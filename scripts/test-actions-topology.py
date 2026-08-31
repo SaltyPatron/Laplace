@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Executable regression tests for Actions delivery and QA authority."""
+"""Executable regression tests for Actions delivery and test-profile authority."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import unittest
 import yaml
@@ -9,6 +10,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 MAIN = WORKFLOWS / "laplace.yml"
+REGISTRY = ROOT / "scripts" / "test-profiles.json"
 
 
 def load(path: Path = MAIN):
@@ -23,23 +25,24 @@ def commands(job: dict) -> str:
     return "\n".join(step.get("run", "") for step in job.get("steps", []))
 
 
+def suites():
+    return {suite["id"]: suite for suite in json.loads(REGISTRY.read_text())["suites"]}
+
+
 class ActionsAuthorityTests(unittest.TestCase):
-    def test_single_runner_fails_policy_before_dependency_work_and_does_not_repeat_it(self):
+    def test_single_runner_uses_profile_authority_before_dependency_work(self):
         graph = jobs()
         self.assertEqual("policy", graph["deps"]["needs"])
         self.assertEqual("deps", graph["build"]["needs"])
-        unit = commands(graph["unit-test"])
-        self.assertEqual(1, unit.count("test-parallel.sh --engine"))
-        for policy_only in (
-            "test-pg-machine-tuning.py",
-            "test-application-runtime.py",
-            "test-application-publish.py",
-            "test-actions-topology.py",
-        ):
-            self.assertNotIn(policy_only, unit)
+        self.assertEqual(1, commands(graph["policy"]).count("bash scripts/ci-policy.sh"))
+        self.assertEqual(1, commands(graph["unit-test"]).count("test-parallel.sh --engine"))
+        policy_alias = (ROOT / "scripts/ci-policy.sh").read_text(encoding="utf-8")
+        self.assertIn("test-profile-registry.py run --profile policy", policy_alias)
+        self.assertNotIn("test-managed-host.py", policy_alias)
         proof = (ROOT / "scripts/pr-proof.sh").read_text(encoding="utf-8")
-        self.assertEqual(1, proof.count("bash scripts/ci-policy.sh"))
-        self.assertNotIn("python3 scripts/test-application-publish.py", proof)
+        self.assertEqual(1, proof.count("test-parallel.sh --policy"))
+        self.assertEqual(1, proof.count("test-parallel.sh --engine"))
+        self.assertNotIn("bash scripts/ci-policy.sh", proof)
 
     def test_delivery_commits_before_environment_qa(self):
         graph = jobs()
@@ -69,16 +72,21 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertNotIn("SMOKE_RESULT", commands(restore))
         self.assertNotIn("EVAL_RESULT", commands(restore))
 
-    def test_dev_db_and_product_profiles_control_execution(self):
+    def test_dev_db_live_and_perf_profiles_control_execution(self):
         graph = jobs()
-        unit = commands(graph["unit-test"])
-        integration = commands(graph["integration-test"])
-        smoke = commands(graph["smoke"])
-        self.assertEqual(1, unit.count("test-parallel.sh --engine"))
-        self.assertIn("test-parallel.sh --integration", integration)
-        self.assertNotIn("Tier=live", integration)
-        self.assertIn("Tier=live", smoke)
-        self.assertNotIn("what does dog mean?", integration)
+        self.assertEqual(1, commands(graph["unit-test"]).count("test-parallel.sh --engine"))
+        self.assertEqual(1, commands(graph["integration-test"]).count("test-parallel.sh --integration"))
+        self.assertEqual(1, commands(graph["smoke"]).count("test-parallel.sh --app-live"))
+        self.assertEqual(1, commands(graph["eval"]).count("test-parallel.sh --perf"))
+        self.assertIn("inputs.generation_benchmark == true", graph["eval"]["if"])
+
+        source = MAIN.read_text(encoding="utf-8")
+        for direct in (
+            "dotnet test ", "ctest ", "npm run test:", "npx playwright",
+            "test-uci-publish.py", "test-cutechess-runtime.py", "eval-generation.py",
+            "verify-generation.py --api",
+        ):
+            self.assertNotIn(direct, source)
 
     def test_empty_database_is_delivered_then_fails_the_named_product_floor(self):
         graph = jobs()
@@ -88,8 +96,21 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertNotIn("check-substrate-floor.sh", commands(publish))
         self.assertIn("needs.publish.result == 'success'", smoke["if"])
         self.assertNotIn("needs.publish.outputs.has_data", smoke["if"])
-        self.assertIn("check-substrate-floor.sh", commands(smoke))
+        self.assertIn("test-parallel.sh --app-live", commands(smoke))
+        self.assertIn("check-substrate-floor.sh", str(suites()["live-floor"]["command"]))
         self.assertIn("needs.publish.outputs.product_ready == 'true'", graph["eval"]["if"])
+
+    def test_registry_owns_previous_direct_dev_live_and_policy_commands(self):
+        registered = suites()
+        self.assertIn("test-uci-publish.py", str(registered["uci-dev"]["command"]))
+        self.assertIn("test-cutechess-runtime.py", str(registered["uci-dev"]["command"]))
+        self.assertIn("npm run typecheck", str(registered["browser-dev"]["command"]))
+        self.assertIn("npm run test:chess-ui", str(registered["browser-dev"]["command"]))
+        self.assertEqual("Tier=live", registered["managed-live"]["selector"]["filter"])
+        self.assertIn("eval-generation.py", str(registered["generation-eval"]["command"]))
+        self.assertIn("verify-generation.py", str(registered["generation-perf"]["command"]))
+        self.assertIn("test-test-profile-registry.py", str(registered["policy-registry"]["command"]))
+        self.assertIn("test-managed-host.py", str(registered["policy-managed-host"]["command"]))
 
     def test_no_post_run_delivery_workaround_remains(self):
         self.assertFalse((WORKFLOWS / "application-delivery.yml").exists())
@@ -122,24 +143,19 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertNotEqual(load(MAIN)["concurrency"]["group"], concurrency["group"])
 
         proof = (ROOT / "scripts/pr-proof.sh").read_text(encoding="utf-8")
-        self.assertNotIn("publish-applications.sh check", proof)
-        self.assertNotIn("check-application-runtime.py", proof)
         for forbidden in (
-            "pipeline.sh install",
-            "pipeline.sh migrate",
-            "sync-extension",
-            "publish-applications.sh deploy",
-            "systemctl ",
-            "sudo ",
-            "--fresh-db",
+            "publish-applications.sh check", "check-application-runtime.py",
+            "pipeline.sh install", "pipeline.sh migrate", "sync-extension",
+            "publish-applications.sh deploy", "systemctl ", "sudo ", "--fresh-db",
+            "dotnet test ", "npx playwright", "test-uci-publish.py", "npm run test:",
         ):
             self.assertNotIn(forbidden, proof)
 
-    def test_clean_pr_ui_typecheck_owns_api_client_generation(self):
-        proof = (ROOT / "scripts/pr-proof.sh").read_text(encoding="utf-8")
-        self.assertIn("npm run typecheck", proof)
-        self.assertNotIn("npm run gen:api", proof)
-
+    def test_clean_pr_ui_typecheck_owns_api_client_generation_through_registry(self):
+        browser = suites()["browser-dev"]
+        command = str(browser["command"])
+        self.assertIn("npm run typecheck", command)
+        self.assertNotIn("npm run gen:api", command)
         package = (ROOT / "web/package.json").read_text(encoding="utf-8")
         self.assertIn('"pretypecheck": "npm run gen:api"', package)
         self.assertIn('"gen:api": "openapi-typescript ./openapi/openapi.json -o ./src/api/types.gen.ts"', package)

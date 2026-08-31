@@ -1,7 +1,6 @@
-# NOTE: Linux dev convenience layer only — recipes here may drift.
-# The canonical orchestration paths are scripts/pipeline.sh (Linux CI)
-# and scripts/win/*.cmd (Windows). scripts/validate-pipeline.py is the
-# cross-toolchain policy gate; trust it over this file when they disagree.
+# NOTE: Linux dev convenience layer only. Build/lifecycle authority is scripts/pipeline.sh;
+# test authority is scripts/test-profile-registry.py via scripts/test-parallel.sh aliases.
+# scripts/validate-pipeline.py is the cross-toolchain policy gate.
 
 set shell := ["bash", "-uc"]
 
@@ -138,15 +137,10 @@ ingest source path="": build-app
 e2e *models: build-app
     scripts/e2e-substrate.sh {{models}}
 
-# W5 / GH #755 — election-first quality harness (exit 0/1/2).
+# W5 / GH #755 — election-first quality harness. Test selection belongs to the
+# executable live profile registry; this convenience target must not invoke it directly.
 eval:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p .eval-proof
-    python3 scripts/eval-generation.py \
-      --probes scripts/eval-probes.json \
-      --baseline scripts/eval-baselines.json \
-      --report .eval-proof/generation.json
+    bash scripts/test-parallel.sh --app-live
 
 ingest-all: build-app
     scripts/ingest-source.sh all
@@ -198,18 +192,19 @@ model-synthesize-ci: build build-app
     @chmod +x scripts/model-synthesize-ci.sh
     scripts/model-synthesize-ci.sh
 
-verify: verify-determinism verify-fk verify-perfcache
+# Verification recipes are compatibility aliases to the same executable profiles used
+# by CI; they do not own independent project/class/CTest selectors.
+verify:
+    bash scripts/test-parallel.sh --engine
 
-verify-determinism: build
-    cmake --build build --target laplace_verify_perfcache_determinism
+verify-determinism:
+    bash scripts/test-parallel.sh --engine
 
 verify-fk:
-    psql -d laplace -U laplace_admin -f scripts/verify-fk.sql
+    bash scripts/test-parallel.sh --regress
 
-verify-perfcache: build
-    cmake --build build --target laplace_t0_perfcache
-    cd build && LD_LIBRARY_PATH="$(realpath engine/core):$(realpath engine/dynamics):$(realpath engine/synthesis):${LD_LIBRARY_PATH:-}" \
-        ctest -R '^LaplaceCoreCodepointTable' --output-on-failure
+verify-perfcache:
+    bash scripts/test-parallel.sh --engine
 
 status:
     @git log --oneline -10
@@ -220,7 +215,7 @@ anchor issue="":
 issue n:
     @scripts/agent-anchor.sh {{n}}
 
-# Parallel test gate (ctest || regress, then dotnet). Use test-serial to force old order.
+# Thin aliases to the one executable test-profile authority.
 test:
     @chmod +x scripts/test-parallel.sh
     bash scripts/test-parallel.sh
