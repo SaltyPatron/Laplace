@@ -19,9 +19,13 @@ CREATE OR REPLACE FUNCTION converse.orient_topic(
         widened boolean)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    WITH candidates AS MATERIALIZED (
+    -- prompt_coherence can return several candidate senses. Language lookup is
+    -- deliberately relation-in/relation-out: laplace.consensus is LIST-partitioned
+    -- by relation type, and calling converse.word_language() once per candidate
+    -- repays that partition traversal once per row. The canonical batch surface
+    -- exists specifically to collapse those probes into one HAS_LANGUAGE scan.
+    WITH raw_candidates AS MATERIALIZED (
         SELECT y.synset_id,
-               converse.word_language(y.synset_id) AS lang,
                y.denote_mu,
                y.specificity,
                y.rel_mass,
@@ -29,6 +33,32 @@ BEGIN ATOMIC
                y.ord
         FROM converse.prompt_coherence(p_prompt) y
         WHERE y.synset_id IS NOT NULL
+    ),
+    candidate_ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT r.synset_id ORDER BY r.synset_id) AS ids
+        FROM raw_candidates r
+    ),
+    language_ranked AS MATERIALIZED (
+        SELECT l.word,
+               l.lang,
+               row_number() OVER (
+                   PARTITION BY l.word
+                   ORDER BY l.mu DESC, l.lang) AS rn
+        FROM candidate_ids i
+        CROSS JOIN LATERAL converse.word_language_candidates_batch(i.ids) l
+    ),
+    candidates AS MATERIALIZED (
+        SELECT r.synset_id,
+               l.lang,
+               r.denote_mu,
+               r.specificity,
+               r.rel_mass,
+               r.peers,
+               r.ord
+        FROM raw_candidates r
+        LEFT JOIN language_ranked l
+          ON l.word = r.synset_id
+         AND l.rn = 1
     ),
     primary_check AS (
         SELECT EXISTS (
