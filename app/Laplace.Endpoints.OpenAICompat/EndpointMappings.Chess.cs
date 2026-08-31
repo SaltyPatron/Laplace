@@ -44,21 +44,50 @@ internal static class ChessEndpoints
         app.MapGet("/chess/learned-pst", async (ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
-        app.MapPost("/chess/play/start", async (PlayStartRequest req, ChessEngineService svc, CancellationToken ct) =>
-            // tenant/user are spec-34 provenance for the play session (stubbed until auth):
-            // tenant defaults to the shared "public" world, user is optional attribution.
-            Results.Json(await svc.StartPlaySessionAsync(req.Record ?? true, req.Moves,
-                req.Tenant ?? "public", req.User, ct))).WithTags("chess");
-
-        app.MapPost("/chess/play/move", async (PlayMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct))).WithTags("chess");
-
-        app.MapPost("/chess/play/bestmove", async (PlayBestMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
-            Results.Json(await svc.PlayBestMoveAsync(req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct)))
-            .WithTags("chess");
-
-        app.MapPost("/chess/play/finish", async (PlayFinishRequest req, ChessEngineService svc, CancellationToken ct) =>
+        // Tenant provenance is request authority, never caller-supplied content. The
+        // API-key middleware already resolves /chess/* through ITenantResolver; bind
+        // the session to that exact tenant so a body cannot deposit another tenant's
+        // witnessed game. User remains optional caller metadata until #938's user-
+        // identity contract is defined.
+        app.MapPost("/chess/play/start", async (HttpContext ctx, PlayStartRequest req,
+            ChessEngineService svc, Auth.ITenantResolver resolver, CancellationToken ct) =>
         {
+            var tenant = await resolver.ResolveAsync(ctx, ct);
+            return Results.Json(await svc.StartPlaySessionAsync(
+                req.Record ?? true, req.Moves, tenant.TenantId, req.User, ct));
+        }).WithTags("chess");
+
+        app.MapPost("/chess/play/move", async (HttpContext ctx, PlayMoveRequest req,
+            ChessEngineService svc, ChessRuntimeService runtime,
+            Auth.ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var tenant = await resolver.ResolveAsync(ctx, ct);
+            var live = await runtime.GetAsync(ct);
+            if (!OwnsPlaySession(live.GetPlaySession(req.SessionId), tenant.TenantId))
+                return Results.NotFound();
+            return Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct));
+        }).WithTags("chess");
+
+        app.MapPost("/chess/play/bestmove", async (HttpContext ctx, PlayBestMoveRequest req,
+            ChessEngineService svc, ChessRuntimeService runtime,
+            Auth.ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var tenant = await resolver.ResolveAsync(ctx, ct);
+            var live = await runtime.GetAsync(ct);
+            if (!OwnsPlaySession(live.GetPlaySession(req.SessionId), tenant.TenantId))
+                return Results.NotFound();
+            return Results.Json(await svc.PlayBestMoveAsync(
+                req.SessionId, req.Fen, req.Depth ?? 4, req.Substrate ?? true, ct));
+        }).WithTags("chess");
+
+        app.MapPost("/chess/play/finish", async (HttpContext ctx, PlayFinishRequest req,
+            ChessEngineService svc, ChessRuntimeService runtime,
+            Auth.ITenantResolver resolver, CancellationToken ct) =>
+        {
+            var tenant = await resolver.ResolveAsync(ctx, ct);
+            var live = await runtime.GetAsync(ct);
+            if (!OwnsPlaySession(live.GetPlaySession(req.SessionId), tenant.TenantId))
+                return Results.NotFound();
             await svc.FinishPlaySessionAsync(req.SessionId, req.Status ?? "draw", req.Adjudicated ?? false, ct);
             return Results.Json(new { finished = true });
         }).WithTags("chess");
@@ -260,6 +289,9 @@ internal static class ChessEndpoints
         }).WithTags("chess-lab");
     }
 
+    internal static bool OwnsPlaySession(PlaySession? session, string tenantId) =>
+        session is not null && string.Equals(session.TenantId, tenantId, StringComparison.Ordinal);
+
     private static bool TryParseKind(string? kind, out ChessLabJobKind parsed) => kind?.ToLowerInvariant() switch
     {
         "substrate-test" or "substratetest" => (parsed = ChessLabJobKind.SubstrateTest) == ChessLabJobKind.SubstrateTest,
@@ -280,7 +312,7 @@ internal static class ChessEndpoints
     private sealed record BestMoveRequest(string Fen, double? Temperature, int? Depth, bool? Substrate, string[]? Moves);
     private sealed record LabStartRequest(string? Kind, Dictionary<string, JsonElement>? Config);
     private sealed record LichessStartRequest(int? Depth = null, int? MaxConcurrent = null, bool? Substrate = null, string[]? Speeds = null);
-    private sealed record PlayStartRequest(bool? Record, string[]? Moves, string? Tenant, string? User);
+    private sealed record PlayStartRequest(bool? Record, string[]? Moves, string? User);
     private sealed record PlayMoveRequest(Guid SessionId, string Fen, string Uci);
     private sealed record PlayBestMoveRequest(Guid SessionId, string Fen, int? Depth, bool? Substrate);
     private sealed record PlayFinishRequest(Guid SessionId, string? Status, bool? Adjudicated);
