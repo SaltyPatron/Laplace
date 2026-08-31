@@ -12,6 +12,15 @@ public interface IRootBias
 public interface ISearchPositionEvaluator
 {
     int Evaluate(Board board);
+
+    /// <summary>
+    /// Capture the evidence generation used by one complete search. Implementations backed by
+    /// mutable persistent state return an immutable view here; the default is already immutable.
+    /// </summary>
+    ISearchPositionEvaluator PrepareSearch() => this;
+
+    /// <summary>Changes whenever scores previously stored in a search table become stale.</summary>
+    long Version => 0;
 }
 
 public readonly record struct SearchTablebaseVerdict(int Wdl, int Dtz);
@@ -71,6 +80,8 @@ public sealed class Search
     private readonly EvalTerm _terms;
     private IRootBias? _rootBias;
     private ISearchPositionEvaluator? _positionEvaluator;
+    private ISearchPositionEvaluator? _activePositionEvaluator;
+    private long _positionEvaluatorVersion;
     private Func<Board, SearchTablebaseVerdict?>? _tablebase;
     private int[][]? _mgPst;
     private int[][]? _egPst;
@@ -95,6 +106,7 @@ public sealed class Search
         _mgPst = mgPst;
         _egPst = egPst;
         _positionEvaluator = positionEvaluator;
+        _positionEvaluatorVersion = positionEvaluator?.Version ?? 0;
         _tablebase = tablebase;
         int bits = Math.Clamp(ttBits, 10, 24);
         TtBits = bits;
@@ -149,6 +161,16 @@ public sealed class Search
 
     public Result Think(Board board, Limits limits, CancellationToken ct = default)
     {
+        // One immutable substrate generation for the entire tree. A completed live game can
+        // advance the persistent evidence between moves, but must never change scores halfway
+        // through a search. Any new generation invalidates entries calculated from the old one.
+        _activePositionEvaluator = _positionEvaluator?.PrepareSearch();
+        long evaluatorVersion = _activePositionEvaluator?.Version ?? 0;
+        if (evaluatorVersion != _positionEvaluatorVersion)
+        {
+            Array.Clear(_tt, 0, _tt.Length);
+            _positionEvaluatorVersion = evaluatorVersion;
+        }
         _nodes = 0;
         _maxNodes = limits.MaxNodes;
         _deadlineMs = limits.MaxTimeMs;
@@ -335,7 +357,7 @@ public sealed class Search
         if (!inCheck)
         {
             int standPat = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
-                           + (_positionEvaluator?.Evaluate(b) ?? 0);
+                           + (_activePositionEvaluator?.Evaluate(b) ?? 0);
             if (standPat >= beta) return beta;
             if (standPat > alpha) alpha = standPat;
         }

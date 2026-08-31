@@ -72,6 +72,7 @@ public static class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("child_structure_reads", boardEvaluator.PositionReads));
         lab.Publish(slot, new ChessLabMetricEvent("child_structure_signals", boardEvaluator.PositionsWithEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("position_atoms_loaded", boardEvaluator.LoadedAtoms));
+        lab.Publish(slot, new ChessLabMetricEvent("position_evidence_generation", boardEvaluator.EvidenceGeneration));
         lab.Publish(slot, new ChessLabMetricEvent("syzygy_max_men", ChessTablebaseRuntime.Largest));
         lab.Publish(slot, new ChessLabMetricEvent("substrate_epoch", ChessTransitionObservations.Epoch));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
