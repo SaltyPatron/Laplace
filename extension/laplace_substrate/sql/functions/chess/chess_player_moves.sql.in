@@ -5,9 +5,9 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
     RETURNS TABLE(next_position bytea, games bigint, score double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- The transition decomposer materializes every witnessed position --MOVE--> position
-    -- with context_id = the playing event. Start at that indexed exact-position evidence,
-    -- then keep only contexts whose colour header names this player. This is a constant number
-    -- of indexed evidence hops; it never opens every full line trajectory in the repertoire.
+    -- with context_id = the playing event. Resolve this player's playing contexts first,
+    -- then join those contexts to exact position evidence. This follows the indexed
+    -- player -> playing -> transition route and never opens complete line trajectories.
     --
     -- One playing contributes at most once to the same successor even if another source has
     -- witnessed the identical transition. Colour and result are still joined on both the line
@@ -15,27 +15,26 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
     WITH rel AS MATERIALIZED (
         SELECT consensus.relation_family_ids('HAS_RESULT') AS result_types
     ),
-    transition_playings AS MATERIALIZED (
-        SELECT t.context_id AS playing_id, t.object_id AS next_position
-        FROM laplace.attestations t
-        WHERE t.subject_id = p_position
-          -- Keep the immutable family directly in the predicate so PostgreSQL can prune the
-          -- LIST relation partitions before touching the position-keyed MOVE leaf.
-          AND t.type_id = ANY (consensus.relation_family_ids('MOVE'))
-          AND t.object_id IS NOT NULL
-          AND t.context_id IS NOT NULL
-        GROUP BY t.context_id, t.object_id
-    ),
-    player_steps AS MATERIALIZED (
-        SELECT tp.next_position, h.subject_id AS line_id, h.context_id AS playing_id,
+    player_playings AS MATERIALIZED (
+        SELECT h.subject_id AS line_id, h.context_id AS playing_id,
                max(h.observation_count)::bigint AS games
-        FROM transition_playings tp
-        JOIN laplace.attestations h ON h.context_id = tp.playing_id
+        FROM laplace.attestations h
         WHERE h.type_id = laplace.relation_type_id(
                   CASE WHEN p_as_white THEN 'HAS_WHITE' ELSE 'HAS_BLACK' END)
           AND h.object_id = p_player
           AND h.context_id IS NOT NULL
-        GROUP BY tp.next_position, h.subject_id, h.context_id
+        GROUP BY h.subject_id, h.context_id
+    ),
+    player_steps AS MATERIALIZED (
+        SELECT t.object_id AS next_position, pp.line_id, pp.playing_id, pp.games
+        FROM player_playings pp
+        JOIN laplace.attestations t ON t.context_id = pp.playing_id
+        WHERE t.subject_id = p_position
+          -- Keep the immutable family directly in the predicate so PostgreSQL prunes the
+          -- LIST relation partitions before joining the player's playing contexts.
+          AND t.type_id = ANY (consensus.relation_family_ids('MOVE'))
+          AND t.object_id IS NOT NULL
+        GROUP BY t.object_id, pp.line_id, pp.playing_id, pp.games
     ),
     results AS MATERIALIZED (
         SELECT ps.next_position, ps.line_id, ps.playing_id, ps.games,

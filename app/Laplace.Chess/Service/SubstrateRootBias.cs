@@ -14,9 +14,13 @@ public sealed class SubstrateRootBias : IRootBias
     private readonly double? _shrinkK0;
     private long _rootReads;
     private long _rootsWithExactEvidence;
+    private long _transitionFloorHits;
+    private long _transitionFloorMisses;
 
     public long RootReads => Volatile.Read(ref _rootReads);
     public long RootsWithExactEvidence => Volatile.Read(ref _rootsWithExactEvidence);
+    public long TransitionFloorHits => Volatile.Read(ref _transitionFloorHits);
+    public long TransitionFloorMisses => Volatile.Read(ref _transitionFloorMisses);
 
     public SubstrateRootBias(NpgsqlDataSource ds, double cpPerPoint = 8.0, int capCp = 150, double? shrinkK0 = null)
     {
@@ -39,8 +43,21 @@ public sealed class SubstrateRootBias : IRootBias
             var rootId = ChessCompose.PositionId(state.Board);
             for (int i = 0; i < moves.Count; i++)
             {
-                var next = _modality.Apply(state, moves[i]);
-                var toId = ChessCompose.PositionId(next.Board);
+                Piece moving = state.Board.Squares[moves[i].From];
+                Hash128 moveId = ChessCompose.MoveId(moving, moves[i]);
+                Hash128 transitionKey = ChessCompose.TransitionKey(rootId, moveId);
+                Hash128 toId;
+                if (ChessTransitionFloor.TryLookup(transitionKey, out toId))
+                {
+                    Interlocked.Increment(ref _transitionFloorHits);
+                }
+                else
+                {
+                    var next = _modality.Apply(state, moves[i]);
+                    toId = ChessCompose.PositionId(next.Board);
+                    ChessTransitionFloor.Remember(transitionKey, toId);
+                    Interlocked.Increment(ref _transitionFloorMisses);
+                }
                 edgeIds[i] = ConsensusKeys.EdgeId(rootId, ChessVocabulary.MoveType, toId);
             }
         }
