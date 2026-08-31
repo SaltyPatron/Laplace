@@ -1,0 +1,94 @@
+name: Application delivery — independent of environment QA
+
+# The full pipeline installs the tested engine and synchronizes the database before
+# its integration/QA lane. A QA failure must stay red, but it must not keep the
+# development box on an older API/SPA payload. This workflow closes only that gap:
+# it runs after the producing workflow completes, proves all delivery prerequisites
+# succeeded, and publishes only when that run's publish job was skipped.
+
+on:
+  workflow_run:
+    workflows: ["Laplace — build, deploy, test"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+# Share the persistent checkout/build tree contract with the producing workflow.
+# workflow_run fires after it completes, but a newer main run may already be queued.
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    name: Deliver API + SPA when QA withheld publish
+    if: github.event.workflow_run.event == 'push'
+    runs-on: [self-hosted, laplace]
+    concurrency:
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
+    timeout-minutes: 20
+    env:
+      LICHESS_API: ${{ secrets.LICHESS_API }}
+      LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
+      LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
+      STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
+    steps:
+      - name: Checkout producing revision and inspect current main
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+          git fetch --no-tags --prune --depth=1 origin main
+          echo "CURRENT_MAIN_SHA=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Read producing workflow phase results
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          jobs="$RUNNER_TEMP/application-delivery-source-jobs.json"
+          curl --fail --silent --show-error --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100" \
+            > "$jobs"
+
+          # Never publish a superseded revision even when its old pipeline completed
+          # after a newer main merge entered the shared-runner queue.
+          if [[ "$SOURCE_SHA" != "$CURRENT_MAIN_SHA" ]]; then
+            echo "deliver=false" >> "$GITHUB_OUTPUT"
+            echo "reason=source ${SOURCE_SHA:0:12} superseded by main ${CURRENT_MAIN_SHA:0:12}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python3 scripts/application-delivery-source.py \
+            --jobs "$jobs" \
+            --event "$SOURCE_EVENT" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Record delivery decision
+        env:
+          DELIVER: ${{ steps.source.outputs.deliver }}
+          REASON: ${{ steps.source.outputs.reason }}
+        run: echo "APPLICATION_DELIVERY deliver=$DELIVER reason=$REASON"
+
+      - name: Publish and verify application transaction
+        if: steps.source.outputs.deliver == 'true'
+        run: bash scripts/publish-applications.sh deploy
+
+      - name: Recover only this workflow's unfinished transaction
+        if: always() && steps.source.outputs.deliver == 'true'
+        run: bash scripts/publish-applications.sh recover

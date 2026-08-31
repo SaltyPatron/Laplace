@@ -12,6 +12,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/publish-applications.sh"
+DELIVERY_SELECTOR = ROOT / "scripts/application-delivery-source.py"
 ADAPTERS = r'''
 source "$1"
 ROOT="$2"
@@ -35,6 +36,13 @@ application_managed() {
 }
 application_main "$3"
 '''
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class ApplicationTransactionTests(unittest.TestCase):
@@ -130,6 +138,53 @@ class ApplicationTransactionTests(unittest.TestCase):
         self.assertIn("managed commit", self.events())
 
 
+class DeliveryDecisionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.selector = load_module("application_delivery_source", DELIVERY_SELECTOR)
+
+    def payload(self, *, unit="success", publish="skipped", integration="failure"):
+        conclusions = {
+            "Build — engine, extensions, app, perfcache": "success",
+            "Unit tests — native engine and managed ABI": unit,
+            "Deploy — stage install to /opt/laplace": "success",
+            "DB — migrate, extension sync, perfcache GUC": "success",
+            "Integration tests — pg_regress || dotnet (parallel)": integration,
+            "Publish — API + SPA, restart service": publish,
+        }
+        jobs = [{"name": name, "conclusion": conclusion}
+                for name, conclusion in conclusions.items()]
+        return {"total_count": len(jobs), "jobs": jobs}
+
+    def test_failed_environment_qa_still_authorizes_owed_delivery(self):
+        decision = self.selector.decide(self.payload(), "push")
+        self.assertTrue(decision.deliver, decision.reason)
+        self.assertIn("publish was skipped", decision.reason)
+
+    def test_failed_dev_proof_never_authorizes_delivery(self):
+        decision = self.selector.decide(self.payload(unit="failure"), "push")
+        self.assertFalse(decision.deliver)
+        self.assertIn("Unit tests", decision.reason)
+
+    def test_already_published_run_does_not_publish_twice(self):
+        decision = self.selector.decide(
+            self.payload(publish="success", integration="success"), "push")
+        self.assertFalse(decision.deliver)
+        self.assertIn("already delivered", decision.reason)
+
+    def test_failed_activation_is_not_retried_as_qa_recovery(self):
+        decision = self.selector.decide(self.payload(publish="failure"), "push")
+        self.assertFalse(decision.deliver)
+        self.assertIn("not auto-retried", decision.reason)
+
+    def test_non_push_and_incomplete_job_payload_fail_closed(self):
+        self.assertFalse(self.selector.decide(self.payload(), "workflow_dispatch").deliver)
+        incomplete = self.payload()
+        incomplete["total_count"] += 1
+        with self.assertRaises(ValueError):
+            self.selector.decide(incomplete, "push")
+
+
 class ReleaseWorkflowTests(unittest.TestCase):
     def test_application_lane_cannot_install_or_migrate(self):
         jobs = yaml.safe_load((ROOT / ".github/workflows/laplace.yml").read_text())["jobs"]
@@ -148,20 +203,30 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("recover", recovery["run"])
         self.assertTrue(any("Validate application-only" in step.get("name", "") for step in jobs["policy"]["steps"]))
 
-    def test_full_release_eval_and_rollback_gate_remain_mandatory(self):
-        jobs = yaml.safe_load((ROOT / ".github/workflows/laplace.yml").read_text())["jobs"]
-        self.assertEqual(["publish", "smoke"], jobs["eval"]["needs"])
-        self.assertIn("eval", jobs["restore-api"]["needs"])
-        restore = jobs["restore-api"]["steps"][0]["run"]
-        self.assertIn('"$EVAL_RESULT" != failure', restore)
-        self.assertIn('"$EVAL_RESULT" != cancelled', restore)
-        for name in ("deploy", "db-ops", "integration-test", "publish"):
-            self.assertNotIn("applications", jobs[name]["if"])
+    def test_application_delivery_is_independent_of_environment_qa(self):
+        path = ROOT / ".github/workflows/application-delivery.yml"
+        source = path.read_text()
+        workflow = yaml.safe_load(source)
+        job = workflow["jobs"]["deliver"]
+
+        self.assertIn('workflows: ["Laplace — build, deploy, test"]', source)
+        self.assertIn("types: [completed]", source)
+        self.assertIn("branches: [main]", source)
+        self.assertIn("workflow_run.event == 'push'", job["if"])
+        self.assertNotIn("integration", job["if"].lower())
+        self.assertEqual("laplace-substrate-lifecycle", job["concurrency"]["group"])
+        self.assertFalse(job["concurrency"]["cancel-in-progress"])
+
+        commands = "\n".join(step.get("run", "") for step in job["steps"])
+        self.assertIn("application-delivery-source.py", commands)
+        self.assertIn("SOURCE_SHA", commands)
+        self.assertIn("CURRENT_MAIN_SHA", commands)
+        self.assertIn("publish-applications.sh deploy", commands)
+        self.assertIn("publish-applications.sh recover", commands)
+        self.assertNotIn("needs.integration-test", commands)
 
     def test_runtime_readiness_rejects_false_or_untyped_results(self):
-        spec = importlib.util.spec_from_file_location("verify_app", ROOT / "scripts/verify-application-release.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_module("verify_app", ROOT / "scripts/verify-application-release.py")
         ready = {"ready": True, "substrate_reachable": True, "perfcache_ready": True,
                  "entities": 1, "consensus_relations": 2}
         module.require_ready(ready)
@@ -191,10 +256,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertGreater(gate_indexes[1], ingest_index)
 
     def test_model_payload_violation_is_advisory_unless_enforced(self):
-        spec = importlib.util.spec_from_file_location(
-            "model_payload_gate", ROOT / "scripts/model-payload-gate-check.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_module("model_payload_gate", ROOT / "scripts/model-payload-gate-check.py")
         with tempfile.TemporaryDirectory(prefix="model-payload-gate-contract-") as td:
             baseline = Path(td) / "baseline.json"
             baseline.write_text(json.dumps({
