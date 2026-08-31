@@ -2,9 +2,11 @@
 """Pure tests for the redacted audit, peer identities and managed DB boundaries."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 
@@ -113,6 +115,96 @@ class PeerMapTests(unittest.TestCase):
         self.assertIn("EntitiesAndConsensusExistAsync", source)
         self.assertIn("PerfCacheProbeAsync", source)
         self.assertIn("budget.CancelAfter(TimeSpan.FromSeconds(5))", source)
+
+
+class DatabaseHealthScriptTests(unittest.TestCase):
+    def _run_health(self, *, connect_fail=False):
+        with tempfile.TemporaryDirectory(prefix="laplace-db-health-test-") as temporary:
+            temp = Path(temporary)
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            log = temp / "psql-calls.jsonl"
+            psql = fake_bin / "psql"
+            psql.write_text(
+                f"""#!{sys.executable}
+import json
+import os
+import sys
+
+argv = sys.argv[1:]
+with open(os.environ["FAKE_PSQL_LOG"], "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(argv) + "\\n")
+
+def value(flag):
+    return argv[argv.index(flag) + 1]
+
+database = value("-d")
+query = argv[-1]
+
+# Reproduce the production psql contract: psql metasyntax is not interpolated in
+# a -c command string and therefore must never reach this server-command lane.
+if ":'" in query or ':"' in query:
+    print("syntax error at or near ':'", file=sys.stderr)
+    raise SystemExit(9)
+
+if query == "SELECT 1":
+    if os.environ.get("FAKE_PSQL_CONNECT_FAIL") == "1":
+        raise SystemExit(7)
+    if database != "laplace":
+        print("connection probe targeted wrong database", file=sys.stderr)
+        raise SystemExit(8)
+    print("1")
+elif "SELECT extversion FROM pg_extension" in query:
+    print("test-ext")
+elif "string_agg(name" in query:
+    print("")
+elif "FROM pg_index" in query and "count(*)" in query:
+    print("0")
+elif "FROM pg_constraint" in query and "count(*)" in query:
+    print("0")
+elif "FROM laplace.ingest_run_journal" in query and "count(*)" in query:
+    print("0")
+elif "FROM ops.index_health()" in query and "count(*)" in query:
+    print("0")
+else:
+    print("unexpected health query: " + query, file=sys.stderr)
+    raise SystemExit(11)
+"""
+            )
+            psql.chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+            env["FAKE_PSQL_LOG"] = str(log)
+            if connect_fail:
+                env["FAKE_PSQL_CONNECT_FAIL"] = "1"
+
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/check-database-health.sh"), "laplace"],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            return result, calls
+
+    def test_health_connects_to_target_database_without_psql_command_metasyntax(self):
+        result, calls = self._run_health()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("DB_HEALTH_OK database=laplace extension=test-ext", result.stdout)
+        self.assertGreaterEqual(len(calls), 7)
+        self.assertEqual("laplace", calls[0][calls[0].index("-d") + 1])
+        self.assertEqual("SELECT 1", calls[0][-1])
+        self.assertTrue(all(":'" not in call[-1] and ':"' not in call[-1] for call in calls))
+
+    def test_health_fails_closed_when_target_database_is_not_connectable(self):
+        result, calls = self._run_health(connect_fail=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("database 'laplace' is not connectable", result.stderr)
+        self.assertEqual(1, len(calls))
+        self.assertEqual("SELECT 1", calls[0][-1])
 
 
 if __name__ == "__main__":
