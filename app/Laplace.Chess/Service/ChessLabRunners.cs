@@ -30,10 +30,9 @@ public static class ChessLabRunners
 
         var ds = liveHost.DataSource;
         var transitionChooser = new SubstrateTransitionChooser(ds);
-        var legalFallback = MatchRunner.SearcherFactory(Math.Min(depth, 2), EvalTerm.All, ct: ct);
         Func<MoveChooser> guided = mode == "off"
             ? MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: ct)
-            : () => transitionChooser.CreateChooser(legalFallback(), ct);
+            : () => transitionChooser.CreateChooser(ct);
         var pure = MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: ct);
         var book = openings ? OpeningSeed.Fens(OpeningSeed.DefaultDir) : null;
         var pgnSink = new ConcurrentBag<MatchPgnGame>();
@@ -65,8 +64,10 @@ public static class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("elo_diff", r.EloDiff));
         var transitionStats = transitionChooser.Snapshot;
         lab.Publish(slot, new ChessLabMetricEvent("transition_trunk_reads", transitionStats.TrunkReads));
-        lab.Publish(slot, new ChessLabMetricEvent("witnessed_transition_decisions", transitionStats.WitnessedDecisions));
-        lab.Publish(slot, new ChessLabMetricEvent("unseen_state_fallbacks", transitionStats.FallbackDecisions));
+        lab.Publish(slot, new ChessLabMetricEvent("substrate_decisions", transitionStats.Decisions));
+        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", transitionStats.ExactTransitionSignals));
+        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_signals", transitionStats.MovePhysicalitySignals));
+        lab.Publish(slot, new ChessLabMetricEvent("child_structure_signals", transitionStats.ChildStructureSignals));
         lab.Publish(slot, new ChessLabMetricEvent("substrate_epoch", transitionStats.SubstrateEpoch));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
             [[r.AWins.ToString(), r.Draws.ToString(), r.BWins.ToString(), elo]]));

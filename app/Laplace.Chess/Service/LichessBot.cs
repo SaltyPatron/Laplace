@@ -312,32 +312,18 @@ public sealed class LichessBot : IAsyncDisposable
                 int searchedDepth;
                 long searchedNodes;
                 IReadOnlyList<string> pv;
-                bool witnessed = false;
+                bool substrateRated = false;
                 if (_transitionChooser is not null)
                 {
-                    Search.Result? fallbackResult = null;
-                    IReadOnlyList<string>? fallbackPv = null;
-                    ChessMove Fallback(ChessState state, Random rng)
-                    {
-                        search ??= _host.BuildSearch(false, maxDepth: Math.Min(_maxDepth, 2));
-                        fallbackResult = search.Think(
-                            state.Board,
-                            new Search.Limits(MaxDepth: Math.Min(_maxDepth, 2), MaxTimeMs: budgetMs), ct);
-                        fallbackPv = search.ExtractPv(state.Board);
-                        return fallbackResult.Value.BestMove ?? MatchRunner.RandomChooser(state, rng);
-                    }
-
-                    var decision = _transitionChooser.ChooseDecision(before, Random.Shared, Fallback, ct);
+                    var decision = _transitionChooser.ChooseDecision(before, Random.Shared, ct);
                     mv = decision.Move;
-                    witnessed = decision.Witnessed;
-                    scoreCp = witnessed
-                        ? (int)Math.Clamp(
-                            Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
-                            -30_000, 30_000)
-                        : fallbackResult?.Score ?? 0;
-                    searchedDepth = fallbackResult?.Depth ?? 0;
-                    searchedNodes = fallbackResult?.Nodes ?? 0;
-                    pv = fallbackPv ?? [mv.ToUci()];
+                    substrateRated = decision.Rated;
+                    scoreCp = (int)Math.Clamp(
+                        Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
+                        -30_000, 30_000);
+                    searchedDepth = 0;
+                    searchedNodes = 0;
+                    pv = [mv.ToUci()];
                 }
                 else
                 {
@@ -354,7 +340,7 @@ public sealed class LichessBot : IAsyncDisposable
 
                 _log.LogDebug(
                     "game {Id}: play {Move} ({Mode}, depth {D}, score {S}cp, budget {B}ms)",
-                    lichessGameId, mv.ToUci(), witnessed ? "witnessed transition" : "search fallback",
+                    lichessGameId, mv.ToUci(), substrateRated ? "substrate forward pass" : "classical control",
                     searchedDepth, scoreCp, budgetMs);
 
                 await PostAsync($"/api/bot/game/{lichessGameId}/move/{mv.ToUci()}", ct);

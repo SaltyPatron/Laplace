@@ -37,13 +37,13 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     title: 'Substrate lift test',
     tagline: 'Does witnessed substrate experience beat classical search?',
     description:
-      'Laplace chooses directly from witnessed position→position consensus while the control uses classical search. '
-      + 'Completed games update only the position trunks they observed, so later games in the same run consume the new evidence.',
+      'Laplace fuses position transitions, reusable move physicality, and composed child-state structure while the control uses classical search. '
+      + 'Completed games advance substrate evidence, so later games in the same run consume the new state.',
     expect: [
       'Live W-D-L score and Elo difference in the feed',
       'Final results table with Elo ± margin',
       'games_recorded metric — every game is witnessed to substrate during the run',
-      'transition reads, witnessed decisions, unseen fallbacks, and substrate epoch',
+      'bounded trunk reads plus exact-transition, move-physicality, child-structure, and substrate-epoch metrics',
       'games.pgn artifact for archival',
     ],
     tips: [

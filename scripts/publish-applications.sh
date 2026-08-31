@@ -9,8 +9,9 @@ application_host_check() {
   [[ ! -e /var/lib/laplace-managed/transaction.json ]] || {
     echo "::error::prior managed transaction unresolved; no application changes made" >&2; return 1;
   }
-  sudo -n /usr/local/libexec/laplace-managed-deploy host-status
-  sudo -n /usr/local/libexec/laplace-managed-deploy preflight
+  # preflight reconciles root-owned host state and then proves host-status. Checking
+  # status first blocked the operation that repairs install-owned drift.
+  application_managed preflight
 }
 application_managed() { bash "$ROOT/deploy/linux/managed-publish.sh" "$@"; }
 application_publish() { bash "$ROOT/scripts/pipeline.sh" publish; }
