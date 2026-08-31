@@ -12,10 +12,14 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// </summary>
 public sealed class ChessTenantContractTests
 {
+    private static Type ChessEndpointsType =>
+        typeof(Program).Assembly.GetType(
+            "Laplace.Endpoints.OpenAICompat.ChessEndpoints", throwOnError: true)!;
+
     [Fact]
     public void PlayStartRequest_DoesNotAcceptTenantProvenanceFromBody()
     {
-        var requestType = typeof(ChessEndpoints).GetNestedType(
+        var requestType = ChessEndpointsType.GetNestedType(
             "PlayStartRequest", BindingFlags.NonPublic);
 
         Assert.NotNull(requestType);
@@ -31,10 +35,13 @@ public sealed class ChessTenantContractTests
             Hash128.OfCanonical("test/chess/play/tenant-binding"),
             "test/chess/play", recordToSubstrate: false,
             tenantId: "tenant-a");
+        var owns = ChessEndpointsType.GetMethod(
+            "OwnsPlaySession", BindingFlags.Static | BindingFlags.NonPublic);
 
-        Assert.True(ChessEndpoints.OwnsPlaySession(session, "tenant-a"));
-        Assert.False(ChessEndpoints.OwnsPlaySession(session, "tenant-b"));
-        Assert.False(ChessEndpoints.OwnsPlaySession(null, "tenant-a"));
+        Assert.NotNull(owns);
+        Assert.True((bool)owns!.Invoke(null, new object?[] { session, "tenant-a" })!);
+        Assert.False((bool)owns.Invoke(null, new object?[] { session, "tenant-b" })!);
+        Assert.False((bool)owns.Invoke(null, new object?[] { null, "tenant-a" })!);
     }
 
     [Fact]
