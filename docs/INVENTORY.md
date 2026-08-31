@@ -34,7 +34,7 @@ Test projects:
 - `Laplace.Endpoints.OpenAICompat.Tests`
 - `Laplace.Substrate.Tests`
 
-## Decomposers — 29 in `Laplace.Decomposers`, 9 in `Laplace.Chess`
+## Decomposers — 29 in `Laplace.Decomposers`, 10 in `Laplace.Chess`
 
 - `AgentTraceDecomposer`
 - `Atomic2020Decomposer`
@@ -77,6 +77,7 @@ Chess:
 - `ChessStockfishEvalDecomposer`
 - `ChessSyzygyDecomposer`
 - `ChessTrajectoryDecomposer`
+- `ChessTransitionsDecomposer`
 
 ## SQL function families — 29 (`extension/laplace_substrate/sql/functions/`)
 
