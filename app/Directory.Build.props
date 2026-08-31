@@ -82,6 +82,13 @@
     directory, BEFORE handing off to the OS loader — so an app-local copy wins
     over /opt/laplace/lib without touching a shared path.
 
+    The self-hosted runner intentionally preserves build/app output trees between
+    jobs and runs. Therefore timestamp-based PreserveNewest is not a correctness
+    rule: a stale copied .so may have a newer mtime than a freshly relinked native
+    artifact and survive into the next managed test. The payload is tiny relative
+    to a test build; copy it unconditionally so artifact identity is content-driven,
+    never mtime-driven.
+
     Ship the same closure with executable publishes as well. If integration fails
     after the shared engine is installed, restore-api must not start an old managed
     layout against a new native ABI. App-local native libraries keep the previous
@@ -93,8 +100,8 @@
     <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/synthesis/*.so*" />
     <None Include="@(LaplaceNativeArtifact)">
       <Link>%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Visible>false</Visible>
     </None>
   </ItemGroup>
