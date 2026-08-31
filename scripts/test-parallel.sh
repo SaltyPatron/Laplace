@@ -121,8 +121,13 @@ set_perfcache_from_build() {
 
 set_perfcache_from_runtime() {
   local bin=""
-  bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$ROOT/build" \
+  # Runtime QA should consume the installed deployment first. Fall back to the
+  # build tree only for a local invocation that has not installed yet.
+  bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" \
     -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1 || true)
+  if [[ -z "$bin" ]]; then
+    bin=$(find "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1 || true)
+  fi
   if [[ -n "$bin" ]]; then
     export LAPLACE_PERFCACHE_BIN="$bin"
     echo "LAPLACE_PERFCACHE_BIN=$bin (runtime QA)"
