@@ -38,18 +38,17 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
   'substrate-test': [
     {
       key: 'mode',
-      label: 'Bias mode',
+      label: 'Decision mode',
       type: 'select',
-      options: ['fold', 'edge', 'off'],
+      options: ['transition', 'off'],
       optionLabels: {
-        fold: 'Fold — substructure consensus (recommended)',
-        edge: 'Edge — raw move popularity',
+        transition: 'Laplace — witnessed state transitions',
         off: 'Off — sanity (pure vs pure)',
       },
-      help: 'Where root-move bias comes from. Fold is the honest transfer test.',
+      help: 'Laplace selects directly from the consensus position→position transition trunk; Off runs the conventional control.',
     },
     { key: 'games', label: 'Games', type: 'number', min: 1, help: 'More games = tighter Elo estimate. No upper limit.', placeholder: '100' },
-    { key: 'depth', label: 'Search depth', type: 'number', min: 1, max: 12, help: 'Fixed depth for both sides. Higher = slower, stronger.' },
+    { key: 'depth', label: 'Control depth', type: 'number', min: 1, max: 12, help: 'Depth of the conventional control. Laplace uses witnessed transitions and only a depth-2 fallback for an unseen state.' },
     { key: 'maxPlies', label: 'Max plies', type: 'number', min: 10, max: 400, help: 'Declare a draw if the game exceeds this length.' },
     { key: 'concurrency', label: 'Parallel games', type: 'number', min: 0, help: '0 = use all performance CPU cores.', placeholder: '0' },
     { key: 'openings', label: 'Opening book', type: 'bool', help: 'Seed from ingested ECO positions instead of random starts.' },
@@ -72,11 +71,14 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
   'lichess-fetch': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'DrNykterstein' },
     { key: 'site', label: 'Site', type: 'select', options: ['lichess', 'chesscom'], optionLabels: { lichess: 'lichess.org', chesscom: 'chess.com' } },
-    { key: 'max', label: 'Max games', type: 'number', min: 1, max: 1000, step: 10, help: 'Leave at default for provider limit.' },
+    { key: 'all', label: 'Ingest all games', type: 'bool', help: 'Omit the provider cap and stream the complete available archive.' },
+    { key: 'max', label: 'Game limit', type: 'number', min: 1, step: 100, help: 'Used only when “Ingest all games” is off.', placeholder: '1000' },
+    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional official FIDE profile to connect to this online identity.', placeholder: '1503014' },
+    { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Record, analyze, deduplicate, and attribute the downloaded games immediately.' },
   ],
 };
 
-const FALLBACK_JOBS: LabJobSpec[] = [{ kind: 'substrate-test', label: 'Substrate test', default: { games: '20', depth: '4', mode: 'fold' } }];
+const FALLBACK_JOBS: LabJobSpec[] = [{ kind: 'substrate-test', label: 'Substrate test', default: { games: '20', depth: '4', mode: 'transition' } }];
 
 function fieldDefault(f: FieldDef): string {
   if (f.type === 'bool') return 'false';
@@ -370,6 +372,8 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
               <a href={`/chess/lab/jobs/${active.id}/artifact/games.pgn`} download>Download games.pgn</a>
               {experimentFor(active.kind)?.recordsLive ? (
                 <Muted>Games were recorded to substrate during the run. PGN is for archival.</Muted>
+              ) : active.kind.toLowerCase().replaceAll('-', '') === 'lichessfetch' && active.summary.message?.includes('new games') ? (
+                <Muted>Games and player profiles were ingested during this run. PGN is retained as the source artifact.</Muted>
               ) : (
                 <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest PGN to substrate</Button>
               )}

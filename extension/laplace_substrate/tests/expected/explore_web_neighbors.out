@@ -19,13 +19,13 @@ DECLARE
     mismatches    bigint;
     wrong_roots   bigint;
     self_rows     bigint;
-    self_all_out  boolean;
     expected_type bytea;
     chosen_type   bytea;
     chosen_out    boolean;
     snapshot_a    text[];
     snapshot_b    text[];
     zero_rows     bigint;
+    revisit_rows  bigint;
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
@@ -94,12 +94,12 @@ BEGIN
         RAISE EXCEPTION 'FAIL: masked/full parity has % mismatched rows', mismatches;
     END IF;
 
-    SELECT count(*), bool_and(e.outbound)
-      INTO self_rows, self_all_out
+    SELECT count(*)
+      INTO self_rows
     FROM consensus.explore_web_neighbors(s1, 32) e
     WHERE e.nbr = s1 AND e.type_id = rel_a;
-    IF self_rows <> 1 OR self_all_out IS DISTINCT FROM true THEN
-        RAISE EXCEPTION 'FAIL: self edge rows=%, all_outbound=%', self_rows, self_all_out;
+    IF self_rows <> 0 THEN
+        RAISE EXCEPTION 'FAIL: self edge escaped crawl suppression, rows=%', self_rows;
     END IF;
 
     SELECT count(*) INTO wrong_roots
@@ -164,7 +164,14 @@ BEGIN
         RAISE EXCEPTION 'FAIL: scalar zero limit returned % rows', zero_rows;
     END IF;
 
-    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self-edge deduplication, and total tie order all hold';
+    SELECT count(*) INTO revisit_rows
+    FROM consensus.explore_web(s1, 3, 32, 128) w
+    WHERE w.hop > 1 AND (w.source_id = s1 OR w.object_id = s1);
+    IF revisit_rows <> 0 THEN
+        RAISE EXCEPTION 'FAIL: multi-hop crawl emitted % back-links to its seed', revisit_rows;
+    END IF;
+
+    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self/revisit suppression, and total tie order all hold';
 END $$;
-NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self-edge deduplication, and total tie order all hold
+NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self/revisit suppression, and total tie order all hold
 ROLLBACK;

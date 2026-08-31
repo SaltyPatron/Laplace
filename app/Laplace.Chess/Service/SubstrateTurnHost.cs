@@ -151,6 +151,15 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
                 _ => Laplace.Modality.GameOutcome.Draw,
             },
             ChessVocabulary.SourceId, _witnessWeight);
+        ChessGraph.AppendTransitions(
+            b, line.Select(static n => n.Id).ToArray(),
+            whiteOutcome switch
+            {
+                PlyOutcome.Win => Laplace.Modality.GameOutcome.WonBy(0),
+                PlyOutcome.Loss => Laplace.Modality.GameOutcome.WonBy(1),
+                _ => Laplace.Modality.GameOutcome.Draw,
+            },
+            _witnessWeight, ChessVocabulary.SourceId, playingId);
         ChessGraph.AppendPositionProjection(
             b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(
@@ -159,6 +168,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var change = await b.BuildAsync(ct);
         await _writer.ApplyAsync(change, ct);
+        ChessTransitionObservations.MarkObserved(line.Take(line.Count - 1).Select(static n => n.Id));
     }
 
     private static PlyOutcome WhiteOutcome(

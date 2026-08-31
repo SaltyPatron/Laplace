@@ -32,6 +32,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     private readonly bool _ownsResources;
 
     public readonly record struct Result(int Parsed, int Novel, int Applied);
+    public readonly record struct ProfileResult(int Profiles, int Players, int Links);
 
     private ChessPgnIngestor(
         NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, NpgsqlSubstrateReader reader,
@@ -86,6 +87,9 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         names.UnionWith(await ChessVocabulary.BootstrapAsync(
             writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis", ChessVocabulary.AnalysisTrustClass,
             ct, reader));
+        names.UnionWith(await ChessVocabulary.BootstrapAsync(
+            writer, ChessTransitions.SourceId, "ChessTransitions", ChessTransitions.TrustClassId,
+            ct, reader));
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names, ct);
     }
 
@@ -125,6 +129,103 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         }
     }
 
+    public async Task<ProfileResult> IngestPlayerProfilesAsync(
+        IReadOnlyList<ChessPlayerProfile> profiles, CancellationToken ct = default)
+    {
+        if (profiles.Count == 0) return default;
+        await Gate.WaitAsync(ct);
+        try
+        {
+            int players = 0, links = 0;
+            var primary = new Dictionary<string, Hash128>(StringComparer.OrdinalIgnoreCase);
+            foreach (var profile in profiles)
+            {
+                var (sourceId, sourceName, trustClass, weight) = ProfileSource(profile.Provider);
+                var names = await ChessVocabulary.BootstrapAsync(
+                    _writer, sourceId, sourceName, trustClass, ct, _reader);
+                await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(_ds, names, ct);
+
+                var b = new SubstrateChangeBuilder(sourceId, $"chess/player-profile/{profile.Provider}");
+                string identityName = profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)
+                    ? profile.DisplayName : profile.ProviderId;
+                var playerId = ChessVocabulary.PlayerId(identityName);
+                ChessVocabulary.EmitPlayer(b, playerId, identityName, sourceId, weight);
+                players++;
+
+                foreach (string alias in new[] { profile.DisplayName, profile.RealName }
+                             .OfType<string>().Where(static x => !string.IsNullOrWhiteSpace(x)))
+                    ChessVocabulary.EmitPlayer(b, playerId, alias, sourceId, weight);
+
+                AddProfileValue(b, playerId, ChessVocabulary.ExternalIdType,
+                    $"{profile.Provider}:{profile.ProviderId}", sourceId, weight);
+                AddProfileValue(b, playerId, ChessVocabulary.FeatureType, profile.Biography, sourceId, weight, "bio");
+                AddProfileValue(b, playerId, ChessVocabulary.FeatureType, profile.Title, sourceId, weight, "title");
+                AddProfileValue(b, playerId, ChessVocabulary.FeatureType, profile.Federation, sourceId, weight, "federation");
+                foreach (var link in profile.Links)
+                    AddProfileValue(b, playerId, ChessVocabulary.FeatureType, link, sourceId, weight, "link");
+                foreach (var (kind, rating) in profile.Ratings)
+                    AddProfileValue(b, playerId, ChessVocabulary.HasRatingType,
+                        $"{kind}:{rating}", sourceId, weight);
+
+                if (!string.IsNullOrWhiteSpace(profile.RealName)
+                    && !PlayerAlias.Canonical(profile.RealName).Equals(
+                        PlayerAlias.Canonical(identityName), StringComparison.Ordinal))
+                {
+                    var realId = ChessVocabulary.PlayerId(profile.RealName);
+                    ChessVocabulary.EmitPlayer(b, realId, profile.RealName, sourceId, weight);
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        playerId, ChessVocabulary.CorrespondsToType, realId,
+                        sourceId, null, weight));
+                    links++;
+                }
+
+                primary[profile.Provider] = playerId;
+                await _writer.ApplyAsync(await b.BuildAsync(ct), ct);
+            }
+
+            if (primary.TryGetValue("fide", out var fide))
+            {
+                foreach (var (provider, online) in primary)
+                {
+                    if (provider.Equals("fide", StringComparison.OrdinalIgnoreCase)) continue;
+                    var profile = profiles.First(p => p.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase));
+                    var (sourceId, _, _, weight) = ProfileSource(provider);
+                    var b = new SubstrateChangeBuilder(sourceId, $"chess/player-profile/{provider}");
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        online, ChessVocabulary.CorrespondsToType, fide,
+                        sourceId, null, weight));
+                    await _writer.ApplyAsync(await b.BuildAsync(ct), ct);
+                    links++;
+                }
+            }
+            return new ProfileResult(profiles.Count, players, links);
+        }
+        finally { Gate.Release(); }
+    }
+
+    private static void AddProfileValue(
+        SubstrateChangeBuilder b, Hash128 playerId, Hash128 typeId, string? value,
+        Hash128 sourceId, double weight, string? prefix = null)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        string token = prefix is null ? value.Trim() : $"{prefix}:{value.Trim()}";
+        if (ContentEmitter.Emit(b, token, sourceId) is { } valueId)
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                playerId, typeId, valueId, sourceId, null, weight));
+    }
+
+    private static (Hash128 SourceId, string Name, Hash128 TrustClass, double Weight) ProfileSource(string provider)
+        => provider.ToLowerInvariant() switch
+        {
+            "lichess" => (ChessVocabulary.LichessProfileSourceId, "LichessPlayerProfile",
+                ChessVocabulary.OnlineProfileTrustClass, SourceTrust.StructuredCorpus),
+            "chesscom" => (ChessVocabulary.ChessComProfileSourceId, "ChessComPlayerProfile",
+                ChessVocabulary.OnlineProfileTrustClass, SourceTrust.StructuredCorpus),
+            "fide" => (ChessVocabulary.FideProfileSourceId, "FidePlayerProfile",
+                ChessVocabulary.FideProfileTrustClass, SourceTrust.StandardsDerived),
+            _ => throw new ArgumentException($"unsupported chess profile provider '{provider}'"),
+        };
+
     private async Task<(int Novel, int Applied)> ApplyChunkAsync(
         List<ChessGameRecord> chunk, CancellationToken ct)
     {
@@ -134,16 +235,21 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         var record = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/ingest");
         var analyze = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "chess/lab/ingest");
         int novel = 0;
+        var observedPositions = new HashSet<Hash128>();
         await foreach (var game in ChessPgnDecomposer.FilterNovelAsync(chunk, _reader, ct))
         {
             novel++;
             ChessPgnDecomposer.RecordGame(game, record);
             ChessAnalyze.DeriveFromParsed(analyze, game);
+            ChessTransitions.DepositFromParsed(analyze, game);
+            for (int i = 0; i + 1 < game.PositionIds.Length; i++)
+                observedPositions.Add(game.PositionIds[i]);
         }
         if (novel == 0) return (0, 0);
 
         await _writer.ApplyAsync(await record.BuildAsync(ct), ct);
         await _writer.ApplyAsync(await analyze.BuildAsync(ct), ct);
+        ChessTransitionObservations.MarkObserved(observedPositions);
         return (novel, novel);
     }
 

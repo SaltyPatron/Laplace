@@ -14,7 +14,7 @@ USAGE=(tatoeba opensubtitles)
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
     echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
-    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes safetensors" >&2
+    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-transitions safetensors" >&2
     exit 2
 fi
 
@@ -240,7 +240,7 @@ case "$source" in
             ingest chess-syzygy
         fi
         ;;
-    chess-analyze|chess-trajectory|chess-opening-match)
+    chess-analyze|chess-transitions|chess-trajectory|chess-opening-match)
         # Substrate-sourced calculated passes: no path, marker-gated, safe to re-run.
         build_cli
         ingest "$source"
@@ -248,7 +248,7 @@ case "$source" in
     *)
         echo "Unknown source: $source" >&2
         echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
-        echo "         chess openings chess-books chess-analyze chess-trajectory chess-eval chess-syzygy \\" >&2
+        echo "         chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy \\" >&2
     echo "         chess-opening-match \\" >&2
         echo "         code repo stack tiny-codes tabular recipe agents all safetensors" >&2
         exit 2

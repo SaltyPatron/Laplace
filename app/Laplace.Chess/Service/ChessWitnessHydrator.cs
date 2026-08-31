@@ -48,6 +48,17 @@ internal static class ChessWitnessHydrator
         ChessVocabulary.BookSourceId.ToBytes(),
     ];
 
+    // Transition replay is testimony-only and safe over historical live/self-play
+    // playings too. Analysis deliberately excludes that source because those games
+    // already calculate analysis inline; applying that restriction to transitions
+    // would leave every pre-transition lab/Lichess game permanently invisible.
+    private static byte[][] TransitionWitnessSources() =>
+    [
+        ChessVocabulary.PgnSourceId.ToBytes(),
+        ChessVocabulary.BookSourceId.ToBytes(),
+        ChessVocabulary.SourceId.ToBytes(),
+    ];
+
     /// <summary>Recorded playings under witness sources — the analyzer's unit count.</summary>
     /// <remarks>
     /// Name keeps "Events" for call-site stability; the counted type is
@@ -57,6 +68,11 @@ internal static class ChessWitnessHydrator
         => await NpgsqlSubstrateReads.CountChessEventsWithPlaysLineAsync(
             ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(),
             WitnessSources(), ct).ConfigureAwait(false);
+
+    internal static async Task<long?> CountTransitionEventsAsync(NpgsqlDataSource ds, CancellationToken ct)
+        => await NpgsqlSubstrateReads.CountChessEventsWithPlaysLineAsync(
+            ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(),
+            TransitionWitnessSources(), ct).ConfigureAwait(false);
 
     /// <summary>Distinct recorded lines under witness sources — the line-grain unit count.</summary>
     internal static async Task<long?> CountRecordedLinesAsync(NpgsqlDataSource ds, CancellationToken ct)
@@ -70,6 +86,7 @@ internal static class ChessWitnessHydrator
         ISubstrateReader reader,
         int chunkSize,
         Func<Hash128, Hash128> markerId,
+        bool includeLive,
         [EnumeratorCancellation] CancellationToken ct)
     {
         chunkSize = Math.Max(1, chunkSize);
@@ -77,7 +94,8 @@ internal static class ChessWitnessHydrator
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var playingIds = await FetchRecordedPlayingIdPageAsync(ds, lastId, chunkSize * 4, ct)
+            var playingIds = await FetchRecordedPlayingIdPageAsync(
+                    ds, lastId, chunkSize * 4, includeLive, ct)
                 .ConfigureAwait(false);
             if (playingIds.Count == 0) yield break;
 
@@ -141,7 +159,8 @@ internal static class ChessWitnessHydrator
         [EnumeratorCancellation] CancellationToken ct)
     {
         await foreach (var g in StreamUnanalyzedEventsAsync(
-            ds, reader, chunkSize, ev => ChessVocabulary.AnalysisMarkerId(ev, ChessAnalyze.Version), ct))
+            ds, reader, chunkSize, ev => ChessVocabulary.AnalysisMarkerId(ev, ChessAnalyze.Version),
+            includeLive: false, ct))
             yield return g;
     }
 
@@ -151,11 +170,13 @@ internal static class ChessWitnessHydrator
         ISubstrateReader reader,
         int chunkSize,
         Func<Hash128, Hash128> markerId,
+        bool includeLive,
         [EnumeratorCancellation] CancellationToken ct)
     {
         chunkSize = Math.Max(1, chunkSize);
         var idChunk = new List<Hash128>(chunkSize);
-        await foreach (var eventId in StreamUnanalyzedEventIdsAsync(ds, reader, chunkSize, markerId, ct))
+        await foreach (var eventId in StreamUnanalyzedEventIdsAsync(
+                           ds, reader, chunkSize, markerId, includeLive, ct))
         {
             idChunk.Add(eventId);
             if (idChunk.Count < chunkSize) continue;
@@ -219,14 +240,15 @@ internal static class ChessWitnessHydrator
     }
 
     private static async Task<List<Hash128>> FetchRecordedPlayingIdPageAsync(
-        NpgsqlDataSource ds, byte[] afterId, int limit, CancellationToken ct)
+        NpgsqlDataSource ds, byte[] afterId, int limit, bool includeLive, CancellationToken ct)
     {
         // Chess_PLAYING, not Chess_Event. EmitGame makes the PLAYING the subject of
         // PLAYS_LINE (GH #736: one event holds many playings, so the event cannot carry a
         // per-game outcome). Substrate page helper is still named ChessEventIdPageAsync
         // (generic typed-entity page); the type argument is PlayingType.
         var rows = await NpgsqlSubstrateReads.ChessEventIdPageAsync(
-            ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(), WitnessSources(),
+            ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(),
+            includeLive ? TransitionWitnessSources() : WitnessSources(),
             afterId.Length == 0 ? Array.Empty<byte>() : afterId, limit, ct).ConfigureAwait(false);
         return rows.Select(static b => Hash128.FromBytes(b)).ToList();
     }

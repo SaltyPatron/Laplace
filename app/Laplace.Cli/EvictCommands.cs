@@ -28,6 +28,7 @@ internal static class EvictCommands
             ["ChessAnalysis"]   = ("chess-analyze",    ["Chess_AnalysisMarker"]),
             ["ChessTrajectory"] = ("chess-trajectory", ["Chess_AnalysisMarker"]),
             ["ChessStockfish"]  = ("chess-eval",       ["Chess_AnalysisMarker"]),
+            ["ChessTransitions"] = ("chess-transitions", ["Chess_AnalysisMarker"]),
         };
 
     public static async Task<int> EvictAsync(string[] args)

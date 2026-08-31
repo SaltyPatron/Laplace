@@ -39,6 +39,7 @@ BEGIN ATOMIC
             FROM laplace.consensus x
             WHERE x.subject_id = f.subject_id
               AND x.object_id IS NOT NULL
+              AND x.object_id <> f.subject_id
 
             UNION ALL
 
@@ -102,6 +103,7 @@ BEGIN ATOMIC
             FROM laplace.consensus x
             WHERE x.subject_id = f.subject_id
               AND x.object_id IS NOT NULL
+              AND x.object_id <> f.subject_id
               AND x.type_id = ANY (p_types)
 
             UNION ALL
@@ -120,6 +122,7 @@ BEGIN ATOMIC
             FROM laplace.consensus_rdefault x
             WHERE x.subject_id = f.subject_id
               AND x.object_id IS NOT NULL
+              AND x.object_id <> f.subject_id
               AND (p_types IS NULL OR x.type_id <> ALL (p_types))
 
             UNION ALL

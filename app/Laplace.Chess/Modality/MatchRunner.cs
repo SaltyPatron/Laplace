@@ -6,6 +6,9 @@ using Laplace.Modality;
 namespace Laplace.Modality.Chess;
 
 public delegate ChessMove MoveChooser(ChessState state, Random rng);
+public readonly record struct MatchPgnGame(
+    IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen,
+    string White, string Black);
 
 public static class MatchRunner
 {
@@ -155,13 +158,17 @@ public static class MatchRunner
         Func<MoveChooser> makeA, Func<MoveChooser> makeB, int games,
         int maxPlies = 200, int seed = 1, int concurrency = 1, int openingPlies = 4,
         IReadOnlyList<string>? openingFens = null,
-        System.Collections.Concurrent.ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>? pgnSink = null,
+        System.Collections.Concurrent.ConcurrentBag<MatchPgnGame>? pgnSink = null,
         IProgress<(int Done, int AWins, int Draws, int BWins)>? progress = null,
         CancellationToken ct = default,
         Action<RecordedEdge[], bool>? recordSink = null,
         ChessLiveGameHost? liveHost = null,
         string? liveLearnContext = null,
-        Action<int, int, string, string>? onPly = null)
+        Action<int, int, string, string>? onPly = null,
+        string? aPlayerName = null,
+        string? bPlayerName = null,
+        string? eventName = null,
+        string? externalIdPrefix = null)
     {
         bool book = openingFens is { Count: > 0 };
         int aWins = 0, draws = 0, bWins = 0, done = 0;
@@ -190,7 +197,23 @@ public static class MatchRunner
                 ? ChessVocabulary.PlaySessionHandle(Guid.NewGuid())
                 : null;
             if (liveHost is not null && gameId is { } gidOpen)
-                liveHost.OpenGameAsync(gidOpen, learnCtx, ct: ct).GetAwaiter().GetResult();
+            {
+                string? whiteName = aWhite ? aPlayerName : bPlayerName;
+                string? blackName = aWhite ? bPlayerName : aPlayerName;
+                Hash128? whiteId = string.IsNullOrWhiteSpace(whiteName)
+                    ? null : ChessVocabulary.PlayerId(whiteName);
+                Hash128? blackId = string.IsNullOrWhiteSpace(blackName)
+                    ? null : ChessVocabulary.PlayerId(blackName);
+                liveHost.OpenGameAsync(
+                    gidOpen, learnCtx, whiteId, blackId, whiteName, blackName,
+                    new ChessLiveGameMetadata(
+                        Event: eventName,
+                        Site: "Laplace Chess Lab",
+                        Date: DateTimeOffset.UtcNow.ToString("yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture),
+                        StartFen: start.Board.ToFen(),
+                        ExternalGameId: externalIdPrefix is null ? null : $"{externalIdPrefix}/{g}"),
+                    ct).GetAwaiter().GetResult();
+            }
 
             var played = PlayOneCore(m, aWhite ? a : b, aWhite ? b : a, maxPlies, rng,
                 book ? 0 : openingPlies, start, pgnMoves, ct,
@@ -213,7 +236,10 @@ public static class MatchRunner
                     .GetAwaiter().GetResult();
             }
             if (pgnMoves is not null)
-                pgnSink!.Add((pgnMoves, outcome, start.Board.ToFen()));
+                pgnSink!.Add(new MatchPgnGame(
+                    pgnMoves, outcome, start.Board.ToFen(),
+                    aWhite ? aPlayerName ?? "A" : bPlayerName ?? "B",
+                    aWhite ? bPlayerName ?? "B" : aPlayerName ?? "A"));
             if (outcome == 2) Interlocked.Increment(ref draws);
             else if ((outcome == 0) == aWhite) Interlocked.Increment(ref aWins);
             else Interlocked.Increment(ref bWins);

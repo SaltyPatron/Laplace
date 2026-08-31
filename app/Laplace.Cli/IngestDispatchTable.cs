@@ -109,6 +109,12 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessTrajectoryDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
+        // Testimony-only transition backfill. Separate from ChessAnalysis because bumping its
+        // marker would double every standing calculated observation count.
+        ("chess-transitions", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessTransitionsDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
         // Stockfish eval pass over recorded games (GH #573). --depth N sets the per-position
         // search depth (default 10 — the v1 census budget); --nodes N switches to a
         // node-capped search (bounded worst case). A run-level memo searches each unique

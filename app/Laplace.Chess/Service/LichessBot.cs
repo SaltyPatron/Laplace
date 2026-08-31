@@ -16,6 +16,7 @@ public sealed class LichessBot : IAsyncDisposable
     private readonly HttpClient _http;
     private readonly int _maxDepth;
     private readonly ChessLiveGameHost _host;
+    private readonly SubstrateTransitionChooser? _transitionChooser;
     private readonly bool _substrate;
     private readonly bool _record;
     private readonly string? _botUsername;
@@ -41,6 +42,7 @@ public sealed class LichessBot : IAsyncDisposable
         _maxDepth = Math.Max(1, maxDepth);
         _host = host;
         _substrate = substrate;
+        _transitionChooser = substrate ? new SubstrateTransitionChooser(host.DataSource) : null;
         _record = record;
         _botUsername = botUsername;
         _onChatLine = onChatLine;
@@ -268,8 +270,6 @@ public sealed class LichessBot : IAsyncDisposable
                         if (motifs.Count > 0)
                             await _host.RecordPlyAnalysisAsync(
                                 substrateGameId, ply, new ChessLivePlyAnalysis(Motifs: motifs), ct);
-                        if (search is null) search = _host.BuildSearch(_substrate, maxDepth: _maxDepth);
-                        else _host.RefreshSearch(search, _substrate);
                     }
 
                     trackedPlies++;
@@ -302,19 +302,60 @@ public sealed class LichessBot : IAsyncDisposable
                 var boardNow = trackState.Board;
                 if (boardNow.WhiteToMove != weAreWhite) continue;
 
-                search ??= _host.BuildSearch(_substrate, maxDepth: _maxDepth);
-
                 int myTime = weAreWhite ? wtime : btime;
                 int myInc = weAreWhite ? winc : binc;
                 int budgetMs = TimeBudget(myTime, myInc);
 
                 var before = trackState;
-                search ??= _host.BuildSearch(_substrate, maxDepth: _maxDepth);
-                var result = search!.Think(boardNow, new Search.Limits(MaxDepth: _maxDepth, MaxTimeMs: budgetMs), ct);
-                if (result.BestMove is not { } mv) continue;
+                ChessMove mv;
+                int scoreCp;
+                int searchedDepth;
+                long searchedNodes;
+                IReadOnlyList<string> pv;
+                bool witnessed = false;
+                if (_transitionChooser is not null)
+                {
+                    Search.Result? fallbackResult = null;
+                    IReadOnlyList<string>? fallbackPv = null;
+                    ChessMove Fallback(ChessState state, Random rng)
+                    {
+                        search ??= _host.BuildSearch(false, maxDepth: Math.Min(_maxDepth, 2));
+                        fallbackResult = search.Think(
+                            state.Board,
+                            new Search.Limits(MaxDepth: Math.Min(_maxDepth, 2), MaxTimeMs: budgetMs), ct);
+                        fallbackPv = search.ExtractPv(state.Board);
+                        return fallbackResult.Value.BestMove ?? MatchRunner.RandomChooser(state, rng);
+                    }
 
-                _log.LogDebug("game {Id}: play {Move} (depth {D}, score {S}cp, budget {B}ms)",
-                    lichessGameId, mv.ToUci(), result.Depth, result.Score, budgetMs);
+                    var decision = _transitionChooser.ChooseDecision(before, Random.Shared, Fallback, ct);
+                    mv = decision.Move;
+                    witnessed = decision.Witnessed;
+                    scoreCp = witnessed
+                        ? (int)Math.Clamp(
+                            Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
+                            -30_000, 30_000)
+                        : fallbackResult?.Score ?? 0;
+                    searchedDepth = fallbackResult?.Depth ?? 0;
+                    searchedNodes = fallbackResult?.Nodes ?? 0;
+                    pv = fallbackPv ?? [mv.ToUci()];
+                }
+                else
+                {
+                    search ??= _host.BuildSearch(false, maxDepth: _maxDepth);
+                    var result = search.Think(
+                        boardNow, new Search.Limits(MaxDepth: _maxDepth, MaxTimeMs: budgetMs), ct);
+                    if (result.BestMove is not { } bestMove) continue;
+                    mv = bestMove;
+                    scoreCp = result.Score;
+                    searchedDepth = result.Depth;
+                    searchedNodes = result.Nodes;
+                    pv = search.ExtractPv(boardNow);
+                }
+
+                _log.LogDebug(
+                    "game {Id}: play {Move} ({Mode}, depth {D}, score {S}cp, budget {B}ms)",
+                    lichessGameId, mv.ToUci(), witnessed ? "witnessed transition" : "search fallback",
+                    searchedDepth, scoreCp, budgetMs);
 
                 await PostAsync($"/api/bot/game/{lichessGameId}/move/{mv.ToUci()}", ct);
 
@@ -329,22 +370,17 @@ public sealed class LichessBot : IAsyncDisposable
                         ChessVocabulary.LaplacePlayerId, ct);
                     trackState = after;
                     trackedPlies = ply;
-                    // PV must come from the search that produced the move —
-                    // the old rebuild-here minted a fresh Search whose empty
-                    // transposition table yielded no PV for the commentary.
-                    var pv = search!.ExtractPv(boardNow);
                     var motifs = ChessMotifs.DetectAtPly(boardNow, mv, after.Board).ToList();
                     await _host.RecordPlyAnalysisAsync(
                         substrateGameId, ply,
-                        new ChessLivePlyAnalysis(result.Score, result.Depth, result.Nodes, pv, motifs), ct);
-                    _host.RefreshSearch(search, _substrate);
+                        new ChessLivePlyAnalysis(scoreCp, searchedDepth, searchedNodes, pv, motifs), ct);
 
                     try
                     {
-                        int whiteCp = boardNow.WhiteToMove ? result.Score : -result.Score;
+                        int whiteCp = boardNow.WhiteToMove ? scoreCp : -scoreCp;
                         string comment = await ChessMoveCommentary.BuildAsync(
                             _host.DataSource,
-                            new ChessMoveCommentary.Inputs(whiteCp, result.Depth, pv, motifs,
+                            new ChessMoveCommentary.Inputs(whiteCp, searchedDepth, pv, motifs,
                                 PositionSurface: toKey),
                             ct);
                         if (!string.IsNullOrWhiteSpace(comment))

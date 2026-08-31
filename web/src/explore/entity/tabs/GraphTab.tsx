@@ -9,9 +9,9 @@ import { useExploreStore } from '../../store';
 import type { BillingReceipt, ExploreConsensusRow } from '../../types';
 import styles from './GraphTab.module.css';
 
-/** Matches server clamps — beam admits ≤fanout new nodes/hop, hard cap 160. */
-const HOPS_MAX = 4;
-const FANOUT_MAX = 16;
+const HOPS_MAX = 8;
+const FANOUT_MAX = 256;
+const NODES_MAX = 2048;
 
 export function GraphTab({
   centerId,
@@ -32,8 +32,9 @@ export function GraphTab({
   const exploreQuote = useExploreStore((s) => s.quoteId);
   const quote = exploreQuote || quoteId;
 
-  const [hops, setHops] = useState(2);
-  const [fanout, setFanout] = useState(10);
+  const [hops, setHops] = useState(4);
+  const [fanout, setFanout] = useState(24);
+  const [nodeCapacity, setNodeCapacity] = useState(256);
   const [dim, setDim] = useState<'2d' | '3d'>('3d');
   const [web, setWeb] = useState<WebGraph | null>(null);
   const [truncated, setTruncated] = useState(false);
@@ -53,7 +54,9 @@ export function GraphTab({
     setBusy(true);
     setErr(null);
     try {
-      const res = await exploreConsensusGraph(centerId, hops, fanout, { tenant, quoteId: quote });
+      const res = await exploreConsensusGraph(
+        centerId, hops, fanout, nodeCapacity, { tenant, quoteId: quote },
+      );
       setWeb({
         nodes: res.graph.nodes.map((n) => ({
           id: n.id_hex,
@@ -121,8 +124,11 @@ export function GraphTab({
         fanout={fanout}
         hopsMax={HOPS_MAX}
         fanoutMax={FANOUT_MAX}
+        maxNodes={nodeCapacity}
+        maxNodesMax={NODES_MAX}
         onHopsChange={setHops}
         onFanoutChange={setFanout}
+        onMaxNodesChange={setNodeCapacity}
         dim={dim}
         onDimChange={setDim}
         toolbar={
@@ -140,11 +146,11 @@ export function GraphTab({
       />
       {truncated ? (
         <Muted className={styles.note}>
-          Beam capped at {maxNodes || 160} nodes (≤{fanout} new / hop by eff_μ) — lower hops/fanout is denser per hop, not a full BFS.
+          Capacity reached at {maxNodes || nodeCapacity} nodes (≤{fanout} strongest unseen nodes per hop).
         </Muted>
       ) : (
         <Muted className={styles.note}>
-          Beam crawl: ≤{fanout} strongest new nodes per hop · ≤{HOPS_MAX} hops · pool-safe concurrency.
+          Multi-hop crawl: ≤{fanout} strongest unseen nodes per hop · capacity {nodeCapacity} · revisits suppressed.
         </Muted>
       )}
       {busy && !web ? <LoadingText>Crawling consensus neighborhood…</LoadingText> : null}

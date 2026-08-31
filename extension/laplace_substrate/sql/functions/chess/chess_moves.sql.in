@@ -6,14 +6,11 @@ CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT
     -- Opening explorer over the rated MOVE web: every continuation the fold has
     -- ever witnessed out of one position, ranked by the conservative estimate.
     --
-    -- MEASURED 2026-08-21: that web is currently EMPTY -- MOVE holds 0 attestations
-    -- and 0 consensus rows, so this returns 0 rows for every input. That is not a bug
-    -- in this function. The typed-trajectory refactor (#1258/#1263) stopped the chess
-    -- lanes attesting per-ply MOVE edges, which is why 010681de correctly flipped the
-    -- openings/chess-books MOVE gates to max 0. Issue #840 records the cells as they
-    -- were BEFORE that change (e4: 305,376 witnesses, real rating/rd), so the rated
-    -- cells this reads are data the refactor removed and #838 is the reseed that
-    -- restores them.
+    -- MEASURED 2026-08-21: the deployed pre-repair corpus was EMPTY because the typed-
+    -- trajectory refactor stopped materializing this bounded cell. Current PGN/live/self-
+    -- play record paths restore one position→position observation per witnessed ply;
+    -- older corpora remain empty until replayed. The cell is bounded by deterministic
+    -- legal transitions, while evidence contexts retain the contributing playings.
     --
     -- Do NOT make this synthesise rows from trajectory geometry to look populated.
     -- I tried exactly that and it was wrong twice over: ChessEngineService.ExploreAsync

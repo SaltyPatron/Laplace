@@ -29,6 +29,9 @@ public static class ChessVocabulary
     public static readonly Hash128 UserPromptSourceId = SubstrateCanonicalIds.Source("ChessUserPrompt");
     public static readonly Hash128 OpeningsSourceId = SubstrateCanonicalIds.Source("ChessOpenings");
     public static readonly Hash128 BookSourceId = SubstrateCanonicalIds.Source("ChessBook");
+    public static readonly Hash128 LichessProfileSourceId = SubstrateCanonicalIds.Source("LichessPlayerProfile");
+    public static readonly Hash128 ChessComProfileSourceId = SubstrateCanonicalIds.Source("ChessComPlayerProfile");
+    public static readonly Hash128 FideProfileSourceId = SubstrateCanonicalIds.Source("FidePlayerProfile");
 
     private static Hash128 TrustClass(string cls) => Hash128.OfCanonical($"substrate/trust_class/{cls}/v1");
 
@@ -41,6 +44,8 @@ public static class ChessVocabulary
     public static readonly Hash128 UserPromptTrustClass = TrustClass("UserPromptContent");
     public static readonly Hash128 OpeningsTrustClass = TrustClass("AcademicCurated");
     public static readonly Hash128 BookTrustClass = TrustClass("AcademicCurated");
+    public static readonly Hash128 OnlineProfileTrustClass = TrustClass("StructuredCorpus");
+    public static readonly Hash128 FideProfileTrustClass = TrustClass("StandardsDerived");
 
 
 
@@ -51,6 +56,8 @@ public static class ChessVocabulary
     // that governed spelling instead of adding a second C# vocabulary literal; the ISA g3
     // ratchet is shrink-only by design.
     public static readonly Hash128 CorrespondsToType = EntityTypeRegistry.Id(ChessSeedManifest.Relations[^2]);
+    public static readonly Hash128 ExternalIdType = EntityTypeRegistry.Id(ChessSeedManifest.Relations[^4]);
+    public static readonly Hash128 FeatureType = EntityTypeRegistry.Id(ChessSeedManifest.Relations[^3]);
 
 
 

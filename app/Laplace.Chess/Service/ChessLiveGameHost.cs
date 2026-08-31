@@ -85,7 +85,10 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);
         var host = new SubstrateTurnHost(ds, writer, reader, witnessWeight, defaultLearnContext);
-        var canonicalNames = await ChessVocabulary.BootstrapAsync(writer, ct);
+        var canonicalNames = new HashSet<string>(await ChessVocabulary.BootstrapAsync(writer, ct));
+        canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
+            writer, ChessTransitions.SourceId, "ChessTransitions",
+            ChessTransitions.TrustClassId, ct, reader));
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, canonicalNames, ct);
         return new ChessLiveGameHost(ds, writer, host);
     }
@@ -264,12 +267,10 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     b.AddAttestation(NativeAttestation.Categorical(
                         lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
 
-                // The player/head-to-head cells are bounded, explicitly reusable statistics.
-                // Move, position, substructure and exact-line outcomes are NOT deposited --
-                // per-constituent outcome rows are the write amplification this model
-                // refuses. They are recovered from what is stored: LearnedPst.ReadWhite
-                // projects the move-keyed fold (chess.learned_moves over each game's
-                // HAS_RESULT + move trajectory) onto the piece-square table.
+                // Player/head-to-head and position→position MOVE cells are bounded reusable
+                // statistics. Exact position/substructure outcome projections remain absent:
+                // piece-square evidence comes from the move-keyed fold, while the transition
+                // cell answers which witnessed legal continuation follows this exact trunk.
                 if (session.WhitePlayerId is { } w2)
                     ChessGraph.AppendPlayerResult(
                         b, w2, session.BlackPlayerId, result.ForMover(0), WitnessWeight,
@@ -300,6 +301,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     MoveIds = session.MoveIds.ToArray(),
                 };
                 ChessAnalyze.DeriveFromWitnessed(b, witnessed);
+                ChessGraph.AppendTransitions(
+                    b, session.PositionIds, result, SourceTrust.StructuredCorpus,
+                    ChessTransitions.SourceId, playingId);
+                b.AddEntity(
+                    ChessTransitions.MarkerId(playingId), EntityTier.Document,
+                    ChessVocabulary.AnalysisMarkerType, ChessTransitions.SourceId);
 
                 // Search scores are calculations on exact pre-move positions. Preserve every
                 // one that was actually performed; do not synthesize scores for the other side.
@@ -316,6 +323,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
+            if (session.PositionIds.Count > 1)
+                ChessTransitionObservations.MarkObserved(session.PositionIds.Take(session.PositionIds.Count - 1));
             InvalidateLearnedPst();
             GamesCompleted++;
         }
