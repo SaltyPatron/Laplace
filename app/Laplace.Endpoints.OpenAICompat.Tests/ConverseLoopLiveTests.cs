@@ -12,27 +12,19 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// The closed OODA loop, live: deposit a turn (mint + inline fold), confirm a
 /// triple through the feedback lane, see the walk serve it; refute it harder,
 /// see the walk drop it — proving the C# deposit → fold → walk lanes wire to
-/// the substrate end to end. Skipped when the substrate is unreachable.
+/// the substrate end to end. Skipped when the seeded substrate is unavailable.
 ///
 /// The tokens are UNIQUE PER RUN (a fresh guid suffix). This is load-bearing,
 /// not cosmetic: consensus cells persist and the CI runner shares one live
-/// database, so fixed token ids would accumulate Glicko history across runs —
-/// a prior run's refutes would poison the next run's "confirmed → served"
-/// assertion (exactly the failure this replaces). A fresh cell each run makes
-/// the confirm→served / refute→dropped transition deterministic and idempotent.
-/// The deposits are truthful, trivial, low-trust (UserFeedback) episodes — the
-/// substrate is built to accumulate episodes — so they are left in place rather
-/// than hand-deleted (a direct live-DB DELETE is the manual mutation the project
-/// bans; the deterministic, fully-isolated proof of the same loop is the
-/// rolled-back chat_loop.sql regress test).
+/// database, so fixed token ids would accumulate Glicko history across runs.
+/// The deterministic, fully-isolated proof of the same loop is the rolled-back
+/// chat_loop.sql regress test.
 /// </summary>
-// Tier=db: a LIVE, shared-substrate-mutating end-to-end smoke — excluded from
-// the CI deploy gate (DOTNET_FILTER 'Tier!=db') alongside every other
-// DB-dependent test. It is environment-sensitive by nature (needs a seeded
-// substrate, deposits and folds real cells) and must never gate publish. The
-// deterministic, isolated, rolled-back proof of the SAME loop is chat_loop.sql
-// in pg_regress, which does gate CI. Run this locally to exercise the C# lanes.
-[Trait("Tier", "db")]
+// Tier=live: this is a shared-substrate-mutating PRODUCT smoke. It needs a seeded
+// substrate and intentionally deposits/folds durable cells. It must not define DB
+// health or gate a fresh database recreation. The isolated chat_loop.sql fixture
+// remains the integration gate for the write/fold/walk mechanism itself.
+[Trait("Tier", "live")]
 public sealed class ConverseLoopLiveTests
 {
     [SkippableFact]
@@ -41,7 +33,6 @@ public sealed class ConverseLoopLiveTests
         Skip.IfNot(SubstrateFloorPresent(), "substrate floor absent (unseeded/mid-reseed DB)");
         CodepointPerfcache.LoadDefault();
 
-        // Fresh, collision-proof tokens so this run's cell has no prior history.
         var tag = Guid.NewGuid().ToString("N")[..12];
         var tokA = $"zzloop{tag}a";
         var tokB = $"zzloop{tag}b";
@@ -49,7 +40,6 @@ public sealed class ConverseLoopLiveTests
         await using var ds = new NpgsqlDataSourceBuilder(
             LaplaceInstall.PostgresConnectionString()).Build();
 
-        // Deposit the "turn": mints the tokens as witnessed content, folded inline.
         var inner = new NpgsqlSubstrateWriter(ds);
         await using (var acc = new ConsensusAccumulatingWriter(inner, ds))
         {
@@ -65,16 +55,12 @@ public sealed class ConverseLoopLiveTests
         var subj = resolved[0].Id!.Value;
         var obj = resolved[1].Id!.Value;
 
-        // Confirm until the conservative signed µ (eff_mu − neutral) is positive:
-        // the walk must serve the claim.
         for (int i = 0; i < 20; i++)
             await FeedbackContent.ApplyAsync(ds,
                 FeedbackContent.BuildTriple(subj, "RELATED_TO", obj, confirm: true));
         Assert.True(await WalkSeesEdge(ds, subj, obj),
             "confirmed claim not served by walk_branches");
 
-        // Refute harder: the edge goes signed-negative and the walk drops it —
-        // the answer changed because the consensus changed.
         for (int i = 0; i < 60; i++)
             await FeedbackContent.ApplyAsync(ds,
                 FeedbackContent.BuildTriple(subj, "RELATED_TO", obj, confirm: false));
@@ -96,13 +82,6 @@ public sealed class ConverseLoopLiveTests
         return (long)(await cmd.ExecuteScalarAsync())! > 0;
     }
 
-    // The loop test deposits content, folds, and walks — it needs a SEEDED
-    // substrate, not merely a reachable server. word_id() is a pure hash and
-    // returns on an empty schema, so a connectivity check would run the test
-    // against an unseeded/mid-reseed DB and fail spuriously (the codepoint
-    // floor is absent → deposits mint nothing → 'confirmed claim not served').
-    // Gate on the floor itself: present → run and prove the loop; absent →
-    // skip (the deterministic, DB-independent proof is chat_loop.sql regress).
     private static bool SubstrateFloorPresent()
     {
         try
