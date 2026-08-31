@@ -19,19 +19,7 @@ public class NativeInteropTests
     {
         const int layers = 34;
         const int expected = 9 * layers + 3;
-        byte[] json = Encoding.UTF8.GetBytes(
-            $$"""
-            {
-              "architectures": ["LlamaForCausalLM"],
-              "hidden_size": 2048,
-              "intermediate_size": 5632,
-              "num_attention_heads": 32,
-              "num_hidden_layers": {{layers}},
-              "num_key_value_heads": 4,
-              "torch_dtype": "bfloat16",
-              "vocab_size": 32000
-            }
-            """);
+        byte[] json = LlamaConfig(layers);
 
         IntPtr recipe;
         fixed (byte* p = json)
@@ -59,17 +47,7 @@ public class NativeInteropTests
             int count = NativeInterop.ArchTemplateRequiredTensorsComplete(
                 template, recipe, out var specs);
 
-            Assert.Equal(expected, count);
-            Assert.Equal(expected, specs.Length);
-            Assert.Equal("model.embed_tokens.weight",
-                Marshal.PtrToStringUTF8((IntPtr)specs[0].Name));
-            Assert.Equal("model.layers.33.post_attention_layernorm.weight",
-                Marshal.PtrToStringUTF8((IntPtr)specs[^3].Name));
-            Assert.Equal("lm_head.weight",
-                Marshal.PtrToStringUTF8((IntPtr)specs[^1].Name));
-            Assert.Equal(2UL, specs[0].Rank);
-            Assert.Equal(32000UL, specs[0].Shape[0]);
-            Assert.Equal(2048UL, specs[0].Shape[1]);
+            AssertCompleteManifest(specs, count, expected);
         }
         finally
         {
@@ -77,4 +55,63 @@ public class NativeInteropTests
             NativeInterop.RecipeFree(recipe);
         }
     }
+
+    [Fact]
+    public unsafe void ArchTemplateManifestMaterialize_OwnsCompleteManifestBeyond300()
+    {
+        const int layers = 34;
+        const int expected = 9 * layers + 3;
+        byte[] json = LlamaConfig(layers);
+
+        using var manifest = NativeInterop.ArchTemplateManifestMaterialize(
+            json, "llama", out var error);
+
+        Assert.Null(error);
+        Assert.NotNull(manifest);
+        AssertCompleteManifest(manifest.Specs, manifest.Count, expected);
+
+        // Dispose is deliberately idempotent: every production early-return path may
+        // leave through a using scope without duplicating native ownership logic.
+        manifest.Dispose();
+    }
+
+    [Fact]
+    public void ArchTemplateManifestMaterialize_RejectsMalformedRecipeBeforeManifestUse()
+    {
+        var manifest = NativeInterop.ArchTemplateManifestMaterialize(
+            Encoding.UTF8.GetBytes("{"), "llama", out var error);
+
+        Assert.Null(manifest);
+        Assert.Equal("recipe_parse returned null", error);
+    }
+
+    private static unsafe void AssertCompleteManifest(
+        TensorSpec[] specs, int count, int expected)
+    {
+        Assert.Equal(expected, count);
+        Assert.Equal(expected, specs.Length);
+        Assert.Equal("model.embed_tokens.weight",
+            Marshal.PtrToStringUTF8((IntPtr)specs[0].Name));
+        Assert.Equal("model.layers.33.post_attention_layernorm.weight",
+            Marshal.PtrToStringUTF8((IntPtr)specs[^3].Name));
+        Assert.Equal("lm_head.weight",
+            Marshal.PtrToStringUTF8((IntPtr)specs[^1].Name));
+        Assert.Equal(2UL, specs[0].Rank);
+        Assert.Equal(32000UL, specs[0].Shape[0]);
+        Assert.Equal(2048UL, specs[0].Shape[1]);
+    }
+
+    private static byte[] LlamaConfig(int layers) => Encoding.UTF8.GetBytes(
+        $$"""
+        {
+          "architectures": ["LlamaForCausalLM"],
+          "hidden_size": 2048,
+          "intermediate_size": 5632,
+          "num_attention_heads": 32,
+          "num_hidden_layers": {{layers}},
+          "num_key_value_heads": 4,
+          "torch_dtype": "bfloat16",
+          "vocab_size": 32000
+        }
+        """);
 }
