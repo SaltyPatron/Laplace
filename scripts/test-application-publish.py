@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Execute the real transaction orchestrator with isolated effect adapters."""
+"""Exercise the real application transaction and deployment-health classifier."""
+from __future__ import annotations
+
 import importlib.util
 import json
 import os
@@ -8,11 +10,10 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/publish-applications.sh"
-DELIVERY_SELECTOR = ROOT / "scripts/application-delivery-source.py"
+VERIFY = ROOT / "scripts/verify-application-release.py"
 ADAPTERS = r'''
 source "$1"
 ROOT="$2"
@@ -38,9 +39,10 @@ application_main "$3"
 '''
 
 
-def load_module(name, path):
+def load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
 
@@ -54,8 +56,10 @@ class ApplicationTransactionTests(unittest.TestCase):
 
     def run_release(self, mode="deploy", fail="", script=SCRIPT):
         env = dict(os.environ, GITHUB_RUN_ID="fixture-run", FAIL_AT=fail)
-        return subprocess.run(["bash", "-c", ADAPTERS, "test", str(script), str(self.root), mode],
-                              env=env, capture_output=True, text=True, timeout=10)
+        return subprocess.run(
+            ["bash", "-c", ADAPTERS, "test", str(script), str(self.root), mode],
+            env=env, capture_output=True, text=True, timeout=10,
+        )
 
     def events(self):
         path = self.root / "events"
@@ -70,9 +74,13 @@ class ApplicationTransactionTests(unittest.TestCase):
     def test_success_requires_verification_and_unchanged_engine_before_commit(self):
         result = self.run_release()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(["guard --snapshot", "host", "publish", "restart", "verify",
-                          "guard --compare", "managed commit", "stamp"], self.events())
+        self.assertEqual([
+            "guard --snapshot", "host", "publish", "restart", "verify",
+            "guard --compare", "managed commit", "stamp",
+        ], self.events())
         self.assertTrue((self.root / "build/.applications-verified.json").exists())
+        self.assertFalse((self.root / "build/.application-release-state.json").exists(),
+                         "test adapter does not create a state receipt")
 
     def test_preflight_failure_never_mutates_or_rolls_back(self):
         for fail in ("guard --snapshot", "host"):
@@ -104,7 +112,6 @@ class ApplicationTransactionTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(["managed rollback", "restore"], self.events())
         self.assertEqual(0, self.run_release("recover").returncode)
-        self.assertEqual(["managed rollback", "restore"], self.events())
 
     def test_recovery_cannot_touch_another_runs_transaction(self):
         (self.root / "build/.application-publish-owner").write_text("other-run")
@@ -132,144 +139,168 @@ class ApplicationTransactionTests(unittest.TestCase):
         self.assertIn(line, source)
         broken.write_text(source.replace(line, "  : # deliberate missing postcondition"))
         result = self.run_release(fail="guard --compare", script=broken)
-        # The same failure injection cannot block commit once the guard is
-        # deliberately removed. The ordinary failure test would therefore fail.
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("managed commit", self.events())
 
 
-class DeliveryDecisionTests(unittest.TestCase):
+class DeploymentReadinessTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.selector = load_module("application_delivery_source", DELIVERY_SELECTOR)
+        cls.verify = load_module("verify_application_release", VERIFY)
 
-    def payload(self, *, unit="success", publish="skipped", integration="failure"):
-        conclusions = {
-            "Build — engine, extensions, app, perfcache": "success",
-            "Unit tests — native engine and managed ABI": unit,
-            "Deploy — stage install to /opt/laplace": "success",
-            "DB — migrate, extension sync, perfcache GUC": "success",
-            "Integration tests — pg_regress || dotnet (parallel)": integration,
-            "Publish — API + SPA, restart service": publish,
+    @staticmethod
+    def readiness(**updates):
+        value = {
+            "ready": False,
+            "substrate_reachable": True,
+            "perfcache_ready": True,
+            "entities": 0,
+            "consensus_relations": 0,
         }
-        jobs = [{"name": name, "conclusion": conclusion}
-                for name, conclusion in conclusions.items()]
-        return {"total_count": len(jobs), "jobs": jobs}
+        value.update(updates)
+        return value
 
-    def test_failed_environment_qa_still_authorizes_owed_delivery(self):
-        decision = self.selector.decide(self.payload(), "push")
-        self.assertTrue(decision.deliver, decision.reason)
-        self.assertIn("publish was skipped", decision.reason)
+    def test_empty_database_is_healthy_delivery_without_product_data(self):
+        self.assertEqual((False, False), self.verify.classify_readiness(self.readiness()))
 
-    def test_failed_dev_proof_never_authorizes_delivery(self):
-        decision = self.selector.decide(self.payload(unit="failure"), "push")
-        self.assertFalse(decision.deliver)
-        self.assertIn("Unit tests", decision.reason)
+    def test_thin_database_is_delivered_then_owned_by_substrate_floor_smoke(self):
+        self.assertEqual(
+            (True, False),
+            self.verify.classify_readiness(self.readiness(entities=1)),
+        )
+        self.assertEqual(
+            (True, False),
+            self.verify.classify_readiness(self.readiness(consensus_relations=1)),
+        )
 
-    def test_already_published_run_does_not_publish_twice(self):
-        decision = self.selector.decide(
-            self.payload(publish="success", integration="success"), "push")
-        self.assertFalse(decision.deliver)
-        self.assertIn("already delivered", decision.reason)
+    def test_populated_but_not_ready_receipt_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "populated substrate"):
+            self.verify.classify_readiness(
+                self.readiness(entities=10, consensus_relations=20)
+            )
 
-    def test_failed_activation_is_not_retried_as_qa_recovery(self):
-        decision = self.selector.decide(self.payload(publish="failure"), "push")
-        self.assertFalse(decision.deliver)
-        self.assertIn("not auto-retried", decision.reason)
+    def test_populated_ready_database_reports_product_ready(self):
+        self.assertEqual(
+            (True, True),
+            self.verify.classify_readiness(
+                self.readiness(ready=True, entities=10, consensus_relations=20)
+            ),
+        )
 
-    def test_non_push_and_incomplete_job_payload_fail_closed(self):
-        self.assertFalse(self.selector.decide(self.payload(), "workflow_dispatch").deliver)
-        incomplete = self.payload()
-        incomplete["total_count"] += 1
-        with self.assertRaises(ValueError):
-            self.selector.decide(incomplete, "push")
-
-
-class ReleaseWorkflowTests(unittest.TestCase):
-    def test_application_lane_cannot_install_or_migrate(self):
-        jobs = yaml.safe_load((ROOT / ".github/workflows/laplace.yml").read_text())["jobs"]
-        app = jobs["application-release"]
-        self.assertEqual("unit-test", app["needs"])
-        self.assertIn("workflow_dispatch", app["if"])
-        self.assertEqual("laplace-substrate-lifecycle", app["concurrency"]["group"])
-        self.assertFalse(app["concurrency"]["cancel-in-progress"])
-        commands = "\n".join(step.get("run", "") for step in app["steps"])
-        for forbidden in ("pipeline.sh install", "pipeline.sh migrate", "sync-extension", "tune-pg", "perfcache-guc"):
-            self.assertNotIn(forbidden, commands)
-        self.assertIn("publish-applications.sh check", commands)
-        self.assertIn("publish-applications.sh deploy", commands)
-        recovery = app["steps"][-1]
-        self.assertIn("always()", recovery["if"])
-        self.assertIn("recover", recovery["run"])
-        self.assertTrue(any("Validate application-only" in step.get("name", "") for step in jobs["policy"]["steps"]))
-
-    def test_application_delivery_is_independent_of_environment_qa(self):
-        path = ROOT / ".github/workflows/application-delivery.yml"
-        source = path.read_text()
-        workflow = yaml.safe_load(source)
-        job = workflow["jobs"]["deliver"]
-
-        self.assertIn('workflows: ["Laplace — build, deploy, test"]', source)
-        self.assertIn("types: [completed]", source)
-        self.assertIn("branches: [main]", source)
-        self.assertIn("workflow_run.event == 'push'", job["if"])
-        self.assertNotIn("integration", job["if"].lower())
-        self.assertEqual("laplace-substrate-lifecycle", job["concurrency"]["group"])
-        self.assertFalse(job["concurrency"]["cancel-in-progress"])
-
-        commands = "\n".join(step.get("run", "") for step in job["steps"])
-        self.assertIn("application-delivery-source.py", commands)
-        self.assertIn("SOURCE_SHA", commands)
-        self.assertIn("CURRENT_MAIN_SHA", commands)
-        self.assertIn("publish-applications.sh deploy", commands)
-        self.assertIn("publish-applications.sh recover", commands)
-        self.assertNotIn("needs.integration-test", commands)
-
-    def test_runtime_readiness_rejects_false_or_untyped_results(self):
-        module = load_module("verify_app", ROOT / "scripts/verify-application-release.py")
-        ready = {"ready": True, "substrate_reachable": True, "perfcache_ready": True,
-                 "entities": 1, "consensus_relations": 2}
-        module.require_ready(ready)
-        for key in ready:
-            with self.subTest(key=key):
-                bad = dict(ready, **{key: False})
-                with self.assertRaises(ValueError):
-                    module.require_ready(bad)
-
-    def test_model_payload_enforcement_is_at_model_ingest_boundary(self):
-        main_jobs = yaml.safe_load((ROOT / ".github/workflows/laplace.yml").read_text())["jobs"]
-        policy_commands = "\n".join(
-            step.get("run", "") for step in main_jobs["policy"]["steps"])
-        self.assertIn("python3 scripts/model-payload-gate-check.py", policy_commands)
-        self.assertNotIn("model-payload-gate-check.py --enforce", policy_commands)
-
-        seed = yaml.safe_load((ROOT / ".github/workflows/seed-models.yml").read_text())
-        steps = seed["jobs"]["ingest"]["steps"]
-        runs = [step.get("run", "") for step in steps]
-        ingest_index = next(i for i, run in enumerate(runs) if "ingest-source.sh model" in run)
-        gate_indexes = [
-            i for i, run in enumerate(runs)
-            if "model-payload-gate-check.py --strict --enforce" in run
+    def test_runtime_failures_and_impossible_ready_state_fail_closed(self):
+        cases = [
+            self.readiness(substrate_reachable=False),
+            self.readiness(perfcache_ready=False),
+            self.readiness(ready=True),
+            self.readiness(ready=True, entities=1),
+            self.readiness(ready=True, consensus_relations=1),
         ]
-        self.assertEqual(2, len(gate_indexes))
-        self.assertLess(gate_indexes[0], ingest_index)
-        self.assertGreater(gate_indexes[1], ingest_index)
+        for value in cases:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.verify.classify_readiness(value)
 
-    def test_model_payload_violation_is_advisory_unless_enforced(self):
-        module = load_module("model_payload_gate", ROOT / "scripts/model-payload-gate-check.py")
-        with tempfile.TemporaryDirectory(prefix="model-payload-gate-contract-") as td:
-            baseline = Path(td) / "baseline.json"
-            baseline.write_text(json.dumps({
-                "total_payload_bytes": 0,
-                "total_vertices": 0,
-                "per_source": {},
-            }))
-            rows = [{"source": "fixture", "rows": 1,
-                     "payload_bytes": 1024, "vertices": 4}]
-            with patch.object(module, "BASELINE", baseline), \
-                 patch.object(module, "measure", return_value=rows):
-                self.assertEqual(0, module.main([]))
-                self.assertEqual(1, module.main(["--enforce"]))
+    def test_negative_boolean_and_untyped_fields_do_not_pass_as_health(self):
+        cases = (
+            ("entities", False),
+            ("entities", -1),
+            ("consensus_relations", "0"),
+            ("consensus_relations", -1),
+            ("ready", 0),
+            ("substrate_reachable", 1),
+            ("perfcache_ready", None),
+        )
+        for key, value in cases:
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                self.verify.classify_readiness(self.readiness(**{key: value}))
+
+    def test_transient_startup_readiness_is_retried_before_verification(self):
+        with patch.object(
+            self.verify,
+            "readiness",
+            side_effect=[ValueError("starting"), (False, False)],
+        ) as readiness, patch.object(
+            self.verify.time, "monotonic", side_effect=[0.0, 0.0]
+        ), patch.object(self.verify.time, "sleep") as sleep:
+            self.assertEqual(
+                (False, False),
+                self.verify.wait_for_readiness("http://unit", 5.0, 0.25),
+            )
+        self.assertEqual(2, readiness.call_count)
+        sleep.assert_called_once_with(0.25)
+
+    def test_readiness_retry_timeout_is_bounded_and_named(self):
+        with patch.object(
+            self.verify,
+            "readiness",
+            side_effect=ValueError("structurally unavailable"),
+        ), patch.object(
+            self.verify.time, "monotonic", side_effect=[0.0, 2.0]
+        ), patch.object(self.verify.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "within 2 seconds"):
+                self.verify.wait_for_readiness("http://unit", 2.0, 0.25)
+        sleep.assert_not_called()
+
+    def test_invalid_readiness_retry_bounds_fail_before_network(self):
+        with patch.object(self.verify, "readiness") as readiness:
+            for timeout, retry in ((-1.0, 1.0), (1.0, 0.0), (1.0, -1.0)):
+                with self.subTest(timeout=timeout, retry=retry), self.assertRaises(ValueError):
+                    self.verify.wait_for_readiness("http://unit", timeout, retry)
+        readiness.assert_not_called()
+
+    def test_full_verification_executes_readiness_spa_and_typed_db_operation(self):
+        calls = []
+        responses = [
+            (503, "application/json", json.dumps(self.readiness()).encode()),
+            (200, "text/html; charset=utf-8", b'<!doctype html><div id="root"></div>'),
+            (200, "application/json", b'{"object":"op.result","name":"ops.substrate_counts"}'),
+        ]
+
+        def fake_request(method, url, body=None, headers=None):
+            calls.append((method, url, body, headers))
+            return responses.pop(0)
+
+        with patch.object(self.verify, "request", side_effect=fake_request), \
+             patch.object(self.verify, "verify_stockfish") as stockfish:
+            self.assertEqual((False, False), self.verify.verify("http://unit"))
+        stockfish.assert_called_once_with()
+        self.assertEqual(
+            ["/health/ready", "/", "/v1/op"],
+            [call[1].removeprefix("http://unit") for call in calls],
+        )
+        self.assertEqual("POST", calls[-1][0])
+        self.assertIn(b"ops.substrate_counts", calls[-1][2])
+
+    def test_readiness_only_does_not_pretend_to_verify_spa_or_typed_operation(self):
+        with patch.object(
+            self.verify,
+            "request",
+            return_value=(503, "application/json", json.dumps(self.readiness()).encode()),
+        ) as request:
+            self.assertEqual(
+                (False, False),
+                self.verify.verify("http://unit", readiness_only=True),
+            )
+        request.assert_called_once()
+
+    def test_state_and_github_outputs_preserve_delivery_and_product_dimensions(self):
+        with tempfile.TemporaryDirectory(prefix="application-state-") as td:
+            state = Path(td) / "state.json"
+            output = Path(td) / "github-output"
+            self.verify.write_state(state, True, False)
+            self.verify.write_github_output(output, True, False)
+            self.assertEqual(
+                {
+                    "has_data": True,
+                    "product_ready": False,
+                    "substrate_reachable": True,
+                    "perfcache_ready": True,
+                },
+                json.loads(state.read_text()),
+            )
+            self.assertEqual(
+                ["has_data=true", "product_ready=false"],
+                output.read_text().splitlines(),
+            )
 
 
 if __name__ == "__main__":

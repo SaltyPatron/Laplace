@@ -1,0 +1,33 @@
+name: PR proof — source, build and DEV/BAT
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+# This repository currently has one registered runner and one persistent untracked
+# build tree. PR proof must serialize with main/deployment workflows until immutable
+# artifacts and isolated runner workspaces replace that contract.
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    name: Source policy, build, DEV/BAT and UI
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact pull-request head
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Prove merge candidate without production mutation
+        run: bash scripts/pr-proof.sh

@@ -22,13 +22,16 @@ public sealed class ServiceHostTests
 
     private sealed class Connection : ILichessConnection
     {
-        public bool Ready;
+        public bool Connected;
+        public bool Configured = true;
+        public string? Error;
         public bool StartAllowed = true;
         public bool Stopped;
         public bool Disposed;
         public (int Depth, int Maximum, bool Substrate)? Started;
         private readonly TaskCompletionSource _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public LichessConnectivityStatus Status() => new(true, null, Ready, "test", 8, 2, true, 0, [], null);
+        public LichessConnectivityStatus Status() =>
+            new(Configured, null, Connected, "test", 8, 2, true, 0, [], Error);
         public IReadOnlyList<LichessChatLine> ChatForGame(string gameId) => [];
         public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null)
         { Started = (depth, maxConcurrent, substrate); return StartAllowed; }
@@ -38,7 +41,7 @@ public sealed class ServiceHostTests
     }
 
     [Fact]
-    public async Task ServiceStartsByDefault_HealthTracksConnection_AndShutdownIsAwaited()
+    public async Task ServiceReadinessDoesNotRequireExternalConnectivity_AndShutdownIsAwaited()
     {
         var bot = new Connection();
         bool failed = false;
@@ -46,10 +49,18 @@ public sealed class ServiceHostTests
         await app.StartAsync();
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
+
+        // The process is configured and serving even before the upstream account
+        // stream connects. Connectivity remains visible in the typed receipt.
+        using var disconnected = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.OK, disconnected.StatusCode);
+        Assert.Contains("\"connected\":false", await disconnected.Content.ReadAsStringAsync());
+        bot.Connected = true;
+        using var connected = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.OK, connected.StatusCode);
+        Assert.Contains("\"connected\":true", await connected.Content.ReadAsStringAsync());
+
         Assert.Equal((6, 3, true), bot.Started);
-        bot.Ready = true;
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/stop", null)).StatusCode);
         Assert.DoesNotContain("tokenPreview\":\"", await client.GetStringAsync("/status"));
         await app.StopAsync();
@@ -60,19 +71,29 @@ public sealed class ServiceHostTests
     }
 
     [Fact]
+    public async Task UnconfiguredProcessDoesNotClaimReadiness()
+    {
+        var bot = new Connection { Configured = false };
+        await using var app = LichessServiceHost.Build(new(Port: 0), bot);
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+        Assert.Equal(HttpStatusCode.ServiceUnavailable,
+            (await client.GetAsync("/health/ready")).StatusCode);
+        await app.StopAsync();
+    }
+
+    [Fact]
     public async Task MissingConfigurationStopsHostWithFailureInsteadOfClaimingReadiness()
     {
-        var bot = new Connection { StartAllowed = false };
+        var bot = new Connection { StartAllowed = false, Configured = false };
         var failed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var app = LichessServiceHost.Build(new(Port: 0), bot, () => failed.TrySetResult());
-        // A fail-closed worker can stop the host before Kestrel finishes binding;
-        // either order is valid, but cancellation without the failure signal is not.
         try { await app.StartAsync(); }
         catch (OperationCanceledException) when (failed.Task.IsCompletedSuccessfully
             && app.Lifetime.ApplicationStopping.IsCancellationRequested) { }
         await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await app.StopAsync();
-        Assert.False(bot.Ready);
+        Assert.False(bot.Connected);
     }
 
     [Theory]

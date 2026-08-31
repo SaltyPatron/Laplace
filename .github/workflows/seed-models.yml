@@ -54,7 +54,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 480
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
@@ -78,7 +78,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
       - name: Re-ingest must short-circuit
@@ -92,7 +92,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { submodules: false, clean: false }
 
       - name: Gate relation types (consensus)
@@ -131,7 +131,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
@@ -193,7 +193,7 @@ jobs:
 
       - name: Upload verification reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: model-verification
           path: |

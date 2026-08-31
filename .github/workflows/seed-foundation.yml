@@ -85,7 +85,7 @@ jobs:
       # Durable surface = ingest_run_journal; do not flood Actions with WS_APPLY/file lines.
       LAPLACE_INGEST_CONSOLE: ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 

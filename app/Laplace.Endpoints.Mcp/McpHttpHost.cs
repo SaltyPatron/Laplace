@@ -78,9 +78,10 @@ internal static class McpHttpHost
     {
         await using var db = LaplaceDataSource.Create(SubstrateAccess.Serving, database);
         await using var connection = await db.OpenConnectionAsync(ct);
-        // Use the same typed inventory/perfcache probes as API readiness. The
-        // health/audit tool performs an exact entity count even in shallow mode;
-        // on a populated corpus that scan exceeds the readiness budget.
+        // Deployment readiness proves that the service can open the installed
+        // substrate schema and load the native perfcache. An empty database after
+        // a lawful recreate is healthy lifecycle state, not a failed MCP process.
+        // Seed/product capability is proved later by Tier=live smoke and eval.
         return await ReadyFromProbesAsync(
             token => NpgsqlSubstrateReads.EntitiesAndConsensusExistAsync(connection, token),
             token => NpgsqlSubstrateReads.PerfCacheProbeAsync(connection, token), ct);
@@ -91,10 +92,12 @@ internal static class McpHttpHost
         Func<CancellationToken, Task<object?>> perfcache, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var present = await inventory(ct);
-        if (!present.EntitiesExist || !present.ConsensusExist) return false;
+        // The inventory probe is still required: it exercises the installed core
+        // relations and fails if migration/extension synchronization is incomplete.
+        // Its booleans describe seed state and deliberately do not decide service
+        // readiness. The perfcache probe proves the native runtime dependency.
+        _ = await inventory(ct);
         await perfcache(ct);
-        // Inventory is estimated; readiness is not a full-corpus integrity claim.
         return true;
     }
 
