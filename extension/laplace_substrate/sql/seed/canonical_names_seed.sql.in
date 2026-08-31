@@ -300,4 +300,9 @@ FROM (VALUES
     ('unicode/emoji/Emoji_Modifier_Base/v1'),
     ('unicode/emoji/Emoji_Component/v1'),
     ('unicode/emoji/Extended_Pictographic/v1')
-) AS v(name);
+) AS v(name)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM laplace.canonical_names existing
+    WHERE existing.name = v.name
+);
