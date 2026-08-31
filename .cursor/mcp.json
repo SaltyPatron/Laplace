@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "laplace": {
-      "command": "/opt/laplace/app/laplace-mcp"
-    }
-  }
-}

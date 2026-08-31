@@ -1,0 +1,22 @@
+name: Repository hygiene
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tracked-tree:
+    name: Tracked tree contains no local/runtime artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Enforce source-tree hygiene and strong secret signatures
+        run: python3 scripts/repo-hygiene-gate.py
