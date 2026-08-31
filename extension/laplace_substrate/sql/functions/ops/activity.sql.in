@@ -27,7 +27,11 @@ CREATE OR REPLACE FUNCTION ops.activity(
                   state text, wait_event_type text, wait_event text,
                   query_seconds double precision, xact_seconds double precision,
                   backend_seconds double precision, query text)
-    LANGUAGE sql STABLE
+    -- This is a live observation, not a transaction-constant relation: both
+    -- pg_stat_activity and clock_timestamp() may change between calls in one
+    -- statement. Mark the function VOLATILE so the planner cannot fold or reorder
+    -- those observations under a false constancy promise.
+    LANGUAGE sql VOLATILE
 BEGIN ATOMIC
     SELECT a.pid,
            a.pid = pg_backend_pid(),

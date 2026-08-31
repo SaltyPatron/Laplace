@@ -42,7 +42,10 @@ $$;
 CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_positives(
     p_relation text, p_ground_truth text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    LANGUAGE sql STABLE
+    -- Sampling is intentionally fresh per call. random() changes on every call,
+    -- so this wrapper must make the same promise rather than presenting planner-
+    -- unsound transaction-constant behavior over a changing sample.
+    LANGUAGE sql VOLATILE
     AS $$
     WITH vocab AS (
         SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
@@ -74,7 +77,9 @@ $$;
 CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_negatives(
     p_relation text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    LANGUAGE sql STABLE
+    -- Both the shuffled vocabulary and final bounded sample use random(); preserve
+    -- that deliberate per-call behavior with an explicit changing declaration.
+    LANGUAGE sql VOLATILE
     AS $$
     WITH vocab AS (
         SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
