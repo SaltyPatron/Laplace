@@ -240,18 +240,16 @@ def _run(
 
 
 def _count_dotnet_list(output: str) -> int:
-    count = 0
-    active = False
-    for line in output.splitlines():
-        if "The following Tests are available:" in line:
-            active = True
-            continue
-        if active:
-            if line.startswith("    ") and line.strip():
-                count += 1
-            elif line.strip() and not line.startswith(" "):
-                active = False
-    return count
+    # Solution-level discovery writes one stream per test assembly concurrently.
+    # A later assembly's unindented "Test run for"/"No test matches" line can
+    # therefore appear between another assembly's heading and its indented test
+    # names.  Do not model the merged stream as one contiguous heading block.
+    if "The following Tests are available:" not in output:
+        return 0
+    return sum(
+        1 for line in output.splitlines()
+        if line.startswith("    ") and line.strip()
+    )
 
 
 def selected_count(suite: dict[str, Any]) -> tuple[int, str]:

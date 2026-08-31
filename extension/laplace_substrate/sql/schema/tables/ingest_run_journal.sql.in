@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS ingest_run_journal (
     consensus_calls    bigint       NOT NULL DEFAULT 0,
     highway_mask_calls bigint       NOT NULL DEFAULT 0,
     highway_mask_pairs bigint       NOT NULL DEFAULT 0,
+    throughput_rows    bigint,
+    throughput_elapsed_ms bigint,
+    throughput_rows_per_s double precision,
+    throughput_baseline_rows_per_s double precision,
+    throughput_slowdown_ratio double precision,
+    throughput_compared boolean      NOT NULL DEFAULT false,
+    throughput_status  text          NOT NULL DEFAULT 'not-measured',
     evidence_persisted boolean      NOT NULL DEFAULT true,
     error              text
 );
@@ -75,9 +82,198 @@ ALTER TABLE ingest_run_journal
     ADD COLUMN IF NOT EXISTS highway_mask_calls bigint NOT NULL DEFAULT 0;
 ALTER TABLE ingest_run_journal
     ADD COLUMN IF NOT EXISTS highway_mask_pairs bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS throughput_rows bigint;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS throughput_elapsed_ms bigint;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS throughput_rows_per_s double precision;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS throughput_baseline_rows_per_s double precision;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS throughput_slowdown_ratio double precision;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS throughput_compared boolean NOT NULL DEFAULT false;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS throughput_status text NOT NULL DEFAULT 'not-measured';
 
 CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
     ON ingest_run_journal (source_name, started_at DESC);
+
+-- Accepted baseline and observed measurement are separate authority. A run may
+-- produce a perfectly valid measurement without anyone having accepted that
+-- measurement as the comparison standard. CI/readers fail closed on that state;
+-- only ops.ingest_throughput_accept() may establish or move the accepted baseline.
+CREATE TABLE IF NOT EXISTS ingest_throughput_baseline (
+    source_name          text PRIMARY KEY,
+    baseline_rows_per_s  double precision NOT NULL CHECK (baseline_rows_per_s > 0),
+    baseline_rows        bigint NOT NULL CHECK (baseline_rows > 0),
+    baseline_elapsed_ms  bigint NOT NULL CHECK (baseline_elapsed_ms > 0),
+    accepted_run_id      uuid,
+    established_at       timestamptz NOT NULL DEFAULT now(),
+    last_rows_per_s      double precision,
+    last_run_id          uuid,
+    last_slowdown_ratio  double precision,
+    last_status          text,
+    last_observed_at     timestamptz
+);
+
+-- Migrate the repository's previously accepted corpus measurements into the
+-- substrate on first install/upgrade. NpgsqlIngestObservability persists the same
+-- IngestRunner WallClock used by the historical INGEST_COMPLETE elapsed_s record,
+-- so these baselines and all new production samples share one timing boundary.
+-- ON CONFLICT DO NOTHING preserves any baseline already accepted in this DB.
+INSERT INTO ingest_throughput_baseline
+    (source_name, baseline_rows_per_s, baseline_rows, baseline_elapsed_ms, established_at)
+VALUES
+    ('CILIDecomposer',         50900.5, 5802654, 114000, now()),
+    ('FrameNetDecomposer',      2558.6, 1399559, 547000, now()),
+    ('ISO639Decomposer',       18405.5,   73622,   4000, now()),
+    ('MapNetDecomposer',        3750.0,   15000,   4000, now()),
+    ('PropBankDecomposer',     29019.1,  290191,  10000, now()),
+    ('SemLinkDecomposer',       9030.2,   90302,  10000, now()),
+    ('UnicodeDecomposer',      94782.6, 3980870,  42000, now()),
+    ('VerbNetDecomposer',       8146.0,   32584,   4000, now()),
+    ('WordFrameNetDecomposer', 12195.0,   73170,   6000, now()),
+    ('WordNetDecomposer',      26620.8, 3540569, 133000, now())
+ON CONFLICT (source_name) DO NOTHING;
+
+-- One terminal journal update is the shared ingest boundary for CLI, console,
+-- UI, API, OpenAI-compatible and MCP entry points. Derive the measurement here,
+-- not in an Actions parser, so every surface records the same verdict even when
+-- no workflow or log scraper is involved.
+CREATE OR REPLACE FUNCTION ops.ingest_throughput_apply()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_rows bigint;
+    v_elapsed_ms bigint;
+    v_rate double precision;
+    v_baseline double precision;
+    v_slowdown double precision;
+BEGIN
+    -- Only a clean completed ingest is a throughput sample. Marker skips,
+    -- capped smoke runs, failures and cancellations retain not-measured.
+    IF NEW.status <> 'ok' OR NEW.ended_at IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    v_rows := NEW.entities + NEW.physicalities + NEW.attestations;
+    -- The managed runner supplies IngestRunResult.WallClock here: exactly the
+    -- Stopwatch boundary emitted as INGEST_COMPLETE elapsed_s and used by the
+    -- accepted historical runner-clock baselines. Direct SQL/manual journal
+    -- transitions have no runner stopwatch, so only those fall back to the
+    -- journal timestamp window.
+    v_elapsed_ms := COALESCE(
+        NULLIF(NEW.throughput_elapsed_ms, 0),
+        round(extract(epoch FROM (NEW.ended_at - NEW.started_at)) * 1000.0)::bigint);
+    NEW.throughput_rows := v_rows;
+    NEW.throughput_elapsed_ms := v_elapsed_ms;
+
+    IF v_rows <= 0 OR v_elapsed_ms <= 0 THEN
+        NEW.throughput_status := 'unmeasured';
+        NEW.throughput_compared := false;
+        RETURN NEW;
+    END IF;
+
+    v_rate := (v_rows::double precision * 1000.0) / v_elapsed_ms::double precision;
+    NEW.throughput_rows_per_s := v_rate;
+
+    SELECT b.baseline_rows_per_s
+      INTO v_baseline
+      FROM @extschema@.ingest_throughput_baseline b
+     WHERE b.source_name = NEW.source_name;
+
+    IF NOT FOUND THEN
+        -- A measurement is evidence, not authority to accept itself. Record the
+        -- exact run rate in the journal and fail closed until an operator accepts
+        -- a baseline explicitly. This prevents a catastrophically slow first run
+        -- from normalizing the regression it should reveal.
+        NEW.throughput_baseline_rows_per_s := NULL;
+        NEW.throughput_slowdown_ratio := NULL;
+        NEW.throughput_compared := false;
+        NEW.throughput_status := 'unbaselined';
+        RETURN NEW;
+    END IF;
+
+    v_slowdown := v_baseline / v_rate;
+    NEW.throughput_baseline_rows_per_s := v_baseline;
+    NEW.throughput_slowdown_ratio := v_slowdown;
+    NEW.throughput_compared := true;
+    NEW.throughput_status := CASE WHEN v_slowdown > 1.5 THEN 'slow' ELSE 'ok' END;
+
+    UPDATE @extschema@.ingest_throughput_baseline
+       SET last_rows_per_s = v_rate,
+           last_run_id = NEW.run_id,
+           last_slowdown_ratio = v_slowdown,
+           last_status = NEW.throughput_status,
+           last_observed_at = now()
+     WHERE source_name = NEW.source_name;
+
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS ingest_run_throughput_apply ON ingest_run_journal;
+CREATE TRIGGER ingest_run_throughput_apply
+BEFORE UPDATE OF status, ended_at, entities, physicalities, attestations
+ON ingest_run_journal
+FOR EACH ROW
+WHEN (OLD.status = 'running' AND NEW.status <> 'running')
+EXECUTE FUNCTION ops.ingest_throughput_apply();
+
+-- Deliberate baseline authority. The latest measured clean run may be slow or
+-- may be the first measurement for a new source; accepting it is an explicit
+-- operator action, never something a run or a red gate can do to itself.
+-- CI `check` is read-only and never calls this function.
+DROP FUNCTION IF EXISTS ops.ingest_throughput_accept(text);
+CREATE OR REPLACE FUNCTION ops.ingest_throughput_accept(p_source text)
+RETURNS TABLE(source_name text, baseline_rows_per_s double precision, accepted_run_id uuid)
+LANGUAGE plpgsql VOLATILE
+AS $$
+DECLARE
+    r @extschema@.ingest_run_journal%ROWTYPE;
+BEGIN
+    SELECT j.* INTO r
+      FROM @extschema@.ingest_run_journal j
+     WHERE j.source_name = p_source
+       AND j.status = 'ok'
+       AND j.throughput_rows_per_s > 0
+       AND j.throughput_rows > 0
+       AND j.throughput_elapsed_ms > 0
+     ORDER BY j.started_at DESC
+     LIMIT 1;
+
+    IF r.run_id IS NULL THEN
+        RAISE EXCEPTION 'ingest_throughput_accept: no measured clean run for source %', p_source;
+    END IF;
+
+    INSERT INTO @extschema@.ingest_throughput_baseline AS b
+        (source_name, baseline_rows_per_s, baseline_rows, baseline_elapsed_ms,
+         accepted_run_id, established_at, last_rows_per_s, last_run_id,
+         last_slowdown_ratio, last_status, last_observed_at)
+    VALUES
+        (p_source, r.throughput_rows_per_s, r.throughput_rows, r.throughput_elapsed_ms,
+         r.run_id, now(), r.throughput_rows_per_s, r.run_id, 1.0, 'accepted', now())
+    ON CONFLICT ON CONSTRAINT ingest_throughput_baseline_pkey DO UPDATE SET
+        baseline_rows_per_s = EXCLUDED.baseline_rows_per_s,
+        baseline_rows = EXCLUDED.baseline_rows,
+        baseline_elapsed_ms = EXCLUDED.baseline_elapsed_ms,
+        accepted_run_id = EXCLUDED.accepted_run_id,
+        established_at = EXCLUDED.established_at,
+        last_rows_per_s = EXCLUDED.last_rows_per_s,
+        last_run_id = EXCLUDED.last_run_id,
+        last_slowdown_ratio = 1.0,
+        last_status = 'accepted',
+        last_observed_at = EXCLUDED.last_observed_at;
+
+    RETURN QUERY
+    SELECT b.source_name, b.baseline_rows_per_s, b.accepted_run_id
+      FROM @extschema@.ingest_throughput_baseline b
+     WHERE b.source_name = p_source;
+END
+$$;
 
 -- The CREATE TABLE above is IF NOT EXISTS, so on any database that already has this
 -- table the status list frozen at its creation is the list that is enforced — a new

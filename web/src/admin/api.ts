@@ -49,6 +49,13 @@ export interface IngestRun {
   input_units_total: number | null;
   fold_drain_ms: number | null;
   writer_maintenance_ms: number | null;
+  throughput_rows: number | null;
+  throughput_elapsed_ms: number | null;
+  throughput_rows_per_s: number | null;
+  throughput_baseline_rows_per_s: number | null;
+  throughput_slowdown_ratio: number | null;
+  throughput_compared: boolean | null;
+  throughput_status: string | null;
   evidence_persisted: boolean | null;
   error: string | null;
 }
@@ -253,9 +260,19 @@ export function vacuum(
 // ---------------------------------------------------------------------------
 
 export interface SourceRosterRow {
-  source_name?: string;
-  name?: string;
-  source_id?: string;
+  source: string;
+  source_id: string;
+  known: boolean;
+  ingested: boolean;
+  evidence_approx: number;
+  has_entities: boolean;
+  last_run_status: string | null;
+  last_run_at: string | null;
+  throughput_status: string | null;
+  throughput_compared: boolean;
+  throughput_rows_per_s: number | null;
+  throughput_baseline_rows_per_s: number | null;
+  throughput_slowdown_ratio: number | null;
   [k: string]: unknown;
 }
 

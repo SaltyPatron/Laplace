@@ -1,0 +1,239 @@
+-- Throughput is decided by the same terminal run-journal transition every entry
+-- point uses. This is a production SQL-path regression: no log parser, workflow
+-- environment or entry-point-specific helper participates in the verdict.
+BEGIN;
+DO $$
+DECLARE
+    ok boolean;
+BEGIN
+    DELETE FROM laplace.ingest_throughput_baseline
+    WHERE source_name IN ('ThroughputRegressionTest', 'ThroughputUnmeasuredTest',
+                          'ThroughputRunnerClockTest');
+    DELETE FROM laplace.ingest_run_journal
+    WHERE source_name IN ('ThroughputRegressionTest', 'ThroughputUnmeasuredTest',
+                          'ThroughputRunnerClockTest');
+
+    -- First clean run is a measurable observation, but it cannot accept itself as
+    -- the standard. compared=0 stays red until explicit operator acceptance.
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status, started_at)
+    VALUES
+        ('10000000-0000-0000-0000-000000000001', 'ThroughputRegressionTest',
+         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         '2026-01-01 00:00:00+00');
+    UPDATE laplace.ingest_run_journal
+       SET status = 'ok', ended_at = '2026-01-01 00:00:10+00', entities = 1000
+     WHERE run_id = '10000000-0000-0000-0000-000000000001';
+
+    SELECT throughput_status = 'unbaselined'
+       AND NOT throughput_compared
+       AND abs(throughput_rows_per_s - 100.0) < 0.001
+       AND throughput_baseline_rows_per_s IS NULL
+       AND throughput_slowdown_ratio IS NULL
+      INTO ok
+      FROM laplace.ingest_run_journal
+     WHERE run_id = '10000000-0000-0000-0000-000000000001';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'first clean run did not remain an unaccepted 100 rows/s observation';
+    END IF;
+
+    SELECT count(*) = 0
+      INTO ok
+      FROM laplace.ingest_throughput_baseline
+     WHERE source_name = 'ThroughputRegressionTest';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'first clean run silently accepted itself as a baseline';
+    END IF;
+
+    SELECT throughput_status = 'unbaselined' AND NOT throughput_compared
+      INTO ok
+      FROM ops.source_status('ThroughputRegressionTest');
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'ops.source_status hid the unbaselined first measurement';
+    END IF;
+
+    -- Baseline establishment is explicit operator authority, even for the first run.
+    PERFORM * FROM ops.ingest_throughput_accept('ThroughputRegressionTest');
+    SELECT abs(baseline_rows_per_s - 100.0) < 0.001
+       AND accepted_run_id = '10000000-0000-0000-0000-000000000001'::uuid
+       AND last_status = 'accepted'
+      INTO ok
+      FROM laplace.ingest_throughput_baseline
+     WHERE source_name = 'ThroughputRegressionTest';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'explicit first baseline acceptance did not record 100 rows/s';
+    END IF;
+
+    -- Same payload at half the accepted rate is a compared 2x slowdown; the red
+    -- run must not rewrite the accepted baseline downward.
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status, started_at)
+    VALUES
+        ('10000000-0000-0000-0000-000000000002', 'ThroughputRegressionTest',
+         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         '2026-01-01 01:00:00+00');
+    UPDATE laplace.ingest_run_journal
+       SET status = 'ok', ended_at = '2026-01-01 01:00:20+00', entities = 1000
+     WHERE run_id = '10000000-0000-0000-0000-000000000002';
+
+    SELECT throughput_status = 'slow'
+       AND throughput_compared
+       AND abs(throughput_slowdown_ratio - 2.0) < 0.001
+      INTO ok
+      FROM laplace.ingest_run_journal
+     WHERE run_id = '10000000-0000-0000-0000-000000000002';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'half-rate run did not record compared 2x slow verdict';
+    END IF;
+
+    SELECT abs(baseline_rows_per_s - 100.0) < 0.001
+       AND abs(last_rows_per_s - 50.0) < 0.001
+       AND last_status = 'slow'
+      INTO ok
+      FROM laplace.ingest_throughput_baseline
+     WHERE source_name = 'ThroughputRegressionTest';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'slow run re-baselined itself or failed to update latest observation';
+    END IF;
+
+    -- ops.source_status is the shared UI/API/MCP/CLI read surface. It must carry
+    -- the stored verdict, not independently recompute a different one.
+    SELECT throughput_status = 'slow'
+       AND throughput_compared
+       AND abs(throughput_slowdown_ratio - 2.0) < 0.001
+      INTO ok
+      FROM ops.source_status('ThroughputRegressionTest');
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'ops.source_status disagrees with journal throughput verdict';
+    END IF;
+
+    -- Re-baselining a slow measurement is also explicit operator authority.
+    PERFORM * FROM ops.ingest_throughput_accept('ThroughputRegressionTest');
+    SELECT abs(baseline_rows_per_s - 50.0) < 0.001
+       AND accepted_run_id = '10000000-0000-0000-0000-000000000002'::uuid
+       AND last_status = 'accepted'
+      INTO ok
+      FROM laplace.ingest_throughput_baseline
+     WHERE source_name = 'ThroughputRegressionTest';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'explicit rebaseline did not move baseline to 50 rows/s';
+    END IF;
+
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status, started_at)
+    VALUES
+        ('10000000-0000-0000-0000-000000000003', 'ThroughputRegressionTest',
+         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         '2026-01-01 02:00:00+00');
+    UPDATE laplace.ingest_run_journal
+       SET status = 'ok', ended_at = '2026-01-01 02:00:20+00', entities = 1000
+     WHERE run_id = '10000000-0000-0000-0000-000000000003';
+    SELECT throughput_status = 'ok'
+       AND throughput_compared
+       AND abs(throughput_slowdown_ratio - 1.0) < 0.001
+      INTO ok
+      FROM laplace.ingest_run_journal
+     WHERE run_id = '10000000-0000-0000-0000-000000000003';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'accepted rate did not compare green at 1x';
+    END IF;
+
+    -- A marker skip is the latest operation but not a measurement. source_status
+    -- keeps latest-run state and latest-throughput state separate.
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status, phase, started_at, ended_at)
+    VALUES
+        ('10000000-0000-0000-0000-000000000004', 'ThroughputRegressionTest',
+         laplace.source_id('ThroughputRegressionTest'), 1, 'skipped-complete', 'complete',
+         '2026-01-01 03:00:00+00', '2026-01-01 03:00:00+00');
+    SELECT last_run_status = 'skipped-complete'
+       AND throughput_status = 'ok'
+       AND throughput_compared
+      INTO ok
+      FROM ops.source_status('ThroughputRegressionTest');
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'marker skip erased or changed last measured throughput state';
+    END IF;
+
+    -- A later clean zero-work run is a real throughput verdict, unlike a marker
+    -- skip. It must replace the older green comparison on every shared read path.
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status, started_at)
+    VALUES
+        ('10000000-0000-0000-0000-000000000005', 'ThroughputRegressionTest',
+         laplace.source_id('ThroughputRegressionTest'), 1, 'running',
+         '2026-01-01 03:10:00+00');
+    UPDATE laplace.ingest_run_journal
+       SET status = 'ok', ended_at = '2026-01-01 03:10:10+00'
+     WHERE run_id = '10000000-0000-0000-0000-000000000005';
+    SELECT last_run_status = 'ok'
+       AND throughput_status = 'unmeasured'
+       AND NOT throughput_compared
+       AND throughput_rows_per_s IS NULL
+      INTO ok
+      FROM ops.source_status('ThroughputRegressionTest');
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'later unmeasured clean run left an older green verdict visible';
+    END IF;
+
+    -- A clean terminal row with no measurable work is explicit unmeasured and
+    -- cannot seed a baseline or disappear from source_status.
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status, started_at)
+    VALUES
+        ('20000000-0000-0000-0000-000000000001', 'ThroughputUnmeasuredTest',
+         laplace.source_id('ThroughputUnmeasuredTest'), 1, 'running',
+         '2026-01-01 04:00:00+00');
+    UPDATE laplace.ingest_run_journal
+       SET status = 'ok', ended_at = '2026-01-01 04:00:10+00'
+     WHERE run_id = '20000000-0000-0000-0000-000000000001';
+    SELECT throughput_status = 'unmeasured' AND NOT throughput_compared
+      INTO ok
+      FROM laplace.ingest_run_journal
+     WHERE run_id = '20000000-0000-0000-0000-000000000001';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'zero-row clean run did not fail closed as unmeasured';
+    END IF;
+    SELECT throughput_status = 'unmeasured'
+       AND NOT throughput_compared
+       AND throughput_rows_per_s IS NULL
+      INTO ok
+      FROM ops.source_status('ThroughputUnmeasuredTest');
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'ops.source_status hid the latest unmeasured clean run';
+    END IF;
+    SELECT count(*) = 0
+      INTO ok
+      FROM laplace.ingest_throughput_baseline
+     WHERE source_name = 'ThroughputUnmeasuredTest';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'unmeasured run seeded a baseline';
+    END IF;
+
+    -- Managed IngestRunner persists its own stopwatch duration before the terminal
+    -- status transition. That runner clock starts before initialize/inventory, while
+    -- journal started_at is later. The trigger must preserve the supplied duration;
+    -- deriving 20s from these timestamps would incorrectly halve the recorded rate.
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status, started_at)
+    VALUES
+        ('30000000-0000-0000-0000-000000000001', 'ThroughputRunnerClockTest',
+         laplace.source_id('ThroughputRunnerClockTest'), 1, 'running',
+         '2026-01-01 05:00:00+00');
+    UPDATE laplace.ingest_run_journal
+       SET status = 'ok', ended_at = '2026-01-01 05:00:20+00',
+           throughput_elapsed_ms = 10000, entities = 1000
+     WHERE run_id = '30000000-0000-0000-0000-000000000001';
+    SELECT throughput_status = 'unbaselined'
+       AND NOT throughput_compared
+       AND throughput_elapsed_ms = 10000
+       AND abs(throughput_rows_per_s - 100.0) < 0.001
+      INTO ok
+      FROM laplace.ingest_run_journal
+     WHERE run_id = '30000000-0000-0000-0000-000000000001';
+    IF ok IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'runner stopwatch duration was overwritten by journal timestamp window';
+    END IF;
+END
+$$;
+ROLLBACK;
