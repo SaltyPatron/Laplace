@@ -1,1 +1,0 @@
-ISA literalism gates green (g1_weight_literalism=23, g3_sql_vocabulary_literalism=250, g3_c_vocabulary_literalism=17, g3_csharp_vocabulary_literalism=506, g11_unqualified_in_setless_body=29, g8_band_literalism=8, g4_dead_canonical=71)
