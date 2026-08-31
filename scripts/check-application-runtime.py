@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Fail-closed, read-only guard for publishing apps against an unchanged engine.
 
-Uses existing successful build/install fingerprints, byte-for-byte native/ROM
-comparisons, live extension versions and the migration journal. No bootstrap,
-installation, SQL writes, service action, network DB auth or secret output.
+Uses existing successful build/install fingerprints, a temporary DESTDIR CMake install
+for exact installed-form native comparisons, raw ROM comparisons, live extension
+versions and the migration journal. No bootstrap, installation into the live prefix,
+SQL writes, service action, network DB auth or secret output.
 """
 import argparse
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = {
@@ -89,6 +92,63 @@ def control_version(path):
     return match[1]
 
 
+@contextmanager
+def staged_install(root, prefix):
+    """Materialize the tested build in a temporary DESTDIR using CMake's install law.
+
+    Build-tree ELFs deliberately carry ``$ORIGIN`` while installed ELFs carry the
+    configured absolute runtime search path. Therefore build bytes are not the installed
+    artifact identity. Running the already-generated install program under DESTDIR applies
+    the same RPATH/install transforms without writing the live prefix.
+    """
+    root = root.resolve()
+    prefix = prefix.resolve()
+    build = root / "build"
+    if not (build / "cmake_install.cmake").is_file():
+        raise ValueError("configured CMake install program missing from tested build")
+    if not prefix.is_absolute():
+        raise ValueError("application runtime install prefix must be absolute")
+
+    with tempfile.TemporaryDirectory(prefix="laplace-installed-form-") as temporary:
+        stage = Path(temporary)
+        env = dict(os.environ)
+        env["DESTDIR"] = str(stage)
+        try:
+            subprocess.run(
+                ["cmake", "--install", str(build)],
+                cwd=root,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.SubprocessError as error:
+            raise ValueError("could not materialize tested CMake installed form") from error
+        yield stage / prefix.relative_to(prefix.anchor)
+
+
+def installed_native_hashes(root, prefix):
+    """Prove live native files equal the installed form of the tested build."""
+    hashes = {}
+    with staged_install(root, prefix) as expected_prefix:
+        for _built, installed in MODULES.items():
+            expected = expected_prefix / installed
+            actual = prefix / installed
+            if not expected.is_file():
+                raise ValueError(f"tested CMake install omitted native artifact: {installed}")
+            if not actual.is_file():
+                raise ValueError(f"installed native artifact missing: {installed}")
+            expected_hash = digest(expected)
+            actual_hash = digest(actual)
+            if expected_hash != actual_hash:
+                raise ValueError(
+                    f"installed native artifact differs from tested installed form: {installed}"
+                )
+            hashes[installed] = actual_hash
+    return hashes
+
+
 def snapshot(root, prefix, database, fingerprint):
     build = root / "build"
     for stamp in ("build-native", "install-native"):
@@ -104,12 +164,8 @@ def snapshot(root, prefix, database, fingerprint):
     migrations = {p.name for p in (root / "db/migrations").glob("*.sql")}
     if not migrations or not migrations.issubset(set(database["migrations"] or [])):
         raise ValueError("pending/unknown migrations; use the full database pipeline")
-    hashes = {}
-    for built, installed in MODULES.items():
-        actual = digest(prefix / installed)
-        if digest(build / built) != actual:
-            raise ValueError(f"installed native artifact differs from tested build: {installed}")
-        hashes[installed] = actual
+
+    hashes = installed_native_hashes(root, prefix)
     for name in ("laplace_geom", "laplace_substrate"):
         built = control_version(build / "extension" / name / f"{name}.control")
         installed = control_version(prefix / "share/postgresql/18/extension" / f"{name}.control")
@@ -146,7 +202,7 @@ def main():
     if args.snapshot:
         with args.snapshot.open("x") as output:
             json.dump(state, output, sort_keys=True)
-    print("PASS: tested native artifacts, installed SQL versions, applied migrations and idle ingest state match")
+    print("PASS: tested installed-form native artifacts, installed SQL versions, applied migrations and idle ingest state match")
 
 
 if __name__ == "__main__":

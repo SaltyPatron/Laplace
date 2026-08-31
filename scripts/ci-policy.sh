@@ -44,6 +44,7 @@ for f in \
   scripts/test-eval-op-lane.py \
   scripts/test-actions-topology.py \
   scripts/test-application-publish.py \
+  scripts/test-application-runtime.py \
   scripts/publish-applications.sh \
   scripts/check-application-runtime.py \
   scripts/verify-application-release.py \
@@ -61,6 +62,7 @@ section "Shell and deploy contracts"
 bash scripts/shellcheck-gate.sh
 bash scripts/test-deploy-payload-sync.sh
 python3 scripts/test-pipeline-install.py
+python3 scripts/test-application-runtime.py
 python3 scripts/test-stockfish-release.py
 python3 scripts/test-managed-services.py
 python3 scripts/test-managed-host.py
