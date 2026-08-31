@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Application release guards: disposable files and mocked read-only DB client."""
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
@@ -19,8 +20,10 @@ class RuntimeGuardTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="laplace-application-contract-")
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name) / "repo"
-        self.prefix = Path(temporary.name) / "install"
+        base = Path(temporary.name)
+        self.root = base / "repo"
+        self.prefix = base / "install"
+        self.staged = base / "staged-install"
         self.fingerprint = "f" * 64
         self.database = {"server_version": "180000", "running_ingests": 0,
                          "extension_functions": "fixture-functions", "database": "fixture",
@@ -31,8 +34,13 @@ class RuntimeGuardTests(unittest.TestCase):
             self.write(self.root / "build/.stamps" / stamp, self.fingerprint)
         self.write(self.root / "db/migrations/001.sql", "SELECT 1;")
         for built, installed in guard.MODULES.items():
-            self.write(self.root / "build" / built, built)
-            self.write(self.prefix / installed, built)
+            # Build and installed bytes are deliberately different. CMake rewrites ELF
+            # runtime paths during installation, so equality must be against the staged
+            # installed form, not directly against build/*.so.
+            self.write(self.root / "build" / built, "build-form:" + built)
+            installed_form = "installed-form:" + installed
+            self.write(self.staged / installed, installed_form)
+            self.write(self.prefix / installed, installed_form)
         for name in ("laplace_geom", "laplace_substrate"):
             for path in (self.root / "build/extension" / name / f"{name}.control",
                          self.prefix / "share/postgresql/18/extension" / f"{name}.control"):
@@ -50,10 +58,19 @@ class RuntimeGuardTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
 
-    def snapshot(self):
-        return guard.snapshot(self.root, self.prefix, self.database, self.fingerprint)
+    @contextmanager
+    def staged_install(self, _root, _prefix):
+        yield self.staged
 
-    def test_exact_installed_runtime_passes(self):
+    def snapshot(self):
+        with patch.object(guard, "staged_install", self.staged_install):
+            return guard.snapshot(self.root, self.prefix, self.database, self.fingerprint)
+
+    def test_exact_installed_runtime_passes_even_when_build_elf_bytes_differ(self):
+        self.assertNotEqual(
+            guard.digest(self.root / "build/engine/core/liblaplace_core.so"),
+            guard.digest(self.prefix / "lib/liblaplace_core.so"),
+        )
         state = self.snapshot()
         self.assertEqual(10, len(state["artifacts"]))
         self.assertEqual(self.fingerprint, state["native_fingerprint"])
@@ -71,21 +88,48 @@ class RuntimeGuardTests(unittest.TestCase):
                         self.snapshot()
                     path.write_text(self.fingerprint)
 
-    def test_each_native_artifact_drift_is_detected(self):
-        for built, installed in guard.MODULES.items():
+    def test_each_native_artifact_drift_is_detected_against_staged_install(self):
+        for _built, installed in guard.MODULES.items():
             with self.subTest(artifact=installed):
                 path = self.prefix / installed
                 original = path.read_bytes()
-                path.write_bytes(b"deliberately broken binary")
-                with self.assertRaisesRegex(ValueError, "artifact differs"):
+                path.write_bytes(b"deliberately broken installed binary")
+                with self.assertRaisesRegex(ValueError, "tested installed form"):
                     self.snapshot()
                 path.write_bytes(original)
                 self.snapshot()
 
     def test_missing_native_artifact_fails(self):
         (self.prefix / "lib/liblaplace_core.so").unlink()
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ValueError, "artifact missing"):
             self.snapshot()
+
+    def test_staged_install_must_contain_every_declared_native_artifact(self):
+        (self.staged / "lib/liblaplace_core.so").unlink()
+        with self.assertRaisesRegex(ValueError, "CMake install omitted"):
+            self.snapshot()
+
+    def test_destdir_install_materializes_without_targeting_live_prefix(self):
+        self.write(self.root / "build/cmake_install.cmake", "# fixture")
+        live_marker = self.prefix / "live-marker"
+        self.write(live_marker, "unchanged")
+        observed = {}
+
+        def fake_run(argv, **kwargs):
+            observed["argv"] = argv
+            observed["cwd"] = kwargs["cwd"]
+            observed["destdir"] = kwargs["env"]["DESTDIR"]
+            stage = Path(observed["destdir"]) / self.prefix.resolve().relative_to("/")
+            self.write(stage / "lib/liblaplace_core.so", "fixture")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with patch.object(guard.subprocess, "run", side_effect=fake_run):
+            with guard.staged_install(self.root, self.prefix) as staged:
+                self.assertTrue((staged / "lib/liblaplace_core.so").is_file())
+                self.assertNotEqual(self.prefix.resolve(), staged.resolve())
+        self.assertEqual(["cmake", "--install", str(self.root.resolve() / "build")], observed["argv"])
+        self.assertEqual(self.root.resolve(), observed["cwd"])
+        self.assertEqual("unchanged", live_marker.read_text())
 
     def test_live_or_installed_sql_version_drift_fails(self):
         self.database["extensions"]["laplace_substrate"] = "old"
