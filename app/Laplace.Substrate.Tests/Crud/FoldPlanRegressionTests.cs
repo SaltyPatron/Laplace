@@ -47,7 +47,7 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         conn.Notice += (_, args) =>
         {
             string message = args.Notice.MessageText;
-            if (message.Contains("Query Text: SELECT b.ord")
+            if (message.Contains("Query Text: WITH locked AS MATERIALIZED")
                 || message.Contains("Query Text: INSERT INTO laplace.consensus")
                 || message.Contains("Query Text: MERGE INTO laplace.consensus"))
                 plans.Add(message);
@@ -101,11 +101,23 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
         void AssertPersistencePlan(IReadOnlyCollection<string> phasePlans, bool matched, bool novel)
         {
             Assert.DoesNotContain(phasePlans, p => p.Contains("Query Text: MERGE INTO laplace.consensus"));
-            Assert.DoesNotContain(phasePlans, p => Enumerable.Range(0, 8)
-                .Any(i => p.Contains($"Seq Scan on {relation}_{i}")));
-            Assert.Contains(phasePlans, p => p.Contains("Query Text: WITH b AS MATERIALIZED")
-                && p.Contains("b.id") && p.Contains("b.s")
-                && (p.Contains("Index Scan") || p.Contains("Hash Join")));
+            var priorPlans = phasePlans
+                .Where(p => p.Contains("Query Text: WITH locked AS MATERIALIZED"))
+                .ToArray();
+            Assert.InRange(priorPlans.Length, 1, 8);
+            Assert.All(priorPlans, p =>
+            {
+                Assert.Contains("FROM ONLY", p);
+                Assert.Contains("c.id = ANY", p);
+                Assert.Contains("b.id", p);
+                Assert.Contains("b.s", p);
+                Assert.DoesNotContain("Append", p);
+                Assert.Equal(1, Enumerable.Range(0, 8)
+                    .Count(i => p.Contains($"{relation}_{i}")));
+                Assert.True(p.Contains("Index Scan") || p.Contains("Hash Join")
+                    || p.Contains("Merge Join") || p.Contains("Seq Scan"),
+                    "exact-leaf prior plan did not expose a target access path");
+            });
             Assert.Equal(matched, phasePlans.Any(p => p.Contains("WHERE b.seen ")));
             Assert.Equal(novel, phasePlans.Any(p => p.Contains("WHERE NOT b.seen")));
             if (matched)

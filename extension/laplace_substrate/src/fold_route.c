@@ -24,8 +24,9 @@
  *  disjoint rows), then execute a SESSION-CACHED prepared plan per type whose
  *  type_id is a hex LITERAL in the plan text, kept in an HTAB of
  *  type_id -> SPI_keepplan'd SPIPlanPtr in TopMemoryContext. Plan-time LIST
- *  pruning excludes unrelated types. Consensus phase 1 exposes one materialized
- *  input set to an adaptive indexed/hash join; phase 3 persists matched rows through the primary-key conflict
+ *  pruning excludes unrelated types. Consensus phase 1 additionally applies
+ *  PostgreSQL's HASH partition function in C and gives each exact leaf only the
+ *  rows it owns; phase 3 persists matched rows through the primary-key conflict
  *  arbiter and novel rows as target-free inserts. The old MERGE remains only
  *  as a bounded concurrent-insert collision fallback. No temp table, no
  *  per-batch ANALYZE, no volatility trap.
@@ -43,13 +44,19 @@
  */
 #include "postgres.h"
 
+#include "access/table.h"
 #include "access/xact.h"
+#include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
+#include "partitioning/partbounds.h"
+#include "partitioning/partdesc.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/partcache.h"
 #include "utils/resowner.h"
 
 #include "laplace/core/hash128.h"
@@ -76,7 +83,23 @@ static HTAB *merge_plans = NULL;          /* attestations matched MERGE       */
 static HTAB *upsert_matched_plans = NULL; /* consensus PK-arbitrated updates  */
 static HTAB *upsert_novel_plans = NULL;   /* consensus target-free inserts    */
 static HTAB *upsert_merge_plans = NULL;   /* collision-only MERGE fallback    */
-static HTAB *upsert_prior_plans = NULL;   /* consensus prior-state FOR UPDATE */
+
+/* The substrate contract is LIST(type_id) -> HASH(subject_id, 8). A prior
+ * lookup must use BOTH pieces of routing information. Literal type pruning
+ * alone still left eight leaves beneath the selected LIST partition, and a
+ * join whose subject key came from unnest could probe/scan all eight for each
+ * input row. Keep one exact-leaf plan per type/remainder instead. */
+#define CONSENSUS_HASH_LEAVES 8
+
+typedef struct PriorRouteEntry
+{
+    char       type_id[16];
+    Oid        hash_parent_oid;
+    Oid        leaf_oids[CONSENSUS_HASH_LEAVES];
+    SPIPlanPtr leaf_plans[CONSENSUS_HASH_LEAVES];
+} PriorRouteEntry;
+
+static HTAB *upsert_prior_routes = NULL;
 
 static HTAB *
 plan_htab(HTAB **slot, const char *name)
@@ -145,6 +168,167 @@ typed_plan(HTAB **slot, const char *name, const uint8_t *type16,
         pfree(sql.data);
     }
     return entry->plan;
+}
+
+static HTAB *
+prior_route_htab(void)
+{
+    if (upsert_prior_routes == NULL)
+    {
+        HASHCTL ctl;
+
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = 16;
+        ctl.entrysize = sizeof(PriorRouteEntry);
+        ctl.hcxt = TopMemoryContext;
+        upsert_prior_routes = hash_create("consensus exact prior routes", 256,
+                                          &ctl,
+                                          HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+    return upsert_prior_routes;
+}
+
+/* Resolve the concrete HASH leaves that own one relation type. Named relation
+ * types resolve to their dedicated LIST child; dynamic types resolve to the
+ * DEFAULT child. Both have the same HASH(8) contract. Resolution happens once
+ * per backend/type and the prepared plans retain normal PostgreSQL dependency
+ * invalidation. */
+static PriorRouteEntry *
+prior_route(const uint8_t *type16, Datum type_datum, const char *label)
+{
+    PriorRouteEntry *entry;
+    bool             found;
+
+    entry = (PriorRouteEntry *) hash_search(prior_route_htab(), type16,
+                                             HASH_ENTER, &found);
+    if (!found)
+    {
+        Oid                namespace_oid;
+        Oid                root_oid;
+        Oid                hash_parent_oid;
+        Relation           root;
+        Relation           hash_parent;
+        PartitionKey       key;
+        PartitionDesc      desc;
+        PartitionBoundInfo bounds;
+        bool               equal;
+        int                datum_index;
+        int                part_index;
+        int                remainder;
+
+        memset(((char *) entry) + sizeof(entry->type_id), 0,
+               sizeof(*entry) - sizeof(entry->type_id));
+        namespace_oid = get_namespace_oid("laplace", false);
+        root_oid = get_relname_relid("consensus", namespace_oid);
+        if (!OidIsValid(root_oid))
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                     errmsg("%s: laplace.consensus does not exist", label)));
+
+        root = table_open(root_oid, AccessShareLock);
+        key = RelationGetPartitionKey(root);
+        desc = RelationGetPartitionDesc(root, false);
+        if (key == NULL || key->strategy != PARTITION_STRATEGY_LIST ||
+            key->partnatts != 1 || desc == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                     errmsg("%s: laplace.consensus must be LIST(type_id) partitioned",
+                            label)));
+        bounds = desc->boundinfo;
+        datum_index = partition_list_bsearch(key->partsupfunc,
+                                              key->partcollation,
+                                              bounds, type_datum, &equal);
+        part_index = equal ? bounds->indexes[datum_index]
+                           : bounds->default_index;
+        if (part_index < 0 || part_index >= desc->nparts)
+            ereport(ERROR,
+                    (errcode(ERRCODE_CHECK_VIOLATION),
+                     errmsg("%s: relation type has no consensus partition", label)));
+        hash_parent_oid = desc->oids[part_index];
+        table_close(root, AccessShareLock);
+
+        hash_parent = table_open(hash_parent_oid, AccessShareLock);
+        key = RelationGetPartitionKey(hash_parent);
+        desc = RelationGetPartitionDesc(hash_parent, false);
+        if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
+            key->partnatts != 1 || desc == NULL ||
+            desc->nparts != CONSENSUS_HASH_LEAVES ||
+            desc->boundinfo->nindexes != CONSENSUS_HASH_LEAVES)
+            ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                     errmsg("%s: consensus relation partition must be HASH(subject_id, %d)",
+                            label, CONSENSUS_HASH_LEAVES)));
+        for (remainder = 0; remainder < CONSENSUS_HASH_LEAVES; remainder++)
+        {
+            part_index = desc->boundinfo->indexes[remainder];
+            if (part_index < 0 || part_index >= desc->nparts)
+                ereport(ERROR,
+                        (errcode(ERRCODE_CHECK_VIOLATION),
+                         errmsg("%s: consensus HASH partition is missing remainder %d",
+                                label, remainder)));
+            entry->leaf_oids[remainder] = desc->oids[part_index];
+        }
+        entry->hash_parent_oid = hash_parent_oid;
+        table_close(hash_parent, AccessShareLock);
+    }
+    return entry;
+}
+
+static SPIPlanPtr
+prior_leaf_plan(PriorRouteEntry *route, int remainder,
+                const uint8_t *type16, const char *label)
+{
+    SPIPlanPtr plan = route->leaf_plans[remainder];
+
+    if (plan == NULL)
+    {
+        static const Oid argtypes[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
+        char             hex[33];
+        char            *namespace_name;
+        char            *relation_name;
+        char            *qualified_name;
+        StringInfoData   sql;
+        int              i;
+
+        namespace_name = get_namespace_name(
+            get_rel_namespace(route->leaf_oids[remainder]));
+        relation_name = get_rel_name(route->leaf_oids[remainder]);
+        if (namespace_name == NULL || relation_name == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                     errmsg("%s: consensus HASH leaf disappeared", label)));
+        qualified_name = quote_qualified_identifier(namespace_name,
+                                                     relation_name);
+        for (i = 0; i < 16; i++)
+            snprintf(hex + i * 2, 3, "%02x", type16[i]);
+
+        initStringInfo(&sql);
+        appendStringInfo(&sql,
+            "WITH locked AS MATERIALIZED ("
+            "  SELECT c.id, c.subject_id, c.rating, c.rd, c.volatility "
+            "  FROM ONLY %s c "
+            "  WHERE c.type_id = '\\x%s'::bytea "
+            "    AND c.id = ANY($1::bytea[]) "
+            "  FOR UPDATE OF c) "
+            "SELECT b.ord, locked.rating, locked.rd, locked.volatility "
+            "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY "
+            "     AS b(id, s, ord) "
+            "JOIN locked ON locked.subject_id = b.s AND locked.id = b.id",
+            qualified_name, hex);
+        plan = SPI_prepare(sql.data, 2, (Oid *) argtypes);
+        if (plan == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior SPI_prepare failed: %s",
+                            label, SPI_result_code_string(SPI_result))));
+        if (SPI_keepplan(plan) != 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior SPI_keepplan failed", label)));
+        route->leaf_plans[remainder] = plan;
+        pfree(sql.data);
+    }
+    return plan;
 }
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +442,164 @@ typedef struct FoldStateArrays
     ArrayType *volatility_array;
 } FoldStateArrays;
 
+typedef struct FoldPriorStates
+{
+    bool   *matched;
+    Datum  *ratings;
+    Datum  *rds;
+    Datum  *volatilities;
+    int     n;
+    uint64  matched_n;
+} FoldPriorStates;
+
+typedef struct PriorLeafBatch
+{
+    Datum *ids;
+    Datum *subjects;
+    int   *positions;
+    int    n;
+    int    fill;
+} PriorLeafBatch;
+
+static FoldPriorStates *
+fold_prior_states_create(int n)
+{
+    FoldPriorStates *states = (FoldPriorStates *) palloc(sizeof(*states));
+
+    states->matched = (bool *) palloc0(sizeof(bool) * n);
+    states->ratings = (Datum *) palloc(sizeof(Datum) * n);
+    states->rds = (Datum *) palloc(sizeof(Datum) * n);
+    states->volatilities = (Datum *) palloc(sizeof(Datum) * n);
+    states->n = n;
+    states->matched_n = 0;
+    return states;
+}
+
+static void
+fold_prior_states_add(FoldPriorStates *states, SPITupleTable *rows,
+                      uint64 nrows, const int *positions, int npositions,
+                      const char *label)
+{
+    uint64 r;
+
+    for (r = 0; r < nrows; r++)
+    {
+        HeapTuple tup = rows->vals[r];
+        TupleDesc desc = rows->tupdesc;
+        bool      null_ord, null_rating, null_rd, null_vol;
+        int64     leaf_ord = DatumGetInt64(
+            SPI_getbinval(tup, desc, 1, &null_ord));
+        Datum     prior_rating = SPI_getbinval(tup, desc, 2, &null_rating);
+        Datum     prior_rd = SPI_getbinval(tup, desc, 3, &null_rd);
+        Datum     prior_vol = SPI_getbinval(tup, desc, 4, &null_vol);
+        int       position;
+
+        if (null_ord || null_rating || null_rd || null_vol ||
+            leaf_ord < 1 || leaf_ord > (int64) npositions)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior read returned an invalid row",
+                            label)));
+        position = positions[leaf_ord - 1];
+        if (position < 0 || position >= states->n || states->matched[position])
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior read returned duplicate routing",
+                            label)));
+        states->matched[position] = true;
+        states->ratings[position] = prior_rating;
+        states->rds[position] = prior_rd;
+        states->volatilities[position] = prior_vol;
+        states->matched_n++;
+    }
+}
+
+/* Route each subject through PostgreSQL's own partition support function,
+ * then read its stored state from exactly the one physical leaf that owns it.
+ * The batch is partitioned once in native memory. Every exact-leaf statement
+ * can choose an index, merge, or hash access path without an Append and without
+ * multiplying the input by the number of HASH leaves. */
+static FoldPriorStates *
+read_run_priors(const uint8_t *type16, Datum type_datum,
+                const Datum *cell_ids, const InArray *subjects,
+                int run_start, int run_n, const char *label)
+{
+    PriorRouteEntry *route = prior_route(type16, type_datum, label);
+    Relation         hash_parent;
+    PartitionKey     key;
+    PriorLeafBatch   batches[CONSENSUS_HASH_LEAVES];
+    FoldPriorStates *states = fold_prior_states_create(run_n);
+    bool              nulls[1] = {false};
+    int              *remainder_by_row = (int *) palloc(sizeof(int) * run_n);
+    int               i;
+
+    memset(batches, 0, sizeof(batches));
+    hash_parent = table_open(route->hash_parent_oid, AccessShareLock);
+    key = RelationGetPartitionKey(hash_parent);
+    if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
+        key->partnatts != 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                 errmsg("%s: cached consensus route is no longer HASH partitioned",
+                        label)));
+
+    for (i = 0; i < run_n; i++)
+    {
+        Datum  value[1] = {subjects->elems[run_start + i]};
+        uint64 hash = compute_partition_hash_value(
+            1, key->partsupfunc, key->partcollation, value, nulls);
+        int remainder = (int) (hash % CONSENSUS_HASH_LEAVES);
+
+        remainder_by_row[i] = remainder;
+        batches[remainder].n++;
+    }
+    table_close(hash_parent, AccessShareLock);
+
+    for (i = 0; i < CONSENSUS_HASH_LEAVES; i++)
+    {
+        if (batches[i].n == 0)
+            continue;
+        batches[i].ids = (Datum *) palloc(sizeof(Datum) * batches[i].n);
+        batches[i].subjects = (Datum *) palloc(sizeof(Datum) * batches[i].n);
+        batches[i].positions = (int *) palloc(sizeof(int) * batches[i].n);
+    }
+    for (i = 0; i < run_n; i++)
+    {
+        PriorLeafBatch *batch = &batches[remainder_by_row[i]];
+        int             at = batch->fill++;
+
+        batch->ids[at] = cell_ids[run_start + i];
+        batch->subjects[at] = subjects->elems[run_start + i];
+        batch->positions[at] = i;
+    }
+
+    for (i = 0; i < CONSENSUS_HASH_LEAVES; i++)
+    {
+        PriorLeafBatch *batch = &batches[i];
+        Datum           vals[2];
+        SPIPlanPtr      plan;
+        int             rc;
+
+        if (batch->n == 0)
+            continue;
+        plan = prior_leaf_plan(route, i, type16, label);
+        vals[0] = PointerGetDatum(construct_array(
+            batch->ids, batch->n, BYTEAOID, -1, false, 'i'));
+        vals[1] = PointerGetDatum(construct_array(
+            batch->subjects, batch->n, BYTEAOID, -1, false, 'i'));
+        rc = SPI_execute_plan(plan, vals, NULL, false, 0);
+        if (rc != SPI_OK_SELECT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior SELECT failed: %s",
+                            label, SPI_result_code_string(rc))));
+        fold_prior_states_add(states, SPI_tuptable, SPI_processed,
+                              batch->positions, batch->n, label);
+        SPI_freetuptable(SPI_tuptable);
+    }
+    return states;
+}
+
 /* Fold is pure in these seven fixed-point inputs and the constant tau. Many
  * novel corpus cells share all seven; calculate each distinct state transition
  * once per batch, not once per edge. Never key only by evidence: matched cells
@@ -281,15 +623,14 @@ typedef struct FoldMemo
 static void
 fold_run_states(const InArray *phis, const InArray *opps,
                 const InArray *games, const InArray *sums,
-                int run_start, int run_n, SPITupleTable *priors,
-                uint64 n_prior, const char *label, FoldStateArrays *out)
+                int run_start, int run_n, const FoldPriorStates *priors,
+                const char *label, FoldStateArrays *out)
 {
-    bool   *matched = (bool *) palloc0(sizeof(bool) * run_n);
+    bool   *matched = priors->matched;
     Datum  *seen = (Datum *) palloc(sizeof(Datum) * run_n);
-    Datum  *ratings = (Datum *) palloc(sizeof(Datum) * run_n);
-    Datum  *rds = (Datum *) palloc(sizeof(Datum) * run_n);
-    Datum  *volatilities = (Datum *) palloc(sizeof(Datum) * run_n);
-    uint64  r;
+    Datum  *ratings = priors->ratings;
+    Datum  *rds = priors->rds;
+    Datum  *volatilities = priors->volatilities;
     int     i;
     HASHCTL memo_ctl;
     HTAB *memo;
@@ -299,29 +640,6 @@ fold_run_states(const InArray *phis, const InArray *opps,
     memo_ctl.entrysize = sizeof(FoldMemo);
     memo = hash_create("batch consensus fold transitions", Min(run_n, 128),
                        &memo_ctl, HASH_ELEM | HASH_BLOBS);
-
-    for (r = 0; r < n_prior; r++)
-    {
-        HeapTuple tup = priors->vals[r];
-        TupleDesc desc = priors->tupdesc;
-        bool      null_ord, null_rating, null_rd, null_vol;
-        int64     ord = DatumGetInt64(SPI_getbinval(tup, desc, 1, &null_ord));
-        Datum     prior_rating = SPI_getbinval(tup, desc, 2, &null_rating);
-        Datum     prior_rd = SPI_getbinval(tup, desc, 3, &null_rd);
-        Datum     prior_vol = SPI_getbinval(tup, desc, 4, &null_vol);
-
-        if (null_ord || null_rating || null_rd || null_vol ||
-            ord < 1 || ord > (int64) run_n || matched[ord - 1])
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: prior-state read returned an invalid row",
-                            label)));
-        matched[ord - 1] = true;
-        /* park the prior in the output slots; the fold pass consumes it */
-        ratings[ord - 1] = prior_rating;
-        rds[ord - 1] = prior_rd;
-        volatilities[ord - 1] = prior_vol;
-    }
 
     for (i = 0; i < run_n; i++)
     {
@@ -554,11 +872,10 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 /* The fold is now three phases per type run, all literal-routed and
  * session-plan-cached:
  *
- *  1. PRIOR_SELECT_SQL reads — and row-locks — the stored Glicko state of
- *     every cell of the run that already exists. FOR UPDATE is what makes the
- *     native fold safe: a locked row cannot change between this read and the
- *     MERGE, so folding from the read state IS folding from the merge-time
- *     state.
+ *  1. read_run_priors partitions the input by PostgreSQL's own HASH support
+ *     function, then reads and row-locks each stored cell from its exact owning
+ *     leaf. A locked row cannot change between this read and persistence, so
+ *     folding from the read state IS folding from the write-time state.
  *  2. fold_run_states() computes every outgoing (rating, rd, volatility) in
  *     one tight native pass — matched cells from their stored prior, novel
  *     cells from the neutral prior. Before this, only the novel half was
@@ -579,20 +896,6 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
  * fallback lazy: it executes only for rows re-classified after a concurrent-
  * insert collision (see upsert_merge_with_retry), so the (f()).col triple
  * evaluation sits on a path whose executions round to zero. */
-static const char *PRIOR_SELECT_SQL =
-    /* Materialize the input ONCE and expose the whole set to PostgreSQL. For a
-     * small batch against a large leaf the planner chooses indexed probes; for
-     * CILI-sized matched batches it hashes the input and scans each of the eight
-     * owning leaves once. The former correlated LATERAL forced one index descent
-     * through every HASH leaf per row: no sequential scans, but still O(rows x
-     * leaves), which is the 3-minute HAS_SYNSET_KEY call observed after #1388. */
-    "WITH b AS MATERIALIZED ("
-    "  SELECT id, s, ord FROM unnest($1::bytea[], $2::bytea[]) "
-    "       WITH ORDINALITY AS u(id, s, ord)) "
-    "SELECT b.ord, c.rating, c.rd, c.volatility "
-    "FROM b JOIN laplace.consensus c "
-    "  ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
-    "FOR UPDATE OF c";
 
 /* Phase 3 has no target join on the ordinary path. Phase 1 already classified
  * and row-locked every existing cell. Persist those rows through the declared
@@ -916,18 +1219,16 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         const uint8_t *type16 = bytea16(types.elems[run_start], label);
         int            run_n = 0;
         int            j = run_start;
-        SPIPlanPtr     prior_plan;
         SPIPlanPtr     matched_plan;
         SPIPlanPtr     novel_plan;
         SPIPlanPtr     merge_plan;
         ArrayType     *run_ids;
         ArrayType     *run_subjects;
+        FoldPriorStates *priors;
         FoldStateArrays folds;
-        Datum          pvals[2];
         Datum          write_vals[9];
         Datum          vals[12];
         uint64         matched_n;
-        static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
         static const Oid write_args[9] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
@@ -936,7 +1237,6 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
              INT8ARRAYOID, INT8ARRAYOID, 1185,
              BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
              INT8ARRAYOID};
-        int            rc;
 
         while (j < subjects.n &&
                memcmp(bytea16(types.elems[j], label), type16, 16) == 0)
@@ -952,19 +1252,11 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                                     subjects.n, run_start, run_n,
                                     BYTEAOID, -1, false, 'i');
 
-        prior_plan = typed_plan(&upsert_prior_plans, "consensus_upsert prior plans",
-                                type16, PRIOR_SELECT_SQL, 2, prior_args);
-        pvals[0] = PointerGetDatum(run_ids);
-        pvals[1] = PointerGetDatum(run_subjects);
-        rc = SPI_execute_plan(prior_plan, pvals, NULL, false, 0);
-        if (rc != SPI_OK_SELECT)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: prior-state SELECT failed: %s",
-                            label, SPI_result_code_string(rc))));
-        matched_n = SPI_processed;
+        priors = read_run_priors(type16, types.elems[run_start], cell_ids,
+                                 &subjects, run_start, run_n, label);
+        matched_n = priors->matched_n;
         fold_run_states(&phis, &opps, &games, &sums, run_start, run_n,
-                        SPI_tuptable, matched_n, label, &folds);
+                        priors, label, &folds);
 
         matched_plan = typed_plan(&upsert_matched_plans,
                                   "consensus_upsert matched plans", type16,
@@ -1029,22 +1321,21 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
 {
     const char    *label = "consensus_upsert_type";
     const uint8_t *type16;
+    Datum          type_datum;
     InArray        subjects, objects, phis, games, sums, ts;
     InArray        opps;
     Datum         *cell_ids;
     ArrayType     *cell_id_array;
+    FoldPriorStates *priors;
     FoldStateArrays folds;
     HTAB          *seen;
     HASHCTL        ctl;
-    SPIPlanPtr     prior_plan;
     SPIPlanPtr     matched_plan;
     SPIPlanPtr     novel_plan;
     SPIPlanPtr     merge_plan;
-    Datum          pvals[2];
     Datum          write_vals[9];
     Datum          vals[12];
     uint64         matched_n;
-    static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
     static const Oid write_args[9] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
@@ -1054,13 +1345,13 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
          BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID};
     int i;
-    int rc;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                  errmsg("%s: type must not be NULL", label)));
-    type16 = bytea16(PG_GETARG_DATUM(0), label);
+    type_datum = PG_GETARG_DATUM(0);
+    type16 = bytea16(type_datum, label);
     in_array(fcinfo, 1, BYTEAOID, -1, false, 'i', false, label, &subjects);
     in_array(fcinfo, 2, BYTEAOID, -1, false, 'i', true, label, &objects);
     in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &phis);
@@ -1121,19 +1412,11 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
-    prior_plan = typed_plan(&upsert_prior_plans, "consensus_upsert prior plans",
-                            type16, PRIOR_SELECT_SQL, 2, prior_args);
-    pvals[0] = PointerGetDatum(cell_id_array);
-    pvals[1] = PointerGetDatum(subjects.array);
-    rc = SPI_execute_plan(prior_plan, pvals, NULL, false, 0);
-    if (rc != SPI_OK_SELECT)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("%s: prior-state SELECT failed: %s",
-                        label, SPI_result_code_string(rc))));
-    matched_n = SPI_processed;
+    priors = read_run_priors(type16, type_datum, cell_ids, &subjects,
+                             0, subjects.n, label);
+    matched_n = priors->matched_n;
     fold_run_states(&phis, &opps, &games, &sums, 0, subjects.n,
-                    SPI_tuptable, matched_n, label, &folds);
+                    priors, label, &folds);
 
     matched_plan = typed_plan(&upsert_matched_plans,
                               "consensus_upsert matched plans", type16,

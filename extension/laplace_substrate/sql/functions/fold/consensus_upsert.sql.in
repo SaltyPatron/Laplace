@@ -2,7 +2,8 @@
 --
 -- NATIVE (2026-07-21, GH #565): the body lives in C (src/fold_route.c).
 -- Consensus is content: dedup it the way ingest dedups laplace.entities. The batch is
--- split by what it IS, per relation type. Phase 1 performs an adaptive keyed batch read;
+-- split by what it IS, per relation type. Phase 1 partitions the batch with
+-- PostgreSQL's own HASH support function and reads each row from its exact leaf;
 -- phase 3 sends matched rows through the primary-key conflict arbiter and novel rows
 -- through target-free inserts. The historical MERGE survives only as the bounded
 -- concurrent-insert collision fallback. Existing cells re-fold from stored state;
@@ -22,15 +23,17 @@
 --
 -- The native routing groups the batch by type in C and executes one SESSION-CACHED
 -- prepared statements per type whose type_id is a LITERAL in the plan text (HTAB
--- of type -> SPI_keepplan'd plans in TopMemoryContext). The prior read exposes the
--- complete input set for an indexed or hash plan; matched persistence uses ON CONFLICT on the declared PK, and novel
+-- of type -> SPI_keepplan'd plans in TopMemoryContext). The prior read groups
+-- subjects by physical HASH remainder once and gives each exact leaf its own
+-- indexed/hash-capable batch; matched persistence uses ON CONFLICT on the declared PK, and novel
 -- persistence never reads the target. There is no temp table, per-batch ANALYZE, or
 -- UPDATE-then-NOT-EXISTS double probe.
--- The function-local settings replan against the actual batch, materialize only
--- the input set, and leave all three join/access methods available. PostgreSQL can
--- therefore use indexed probes for a small batch or hash the input and visit each
--- owning leaf once for a corpus-sized matched batch. Disabling hash joins forced
--- the post-#1388 CILI run through millions of otherwise-fast index descents.
+-- The function-local settings replan against the actual leaf batch and leave all
+-- three join/access methods available. There is no parent Append below the type
+-- partition and therefore no rows-times-eight probe shape: each subject appears
+-- in exactly one statement against exactly one physical relation. PostgreSQL can
+-- use indexed probes for a small leaf batch or scan that one owning leaf once for
+-- a corpus-sized matched batch.
 -- These settings restore the caller's values on return, including errors.
 --
 -- One implementation per fact, preserved:
