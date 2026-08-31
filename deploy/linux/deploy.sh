@@ -148,5 +148,18 @@ test -x "$APP_DIR/laplace-uci" || { echo "::error::laplace-uci missing from $APP
 test -x "$APP_DIR/laplace-mcp" || { echo "::error::laplace-mcp missing from $APP_DIR after sync"; exit 1; }
 test -f "$release/mcp/Laplace.Endpoints.Mcp.dll"
 test -x "$APP_DIR/laplace-lichess"
-timeout 10s "$APP_DIR/laplace-mcp" </dev/null || { echo "::error::deployed laplace-mcp failed its EOF startup smoke test"; exit 1; }
+
+# The launcher inode being executable is not enough: #920 was exactly a launcher
+# that survived while its runtime target was absent/stale. Resolve the deployed
+# symlink and require it to be THIS publish's immutable release before exercising
+# the product protocol against it.
+mcp_target="$(readlink -f "$APP_DIR/laplace-mcp" 2>/dev/null || true)"
+expected_mcp="$(readlink -f "$release/mcp/Laplace.Endpoints.Mcp" 2>/dev/null || true)"
+test -n "$mcp_target" && test -x "$mcp_target" || {
+  echo "::error::deployed laplace-mcp does not resolve to an executable target"; exit 1;
+}
+[[ -n "$expected_mcp" && "$mcp_target" == "$expected_mcp" ]] || {
+  echo "::error::deployed laplace-mcp target is stale: got '$mcp_target', expected '$expected_mcp'"; exit 1;
+}
+python3 "$REPO_ROOT/scripts/probe-mcp-stdio.py" "$mcp_target"
 echo "✓ published API + SPA + UCI + versioned MCP/Lichess to $APP_DIR"
