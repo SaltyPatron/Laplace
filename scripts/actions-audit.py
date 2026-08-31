@@ -67,16 +67,34 @@ if jobs:
     if needs(smoke) != {"publish", "integration-test"}: fail("product smoke must execute after post-delivery DB QA")
     if "needs.integration-test.result == 'success'" in smoke_if: fail("DB QA still suppresses product evidence")
     if "needs.publish.outputs.has_data" in smoke_if: fail("empty/thin substrate silently skips product-floor evidence")
-    if "check-substrate-floor.sh" not in runs(smoke): fail("product smoke lacks substrate-floor gate")
+    if "test-parallel.sh --app-live" not in runs(smoke): fail("product smoke bypasses live profile")
     if needs(restore) != {"deploy", "publish"}: fail("recovery owns more than failed application publication")
     if "needs.publish.result != 'success'" not in str(restore.get("if", "")): fail("recovery is not limited to failed publication")
     if needs(jobs["deps"]) != {"policy"} or needs(jobs["build"]) != {"deps"}: fail("single-runner policy/deps/build order drifted")
+    if runs(jobs["policy"]).count("bash scripts/ci-policy.sh") != 1: fail("policy job bypasses canonical policy profile alias")
     if runs(jobs["unit-test"]).count("test-parallel.sh --engine") != 1: fail("DEV/BAT is not one canonical profile invocation")
+    if runs(jobs["integration-test"]).count("test-parallel.sh --integration") != 1: fail("DB QA is not one canonical profile invocation")
+    if runs(jobs["smoke"]).count("test-parallel.sh --app-live") != 1: fail("live product proof is not one canonical profile invocation")
+    if "test-parallel.sh --perf" not in runs(jobs["eval"]): fail("explicit performance benchmark bypasses perf profile")
+
+    primary_source = (WF / "laplace.yml").read_text(encoding="utf-8")
+    for direct in (
+        "dotnet test ", "ctest ", "npm run test:", "npx playwright",
+        "test-uci-publish.py", "test-cutechess-runtime.py", "verify-generation.py --api",
+    ):
+        if direct in primary_source:
+            fail(f"laplace.yml contains direct test variant outside registry: {direct}")
 
 proof = (ROOT / "scripts" / "pr-proof.sh").read_text(encoding="utf-8")
-if proof.count("bash scripts/ci-policy.sh") != 1: fail("PR proof must execute policy exactly once")
-for forbidden in ("publish-applications.sh check", "check-application-runtime.py", "pipeline.sh install", "pipeline.sh migrate", "sync-extension", "publish-applications.sh deploy", "systemctl ", "sudo ", "--fresh-db"):
-    if forbidden in proof: fail(f"PR proof assumes/mutates installed runtime via {forbidden}")
+if proof.count("test-parallel.sh --policy") != 1: fail("PR proof must execute policy profile exactly once")
+if proof.count("test-parallel.sh --engine") != 1: fail("PR proof must execute DEV/BAT profile exactly once")
+for forbidden in (
+    "bash scripts/ci-policy.sh", "publish-applications.sh check", "check-application-runtime.py",
+    "pipeline.sh install", "pipeline.sh migrate", "sync-extension", "publish-applications.sh deploy",
+    "systemctl ", "sudo ", "--fresh-db", "dotnet test ", "npx playwright",
+    "test-uci-publish.py", "test-cutechess-runtime.py", "npm run test:",
+):
+    if forbidden in proof: fail(f"PR proof assumes/mutates/duplicates test authority via {forbidden}")
 
 pr = workflows.get("pr-validation.yml", {})
 prove = (pr.get("jobs") or {}).get("prove", {})
@@ -114,12 +132,21 @@ runner = (ROOT / "scripts" / "bootstrap-laplace-runner.sh").read_text(encoding="
 for token in ('RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"', "--name hart-server", "--work _work"):
     if token not in runner: fail(f"runner contract missing {token}")
 
+registry_tool = ROOT / "scripts" / "test-profile-registry.py"
+registry_data = ROOT / "scripts" / "test-profiles.json"
+if not registry_tool.exists() or not registry_data.exists(): fail("executable test-profile registry is missing")
 test_runner = (ROOT / "scripts" / "test-parallel.sh").read_text(encoding="utf-8")
-for token in ("DOTNET_DEV_FILTER='Tier!=db&Tier!=live&Tier!=perf'", "DOTNET_DB_FILTER='Tier=db'", "DOTNET_LIVE_FILTER='Tier=live'"):
-    if token not in test_runner: fail(f"test profile contract missing {token}")
+if "test-profile-registry.py run --profile" not in test_runner: fail("legacy test entry point bypasses registry executor")
+for token in ("DOTNET_DEV_FILTER=", "DOTNET_DB_FILTER=", "DOTNET_LIVE_FILTER=", "ctest --test-dir", "dotnet test Laplace.slnx"):
+    if token in test_runner: fail(f"legacy test selector remains outside registry: {token}")
+policy_alias = (ROOT / "scripts" / "ci-policy.sh").read_text(encoding="utf-8")
+if "test-profile-registry.py run --profile policy" not in policy_alias:
+    fail("ci-policy.sh is not a thin alias to the policy profile")
+for token in ("test-managed-host.py", "test-actions-topology.py", "shellcheck-gate.sh"):
+    if token in policy_alias: fail(f"ci-policy.sh retains direct policy implementation: {token}")
 
 if failures:
     print("ACTIONS_AUDIT_FAILED", file=sys.stderr)
     for failure in failures: print(f"  - {failure}", file=sys.stderr)
     raise SystemExit(1)
-print(f"ACTIONS_AUDIT_OK workflows={len(workflows)} delivery=before_qa pr_proof=isolated-worktree")
+print(f"ACTIONS_AUDIT_OK workflows={len(workflows)} delivery=before_qa test_profiles=registry pr_proof=isolated-worktree")

@@ -326,8 +326,13 @@ class EntryPointTests(unittest.TestCase):
     def test_ci_repairs_host_before_live_install_and_never_installs_root_code(self):
         workflow = (ROOT / ".github/workflows/laplace.yml").read_text()
         policy = (ROOT / "scripts/ci-policy.sh").read_text()
+        registry = json.loads((ROOT / "scripts/test-profiles.json").read_text())
         self.assertIn("run: bash scripts/ci-policy.sh", workflow)
-        self.assertIn("python3 scripts/test-managed-host.py", policy)
+        self.assertIn("test-profile-registry.py run --profile policy", policy)
+        self.assertNotIn("python3 scripts/test-managed-host.py", policy)
+        managed_host = [suite for suite in registry["suites"] if suite["id"] == "policy-managed-host"]
+        self.assertEqual(1, len(managed_host))
+        self.assertEqual(["python3", "scripts/test-managed-host.py"], managed_host[0]["command"])
         publish = (ROOT / "deploy/linux/managed-publish.sh").read_text()
         self.assertIn('sudo -n "$HELPER" reconcile-host', publish)
         self.assertIn('sudo -n "$HELPER" host-status', publish)

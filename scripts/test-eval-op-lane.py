@@ -36,6 +36,11 @@ def _load_primary_workflow():
     return workflow
 
 
+def _load_test_profiles():
+    value = json.loads((ROOT / "scripts/test-profiles.json").read_text(encoding="utf-8"))
+    return value["suites"]
+
+
 class _Response(BytesIO):
     def __enter__(self):
         return self
@@ -178,7 +183,14 @@ class EvalOperationLaneTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
         eval_block = workflow[workflow.index("  eval:"):workflow.index("  restore-api:")]
         self.assertNotIn("--" + "db", eval_block)
-        self.assertEqual(2, eval_block.count("--api http://127.0.0.1:8080"))
+        self.assertNotIn("verify-generation.py", eval_block)
+        self.assertNotIn("eval-generation.py", eval_block)
+        self.assertEqual(0, eval_block.count("--api http://127.0.0.1:8080"))
+        perf = next(s for s in _load_test_profiles() if s["id"] == "generation-perf")
+        perf_command = " ".join(perf["command"])
+        self.assertIn("verify-generation.py", perf_command)
+        self.assertIn("--api ${LAPLACE_API_BASE:-http://127.0.0.1:8080}", perf_command)
+        self.assertNotIn("--" + "db", perf_command)
 
         probes = json.loads((ROOT / "scripts/eval-probes.json").read_text(encoding="utf-8"))
         self.assertNotIn("sql", {probe.get("surface") for probe in probes["probes"]})
@@ -196,18 +208,18 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertEqual("false", benchmark["default"])
 
         eval_job = workflow["jobs"]["eval"]
+        self.assertIn("github.event_name == 'workflow_dispatch'", eval_job["if"])
+        self.assertIn("inputs.generation_benchmark == true", eval_job["if"])
         benchmark_steps = [
             step for step in eval_job["steps"]
-            if "scripts/verify-generation.py" in step.get("run", "")
+            if "test-parallel.sh --perf" in step.get("run", "")
         ]
         self.assertEqual(1, len(benchmark_steps))
-        benchmark_step = benchmark_steps[0]
-        self.assertEqual(
-            "github.event_name == 'workflow_dispatch' && "
-            "inputs.generation_benchmark == true",
-            benchmark_step["if"],
-        )
-        self.assertIn("--enforce", benchmark_step["run"])
+        self.assertNotIn("if", benchmark_steps[0])
+        perf = next(s for s in _load_test_profiles() if s["id"] == "generation-perf")
+        perf_command = " ".join(perf["command"])
+        self.assertIn("verify-generation.py", perf_command)
+        self.assertIn("--enforce", perf_command)
 
     def test_generation_probe_builds_each_lane_plan_once_per_seed_batch(self):
         sql_root = ROOT / "extension/laplace_substrate/sql/functions/converse"

@@ -139,7 +139,7 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: Native and managed DEV/BAT
+      - name: Execute DEV/BAT profile
         env:
           LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
         run: |
@@ -150,21 +150,6 @@ jobs:
           else
             bash scripts/test-parallel.sh --engine
           fi
-      - name: Published UCI handshake and legal search
-        run: |
-          runtime=$(mktemp -d)
-          trap 'rm -rf "$runtime"' EXIT
-          dotnet publish app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj -c Release --no-self-contained -o "$runtime"
-          python3 scripts/test-uci-publish.py "$runtime"
-          python3 scripts/install-stockfish.py --prefix "$runtime/chess-tools"
-          python3 scripts/test-cutechess-runtime.py /opt/laplace/bin/cutechess-cli "$runtime/laplace-uci" "$runtime/chess-tools/bin/stockfish"
-      - name: Chess browser strength controls
-        working-directory: web
-        run: |
-          npm ci --no-audit --no-fund
-          npm run typecheck
-          npx playwright install chromium
-          npm run test:chess-ui
 
   application-release:
     name: Applications — verified existing engine, independent transaction
@@ -194,11 +179,6 @@ jobs:
           [[ "$FRESH_DB" != true && "$FULL_CLEAN" != true ]] || exit 1
       - name: Read-only installed-runtime compatibility
         run: bash scripts/publish-applications.sh check
-      - name: API contracts against installed native runtime
-        run: |
-          export LD_LIBRARY_PATH="/opt/laplace/lib:${LD_LIBRARY_PATH:-}"
-          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
-            -c Release --no-build --filter 'Tier!=db&Tier!=live&Tier!=perf' --verbosity minimal
       - name: Publish and verify application-only transaction
         if: inputs.stage == 'applications'
         env:
@@ -345,14 +325,11 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
       - name: Clear stale pg_regress output
         run: rm -rf build/extension/*/tests/regress_output
-      - name: DB health, pg_regress and managed DB tests
+      - name: Execute database QA profile
         env:
           LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
         run: |
           chmod +x scripts/test-parallel.sh
-          bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$GITHUB_WORKSPACE/build" \
-            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
-          [[ -n "$bin" ]] || { echo "::error::perfcache blob not found for DB QA"; exit 1; }
           if [[ "${LAPLACE_TEST_SERIAL:-}" == 1 ]]; then
             bash scripts/test-parallel.sh --serial --integration
           else
@@ -386,36 +363,17 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: Named substrate-floor gate
-        run: bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
-      - name: Live API contract
+      - name: Execute live product profile
         env:
           LAPLACE_API_BASE: http://127.0.0.1:8080
-        run: |
-          capabilities=$(curl -fsS "$LAPLACE_API_BASE/v1/capabilities")
-          grep -q '"chat_completions"' <<<"$capabilities"
-          grep -q '"op"' <<<"$capabilities"
-          readiness=$(curl -fsS "$LAPLACE_API_BASE/health/ready")
-          grep -q '"ready":true' <<<"$readiness"
-          grep -q '"substrate_reachable":true' <<<"$readiness"
-          inventory=$(curl -fsS -X POST "$LAPLACE_API_BASE/v1/op" \
-            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"name":"ops.substrate_counts","max_rows":20}')
-          grep -q '"object":"op.result"' <<<"$inventory"
-          completion=$(curl -fsS -X POST "$LAPLACE_API_BASE/v1/chat/completions" \
-            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')
-          grep -q '"object":"chat.completion"' <<<"$completion"
-      - name: Live product acceptance tests
-        run: |
-          cd app
-          dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal --filter 'Tier=live'
+        run: bash scripts/test-parallel.sh --app-live
 
   eval:
-    name: Product eval — generation and election correctness
+    name: Optional performance proof — explicit generation benchmark
     needs: [publish, smoke]
     if: >-
-      always() && !cancelled() && needs.publish.result == 'success' &&
+      always() && !cancelled() && github.event_name == 'workflow_dispatch' &&
+      inputs.generation_benchmark == true && needs.publish.result == 'success' &&
       needs.publish.outputs.product_ready == 'true' && needs.smoke.result == 'success'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 45
@@ -427,17 +385,8 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: Election and generation quality harness
-        run: |
-          mkdir -p .eval-proof
-          python3 scripts/eval-generation.py --api http://127.0.0.1:8080 \
-            --probes scripts/eval-probes.json --baseline scripts/eval-baselines.json \
-            --report .eval-proof/generation.json
-      - name: Explicit generation benchmark
-        if: github.event_name == 'workflow_dispatch' && inputs.generation_benchmark == true
-        run: |
-          python3 scripts/verify-generation.py --api http://127.0.0.1:8080 \
-            --report .eval-proof/lane-detectors.json --enforce
+      - name: Execute explicit performance profile
+        run: bash scripts/test-parallel.sh --perf
 
   restore-api:
     name: Recovery — failed application activation only
