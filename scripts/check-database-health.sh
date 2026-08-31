@@ -100,4 +100,4 @@ if [[ "${op_invalid:-0}" != "0" ]]; then
   fail "ops.index_health reports $op_invalid invalid index(es)"
 fi
 
-echo "DB_HEALTH_OK database=$DB extension=$ext invalid_indexes=0 unvalidated_constraints=0 running_ingests=0"
+echo "DB_HEALTH_OK database=$DB extension=$ext required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=0 seed_state=not_required"
