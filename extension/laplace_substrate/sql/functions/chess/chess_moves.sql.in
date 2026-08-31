@@ -3,22 +3,19 @@ CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT
     RETURNS TABLE(next_position bytea, eff_mu double precision, rd double precision,
                   witness_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- Opening explorer over the rated MOVE web: every continuation the fold has
+    -- Opening explorer over the rated MOVE web: every continuation the substrate has
     -- ever witnessed out of one position, ranked by the conservative estimate.
     --
     -- MEASURED 2026-08-21: the deployed pre-repair corpus was EMPTY because the typed-
     -- trajectory refactor stopped materializing this bounded cell. Current PGN/live/self-
     -- play record paths restore one position→position observation per witnessed ply;
-    -- older corpora remain empty until replayed. The cell is bounded by deterministic
+    -- older corpora require the ChessTransitions reconstruction operation. The cell is bounded by deterministic
     -- legal transitions, while evidence contexts retain the contributing playings.
     --
-    -- Do NOT make this synthesise rows from trajectory geometry to look populated.
-    -- I tried exactly that and it was wrong twice over: ChessEngineService.ExploreAsync
-    -- ALREADY reads structural.geometry_successors_typed itself, so the join ran that
-    -- surface a second time and one /chess/explore call took 147.9s; and a synthetic
-    -- row makes hasRating true with eff_mu 0, so Explore reported effMu -1500 on every
-    -- move (0 - NeutralMu/1e9). Returning nothing until the cells exist is the honest
-    -- answer, and Explore already degrades to the successor counts on its own.
+    -- Do not reconstruct this index on a request by unpacking every complete game
+    -- trajectory. The initial position occurs in roughly 1.64 million trajectories in
+    -- the measured corpus; the exact keyed MOVE cells exist specifically so this read is
+    -- proportional to legal continuations rather than historical games.
     -- Position ids are COMPOSED (ChessCompose merkle path), never
     -- realize.canonical_id(surface) — callers hold them from composing a board state or
     -- from a prior chess_moves step. Rides
