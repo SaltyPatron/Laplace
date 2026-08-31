@@ -148,13 +148,37 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("recover", recovery["run"])
         self.assertTrue(any("Validate application-only" in step.get("name", "") for step in jobs["policy"]["steps"]))
 
-    def test_full_release_eval_and_rollback_gate_remain_mandatory(self):
+    def test_full_release_commits_delivery_before_environment_qa(self):
         jobs = yaml.safe_load((ROOT / ".github/workflows/laplace.yml").read_text())["jobs"]
+        publish = jobs["publish"]
+        integration = jobs["integration-test"]
+        restore = jobs["restore-api"]
+
+        # Build/unit/db lifecycle gate activation. Environment QA remains a red
+        # signal, but it cannot withhold or undo the application payload needed to
+        # inspect and repair the failure on this development system.
+        self.assertEqual("db-ops", publish["needs"])
+        self.assertIn("needs.db-ops.result == 'success'", publish["if"])
+        self.assertEqual(["db-ops", "publish"], integration["needs"])
+        self.assertIn("inputs.stage == 'integrate'", integration["if"])
+        self.assertIn("needs.publish.result == 'success'", integration["if"])
+
+        publish_commands = "\n".join(step.get("run", "") for step in publish["steps"])
+        self.assertIn("managed-publish.sh commit", publish_commands)
+        self.assertIn("pipeline.sh publish-stamp", publish_commands)
+
+        self.assertEqual(["deploy", "publish"], restore["needs"])
+        restore_commands = "\n".join(step.get("run", "") for step in restore["steps"])
+        self.assertIn("managed-publish.sh rollback", restore_commands)
+        self.assertNotIn("managed-publish.sh commit", restore_commands)
+        self.assertNotIn("SMOKE_RESULT", restore_commands)
+        self.assertNotIn("EVAL_RESULT", restore_commands)
+
+        # Smoke/eval are post-delivery product evidence. They can make the workflow
+        # red, but they are not transaction owners and cannot roll the payload back.
+        self.assertEqual("publish", jobs["smoke"]["needs"])
         self.assertEqual(["publish", "smoke"], jobs["eval"]["needs"])
-        self.assertIn("eval", jobs["restore-api"]["needs"])
-        restore = jobs["restore-api"]["steps"][0]["run"]
-        self.assertIn('"$EVAL_RESULT" != failure', restore)
-        self.assertIn('"$EVAL_RESULT" != cancelled', restore)
+
         for name in ("deploy", "db-ops", "integration-test", "publish"):
             self.assertNotIn("applications", jobs[name]["if"])
 
