@@ -123,6 +123,26 @@
     font-size: var(--text-sm);
   }
 
+  dl.profileFacts {
+    margin: var(--space-2) 0 0;
+  }
+
+  .profileFacts div {
+    display: grid;
+    grid-template-columns: minmax(6rem, auto) 1fr;
+    gap: var(--space-2);
+  }
+
+  .profileFacts dt {
+    color: var(--color-text-muted);
+  }
+
+  .profileFacts dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
   .profileLinks {
     display: flex;
     flex-wrap: wrap;

@@ -344,12 +344,13 @@ public static class ChessLabRunners
 
     public static async Task RunLichessFetchAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
-        string user = Config(slot.Job.Config, "user", "");
+        string user = Config(slot.Job.Config, "user", "").Trim();
         string site = Config(slot.Job.Config, "site", "lichess");
-        bool all = Config(slot.Job.Config, "all", "true") == "true";
-        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
-        int? max = !all && int.TryParse(Config(slot.Job.Config, "max", ""), out var m) ? m : null;
+        bool all = bool.TryParse(Config(slot.Job.Config, "all", "true"), out bool allValue) && allValue;
+        bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
+        int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
+        if (user.Length == 0) throw new ArgumentException("A provider username is required.");
         var outPath = Path.Combine(
             LabDir, slot.Job.Id, $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn");
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
@@ -399,7 +400,7 @@ public static class ChessLabRunners
         string user = Config(slot.Job.Config, "user", "").Trim();
         string site = Config(slot.Job.Config, "site", "lichess");
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
-        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
+        bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
 
         var online = await ChessGameFetcher.FetchProfileAsync(user, site, ct);

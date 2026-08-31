@@ -87,10 +87,28 @@ export function PlayerPage() {
                     {profile.provider_id}
                   </Muted>
                   {profile.biography ? <p>{profile.biography}</p> : null}
+                  {profile.aliases.filter((alias) =>
+                    alias.localeCompare(profile.display_name, undefined, { sensitivity: 'accent' }) !== 0
+                    && alias.localeCompare(profile.provider_id, undefined, { sensitivity: 'accent' }) !== 0
+                  ).length > 0 ? (
+                    <p className={styles.profileFacts}>
+                      Aliases: {profile.aliases.filter((alias) =>
+                        alias.localeCompare(profile.display_name, undefined, { sensitivity: 'accent' }) !== 0
+                        && alias.localeCompare(profile.provider_id, undefined, { sensitivity: 'accent' }) !== 0
+                      ).join(' · ')}
+                    </p>
+                  ) : null}
                   {Object.keys(profile.ratings).length > 0 ? (
                     <p className={styles.profileFacts}>
                       {Object.entries(profile.ratings).map(([kind, rating]) => `${kind} ${rating}`).join(' · ')}
                     </p>
+                  ) : null}
+                  {Object.keys(profile.facts).length > 0 ? (
+                    <dl className={styles.profileFacts}>
+                      {Object.entries(profile.facts).map(([kind, value]) => (
+                        <div key={kind}><dt>{kind.replaceAll('_', ' ')}</dt><dd>{value}</dd></div>
+                      ))}
+                    </dl>
                   ) : null}
                   {profile.links.length > 0 ? (
                     <div className={styles.profileLinks}>

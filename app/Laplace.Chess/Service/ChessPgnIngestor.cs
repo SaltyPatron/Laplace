@@ -161,8 +161,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 ChessVocabulary.EmitPlayer(b, playerId, identityName, sourceId, weight);
                 players++;
 
-                foreach (string alias in new[] { profile.DisplayName, profile.RealName }
-                             .OfType<string>().Where(static x => !string.IsNullOrWhiteSpace(x)))
+                foreach (string alias in profile.Aliases
+                             .Append(profile.DisplayName)
+                             .Append(profile.RealName ?? "")
+                             .Where(static x => !string.IsNullOrWhiteSpace(x))
+                             .Distinct(StringComparer.OrdinalIgnoreCase))
                     ChessVocabulary.EmitPlayer(b, playerId, alias, sourceId, weight);
 
                 AddProfileValue(b, playerId, ChessVocabulary.ExternalIdType,
