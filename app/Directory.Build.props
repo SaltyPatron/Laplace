@@ -23,35 +23,31 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
   </PropertyGroup>
   <!--
-    Throughput and db-bound tests are excluded BY DEFAULT, not by remembering a
-    filter. scripts/test-parallel.sh has always passed `Tier!=perf & Tier!=db`,
-    so CI never ran them; a bare `dotnet test` did. On a box that is also
-    seeding or building, a ">500k rows/sec" gate reports machine load rather
-    than a regression, which produced failures nobody acted on. That is worse
-    than not running the test.
+    Tier=db RUNS by default. It was previously excluded here and in
+    scripts/test-parallel.sh, so 66 useful PostgreSQL-backed tests executed nowhere,
+    including the fold's bit-exact determinism proof. DB-tier tests must own/create
+    their fixture state and may depend on PostgreSQL, but not on a particular seeded
+    product corpus.
 
-    Tier=db RUNS (2026-08-24). It used to be excluded here and in test-parallel.sh
-    together, so 66 passing tests executed NOWHERE: not in CI, not in `just test`,
-    not in a bare `dotnet test`. Among them is
-    ConsensusAccumulatingWriterTests.Production_IsBitExactDeterministic, the fold's
-    bit-exactness guarantee. Their dependency is a PostgreSQL cluster, and the test
-    phase already requires one: pg_regress runs beside them and cannot start without
-    it. Verified against the live cluster: Substrate 64/64, Decomposers 1/1, Chess 1/1.
+    Tier=live is intentionally different: it exercises the standing shared substrate
+    and may require foundation/knowledge seeds or deposit durable product episodes.
+    Those are explicit product acceptance probes, not unit/database-health tests, so a
+    bare `dotnet test` does not run them accidentally during recreate/reseed work.
 
-    Tier=perf stays excluded, for the reason above: a throughput gate on a box that is
-    also seeding reports machine load rather than a regression.
+    Tier=perf also stays explicit because a throughput threshold on a busy self-hosted
+    runner measures ambient machine load as much as code.
 
-    Same expression as the script, applied as the project default, so the two
-    cannot drift. Passing an explicit filter on the command line still
-    overrides this, so the tests are skipped by default and never removed:
+    Explicit filters still override the default:
 
-      dotnet test /p:VSTestTestCaseFilter="Tier=perf"   run the gates on purpose
-      dotnet test /p:VSTestTestCaseFilter=""            run absolutely everything
+      dotnet test /p:VSTestTestCaseFilter="Tier=db"    run DB-backed tests
+      dotnet test /p:VSTestTestCaseFilter="Tier=live"  run seeded/shared product smokes
+      dotnet test /p:VSTestTestCaseFilter="Tier=perf"  run performance tests intentionally
+      dotnet test /p:VSTestTestCaseFilter=""           run absolutely everything
   -->
   <!-- IsTestProject is set by the test SDK, which imports AFTER this file, so it
        is empty here; key off the project name, which is known immediately. -->
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) AND '$(VSTestTestCaseFilter)' == ''">
-    <VSTestTestCaseFilter>Tier!=perf</VSTestTestCaseFilter>
+    <VSTestTestCaseFilter>Tier!=perf&amp;Tier!=live</VSTestTestCaseFilter>
   </PropertyGroup>
   <ItemGroup>
     <!-- Outputs live outside the repo, so tests can no longer find the repo
@@ -82,6 +78,13 @@
     directory, BEFORE handing off to the OS loader — so an app-local copy wins
     over /opt/laplace/lib without touching a shared path.
 
+    The self-hosted runner intentionally preserves build/app output trees between
+    jobs and runs. Therefore timestamp-based PreserveNewest is not a correctness
+    rule: a stale copied .so may have a newer mtime than a freshly relinked native
+    artifact and survive into the next managed test. The payload is tiny relative
+    to a test build; copy it unconditionally so artifact identity is content-driven,
+    never mtime-driven.
+
     Ship the same closure with executable publishes as well. If integration fails
     after the shared engine is installed, restore-api must not start an old managed
     layout against a new native ABI. App-local native libraries keep the previous
@@ -93,8 +96,8 @@
     <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/synthesis/*.so*" />
     <None Include="@(LaplaceNativeArtifact)">
       <Link>%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Visible>false</Visible>
     </None>
   </ItemGroup>
