@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, NamedTuple
 
 REQUIRED_JOBS = (
     "Build — engine, extensions, app, perfcache",
@@ -27,8 +26,7 @@ REQUIRED_JOBS = (
 PUBLISH_JOB = "Publish — API + SPA, restart service"
 
 
-@dataclass(frozen=True)
-class Decision:
+class Decision(NamedTuple):
     deliver: bool
     reason: str
 
