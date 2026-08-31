@@ -18,9 +18,15 @@ fail() {
   exit 1
 }
 
-exists=$("${PSQL[@]}" -d postgres --set=db="$DB" -tAc \
-  "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db')" 2>/dev/null || true)
-[[ "$exists" == "t" ]] || fail "database '$DB' does not exist"
+# `psql -c` sends a server-parsable command string; it does not perform psql
+# variable interpolation inside that command. The former pg_database probe passed
+# `:'db'` through -c, suppressed the resulting syntax error, and therefore reported
+# every healthy database as absent (#1365). Connect to the target database directly:
+# that proves the stronger condition this gate actually needs without SQL quoting.
+if ! probe=$("${PSQL[@]}" -d "$DB" -tAc "SELECT 1" 2>/dev/null); then
+  fail "database '$DB' is not connectable"
+fi
+[[ "$probe" == "1" ]] || fail "database '$DB' failed connection probe"
 
 ext=$("${PSQL[@]}" -d "$DB" -tAc \
   "SELECT extversion FROM pg_extension WHERE extname = 'laplace_substrate'" 2>/dev/null || true)
