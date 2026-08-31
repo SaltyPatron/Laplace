@@ -99,7 +99,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             names = {trigger} if isinstance(trigger, str) else set(trigger)
             self.assertNotIn("workflow_run", names, path.name)
 
-    def test_pull_request_proof_is_source_build_only_and_same_repository(self):
+    def test_pull_request_proof_is_isolated_nonmutating_and_same_repository(self):
         path = WORKFLOWS / "pr-validation.yml"
         workflow = load(path)
         prove = workflow["jobs"]["prove"]
@@ -109,8 +109,17 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertNotIn("${{ secrets.", source)
         command = commands(prove)
         self.assertIn("scripts/pr-proof.sh", command)
+        self.assertIn("git worktree add --detach", command)
+        self.assertIn("git worktree remove --force", command)
+        self.assertIn("LAPLACE_PR_WORKTREE", command)
+        self.assertNotIn("git checkout --force", command)
         for forbidden in ("pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh deploy", "sudo "):
             self.assertNotIn(forbidden, command)
+
+        concurrency = workflow["concurrency"]
+        self.assertEqual("laplace-pr-${{ github.event.pull_request.number }}", concurrency["group"])
+        self.assertEqual("true", concurrency["cancel-in-progress"])
+        self.assertNotEqual(load(MAIN)["concurrency"]["group"], concurrency["group"])
 
         proof = (ROOT / "scripts/pr-proof.sh").read_text(encoding="utf-8")
         self.assertNotIn("publish-applications.sh check", proof)
@@ -125,6 +134,15 @@ class ActionsAuthorityTests(unittest.TestCase):
             "--fresh-db",
         ):
             self.assertNotIn(forbidden, proof)
+
+    def test_clean_pr_ui_typecheck_owns_api_client_generation(self):
+        proof = (ROOT / "scripts/pr-proof.sh").read_text(encoding="utf-8")
+        self.assertIn("npm run typecheck", proof)
+        self.assertNotIn("npm run gen:api", proof)
+
+        package = (ROOT / "web/package.json").read_text(encoding="utf-8")
+        self.assertIn('"pretypecheck": "npm run gen:api"', package)
+        self.assertIn('"gen:api": "openapi-typescript ./openapi/openapi.json -o ./src/api/types.gen.ts"', package)
 
     def test_manual_mutation_workflows_are_not_source_triggered(self):
         paths = [WORKFLOWS / "db-ops.yml", *sorted(WORKFLOWS.glob("seed-*.yml"))]
