@@ -15,17 +15,21 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// </summary>
 public sealed class SqlVolatilityGateTests
 {
-    private static readonly Regex DollarRoutine = new(
-        @"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?<name>[^\s(]+)\s*\(.*?"
-        + @"(?<vol>\bIMMUTABLE\b|\bSTABLE\b|\bLAPLACE_IMMUTABLE_STRICT\b|\bLAPLACE_STABLE_STRICT\b).*?"
-        + @"\bAS\s+(?<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$)(?<body>.*?)\k<tag>",
+    private static readonly Regex RoutineStart = new(
+        @"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?<name>[^\s(]+)\s*\(",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex StableDeclaration = new(
+        @"\b(?:IMMUTABLE|STABLE|LAPLACE_IMMUTABLE_STRICT|LAPLACE_STABLE_STRICT)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex DollarBody = new(
+        @"\bAS\s+(?<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$)(?<body>.*?)\k<tag>",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
-    private static readonly Regex AtomicRoutine = new(
-        @"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?<name>[^\s(]+)\s*\(.*?"
-        + @"(?<vol>\bIMMUTABLE\b|\bSTABLE\b|\bLAPLACE_IMMUTABLE_STRICT\b|\bLAPLACE_STABLE_STRICT\b).*?"
-        + @"\bBEGIN\s+ATOMIC\b(?<body>.*?)\bEND\s*;",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    private static readonly Regex AtomicBodyStart = new(
+        @"\bBEGIN\s+ATOMIC\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // PostgreSQL classifies these as VOLATILE because they change per call or have
     // side effects. Deliberately absent: now()/transaction_timestamp() and
@@ -96,16 +100,44 @@ public sealed class SqlVolatilityGateTests
 
         var bodies = StableRoutineBodies(sql).ToDictionary(x => x.Name, x => x.Body);
         Assert.Equal(2, bodies.Count);
-        Assert.Single(VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.bad"])).Cast<Match>());
-        Assert.Empty(VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.good"])).Cast<Match>());
+        Assert.Equal(1, VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.bad"])).Count);
+        Assert.Equal(0, VolatileBuiltinCall.Matches(ExecutableSql(bodies["demo.good"])).Count);
     }
 
     private static IEnumerable<(string Name, string Body)> StableRoutineBodies(string sql)
     {
-        foreach (Match m in DollarRoutine.Matches(sql))
-            yield return (m.Groups["name"].Value, m.Groups["body"].Value);
-        foreach (Match m in AtomicRoutine.Matches(sql))
-            yield return (m.Groups["name"].Value, m.Groups["body"].Value);
+        MatchCollection starts = RoutineStart.Matches(sql);
+        for (int i = 0; i < starts.Count; i++)
+        {
+            Match start = starts[i];
+            int blockEnd = i + 1 < starts.Count ? starts[i + 1].Index : sql.Length;
+            string block = sql[start.Index..blockEnd];
+
+            Match dollar = DollarBody.Match(block);
+            Match atomic = AtomicBodyStart.Match(block);
+            int bodyStart;
+            string body;
+            if (dollar.Success && (!atomic.Success || dollar.Index < atomic.Index))
+            {
+                bodyStart = dollar.Index;
+                body = dollar.Groups["body"].Value;
+            }
+            else if (atomic.Success)
+            {
+                bodyStart = atomic.Index;
+                body = block[(atomic.Index + atomic.Length)..];
+            }
+            else
+            {
+                // Native/C declarations use AS 'MODULE_PATHNAME' and have no SQL
+                // body to police here.
+                continue;
+            }
+
+            string header = block[..bodyStart];
+            if (!StableDeclaration.IsMatch(header)) continue;
+            yield return (start.Groups["name"].Value, body);
+        }
     }
 
     private static string ExecutableSql(string body)
