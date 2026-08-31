@@ -13,6 +13,9 @@ public enum ChessLabJobKind
     Cutechess,
     LichessBot,
     LichessFetch,
+    PlayerProfile,
+    FideSearch,
+    FideRoster,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

@@ -1,4 +1,5 @@
 using Laplace.Api.Contracts;
+using Laplace.Chess.Service;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
@@ -100,8 +101,11 @@ internal sealed partial class SubstrateClient
         if (!string.IsNullOrWhiteSpace(search))
         {
             var query = search.Trim();
+            var canonical = PlayerAlias.Canonical(query);
             var candidates = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
-                _dataSource, query, 2000, ct, TranslateReadError);
+                _dataSource,
+                [query, canonical, canonical.Replace(" ", "", StringComparison.Ordinal)],
+                2000, ct, TranslateReadError);
             var exact = await ChessFindPlayerAsync(query, ct);
             var scored = candidates
                 .Select(static r => new ChessPlayerRow(
@@ -153,12 +157,19 @@ internal sealed partial class SubstrateClient
             ? players.OrderBy(selector).ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase)
             : players.OrderByDescending(selector).ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase);
 
-    private static int PlayerSearchScore(string query, string candidate)
+    internal static int PlayerSearchScore(string query, string candidate)
     {
-        var q = NormalizePlayerName(query);
-        var name = NormalizePlayerName(candidate);
+        var q = NormalizePlayerSearch(query);
+        var name = NormalizePlayerSearch(candidate);
         if (q.Length == 0 || name.Length == 0) return int.MaxValue;
         if (name == q) return 0;
+
+        // Provider handles commonly concatenate the same real name that FIDE writes as
+        // "Last, First". Identity search must preserve that equivalence instead of finding
+        // the candidate in SQL and then rejecting it in the endpoint ranker.
+        var compactQuery = q.Replace(" ", "", StringComparison.Ordinal);
+        var compactName = name.Replace(" ", "", StringComparison.Ordinal);
+        if (compactName == compactQuery) return 1;
 
         var qTokens = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var nameTokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -177,26 +188,15 @@ internal sealed partial class SubstrateClient
         return 10 + distance;
     }
 
-    private static string NormalizePlayerName(string value)
+    private static string NormalizePlayerSearch(string value)
     {
-        var decomposed = value.Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(decomposed.Length);
-        var pendingSpace = false;
-        foreach (var ch in decomposed)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark) continue;
-            if (char.IsLetterOrDigit(ch))
-            {
-                if (pendingSpace && sb.Length > 0) sb.Append(' ');
-                sb.Append(char.ToLowerInvariant(ch));
-                pendingSpace = false;
-            }
-            else
-            {
-                pendingSpace = sb.Length > 0;
-            }
-        }
-        return sb.ToString();
+        string canonical = PlayerAlias.Canonical(value);
+        var decomposed = canonical.Normalize(NormalizationForm.FormD);
+        var result = new StringBuilder(decomposed.Length);
+        foreach (char ch in decomposed)
+            if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark)
+                result.Append(ch);
+        return result.ToString();
     }
 
     private static int Levenshtein(string left, string right)
@@ -253,6 +253,9 @@ internal sealed partial class SubstrateClient
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var name = await ReadLabelAsync(conn, id, ct) ?? idHex;
+        var profileEdges = await NpgsqlSubstrateReads.ChessPlayerProfileEdgesAsync(
+            conn, id, ct, TranslateReadError);
+        var profiles = MapChessProfiles(profileEdges);
 
         return new ChessPlayerResponse("chess.player", idHex.ToLowerInvariant(), name,
             overall,
@@ -261,7 +264,73 @@ internal sealed partial class SubstrateClient
             // Peak is the highest Elo any source ever tagged him with. Ratings come
             // back rating-descending, so it is the first row — no client-side max.
             ratingRows.Count == 0 ? null : ratingRows[0].Rating,
-            ratingRows, opponentRows);
+            ratingRows, opponentRows, profiles);
+    }
+
+    private static IReadOnlyList<ChessIdentityProfile> MapChessProfiles(
+        IReadOnlyList<NpgsqlSubstrateReads.ChessProfileEdgeRow> edges)
+    {
+        var profiles = new List<ChessIdentityProfile>();
+        foreach (var group in edges.GroupBy(static e => e.SubjectIdHex, StringComparer.OrdinalIgnoreCase))
+        {
+            string? externalId = group.FirstOrDefault(static e =>
+                e.Relation.Equals(ChessSeedManifest.Relations[^4], StringComparison.OrdinalIgnoreCase)).Value;
+            if (string.IsNullOrWhiteSpace(externalId)) continue;
+            int separator = externalId.IndexOf(':');
+            if (separator <= 0 || separator == externalId.Length - 1) continue;
+            string provider = externalId[..separator];
+            string providerId = externalId[(separator + 1)..];
+            var aliases = group.Where(static e =>
+                    e.Relation.Equals(ChessSeedManifest.Relations[^1], StringComparison.OrdinalIgnoreCase))
+                .Select(static e => e.Value).Where(static v => !string.IsNullOrWhiteSpace(v))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var facts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var links = new List<string>();
+            string? title = null, federation = null, biography = null, avatar = null;
+            foreach (var edge in group)
+            {
+                if (edge.Relation.Equals(ChessSeedManifest.Relations[3], StringComparison.OrdinalIgnoreCase))
+                {
+                    int colon = edge.Value.LastIndexOf(':');
+                    if (colon > 0 && int.TryParse(edge.Value[(colon + 1)..], out int rating))
+                        ratings[edge.Value[..colon]] = rating;
+                    continue;
+                }
+                if (!edge.Relation.Equals(ChessSeedManifest.Relations[^3], StringComparison.OrdinalIgnoreCase)) continue;
+                if (TakePrefixed(edge.Value, "title", out var value)) title = value;
+                else if (TakePrefixed(edge.Value, "federation", out value)) federation = value;
+                else if (TakePrefixed(edge.Value, "bio", out value)) biography = value;
+                else if (TakePrefixed(edge.Value, "avatar", out value)) avatar = value;
+                else if (TakePrefixed(edge.Value, "link", out value)) links.Add(value);
+                else if (edge.Value.StartsWith("fact:", StringComparison.OrdinalIgnoreCase))
+                {
+                    int keyEnd = edge.Value.IndexOf(':', 5);
+                    if (keyEnd > 5 && keyEnd < edge.Value.Length - 1)
+                        facts[edge.Value[5..keyEnd]] = edge.Value[(keyEnd + 1)..];
+                }
+            }
+            string display = aliases.FirstOrDefault(a =>
+                !a.Equals(providerId, StringComparison.OrdinalIgnoreCase)) ?? aliases.FirstOrDefault() ?? providerId;
+            profiles.Add(new ChessIdentityProfile(
+                group.Key, provider, providerId, display, aliases, title, federation,
+                biography, avatar, links.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                ratings, facts));
+        }
+        return profiles.OrderBy(static p => p.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenBy(static p => p.Provider, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static bool TakePrefixed(string text, string prefix, out string value)
+    {
+        string marker = prefix + ":";
+        if (text.StartsWith(marker, StringComparison.OrdinalIgnoreCase))
+        {
+            value = text[marker.Length..];
+            return true;
+        }
+        value = "";
+        return false;
     }
 
     private static ChessRecord MapRecord(NpgsqlSubstrateReads.ChessPlayerRecordRow row)

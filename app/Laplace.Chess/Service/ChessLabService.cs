@@ -134,6 +134,12 @@ public sealed class ChessLabService
                     await ChessLabRunners.RunLichessBotAsync(this, slot, ct); return;
                 case ChessLabJobKind.LichessFetch:
                     await ChessLabRunners.RunLichessFetchAsync(this, slot, ct); return;
+                case ChessLabJobKind.PlayerProfile:
+                    await ChessLabRunners.RunPlayerProfileAsync(this, slot, ct); return;
+                case ChessLabJobKind.FideSearch:
+                    await ChessLabRunners.RunFideSearchAsync(this, slot, ct); return;
+                case ChessLabJobKind.FideRoster:
+                    await ChessLabRunners.RunFideRosterAsync(this, slot, ct); return;
                 default:
                     Finish(slot, ChessLabJobState.Failed, "unknown job kind");
                     return;

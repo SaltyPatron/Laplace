@@ -93,6 +93,15 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
     }
 
     [Theory]
+    [InlineData("Magnus", "Carlsen, Magnus")]
+    [InlineData("Carlsen", "Carlsen, Magnus")]
+    [InlineData("MagnusCarlsen", "Carlsen, Magnus")]
+    [InlineData("Magnus Carlsen", "Carlsen, Magnus")]
+    [InlineData("Carlsen, Magnus", "Carlsen, Magnus")]
+    public void PlayerSearchScore_AcceptsNameAndHandleForms(string query, string candidate)
+        => Assert.NotEqual(int.MaxValue, SubstrateClient.PlayerSearchScore(query, candidate));
+
+    [Theory]
     [InlineData("Karpov", "Karpov, Anatoly")]
     [InlineData("Fisher", "Fischer, Bobby")]
     public async Task Players_SearchAcceptsSurnameAndNearbySpelling(string query, string expected)
@@ -145,6 +154,9 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
         Assert.Equal(body.Overall.Wins, body.AsWhite.Wins + body.AsBlack.Wins);
         Assert.Equal(body.Overall.Draws, body.AsWhite.Draws + body.AsBlack.Draws);
         Assert.Equal(body.Overall.Losses, body.AsWhite.Losses + body.AsBlack.Losses);
+        var profile = Assert.Single(body.Profiles);
+        Assert.Equal("fide", profile.Provider);
+        Assert.Equal("5000017", profile.ProviderId);
     }
 
     [Fact]

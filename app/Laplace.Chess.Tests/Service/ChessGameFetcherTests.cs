@@ -29,4 +29,43 @@ public sealed class ChessGameFetcherTests
         Assert.Equal(2803, p.Ratings["rapid"]);
         Assert.Equal(2860, p.Ratings["blitz"]);
     }
+
+    [Fact]
+    public void FideSearch_ParsesOfficialCandidateRows()
+    {
+        const string html = """
+            <table><tr>
+              <td><a href="/profile/1503014">Carlsen, Magnus</a></td>
+              <td data-label="title">GM</td><td><img alt="NOR"></td>
+              <td data-label="Rtg">2839</td><td data-label="Rtg">2818</td><td data-label="Rtg">2890</td>
+              <td data-label="B-Year">1990</td>
+            </tr></table>
+            """;
+
+        var player = Assert.Single(ChessGameFetcher.ParseFideSearch(html));
+        Assert.Equal("1503014", player.FideId);
+        Assert.Equal("Carlsen, Magnus", player.Name);
+        Assert.Equal("GM", player.Title);
+        Assert.Equal("NOR", player.Federation);
+        Assert.Equal(2839, player.Standard);
+        Assert.Equal(1990, player.BirthYear);
+    }
+
+    [Fact]
+    public void FideTop_ParsesOfficialCohortRank()
+    {
+        const string html = """
+            <table><tr><td><span class="rank_span">1</span></td>
+              <td><a href="/profile/700070">Hou, Yifan</a></td>
+              <td class="flag-wrapper"><img src="/images/flags/cn.svg"> CHN</td>
+              <td class="rating_column">2617</td><td class="bday_column">1994</td>
+            </tr></table>
+            """;
+
+        var player = Assert.Single(ChessGameFetcher.ParseFideTop(html, "women"));
+        Assert.Equal(1, player.Rank);
+        Assert.Equal("700070", player.FideId);
+        Assert.Equal("CHN", player.Federation);
+        Assert.Equal(2617, player.Standard);
+    }
 }

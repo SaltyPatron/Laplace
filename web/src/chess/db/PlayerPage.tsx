@@ -68,6 +68,46 @@ export function PlayerPage() {
         </Muted>
       </header>
 
+      {player.profiles.length > 0 ? (
+        <Panel title="Profiles & identities">
+          <div className={styles.profileGrid}>
+            {player.profiles.map((profile) => (
+              <article className={styles.profileCard} key={`${profile.provider}:${profile.provider_id}`}>
+                {profile.avatar_url ? (
+                  <img className={styles.profileAvatar} src={profile.avatar_url} alt="" />
+                ) : null}
+                <div className={styles.profileBody}>
+                  <div className={styles.profileHeading}>
+                    <strong>{profile.display_name}</strong>
+                    <span>{profile.provider}</span>
+                  </div>
+                  <Muted>
+                    {profile.title ? `${profile.title} · ` : ''}
+                    {profile.federation ? `${profile.federation} · ` : ''}
+                    {profile.provider_id}
+                  </Muted>
+                  {profile.biography ? <p>{profile.biography}</p> : null}
+                  {Object.keys(profile.ratings).length > 0 ? (
+                    <p className={styles.profileFacts}>
+                      {Object.entries(profile.ratings).map(([kind, rating]) => `${kind} ${rating}`).join(' · ')}
+                    </p>
+                  ) : null}
+                  {profile.links.length > 0 ? (
+                    <div className={styles.profileLinks}>
+                      {profile.links.map((link, i) => (
+                        <a href={link} key={link} target="_blank" rel="noreferrer">
+                          {i === 0 ? 'Official profile' : `Link ${i + 1}`} ↗
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
       <div className={styles.statGrid}>
         <StatCard label="Games" value={player.overall.games.toLocaleString()} />
         <StatCard label="Record (W–L–D)" value={recordText(player.overall)} />

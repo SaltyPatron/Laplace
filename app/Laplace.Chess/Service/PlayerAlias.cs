@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace Laplace.Chess.Service;
 
-internal static partial class PlayerAlias
+public static partial class PlayerAlias
 {
     [GeneratedRegex(@"[^\p{L}\p{N}\s]+")]
     private static partial Regex PunctRegex();

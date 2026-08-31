@@ -2386,7 +2386,7 @@ public static class NpgsqlSubstrateReads
     /// distance can be expressed without teaching the substrate a second text identity.
     /// </summary>
     public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessPlayerSearchCandidatesAsync(
-        NpgsqlDataSource dataSource, string query, int limit, CancellationToken ct,
+        NpgsqlDataSource dataSource, IReadOnlyList<string> queries, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
@@ -2397,8 +2397,8 @@ public static class NpgsqlSubstrateReads
                 r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
             p =>
             {
-                p.Add("queries", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
-                    PlayerCaseForms(query);
+                p.Add("queries", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = queries
+                    .SelectMany(PlayerCaseForms).Distinct(StringComparer.Ordinal).ToArray();
                 p.AddWithValue("limit", RequestedLimit(limit));
             }, ct: ct, label: "chess_player_search_candidates", onError: onError,
             timeoutSeconds: 30);
@@ -2468,6 +2468,46 @@ public static class NpgsqlSubstrateReads
             static r => new ChessPlayerRatingRow(r.GetInt32(0), r.GetInt64(1)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "chess_player_ratings", onError: onError);
+
+    public readonly record struct ChessProfileEdgeRow(
+        string SubjectIdHex, string Relation, string Value);
+
+    /// <summary>
+    /// Profile facts for a player and its directly asserted identity peers. Relation filtering
+    /// happens before rendering, so thousands of game/outcome cells can never crowd profile
+    /// data out or turn a career read into a broad neighborhood traversal.
+    /// </summary>
+    public static Task<IReadOnlyList<ChessProfileEdgeRow>> ChessPlayerProfileEdgesAsync(
+        NpgsqlConnection conn, byte[] id, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(conn, """
+            WITH identity_ids(id) AS (
+                SELECT @id::bytea
+                UNION
+                SELECT c.object_id
+                FROM consensus.consensus_out(@id) c
+                WHERE c.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+                UNION
+                SELECT c.subject_id
+                FROM consensus.consensus_in(@id) c
+                WHERE c.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+            )
+            SELECT encode(i.id, 'hex'), lexical.type_label(c.type_id), realize.render(c.object_id)
+            FROM identity_ids i
+            CROSS JOIN LATERAL consensus.consensus_out(i.id) c
+            WHERE c.type_id = ANY(ARRAY[
+                laplace.relation_type_id('HAS_EXTERNAL_ID'),
+                laplace.relation_type_id('HAS_NAME_ALIAS'),
+                laplace.relation_type_id('HAS_FEATURE'),
+                laplace.relation_type_id('HAS_RATING')
+            ]::bytea[])
+            ORDER BY i.id, c.type_id, c.object_id
+            """,
+            static r => new ChessProfileEdgeRow(
+                r.GetString(0), r.GetString(1), r.IsDBNull(2) ? "" : r.GetString(2)),
+            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
+            ct: ct, label: "chess_player_profiles", onError: onError,
+            timeoutSeconds: 30);
 
     public readonly record struct ChessHeadToHeadRow(
         string OpponentIdHex, string Opponent, long Games, double Rating, double Rd, double EffMu);
