@@ -2,9 +2,11 @@
 --
 -- NATIVE (2026-07-21, GH #565): the body lives in C (src/fold_route.c).
 -- Consensus is content: dedup it the way ingest dedups laplace.entities. The batch is
--- split by what it IS, per relation type, then one MERGE handles matched and novel
--- cells against the literal-routed relation partition. Existing cells re-fold from
--- stored state; novel cells fold from the neutral prior.
+-- split by what it IS, per relation type. Phase 1 performs correlated keyed probes;
+-- phase 3 sends matched rows through the primary-key conflict arbiter and novel rows
+-- through target-free inserts. The historical MERGE survives only as the bounded
+-- concurrent-insert collision fallback. Existing cells re-fold from stored state;
+-- novel cells fold from the neutral prior.
 --
 -- History of the SQL forms this replaces (all measured, kept so nobody
 -- re-tries them):
@@ -19,14 +21,16 @@
 --    per-type statements re-planned per call.
 --
 -- The native routing groups the batch by type in C and executes one SESSION-CACHED
--- prepared statement per type whose type_id is a LITERAL in the plan text (HTAB
--- of type -> SPI_keepplan'd plan in TopMemoryContext): LIST pruning by type,
--- matched/unmatched decided in one target join, HASH pruning per row, no temp table,
--- no per-batch ANALYZE, and no UPDATE-then-NOT-EXISTS double probe.
--- The function-local settings replan against the actual batch and current
--- relation size and disallow materializing the target for repeated full scans.
--- Otherwise an empty-partition plan can survive foundation ingest and make
--- the drain quadratic. The prior read also uses a correlated, row-locked probe.
+-- prepared statements per type whose type_id is a LITERAL in the plan text (HTAB
+-- of type -> SPI_keepplan'd plans in TopMemoryContext). The prior read is a keyed
+-- LATERAL probe; matched persistence uses ON CONFLICT on the declared PK, and novel
+-- persistence never reads the target. There is no temp table, per-batch ANALYZE, or
+-- UPDATE-then-NOT-EXISTS double probe.
+-- The function-local settings replan against the actual batch, disallow
+-- materializing the target, and require the correlated prior read to use the
+-- declared primary-key indexes. Otherwise freshly analyzed empty HASH leaves
+-- look cheap enough to sequentially scan once per input row, recreating the
+-- rows-times-leaves drain even though the lookup predicate is fully keyed.
 -- These settings restore the caller's values on return, including errors.
 --
 -- One implementation per fact, preserved:
@@ -35,8 +39,8 @@
 --    pass per type run for BOTH arms: matched cells fold from their stored prior
 --    (read and row-locked by a per-type FOR UPDATE probe), novel cells from the
 --    neutral prior; the rating period IS the batch. The scalar remains in the
---    MERGE only as the lazy MATCHED fallback for a cell inserted concurrently
---    between the prior read and the MERGE;
+--    collision MERGE only as the lazy MATCHED fallback for a cell inserted
+--    concurrently between the prior read and phase-3 persistence;
 --  * cell ids are computed in C through the SAME core hash the SQL
 --    laplace.consensus_id() wraps — blake3(subject || type || COALESCE(object, 16 zero
 --    bytes)) — byte-identical layout;
@@ -76,7 +80,8 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert'
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
-    SET enable_material = off;
+    SET enable_material = off
+    SET enable_seqscan = off;
 
 -- Direct routed form for first-party type lanes. The type is part of every cell
 -- identity but is transmitted once per set operation, not once per row.
@@ -93,4 +98,5 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_type'
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
-    SET enable_material = off;
+    SET enable_material = off
+    SET enable_seqscan = off;

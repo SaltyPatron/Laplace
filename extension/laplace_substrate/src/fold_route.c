@@ -24,18 +24,18 @@
  *  disjoint rows), then execute a SESSION-CACHED prepared plan per type whose
  *  type_id is a hex LITERAL in the plan text, kept in an HTAB of
  *  type_id -> SPI_keepplan'd SPIPlanPtr in TopMemoryContext. Plan-time LIST
- *  pruning excludes unrelated types; runtime HASH pruning picks the one leaf
- *  per row. Consensus folds use custom plans for each batch so a plan made
- *  against an empty seed partition cannot outlive its cardinality. The fold
- *  plan is one MERGE, not an UPDATE plus an INSERT/NOT-EXISTS second probe.
- *  No temp table, no per-batch ANALYZE, no volatility trap.
+ *  pruning excludes unrelated types. Consensus phase 1 uses correlated keyed
+ *  probes; phase 3 persists matched rows through the primary-key conflict
+ *  arbiter and novel rows as target-free inserts. The old MERGE remains only
+ *  as a bounded concurrent-insert collision fallback. No temp table, no
+ *  per-batch ANALYZE, no volatility trap.
  *
  * Fold math stays one implementation per fact: both fold arms run the same
  * core (glicko2_init + glicko2_fold_uniform_period) the SQL scalar
  * (laplace_glicko2_accumulate_games) wraps — computed natively in one pass
  * per type run, matched cells from their stored prior, novel cells from the
- * neutral prior. The scalar itself remains in the MERGE only as the lazy
- * fallback for a concurrently-inserted cell (see UPSERT_MERGE_SQL).
+ * neutral prior. The scalar remains only in the collision MERGE fallback for
+ * a concurrently-inserted cell (see UPSERT_MERGE_SQL).
  * consensus_id stays one implementation the same way: the SQL definition IS
  * blake3(subject || type || COALESCE(object, 16 zero bytes)) via the core
  * hash128_blake3; this file calls that exact core function over the exact
@@ -72,8 +72,10 @@ typedef struct TypePlanEntry
     SPIPlanPtr plan;
 } TypePlanEntry;
 
-static HTAB *merge_plans = NULL;          /* attestations matched MERGE     */
-static HTAB *upsert_merge_plans = NULL;   /* consensus matched/unmatched     */
+static HTAB *merge_plans = NULL;          /* attestations matched MERGE       */
+static HTAB *upsert_matched_plans = NULL; /* consensus PK-arbitrated updates  */
+static HTAB *upsert_novel_plans = NULL;   /* consensus target-free inserts    */
+static HTAB *upsert_merge_plans = NULL;   /* collision-only MERGE fallback    */
 static HTAB *upsert_prior_plans = NULL;   /* consensus prior-state FOR UPDATE */
 
 static HTAB *
@@ -204,9 +206,8 @@ bytea16(Datum d, const char *label)
 
 /*
  * n copies of the neutral opponent, for callers that supply no per-witness
- * ratings. Keeps UPSERT_MERGE_SQL's concurrent-insert fallback folding against
- * exactly the same opponent as the precomputed path, so the two arms cannot
- * disagree about a cell (GH #1321).
+ * ratings. The collision-only MERGE fallback consumes this exact opponent, so
+ * a concurrent insert cannot change the fold evidence (GH #1321).
  */
 static ArrayType *
 neutral_opponent_array(int n)
@@ -564,9 +565,10 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
  *     native: every already-existing cell crossed into the record-returning
  *     scalar through the executor once per matched row — the last per-row
  *     fold work in the write path.
- *  3. UPSERT_MERGE_SQL persists precomputed state through both arms of one
- *     matched/unmatched join. Still one MERGE — the historical
- *     UPDATE-then-INSERT/NOT-EXISTS double probe stays dead.
+ *  3. UPSERT_MATCHED_SQL sends rows seen in phase 1 through the primary-key
+ *     conflict arbiter, while UPSERT_NOVEL_SQL inserts unseen rows without a
+ *     target read. UPSERT_MERGE_SQL is reached only after a concurrent insert
+ *     invalidates phase 1's novel classification.
  *
  * b.seen is the router's own matched prediction from phase 1. A MERGE-matched
  * row the router did NOT see can only be a cell inserted by a concurrent
@@ -581,13 +583,57 @@ static const char *PRIOR_SELECT_SQL =
     "SELECT b.ord, c.rating, c.rd, c.volatility "
     "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY AS b(id, s, ord) "
     /* FOR UPDATE inside the correlated subquery prevents join flattening.
-     * The batch must drive keyed probes, even while ANALYZE still describes
-     * an empty partition. An ordinary join can instead rescan/materialize
-     * the whole relation for every input cell (quadratic seed drains). */
+     * The batch must drive keyed probes. The SQL function also disables
+     * sequential scans locally: freshly analyzed empty HASH leaves otherwise
+     * look cheap enough to scan once per input row despite this complete PK
+     * predicate, recreating the rows-times-leaves seed drain. */
     "CROSS JOIN LATERAL ("
     "  SELECT c.rating, c.rd, c.volatility FROM laplace.consensus c "
     "  WHERE c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
     "  FOR UPDATE OF c) c";
+
+/* Phase 3 has no target join on the ordinary path. Phase 1 already classified
+ * and row-locked every existing cell. Persist those rows through the declared
+ * primary-key arbiter; PostgreSQL routes the proposed row by type+subject and
+ * probes the owning HASH leaf's unique index. Novel rows are plain inserts and
+ * therefore perform no target read at all. This removes the empty-leaf MERGE
+ * plan that produced O(rows x leaves) sequential scans in GH #1370.
+ *
+ * A cell inserted by a concurrent writer after phase 1 makes the novel INSERT
+ * raise unique_violation. upsert_persist_keyed_or_fallback rolls back this
+ * phase-3 subtransaction and executes the old MERGE race fallback once; its
+ * b.seen=false arm folds the newly committed prior correctly. Thus the bad
+ * planner shape is no longer the production path without weakening the
+ * concurrent-insert correctness contract. */
+static const char *UPSERT_MATCHED_SQL =
+    "INSERT INTO laplace.consensus AS c "
+    "  (id, subject_id, type_id, object_id, rating, rd, volatility, "
+    "   witness_count, last_observed_at) "
+    "SELECT b.id, b.s, '\\x%s'::bytea, b.o, b.new_rating, b.new_rd, "
+    "       b.new_volatility, b.games, b.ts "
+    "FROM unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
+    "             $5::timestamptz[], $6::bool[], $7::int8[], $8::int8[], "
+    "             $9::int8[]) "
+    "     AS b(id, s, o, games, ts, seen, new_rating, new_rd, new_volatility) "
+    "WHERE b.seen "
+    "ON CONFLICT (id, type_id, subject_id) DO UPDATE SET "
+    "  rating = EXCLUDED.rating, "
+    "  rd = EXCLUDED.rd, "
+    "  volatility = EXCLUDED.volatility, "
+    "  witness_count = c.witness_count + EXCLUDED.witness_count, "
+    "  last_observed_at = GREATEST(c.last_observed_at, EXCLUDED.last_observed_at)";
+
+static const char *UPSERT_NOVEL_SQL =
+    "INSERT INTO laplace.consensus "
+    "  (id, subject_id, type_id, object_id, rating, rd, volatility, "
+    "   witness_count, last_observed_at) "
+    "SELECT b.id, b.s, '\\x%s'::bytea, b.o, b.new_rating, b.new_rd, "
+    "       b.new_volatility, b.games, b.ts "
+    "FROM unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
+    "             $5::timestamptz[], $6::bool[], $7::int8[], $8::int8[], "
+    "             $9::int8[]) "
+    "     AS b(id, s, o, games, ts, seen, new_rating, new_rd, new_volatility) "
+    "WHERE NOT b.seen";
 
 static const char *UPSERT_MERGE_SQL =
     "MERGE INTO laplace.consensus c "
@@ -696,6 +742,91 @@ upsert_merge_with_retry(SPIPlanPtr plan, Datum *vals, const char *label)
     }
 }
 
+/* Persist a phase-1 classification without joining the batch back to the
+ * partitioned target. Existing rows use the PK conflict arbiter; novel rows
+ * insert directly. Both writes share a subtransaction so a concurrent insert
+ * of a phase-1-novel cell can roll back any preceding matched updates before
+ * the established MERGE race fallback reclassifies it under a fresh snapshot. */
+static uint64
+upsert_persist_keyed_or_fallback(SPIPlanPtr matched_plan,
+                                 SPIPlanPtr novel_plan,
+                                 SPIPlanPtr merge_plan,
+                                 Datum *write_vals, Datum *merge_vals,
+                                 uint64 matched_n, uint64 total_n,
+                                 const char *label)
+{
+    MemoryContext   oldcontext = CurrentMemoryContext;
+    ResourceOwner   oldowner = CurrentResourceOwner;
+    volatile uint64 processed = 0;
+    volatile bool   fallback = false;
+
+    BeginInternalSubTransaction(NULL);
+    MemoryContextSwitchTo(oldcontext);
+    PG_TRY();
+    {
+        int rc;
+
+        if (matched_n > 0)
+        {
+            rc = SPI_execute_plan(matched_plan, write_vals, NULL, false, 0);
+            if (rc != SPI_OK_INSERT || SPI_processed != matched_n)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                         errmsg("%s: keyed matched upsert affected %lu of %lu rows (%s)",
+                                label, (unsigned long) SPI_processed,
+                                (unsigned long) matched_n,
+                                SPI_result_code_string(rc))));
+            processed += SPI_processed;
+        }
+        if (matched_n < total_n)
+        {
+            uint64 novel_n = total_n - matched_n;
+
+            rc = SPI_execute_plan(novel_plan, write_vals, NULL, false, 0);
+            if (rc != SPI_OK_INSERT || SPI_processed != novel_n)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                         errmsg("%s: keyed novel insert affected %lu of %lu rows (%s)",
+                                label, (unsigned long) SPI_processed,
+                                (unsigned long) novel_n,
+                                SPI_result_code_string(rc))));
+            processed += SPI_processed;
+        }
+        ReleaseCurrentSubTransaction();
+        MemoryContextSwitchTo(oldcontext);
+        CurrentResourceOwner = oldowner;
+    }
+    PG_CATCH();
+    {
+        ErrorData *edata;
+
+        MemoryContextSwitchTo(oldcontext);
+        edata = CopyErrorData();
+        FlushErrorState();
+        RollbackAndReleaseCurrentSubTransaction();
+        MemoryContextSwitchTo(oldcontext);
+        CurrentResourceOwner = oldowner;
+
+        if (edata->sqlerrcode != ERRCODE_UNIQUE_VIOLATION)
+            ReThrowError(edata);
+        FreeErrorData(edata);
+        fallback = true;
+    }
+    PG_END_TRY();
+
+    if (!fallback)
+        return processed;
+
+    processed = upsert_merge_with_retry(merge_plan, merge_vals, label);
+    if (processed != total_n)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: collision fallback affected %lu of %lu rows",
+                        label, (unsigned long) processed,
+                        (unsigned long) total_n)));
+    return processed;
+}
+
 Datum
 pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
 {
@@ -784,13 +915,20 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         int            run_n = 0;
         int            j = run_start;
         SPIPlanPtr     prior_plan;
+        SPIPlanPtr     matched_plan;
+        SPIPlanPtr     novel_plan;
         SPIPlanPtr     merge_plan;
         ArrayType     *run_ids;
         ArrayType     *run_subjects;
         FoldStateArrays folds;
         Datum          pvals[2];
+        Datum          write_vals[9];
         Datum          vals[12];
+        uint64         matched_n;
         static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
+        static const Oid write_args[9] =
+            {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
+             1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
         static const Oid args[12] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              INT8ARRAYOID, INT8ARRAYOID, 1185,
@@ -822,9 +960,16 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                     (errcode(ERRCODE_INTERNAL_ERROR),
                      errmsg("%s: prior-state SELECT failed: %s",
                             label, SPI_result_code_string(rc))));
+        matched_n = SPI_processed;
         fold_run_states(&phis, &opps, &games, &sums, run_start, run_n,
-                        SPI_tuptable, SPI_processed, label, &folds);
+                        SPI_tuptable, matched_n, label, &folds);
 
+        matched_plan = typed_plan(&upsert_matched_plans,
+                                  "consensus_upsert matched plans", type16,
+                                  UPSERT_MATCHED_SQL, 9, write_args);
+        novel_plan = typed_plan(&upsert_novel_plans,
+                                "consensus_upsert novel plans", type16,
+                                UPSERT_NOVEL_SQL, 9, write_args);
         merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
                                 type16, UPSERT_MERGE_SQL, 12, args);
         vals[0] = PointerGetDatum(run_ids);
@@ -854,7 +999,18 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
             ? array_window(opps.array, opps.elems, NULL, opps.n,
                            run_start, run_n, INT8OID, 8, true, 'd')
             : neutral_opponent_array(run_n));
-        affected += (int64) upsert_merge_with_retry(merge_plan, vals, label);
+        write_vals[0] = vals[0];
+        write_vals[1] = vals[1];
+        write_vals[2] = vals[2];
+        write_vals[3] = vals[4];
+        write_vals[4] = vals[6];
+        write_vals[5] = vals[7];
+        write_vals[6] = vals[8];
+        write_vals[7] = vals[9];
+        write_vals[8] = vals[10];
+        affected += (int64) upsert_persist_keyed_or_fallback(
+            matched_plan, novel_plan, merge_plan, write_vals, vals,
+            matched_n, (uint64) run_n, label);
 
         run_start = j;
     }
@@ -879,10 +1035,17 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     HTAB          *seen;
     HASHCTL        ctl;
     SPIPlanPtr     prior_plan;
+    SPIPlanPtr     matched_plan;
+    SPIPlanPtr     novel_plan;
     SPIPlanPtr     merge_plan;
     Datum          pvals[2];
+    Datum          write_vals[9];
     Datum          vals[12];
+    uint64         matched_n;
     static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
+    static const Oid write_args[9] =
+        {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
+         1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
     static const Oid args[12] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID, INT8ARRAYOID, 1185,
@@ -966,9 +1129,16 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: prior-state SELECT failed: %s",
                         label, SPI_result_code_string(rc))));
+    matched_n = SPI_processed;
     fold_run_states(&phis, &opps, &games, &sums, 0, subjects.n,
-                    SPI_tuptable, SPI_processed, label, &folds);
+                    SPI_tuptable, matched_n, label, &folds);
 
+    matched_plan = typed_plan(&upsert_matched_plans,
+                              "consensus_upsert matched plans", type16,
+                              UPSERT_MATCHED_SQL, 9, write_args);
+    novel_plan = typed_plan(&upsert_novel_plans,
+                            "consensus_upsert novel plans", type16,
+                            UPSERT_NOVEL_SQL, 9, write_args);
     merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
                             type16, UPSERT_MERGE_SQL, 12, args);
     vals[0] = PointerGetDatum(cell_id_array);
@@ -984,8 +1154,19 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     vals[10] = PointerGetDatum(folds.volatility_array);
     vals[11] = PointerGetDatum(
         opps.n > 0 ? opps.array : neutral_opponent_array((int) subjects.n));
+    write_vals[0] = vals[0];
+    write_vals[1] = vals[1];
+    write_vals[2] = vals[2];
+    write_vals[3] = vals[4];
+    write_vals[4] = vals[6];
+    write_vals[5] = vals[7];
+    write_vals[6] = vals[8];
+    write_vals[7] = vals[9];
+    write_vals[8] = vals[10];
     {
-        int64 affected = (int64) upsert_merge_with_retry(merge_plan, vals, label);
+        int64 affected = (int64) upsert_persist_keyed_or_fallback(
+            matched_plan, novel_plan, merge_plan, write_vals, vals,
+            matched_n, (uint64) subjects.n, label);
         SPI_finish();
         PG_RETURN_INT64(affected);
     }
