@@ -4,57 +4,59 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
         p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, games bigint, score double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- Start from this player's own playing/line headers, then decode each line ONCE and
-    -- take the constituent after every matching position ordinal. Exact move occurrence is
-    -- ordered structure; no per-ply MOVE evidence row is required. HAS_RESULT is joined on
-    -- the same playing context so another playing of an identical line cannot leak its score.
+    -- The transition decomposer materializes every witnessed position --MOVE--> position
+    -- with context_id = the playing event. Start at that indexed exact-position evidence,
+    -- then keep only contexts whose colour header names this player. This is a constant number
+    -- of indexed evidence hops; it never opens every full line trajectory in the repertoire.
+    --
+    -- One playing contributes at most once to the same successor even if another source has
+    -- witnessed the identical transition. Colour and result are still joined on both the line
+    -- and playing context, so a shared line cannot leak another playing's side or score.
     WITH rel AS MATERIALIZED (
         SELECT consensus.relation_family_ids('HAS_RESULT') AS result_types
     ),
-    player_lines AS MATERIALIZED (
-        SELECT h.subject_id AS line_id, h.context_id AS playing_id,
+    transition_playings AS MATERIALIZED (
+        SELECT t.context_id AS playing_id, t.object_id AS next_position
+        FROM laplace.attestations t
+        WHERE t.subject_id = p_position
+          -- Keep the immutable family directly in the predicate so PostgreSQL can prune the
+          -- LIST relation partitions before touching the position-keyed MOVE leaf.
+          AND t.type_id = ANY (consensus.relation_family_ids('MOVE'))
+          AND t.object_id IS NOT NULL
+          AND t.context_id IS NOT NULL
+        GROUP BY t.context_id, t.object_id
+    ),
+    player_steps AS MATERIALIZED (
+        SELECT tp.next_position, h.subject_id AS line_id, h.context_id AS playing_id,
                max(h.observation_count)::bigint AS games
-        FROM laplace.attestations h
+        FROM transition_playings tp
+        JOIN laplace.attestations h ON h.context_id = tp.playing_id
         WHERE h.type_id = laplace.relation_type_id(
                   CASE WHEN p_as_white THEN 'HAS_WHITE' ELSE 'HAS_BLACK' END)
           AND h.object_id = p_player
           AND h.context_id IS NOT NULL
-        GROUP BY h.subject_id, h.context_id
+        GROUP BY tp.next_position, h.subject_id, h.context_id
     ),
     results AS MATERIALIZED (
-        SELECT pl.line_id, pl.playing_id, pl.games, max(r.object_id) AS result_id
-        FROM player_lines pl
+        SELECT ps.next_position, ps.line_id, ps.playing_id, ps.games,
+               max(r.object_id) AS result_id
+        FROM player_steps ps
         JOIN laplace.attestations r
-          ON r.subject_id = pl.line_id
-         AND r.context_id = pl.playing_id
+          ON r.subject_id = ps.line_id
+         AND r.context_id = ps.playing_id
         JOIN rel ON r.type_id = ANY (rel.result_types)
-        GROUP BY pl.line_id, pl.playing_id, pl.games
+        GROUP BY ps.next_position, ps.line_id, ps.playing_id, ps.games
     ),
-    player_games AS MATERIALIZED (
-        SELECT r.line_id, r.playing_id, r.games,
+    scored_steps AS MATERIALIZED (
+        SELECT r.next_position, r.games,
                chess.outcome(p_as_white, r.result_id)::double precision / 2.0 AS score
         FROM results r
         WHERE chess.outcome(p_as_white, r.result_id) IS NOT NULL
-    ),
-    steps AS MATERIALIZED (
-        SELECT pg.games, pg.score, t.ids[i.ordinal + 1] AS next_position
-        FROM player_games pg
-        JOIN laplace.physicalities p
-          ON p.entity_id = pg.line_id
-         AND p.type = 1
-         AND p.trajectory IS NOT NULL
-        CROSS JOIN LATERAL (
-            SELECT array_agg(c.entity_id ORDER BY c.ordinal) AS ids
-            FROM public.laplace_trajectory_constituents(p.trajectory) c
-        ) t
-        CROSS JOIN LATERAL generate_subscripts(t.ids, 1) AS i(ordinal)
-        WHERE t.ids[i.ordinal] = p_position
-          AND i.ordinal < cardinality(t.ids)
     )
     SELECT next_position,
            sum(games)::bigint AS games,
            (sum(score * games) / sum(games))::double precision AS score
-    FROM steps
+    FROM scored_steps
     GROUP BY next_position
     ORDER BY games DESC
     LIMIT p_limit
