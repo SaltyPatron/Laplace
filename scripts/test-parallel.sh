@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# Parallel, change-aware test orchestration for Linux (parity with scripts/win/test-all.cmd).
+# Profiled, change-aware test orchestration for Linux.
 #
 # Usage:
-#   scripts/test-parallel.sh                # ctest (excl. regress) || regress, then dotnet
-#   scripts/test-parallel.sh --engine       # ctest -LE regress only
-#   scripts/test-parallel.sh --regress      # ctest -L regress only
-#   scripts/test-parallel.sh --app          # dotnet test only
-#   scripts/test-parallel.sh --integration  # regress || dotnet (CI integration job)
-#   scripts/test-parallel.sh --serial       # force serial (or set LAPLACE_TEST_SERIAL=1)
-#   scripts/test-parallel.sh --all          # ignore fingerprint stamps (LAPLACE_FORCE_ALL=1)
+#   scripts/test-parallel.sh                # native DEV + regress QA, managed DEV + DB QA
+#   scripts/test-parallel.sh --engine       # DEV/BAT: native engine + managed non-DB tests
+#   scripts/test-parallel.sh --regress      # QA: pg_regress only
+#   scripts/test-parallel.sh --app          # managed DEV/BAT, then managed DB QA
+#   scripts/test-parallel.sh --app-dev      # managed DEV/BAT only
+#   scripts/test-parallel.sh --app-db       # managed database QA only
+#   scripts/test-parallel.sh --app-live     # seeded/shared product acceptance only
+#   scripts/test-parallel.sh --integration  # DB health, then pg_regress || managed DB QA
+#   scripts/test-parallel.sh --serial       # force serial ctest/profile execution
+#   scripts/test-parallel.sh --all          # ignore fingerprint stamps
 #
-# Change-aware: each layer is gated on a content fingerprint (scripts/lib/fp.sh)
-# and skipped when its inputs are unchanged since the last PASSING run of that
-# layer. dotnet tests run only the affected ProjectReference closure
-# (scripts/affected-app.py), salted with the native engine + migrations state so
-# an engine or schema change re-proves the app layer even with no C# diff.
+# The executable boundary is intentional:
+#   DEV/BAT  = native non-regress + managed tests that own no database/product state
+#   DB QA    = installed PostgreSQL/extension behavior and disposable DB fixtures
+#   LIVE     = seeded shared substrate/product behavior
+#   PERF     = explicit benchmark lane
 #
-# Env:
-#   CTEST_PARALLEL_LEVEL / CMAKE_BUILD_PARALLEL_LEVEL — from nproc if unset
-#   LAPLACE_TEST_SERIAL=1 — serial ctest + serial layers
-#   LAPLACE_FORCE_ALL=1 — run everything regardless of stamps
+# A profile is selected while EXECUTING tests, not merely checked afterward.
+# This prevents the QA lane from inheriting every unit/contract test registered in
+# the build and prevents a fresh healthy database from being judged by conversational
+# behavior that requires lexical/knowledge seeds.
 
 set -euo pipefail
 
@@ -31,31 +34,29 @@ source "$ROOT/scripts/lib/fp.sh"
 
 MODE=all
 SERIAL="${LAPLACE_TEST_SERIAL:-0}"
-# Tier=db RUNS. It was excluded here and, mirroring this line, in
-# app/Directory.Build.props -- so 66 passing tests executed NOWHERE: not in CI, not in
-# `just test`, not in a bare `dotnet test`. Among them is
-# ConsensusAccumulatingWriterTests.Production_IsBitExactDeterministic, the fold's
-# bit-exactness guarantee, and Production_MixedPhiFailsLoud.
-#
-# The dependency is a PostgreSQL cluster, and this phase already requires one: pg_regress
-# runs beside these tests and cannot start without it. The db-tier fixtures build their own
-# throwaway databases, so they need the cluster, not a seeded substrate.
-#
-# Verified 2026-08-24 against the live cluster: Substrate 64/64, Decomposers 1/1, Chess 1/1
-# (1 skipped). Tier=perf stays excluded for the reason Directory.Build.props gives -- a
-# ">500k rows/sec" gate on a box that is also seeding reports machine load, not a regression.
-DOTNET_FILTER='Tier!=perf'
+
+# These four sets are deliberately disjoint. Untagged managed tests are DEV/BAT.
+# Tier=db tests must own/create their database fixture state and may rely on the
+# installed extension, but not on a particular seeded corpus. Tier=live is the
+# standing shared product substrate. Tier=perf is never inferred from wall-clock
+# behavior on a busy runner.
+DOTNET_DEV_FILTER='Tier!=db&Tier!=live&Tier!=perf'
+DOTNET_DB_FILTER='Tier=db'
+DOTNET_LIVE_FILTER='Tier=live'
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --engine)      MODE=engine; shift ;;
     --regress)     MODE=regress; shift ;;
     --app)         MODE=app; shift ;;
+    --app-dev)     MODE=app-dev; shift ;;
+    --app-db)      MODE=app-db; shift ;;
+    --app-live)    MODE=app-live; shift ;;
     --integration) MODE=integration; shift ;;
     --serial)      SERIAL=1; shift ;;
     --all)         export LAPLACE_FORCE_ALL=1; shift ;;
     -h|--help)
-      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -73,6 +74,9 @@ if [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
   fi
 fi
 
+# DEV/BAT must execute the native artifacts built from this tree. App-local copies
+# are refreshed by Directory.Build.props; LD_LIBRARY_PATH is the second line of
+# defence for invocations that do not load from the app base directory.
 export LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
 
 PYTHON="$(command -v python3 || command -v python)"
@@ -81,15 +85,10 @@ run_ctest_engine() {
   local fp
   fp=$(fp_native)
   if fp_check test-engine "$fp"; then
-    echo "==== ctest (excl. regress) skipped — engine unchanged since last pass (fp ${fp:0:12}) ===="
+    echo "==== native DEV/BAT skipped — engine unchanged since last pass (fp ${fp:0:12}) ===="
     return 0
   fi
-  echo "==== ctest (excl. regress) -j ${CTEST_PARALLEL_LEVEL} ===="
-  # rc must be captured and returned: a bare ctest followed by fp_record makes
-  # fp_record the last command, so the function returns ITS status and a failing
-  # suite reports success. Recording only on success matters just as much -- a
-  # stamp written after a failure makes the next run fp_check-skip the suite
-  # entirely, caching the failure as a pass.
+  echo "==== native DEV/BAT: ctest -LE regress -j ${CTEST_PARALLEL_LEVEL} ===="
   local rc=0
   ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -LE regress || rc=$?
   if [[ "$rc" -eq 0 ]]; then fp_record test-engine "$fp"; fi
@@ -97,74 +96,85 @@ run_ctest_engine() {
 }
 
 run_ctest_regress() {
-  # Regress exercises the INSTALLED extension against live PG, so the pass is
-  # only reusable while both the sources and the installed image are the ones
-  # it ran against — fold the install stamp into the key.
+  # pg_regress exercises the installed extension in its own disposable database.
   local fp
   fp="$(fp_native):$(cat "$FP_STAMP_DIR/install-native" 2>/dev/null || echo uninstalled)"
   if fp_check test-regress "$fp"; then
-    echo "==== ctest (regress) skipped — engine/extension + install unchanged since last pass ===="
+    echo "==== PostgreSQL QA skipped — engine/extension + install unchanged since last pass ===="
     return 0
   fi
-  echo "==== ctest (regress) -j ${CTEST_PARALLEL_LEVEL} ===="
-  # Same capture-and-return as run_ctest_engine. Observed live: chess_read failed,
-  # ctest printed "1 of 16 tests failed" and "Errors while running CTest", and the
-  # layer still reported ctest-regress_rc=0.
+  echo "==== PostgreSQL QA: ctest -L regress -j ${CTEST_PARALLEL_LEVEL} ===="
   local rc=0
   ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -L regress || rc=$?
   if [[ "$rc" -eq 0 ]]; then fp_record test-regress "$fp"; fi
   return "$rc"
 }
 
-run_dotnet() {
+set_perfcache_from_build() {
   local bin=""
-  bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$ROOT/build" \
-    -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1 || true)
+  bin=$(find "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1 || true)
   if [[ -n "$bin" ]]; then
     export LAPLACE_PERFCACHE_BIN="$bin"
-    echo "LAPLACE_PERFCACHE_BIN=$bin"
+    echo "LAPLACE_PERFCACHE_BIN=$bin (built tree)"
   fi
+}
 
-  # dotnet tests read the INSTALLED perfcache blob/extension and the migrated
-  # DB, so a reinstall must re-prove the app layer even with no source diff —
-  # fold the install stamp into the salt exactly as run_ctest_regress keys.
-  local salt plan_out plan_rc=0
-  salt="$(fp_runtime):$(cat "$FP_STAMP_DIR/install-native" 2>/dev/null || echo uninstalled)"
+set_perfcache_from_runtime() {
+  local bin=""
+  # Runtime QA should consume the installed deployment first. Fall back to the
+  # build tree only for a local invocation that has not installed yet.
+  bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" \
+    -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1 || true)
+  if [[ -z "$bin" ]]; then
+    bin=$(find "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1 || true)
+  fi
+  if [[ -n "$bin" ]]; then
+    export LAPLACE_PERFCACHE_BIN="$bin"
+    echo "LAPLACE_PERFCACHE_BIN=$bin (runtime QA)"
+  fi
+}
+
+run_dotnet_dev() {
+  set_perfcache_from_build
+
+  # The project graph supplies app-source fingerprints. Add the native source state,
+  # the executable profile, and this runner's content so a filter/orchestration change
+  # cannot reuse a pass recorded for a different test set.
+  local runner_fp salt plan_out plan_rc=0
+  runner_fp=$(sha256sum "$ROOT/scripts/test-parallel.sh" | cut -d' ' -f1)
+  salt="$(fp_native):profile=dev:filter=$DOTNET_DEV_FILTER:runner=$runner_fp"
   plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns test --salt "$salt") || plan_rc=$?
   if [[ "$plan_rc" -ne 0 ]]; then
-    echo "::warning::affected-app plan failed (rc=$plan_rc) — full solution test"
+    echo "::warning::affected-app DEV/BAT plan failed (rc=$plan_rc) — full solution test"
     ( cd "$ROOT/app" && dotnet test Laplace.slnx -c Release --nologo --verbosity minimal \
-        --filter "$DOTNET_FILTER" )
-    return 0
+        --filter "$DOTNET_DEV_FILTER" )
+    return $?
   fi
   if [[ -z "$plan_out" ]]; then
-    echo "==== dotnet test skipped — no affected test project since last pass ===="
+    echo "==== managed DEV/BAT skipped — no affected test project since last pass ===="
     return 0
   fi
 
   local -a projs=()
   mapfile -t projs <<<"$plan_out"
   if (( ${#projs[@]} > 6 )); then
-    echo "==== dotnet test (${#projs[@]} affected — full solution, $DOTNET_FILTER) ===="
-    # `return 0` here discarded the result outright -- the full-solution path could
-    # not fail. The per-project path below already does this correctly (tracks rc,
-    # records only what passed); this now matches it.
+    echo "==== managed DEV/BAT (${#projs[@]} affected — full solution) ===="
     local rc=0
     ( cd "$ROOT/app" && dotnet test Laplace.slnx -c Release --nologo --verbosity minimal \
-        --filter "$DOTNET_FILTER" ) || rc=$?
+        --filter "$DOTNET_DEV_FILTER" ) || rc=$?
     if [[ "$rc" -eq 0 ]]; then
       "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns test --salt "$salt"
     fi
     return "$rc"
   fi
 
-  echo "==== dotnet test (${#projs[@]} affected project(s), $DOTNET_FILTER) ===="
+  echo "==== managed DEV/BAT (${#projs[@]} affected project(s)) ===="
   local p name rc=0
   local -a passed=()
   for p in "${projs[@]}"; do
-    echo "---- dotnet test $p ----"
+    echo "---- dotnet DEV/BAT $p ----"
     if ( cd "$ROOT/app" && dotnet test "$p" -c Release --nologo --verbosity minimal \
-           --filter "$DOTNET_FILTER" ); then
+           --filter "$DOTNET_DEV_FILTER" ); then
       name="${p##*/}"
       passed+=("${name%.csproj}")
     else
@@ -176,6 +186,28 @@ run_dotnet() {
       --projects "${passed[@]}"
   fi
   return "$rc"
+}
+
+run_dotnet_db() {
+  # Always execute the DB profile after db-ops. Database identity/state is runtime
+  # input that is intentionally outside the source fingerprint; a freshly recreated
+  # database must not inherit a test stamp from the database that was dropped.
+  set_perfcache_from_runtime
+  echo "==== managed database QA: full solution, $DOTNET_DB_FILTER ===="
+  ( cd "$ROOT/app" && dotnet test Laplace.slnx -c Release --nologo --verbosity minimal \
+      --filter "$DOTNET_DB_FILTER" )
+}
+
+run_dotnet_live() {
+  set_perfcache_from_runtime
+  echo "==== seeded/shared product acceptance: full solution, $DOTNET_LIVE_FILTER ===="
+  ( cd "$ROOT/app" && dotnet test Laplace.slnx -c Release --nologo --verbosity minimal \
+      --filter "$DOTNET_LIVE_FILTER" )
+}
+
+run_database_health() {
+  echo "==== seed-independent database health ===="
+  bash "$ROOT/scripts/check-database-health.sh" "${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}"
 }
 
 parallel_pair() {
@@ -202,30 +234,63 @@ parallel_pair() {
 }
 
 case "$MODE" in
-  engine)  run_ctest_engine; exit $? ;;
-  regress) run_ctest_regress; exit $? ;;
-  app)     run_dotnet; exit $? ;;
+  engine)
+    run_ctest_engine
+    run_dotnet_dev
+    echo "==== DEV/BAT OK ===="
+    exit 0
+    ;;
+  regress)
+    run_ctest_regress
+    exit $?
+    ;;
+  app)
+    run_dotnet_dev
+    run_database_health
+    run_dotnet_db
+    exit 0
+    ;;
+  app-dev)
+    run_dotnet_dev
+    exit $?
+    ;;
+  app-db)
+    run_database_health
+    run_dotnet_db
+    exit $?
+    ;;
+  app-live)
+    run_dotnet_live
+    exit $?
+    ;;
   integration)
+    run_database_health
     if [[ "$SERIAL" == "1" ]]; then
       run_ctest_regress
-      run_dotnet
+      run_dotnet_db
     else
-      echo "==== parallel: ctest-regress || dotnet ===="
-      parallel_pair ctest-regress run_ctest_regress dotnet run_dotnet
+      echo "==== QA parallel: PostgreSQL regress || managed DB fixtures ===="
+      parallel_pair postgres-regress run_ctest_regress managed-db run_dotnet_db
     fi
-    echo "==== test-parallel (integration) OK ===="
-    exit 0 ;;
+    echo "==== database QA OK ===="
+    exit 0
+    ;;
 esac
 
-# Full gate: engine ∥ regress, then app (unless --serial).
+# Full local gate: native DEV and PostgreSQL regress may run together; managed DEV
+# follows so it sees an uncontended built tree, then DB QA proves the runtime.
 if [[ "$SERIAL" == "1" ]]; then
   run_ctest_engine
+  run_dotnet_dev
+  run_database_health
   run_ctest_regress
-  run_dotnet
+  run_dotnet_db
   exit 0
 fi
 
-echo "==== parallel: ctest-engine || ctest-regress ===="
-parallel_pair ctest-engine run_ctest_engine ctest-regress run_ctest_regress
-run_dotnet
+echo "==== parallel: native DEV || PostgreSQL regress ===="
+parallel_pair native-dev run_ctest_engine postgres-regress run_ctest_regress
+run_dotnet_dev
+run_database_health
+run_dotnet_db
 echo "==== test-parallel OK ===="

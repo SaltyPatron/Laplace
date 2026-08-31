@@ -18,10 +18,10 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 ///   (4) scoped_consensus isolates tenant A's world from tenant B's,
 ///   (5) recall_session accepts the canonically minted session id.
 /// Tenants/content are unique per run (fresh guid) so cells carry no prior
-/// history — same discipline as ConverseLoopLiveTests. Tier=db: excluded from
-/// the deploy gate; run locally against a seeded substrate.
+/// history — same discipline as ConverseLoopLiveTests. Tier=live: this is a
+/// seeded/shared product acceptance probe, not a database-health fixture.
 /// </summary>
-[Trait("Tier", "db")]
+[Trait("Tier", "live")]
 public sealed class ConversationProvenanceLiveTests
 {
     [SkippableFact]
@@ -62,7 +62,6 @@ public sealed class ConversationProvenanceLiveTests
             }
         }
 
-        // (1) evidence rows exist under the per-tenant source with session context.
         Assert.True(await CountAsync(ds,
             """
             SELECT count(*) FROM laplace.attestations
@@ -71,7 +70,6 @@ public sealed class ConversationProvenanceLiveTests
             ("src", $"UserPrompt@{tenantA}"), ("ctx", sessionA.ToBytes())) >= 1,
             "tenant A's prompt testimony missing its source+session provenance");
 
-        // (2) provenance unmashed: one PRECEDES evidence row per tenant.
         var precedesRows = await CountAsync(ds,
             """
             SELECT count(*) FROM laplace.attestations
@@ -82,7 +80,6 @@ public sealed class ConversationProvenanceLiveTests
         Assert.True(precedesRows >= 2,
             $"expected distinct evidence rows for two tenants, saw {precedesRows}");
 
-        // (3) both tenants corroborate ONE consensus cell.
         var witnesses = await CountAsync(ds,
             """
             SELECT COALESCE(max(witness_count), 0) FROM laplace.consensus
@@ -93,7 +90,6 @@ public sealed class ConversationProvenanceLiveTests
         Assert.True(witnesses >= 2,
             $"PRECEDES cell should hold both tenants' testimony, witness_count={witnesses}");
 
-        // (4) isolation: A's scoped world holds A's membership cell, not B's.
         await using (var conn = await ds.OpenConnectionAsync())
         {
             await using (var scopeCmd = new NpgsqlCommand(
@@ -117,14 +113,13 @@ public sealed class ConversationProvenanceLiveTests
                 ("s", promptRoot.ToBytes()), ("o", sessionB.ToBytes())));
         }
 
-        // (5) recall_session accepts the canonically minted session id.
         await using (var conn = await ds.OpenConnectionAsync())
         await using (var cmd = new NpgsqlCommand(
             "SELECT count(*) FROM converse.recall_session(@p, @session)", conn))
         {
             cmd.Parameters.AddWithValue("p", prompt);
             cmd.Parameters.AddWithValue("session", sessionA.ToBytes());
-            await cmd.ExecuteScalarAsync(); // must execute without error; rows may be 0
+            await cmd.ExecuteScalarAsync();
         }
     }
 
