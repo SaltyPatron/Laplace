@@ -59,4 +59,28 @@ public sealed class ChessMoveOutcomeTests
         Assert.Contains(change.Entities, e =>
             e.Id == ChessMoveOutcomes.MarkerId(parsed.LineId, ChessMoveOutcomes.Version));
     }
+
+    [Fact]
+    public void RecordGame_FoldsEachDeterministicPositionTransition_WithPlayingProvenance()
+    {
+        var (parsed, _) = Record();
+        var builder = new SubstrateChangeBuilder(ChessTransitions.SourceId, "test/transitions");
+        ChessTransitions.DepositFromParsed(builder, parsed);
+        var change = builder.Build();
+        var transitions = change.Attestations
+            .Where(a => a.TypeId == ChessVocabulary.MoveType)
+            .ToList();
+        Assert.Equal(parsed.PositionIds.Length - 1, transitions.Count);
+
+        long win = ChessGraph.ScoreFp1e9(PlyOutcome.Win);
+        long loss = ChessGraph.ScoreFp1e9(PlyOutcome.Loss);
+        for (int ply = 0; ply + 1 < parsed.PositionIds.Length; ply++)
+        {
+            var edge = Assert.Single(transitions, a =>
+                a.SubjectId == parsed.PositionIds[ply]
+                && a.ObjectId == parsed.PositionIds[ply + 1]);
+            Assert.Equal(parsed.PlayingId, edge.ContextId);
+            Assert.Equal(ply % 2 == 0 ? win : loss, edge.SumScoreFp1e9);
+        }
+    }
 }

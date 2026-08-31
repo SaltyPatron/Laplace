@@ -35,18 +35,19 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'substrate-test',
     title: 'Substrate lift test',
-    tagline: 'Does consensus make search smarter?',
+    tagline: 'Does witnessed substrate experience beat classical search?',
     description:
-      'Plays guided (substrate-biased root moves) against a pure classical engine at the same depth. '
-      + 'Positive Elo means the substrate measurably raises the floor — the honest transfer test for recorded evidence.',
+      'Laplace chooses directly from witnessed position→position consensus while the control uses classical search. '
+      + 'Completed games update only the position trunks they observed, so later games in the same run consume the new evidence.',
     expect: [
       'Live W-D-L score and Elo difference in the feed',
       'Final results table with Elo ± margin',
       'games_recorded metric — every game is witnessed to substrate during the run',
+      'transition reads, witnessed decisions, unseen fallbacks, and substrate epoch',
       'games.pgn artifact for archival',
     ],
     tips: [
-      'Start with mode fold (substructure consensus); edge is raw move popularity.',
+      'Transition mode is the Laplace path; Off is the conventional sanity control.',
       'Use opening book when the corpus has ECO coverage — random starts need more games.',
       'Concurrency 0 uses all performance cores; scale games before depth for stable Elo.',
     ],
@@ -129,17 +130,18 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   },
   {
     kind: 'lichess-fetch',
-    title: 'Fetch player PGN',
-    tagline: 'Download games from Lichess or Chess.com.',
+    title: 'Ingest player games',
+    tagline: 'Import a player’s complete Lichess or Chess.com archive and identity.',
     description:
-      'Pulls recent games for a username into a server-side PGN file. Good precursor to review or manual ingest.',
+      'Streams the requested archive, records and analyzes novel games, attributes them to the provider username, and imports provider/FIDE profile links.',
     expect: [
       'games_fetched count',
+      'games_ingested and profiles_ingested counts',
       'games.pgn artifact with download link',
     ],
     tips: [
-      'Set max to cap download size; leave empty for provider default.',
-      'Chess.com usernames are case-sensitive.',
+      'Leave “Ingest all games” on for the complete available archive; turn it off to apply a cap.',
+      'Add a FIDE ID to connect the online account to an official real-world identity.',
     ],
     category: 'lichess',
     recordsLive: false,

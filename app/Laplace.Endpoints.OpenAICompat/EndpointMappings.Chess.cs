@@ -125,13 +125,13 @@ internal static class ChessEndpoints
             {
                 jobs = new object[]
                 {
-                    new { kind = "substrate-test", label = "Substrate test (guided vs pure)", @default = new { games = "20", depth = "4", mode = "fold", concurrency = "0" } },
+                    new { kind = "substrate-test", label = "Substrate test (guided vs pure)", @default = new { games = "20", depth = "4", mode = "transition", concurrency = "0" } },
                     new { kind = "ladder", label = "Eval overlay ladder", @default = new { games = "20", depth = "4", maxPlies = "160", concurrency = "0" } },
                     new { kind = "tactics", label = "Tactics solve rate", @default = new { depth = "6" } },
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
                     new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true" } },
-                    new { kind = "lichess-fetch", label = "Fetch player PGN", @default = new { site = "lichess" } },
+                    new { kind = "lichess-fetch", label = "Ingest player games", @default = new { site = "lichess", all = "true", max = "1000", ingest = "true" } },
                 },
                 engines,
             });

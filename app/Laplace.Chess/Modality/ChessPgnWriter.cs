@@ -46,4 +46,13 @@ public static class ChessPgnWriter
         foreach (var (moves, outcome, startFen) in games)
             w.Write(GameToPgn(moves, outcome, startFen, white, black, @event));
     }
+
+    public static void WriteFile(string path, IEnumerable<MatchPgnGame> games, string @event)
+    {
+        using var w = new StreamWriter(path, append: false);
+        foreach (var game in games)
+            w.Write(GameToPgn(
+                game.Moves, game.Outcome, game.StartFen,
+                game.White, game.Black, @event));
+    }
 }

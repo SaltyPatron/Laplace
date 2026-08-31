@@ -377,8 +377,9 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 			oe = (SeenNode *) hash_search(seen, &nbr, HASH_FIND, &ofound);
 			if (ofound)
 			{
-				/* Weave: both endpoints already retained. */
-				emit_edge(rsinfo, &edge);
+				/* A crawl edge must discover a node. Re-emitting links to the seed or
+				 * any earlier frontier made later hops fold back over the graph that
+				 * was already displayed, producing cycles instead of expansion. */
 				continue;
 			}
 

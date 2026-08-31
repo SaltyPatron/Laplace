@@ -41,8 +41,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // TWO sources, because the fused pass (GH #600) writes under two. ChessPgn carries the
-        // witnessed record; ChessAnalysis carries the calculated derivation DeriveFromParsed
+        // Three sources, because the fused pass writes witnessed, calculated, and bounded
+        // transition layers. ChessPgn carries the record; ChessAnalysis carries DeriveFromParsed
         // deposits in the same Compose call. Only ChessPgn was ever bootstrapped, so the
         // analyzer's source id had no HAS_NAME edge and resolved to nothing: on a live box it
         // showed up as a bare hex id holding 705,141 rows -- the fourth largest source in the
@@ -54,7 +54,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var analysis = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis",
             ChessVocabulary.AnalysisTrustClass, ct, context.Reader);
-        _canonicalNames = pgn.Concat(analysis).Distinct().ToArray();
+        var transitions = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessTransitions.SourceId, "ChessTransitions",
+            ChessTransitions.TrustClassId, ct, context.Reader);
+        _canonicalNames = pgn.Concat(analysis).Concat(transitions).Distinct().ToArray();
 
         // Ledger lifecycle moved here from ExtractRecordsAsync: with the file-worker pool there
         // is no longer ONE record stream to bracket. Reset once per run at init, report once at
@@ -297,7 +300,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     internal static void ComposeGame(ChessGameRecord record, SubstrateChangeBuilder b, bool analyzeInline)
     {
         RecordGame(record, b);
-        if (analyzeInline) ChessAnalyze.DeriveFromParsed(b, record);
+        if (analyzeInline)
+        {
+            ChessAnalyze.DeriveFromParsed(b, record);
+            ChessTransitions.DepositFromParsed(b, record);
+        }
     }
 
     private static async IAsyncEnumerable<ChessGameRecord> StreamNovelGamesAsync(

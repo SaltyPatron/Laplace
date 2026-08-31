@@ -146,11 +146,11 @@ public sealed class ChessEngineService : IAsyncDisposable
     /// Opening explorer over exact successors projected from line trajectories. Player
     /// repertoire is read through playing→line provenance rather than per-ply MOVE evidence.
     ///
-    /// MEASURED 2026-08-21: the MOVE relation holds 0 attestations and 0 consensus rows
-    /// corpus-wide -- the typed-trajectory refactor removed the per-ply MOVE evidence that
-    /// fed those cells (#840 records them as they were: e4 at 305,376 witnesses with real
-    /// eff_mu/rd; #838 is the reseed that restores them). Until then chess.moves() returns
-    /// nothing and this path is carried by the trajectory successors alone. Do NOT make
+    /// MEASURED 2026-08-21: the deployed pre-repair corpus held 0 MOVE attestations because
+    /// the typed-trajectory refactor stopped materializing its bounded transition cells.
+    /// Current record paths restore position→position MOVE observations as games arrive;
+    /// an older corpus still needs replay before those rows exist. Until then chess.moves()
+    /// returns nothing and this path is carried by trajectory successors alone. Do NOT make
     /// chess.moves synthesise rows to look populated: tried in #1274, reverted in #1276 --
     /// a synthetic row flips hasRating true with eff_mu 0 and every move reported -1500.
     ///
@@ -273,12 +273,15 @@ public sealed class ChessEngineService : IAsyncDisposable
 
 
     private SubstructureFoldBias? _foldBias;
+    private SubstrateTransitionChooser? _transitionChooser;
     private bool _learnedTried;
     private int[][]? _lpMg, _lpEg;
     private Task? _learnedRefresh;
     private readonly object _learnedGate = new();
 
     private SubstructureFoldBias FoldBias() => _foldBias ??= new SubstructureFoldBias(_ds!);
+    private SubstrateTransitionChooser TransitionChooser() =>
+        _transitionChooser ??= new SubstrateTransitionChooser(_ds!);
 
     /// <summary>
     /// The learned fold NEVER runs on a request thread. MEASURED live 2026-08-21:
@@ -374,6 +377,20 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
+        if (substrate)
+        {
+            var chosen = ChooseFromSubstrate(state, depth, ct);
+            var nextState = _modality.Apply(state, chosen.Move);
+            var nextStatus = _modality.Terminal(nextState) is { } nextTerm ? Describe(nextTerm) : "ongoing";
+            var nextMotifs = ChessMotifs.DetectAtPly(state.Board, chosen.Move, nextState.Board).ToList();
+            int guidedWhiteCp = state.Board.WhiteToMove ? chosen.ScoreCp : -chosen.ScoreCp;
+            return new ChessBestMove(
+                chosen.Move.ToUci(), nextState.Board.ToFen(), chosen.EffMu,
+                chosen.Witnessed, nextStatus != "ongoing", nextStatus,
+                ScoreCp: guidedWhiteCp, Depth: chosen.Depth, Nodes: chosen.Nodes,
+                Pv: chosen.Pv, Motifs: nextMotifs);
+        }
+
         var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         if (result.BestMove is not { } mv)
@@ -392,6 +409,43 @@ public sealed class ChessEngineService : IAsyncDisposable
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
             Pv: pv, Motifs: motifs);
+    }
+
+    private readonly record struct RuntimeMove(
+        ChessMove Move, bool Witnessed, double EffMu, int ScoreCp, int Depth,
+        long Nodes, IReadOnlyList<string> Pv);
+
+    private RuntimeMove ChooseFromSubstrate(ChessState state, int requestedDepth, CancellationToken ct)
+    {
+        Search.Result? fallbackResult = null;
+        IReadOnlyList<string>? fallbackPv = null;
+        ChessMove Fallback(ChessState fallbackState, Random rng)
+        {
+            var search = new Search(EvalTerm.All, ttBits: 16);
+            var result = search.Think(
+                fallbackState.Board,
+                new Search.Limits(MaxDepth: Math.Min(Math.Clamp(requestedDepth, 1, 12), 2)), ct);
+            fallbackResult = result;
+            fallbackPv = search.ExtractPv(fallbackState.Board);
+            return result.BestMove ?? MatchRunner.RandomChooser(fallbackState, rng);
+        }
+
+        var decision = TransitionChooser().ChooseDecision(state, Rng(), Fallback, ct);
+        if (decision.Witnessed)
+        {
+            int cp = (int)Math.Clamp(
+                Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
+                -30_000, 30_000);
+            return new RuntimeMove(
+                decision.Move, true, decision.EffMu, cp, 0, 0, [decision.Move.ToUci()]);
+        }
+        var fallback = fallbackResult;
+        return new RuntimeMove(
+            decision.Move, false, 0,
+            fallback?.Score ?? 0,
+            fallback?.Depth ?? 0,
+            fallback?.Nodes ?? 0,
+            fallbackPv ?? [decision.Move.ToUci()]);
     }
 
     /// <summary>
@@ -559,6 +613,38 @@ public sealed class ChessEngineService : IAsyncDisposable
         var state = session.State ?? _modality!.FromFen(fen);
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
+
+        if (substrate)
+        {
+            var chosen = ChooseFromSubstrate(state, depth, ct);
+            string guidedFromKey = _modality.StateKey(state);
+            var nextState = _modality.Apply(state, chosen.Move);
+            string guidedToKey = _modality.StateKey(nextState);
+            var nextStatus = _modality.Terminal(nextState) is { } nextTerm ? Describe(nextTerm) : "ongoing";
+            var nextMotifs = ChessMotifs.DetectAtPly(state.Board, chosen.Move, nextState.Board).ToList();
+            int guidedWhiteCp = state.Board.WhiteToMove ? chosen.ScoreCp : -chosen.ScoreCp;
+
+            session.State = nextState;
+            session.Moves.Add(chosen.Move.ToUci());
+            session.PlyCount = session.Moves.Count;
+            if (session.RecordToSubstrate)
+            {
+                await _liveHost.RecordPlayPlyAsync(
+                    sessionId, session.PlyCount, guidedFromKey, guidedToKey, chosen.Move.ToUci(),
+                    ChessVocabulary.LaplacePlayerId, ct);
+                await _liveHost.RecordPlayPlyAnalysisAsync(
+                    sessionId, session.PlyCount,
+                    new ChessLivePlyAnalysis(chosen.ScoreCp, chosen.Depth, chosen.Nodes, chosen.Pv, nextMotifs), ct);
+            }
+            if (nextStatus != "ongoing")
+                await _liveHost.FinishPlaySessionAsync(
+                    sessionId, ParseTerminalStatus(nextStatus), adjudicated: false, ct);
+            return new ChessBestMove(
+                chosen.Move.ToUci(), nextState.Board.ToFen(), chosen.EffMu,
+                chosen.Witnessed, nextStatus != "ongoing", nextStatus,
+                ScoreCp: guidedWhiteCp, Depth: chosen.Depth, Nodes: chosen.Nodes,
+                Pv: chosen.Pv, Motifs: nextMotifs);
+        }
 
         var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));

@@ -131,6 +131,30 @@ public static class ChessGraph
     }
 
     /// <summary>
+    /// Materialize the deterministic state transition witnessed by a playing. The bounded
+    /// consensus cell is position --MOVE--> position; the move object remains the reusable
+    /// piece/from/to/special composition and (from, move) resolves to the same destination in
+    /// <see cref="ChessTransitionFloor"/>. Context is the playing, so replaying the same source
+    /// occurrence deduplicates while independent games add witnesses to one transition cell.
+    /// </summary>
+    internal static void AppendTransitions(
+        SubstrateChangeBuilder b, IReadOnlyList<Hash128> positions, GameOutcome result,
+        double witnessWeight, Hash128 sourceId, Hash128 playingId)
+    {
+        if (positions.Count < 2) return;
+        for (int ply = 0; ply + 1 < positions.Count; ply++)
+            b.AddAttestation(NativeAttestation.Aggregated(
+                subject: positions[ply],
+                typeId: ChessVocabulary.MoveType,
+                obj: positions[ply + 1],
+                sourceId: sourceId,
+                contextId: playingId,
+                games: 1,
+                sumScoreFp1e9: ScoreFp1e9(result.ForMover(ply & 1)),
+                witnessWeight: witnessWeight));
+    }
+
+    /// <summary>
     /// Emit the position (and its substructures) as content nodes and return the position id.
     /// For lanes that attest onto a position — e.g. the chess-book decomposer grounding prose
     /// commentary to the exact position it explains.

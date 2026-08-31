@@ -111,7 +111,13 @@ export function exploreContainers(idHex: string, maxHops = 3, limit = 50, opts: 
   }>(`/v1/explore/entities/${idHex}/containers?max_hops=${maxHops}&limit=${limit}`, opts);
 }
 
-export function exploreConsensusGraph(idHex: string, hops = 2, fanout = 10, opts: ApiOptions = {}) {
+export function exploreConsensusGraph(
+  idHex: string,
+  hops = 4,
+  fanout = 24,
+  maxNodes = 256,
+  opts: ApiOptions = {},
+) {
   return apiGet<{
     graph: {
       id_hex: string;
@@ -131,7 +137,7 @@ export function exploreConsensusGraph(idHex: string, hops = 2, fanout = 10, opts
       max_nodes?: number;
     };
     billing?: BillingReceipt | null;
-  }>(`/v1/explore/entities/${idHex}/graph?hops=${hops}&fanout=${fanout}`, opts);
+  }>(`/v1/explore/entities/${idHex}/graph?hops=${hops}&fanout=${fanout}&max_nodes=${maxNodes}`, opts);
 }
 
 export async function preflight(serviceId: string, tenant: string, units = 1) {

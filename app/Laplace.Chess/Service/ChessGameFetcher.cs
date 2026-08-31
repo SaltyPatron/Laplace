@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Service;
@@ -25,6 +26,16 @@ public static class ChessGameFetcher
             "lichess" => FetchLichessAsync(user, max, outPath, log, ct),
             "chesscom" or "chess.com" or "chess" => FetchChessComAsync(user, max, minTcSeconds, outPath, log, ct),
             _ => throw new ArgumentException($"unknown site '{site}' (chesscom|lichess)", nameof(site)),
+        };
+
+    public static Task<ChessPlayerProfile> FetchProfileAsync(
+        string identifier, string site, CancellationToken ct)
+        => site.ToLowerInvariant() switch
+        {
+            "lichess" => FetchLichessProfileAsync(identifier, ct),
+            "chesscom" or "chess.com" or "chess" => FetchChessComProfileAsync(identifier, ct),
+            "fide" => FetchFideProfileAsync(identifier, ct),
+            _ => throw new ArgumentException($"unknown player profile site '{site}' (lichess|chesscom|fide)", nameof(site)),
         };
 
     public static async Task<int> FetchChessComAsync(
@@ -103,7 +114,137 @@ public static class ChessGameFetcher
         await using (var src = await resp.Content.ReadAsStreamAsync(ct))
         await using (var dst = File.Create(outPath))
             await src.CopyToAsync(dst, ct);
-        return CountGames(await File.ReadAllTextAsync(outPath, ct));
+        // Do not materialize a potentially multi-gigabyte all-games export merely to count it.
+        // The PGN parser streams the completed file one game at a time.
+        return PgnGames.StreamGames(outPath).Count();
+    }
+
+    public static async Task<ChessPlayerProfile> FetchLichessProfileAsync(string user, CancellationToken ct)
+    {
+        string json = await GetStringWithRetryAsync(
+            $"https://lichess.org/api/user/{Uri.EscapeDataString(user)}", ct);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        string username = String(root, "username") ?? String(root, "id") ?? user;
+        JsonElement profile = root.TryGetProperty("profile", out var p) ? p : default;
+        var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (root.TryGetProperty("perfs", out var perfs))
+            foreach (string key in new[] { "standard", "classical", "rapid", "blitz", "bullet" })
+                if (perfs.TryGetProperty(key, out var perf) && perf.TryGetProperty("rating", out var rating)
+                    && rating.TryGetInt32(out int value))
+                    ratings[key] = value;
+        if (profile.ValueKind == JsonValueKind.Object
+            && profile.TryGetProperty("fideRating", out var fideRating)
+            && fideRating.TryGetInt32(out int fideValue))
+            ratings["fide"] = fideValue;
+
+        var links = new List<string> { $"https://lichess.org/@/{username}" };
+        if (profile.ValueKind == JsonValueKind.Object && profile.TryGetProperty("links", out var linkValue))
+        {
+            if (linkValue.ValueKind == JsonValueKind.String)
+                links.AddRange((linkValue.GetString() ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            else if (linkValue.ValueKind == JsonValueKind.Array)
+                links.AddRange(linkValue.EnumerateArray()
+                    .Select(v => v.GetString())
+                    .OfType<string>()
+                    .Where(v => !string.IsNullOrWhiteSpace(v)));
+        }
+
+        return new ChessPlayerProfile(
+            "lichess", username, username,
+            profile.ValueKind == JsonValueKind.Object ? String(profile, "realName") : null,
+            profile.ValueKind == JsonValueKind.Object ? String(profile, "bio") : null,
+            String(root, "title"),
+            profile.ValueKind == JsonValueKind.Object ? String(profile, "country") : null,
+            null,
+            links.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), ratings);
+    }
+
+    public static async Task<ChessPlayerProfile> FetchChessComProfileAsync(string user, CancellationToken ct)
+    {
+        string escaped = Uri.EscapeDataString(user);
+        string json = await GetStringWithRetryAsync($"https://api.chess.com/pub/player/{escaped}", ct);
+        string statsJson = await GetStringWithRetryAsync($"https://api.chess.com/pub/player/{escaped}/stats", ct);
+        using var doc = JsonDocument.Parse(json);
+        using var statsDoc = JsonDocument.Parse(statsJson);
+        var root = doc.RootElement;
+        string username = String(root, "username") ?? user;
+        var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, label) in new[]
+        {
+            ("chess_daily", "daily"), ("chess_rapid", "rapid"),
+            ("chess_blitz", "blitz"), ("chess_bullet", "bullet"),
+        })
+            if (statsDoc.RootElement.TryGetProperty(key, out var perf)
+                && perf.TryGetProperty("last", out var last)
+                && last.TryGetProperty("rating", out var rating)
+                && rating.TryGetInt32(out int value))
+                ratings[label] = value;
+
+        var links = new List<string>();
+        if (String(root, "url") is { } url) links.Add(url);
+        if (String(root, "country") is { } country) links.Add(country);
+        return new ChessPlayerProfile(
+            "chesscom", username, username, String(root, "name"), null,
+            String(root, "title"), String(root, "country"), null, links, ratings);
+    }
+
+    public static async Task<ChessPlayerProfile> FetchFideProfileAsync(string fideId, CancellationToken ct)
+    {
+        if (!fideId.All(char.IsDigit) || fideId.Length is < 4 or > 12)
+            throw new ArgumentException("FIDE identifier must contain 4 to 12 digits.", nameof(fideId));
+        string url = $"https://ratings.fide.com/profile/{fideId}";
+        string html = await GetStringWithRetryAsync(url, ct);
+        return ParseFideProfile(html, fideId, url);
+    }
+
+    internal static ChessPlayerProfile ParseFideProfile(string html, string fideId, string url)
+    {
+        string text = WebText(html);
+        string name = HtmlMatch(html, @"<title[^>]*>\s*(.*?)\s+FIDE Profile\s*</title>")
+            ?? HtmlMatch(html, @"<h1[^>]*>\s*(.*?)\s*</h1>")
+            ?? throw new InvalidDataException("FIDE profile did not contain a player name.");
+        var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        AddRating(text, ratings, "standard", @"(\d{3,4})\s+STANDARD\b");
+        AddRating(text, ratings, "rapid", @"(\d{3,4})\s+RAPID\b");
+        AddRating(text, ratings, "blitz", @"(\d{3,4})\s+BLITZ\b");
+        return new ChessPlayerProfile(
+            "fide", fideId, name, name, null,
+            Match(text, @"FIDE title\s+(.+?)\s+(?:World Rank|Titles|Period)\b"),
+            Match(text, @"FIDE ID\s+\d+\s+Federation\s+(.+?)\s+B-Year\b")
+                ?? Match(text, @"(?<!Chess )Federation\s+(.+?)\s+(?:B-Year|Gender|FIDE title)\b"),
+            fideId, [url], ratings);
+    }
+
+    private static string? String(JsonElement root, string name) =>
+        root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static string WebText(string html)
+    {
+        string withLines = Regex.Replace(html, @"</(?:div|p|h\d|td|th|li|tr)>", "\n", RegexOptions.IgnoreCase);
+        string noTags = Regex.Replace(withLines, "<[^>]+>", " ");
+        string decoded = System.Net.WebUtility.HtmlDecode(noTags).Replace('\u00a0', ' ');
+        return Regex.Replace(decoded, @"\s+", " ").Trim();
+    }
+
+    private static string? Match(string text, string pattern)
+    {
+        var m = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        return m.Success ? m.Groups[1].Value.Trim() : null;
+    }
+
+    private static string? HtmlMatch(string html, string pattern)
+    {
+        var m = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!m.Success) return null;
+        string value = Regex.Replace(m.Groups[1].Value, "<[^>]+>", " ");
+        return Regex.Replace(System.Net.WebUtility.HtmlDecode(value), @"\s+", " ").Trim();
+    }
+
+    private static void AddRating(string text, Dictionary<string, int> ratings, string key, string pattern)
+    {
+        if (int.TryParse(Match(text, pattern), out int value)) ratings[key] = value;
     }
 
     private static async Task<string> GetStringWithRetryAsync(string url, CancellationToken ct)
@@ -121,13 +262,18 @@ public static class ChessGameFetcher
         }
     }
 
-    private static int CountGames(string pgn)
-    {
-        int n = 0, i = 0;
-        while ((i = pgn.IndexOf("[Event ", i, StringComparison.Ordinal)) >= 0) { n++; i += 7; }
-        return n;
-    }
-
     internal static string Sanitize(string s)
         => new(s.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
 }
+
+public sealed record ChessPlayerProfile(
+    string Provider,
+    string ProviderId,
+    string DisplayName,
+    string? RealName,
+    string? Biography,
+    string? Title,
+    string? Federation,
+    string? FideId,
+    IReadOnlyList<string> Links,
+    IReadOnlyDictionary<string, int> Ratings);

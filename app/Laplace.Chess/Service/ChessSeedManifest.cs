@@ -25,6 +25,10 @@ public static class ChessSeedManifest
     internal const string HasEco         = "HAS_ECO";
     internal const string GameHasOpening = "GAME_HAS_OPENING";
     internal const string GameHasEco     = "GAME_HAS_ECO";
+    internal const string HasExternalId  = "HAS_EXTERNAL_ID";
+    internal const string HasFeature     = "HAS_FEATURE";
+    internal const string CorrespondsTo  = "CORRESPONDS_TO";
+    internal const string HasNameAlias   = "HAS_NAME_ALIAS";
 
     public static readonly IReadOnlyList<string> Relations =
     [
@@ -49,7 +53,7 @@ public static class ChessSeedManifest
         // ChessVocabulary.EmitPlayer (HAS_NAME_ALIAS). Both are family_roots, so family
         // expansion never pulls them — an undeclared emit is the 0xC0000005 class, previously
         // masked only by global foundation seeding.
-        "CORRESPONDS_TO", "HAS_NAME_ALIAS",
+        CorrespondsTo, HasNameAlias, HasExternalId, HasFeature,
     ];
 
     public static ISourceManifest ForLane(Hash128 sourceId, string sourceName, Hash128 trustClass) =>

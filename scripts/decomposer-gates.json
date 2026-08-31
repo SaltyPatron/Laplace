@@ -468,6 +468,22 @@
         }
       ]
     },
+    "chess-transitions": {
+      "decomposer": "ChessTransitions",
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "MOVE",
+          "min": 1,
+          "scope": "source_evidence"
+        }
+      ]
+    },
     "code": {
       "decomposer": "CodeDecomposer",
       "layer": 2,

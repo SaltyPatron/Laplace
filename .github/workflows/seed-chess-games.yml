@@ -194,3 +194,15 @@ jobs:
       database: ${{ inputs.database }}
       timeout_minutes: 720
       run_gate: true
+
+  # Existing corpora predate the inline deterministic transition witness. This
+  # marker-gated pass fills only missing position -> position cells; new games
+  # already deposit them in the seed transaction.
+  transitions:
+    needs: seed
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: chess-transitions
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: true
