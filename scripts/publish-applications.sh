@@ -9,8 +9,6 @@ application_host_check() {
   [[ ! -e /var/lib/laplace-managed/transaction.json ]] || {
     echo "::error::prior managed transaction unresolved; no application changes made" >&2; return 1;
   }
-  # These helper operations inspect policy/legacy bots; they do not reconcile
-  # host policy, stop services or require a second bootstrap.
   sudo -n /usr/local/libexec/laplace-managed-deploy host-status
   sudo -n /usr/local/libexec/laplace-managed-deploy preflight
 }
@@ -56,6 +54,7 @@ application_recover() {
     application_restore || return 1
     rm "$pending"
   fi
+  rm -f "$ROOT/build/.application-release-state.json"
   rm "$marker"
 }
 
@@ -89,6 +88,7 @@ application_main() (
     exit 0
   fi
   mkdir -p "$ROOT/build"
+  rm -f "$ROOT/build/.application-release-state.json"
   (set -o noclobber; printf '%s' "$owner" > "$ROOT/build/.application-publish-owner")
   attempted=1
   application_publish

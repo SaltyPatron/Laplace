@@ -16,7 +16,8 @@ public sealed class HttpTransportTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public async Task ReadinessRequiresInventoryAndSuccessfulPerfcacheProbe(bool entities, bool consensus)
+    public async Task ReadinessProvesInstalledSchemaAndPerfcacheWithoutRequiringSeeds(
+        bool entities, bool consensus)
     {
         int inventoryCalls = 0, perfcacheCalls = 0;
         using var budget = new CancellationTokenSource();
@@ -31,16 +32,23 @@ public sealed class HttpTransportTests
             perfcacheCalls++;
             return Task.FromResult<object?>(null);
         }, budget.Token);
-        Assert.Equal(entities && consensus, ready);
+
+        // entities/consensus are product seed state. A lawful empty DB remains a
+        // healthy installed service as long as schema access and perfcache succeed.
+        Assert.True(ready);
         Assert.Equal(1, inventoryCalls);
-        Assert.Equal(ready ? 1 : 0, perfcacheCalls);
+        Assert.Equal(1, perfcacheCalls);
     }
 
     [Fact]
-    public async Task ReadinessCannotTurnFailedOrCancelledProbesIntoSuccess()
+    public async Task ReadinessCannotTurnFailedOrCancelledLifecycleProbesIntoSuccess()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() => McpHttpHost.ReadyFromProbesAsync(
-            _ => Task.FromResult((true, true)), _ => throw new InvalidOperationException("probe failed"), default));
+            _ => throw new InvalidOperationException("inventory failed"),
+            _ => Task.FromResult<object?>(null), default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => McpHttpHost.ReadyFromProbesAsync(
+            _ => Task.FromResult((false, false)),
+            _ => throw new InvalidOperationException("perfcache failed"), default));
         using var budget = new CancellationTokenSource();
         budget.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => McpHttpHost.ReadyFromProbesAsync(

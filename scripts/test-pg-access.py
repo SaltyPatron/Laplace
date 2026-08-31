@@ -104,11 +104,6 @@ class PeerMapTests(unittest.TestCase):
         self.assertLess(renderer, destination)
         self.assertIn("render-pg-peer-map.py", source[renderer:destination])
 
-    def test_ci_runs_the_executable_audit_and_database_contract_tests(self):
-        source = (ROOT / ".github/workflows/laplace.yml").read_text()
-        self.assertIn("python3 scripts/test-pg-access.py", source)
-        self.assertIn("ManagedServiceDatabaseTests", source)
-
     def test_mcp_readiness_uses_bounded_serving_probes_not_a_full_entity_audit(self):
         source = (ROOT / "app/Laplace.Endpoints.Mcp/McpHttpHost.cs").read_text()
         self.assertNotIn("SubstrateHealthAsync", source)

@@ -48,8 +48,18 @@ internal static class LichessServiceHost
         app.MapGet("/health/ready", (ILichessConnection bot) =>
         {
             var status = bot.Status();
-            bool ready = status.Configured && status.Connected && status.Error is null;
-            return Results.Json(new { service = "laplace-lichess", ready }, statusCode: ready ? 200 : 503);
+            // Deployment readiness proves that the configured worker process is alive
+            // and can serve its status/control surface. Lichess connectivity is an
+            // external product integration and may flap independently; /status and
+            // post-delivery QA report it without rolling a healthy API/SPA payload back.
+            bool ready = status.Configured;
+            return Results.Json(new
+            {
+                service = "laplace-lichess",
+                ready,
+                connected = status.Connected,
+                error = status.Error
+            }, statusCode: ready ? 200 : 503);
         });
         app.MapGet("/status", (ILichessConnection bot) => Results.Json(bot.Status()));
         app.MapGet("/games/{gameId}/chat", (string gameId, ILichessConnection bot) =>

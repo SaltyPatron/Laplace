@@ -11,6 +11,8 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -24,6 +26,14 @@ def _load_eval_generation():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def _load_primary_workflow():
+    path = ROOT / ".github" / "workflows" / "laplace.yml"
+    workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    if not isinstance(workflow, dict):
+        raise ValueError("laplace.yml must be a mapping")
+    return workflow
 
 
 class _Response(BytesIO):
@@ -179,19 +189,25 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertNotIn("word_" + "language", text)
 
     def test_long_generation_benchmark_is_dispatch_only(self):
-        workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
-        input_block = workflow[
-            workflow.index("      generation_benchmark:"):
-            workflow.index("\n\n# NO WORKFLOW-LEVEL CONCURRENCY")
-        ]
-        self.assertIn("type: boolean", input_block)
-        self.assertIn("default: false", input_block)
+        workflow = _load_primary_workflow()
+        dispatch = workflow["on"]["workflow_dispatch"]
+        benchmark = dispatch["inputs"]["generation_benchmark"]
+        self.assertEqual("boolean", benchmark["type"])
+        self.assertEqual("false", benchmark["default"])
 
-        eval_block = workflow[workflow.index("  eval:"):workflow.index("  restore-api:")]
-        detector_block = eval_block[eval_block.index("      - name: Lane detectors") :]
-        self.assertIn("github.event_name == 'workflow_dispatch'", detector_block)
-        self.assertIn("inputs.generation_benchmark == true", detector_block)
-        self.assertNotIn("if: ${{ !cancelled() }}", detector_block)
+        eval_job = workflow["jobs"]["eval"]
+        benchmark_steps = [
+            step for step in eval_job["steps"]
+            if "scripts/verify-generation.py" in step.get("run", "")
+        ]
+        self.assertEqual(1, len(benchmark_steps))
+        benchmark_step = benchmark_steps[0]
+        self.assertEqual(
+            "github.event_name == 'workflow_dispatch' && "
+            "inputs.generation_benchmark == true",
+            benchmark_step["if"],
+        )
+        self.assertIn("--enforce", benchmark_step["run"])
 
     def test_generation_probe_builds_each_lane_plan_once_per_seed_batch(self):
         sql_root = ROOT / "extension/laplace_substrate/sql/functions/converse"

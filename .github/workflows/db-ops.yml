@@ -66,7 +66,7 @@ jobs:
     # not minutes. Every other operation keeps the 30-minute leash.
     timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || 30 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
@@ -190,15 +190,11 @@ jobs:
         if: inputs.operation == 'recreate'
         run: bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
 
-      - name: Verify
-        # Every operation ends by proving the database answers. A lifecycle
-        # action that reports success without a read is how "the DB is fine"
-        # becomes a claim nobody checked.
-        run: |
-          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SELECT extname, extversion FROM pg_extension WHERE extname LIKE 'laplace%'"
-          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SET search_path=laplace,public; SELECT * FROM substrate_health()"
+      - name: Verify structural database health
+        # Database lifecycle owns extension/schema/index/constraint/journal
+        # health. It does not ask seeded converse, generation, or chess
+        # behavior to prove that creation/repair succeeded.
+        run: bash scripts/check-database-health.sh "${{ inputs.database }}"
 
       - name: Next step
         if: inputs.operation == 'recreate' || inputs.operation == 'remigrate'

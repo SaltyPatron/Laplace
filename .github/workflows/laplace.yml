@@ -1,155 +1,77 @@
 name: Laplace — build, deploy, test
 
-# One sequenced, idempotent pipeline. Every stage is a no-op on a healthy,
-# up-to-date system; every stage gates the next. CI is an orchestrator only —
-# the operations live in scripts/pipeline.sh (one phase per job) so the
-# Actions graph maps 1:1 onto pipeline phases.
-#
-#   policy ─┐
-#           ├─> build -> unit-test -> deploy -> db-ops -> integration-test
-#   deps ───┘                              (seed: dispatch-only)   │
-#                              restore-api <── smoke <── publish <─┘
-#
-# Seeds NEVER run on push (operator decision 2026-07-24): a push deploys code
-# (install/db-ops legitimately bounce PG — that IS the deployment unit), but
-# seed ladders are long, data-touching, and belong to the operator. They run
-# only on workflow_dispatch (seed=true, or forced by fresh_db) or via the
-# dedicated seed-*.yml workflows. Rebuilds therefore preempt seeds by design —
-# seed steps are required to be idempotent/resumable (content-addressing +
-# completion markers), so a preempted seed loses nothing and re-runs cleanly.
-# publish still gates on /health/ready: on push the standing substrate is
-# already seeded, so the gate holds; on a fresh_db dispatch, seed is forced
-# and precedes publish exactly as before.
+# One registered self-hosted runner executes one GitHub job at a time. The order is
+# therefore the delivery contract, not a diagram: construction proof -> installed
+# lifecycle -> application activation -> environment/product QA. QA remains red when
+# broken but cannot withhold or roll back a payload whose own activation passed.
 
 on:
-  # Main only — PRs must not burn the self-hosted runner. Manual re-runs via
-  # workflow_dispatch. Merge-to-main is the gate.
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       stage:
-        # HOW FAR TO GO. A dispatch used to mean the whole ladder -- policy,
-        # build, unit tests, deploy, migrate, pg_regress, publish, smoke --
-        # even when the operator only wanted to know whether a branch compiles.
-        # Stop where you meant to stop.
-        #
-        # Cumulative: each stage runs everything before it. Push to main is
-        # ALWAYS `all` and is unaffected by this input, so the deploy path
-        # cannot be weakened by a default.
-        #
-        #   check      policy + deps           -- manifest, vocabulary, codegen
-        #                                         determinism, presence tripwire
-        #   build      + build                 -- engine, extensions, app, perfcache
-        #   test       + unit tests            -- native ctest
-        #   deploy     + deploy + db-ops       -- install to /opt/laplace, migrate,
-        #                                         extension sync, tuning
-        #   integrate  + integration tests     -- pg_regress + dotnet (+ seed, when
-        #                                         the seed/fresh_db inputs ask for it)
-        #   all        + publish + smoke       -- ship the API and SPA, prove it live
-        description: "how far to run (cumulative; push to main is always 'all')"
+        description: "how far to run (cumulative; push to main is always all)"
         type: choice
         required: true
         default: all
-        # Application-only stages never enter deploy/db-ops. They require the
-        # installed engine to match the tested build and retain full-release eval.
         options: [check, build, test, deploy, integrate, all, application-check, applications]
       full_clean:
-        description: "wipe build/ before building (same as --force-rebuild)"
+        description: "wipe build/ before building"
         type: boolean
         default: false
       force_codegen:
-        description: "ignore attestation-law stamp; always regenerate"
+        description: "ignore attestation-law stamp"
         type: boolean
         default: false
       fresh_db:
-        description: "nuke + re-migrate + force-reseed foundation (destructive schema changes only)"
+        description: "nuke + re-migrate; leaves an empty substrate"
         type: boolean
         default: false
       serial_tests:
-        description: "force serial ctest/regress (LAPLACE_TEST_SERIAL=1)"
+        description: "force serial ctest/regress"
         type: boolean
         default: false
       force_all:
-        description: "ignore content-fingerprint stamps — run every phase/test even when its inputs are unchanged"
+        description: "ignore content-fingerprint stamps"
         type: boolean
         default: false
       generation_benchmark:
-        description: "run the expensive multi-prompt generation lane benchmark"
+        description: "run the expensive generation benchmark"
         type: boolean
         default: false
-
-# NO WORKFLOW-LEVEL CONCURRENCY -- it cannot say what this pipeline needs.
-#
-# Two different things happen in this workflow and they want opposite policies:
-#
-#   CHEAP AND PURE   policy, build, unit-test. Superseding these is free, and on
-#                    main it is better than free: a later merge means the running
-#                    build is already testing deprecated code. Cancel it.
-#   MUTATING         deploy, db-ops, publish, smoke, restore-api. These stop the
-#                    API, replace binaries in /opt/laplace and bounce PostgreSQL.
-#                    A cancel lands anywhere in that window -- half-installed
-#                    tree, service down, or the MSB3027 poisoned-output state.
-#                    Never cancel these.
-#
-# A workflow-level group cancels the WHOLE RUN, including a job mid-install, so it
-# cannot hold both policies at once. That is why the old config had to queue main
-# entirely: it was protecting the deploy by refusing to cancel the build. The groups
-# are per-job below instead.
-#
-# Cancelling the build is what protects against a stale deploy: every mutating job
-# is `needs:` the build, so a cancelled build takes its own deploy with it and no
-# superseded code can reach the box.
 
 permissions:
   contents: read
 
-# Whole-run serialization protects the shared self-hosted workspace from a new build
-# replacing files while an earlier run's tests still consume them.
-# Runs queue and never cancel: cancel-in-progress would kill deploy/db-ops/
-# publish mid-install (the "never cancelled" jobs below — half-installed
-# tree), so a superseded run finishes wastefully-but-safely instead. And the
-# group is REF-INDEPENDENT: the wipe race is on the one shared _work/, which
-# a workflow_dispatch from another ref hits just the same.
+# The runner keeps one persistent untracked build tree. Do not allow another run to
+# replace it while a job consumes it. Mutating jobs additionally take the lifecycle
+# lock below and are never cancelled halfway through a transaction.
 concurrency:
   group: laplace-shared-workspace
   cancel-in-progress: false
 
 env:
-  LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/build/external' }}
+  LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
-  # Build against the SAME from-source postgres the postmaster runs — never
-  # the apt-packaged headers (packaged PG is being removed from the host).
-  LAPLACE_PG_PREFIX:      ${{ vars.LAPLACE_PG_PREFIX      || '/opt/laplace/pgsql-18' }}
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
-  # Change-aware skipping (scripts/lib/fp.sh): phases/tests whose input content
-  # is unchanged since their last SUCCESS no-op. force_all bypasses every gate.
   LAPLACE_FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.force_all && '1' || '' }}
 
 jobs:
-
   policy:
-    name: Policy — manifest, attestation, vocabulary
-    # Self-hosted (was ubuntu-latest): it was the ONLY GitHub-hosted job, and `build` needs it.
-    # When the account's hosted-minutes/spending-limit blocks hosted jobs, GitHub refuses to
-    # schedule the whole run (0 jobs, indefinitely pending) even though every other job is
-    # self-hosted. These checks are pure python/bash/git (validate-pipeline, regenerate+verify
-    # deterministic, banned-terms) — safe on the self-hosted runner, which already runs `deps`.
+    name: Policy — source and architecture contracts
     runs-on: [self-hosted, laplace]
     timeout-minutes: 15
     steps:
-      # Persistent single-repository runner: use git directly so a transient
-      # codeload.github.com throttle cannot kill deployment in "Set up job".
-      # Force only tracked files; preserve the shared untracked build tree.
       - name: Checkout requested revision (preserve build tree)
         env:
           TARGET_SHA: ${{ github.sha }}
         run: |
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
-
-      - name: Validate application-only release options before building
+      - name: Validate application-only options
         if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["application-check", "applications"]'), inputs.stage)
         env:
           FRESH_DB: ${{ inputs.fresh_db }}
@@ -159,175 +81,12 @@ jobs:
             echo "::error::application releases cannot reset the DB or discard install receipts"
             exit 1
           }
-
-      - name: CI presence tripwire
-        # Guards against a repo-hygiene commit sweeping the CI definition away
-        # again (commit 0b5d1df deleted every workflow + composite action and
-        # CI silently stopped triggering).
-        run: |
-          fail=0
-          for f in \
-            .github/workflows/laplace.yml \
-            .github/workflows/_ingest.yml \
-            .github/workflows/seed-foundation.yml \
-            .github/workflows/seed-knowledge.yml \
-            .github/workflows/seed-documents.yml \
-            .github/workflows/seed-chess.yml \
-            .github/workflows/seed-code.yml \
-            .github/workflows/seed-models.yml \
-            .github/actions/setup-laplace-env/action.yml \
-            scripts/pipeline.sh \
-            scripts/test-parallel.sh \
-            scripts/lib/fp.sh \
-            scripts/affected-app.py \
-            scripts/setup-host.sh \
-            scripts/bootstrap-laplace-runner.sh \
-            scripts/ingest-source.sh \
-            scripts/isa-gate-check.py \
-            scripts/isa-gate-baseline.json \
-            scripts/model-payload-gate-check.py \
-            scripts/model-payload-gate-baseline.json \
-            scripts/ensure-foundation.sh \
-            scripts/laplace_api.py \
-            scripts/eval-generation.py \
-            scripts/verify-generation.py \
-            scripts/test-eval-op-lane.py \
-            scripts/eval-probes.json \
-            scripts/eval-baselines.json \
-            scripts/shellcheck-gate.sh; do
-            [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
-          done
-          exit "$fail"
-
-      - name: Shellcheck gate (severity warning)
-        # GH #847 — catch quote/array bugs and swallowed-failure patterns that
-        # turn into false "all clear". Severity warning (raised from error
-        # 2026-08-11: SC2155 masks command exit status and only reports at
-        # warning); style/info remain out of scope.
-        run: bash scripts/shellcheck-gate.sh
-
-      - name: Deploy payload contract
-        run: |
-          bash scripts/test-deploy-payload-sync.sh
-          python3 scripts/test-pipeline-install.py
-          python3 scripts/test-stockfish-release.py
-
-      - name: Managed service privilege and deployment contracts
-        run: |
-          python3 scripts/test-managed-services.py
-          python3 scripts/test-managed-host.py
-          python3 scripts/test-managed-tls.py
-          python3 scripts/test-pg-access.py
-          shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
-
-      - name: Validate witness-manifest vs orchestration scripts
-        run: python3 scripts/validate-pipeline.py
-
-      - name: Eval operation-lane architecture gate
-        run: python3 scripts/test-eval-op-lane.py
-
-      - name: SQL corpus auditor regression tests
-        run: python3 scripts/test-sql-audit.py
-
-      - name: SQL corpus high-severity ratchet
-        # Existing medium/low debt remains visible in the generated local report.
-        # CI blocks only new unbaselined high-confidence correctness/security hazards.
-        run: python3 scripts/sql-audit.py --skip-near-clones --fail-on high
-
-      - name: Upgrade drop-order gate — live dependents must drop before their base
-        run: python3 scripts/check-upgrade-drop-order.py
-
-      - name: Enforce ISA literalism ratchets
-        run: python3 scripts/isa-gate-check.py
-
-      - name: Model-lane payload gate (shrink-only)
-        # GH #1026 class: a model is testimony (attestations), not geometry
-        # payload — factors mode filled the cluster volume before anything
-        # complained. Measures the standing substrate against the recorded
-        # baseline; SKIPs (exit 0) when the substrate is unreachable so the
-        # gate survives maintenance windows instead of getting disabled.
-        run: python3 scripts/model-payload-gate-check.py
-
-      - name: Regenerate attestation law + verify deterministic
-        run: |
-          set -euo pipefail
-          # Codegen outputs are gitignored (CMake regenerates them every build), so a
-          # `git diff` here guards nothing — every listed file is untracked. The real
-          # invariant is that codegen is a DETERMINISTIC function of the manifest TOML;
-          # non-determinism breaks the content-addressed rock. Regenerate, snapshot,
-          # wipe, regenerate from clean, and require byte-identical output.
-          outs=(
-            engine/core/src/generated/relation_law.c
-            engine/core/src/generated/pos_law.c
-            engine/core/include/laplace/core/relation_law.h
-            engine/core/include/laplace/core/pos_law.h
-            engine/core/include/laplace/core/highway_manifest.h
-            extension/laplace_substrate/sql/generated/seed_relation_types.sql.in
-            extension/laplace_substrate/sql/generated/seed_pos.sql.in
-          )
-          python3 scripts/codegen-attestation-law.py
-          for f in "${outs[@]}"; do
-            [ -f "$f" ] || { echo "::error file=$f::codegen did not produce a declared output"; exit 1; }
-          done
-          a=$(cat "${outs[@]}" | sha256sum | cut -d' ' -f1)
-          # Wipe only the OUTPUTS, never the codegen stamp: the python codegen
-          # doesn't read the stamp, the stamp keys on manifest/script mtimes
-          # (untouched here), and the regen below restores byte-identical
-          # outputs — deleting the stamp on this shared self-hosted workspace
-          # forced the build job's phase_codegen to re-run on every push.
-          rm -f "${outs[@]}"
-          python3 scripts/codegen-attestation-law.py
-          b=$(cat "${outs[@]}" | sha256sum | cut -d' ' -f1)
-          [ "$a" = "$b" ] || { echo "::error::codegen NON-DETERMINISTIC ($a != $b) — same TOML, different output; breaks content-addressing"; exit 1; }
-          echo "codegen deterministic across a clean regen: $a"
-
-      - name: Docs inventory drift gate
-        # Countable facts are generated; prose points at the inventory.
-        run: python3 scripts/docs-inventory.py --check
-
-      - name: Forbid C# attestation policy in decomposers
-        run: |
-          set -e
-          violations=0
-          files=$(find app \( -path 'app/Laplace.Decomposers/*.cs' -o -path 'app/Laplace.Decomposers/*/*.cs' -o -path 'app/Laplace.Substrate/Abstractions/*.cs' \) \
-            ! -path 'app/Laplace.Decomposers.Tests/*')
-          for pattern in AttestationFactory 'RelationTypeRegistry\.Attest' 'ScoreFp1e9\s*=' 'AttestationOutcome\.(Confirm|Refute|Draw)'; do
-            while IFS= read -r f; do
-              [ -z "$f" ] && continue
-              echo "::error file=$f::Forbidden attestation policy: $pattern"
-              violations=$((violations+1))
-            done < <(rg -l "$pattern" $files 2>/dev/null || true)
-          done
-          exit "$violations"
-
-      - name: Scan for unflagged banned terms
-        run: |
-          set +e
-          banned_terms=(
-            "HNSWLib" "hnswlib" "FAISS" "ScaNN" "Milvus" "Pinecone"
-            "oneDNN" "cuDNN"
-          )
-          files_to_scan=$(find . -type f \( -name '*.md' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.c' -o -name '*.cs' -o -name '*.sql' \) \
-            ! -path './.git/*' ! -path './node_modules/*' ! -path './.github/archive/*')
-          violations=0
-          for term in "${banned_terms[@]}"; do
-            while IFS= read -r match; do
-              file=$(echo "$match" | cut -d: -f1)
-              case "$file" in
-                ./.claude/agents/conventional-ai-skeptic.md)
-                  ;;
-                *)
-                  echo "::warning file=$file::Banned term '$term' appears outside allowed files"
-                  violations=$((violations+1))
-                  ;;
-              esac
-            done < <(grep -nH "$term" $files_to_scan 2>/dev/null)
-          done
-          echo "Total unflagged banned-term occurrences: $violations"
-          exit "$violations"
+      - name: Run deterministic policy suite
+        run: bash scripts/ci-policy.sh
 
   deps:
-    name: Runner capabilities + system deps (no-op when current)
+    name: Runner capabilities + pinned system dependencies
+    needs: policy
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     steps:
@@ -337,176 +96,13 @@ jobs:
         run: |
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
-
-      - name: Guard — workspace must stay submodule-free
-        run: |
-          fail=0
-          if [ -d .git/modules ] && [ -n "$(ls -A .git/modules 2>/dev/null)" ]; then
-            echo "::error::.git/modules is populated — deps must source from \$LAPLACE_EXTERNAL"
-            fail=1
-          fi
-          init=$(git submodule status 2>/dev/null | grep -cE '^[ +U]' || true)
-          if [ "${init:-0}" -gt 0 ]; then
-            echo "::error::$init submodule(s) initialized in workspace"
-            fail=1
-          fi
-          [ "$fail" -eq 0 ] && echo "workspace submodule-free"
-          exit "$fail"
-
-      - name: Toolchain probes
-        run: |
-          [ -d /opt/intel/oneapi ] || { echo "::error::oneAPI missing"; exit 1; }
-          command -v python3 >/dev/null || { echo "::error::python3 missing"; exit 1; }
-          "$LAPLACE_PG_PREFIX/bin/pg_config" --version >/dev/null || { echo "::error::pg_config not found at $LAPLACE_PG_PREFIX"; exit 1; }
-          command -v dotnet >/dev/null || { echo "::error::dotnet not found"; exit 1; }
-          command -v bash >/dev/null || { echo "::error::bash not found"; exit 1; }
-          RESULT=$(psql -d postgres -U laplace_admin -tAc "SELECT current_user || ' on ' || current_database();")
-          [ "$RESULT" = "laplace_admin on postgres" ] || { echo "::error::peer auth failed: $RESULT"; exit 1; }
-          UCD_ZIP="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip"
-          [ -f "$UCD_ZIP" ] || { echo "::error::UCD zip missing: $UCD_ZIP"; exit 1; }
-
-      - name: Verify the external cache is provisioned (no per-build clone)
-        run: |
-          # External sources do not change between builds, so the runner must NOT
-          # clone or fetch them per run. 391d9be7 moved them to the shared cache and
-          # deleted .gitmodules (933 lines, 311 submodules -- 10 core deps plus ~300
-          # tree-sitter grammars); this step still called sync-external.sh, whose first
-          # line is `[ -f .gitmodules ] || exit 2`. Every build since has either failed
-          # here or re-fetched gigabytes that were already on disk.
-          #
-          # The cache is provisioned ONCE by scripts/bootstrap-laplace-runner.sh. CI's
-          # job is to prove it is there and fail loudly pointing at the bootstrap if it
-          # is not -- never to populate it.
-          for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
-            mkdir -p "/opt/laplace/$d"
-          done
-
-          CACHE="${LAPLACE_EXTERNAL:-${LAPLACE_SUBMODULE_CACHE:-/build/external}}"
-          # PINS.tsv lives WITH the cache, never in the checkout: a repo-root file of
-          # URLs+shas reads as a sync target to any agent or tool that finds it.
-          [ -f "$CACHE/PINS.tsv" ] || {
-            echo "::error::$CACHE/PINS.tsv missing — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
-            exit 1
-          }
-          [ -d "$CACHE" ] || {
-            echo "::error::$CACHE missing — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
-            exit 1
-          }
-
-          # PRESENT, CURRENT, BUILT — three distinct questions. Checking only the first
-          # is what let a cache drift from its pins silently.
-          miss=0; stale=0
-          while IFS=$'\t' read -r path url pin; do
-            case "$path" in ''|'#'*) continue;; esac
-            entry="$CACHE/${path#external/}"
-
-            # PRESENT
-            if [ ! -d "$entry/.git" ]; then
-              echo "::error::absent: $entry"; miss=$((miss+1)); continue
-            fi
-
-            # CURRENT — the pinned commit must be checked out, not merely fetched.
-            # safe.directory: the cache is owned by the runner user, so git refuses
-            # without it. sync-external.sh exported the same guard.
-            head=$(git -c safe.directory='*' -C "$entry" rev-parse HEAD 2>/dev/null || echo "")
-            if [ "$head" != "$pin" ]; then
-              echo "::error::stale: ${path#external/} at ${head:0:12}, pinned ${pin:0:12}"
-              stale=$((stale+1))
-            fi
-          done < "$CACHE/PINS.tsv"
-
-          # BUILT — the artifacts the build actually links against, not the sources.
-          for f in \
-            /opt/laplace/proj/lib/libproj.so \
-            /opt/laplace/geos/lib/libgeos_c.so \
-            /opt/laplace/gdal/lib/libgdal.so \
-            /opt/laplace/pgsql-18/bin/postgres \
-            /opt/laplace/pgsql-18/lib/postgis-3.so \
-            /opt/laplace/tree-sitter/lib/libtree-sitter.a; do
-            [ -e "$f" ] || { echo "::error::unbuilt: $f"; miss=$((miss+1)); }
-          done
-
-          # PROVENANCE, not presence. `test -e` cannot tell a correct binary from a
-          # stale one, and it reported "artifacts built" over a postgres compiled
-          # without the write-path codecs for as long as that binary existed.
-          #
-          # A wrong binary must TRIGGER the rebuild, not block it. This gate runs
-          # BEFORE "Build system deps", so counting a flag miss into $miss exits 1
-          # and the step that would fix it never executes — a detector that
-          # prevents its own remedy. Raise the force flag instead and let the
-          # build step do the work.
-          need_rebuild=0
-          if [ ! -x /opt/laplace/pgsql-18/bin/pg_config ]; then
-            # An unverifiable install must not pass silently — that is the same
-            # "gate reports success over something it never checked" defect this
-            # provenance assertion exists to remove.
-            echo "::error::pg_config missing or not executable — cannot verify postgres build flags"
-            miss=$((miss+1))
-          else
-            cfg=$(/opt/laplace/pgsql-18/bin/pg_config --configure 2>/dev/null || true)
-            for flag in --with-lz4 --with-zstd --with-liburing; do
-              case "$cfg" in
-                *"$flag"*) ;;
-                *) echo "::warning::postgres built without $flag — forcing a dep rebuild"
-                   need_rebuild=1 ;;
-              esac
-            done
-            if [ "$need_rebuild" -eq 1 ]; then
-              echo "LAPLACE_FORCE_DEPS=1" >> "$GITHUB_ENV"
-              echo "postgres predates the mandatory write-path codecs; dep rebuild forced"
-            fi
-          fi
-
-          if [ "$miss" -gt 0 ] || [ "$stale" -gt 0 ]; then
-            echo "::error::external cache: $miss absent/unbuilt, $stale stale —"
-            echo "::error::  provision: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
-            echo "::error::  rebuild:   LAPLACE_FORCE_DEPS=1 bash scripts/build-system-deps.sh"
-            exit 1
-          fi
-          if [ "${need_rebuild:-0}" -eq 1 ]; then
-            echo "external cache: $(grep -cv '^#' "$CACHE/PINS.tsv") pins current; REBUILD FORCED (see warnings above)"
-          else
-            echo "external cache verified: $(grep -cv '^#' "$CACHE/PINS.tsv") pins current, artifacts built"
-          fi
-
-      - name: Build system deps (fingerprinted — skip unless pins change)
-        run: |
-          # Stamp + installs live under /opt/laplace; LAPLACE_FORCE_DEPS=1 to rebuild.
-          umask 0002
-          bash scripts/build-system-deps.sh
-
-      - name: Verify installed dep artifacts
-        run: |
-          miss=0
-          # Post-build, the flags are load-bearing and their absence IS fatal:
-          # the rebuild has already had its chance.
-          if [ -x /opt/laplace/pgsql-18/bin/pg_config ]; then
-            cfg=$(/opt/laplace/pgsql-18/bin/pg_config --configure 2>/dev/null || true)
-            for flag in --with-lz4 --with-zstd --with-liburing; do
-              case "$cfg" in
-                *"$flag"*) ;;
-                *) echo "::error::postgres STILL lacks $flag after the dep build"
-                   miss=$((miss+1)) ;;
-              esac
-            done
-          fi
-          for f in \
-            /opt/laplace/proj/lib/libproj.so \
-            /opt/laplace/geos/lib/libgeos_c.so \
-            /opt/laplace/gdal/lib/libgdal.so \
-            /opt/laplace/pgsql-18/bin/postgres \
-            /opt/laplace/pgsql-18/lib/postgis-3.so \
-            /opt/laplace/tree-sitter/lib/libtree-sitter.a; do
-            if [ -e "$f" ]; then echo "  ok $f"; else echo "::error::missing artifact: $f"; miss=1; fi
-          done
-          exit "$miss"
+      - name: Verify and build pinned host dependencies
+        run: bash scripts/ci-deps.sh
 
   build:
     name: Build — engine, extensions, app, perfcache
-    needs: [policy, deps]
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      contains(fromJSON('["build", "test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
+    needs: deps
+    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["build", "test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
@@ -517,34 +113,22 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-
-      - name: Clean build tree (dispatch full_clean only)
+      - name: Clean build tree
         if: github.event_name == 'workflow_dispatch' && inputs.full_clean
         run: |
-          # checkout is clean:false, so the persistent runner accumulates untracked cruft.
-          # Purge stale codegen output from prior builds (old generated/NN_*.sql.in linger and
-          # trip the manifest-completeness gate on a fresh configure); pipeline.sh clean then
-          # wipes build/ so the native engine (content_witness_batch.c etc.) truly recompiles.
           find extension/laplace_substrate/sql/generated -name '[0-9]*_*.sql.in' -delete 2>/dev/null || true
           bash scripts/pipeline.sh clean
-
-      - name: Build
+      - name: Build exact revision
         run: |
           args=()
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.full_clean }}" = "true" ]; then
-            args+=(--force-rebuild)
-          fi
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_codegen }}" = "true" ]; then
-            args+=(--force-codegen)
-          fi
+          [[ "${{ github.event_name }}" != workflow_dispatch || "${{ inputs.full_clean }}" != true ]] || args+=(--force-rebuild)
+          [[ "${{ github.event_name }}" != workflow_dispatch || "${{ inputs.force_codegen }}" != true ]] || args+=(--force-codegen)
           bash scripts/pipeline.sh "${args[@]}" build
 
   unit-test:
-    name: Unit tests — native engine and managed ABI
+    name: DEV/BAT — native, managed, ABI and application contracts
     needs: build
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      contains(fromJSON('["test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
+    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:
@@ -555,51 +139,18 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: ctest
+      - name: Native and managed DEV/BAT
         env:
           LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
         run: |
-          # Tripwire (#880): this job needs the build tree the build job is
-          # expected to leave behind; if it is absent, name that directly
-          # instead of failing as a bare `cd` three theories deep.
-          if [ ! -d build ]; then
-            echo "::error::build/ absent at ctest start — the build job did not leave the required shared-workspace output. Re-run after inspecting the producing job."
-            exit 1
-          fi
+          [[ -d build ]] || { echo "::error::build/ absent at test start"; exit 1; }
           chmod +x scripts/test-parallel.sh
-          if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
+          if [[ "${LAPLACE_TEST_SERIAL:-}" == 1 ]]; then
             bash scripts/test-parallel.sh --serial --engine
           else
             bash scripts/test-parallel.sh --engine
           fi
-      - name: Managed core and native ABI gate (before installation)
-        run: |
-          # PR #1329 installed a new ABI before the managed signature regression
-          # ran in integration, then restored the old API after that failure.
-          # Execute the built managed/native boundary before any live install.
-          export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-          dotnet test app/Laplace.Core.Tests/Laplace.Core.Tests.csproj \
-            -c Release --no-build --filter 'Tier!=db&Tier!=perf' --verbosity minimal
-
-      - name: Bootstrap tuning validation (disposable PostgreSQL; no live changes)
-        run: python3 scripts/test-pg-machine-tuning.py
-
-      - name: Application release compatibility and recovery contracts (no activation)
-        run: |
-          python3 scripts/test-application-runtime.py
-          python3 scripts/test-application-publish.py
-
-      - name: Managed service transport and authorization tests (no activation)
-        run: |
-          dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj -c Release --no-build --verbosity minimal
-          dotnet test app/Laplace.Endpoints.Lichess.Tests/Laplace.Endpoints.Lichess.Tests.csproj -c Release --no-build --verbosity minimal
-          dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ManagedServiceDatabaseTests' --verbosity minimal
-          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ServiceControlTests' --verbosity minimal
-
-      - name: Read-path architecture and scanner contracts (before installation)
-        run: dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ReadPathArchitectureGateTests|FullyQualifiedName~ReadPathSqlScannerTests' --verbosity minimal
-
-      - name: Published UCI handshake and legal search (no activation)
+      - name: Published UCI handshake and legal search
         run: |
           runtime=$(mktemp -d)
           trap 'rm -rf "$runtime"' EXIT
@@ -607,13 +158,7 @@ jobs:
           python3 scripts/test-uci-publish.py "$runtime"
           python3 scripts/install-stockfish.py --prefix "$runtime/chess-tools"
           python3 scripts/test-cutechess-runtime.py /opt/laplace/bin/cutechess-cli "$runtime/laplace-uci" "$runtime/chess-tools/bin/stockfish"
-
-      - name: Chess runner and read-only preview contracts
-        run: |
-          dotnet test app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj -c Release --no-build --filter 'Tier!=db&Tier!=perf' --verbosity minimal
-          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ChessRuntimeContractTests' --verbosity minimal
-
-      - name: Chess browser strength controls (mock API; no activation)
+      - name: Chess browser strength controls
         working-directory: web
         run: |
           npm ci --no-audit --no-fund
@@ -622,7 +167,7 @@ jobs:
           npm run test:chess-ui
 
   application-release:
-    name: Applications — verified existing engine, independent runtime transaction
+    name: Applications — verified existing engine, independent transaction
     needs: unit-test
     if: >-
       !cancelled() && needs.unit-test.result == 'success' &&
@@ -630,8 +175,6 @@ jobs:
       contains(fromJSON('["application-check", "applications"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     concurrency:
-      # Hold the lifecycle slot across preflight, publish, verification AND
-      # recovery; no engine install may interleave these steps.
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
     timeout-minutes: 20
@@ -643,22 +186,19 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: Refuse destructive/full-engine options in an application release
+      - name: Refuse destructive application-release options
         env:
           FRESH_DB: ${{ inputs.fresh_db }}
           FULL_CLEAN: ${{ inputs.full_clean }}
         run: |
-          [[ "$FRESH_DB" != true && "$FULL_CLEAN" != true ]] || {
-            echo "::error::application releases cannot reset the DB or discard install receipts"
-            exit 1
-          }
-      - name: Read-only application compatibility preflight
+          [[ "$FRESH_DB" != true && "$FULL_CLEAN" != true ]] || exit 1
+      - name: Read-only installed-runtime compatibility
         run: bash scripts/publish-applications.sh check
-      - name: API contracts against the installed native runtime
+      - name: API contracts against installed native runtime
         run: |
           export LD_LIBRARY_PATH="/opt/laplace/lib:${LD_LIBRARY_PATH:-}"
           dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
-            -c Release --no-build --filter 'Tier!=db&Tier!=perf' --verbosity minimal
+            -c Release --no-build --filter 'Tier!=db&Tier!=live&Tier!=perf' --verbosity minimal
       - name: Publish and verify application-only transaction
         if: inputs.stage == 'applications'
         env:
@@ -669,50 +209,20 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
         run: bash scripts/publish-applications.sh deploy
-      - name: Recover only this run's unfinished application transaction
+      - name: Recover only this run's unfinished transaction
         if: always() && inputs.stage == 'applications'
         run: bash scripts/publish-applications.sh recover
 
   deploy:
-    name: Deploy — stage install to /opt/laplace
+    name: Install — engine and extension payload
     needs: unit-test
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
+    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     concurrency:
-      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
-      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
-      # overlapping is a half-installed tree.
-      #
-      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
-      # many corpora can land at once and the apply path is built for it -- so
-      # serialising them here would freeze one dev box's limits into the pipeline.
-      # Exclusion against live ingest is enforced where it belongs, by the
-      # ingest_run_journal preflight on the deploy job, which is a real lock that
-      # works across every workflow and at any number of runners.
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
-    timeout-minutes: 15
+    timeout-minutes: 315
     steps:
-      # WAIT FOR LIVE INGESTS BEFORE TOUCHING THE BOX.
-      #
-      # Deploy stops the API, replaces binaries and bounces PostgreSQL. Doing that under
-      # a running ingest is killed when deploy restarts PostgreSQL. The deploy waits on
-      # the substrate's ingest journal instead of relying on operator timing.
-      #
-      # THE LOCK LIVES IN THE SUBSTRATE, NOT IN GITHUB. Concurrency groups cannot express
-      # reader-writer: many seeds may run at once (they are content-addressed writers and
-      # the apply path is built for it), but a PG bounce excludes all of them. Putting
-      # every seed in one group would serialise ingest against ingest, which is this
-      # box's capacity limit masquerading as architecture. ingest_run_journal already
-      # records exactly what is needed, across every workflow and every dispatcher.
-      #
-      # Bounded: a stuck 'running' row must not wedge deploys forever. On timeout this
-      # reports what it is waiting on and FAILS rather than deploying anyway -- killing an
-      # ingest silently is the thing being fixed.
-      # Checkout precedes the wait: the wait script comes FROM the checkout, so a
-      # fresh runner workspace has nothing to run until after it (Copilot, PR #797).
       - name: Checkout requested revision (preserve build tree)
         env:
           TARGET_SHA: ${{ github.sha }}
@@ -720,36 +230,20 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: Wait for in-flight ingests (substrate lock)
+      - name: Wait for in-flight ingests
         timeout-minutes: 305
         run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
-
-      - name: Reconcile managed host desired state and check drift (before live install)
+      - name: Reconcile managed host desired state
         run: bash deploy/linux/managed-publish.sh preflight
-
-      - name: Install
-        # pipeline.sh install owns the API stop/start around the install window
-        # — a fingerprint-skipped install never bounces the service at all.
+      - name: Install exact build
         run: bash scripts/pipeline.sh install
 
   db-ops:
-    name: DB — migrate, extension sync, perfcache GUC
+    name: DB lifecycle — migrate, extension sync and runtime configuration
     needs: deploy
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
+    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     concurrency:
-      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
-      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
-      # overlapping is a half-installed tree.
-      #
-      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
-      # many corpora can land at once and the apply path is built for it -- so
-      # serialising them here would freeze one dev box's limits into the pipeline.
-      # Exclusion against live ingest is enforced where it belongs, by the
-      # ingest_run_journal preflight on the deploy job, which is a real lock that
-      # works across every workflow and at any number of runners.
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
     timeout-minutes: 20
@@ -761,123 +255,38 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-
-      - name: Migrate + sync extension + tune + perfcache GUC + API env
+      - name: Apply lifecycle transaction
         run: |
-          # ALTER EXTENSION takes AccessExclusive locks. Deploy's install phase
-          # restarts the API before this separate job begins, so a live read can
-          # immediately reacquire AccessShare and make the DDL fail its lock
-          # timeout. Measured in run 32337957529: a 29-second API query blocked
-          # DROP INDEX during the exact-render upgrade.
-          #
-          # Quiesce the known connection owner for the complete DB mutation
-          # window, then restore precisely the state we found. The always-run
-          # restore-api job remains the outer failure safety net.
           api_was_active=0
           if systemctl is-active --quiet laplace-api; then
             api_was_active=1
             sudo -n systemctl stop laplace-api
           fi
           restore_db_ops_api() {
-            if [ "$api_was_active" -eq 1 ]; then
-              sudo -n systemctl start laplace-api || true
-            fi
+            [[ "$api_was_active" -eq 0 ]] || sudo -n systemctl start laplace-api || true
           }
           trap restore_db_ops_api EXIT
-
           args=()
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
-            args+=(--fresh-db)
-          fi
+          [[ "${{ github.event_name }}" != workflow_dispatch || "${{ inputs.fresh_db }}" != true ]] || args+=(--fresh-db)
           bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
 
-  integration-test:
-    name: Integration tests — pg_regress || dotnet (parallel)
-    # Seed is dispatch-only; on push it skips instantly and tests run against
-    # the standing (already seeded) substrate with the freshly installed
-    # extension — the layer the tests are supposed to validate.
+      - name: Prove seed-independent database health before delivery
+        run: bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+
+  publish:
+    name: Deliver — API, SPA, UCI and managed services
     needs: db-ops
     if: >-
       !cancelled() && needs.db-ops.result == 'success' &&
-      (github.event_name != 'workflow_dispatch' ||
-       contains(fromJSON('["integrate", "all"]'), inputs.stage))
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 60
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-
-      - name: Clear stale regress output (diffs below must be from THIS run)
-        run: rm -rf build/extension/*/tests/regress_output
-
-      - name: pg_regress || dotnet test (parallel, change-aware)
-        env:
-          LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
-        run: |
-          chmod +x scripts/test-parallel.sh
-          bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$GITHUB_WORKSPACE/build" \
-            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
-          test -n "$bin" || { echo "::error::perfcache blob not found for dotnet tests"; exit 1; }
-          # regress ∥ dotnet-affected (engine gtests already ran in unit-test)
-          if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
-            bash scripts/test-parallel.sh --serial --integration
-          else
-            bash scripts/test-parallel.sh --integration
-          fi
-
-      - name: Show regress diffs on failure
-        if: failure()
-        run: |
-          for f in build/extension/*/tests/regress_output/regression.diffs; do
-            [ -f "$f" ] || continue
-            echo "::group::$f"
-            cat "$f"
-            echo "::endgroup::"
-          done
-
-  publish:
-    name: Publish — API + SPA, restart service
-    needs: integration-test
-    # A job with no `if` defaults to success(), and success() is evaluated over the
-    # WHOLE transitive needs graph — not just the direct parent. `seed` is
-    # dispatch-only, so on every push it is skipped, and that skip propagates down
-    # through integration-test (which survives it only because it declares its own
-    # `if`) into publish and smoke, which did not. Push-to-main therefore installed
-    # the extension and ran the tests but never shipped the API or SPA, while
-    # restore-api (`if: always()`) faithfully restarted the OLD binaries — so the
-    # box looked healthy and served stale code. State what this job actually
-    # requires instead of inheriting a condition about a job it does not use.
-    if: >-
-      !cancelled() && needs.integration-test.result == 'success' &&
-      (github.event_name != 'workflow_dispatch' ||
-       inputs.stage == 'all')
+      (github.event_name != 'workflow_dispatch' || inputs.stage == 'all')
     runs-on: [self-hosted, laplace]
     concurrency:
-      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
-      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
-      # overlapping is a half-installed tree.
-      #
-      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
-      # many corpora can land at once and the apply path is built for it -- so
-      # serialising them here would freeze one dev box's limits into the pipeline.
-      # Exclusion against live ingest is enforced where it belongs, by the
-      # ingest_run_journal preflight on the deploy job, which is a real lock that
-      # works across every workflow and at any number of runners.
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
     timeout-minutes: 20
     outputs:
-      # Whether the deployed API came up READY (substrate has data), as opposed to
-      # deployed-but-unseeded. Smoke exercises live reads and can only mean anything
-      # against a seeded substrate.
-      seeded: ${{ steps.readiness.outputs.seeded }}
-    # Runtime credentials: repository Secrets (encrypted), not machine secrets.env.
-    # Non-secret knobs stay in vars / workflow env above.
+      has_data: ${{ steps.release.outputs.has_data }}
+      product_ready: ${{ steps.release.outputs.product_ready }}
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
@@ -893,107 +302,81 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-
-      - name: Publish (API + SPA + uci + chess-lab + secrets)
+      - name: Publish, activate, verify and commit
+        id: release
         run: |
           bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
-          bash scripts/pipeline.sh publish
+          bash scripts/publish-applications.sh deploy
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import pathlib
+          import sys
+          state = json.loads(pathlib.Path("build/.application-release-state.json").read_text())
+          with open(sys.argv[1], "a", encoding="utf-8") as output:
+              for key in ("has_data", "product_ready"):
+                  value = state.get(key)
+                  if type(value) is not bool:
+                      raise SystemExit(f"application release state {key} is not boolean")
+                  output.write(f"{key}={'true' if value else 'false'}\n")
+          PY
+      - name: Recover only this run's unfinished transaction
+        if: always()
+        run: bash scripts/publish-applications.sh recover
 
-      - name: Restart API + readiness gate
-        id: readiness
-        # Gate on /health/ready, not /health: /health is liveness only (a
-        # hard-coded "ok" that proves the process started). Readiness proves
-        # the service can reach the substrate AND the T0 perfcache is loaded
-        # in PG — exactly the states whose absence previously sailed through
-        # this gate and surfaced four jobs later as a smoke 503.
-        #
-        # Change-aware: when pipeline.sh publish skipped the deploy (publish
-        # domain unchanged) and the service is already active, don't bounce a
-        # live service that runs the same bits — still prove readiness. The
-        # publish stamp is recorded ONLY here, after readiness passes, so
-        # "published" means deployed AND restarted AND ready.
+  integration-test:
+    name: QA — seed-independent PostgreSQL and managed DB fixtures
+    needs: [db-ops, publish]
+    if: >-
+      always() && !cancelled() && needs.db-ops.result == 'success' &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'integrate' && needs.publish.result == 'skipped') ||
+        (needs.publish.result == 'success' &&
+         (github.event_name != 'workflow_dispatch' || inputs.stage == 'all'))
+      )
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
         run: |
-          action=$(cat build/.publish-action 2>/dev/null || echo deployed)
-          if [[ "$action" == "skipped" ]] && systemctl is-active --quiet laplace-api; then
-            echo "publish skipped (domain unchanged) — service active; verifying readiness without restart"
-            bash deploy/linux/managed-publish.sh verify
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Clear stale pg_regress output
+        run: rm -rf build/extension/*/tests/regress_output
+      - name: DB health, pg_regress and managed DB tests
+        env:
+          LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
+        run: |
+          chmod +x scripts/test-parallel.sh
+          bin=$(find "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/share/laplace" "$GITHUB_WORKSPACE/build" \
+            -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+          [[ -n "$bin" ]] || { echo "::error::perfcache blob not found for DB QA"; exit 1; }
+          if [[ "${LAPLACE_TEST_SERIAL:-}" == 1 ]]; then
+            bash scripts/test-parallel.sh --serial --integration
           else
-            sudo systemctl restart laplace-api
-            bash deploy/linux/managed-publish.sh activate
+            bash scripts/test-parallel.sh --integration
           fi
-          for i in $(seq 1 30); do
-            sleep 2
-            if curl -fsS http://127.0.0.1:5187/health/ready >/dev/null 2>&1; then
-              echo "laplace-api ready"
-              # #792: ready ≠ foundation floor. Entities>0 can be thin residue
-              # after a failed seed; fail loud before stamp / smoke.
-              bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
-              echo "seeded=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+      - name: Show pg_regress diffs on failure
+        if: failure()
+        run: |
+          for file in build/extension/*/tests/regress_output/regression.diffs; do
+            [[ -f "$file" ]] || continue
+            echo "::group::$file"
+            cat "$file"
+            echo "::endgroup::"
           done
 
-          # Not ready. Named fail (#792) — never soft-exit and skip smoke.
-          # Seeds stay dispatch-only (no auto-reseed from this gate). Heal:
-          #   gh workflow run seed-foundation.yml --ref main
-          detail=$(curl -sS http://127.0.0.1:5187/health/ready || true)
-          echo "$detail"
-          if python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if (d.get("substrate_reachable") and d.get("perfcache_ready") and not d.get("consensus_relations")) else 1)' "$detail"
-          then
-            # An EMPTY substrate is not a broken deploy. The service is up, the perfcache
-            # loaded, the extension installed — publish did its job. What is missing is
-            # DATA, which publish does not own and cannot heal (seeds stay dispatch-only).
-            #
-            # This used to write seeded=false and then exit 1, which contradicted itself:
-            # smoke and eval already gate on `needs.publish.outputs.seeded == 'true'`, so
-            # the output published here is exactly what makes them skip cleanly — and
-            # failing the job meant that guard could never be reached. /health/ready
-            # reports ready:false while unseeded, so the poll above can never succeed on a
-            # fresh database, which made main structurally red for the entire window
-            # between a recreate and a seed. That window is now normal: HASH(id)
-            # repartitioning made drop-then-recreate the upgrade path.
-            #
-            # #792 is preserved. That defect was a STALE deploy silently skipping smoke;
-            # every not-ready-for-any-other-reason path below still fails loudly. The one
-            # case softened here is the one the substrate itself reports as merely empty.
-            echo "::warning::UNSEEDED_SUBSTRATE: API reachable + perfcache loaded, but substrate has no consensus/entities. Downstream smoke/eval will skip. Heal via: gh workflow run \"Seed — foundation\" -f source=ladder"
-            echo "seeded=false" >> "$GITHUB_OUTPUT"
-            # Deliberately NOT stamped: the stamp lets a later run skip publish on an
-            # unchanged domain, and this box has not served a ready check. Re-publishing
-            # is idempotent; skipping one that was never verified is not.
-            exit 0
-          fi
-
-          echo "::error::laplace-api not ready 60s after restart — readiness detail above"
-          # journalctl needs no root when the runner is in systemd-journal;
-          # sudo -n (never prompts) systemctl status is the granted fallback.
-          journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
-            || sudo -n systemctl status laplace-api || true
-          exit 1
-
   smoke:
-    name: Smoke — live endpoint + substrate counts
-    needs: publish
-    # Same transitive-skip trap as publish: smoke is the gate that would have
-    # CAUGHT a stale deploy, and it was skipped by the very condition that caused
-    # one. It must state its own requirement.
+    name: Product proof — seeded live endpoints
+    needs: [publish, integration-test]
+    # Product evidence is ordered after post-delivery DB QA. `always()` plus the
+    # absence of any integration-success predicate means DB QA may stay red without
+    # suppressing the product-floor evidence or rolling the committed payload back.
     if: >-
-      !cancelled() && needs.publish.result == 'success' &&
-      needs.publish.outputs.seeded == 'true'
+      always() && !cancelled() && needs.publish.result == 'success'
     runs-on: [self-hosted, laplace]
-    concurrency:
-      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
-      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
-      # overlapping is a half-installed tree.
-      #
-      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
-      # many corpora can land at once and the apply path is built for it -- so
-      # serialising them here would freeze one dev box's limits into the pipeline.
-      # Exclusion against live ingest is enforced where it belongs, by the
-      # ingest_run_journal preflight on the deploy job, which is a real lock that
-      # works across every workflow and at any number of runners.
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: false
     timeout-minutes: 20
     steps:
       - name: Checkout requested revision (preserve build tree)
@@ -1003,61 +386,38 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-
-      - name: Substrate floor (fail loud — #792)
+      - name: Named substrate-floor gate
         run: bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
-
-      - name: Live endpoint smoke
+      - name: Live API contract
         env:
           LAPLACE_API_BASE: http://127.0.0.1:8080
         run: |
-          capabilities="$(curl -fsS "${LAPLACE_API_BASE}/v1/capabilities")"
-          grep -q '"chat_completions"' <<<"${capabilities}"
-          grep -q '"op"' <<<"${capabilities}"
-
-          readiness="$(curl -fsS "${LAPLACE_API_BASE}/health/ready")"
-          printf '%s\n' "${readiness}"
-          grep -q '"ready":true' <<<"${readiness}"
-          grep -q '"substrate_reachable":true' <<<"${readiness}"
-          grep -Eq '"entities":[1-9][0-9]*' <<<"${readiness}"
-          grep -Eq '"consensus_relations":[1-9][0-9]*' <<<"${readiness}"
-
-          inventory="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/op" \
+          capabilities=$(curl -fsS "$LAPLACE_API_BASE/v1/capabilities")
+          grep -q '"chat_completions"' <<<"$capabilities"
+          grep -q '"op"' <<<"$capabilities"
+          readiness=$(curl -fsS "$LAPLACE_API_BASE/health/ready")
+          grep -q '"ready":true' <<<"$readiness"
+          grep -q '"substrate_reachable":true' <<<"$readiness"
+          inventory=$(curl -fsS -X POST "$LAPLACE_API_BASE/v1/op" \
             -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"name":"ops.substrate_counts","max_rows":20}')"
-          printf '%s\n' "${inventory}"
-          grep -q '"object":"op.result"' <<<"${inventory}"
-          grep -q '"name":"ops.substrate_counts"' <<<"${inventory}"
-
-          completion="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/chat/completions" \
+            --data '{"name":"ops.substrate_counts","max_rows":20}')
+          grep -q '"object":"op.result"' <<<"$inventory"
+          completion=$(curl -fsS -X POST "$LAPLACE_API_BASE/v1/chat/completions" \
             -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')"
-          printf '%s\n' "${completion}"
-          grep -q '"object":"chat.completion"' <<<"${completion}"
-
-      - name: Endpoint contract tests against the live service
+            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')
+          grep -q '"object":"chat.completion"' <<<"$completion"
+      - name: Live product acceptance tests
         run: |
           cd app
-          dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-            --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
+          dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal --filter 'Tier=live'
 
   eval:
-    name: Eval — generation / election correctness
+    name: Product eval — generation and election correctness
     needs: [publish, smoke]
-    # Same seeded guard as smoke. The bounded election harness is the ordinary
-    # deploy gate and governs itself via eval-baselines.json. The multi-prompt
-    # lane benchmark is deliberately opt-in: its cold generation battery is a
-    # performance/quality investigation, not a prerequisite for publishing.
     if: >-
-      !cancelled() && needs.publish.result == 'success' &&
-      needs.publish.outputs.seeded == 'true' &&
-      needs.smoke.result == 'success'
+      always() && !cancelled() && needs.publish.result == 'success' &&
+      needs.publish.outputs.product_ready == 'true' && needs.smoke.result == 'success'
     runs-on: [self-hosted, laplace]
-    concurrency:
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: false
-    # The explicit generation benchmark retains this conservative outer bound;
-    # ordinary deploy runs execute only the bounded correctness harness.
     timeout-minutes: 45
     steps:
       - name: Checkout requested revision (preserve build tree)
@@ -1067,69 +427,39 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: Election + generation quality harness
+      - name: Election and generation quality harness
         run: |
           mkdir -p .eval-proof
-          python3 scripts/eval-generation.py \
-            --api http://127.0.0.1:8080 \
-            --probes scripts/eval-probes.json \
-            --baseline scripts/eval-baselines.json \
+          python3 scripts/eval-generation.py --api http://127.0.0.1:8080 \
+            --probes scripts/eval-probes.json --baseline scripts/eval-baselines.json \
             --report .eval-proof/generation.json
-
-      - name: Lane detectors — seed variance / echo / flatness / content (W5 #755)
-        # Explicit benchmark only. It enforces the declared replay and echo classes;
-        # content and flatness remain measured outputs without blocking thresholds.
-        if: >-
-          !cancelled() && github.event_name == 'workflow_dispatch' &&
-          inputs.generation_benchmark == true
+      - name: Explicit generation benchmark
+        if: github.event_name == 'workflow_dispatch' && inputs.generation_benchmark == true
         run: |
-          python3 scripts/verify-generation.py \
-            --api http://127.0.0.1:8080 \
-            --report .eval-proof/lane-detectors.json \
-            --enforce
+          python3 scripts/verify-generation.py --api http://127.0.0.1:8080 \
+            --report .eval-proof/lane-detectors.json --enforce
 
   restore-api:
-    name: Restore API (always — even after failed stages)
-    if: always() && needs.deploy.result != 'skipped'
-    needs: [deploy, publish, smoke, eval]
+    name: Recovery — failed application activation only
+    needs: [deploy, publish]
+    if: >-
+      always() && needs.deploy.result != 'skipped' &&
+      needs.publish.result != 'success'
     runs-on: [self-hosted, laplace]
     concurrency:
-      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
-      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
-      # overlapping is a half-installed tree.
-      #
-      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
-      # many corpora can land at once and the apply path is built for it -- so
-      # serialising them here would freeze one dev box's limits into the pipeline.
-      # Exclusion against live ingest is enforced where it belongs, by the
-      # ingest_run_journal preflight on the deploy job, which is a real lock that
-      # works across every workflow and at any number of runners.
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
     timeout-minutes: 10
     steps:
-      - name: Commit verified publish or restore the previous runtime
-        env:
-          PUBLISH_RESULT: ${{ needs.publish.result }}
-          SMOKE_RESULT: ${{ needs.smoke.result }}
-          EVAL_RESULT: ${{ needs.eval.result }}
-          PUBLISHED_SEEDED: ${{ needs.publish.outputs.seeded }}
-        run: |
-          if [[ "$PUBLISH_RESULT" == success && "$SMOKE_RESULT" != failure && "$SMOKE_RESULT" != cancelled && "$EVAL_RESULT" != failure && "$EVAL_RESULT" != cancelled ]]; then
-            bash deploy/linux/managed-publish.sh commit
-            if [[ "$PUBLISHED_SEEDED" == true ]]; then
-              bash scripts/pipeline.sh publish-stamp
-            fi
-          else
-            bash deploy/linux/managed-publish.sh rollback
-          fi
+      - name: Recover only this run's unfinished application transaction
+        run: bash scripts/publish-applications.sh recover
       - name: Ensure API is running
         if: always()
         run: |
           sudo systemctl start laplace-api || true
           sleep 3
           curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
-            echo "::warning::laplace-api unhealthy after restore"
+            echo "::warning::laplace-api unhealthy after recovery"
             journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
               || sudo -n systemctl status laplace-api || true
             exit 1

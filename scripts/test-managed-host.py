@@ -325,7 +325,9 @@ class EntryPointTests(unittest.TestCase):
 
     def test_ci_repairs_host_before_live_install_and_never_installs_root_code(self):
         workflow = (ROOT / ".github/workflows/laplace.yml").read_text()
-        self.assertIn("python3 scripts/test-managed-host.py", workflow)
+        policy = (ROOT / "scripts/ci-policy.sh").read_text()
+        self.assertIn("run: bash scripts/ci-policy.sh", workflow)
+        self.assertIn("python3 scripts/test-managed-host.py", policy)
         publish = (ROOT / "deploy/linux/managed-publish.sh").read_text()
         self.assertIn('sudo -n "$HELPER" reconcile-host', publish)
         self.assertIn('sudo -n "$HELPER" host-status', publish)
