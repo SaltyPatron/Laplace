@@ -43,8 +43,6 @@ internal sealed class OpenSubtitlesAlignedHandler
 
     private sealed class AlignedBlockUnit : IMultiTreeIngestDeferredUnit
     {
-        private static readonly Hash128 SequenceSchema =
-            Hash128.OfCanonical("opensubtitles/sequence-block512/schema/v1");
         private static readonly Hash128 AlignmentSchema =
             Hash128.OfCanonical("opensubtitles/alignment-block512/schema/v1");
 
@@ -97,8 +95,6 @@ internal sealed class OpenSubtitlesAlignedHandler
                     out rightIds[i], rightCoords.AsSpan(i * 4, 4));
             }
 
-            builder.AddEntity(
-                SequenceSchema, EntityTier.Word, EntityTypeRegistry.SourceReference, _source);
             builder.AddEntity(
                 AlignmentSchema, EntityTier.Word, EntityTypeRegistry.SourceReference, _source);
             Hash128 pairReference = Hash128.OfCanonical(
@@ -153,9 +149,12 @@ internal sealed class OpenSubtitlesAlignedHandler
         private (Hash128 Id, double[] Coord) StageSequence(
             SubstrateChangeBuilder builder, Hash128[] sentenceIds, double[] sentenceCoords)
         {
-            var constituents = new Hash128[sentenceIds.Length + 1];
-            constituents[0] = SequenceSchema;
-            sentenceIds.CopyTo(constituents, 1);
+            // Sequence identity is content-only. OpenSubtitles is testimony about
+            // this ordered composition, not an identity namespace for it: another
+            // corpus admitting the same sentence ids in the same order must reach
+            // the same Merkle id and trajectory. Source/language metadata stays on
+            // the entity rows and attestations rather than entering this preimage.
+            Hash128[] constituents = sentenceIds;
             Hash128 id = Hash128.Merkle(EntityTier.Document, constituents);
             builder.AddEntity(
                 id, EntityTier.Document, EntityTypeRegistry.OpenSubtitlesSequence, _source);
