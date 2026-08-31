@@ -1,3 +1,4 @@
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -20,13 +21,7 @@ public sealed class ChessExploreReadPathTests
 
     private static string FindRepoRoot()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Laplace.slnx")))
-                return dir.FullName;
-            dir = dir.Parent;
-        }
+        if (LaplaceInstall.TryRepoRoot(out string root)) return root;
         throw new DirectoryNotFoundException("Laplace repository root not found");
     }
 }
