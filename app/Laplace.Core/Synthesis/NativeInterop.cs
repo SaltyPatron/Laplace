@@ -138,8 +138,22 @@ public static partial class NativeInterop
     public static partial IntPtr ArchTemplateLoad(string templateName);
 
     [LibraryImport(Library, EntryPoint = "arch_template_required_tensors")]
-    public static unsafe partial int ArchTemplateRequiredTensors(
+    private static unsafe partial int ArchTemplateRequiredTensorsNative(
         IntPtr tmpl, IntPtr recipe, TensorSpec* outSpecs, nuint cap);
+
+    /// <summary>
+    /// Bounded ABI form retained for native-parity callers. The C ABI reports the
+    /// required count when <paramref name="cap"/> is too small and intentionally does
+    /// not populate <paramref name="outSpecs"/> in that case. Managed callers historically
+    /// treated any positive result as populated data, so translate capacity shortfall to
+    /// a fail-loud status instead of handing them a default/zero manifest.
+    /// </summary>
+    public static unsafe int ArchTemplateRequiredTensors(
+        IntPtr tmpl, IntPtr recipe, TensorSpec* outSpecs, nuint cap)
+    {
+        int count = ArchTemplateRequiredTensorsNative(tmpl, recipe, outSpecs, cap);
+        return count > 0 && (nuint)count > cap ? -2 : count;
+    }
 
     [LibraryImport(Library, EntryPoint = "arch_template_free")]
     public static partial void ArchTemplateFree(IntPtr tmpl);
