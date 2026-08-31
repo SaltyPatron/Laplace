@@ -31,20 +31,16 @@ source "$ROOT/scripts/lib/fp.sh"
 
 MODE=all
 SERIAL="${LAPLACE_TEST_SERIAL:-0}"
-# Tier=db RUNS. It was excluded here and, mirroring this line, in
-# app/Directory.Build.props -- so 66 passing tests executed NOWHERE: not in CI, not in
-# `just test`, not in a bare `dotnet test`. Among them is
-# ConsensusAccumulatingWriterTests.Production_IsBitExactDeterministic, the fold's
-# bit-exactness guarantee, and Production_MixedPhiFailsLoud.
+# Tier=db RUNS. These tests may require PostgreSQL, but they must create/own their
+# fixture state rather than depend on a particular seeded product corpus.
 #
-# The dependency is a PostgreSQL cluster, and this phase already requires one: pg_regress
-# runs beside these tests and cannot start without it. The db-tier fixtures build their own
-# throwaway databases, so they need the cluster, not a seeded substrate.
+# Tier=live is different: it exercises the standing shared substrate/product and
+# may require foundation/knowledge seeds or mutate durable cells. Those tests are
+# valuable product acceptance probes, but they are not database-health tests and
+# must not make migrate/integration red while a fresh DB is legitimately unseeded.
 #
-# Verified 2026-08-24 against the live cluster: Substrate 64/64, Decomposers 1/1, Chess 1/1
-# (1 skipped). Tier=perf stays excluded for the reason Directory.Build.props gives -- a
-# ">500k rows/sec" gate on a box that is also seeding reports machine load, not a regression.
-DOTNET_FILTER='Tier!=perf'
+# Tier=perf remains explicit because runner load is not a stable performance oracle.
+DOTNET_FILTER='Tier!=perf&Tier!=live'
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -85,11 +81,6 @@ run_ctest_engine() {
     return 0
   fi
   echo "==== ctest (excl. regress) -j ${CTEST_PARALLEL_LEVEL} ===="
-  # rc must be captured and returned: a bare ctest followed by fp_record makes
-  # fp_record the last command, so the function returns ITS status and a failing
-  # suite reports success. Recording only on success matters just as much -- a
-  # stamp written after a failure makes the next run fp_check-skip the suite
-  # entirely, caching the failure as a pass.
   local rc=0
   ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -LE regress || rc=$?
   if [[ "$rc" -eq 0 ]]; then fp_record test-engine "$fp"; fi
@@ -97,9 +88,6 @@ run_ctest_engine() {
 }
 
 run_ctest_regress() {
-  # Regress exercises the INSTALLED extension against live PG, so the pass is
-  # only reusable while both the sources and the installed image are the ones
-  # it ran against — fold the install stamp into the key.
   local fp
   fp="$(fp_native):$(cat "$FP_STAMP_DIR/install-native" 2>/dev/null || echo uninstalled)"
   if fp_check test-regress "$fp"; then
@@ -107,9 +95,6 @@ run_ctest_regress() {
     return 0
   fi
   echo "==== ctest (regress) -j ${CTEST_PARALLEL_LEVEL} ===="
-  # Same capture-and-return as run_ctest_engine. Observed live: chess_read failed,
-  # ctest printed "1 of 16 tests failed" and "Errors while running CTest", and the
-  # layer still reported ctest-regress_rc=0.
   local rc=0
   ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -L regress || rc=$?
   if [[ "$rc" -eq 0 ]]; then fp_record test-regress "$fp"; fi
@@ -125,9 +110,6 @@ run_dotnet() {
     echo "LAPLACE_PERFCACHE_BIN=$bin"
   fi
 
-  # dotnet tests read the INSTALLED perfcache blob/extension and the migrated
-  # DB, so a reinstall must re-prove the app layer even with no source diff —
-  # fold the install stamp into the salt exactly as run_ctest_regress keys.
   local salt plan_out plan_rc=0
   salt="$(fp_runtime):$(cat "$FP_STAMP_DIR/install-native" 2>/dev/null || echo uninstalled)"
   plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns test --salt "$salt") || plan_rc=$?
@@ -146,9 +128,6 @@ run_dotnet() {
   mapfile -t projs <<<"$plan_out"
   if (( ${#projs[@]} > 6 )); then
     echo "==== dotnet test (${#projs[@]} affected — full solution, $DOTNET_FILTER) ===="
-    # `return 0` here discarded the result outright -- the full-solution path could
-    # not fail. The per-project path below already does this correctly (tracks rc,
-    # records only what passed); this now matches it.
     local rc=0
     ( cd "$ROOT/app" && dotnet test Laplace.slnx -c Release --nologo --verbosity minimal \
         --filter "$DOTNET_FILTER" ) || rc=$?
@@ -179,8 +158,6 @@ run_dotnet() {
 }
 
 parallel_pair() {
-  # parallel_pair <label-a> <fn-a> <label-b> <fn-b> — run both, print both logs,
-  # fail if either failed.
   local la="$1" fa="$2" lb="$3" fb="$4"
   local log_a log_b pid_a pid_b rc_a rc_b
   log_a="$(mktemp)"; log_b="$(mktemp)"
@@ -217,7 +194,6 @@ case "$MODE" in
     exit 0 ;;
 esac
 
-# Full gate: engine ∥ regress, then app (unless --serial).
 if [[ "$SERIAL" == "1" ]]; then
   run_ctest_engine
   run_ctest_regress
