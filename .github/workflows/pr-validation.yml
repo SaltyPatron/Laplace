@@ -10,10 +10,13 @@ permissions:
 
 # This repository currently has one registered runner and one persistent untracked
 # build tree. PR proof must serialize with main/deployment workflows until immutable
-# artifacts and isolated runner workspaces replace that contract.
+# artifacts and isolated runner workspaces replace that contract. Main delivery has
+# priority: PR runs may queue behind it, but a newly submitted PR proof must never
+# replace/cancel an already-pending main run in this shared concurrency group.
 concurrency:
   group: laplace-shared-workspace
   cancel-in-progress: false
+  queue: max
 
 jobs:
   prove:
