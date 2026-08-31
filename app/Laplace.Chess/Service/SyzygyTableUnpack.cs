@@ -7,13 +7,14 @@ namespace Laplace.Chess.Service;
 
 /// <summary>
 /// Opens Syzygy packaging: each <c>.rtbw</c> file is one material table (the package
-/// unit). Fathom is the codec — thread-safe <c>tb_probe_wdl</c> for the WDL product,
-/// locked <c>tb_probe_root</c> only when DTZ is needed (non-draws). Placement walks the
-/// material's index space; there is no Fathom "dump table" API. Parallelism:
-/// <see cref="DecomposerMultiFile{TRecord}"/> runs materials across file workers;
-/// the decomposer invokes one stream per material, and concurrent materials share one
-/// compose-worker-sized probe budget (the optional gate on
-/// <see cref="ExtractMaterialAsync"/>) so file fan × probe fan never oversubscribes.
+/// unit). Fathom is the codec. Every persisted edge needs <c>tb_probe_root</c>, because
+/// WDL alone does not identify its typed move or successor and cannot produce the
+/// position → move → position graph. Placement walks the material's index space;
+/// there is no Fathom "dump table" API. Parallel work is emitted in placement order:
+/// content-addressed chunk and material identities must be invariant under worker timing.
+/// <see cref="DecomposerMultiFile{TRecord}"/> runs materials across file workers, and
+/// concurrent materials share one compose-worker-sized probe budget (the optional gate
+/// on <see cref="ExtractMaterialAsync"/>) so file fan × probe fan never oversubscribes.
 /// </summary>
 public static class SyzygyTableUnpack
 {
@@ -93,7 +94,9 @@ public static class SyzygyTableUnpack
 
     /// <summary>
     /// Extract every probeable product for one material table (one <c>.rtbw</c> basename).
-    /// WDL probes run in parallel; DTZ uses the locked root probe only for non-draws.
+    /// Probe work may complete in parallel, but results are yielded in canonical placement
+    /// order. This is part of the persisted identity contract: completion-order output made
+    /// the 2,048-transition Merkle chunks and their material root change on every run.
     /// <paramref name="probeGate"/>, when supplied, is a probe budget SHARED with the other
     /// concurrently-unpacking materials: each probe holds one slot for its duration, so
     /// the total probe fan across materials never exceeds the gate's capacity, and the
@@ -110,42 +113,55 @@ public static class SyzygyTableUnpack
         int degree = workers > 0
             ? workers
             : Math.Max(1, IngestTopology.Current.ComposeWorkers);
-        await foreach (var product in ParallelIngestWork.RunAsync(
-                           EnumerateBoardsAsync(pieces, ct),
-                           degree,
-                           (board, token) => ProbeBoardAsync(board, prober, probeGate, token),
-                           ct).ConfigureAwait(false))
-            yield return product;
+        int windowSize = Math.Clamp(degree * 32, 256, 4_096);
+        var boards = new List<Board>(windowSize);
+        await foreach (var board in EnumerateBoardsAsync(pieces, ct).ConfigureAwait(false))
+        {
+            boards.Add(board);
+            if (boards.Count < windowSize) continue;
+            await foreach (var product in ProbeWindowInOrderAsync(
+                               boards, prober, degree, probeGate, ct).ConfigureAwait(false))
+                yield return product;
+            boards = new List<Board>(windowSize);
+        }
+        if (boards.Count > 0)
+            await foreach (var product in ProbeWindowInOrderAsync(
+                               boards, prober, degree, probeGate, ct).ConfigureAwait(false))
+                yield return product;
     }
 
-    private static async IAsyncEnumerable<SyzygyProduct> ProbeBoardAsync(
-        Board board,
+    private static async IAsyncEnumerable<SyzygyProduct> ProbeWindowInOrderAsync(
+        IReadOnlyList<Board> boards,
         ISyzygyProber prober,
+        int degree,
         SemaphoreSlim? probeGate,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        SyzygyProduct? product;
-        if (probeGate is null)
+        var products = new SyzygyProduct?[boards.Count];
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, boards.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = degree, CancellationToken = ct },
+            async (index, token) =>
+            {
+                if (probeGate is not null)
+                    await probeGate.WaitAsync(token).ConfigureAwait(false);
+                try { products[index] = ProbeBoard(boards[index], prober); }
+                finally { probeGate?.Release(); }
+            }).ConfigureAwait(false);
+
+        // Parallel.ForEachAsync completion order is deliberately discarded. The board
+        // ordinal owns transition order, hence chunk boundaries and the material Merkle root.
+        for (int i = 0; i < products.Length; i++)
         {
-            product = ProbeBoard(board, prober);
+            ct.ThrowIfCancellationRequested();
+            if (products[i] is { } product) yield return product;
         }
-        else
-        {
-            // Hold the slot for the probe only — released BEFORE the yield so output
-            // backpressure never parks a slot of the shared budget.
-            await probeGate.WaitAsync(ct).ConfigureAwait(false);
-            try { product = ProbeBoard(board, prober); }
-            finally { probeGate.Release(); }
-        }
-        if (product is { } p) yield return p;
     }
 
     private static SyzygyProduct? ProbeBoard(Board board, ISyzygyProber prober)
     {
-        if (prober.ProbeWdl(board) is not { }) return null;
-        // Root probe supplies the optimal deterministic transition for wins, draws and losses.
-        // WDL alone cannot compose an endgame trajectory.
+        // Root supplies WDL, DTZ and the exact transition in one decode. Calling ProbeWdl
+        // first decoded every state twice while its answer was immediately discarded.
         if (prober.Probe(board) is not { } full) return null;
 
         string surface = Modality.StateKey(new ChessState(board));

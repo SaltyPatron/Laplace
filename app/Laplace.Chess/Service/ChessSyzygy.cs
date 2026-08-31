@@ -18,6 +18,17 @@ public readonly record struct SyzygyVerdict(
 
 public readonly record struct SyzygyChunkRef(Hash128 Id, double[] Coord);
 
+/// <summary>
+/// One fully composed storage leaf. Preparing it once at extraction time discards the
+/// thousands of FEN strings that produced it and keeps only the content-addressed graph
+/// trajectory needed by apply.
+/// </summary>
+public sealed record SyzygyTransitionChunk(
+    Hash128 Id, double[] Coord, double[] Trajectory, int NConstituents)
+{
+    public SyzygyChunkRef Reference => new(Id, Coord);
+}
+
 /// <summary>Probe boundary: the native kernel in production, a fake in tests.</summary>
 public interface ISyzygyProber
 {
@@ -71,7 +82,10 @@ public sealed class SyzygyNativeProber : ISyzygyProber
 public static class ChessSyzygy
 {
     public const int Version = 2;
-    public const int MaterialGraphVersion = 1;
+    // v2 pins material roots to canonical placement-order chunks. v1 grouped parallel
+    // probe completion order, so worker timing changed chunk boundaries and a re-run minted
+    // a different graph behind the same material physicality identity.
+    public const int MaterialGraphVersion = 2;
 
     public const string SourceName = "ChessSyzygy";
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
@@ -189,36 +203,21 @@ public static class ChessSyzygy
         {
             int take = Math.Min(TransitionsPerChunk, products.Count - offset);
             var slice = products.Skip(offset).Take(take).ToArray();
-            var chunk = DescribeTransitionChunk(slice);
-            if (DeriveTransitionChunk(b, slice, chunk.Id)) chunks.Add(chunk);
+            var chunk = PrepareTransitionChunk(slice);
+            if (chunk is not null)
+            {
+                DeriveTransitionChunk(b, chunk);
+                chunks.Add(chunk.Reference);
+            }
         }
 
         DeriveMaterialRoot(b, chunks, materialId);
     }
 
-    internal static SyzygyChunkRef DescribeTransitionChunk(IReadOnlyList<SyzygyProduct> products)
+    internal static SyzygyTransitionChunk? PrepareTransitionChunk(
+        IReadOnlyList<SyzygyProduct> products)
     {
         var facts = new List<Hash128>(products.Count);
-        var coords = new List<double>(products.Count * 12);
-        foreach (var product in products)
-        {
-            if (!TryTransition(product, out var from, out var move, out var to))
-                throw InvalidTransition(product);
-            facts.Add(Hash128.OfCanonical(
-                $"chess/syzygy/transition/{from.Id}/{move.Id}/{to.Id}/{product.Wdl}/{product.Dtz}"));
-            coords.AddRange(from.Coord); coords.AddRange(move.Coord); coords.AddRange(to.Coord);
-        }
-        return facts.Count == 0
-            ? new SyzygyChunkRef(default, Array.Empty<double>())
-            : new SyzygyChunkRef(
-                Hash128.Merkle(ChessCompose.SegmentTier, CollectionsMarshal.AsSpan(facts)),
-                Math4d.KarcherMean(CollectionsMarshal.AsSpan(coords)));
-    }
-
-    internal static bool DeriveTransitionChunk(
-        SubstrateChangeBuilder b, IReadOnlyList<SyzygyProduct> products, Hash128 chunkId)
-    {
-        if (chunkId == default) return false;
         var ids = new List<Hash128>(products.Count * 3);
         var coords = new List<double>(products.Count * 12);
         var flags = new List<ulong>(products.Count * 3);
@@ -226,23 +225,33 @@ public static class ChessSyzygy
         {
             if (!TryTransition(product, out var from, out var move, out var to))
                 throw InvalidTransition(product);
+            facts.Add(Hash128.OfCanonical(
+                $"chess/syzygy/transition/{from.Id}/{move.Id}/{to.Id}/{product.Wdl}/{product.Dtz}"));
             ids.Add(from.Id); ids.Add(move.Id); ids.Add(to.Id);
             coords.AddRange(from.Coord); coords.AddRange(move.Coord); coords.AddRange(to.Coord);
             flags.Add(PackTransitionFlags(0, product.Wdl, product.Dtz));
             flags.Add(PackTransitionFlags(1, product.Wdl, product.Dtz));
             flags.Add(PackTransitionFlags(2, product.Wdl, product.Dtz));
         }
-        if (ids.Count == 0) return false;
-        double[] centroid = Math4d.KarcherMean(CollectionsMarshal.AsSpan(coords));
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        b.AddEntity(chunkId, ChessCompose.SegmentTier, ChessVocabulary.AnalysisMarkerType, SourceId);
-        b.AddPhysicality(new PhysicalityRow(
-            PhysicalityId.Compute(chunkId, PhysicalityType.Projection),
-            chunkId, SourceId, PhysicalityType.Projection,
-            centroid[0], centroid[1], centroid[2], centroid[3], Hilbert128.Encode(centroid),
+        if (facts.Count == 0) return null;
+        return new SyzygyTransitionChunk(
+            Hash128.Merkle(ChessCompose.SegmentTier, CollectionsMarshal.AsSpan(facts)),
+            Math4d.KarcherMean(CollectionsMarshal.AsSpan(coords)),
             Trajectory.Build(CollectionsMarshal.AsSpan(ids), CollectionsMarshal.AsSpan(flags)),
-            ids.Count, null, null, nowUs));
-        return true;
+            ids.Count);
+    }
+
+    internal static void DeriveTransitionChunk(
+        SubstrateChangeBuilder b, SyzygyTransitionChunk chunk)
+    {
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        b.AddEntity(chunk.Id, ChessCompose.SegmentTier, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddPhysicality(new PhysicalityRow(
+            PhysicalityId.Compute(chunk.Id, PhysicalityType.Projection),
+            chunk.Id, SourceId, PhysicalityType.Projection,
+            chunk.Coord[0], chunk.Coord[1], chunk.Coord[2], chunk.Coord[3],
+            Hilbert128.Encode(chunk.Coord), chunk.Trajectory,
+            chunk.NConstituents, null, null, nowUs));
     }
 
     private static InvalidDataException InvalidTransition(SyzygyProduct product) => new(
@@ -357,8 +366,12 @@ public static class ChessSyzygy
                 var product = new SyzygyProduct(
                     surface, ChessCompose.PositionId(surface), verdict.Wdl, verdict.Dtz,
                     verdict.From, verdict.To, verdict.Promotes);
-                var chunk = DescribeTransitionChunk([product]);
-                if (DeriveTransitionChunk(b, [product], chunk.Id)) chunks.Add(chunk);
+                var chunk = PrepareTransitionChunk([product]);
+                if (chunk is not null)
+                {
+                    DeriveTransitionChunk(b, chunk);
+                    chunks.Add(chunk.Reference);
+                }
             }
 
             if (ply == n) break;

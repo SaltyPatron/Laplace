@@ -42,6 +42,35 @@ public sealed class ChessSyzygyTests
         }
     }
 
+    private sealed class DelayedRootProber : ISyzygyProber
+    {
+        public int Largest => 3;
+        public int WdlCalls;
+        public int RootCalls;
+
+        public int? ProbeWdl(Board board)
+        {
+            Interlocked.Increment(ref WdlCalls);
+            throw new InvalidOperationException("material extraction must not decode WDL twice");
+        }
+
+        public SyzygyVerdict? Probe(Board board)
+        {
+            Interlocked.Increment(ref RootCalls);
+            // Vary completion time from board content so a completion-order stream is
+            // observably different from the canonical placement walk.
+            int delay = 1 + (int)(ChessCompose.PositionId(board).Lo % 5);
+            Thread.Sleep(delay);
+            var move = MoveGen.Legal(board).FirstOrDefault();
+            if (move == default) return null;
+            return new SyzygyVerdict(
+                SyzygyNative.Draw, 0,
+                Board.RankOf(move.From) * 8 + Board.FileOf(move.From),
+                Board.RankOf(move.To) * 8 + Board.FileOf(move.To),
+                move.IsPromotion ? 1 : 0);
+        }
+    }
+
     private static SubstrateChange Derive(ISyzygyProber prober, string pgn)
     {
         var parsed = ChessPgnDecomposer.TryParseGame(pgn)!;
@@ -164,6 +193,34 @@ public sealed class ChessSyzygyTests
     }
 
     [Fact]
+    public async Task MaterialExtraction_ParallelProbePreservesCanonicalPlacementOrder()
+    {
+        var expected = new List<string>();
+        Assert.True(SyzygyTableUnpack.TryParseMaterial("KQvK", out var pieces));
+        var modality = new ChessModality();
+        await foreach (var board in SyzygyTableUnpack.EnumerateBoardsAsync(pieces, CancellationToken.None))
+        {
+            if (MoveGen.Legal(board).Count == 0) continue;
+            expected.Add(modality.StateKey(new ChessState(board)));
+            if (expected.Count == 64) break;
+        }
+
+        var prober = new DelayedRootProber();
+        var actual = new List<string>();
+        await foreach (var product in SyzygyTableUnpack.ExtractMaterialAsync(
+                           "KQvK", prober, workers: 4,
+                           ct: CancellationToken.None))
+        {
+            actual.Add(product.Surface);
+            if (actual.Count == expected.Count) break;
+        }
+
+        Assert.Equal(expected, actual);
+        Assert.Equal(0, prober.WdlCalls);
+        Assert.True(prober.RootCalls >= actual.Count);
+    }
+
+    [Fact]
     public void DeriveGame_DepositsDeduplicatedTransitionGraph()
     {
         var prober = new FakeProber(3, new SyzygyVerdict(SyzygyNative.Win, 12));
@@ -211,7 +268,8 @@ public sealed class ChessSyzygyTests
         var b = new SubstrateChangeBuilder(ChessSyzygy.SourceId, "test/syzygy-material");
 
         Assert.NotNull(record.Chunk);
-        Assert.True(ChessSyzygy.DeriveTransitionChunk(b, [product], record.Chunk.Value.Id));
+        Assert.NotNull(record.PreparedChunk);
+        ChessSyzygy.DeriveTransitionChunk(b, record.PreparedChunk!);
         var change = b.SetInputUnitsConsumed(1).Build();
 
         var trajectory = Assert.Single(change.Physicalities);

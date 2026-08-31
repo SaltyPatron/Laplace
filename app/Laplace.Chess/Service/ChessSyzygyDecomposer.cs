@@ -37,8 +37,12 @@ public sealed class ChessSyzygyDecomposer
     protected override double SourceTrust => TC.StandardsDerived;
     protected override string BatchLabelPrefix => "chess/syzygy";
 
-    public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
-    public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
+    // One pipeline record is a prepared leaf of up to 2,048 transitions, not one PGN
+    // game. Its packed trajectory is about 192 KiB and its extraction-side graph buffers
+    // briefly add another few hundred KiB. Sizing it as a 1.2 KiB chess record let the
+    // generic pending queue retain thousands of these leaves at once.
+    public override int EstimatedBytesPerRecord => 512 * 1_024;
+    public override int EstimatedComposeUnitsPerRecord => 1;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
@@ -193,8 +197,8 @@ public sealed class ChessSyzygyDecomposer
         string fileLabel, DecomposerOptions options) =>
         new DirectComposeHandler<ChessSyzygyRecord>(static (r, b) =>
         {
-            if (r.Products is { } products && r.Chunk is { } chunk)
-                ChessSyzygy.DeriveTransitionChunk(b, products, chunk.Id);
+            if (r.PreparedChunk is { } chunk)
+                ChessSyzygy.DeriveTransitionChunk(b, chunk);
             else if (r.Chunks is { } chunks)
                 ChessSyzygy.DeriveMaterialRoot(b, chunks, r.TrunkRootId);
             else if (r.Product is { } product)
@@ -315,13 +319,12 @@ public sealed record ChessSyzygyRecord : ITrunkRootRecord
     }
 
     private ChessSyzygyRecord(
-        string material, IReadOnlyList<SyzygyProduct>? products,
-        SyzygyChunkRef? chunk, IReadOnlyList<SyzygyChunkRef>? chunks,
+        string material, SyzygyTransitionChunk? preparedChunk,
+        IReadOnlyList<SyzygyChunkRef>? chunks,
         Hash128 trunkRootId, long inputUnits)
     {
         Material = material;
-        Products = products;
-        Chunk = chunk;
+        PreparedChunk = preparedChunk;
         Chunks = chunks;
         TrunkRootId = trunkRootId;
         InputUnits = inputUnits;
@@ -329,19 +332,20 @@ public sealed record ChessSyzygyRecord : ITrunkRootRecord
 
     public static ChessSyzygyRecord CreateChunk(string material, IReadOnlyList<SyzygyProduct> products)
     {
-        var chunk = ChessSyzygy.DescribeTransitionChunk(products);
+        var chunk = ChessSyzygy.PrepareTransitionChunk(products)
+                    ?? throw new InvalidDataException("Syzygy transition chunk is empty");
         return new ChessSyzygyRecord(
-            material, products, chunk, null, chunk.Id, products.Count);
+            material, chunk, null, chunk.Id, products.Count);
     }
 
     public static ChessSyzygyRecord CreateMaterialRoot(
         string material, IReadOnlyList<SyzygyChunkRef> chunks) =>
-        new(material, null, null, chunks, ChessSyzygy.MaterialId(material), 0);
+        new(material, null, chunks, ChessSyzygy.MaterialId(material), 0);
 
     public SyzygyProduct? Product { get; }
     public string? Material { get; }
-    public IReadOnlyList<SyzygyProduct>? Products { get; }
-    public SyzygyChunkRef? Chunk { get; }
+    public SyzygyTransitionChunk? PreparedChunk { get; }
+    public SyzygyChunkRef? Chunk => PreparedChunk?.Reference;
     public IReadOnlyList<SyzygyChunkRef>? Chunks { get; }
     public Hash128 TrunkRootId { get; }
     public long InputUnits { get; }
