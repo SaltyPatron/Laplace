@@ -68,6 +68,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge);
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_type);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_partition_leaf);
 
 /* ------------------------------------------------------------------ */
 /* Session plan cache: one HTAB per statement family, keyed by type id */
@@ -100,6 +101,8 @@ typedef struct PriorRouteEntry
 } PriorRouteEntry;
 
 static HTAB *upsert_prior_routes = NULL;
+
+static const uint8_t *bytea16(Datum d, const char *label);
 
 static HTAB *
 plan_htab(HTAB **slot, const char *name)
@@ -272,6 +275,53 @@ prior_route(const uint8_t *type16, Datum type_datum, const char *label)
         table_close(hash_parent, AccessShareLock);
     }
     return entry;
+}
+
+/* Return the one physical consensus leaf that owns (type, subject).  Repair
+ * and inference SQL occasionally need to mutate derived state outside the
+ * ingest upsert.  Giving those callers the same native partition router keeps
+ * them from issuing parent UPDATE/DELETE statements whose plans open every
+ * HASH child.  This is routing metadata only; it never reads or changes a
+ * consensus row. */
+Datum
+pg_laplace_consensus_partition_leaf(PG_FUNCTION_ARGS)
+{
+    const char      *label = "consensus.partition_leaf";
+    Datum            type_datum;
+    const uint8_t   *type16;
+    PriorRouteEntry *route;
+    Relation         hash_parent;
+    PartitionKey     key;
+    Datum            values[1];
+    bool             nulls[1] = {false};
+    uint64           hash;
+    int              remainder;
+
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: type and subject must not be NULL", label)));
+
+    type_datum = PG_GETARG_DATUM(0);
+    type16 = bytea16(type_datum, label);
+    (void) bytea16(PG_GETARG_DATUM(1), label);
+    route = prior_route(type16, type_datum, label);
+
+    hash_parent = table_open(route->hash_parent_oid, AccessShareLock);
+    key = RelationGetPartitionKey(hash_parent);
+    if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
+        key->partnatts != 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                 errmsg("%s: cached consensus route is no longer HASH partitioned",
+                        label)));
+    values[0] = PG_GETARG_DATUM(1);
+    hash = compute_partition_hash_value(
+        1, key->partsupfunc, key->partcollation, values, nulls);
+    table_close(hash_parent, AccessShareLock);
+
+    remainder = (int) (hash % CONSENSUS_HASH_LEAVES);
+    PG_RETURN_OID(route->leaf_oids[remainder]);
 }
 
 static SPIPlanPtr

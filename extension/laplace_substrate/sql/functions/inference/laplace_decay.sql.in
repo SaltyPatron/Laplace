@@ -6,9 +6,14 @@ RETURNS void
 LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     v_id bytea := laplace.consensus_id(p_subject, p_type, p_object);
+    v_leaf regclass;
 BEGIN
-    UPDATE laplace.consensus
-    SET rd = LEAST((rd / p_decay_factor)::bigint, consensus.glicko2_initial_rd())
-    WHERE id = v_id;
+    v_leaf := consensus.partition_leaf(p_type, p_subject);
+    EXECUTE format($q$
+        UPDATE ONLY %s
+        SET rd = LEAST((rd / $1)::bigint, consensus.glicko2_initial_rd())
+        WHERE id = $2 AND type_id = $3 AND subject_id = $4
+    $q$, v_leaf)
+    USING p_decay_factor, v_id, p_type, p_subject;
 END;
 $$;

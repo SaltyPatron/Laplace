@@ -107,3 +107,14 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     SET enable_hashjoin = on
     SET enable_mergejoin = on
     SET enable_seqscan = on;
+
+-- The physical owner of one consensus key, resolved by the same PostgreSQL
+-- partition support function as the native ingest writer.  This is the single
+-- routing authority for the rare non-ingest mutations (decay, source eviction):
+-- callers mutate ONLY the returned leaf and never plan against the parent.
+CREATE OR REPLACE FUNCTION consensus.partition_leaf(
+    p_type bytea,
+    p_subject bytea)
+    RETURNS regclass
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_partition_leaf'
+    LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;
