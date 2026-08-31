@@ -128,3 +128,8 @@ for suffix in dll deps.json runtimeconfig.json; do
   mv "$TEST_ROOT/missing-uci-file" "$UCI_STAGE/laplace-uci.$suffix"
 done
 echo "OK apphost-only and incomplete UCI packages are rejected"
+
+# This script already owns the deploy payload policy gate in CI. Keep the MCP
+# protocol regression under the same gate so a missing/stale probe cannot be
+# skipped merely because no workflow file changed.
+python3 "$ROOT/scripts/test-mcp-deploy-contract.py"
