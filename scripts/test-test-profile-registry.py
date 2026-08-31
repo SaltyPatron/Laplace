@@ -124,6 +124,25 @@ class TestProfileRegistryTests(unittest.TestCase):
             ),
         )
 
+    def test_dotnet_discovery_counts_interleaved_solution_output(self):
+        output = """Test run for A.Tests.dll
+The following Tests are available:
+Test run for B.Tests.dll
+No test matches the given testcase filter `Tier=db` in A.Tests.dll
+    B.Tests.DatabaseFixture.First
+Test run for C.Tests.dll
+The following Tests are available:
+No test matches the given testcase filter `Tier=db` in C.Tests.dll
+    B.Tests.DatabaseFixture.Second(value: 1)
+"""
+        self.assertEqual(2, registry._count_dotnet_list(output))
+
+    def test_dotnet_discovery_without_listing_heading_is_zero(self):
+        self.assertEqual(
+            0,
+            registry._count_dotnet_list("    indented build warning without discovery\n"),
+        )
+
     def test_dotnet_runtime_expansion_receipt_preserves_discovery_and_exact_selection(self):
         with tempfile.TemporaryDirectory(prefix="test-profile-receipt-") as td:
             receipt = Path(td) / "receipt.json"

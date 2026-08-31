@@ -155,7 +155,7 @@ internal sealed class SubstrateTools : IMcpTools
             () => Schema(),
             (_, _) => McpRuntime()),
         new("source_status", "Is a source ingested, and how do we know.",
-            "Ingest state per source (ops.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
+            "Ingest state per source (ops.source_status): known, ingested, approximate evidence, the last run, and the substrate-owned throughput verdict/rate/baseline/slowdown. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. `throughput_compared=false` is not green. Absence is an answer here, never an empty result set.",
             () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
             (s, a) => s.SourceStatus(a)),
         new("ingest", "Run a corpus ingest through the CLI's tested pipeline.",
@@ -687,6 +687,11 @@ internal sealed class SubstrateTools : IMcpTools
             ["has_entities"] = s.HasEntities,
             ["last_run_status"] = s.LastRunStatus is null ? null : JsonValue.Create(s.LastRunStatus),
             ["last_run_at"] = s.LastRunAt is null ? null : JsonValue.Create(s.LastRunAt.Value),
+            ["throughput_status"] = s.ThroughputStatus is null ? null : JsonValue.Create(s.ThroughputStatus),
+            ["throughput_compared"] = s.ThroughputCompared,
+            ["throughput_rows_per_s"] = s.ThroughputRowsPerS is null ? null : JsonValue.Create(s.ThroughputRowsPerS.Value),
+            ["throughput_baseline_rows_per_s"] = s.ThroughputBaselineRowsPerS is null ? null : JsonValue.Create(s.ThroughputBaselineRowsPerS.Value),
+            ["throughput_slowdown_ratio"] = s.ThroughputSlowdownRatio is null ? null : JsonValue.Create(s.ThroughputSlowdownRatio.Value),
         }));
     }
 

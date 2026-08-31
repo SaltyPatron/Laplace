@@ -1,5 +1,6 @@
 using global::Npgsql;
 using NpgsqlTypes;
+using System.Globalization;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Ingestion;
@@ -299,6 +300,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             "UPDATE laplace.ingest_run_journal SET "
             + "status = $2, phase = CASE WHEN $2 = 'failed' THEN 'failed' ELSE 'complete' END, "
             + "ended_at = now(), "
+            // Persist the same runner stopwatch that emits INGEST_COMPLETE elapsed_s.
+            // started_at is journal-entry time, after decomposer initialization/inventory,
+            // so deriving throughput from ended_at-started_at would compare a shorter
+            // clock against the historical runner-clock baselines migrated by #1080.
+            + "throughput_elapsed_ms = $13, "
             + "units_attempted = $3, units_applied = $4, units_failed = $5, "
             + "entities = $6, physicalities = $7, attestations = $8, "
             + "error = COALESCE($9, error), "
@@ -323,14 +329,76 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 {
                     Value = (object?)error ?? DBNull.Value,
                     NpgsqlDbType = NpgsqlDbType.Text,
-                });
+            });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (long)result.FilesDone });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = result.InputUnitsDone });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = result.InputUnitsTotal });
-            });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = Math.Max(1L, (long)Math.Round(result.WallClock.TotalMilliseconds)),
+                    NpgsqlDbType = NpgsqlDbType.Bigint,
+                });
+                });
 
+        ReportThroughputVerdict(sourceName);
         WarnIfPlacementsExceedEntities(sourceName, result);
         ReleaseLivenessLock();
+    }
+
+    /// <summary>
+    /// Emit the substrate-owned verdict after the terminal journal transition. The
+    /// trigger is the authority; this is deliberately a readback rather than a second
+    /// throughput calculation. Every ingest entry point uses this observer, so a slow,
+    /// unmeasured, or unbaselined run is visible even when no Actions gate follows it.
+    /// </summary>
+    private void ReportThroughputVerdict(string sourceName)
+    {
+        try
+        {
+            using var conn = _ds.OpenConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT status, throughput_status, throughput_compared, "
+                + "throughput_rows, throughput_elapsed_ms, throughput_rows_per_s, "
+                + "throughput_baseline_rows_per_s, throughput_slowdown_ratio "
+                + "FROM laplace.ingest_run_journal WHERE run_id = $1";
+            cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read())
+            {
+                Console.Error.WriteLine(
+                    $"INGEST_THROUGHPUT_READ_FAILED source={sourceName} run={_runId} error=journal-row-missing");
+                return;
+            }
+
+            string runStatus = reader.GetString(0);
+            if (runStatus == "running")
+                return; // The terminal UPDATE already emitted INGEST_RUN_JOURNAL_WRITE_FAILED.
+
+            string verdict = reader.GetString(1);
+            bool compared = reader.GetBoolean(2);
+            string rows = reader.IsDBNull(3) ? "-" : reader.GetInt64(3).ToString();
+            string elapsedMs = reader.IsDBNull(4) ? "-" : reader.GetInt64(4).ToString();
+            string rate = reader.IsDBNull(5)
+                ? "-" : reader.GetDouble(5).ToString("0.0", CultureInfo.InvariantCulture);
+            string baseline = reader.IsDBNull(6)
+                ? "-" : reader.GetDouble(6).ToString("0.0", CultureInfo.InvariantCulture);
+            string slowdown = reader.IsDBNull(7)
+                ? "-" : reader.GetDouble(7).ToString("0.00", CultureInfo.InvariantCulture);
+            string receipt = $"source={sourceName} run={_runId} verdict={verdict} "
+                + $"compared={(compared ? 1 : 0)} rows={rows} elapsed_ms={elapsedMs} "
+                + $"rate_rows_s={rate} baseline_rows_s={baseline} slowdown={slowdown}";
+
+            Console.WriteLine($"INGEST_THROUGHPUT {receipt}");
+            if (verdict is "slow" or "unmeasured" or "unbaselined")
+                Console.Error.WriteLine($"INGEST_THROUGHPUT_REJECTED {receipt}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"INGEST_THROUGHPUT_READ_FAILED source={sourceName} run={_runId} "
+                + $"error=[{ex.GetType().Name}] {ex.Message}");
+        }
     }
 
     /// <summary>

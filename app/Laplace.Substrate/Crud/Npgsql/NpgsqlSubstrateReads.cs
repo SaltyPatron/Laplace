@@ -2072,7 +2072,9 @@ public static class NpgsqlSubstrateReads
     /// <summary>One source's ingest state — see <c>ops.source_status()</c>.</summary>
     public readonly record struct SourceStatusRow(
         string Source, byte[] SourceId, bool Known, bool Ingested,
-        long EvidenceApprox, bool HasEntities, string? LastRunStatus, DateTime? LastRunAt);
+        long EvidenceApprox, bool HasEntities, string? LastRunStatus, DateTime? LastRunAt,
+        string? ThroughputStatus, bool ThroughputCompared, double? ThroughputRowsPerS,
+        double? ThroughputBaselineRowsPerS, double? ThroughputSlowdownRatio);
 
     /// <summary>
     /// <c>ops.source_status()</c> — is a source ingested, and how do we know.
@@ -2088,12 +2090,19 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource,
             "SELECT source, source_id, known, ingested, evidence_approx, has_entities, "
-            + "last_run_status, last_run_at FROM ops.source_status(@s)",
+            + "last_run_status, last_run_at, throughput_status, throughput_compared, "
+            + "throughput_rows_per_s, throughput_baseline_rows_per_s, throughput_slowdown_ratio "
+            + "FROM ops.source_status(@s)",
             static r => new SourceStatusRow(
                 r.GetString(0), (byte[])r[1], r.GetBoolean(2), r.GetBoolean(3),
                 r.GetInt64(4), r.GetBoolean(5),
                 r.IsDBNull(6) ? null : r.GetString(6),
-                r.IsDBNull(7) ? null : r.GetDateTime(7)),
+                r.IsDBNull(7) ? null : r.GetDateTime(7),
+                r.IsDBNull(8) ? null : r.GetString(8),
+                r.GetBoolean(9),
+                r.IsDBNull(10) ? null : r.GetDouble(10),
+                r.IsDBNull(11) ? null : r.GetDouble(11),
+                r.IsDBNull(12) ? null : r.GetDouble(12)),
             p => p.Add("s", NpgsqlDbType.Text).Value = (object?)source ?? DBNull.Value,
             ct: ct, label: "source_status", onError: onError);
 

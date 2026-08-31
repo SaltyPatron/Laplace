@@ -2,73 +2,58 @@
 --
 -- WHY THIS EXISTS. There was no standardized answer to the most basic operational
 -- question in the system, so every caller assembled one, and every assembly was wrong in
--- a different way:
+-- a different way. The source inventory therefore comes from the substrate itself, while
+-- the journal remains authority for the most recent operation and its measured health.
 --
---   ops.evidence_count(laplace.source_id('X')) > 0     says DOCUMENTS ARE NOT INGESTED. The document
---                                          lane is content-only by design -- entities and
---                                          geometry, zero distributional attestations --
---                                          so the obvious test reports 3.6M entities of
---                                          real corpus as absent. This exact false
---                                          negative has been reached three times.
---   a name you typed                       returns 0 for "Wiktionary" when the source
---                                          declares "WiktionaryDecomposer". Zero rows
---                                          then means "you guessed wrong", not "absent",
---                                          and nothing tells the caller which.
---   ingest_run_journal                     is ops metadata, explicitly not preserved
---                                          across dump/restore. A source ingested before
---                                          the journal existed, or on a restored box, has
---                                          no row and is not absent.
---
--- So the enumeration comes FROM THE SUBSTRATE, never from a name the caller typed: every
--- source that has written attestations, entities, or a journal row appears. Absence is
--- then a real answer rather than a spelling failure.
---
--- INGESTED IS THREE FACTS, NOT ONE. Evidence, first-observed entities, and a completion
--- marker each answer a different question, and a lane can legitimately have one without
--- the others. They are returned separately and `ingested` is their disjunction, so a
--- caller can see WHY rather than being handed a boolean to misread.
---
--- FAST, AND THE FIRST CUT WAS NOT. Per-source volume comes from ops.source_counts_approx()
--- (planner statistics), never a scan. The entity side asks EXISTS per known source -- an
--- index probe against entities_first_observed_btree, a couple of dozen of them -- because
--- the question is "did this source observe entities", not "how many".
---
--- The first version wrote `GROUP BY first_observed_by` over 44M entities and carried a
--- comment claiming it was fast by construction. It timed out at 15s through MCP. A
--- standardized operation that cannot answer inside the caller's timeout is not
--- standardized, it is a slow query with a nicer name.
---
--- DROP first: an ad-hoc / pre-membership install of this function is not owned
--- by the extension. CREATE OR REPLACE then fails ALTER EXTENSION UPDATE with
--- "function ops.source_status(text) is not a member of extension laplace_substrate"
--- (CI 2026-08-03 runs 30788596381 / 30791014736). Same trap as geometry_audit /
--- sense_audit / prompt_language.
+-- Throughput is the same rule: UI/API/MCP/CLI and CI must not independently parse logs
+-- and invent different answers. The latest clean run carrying a throughput verdict is
+-- projected alongside the latest run status. A later marker skip may be the latest run
+-- while the previous real run remains the relevant throughput observation; an
+-- `unmeasured` clean run is itself a verdict and must remain visible rather than exposing
+-- an older green comparison.
 DROP FUNCTION IF EXISTS ops.source_status(text);
-
 DROP FUNCTION IF EXISTS laplace.source_status(text);
+
 CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
-    RETURNS TABLE(source            text,
-                  source_id         bytea,
-                  ingested          boolean,
-                  known             boolean,
-                  evidence_approx   bigint,
-                  has_entities      boolean,
-                  last_run_status   text,
-                  last_run_at       timestamptz)
+    RETURNS TABLE(source                         text,
+                  source_id                      bytea,
+                  ingested                       boolean,
+                  known                          boolean,
+                  evidence_approx                bigint,
+                  has_entities                   boolean,
+                  last_run_status                text,
+                  last_run_at                    timestamptz,
+                  throughput_status              text,
+                  throughput_compared            boolean,
+                  throughput_rows_per_s          double precision,
+                  throughput_baseline_rows_per_s double precision,
+                  throughput_slowdown_ratio      double precision)
     LANGUAGE sql STABLE
     AS $$
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
     FROM ops.source_counts_approx() s
 ),
--- NOTE: no by_entities aggregate. Entities carry first_observed_by, which is how a
--- CONTENT-ONLY lane proves it ran, but aggregating 44M rows to learn a boolean is the
--- wrong shape. The EXISTS probe lives in the projection, once per known source id.
--- Journal is ops metadata: authoritative about the LAST RUN, never about existence.
+-- Journal is ops metadata: authoritative about the LAST RUN, never about substrate
+-- existence. Keep this separate from by_throughput because a marker skip must not erase
+-- the last real throughput verdict.
 by_journal AS (
     SELECT DISTINCT ON (j.source_name)
            j.source_name, j.source_id, j.status, j.started_at
     FROM @extschema@.ingest_run_journal j
+    ORDER BY j.source_name, j.started_at DESC
+),
+by_throughput AS (
+    SELECT DISTINCT ON (j.source_name)
+           j.source_name, j.source_id,
+           j.throughput_status,
+           j.throughput_compared,
+           j.throughput_rows_per_s,
+           j.throughput_baseline_rows_per_s,
+           j.throughput_slowdown_ratio
+    FROM @extschema@.ingest_run_journal j
+    WHERE j.status = 'ok'
+      AND j.throughput_status <> 'not-measured'
     ORDER BY j.source_name, j.started_at DESC
 ),
 ids AS (
@@ -78,24 +63,25 @@ ids AS (
 rolled AS (
     SELECT i.source_id,
            -- EXACT FOR THE TAIL, ESTIMATE FOR THE HEAD. ops.source_counts_approx()
-           -- derives evidence from pg_stats most-common-values, and the MCV list holds
-           -- TEN entries: with one source at 84% of 371M rows, a source at 0.004% is
-           -- about one row in the sample and can never qualify as a common value at ANY
-           -- statistics target. Rendering that blindness as 0 is what made four sources
-           -- that between them hold 96,037 attestations read as "ingested nothing".
-           -- The sources the estimator cannot see are by definition the small ones, so
-           -- counting them exactly is affordable; the head keeps the free estimate.
+           -- derives evidence from planner MCV statistics. The estimator can miss a
+           -- small source, so count only that tail exactly instead of scanning the head.
            COALESCE(ev.evidence_approx,
                     (SELECT count(*) FROM @extschema@.attestations a
-                      WHERE a.source_id = i.source_id))       AS evidence_approx,
+                      WHERE a.source_id = i.source_id))             AS evidence_approx,
            EXISTS (SELECT 1 FROM @extschema@.entities e
-                   WHERE e.first_observed_by = i.source_id)    AS has_entities,
-           jr.source_name                                      AS journal_name,
-           jr.status                                           AS last_run_status,
-           jr.started_at                                       AS last_run_at
+                   WHERE e.first_observed_by = i.source_id)        AS has_entities,
+           jr.source_name                                          AS journal_name,
+           jr.status                                               AS last_run_status,
+           jr.started_at                                           AS last_run_at,
+           tp.throughput_status,
+           COALESCE(tp.throughput_compared, false)                 AS throughput_compared,
+           tp.throughput_rows_per_s,
+           tp.throughput_baseline_rows_per_s,
+           tp.throughput_slowdown_ratio
     FROM ids i
-    LEFT JOIN by_evidence ev ON ev.source_id = i.source_id
-    LEFT JOIN by_journal  jr ON jr.source_id = i.source_id
+    LEFT JOIN by_evidence   ev ON ev.source_id = i.source_id
+    LEFT JOIN by_journal    jr ON jr.source_id = i.source_id
+    LEFT JOIN by_throughput tp ON tp.source_id = i.source_id
 ), rolled_numbered AS MATERIALIZED (
     SELECT r.*, row_number() OVER (ORDER BY r.source_id) AS rn FROM rolled r
 ), rendered AS MATERIALIZED (
@@ -103,16 +89,21 @@ rolled AS (
     FROM rolled_numbered
 ),
 matched AS (
-    SELECT COALESCE(r.journal_name, x.labels[r.rn])                     AS source,
+    SELECT COALESCE(r.journal_name, x.labels[r.rn])                 AS source,
            r.source_id,
-           (r.evidence_approx > 0 OR r.has_entities)                     AS ingested,
-           true                                                          AS known,
+           (r.evidence_approx > 0 OR r.has_entities)                AS ingested,
+           true                                                     AS known,
            r.evidence_approx,
            r.has_entities,
            r.last_run_status,
-           r.last_run_at
-    -- The journal's recorded name beats realize.render(): render returns a source's CANONICAL
-    -- PATH ("substrate/source/ChessPgn/v1"), which is correct and useless as a label.
+           r.last_run_at,
+           r.throughput_status,
+           r.throughput_compared,
+           r.throughput_rows_per_s,
+           r.throughput_baseline_rows_per_s,
+           r.throughput_slowdown_ratio
+    -- The journal's recorded name beats realize.render(): render returns a source's
+    -- canonical path, which is correct and useless as an operator-facing lane label.
     FROM rolled_numbered r CROSS JOIN rendered x
     WHERE p_source IS NULL
        OR r.journal_name = p_source
@@ -120,28 +111,21 @@ matched AS (
 )
 SELECT * FROM matched
 UNION ALL
--- ABSENCE IS AN ANSWER, NOT AN EMPTY RESULT.
---
--- Asked about a specific source that has written nothing, the first cut returned ZERO
--- ROWS -- which is indistinguishable from misspelling the name, and on a mesh this dense
--- a wrong name is overwhelmingly the likelier cause. That is precisely the overloaded
--- empty this function was written to end, reproduced inside it.
---
--- So a named query ALWAYS returns exactly one row. ingested = false with a resolved
--- source_id means "this source has written nothing"; the id is there so the caller can
--- see the name did resolve to an identity, and the answer is about the substrate rather
--- than about their spelling.
+-- A named query always returns one row: absence must not be overloaded with a typo.
 SELECT p_source,
        @extschema@.source_id(p_source),
        false,
-       -- KNOWN separates "declared source that has written nothing" from "no such source".
-       -- Bootstrapping a lane mints its source ENTITY, so an id with no entity is a name
-       -- nothing in this substrate has ever declared -- almost always a misspelling, which
-       -- on a mesh this dense is far likelier than genuine absence. Reporting both as a
-       -- bare `ingested = false` answers a question the caller did not ask.
        EXISTS (SELECT 1 FROM @extschema@.entities e
                WHERE e.id = @extschema@.source_id(p_source)),
-       0::bigint, false, NULL::text, NULL::timestamptz
+       0::bigint,
+       false,
+       NULL::text,
+       NULL::timestamptz,
+       NULL::text,
+       false,
+       NULL::double precision,
+       NULL::double precision,
+       NULL::double precision
 WHERE p_source IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM matched)
 ORDER BY evidence_approx DESC, source_id

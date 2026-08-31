@@ -1,273 +1,241 @@
 #!/usr/bin/env python3
-"""Record and compare per-source ingest throughput.
+"""Read or deliberately accept per-source ingest throughput baselines.
 
-The signal has always existed and nothing ever read it. IngestRunner emits
-INGEST_COMPLETE (source, elapsed_s, rows_new, status) per run and INGEST_BATCH
-(rate_rows_s) per batch, and both land in $LAPLACE_OPS_LOG_DIR/laplace-cli.csv --
-queryable as ops.app_log through file_fdw. ingest-source.sh now emits INGEST_TIMING
-with the wall clock at the shell boundary. But no script parsed any of it, no
-baseline was written down, and no gate compared against one, so "the seed is slow"
-was an opinion for fourteen months.
+The authority is the substrate, not Actions logs and not a repository JSON file.
+Every IngestRunner entry point closes the same ingest_run_journal row; the journal
+trigger records the rows/s observation and comparison there. This script is only
+the CI/operator reader over that state.
 
-IngestBaselineGates declares MinWriterRowsPerSecond=500000 and MaxSecondsPerGigabyte=30,
-but those are enforced only by Tier=perf tests that CI excludes, and they measure a
-4 MiB synthetic buffer -- not a corpus. This measures corpora.
+Compatibility: existing workflow calls pass a detail-log path. The file contents are
+never parsed; the basename is used only to resolve the source key. This keeps CI on
+the same verdict used by CLI/UI/API/MCP without requiring an entry-point-specific path.
 
-    record   parse logs, write/merge scripts/ingest-baselines.json
-    check    parse logs, compare against the baseline, exit 1 on regression
-    show     print the current baseline
-
-Input is any mix of files and stdin: a tee'd ingest log, laplace-cli.csv, or the
-output of `gh run view --log`. Lines are matched by content, not by file format.
+    check  <source-or-log>...  fail on slow/unmeasured/unbaselined or zero comparisons
+    record <source-or-log>...  explicitly accept the latest measured clean run
+    show                       display accepted substrate baselines
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BASELINE_PATH = ROOT / "scripts" / "ingest-baselines.json"
-
-# Tolerated slowdown before `check` fails. Wide on purpose: this box is shared, an
-# autovacuum or a concurrent CI job perturbs a seed, and a flaky gate teaches people
-# to ignore it. It is here to catch a 2x regression, not a 10% one.
-DEFAULT_TOLERANCE = 1.5
-
-# Sentinel in the failures list — distinct from the slow (>0) and content-drift (==0)
-# buckets so "no baseline" is not reported as "ingested different content".
-UNBASELINED = -1.0
-
-# IngestBaselineGates.MinWriterRowsPerSecond. Reported on every line, never enforced
-# here: every recorded corpus is already 5x-195x under it (framenet 2,559/s ... unicode
-# 94,783/s, measured 2026-08-16), so enforcing would redden the whole seed pipeline in
-# one commit. Printing the ratio is what stops the gap from being invisible — a check
-# that only compares a source to its own past can catch a regression from slow, never
-# slow itself.
-ABSOLUTE_FLOOR_ROWS_PER_S = 500_000
-
-COMPLETE_RE = re.compile(
-    r"INGEST_COMPLETE\s+source=(?P<source>\S+).*?"
-    r"rows_new=(?P<ent>\d+)e\+(?P<phys>\d+)p\+(?P<att>\d+)a\s+"
-    r"elapsed_s=(?P<elapsed>[\d.]+).*?status=(?P<status>\S+)"
-)
-TIMING_RE = re.compile(
-    r"INGEST_TIMING\s+source=(?P<source>\S+)\s+elapsed_s=(?P<elapsed>\d+)\s+rc=(?P<rc>\d+)"
-)
+GATES = ROOT / "scripts" / "decomposer-gates.json"
+LOG_BASENAME_RE = re.compile(r"^laplace-ingest-(?P<key>.+)\.log$")
 
 
-def normalize(source: str) -> str:
-    """The two emitters name the same run differently: ingest-source.sh uses the CLI
-    source key ('wiktionary'), IngestRunner uses the decomposer class
-    ('WiktionaryDecomposer'). Without folding them, one run produces two baseline
-    entries and neither carries both numbers. Where the fold does not apply the keys
-    simply stay distinct, which is honest -- better than guessing them equal."""
-    s = source[:-len("Decomposer")] if source.endswith("Decomposer") else source
-    return s.lower()
+def _manifest() -> dict:
+    try:
+        return json.loads(GATES.read_text()).get("sources", {})
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"ingest-baseline: cannot read {GATES}: {exc}") from exc
 
 
-def parse(streams) -> dict[str, dict]:
-    """Collect the last observation per source. Later lines win: a re-ingest in the
-    same log is the fresher measurement, and the idempotency job deliberately runs
-    one, so taking the max or the mean would blend a cold seed with a warm no-op."""
-    seen: dict[str, dict] = {}
-    for stream in streams:
-        for line in stream:
-            m = COMPLETE_RE.search(line)
-            if m:
-                rows = int(m["ent"]) + int(m["phys"]) + int(m["att"])
-                elapsed = float(m["elapsed"])
-                seen.setdefault(normalize(m["source"]), {}).update(
-                    source=normalize(m["source"]),
-                    decomposer=m["source"],
-                    elapsed_s=elapsed,
-                    rows_new=rows,
-                    status=m["status"],
-                    rows_per_s=round(rows / elapsed, 1) if elapsed > 0 else None,
-                )
-                continue
-            m = TIMING_RE.search(line)
-            if m:
-                # Shell wall clock includes the CLI build and process start, so it is
-                # always >= the runner's own elapsed_s. Keep both; they answer different
-                # questions ("how long did the seed take" vs "how fast is the writer").
-                seen.setdefault(normalize(m["source"]), {}).update(
-                    source=normalize(m["source"]),
-                    wall_s=int(m["elapsed"]),
-                    rc=int(m["rc"]),
-                )
-    return seen
+def resolve_source(hint: str) -> str:
+    """Resolve a CLI key/log path to the journal's declared decomposer source name."""
+    raw = Path(hint).name
+    m = LOG_BASENAME_RE.match(raw)
+    key = m.group("key") if m else hint
+    entry = _manifest().get(key)
+    if entry and entry.get("decomposer"):
+        return str(entry["decomposer"])
+    # Direct operator use may already name the journal source.
+    return key
 
 
-def load_baseline() -> dict:
-    if not BASELINE_PATH.is_file():
-        return {}
-    return json.loads(BASELINE_PATH.read_text())
+def _psql(sql: str, *, source: str | None = None) -> str:
+    host = os.environ.get("PGHOST", "/var/run/postgresql")
+    user = os.environ.get("PGUSER", "laplace_admin")
+    db = os.environ.get("LAPLACE_DBNAME") or os.environ.get("PGDATABASE") or "laplace"
+    cmd = [
+        "psql", "-X", "-qAt", "-F", "\t", "-v", "ON_ERROR_STOP=1",
+        "-h", host, "-U", user, "-d", db,
+    ]
+    if source is not None:
+        cmd += ["-v", f"source={source}"]
+    proc = subprocess.run(cmd, input=sql, text=True, capture_output=True)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        raise RuntimeError(f"psql failed for {db}@{host}: {detail}")
+    return proc.stdout.strip()
 
 
-def open_inputs(paths):
-    if not paths:
-        return [sys.stdin]
-    streams = []
-    for p in paths:
-        fp = Path(p)
-        if not fp.is_file():
-            sys.stderr.write(f"ingest-baseline: no such file: {p}\n")
-            raise SystemExit(2)
-        streams.append(fp.open(errors="replace"))
-    return streams
+def _status(source: str) -> dict[str, str | float | bool | None]:
+    row = _psql(
+        """
+SELECT source,
+       coalesce(last_run_status, ''),
+       coalesce(throughput_status, ''),
+       throughput_compared::text,
+       coalesce(throughput_rows_per_s::text, ''),
+       coalesce(throughput_baseline_rows_per_s::text, ''),
+       coalesce(throughput_slowdown_ratio::text, '')
+FROM ops.source_status(:'source');
+""",
+        source=source,
+    )
+    if not row:
+        raise RuntimeError(f"ops.source_status returned no row for {source}")
+    fields = row.split("\t")
+    if len(fields) != 7:
+        raise RuntimeError(f"unexpected ops.source_status row for {source}: {row!r}")
+    src, run_status, verdict, compared, rate, baseline, ratio = fields
+    return {
+        "source": src,
+        "last_run_status": run_status or None,
+        "throughput_status": verdict or None,
+        "throughput_compared": compared == "t",
+        "rows_per_s": float(rate) if rate else None,
+        "baseline_rows_per_s": float(baseline) if baseline else None,
+        "slowdown_ratio": float(ratio) if ratio else None,
+    }
 
 
-def cmd_record(args) -> int:
-    observed = parse(open_inputs(args.logs))
-    if not observed:
-        sys.stderr.write("ingest-baseline: no INGEST_COMPLETE or INGEST_TIMING lines found\n")
-        return 1
-    baseline = load_baseline()
-    for source, obs in sorted(observed.items()):
-        if obs.get("status") not in (None, "ok"):
-            print(f"  skip {source}: status={obs['status']} (not a clean run)")
+def _fmt(value: float | None) -> str:
+    return "-" if value is None else f"{value:,.1f}"
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    if not args.sources:
+        print("ingest-baseline: check requires a source or compatibility log path", file=sys.stderr)
+        return 2
+
+    failed = 0
+    observed = 0
+    compared = 0
+    for hint in args.sources:
+        source = resolve_source(hint)
+        try:
+            s = _status(source)
+        except RuntimeError as exc:
+            print(f"ingest-baseline: {exc}", file=sys.stderr)
+            failed += 1
             continue
-        prev = baseline.get(source)
-        baseline[source] = obs
-        if prev and prev.get("elapsed_s"):
-            delta = obs.get("elapsed_s", 0) / prev["elapsed_s"]
-            print(f"  {source}: {obs.get('elapsed_s')}s ({delta:.2f}x previous {prev['elapsed_s']}s)")
-        elif obs.get("elapsed_s") is not None:
-            print(f"  {source}: {obs['elapsed_s']}s (new)")
+
+        observed += 1
+        verdict = s["throughput_status"]
+        ratio = s["slowdown_ratio"]
+        did_compare = bool(s["throughput_compared"])
+        if did_compare:
+            compared += 1
+
+        detail = (
+            f"{source}: rate={_fmt(s['rows_per_s'])} rows/s "
+            f"baseline={_fmt(s['baseline_rows_per_s'])} rows/s "
+            f"slowdown={('-' if ratio is None else f'{ratio:.2f}x')} "
+            f"last_run={s['last_run_status'] or '-'}"
+        )
+
+        if verdict == "slow":
+            print(f"  SLOW {detail}")
+            failed += 1
+        elif verdict == "unmeasured" or verdict is None:
+            print(f"  MISS {detail}")
+            failed += 1
+        elif verdict in ("unbaselined", "baseline-established"):
+            # `baseline-established` is retained only as a defensive read of an
+            # intermediate-schema journal row. Current substrate code emits
+            # `unbaselined` and never lets a measurement accept itself.
+            print(
+                f"  MISS {detail} (no accepted baseline; run `ingest-baseline.py record` "
+                "deliberately, then measure again)"
+            )
+            failed += 1
+        elif verdict == "ok":
+            if not did_compare:
+                print(f"  MISS {detail} (ok verdict without a comparison)")
+                failed += 1
+            else:
+                print(f"  ok   {detail}")
         else:
-            print(f"  {source}: {obs.get('wall_s')}s wall only (no INGEST_COMPLETE in input)")
-    BASELINE_PATH.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n")
-    print(f"wrote {BASELINE_PATH.relative_to(ROOT)} ({len(baseline)} sources)")
+            print(f"  MISS {detail} (unknown verdict {verdict!r})")
+            failed += 1
+
+    # The original false-green was exactly a successful command that compared
+    # nothing. Keep this aggregate invariant even though every unbaselined or
+    # unmeasured source is already a per-source failure above.
+    if failed == 0 and compared == 0:
+        print(
+            f"ingest-baseline: FAILED (observed={observed} compared=0 failed=0)",
+            file=sys.stderr,
+        )
+        return 1
+    if failed:
+        print(
+            f"ingest-baseline: FAILED (observed={observed} compared={compared} failed={failed})",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"ingest-baseline: OK (observed={observed} compared={compared})")
     return 0
 
 
-def cmd_check(args) -> int:
-    observed = parse(open_inputs(args.logs))
-    baseline = load_baseline()
-    if not observed:
-        sys.stderr.write("ingest-baseline: no timing lines found in input\n")
-        return 1
-    if not baseline:
-        sys.stderr.write(
-            "ingest-baseline: no baseline recorded yet — run `record` first. "
-            "Refusing to pass a check with nothing to compare against.\n")
-        return 1
-
-    failures = []
-    for source, obs in sorted(observed.items()):
-        elapsed = obs.get("elapsed_s")
-        prev = baseline.get(source)
-        if elapsed is None:
+def cmd_record(args: argparse.Namespace) -> int:
+    if not args.sources:
+        print("ingest-baseline: record requires a source or compatibility log path", file=sys.stderr)
+        return 2
+    failed = 0
+    for hint in args.sources:
+        source = resolve_source(hint)
+        try:
+            row = _psql(
+                "SELECT source_name, baseline_rows_per_s, accepted_run_id "
+                "FROM ops.ingest_throughput_accept(:'source');\n",
+                source=source,
+            )
+        except RuntimeError as exc:
+            print(f"ingest-baseline: {exc}", file=sys.stderr)
+            failed += 1
             continue
-        if not prev or not prev.get("elapsed_s"):
-            # WAS A NOTICE, NOW A FAILURE. An empty baseline FILE already refused to pass
-            # (above); a missing ENTRY printed a line and continued, so the largest corpus
-            # in the manifest was the one source the gate could not fail on. Measured
-            # 2026-08-16: conceptnet ran 43m26s at ~2,753 rows/s with no baseline recorded,
-            # and this step went green. --allow-unbaselined is the deliberate first-run
-            # escape hatch; it must be typed, not defaulted.
-            if args.allow_unbaselined:
-                print(f"  {source}: {elapsed}s (no baseline — allowed by --allow-unbaselined)")
-                continue
-            print(f"  NEW  {source}: {elapsed}s with no recorded baseline — "
-                  f"run `ingest-baseline.py record` or pass --allow-unbaselined")
-            failures.append((source, UNBASELINED))
-            continue
-        ratio = elapsed / prev["elapsed_s"]
-        mark = "ok " if ratio <= args.tolerance else "SLOW"
-        rows = obs.get("rows_new")
-        floor = ""
-        if rows and elapsed:
-            rate = rows / elapsed
-            floor = (f"  [{rate:,.0f} rows/s = "
-                     f"{ABSOLUTE_FLOOR_ROWS_PER_S / rate:.0f}x under the "
-                     f"{ABSOLUTE_FLOOR_ROWS_PER_S:,}/s IngestBaselineGates floor]")
-        print(f"  {mark} {source}: {elapsed}s vs baseline {prev['elapsed_s']}s "
-              f"({ratio:.2f}x){floor}")
-        if ratio > args.tolerance:
-            failures.append((source, ratio))
+        print(f"accepted {row}")
+    return 1 if failed else 0
 
-    # ROW COUNTS ARE THE CORRECTNESS CHECK, and they matter more than the timings.
-    # Ids are content hashes, so re-seeding the same files from scratch must produce the
-    # same rows_new. A changed count means the run ingested DIFFERENT CONTENT -- which is
-    # exactly what a refactor of per-source file RESOLUTION can silently cause, and no
-    # timing comparison would ever show it.
-    for source, obs in sorted(observed.items()):
-        rows = obs.get("rows_new")
-        prev = baseline.get(source)
-        if rows is None or not prev or not prev.get("rows_new"):
-            continue
-        if rows != prev["rows_new"]:
-            delta = rows - prev["rows_new"]
-            print(f"  ROWS {source}: {rows:,} vs baseline {prev['rows_new']:,} "
-                  f"({delta:+,}) — different content ingested, not a timing difference")
-            failures.append((source, 0.0))
 
-    if args.max_seconds:
-        for source, obs in sorted(observed.items()):
-            elapsed = obs.get("elapsed_s")
-            if elapsed is not None and elapsed > args.max_seconds:
-                print(f"  OVER {source}: {elapsed}s exceeds --max-seconds {args.max_seconds}")
-                failures.append((source, elapsed / args.max_seconds))
-
-    if failures:
-        slow = [f for f in failures if f[1] > 0.0]
-        drift = [f for f in failures if f[1] == 0.0]
-        unbaselined = [f for f in failures if f[1] == UNBASELINED]
-        parts = []
-        if slow:
-            parts.append(f"{len(slow)} slower than {args.tolerance}x")
-        if drift:
-            parts.append(f"{len(drift)} ingested different content")
-        if unbaselined:
-            parts.append(f"{len(unbaselined)} with no recorded baseline")
-        sys.stderr.write("ingest-baseline: " + "; ".join(parts) + "\n")
+def cmd_show(_args: argparse.Namespace) -> int:
+    try:
+        rows = _psql(
+            """
+SELECT source_name,
+       round(baseline_rows_per_s::numeric, 1),
+       baseline_rows,
+       baseline_elapsed_ms,
+       coalesce(round(last_rows_per_s::numeric, 1)::text, '-'),
+       coalesce(last_status, '-')
+FROM laplace.ingest_throughput_baseline
+ORDER BY source_name;
+"""
+        )
+    except RuntimeError as exc:
+        print(f"ingest-baseline: {exc}", file=sys.stderr)
         return 1
-    print("ingest-baseline: OK")
-    return 0
-
-
-def cmd_show(_args) -> int:
-    baseline = load_baseline()
-    if not baseline:
-        print("no baseline recorded")
-        return 0
-    for source, obs in sorted(baseline.items()):
-        elapsed = obs.get("elapsed_s")
-        wall = obs.get("wall_s")
-        rate = obs.get("rows_per_s")
-        shown = f"{elapsed:.1f}s" if elapsed is not None else (
-            f"{wall}s wall" if wall is not None else "no timing")
-        print(f"  {source:16} {shown:>14}  {obs.get('rows_new', 0):>12} rows  "
-              f"{rate if rate is not None else '-'} rows/s")
+    print(rows if rows else "no substrate throughput baselines")
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    rec = sub.add_parser("record", help="write/merge the baseline from logs")
-    rec.add_argument("logs", nargs="*", help="log files (default: stdin)")
-    rec.set_defaults(fn=cmd_record)
+    check = sub.add_parser("check", help="read the substrate verdict and fail on regression")
+    check.add_argument("sources", nargs="*", help="source key/name or compatibility detail-log path")
+    # Retain historical flags as parser compatibility. The substrate owns tolerance
+    # and elapsed boundaries now; CI cannot override them from a shell command.
+    check.add_argument("--tolerance", type=float, default=None, help=argparse.SUPPRESS)
+    check.add_argument("--max-seconds", type=float, default=None, help=argparse.SUPPRESS)
+    check.add_argument("--require-comparison", action="store_true", help=argparse.SUPPRESS)
+    check.set_defaults(fn=cmd_check)
 
-    chk = sub.add_parser("check", help="compare logs against the baseline")
-    chk.add_argument("logs", nargs="*", help="log files (default: stdin)")
-    chk.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE,
-                     help=f"allowed slowdown ratio (default {DEFAULT_TOLERANCE})")
-    chk.add_argument("--max-seconds", type=float, default=None,
-                     help="also fail any source slower than this many seconds")
-    chk.add_argument("--allow-unbaselined", action="store_true",
-                     help="pass a source that has no recorded baseline (first run of a "
-                          "new corpus); without it, an unbaselined source FAILS")
-    chk.set_defaults(fn=cmd_check)
+    record = sub.add_parser("record", help="explicitly accept the latest measured clean run")
+    record.add_argument("sources", nargs="*", help="source key/name or compatibility detail-log path")
+    record.set_defaults(fn=cmd_record)
 
-    show = sub.add_parser("show", help="print the recorded baseline")
+    show = sub.add_parser("show", help="show substrate-owned accepted baselines")
     show.set_defaults(fn=cmd_show)
 
     args = ap.parse_args()

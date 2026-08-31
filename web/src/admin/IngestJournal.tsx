@@ -195,6 +195,7 @@ export function IngestJournal() {
                   <th scope="col" className={styles.num}>Input</th>
                   <th scope="col" className={styles.num}>Files</th>
                   <th scope="col" className={styles.num}>Staged E/P/A</th>
+                  <th scope="col">Throughput</th>
                   <th scope="col" className={styles.num}>Took</th>
                   <th scope="col">Force close</th>
                 </tr>
@@ -243,6 +244,24 @@ export function IngestJournal() {
                         {(r.entities ?? 0).toLocaleString()}/
                         {(r.physicalities ?? 0).toLocaleString()}/
                         {(r.attestations ?? 0).toLocaleString()}
+                      </td>
+                      <td>
+                        {r.throughput_status ? (
+                          <>
+                            <span className={`${styles.badge} ${statusClass(r.throughput_status)}`}>
+                              {r.throughput_status}
+                            </span>
+                            <div className={styles.progressPct}>
+                              {r.throughput_rows_per_s == null
+                                ? 'not measured'
+                                : `${Math.round(r.throughput_rows_per_s).toLocaleString()} rows/s`}
+                              {r.throughput_slowdown_ratio == null
+                                ? ''
+                                : ` · ${r.throughput_slowdown_ratio.toFixed(2)}× baseline`}
+                              {r.throughput_compared ? '' : ' · not compared'}
+                            </div>
+                          </>
+                        ) : '—'}
                       </td>
                       <td className={styles.num}>
                         <div>{duration(r)}</div>
