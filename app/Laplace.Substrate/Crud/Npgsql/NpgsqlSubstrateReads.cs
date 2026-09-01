@@ -2422,15 +2422,20 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH p AS (SELECT chess.player_id(@name) AS id)
             SELECT encode(p.id, 'hex'), converse.label_or_hex(p.id),
-                   e.witness_count,
-                   round((e.rating / 1e9)::numeric, 3)::double precision,
-                   round((e.rd / 1e9)::numeric, 3)::double precision,
-                   consensus.eff_mu_display(e.rating, e.rd)::double precision
+                   COALESCE(o.witness_count, 0),
+                   round((COALESCE(o.rating, consensus.glicko2_neutral_mu()) / 1e9)::numeric, 3)::double precision,
+                   round((COALESCE(o.rd, consensus.glicko2_initial_rd()) / 1e9)::numeric, 3)::double precision,
+                   consensus.eff_mu_display(
+                       COALESCE(o.rating, consensus.glicko2_neutral_mu()),
+                       COALESCE(o.rd, consensus.glicko2_initial_rd()))::double precision
             FROM p
-            CROSS JOIN LATERAL consensus.edges_raw(
+            JOIN laplace.entities pe
+              ON pe.id = p.id
+             AND pe.type_id = laplace.entity_type_id('Chess_Player')
+            LEFT JOIN LATERAL consensus.edges_raw(
                 p.id, 'out',
                 ARRAY[laplace.relation_type_id('OUTCOME')],
-                1, true, 'eff_mu') e
+                1, true, 'eff_mu') o ON true
             """,
             static r => new ChessPlayerStrengthRow(
                 r.GetString(0), r.GetString(1),

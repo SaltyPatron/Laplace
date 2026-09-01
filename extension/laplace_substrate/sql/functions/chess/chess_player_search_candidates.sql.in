@@ -42,12 +42,27 @@ BEGIN ATOMIC
             || consensus.relation_family_ids('HAS_NAME_ALIAS'))
     ),
     rated AS MATERIALIZED (
-        SELECT p.player, o.witness_count AS games, o.rating, o.rd
+        SELECT p.player,
+               COALESCE(o.witness_count, 0) AS games,
+               COALESCE(o.rating, consensus.glicko2_neutral_mu()) AS rating,
+               COALESCE(o.rd, consensus.glicko2_initial_rd()) AS rd
         FROM players p
-        JOIN laplace.consensus o
-          ON o.subject_id = p.player
-         AND o.type_id = ANY (consensus.relation_family_ids('OUTCOME'))
-        ORDER BY consensus.eff_mu(o.rating, o.rd) DESC, p.player
+        LEFT JOIN LATERAL (
+            SELECT c.witness_count, c.rating, c.rd
+            FROM laplace.consensus c
+            WHERE c.subject_id = p.player
+              AND c.type_id = ANY (consensus.relation_family_ids('OUTCOME'))
+            ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.id
+            LIMIT 1
+        ) o ON true
+        -- Profile-only FIDE identities are searchable before a game archive is
+        -- associated with them.  Rated careers still lead an equally relevant
+        -- candidate set; the endpoint's human-name score remains authoritative.
+        ORDER BY (o.rating IS NOT NULL) DESC,
+                 consensus.eff_mu(
+                     COALESCE(o.rating, consensus.glicko2_neutral_mu()),
+                     COALESCE(o.rd, consensus.glicko2_initial_rd())) DESC,
+                 p.player
         LIMIT p_limit
     ),
     batch AS MATERIALIZED (

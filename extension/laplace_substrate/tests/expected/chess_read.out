@@ -147,6 +147,7 @@ DECLARE
     tal     bytea := chess.player_id('Tal, Mikhail');
     botv    bytea := chess.player_id('Botvinnik, Mikhail');
     spas    bytea := chess.player_id('Spassky, Boris');
+    profile_only bytea := chess.player_id('Profile, Only');
     -- playing-events and the lines they play; ln_a is SHARED by e1 and e4
     e1      bytea := public.laplace_hash128_blake3('test/chess2/e1');
     e2      bytea := public.laplace_hash128_blake3('test/chess2/e2');
@@ -534,7 +535,8 @@ BEGIN
     -- first constituent IS the codepoint, bound to him by a HAS_NAME_ALIAS cell -- and
     -- the same display-scale law on the rating columns.
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (cap_t, 0, type_t, src), (tname, 0, type_t, src);
+        (cap_t, 0, type_t, src), (tname, 0, type_t, src),
+        (profile_only, 0, laplace.entity_type_id('Chess_Player'), src);
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (public.laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
@@ -546,6 +548,8 @@ BEGIN
         (public.laplace_hash128_blake3('t2/c_alias'), tal, laplace.relation_type_id('HAS_NAME_ALIAS'),
             tname, 1500000000000, 50000000000, 60000000, 1, now()),
         (public.laplace_hash128_blake3('t2/c_primary_name'), botv, laplace.relation_type_id('HAS_NAME'),
+            tname, 1500000000000, 50000000000, 60000000, 1, now()),
+        (public.laplace_hash128_blake3('t2/c_profile_alias'), profile_only, laplace.relation_type_id('HAS_NAME_ALIAS'),
             tname, 1500000000000, 50000000000, 60000000, 1, now());
 
     SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu
@@ -569,6 +573,14 @@ BEGIN
      WHERE p.player_id = botv;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: partial player candidates did not include primary HAS_NAME';
+    END IF;
+
+    SELECT p.games, p.rating, p.rd, p.eff_mu INTO n, ra, rdv, mu
+      FROM chess.player_search_candidates(ARRAY['Te'], 10) p
+     WHERE p.player_id = profile_only;
+    IF n <> 0 OR ra <> 1500.0 OR rdv <> 350.0 OR mu <> 800.0 THEN
+        RAISE EXCEPTION 'FAIL: profile-only player was hidden or assigned invented career evidence: %/%/%/%',
+            n, ra, rdv, mu;
     END IF;
 
     IF to_regprocedure('chess.game_plies(bytea)') IS NOT NULL THEN
