@@ -4,18 +4,22 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.Lichess;
 
-internal sealed record LichessOptions(int Depth = DefaultDepth, int MaxConcurrent = 2, bool Substrate = true,
-    int Port = 5189, IReadOnlySet<string>? Speeds = null)
+internal sealed record LichessOptions(
+    int Depth = LichessDefaults.SearchDepth,
+    int MaxConcurrent = LichessDefaults.MaxConcurrent,
+    bool Substrate = true,
+    int Port = 5189,
+    IReadOnlySet<string>? Speeds = null)
 {
-    public const int DefaultDepth = 6;
-
     public static LichessOptions FromEnvironment()
     {
         static int Number(string name, int fallback) => Environment.GetEnvironmentVariable(name) is { } text
             ? int.Parse(text, System.Globalization.CultureInfo.InvariantCulture) : fallback;
         var speeds = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_SPEEDS")?
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return new(Number("LAPLACE_LICHESS_DEPTH", DefaultDepth), Number("LAPLACE_LICHESS_MAX_CONCURRENT", 2),
+        return new(
+            Number("LAPLACE_LICHESS_DEPTH", LichessDefaults.SearchDepth),
+            Number("LAPLACE_LICHESS_MAX_CONCURRENT", LichessDefaults.MaxConcurrent),
             Environment.GetEnvironmentVariable("LAPLACE_LICHESS_SUBSTRATE") != "false",
             Speeds: speeds is { Length: > 0 } ? speeds.ToHashSet(StringComparer.OrdinalIgnoreCase) : null);
     }
