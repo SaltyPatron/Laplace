@@ -1,5 +1,6 @@
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using System.Collections.Immutable;
 
 namespace Laplace.Decomposers.Abstractions;
 
@@ -97,6 +98,14 @@ public sealed class BootstrapIntentBuilder
 
 
         PosReference.SeedCanonical(_inner, _sourceId);
-        return _inner.Build();
+        // The intent that mints type/relation entities owns their readback names too.
+        // Carry the complete SET to the writer so registration cannot be forgotten by a
+        // new ingest entry point or repeated separately after every bootstrap operation.
+        return _inner.Build() with
+        {
+            CanonicalNames = _canonicalNames
+                .OrderBy(static name => name, StringComparer.Ordinal)
+                .ToImmutableArray(),
+        };
     }
 }

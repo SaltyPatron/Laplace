@@ -146,12 +146,23 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             var identityLinks = new HashSet<(Hash128 Subject, Hash128 Object, Hash128 Source)>();
             var planned = new List<(ChessPlayerProfile Profile, Hash128 PlayerId,
                 Hash128 SourceId, double Weight, SubstrateChangeBuilder Builder)>();
+
+            // Bootstrap each provider source once, then register the union in one set call.
+            // The former placement inside this loop performed the same source existence
+            // probe and register_canonicals command once per player in a top-N ingest.
+            var providerSources = profiles
+                .Select(static profile => ProfileSource(profile.Provider))
+                .DistinctBy(static source => source.SourceId)
+                .ToArray();
+            var canonicalNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var source in providerSources)
+                canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
+                    _writer, source.SourceId, source.Name, source.TrustClass, ct, _reader));
+            await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(_ds, canonicalNames, ct);
+
             foreach (var profile in profiles)
             {
-                var (sourceId, sourceName, trustClass, weight) = ProfileSource(profile.Provider);
-                var names = await ChessVocabulary.BootstrapAsync(
-                    _writer, sourceId, sourceName, trustClass, ct, _reader);
-                await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(_ds, names, ct);
+                var (sourceId, _, _, weight) = ProfileSource(profile.Provider);
 
                 var b = new SubstrateChangeBuilder(sourceId,
                     $"chess/player-profile/{profile.Provider}/{ChessGameFetcher.Sanitize(profile.ProviderId)}");

@@ -336,20 +336,6 @@ public static class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary><c>realize.register_canonical(name)</c></summary>
-    public static async Task<byte[]?> RegisterCanonicalAsync(
-        NpgsqlDataSource dataSource, string name, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null)
-    {
-        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT realize.register_canonical(@name)
-            """,
-            static r => r.IsDBNull(0) ? null : r.GetFieldValue<byte[]>(0),
-            p => p.AddWithValue("name", name),
-            ct: ct, label: "register_canonical", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? null : rows[0];
-    }
-
     /// <summary><c>laplace.intent_preflight(entity_ids, phys_ids, att_ids)</c></summary>
     public static async Task<byte[]?> IntentPreflightEntityBitmapAsync(
         NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,

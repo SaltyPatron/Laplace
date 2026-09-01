@@ -19,6 +19,37 @@ public class NpgsqlSubstrateWriterTests
     private static Hash128 H(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
 
     [Fact]
+    public async Task RegisterCanonicalsAsync_IsOneSharedSetOperationAcrossCallers()
+    {
+        string scope = Guid.NewGuid().ToString("N");
+        string a = $"test/canonical/{scope}/a";
+        string b = $"test/canonical/{scope}/b";
+        string c = $"test/canonical/{scope}/c";
+
+        var calls = Enumerable.Range(0, 12)
+            .Select(i => NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
+                _pg.DataSource,
+                i % 2 == 0 ? new[] { a, b, a } : new[] { b, a }))
+            .ToArray();
+        var results = await Task.WhenAll(calls);
+
+        Assert.Equal(1, results.Sum(static result => result.RoundTrips));
+        Assert.Equal(2, results.Sum(static result => result.Submitted));
+        Assert.Equal(2L, results.Sum(static result => result.Inserted));
+
+        var superset = await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
+            _pg.DataSource, new[] { c, b, "  ", c });
+        Assert.Equal(1, superset.RoundTrips);
+        Assert.Equal(1, superset.Submitted);
+        Assert.Equal(1L, superset.Inserted);
+
+        await using var cmd = _pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.canonical_names WHERE name = ANY($1::text[])");
+        cmd.Parameters.AddWithValue(new[] { a, b, c });
+        Assert.Equal(3L, (long)(await cmd.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task ApplyAsync_EmptyIntentIsNoOp()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);

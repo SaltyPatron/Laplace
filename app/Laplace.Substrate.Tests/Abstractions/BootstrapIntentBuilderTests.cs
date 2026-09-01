@@ -51,6 +51,24 @@ public class BootstrapIntentBuilderTests
     }
 
     [Fact]
+    public void Build_CarriesCanonicalNamesAsOneDeterministicSet()
+    {
+        var b = new BootstrapIntentBuilder(SourceId, "WordNetDecomposer", TrustClassId);
+        b.AddType("WordNet_Synset");
+        b.AddRelationType("HAS_DEFINITION");
+        b.AddType("WordNet_Synset");
+
+        var change = b.Build();
+
+        Assert.Equal(
+            change.CanonicalNames.OrderBy(static name => name, StringComparer.Ordinal),
+            change.CanonicalNames);
+        Assert.Equal(change.CanonicalNames.Distinct(StringComparer.Ordinal), change.CanonicalNames);
+        Assert.Contains("WordNet_Synset", change.CanonicalNames);
+        Assert.Contains("HAS_DEFINITION", change.CanonicalNames);
+    }
+
+    [Fact]
     public void Build_EmitsHasTrustClassAttestation()
     {
         var b = new BootstrapIntentBuilder(SourceId, "TestDecomposer", TrustClassId);
