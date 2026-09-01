@@ -1,41 +1,18 @@
--- Presence probes are already batched and concurrency is owned by the caller.
--- Do NOT let one client batch recursively fan into PostgreSQL workers: the ingest
--- reader/apply path already owns a machine-sized probe/COPY fan, and nested Gather
--- workers multiply that fan while competing with the same WAL/cache/I/O resources.
+-- Generic id-only entity presence is a thin fixed SQL surface over one set
+-- operation. It is intentionally PARALLEL RESTRICTED: caller-side batching owns
+-- concurrency, so a single probe must not recursively fan into Gather workers.
 CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL RESTRICTED
- AS $$
+AS $$
     SELECT (u.ord - 1)::int
     FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
-    INNER JOIN laplace.entities e ON e.id = u.id
+    JOIN laplace.entities e ON e.id = u.id
 $$;
 
--- KEYED overload retained for compatibility. Hot ingest callers should use the
--- native keyed bitmap route, which already owns tier routing in C. This legacy
--- SQL surface must not invent a second parallel fan either.
-CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[], p_tiers smallint[])
-    RETURNS TABLE(idx int)
-    LANGUAGE plpgsql VOLATILE PARALLEL RESTRICTED
- AS $$
-DECLARE
-    v_tier smallint;
-BEGIN
-    IF to_regclass('pg_temp._epo_batch') IS NOT NULL THEN
-        DROP TABLE _epo_batch;
-    END IF;
-    CREATE TEMP TABLE _epo_batch ON COMMIT DROP AS
-        SELECT u.id, u.t, (u.ord - 1)::int AS idx
-        FROM unnest(p_ids, p_tiers) WITH ORDINALITY u(id, t, ord);
-    CREATE INDEX ON _epo_batch (t);
-
-    FOR v_tier IN SELECT DISTINCT b.t FROM _epo_batch b LOOP
-        RETURN QUERY
-        SELECT b.idx
-        FROM _epo_batch b
-        JOIN laplace.entities e
-          ON e.tier = v_tier
-         AND e.id = b.id
-        WHERE b.t = v_tier;
-    END LOOP;
-END $$;
+-- The old (ids,tiers) plpgsql overload materialized a temp table, built an index,
+-- looped tiers, and dynamically relied on per-iteration planning. It has no caller:
+-- the hot tier-keyed route is laplace.entities_stored_bitmap/tier_batch_existence_probe,
+-- whose native implementation owns the routing directly. Keep one operation, not a
+-- second SQL implementation that can drift back onto the hot path.
+DROP FUNCTION IF EXISTS laplace.entities_present_ordinals(bytea[], smallint[]);
