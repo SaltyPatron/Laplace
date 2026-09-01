@@ -1,43 +1,7 @@
+-- RETIRED: consensus is derived state, not a cache that inference may delete
+-- independently of testimony. Direct DELETE makes the graph disagree with its
+-- surviving attestations and requires an out-of-band refold to become truthful
+-- again. No caller exists; remove the executable alternate implementation while
+-- preserving upgrade cleanup.
+DROP FUNCTION IF EXISTS generation.prune(bigint, boolean);
 DROP FUNCTION IF EXISTS laplace.laplace_prune(bigint, boolean);
-CREATE OR REPLACE FUNCTION generation.prune(
-    p_max_eff_mu bigint DEFAULT 0,
-    p_dry_run    boolean DEFAULT true)
-RETURNS TABLE(affected_rows bigint)
-LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    v_leaf regclass;
-    v_count bigint;
-    v_total bigint := 0;
-BEGIN
-    -- This operation intentionally visits the complete derived relation, but
-    -- does so once per physical leaf.  A parent DELETE built one giant ModifyTable
-    -- plan over every child and made its behavior depend on parent pruning.
-    FOR v_leaf IN
-        SELECT pt.relid::regclass
-        FROM pg_partition_tree('laplace.consensus'::regclass) pt
-        WHERE pt.isleaf
-        ORDER BY pt.relid
-    LOOP
-        IF p_dry_run THEN
-            EXECUTE format($q$
-                SELECT count(*)::bigint FROM ONLY %s
-                WHERE object_id IS NOT NULL
-                  AND consensus.eff_mu(rating, rd) < $1
-            $q$, v_leaf)
-            INTO v_count USING p_max_eff_mu;
-        ELSE
-            EXECUTE format($q$
-                WITH deleted AS (
-                    DELETE FROM ONLY %s
-                    WHERE object_id IS NOT NULL
-                      AND consensus.eff_mu(rating, rd) < $1
-                    RETURNING 1)
-                SELECT count(*)::bigint FROM deleted
-            $q$, v_leaf)
-            INTO v_count USING p_max_eff_mu;
-        END IF;
-        v_total := v_total + v_count;
-    END LOOP;
-    RETURN QUERY SELECT v_total;
-END;
-$$;
