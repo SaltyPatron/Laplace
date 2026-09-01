@@ -66,8 +66,23 @@ int64_t laplace_fp_sqrt(int64_t x) {
 }
 
 int64_t laplace_fp_exp(int64_t x) {
-    if (x >  60LL * LAPLACE_FP_ONE) return INT64_MAX / 2;
-    if (x < -60LL * LAPLACE_FP_ONE) return 0;
+    /*
+     * Q1e9 spends roughly 30 carrier bits on 1.0.  Range reduction therefore
+     * cannot treat the reduced mantissa as an unscaled integer: shifting a
+     * ~1e9 result left by only ~34 bits already crosses signed int64.
+     *
+     * Clamp BEFORE range-reduction arithmetic so INT64_MIN/INT64_MAX cannot
+     * overflow in -x or x + ln(2)/2.  Positive overflow saturates with one
+     * Q1e9 unit of headroom because the logistic computes 1 + exp(x).
+     * Negative underflow saturates to the smallest positive Q1e9 value: exp(x)
+     * is strictly positive, and a zero here can become an illegal Glicko
+     * volatility even though PostgreSQL correctly requires volatility > 0.
+     */
+    const int64_t saturation = INT64_MAX - LAPLACE_FP_ONE;
+    const int64_t min_positive = 1;
+    const int64_t range_limit = 60LL * LAPLACE_FP_ONE;
+    if (x >= range_limit) return saturation;
+    if (x <= -range_limit) return min_positive;
 
     int64_t k;
     if (x >= 0) {
@@ -85,15 +100,20 @@ int64_t laplace_fp_exp(int64_t x) {
         if (term > -10 && term < 10) break;
     }
 
+    if (result <= 0) return min_positive;
+
     if (k > 0) {
-        if (k >= 62) return INT64_MAX / 2;
+        if (k >= 63) return saturation;
+        if (result > (saturation >> k)) return saturation;
         result <<= k;
     } else if (k < 0) {
-        if (k <= -62) return 0;
-        int64_t add = (1LL << ((-k) - 1));
-        result = (result + add) >> (-k);
+        int64_t shift = -k;
+        if (shift >= 63) return min_positive;
+        int64_t add = INT64_C(1) << (shift - 1);
+        result = (result + add) >> shift;
     }
-    return result;
+    if (result < min_positive) return min_positive;
+    return result > saturation ? saturation : result;
 }
 
 int64_t laplace_fp_log(int64_t x) {
