@@ -66,8 +66,19 @@ int64_t laplace_fp_sqrt(int64_t x) {
 }
 
 int64_t laplace_fp_exp(int64_t x) {
-    if (x >  60LL * LAPLACE_FP_ONE) return INT64_MAX / 2;
-    if (x < -60LL * LAPLACE_FP_ONE) return 0;
+    /*
+     * Q1e9 means the integer carrier already spends ~30 bits representing 1.0.
+     * The old range-reduction tail guarded `k >= 62` as though `result` were an
+     * unscaled integer, then executed `result <<= k`.  In reality the largest
+     * safe positive shift is only about 33 bits: exp(23) already exceeds the
+     * signed int64 carrier and the shift invoked undefined behaviour.  Glicko's
+     * logistic reaches this domain at roughly a 4k Elo gap, after which E could
+     * turn negative and amplify a corrupt/outlier rating into a runaway fold.
+     *
+     * Saturate before the shift.  Leave one Q1e9 unit of headroom so the primary
+     * consumer `1 + exp(x)` is representable exactly in the same carrier.
+     */
+    const int64_t saturation = INT64_MAX - LAPLACE_FP_ONE;
 
     int64_t k;
     if (x >= 0) {
@@ -85,15 +96,21 @@ int64_t laplace_fp_exp(int64_t x) {
         if (term > -10 && term < 10) break;
     }
 
+    if (result <= 0) return 0;
+
     if (k > 0) {
-        if (k >= 62) return INT64_MAX / 2;
+        if (k >= 63) return saturation;
+        if (result > (saturation >> k)) return saturation;
         result <<= k;
     } else if (k < 0) {
-        if (k <= -62) return 0;
-        int64_t add = (1LL << ((-k) - 1));
-        result = (result + add) >> (-k);
+        int64_t shift = -k;
+        if (shift >= 63) return 0;
+        int64_t add = INT64_C(1) << (shift - 1);
+        result = (result + add) >> shift;
     }
-    return result;
+
+    if (result < 0) return 0;
+    return result > saturation ? saturation : result;
 }
 
 int64_t laplace_fp_log(int64_t x) {
