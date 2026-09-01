@@ -120,25 +120,28 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
           {hasClocks ? <span className={styles.clock}>{mmss(topClock)}</span> : null}
         </div>
 
-        <Board
-          fen={fen}
-          legal={[]}
-          sel={null}
-          drag={null}
-          marks={new Set()}
-          userArrows={[]}
-          showPick={false}
-          whiteEval=""
-          evalFrac={0.5}
-          evalDetail=""
-          boardRef={boardRef}
-          flip={flip}
-          lastMove={lastMove}
-          readOnly
-          onPointerDown={() => {}}
-          onPointerUp={() => {}}
-          onDragMove={() => {}}
-        />
+        <div className={styles.replayBoard}>
+          <Board
+            fen={fen}
+            legal={[]}
+            sel={null}
+            drag={null}
+            marks={new Set()}
+            userArrows={[]}
+            showPick={false}
+            whiteEval=""
+            evalFrac={0.5}
+            evalDetail=""
+            boardRef={boardRef}
+            flip={flip}
+            lastMove={lastMove}
+            readOnly
+            displayOnly
+            onPointerDown={() => {}}
+            onPointerUp={() => {}}
+            onDragMove={() => {}}
+          />
+        </div>
 
         <div className={styles.clockRow}>
           <span className={styles.sideName}>{botName}</span>
