@@ -48,23 +48,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         // showed up as a bare hex id holding 705,141 rows -- the fourth largest source in the
         // substrate, anonymous. A source that writes must be a source that is named, or its
         // volume is invisible to source_counts and every audit that reads it.
-        var pgn = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct,
-            context.Reader);
-        var analysis = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis",
-            ChessVocabulary.AnalysisTrustClass, ct, context.Reader);
-        var transitions = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessTransitions.SourceId, "ChessTransitions",
-            ChessTransitions.TrustClassId, ct, context.Reader);
-        var positions = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
-            ChessPositionOutcomes.TrustClassId, ct, context.Reader);
-        var syzygy = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessSyzygy.SourceId, ChessSyzygy.SourceName,
-            ChessSyzygy.TrustClassId, ct, context.Reader);
-        _canonicalNames = pgn.Concat(analysis).Concat(transitions).Concat(positions).Concat(syzygy)
-            .Distinct().ToArray();
+        _canonicalNames = await ChessVocabulary.BootstrapManyAsync(context.Writer,
+        [
+            new(ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass),
+            new(ChessVocabulary.AnalysisSourceId, "ChessAnalysis", ChessVocabulary.AnalysisTrustClass),
+            new(ChessTransitions.SourceId, "ChessTransitions", ChessTransitions.TrustClassId),
+            new(ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
+                ChessPositionOutcomes.TrustClassId),
+            new(ChessSyzygy.SourceId, ChessSyzygy.SourceName, ChessSyzygy.TrustClassId),
+        ], ct, context.Reader);
 
         // Ledger lifecycle moved here from ExtractRecordsAsync: with the file-worker pool there
         // is no longer ONE record stream to bracket. Reset once per run at init, report once at

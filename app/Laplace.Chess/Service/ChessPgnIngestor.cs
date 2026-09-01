@@ -80,22 +80,15 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, NpgsqlSubstrateReader reader,
         CancellationToken ct)
     {
-        var names = new HashSet<string>();
-        names.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessVocabulary.PgnSourceId, "ChessPgn", ChessVocabulary.PgnTrustClass,
-            ct, reader));
-        names.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis", ChessVocabulary.AnalysisTrustClass,
-            ct, reader));
-        names.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessTransitions.SourceId, "ChessTransitions", ChessTransitions.TrustClassId,
-            ct, reader));
-        names.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
-            ChessPositionOutcomes.TrustClassId, ct, reader));
-        names.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessSyzygy.SourceId, ChessSyzygy.SourceName,
-            ChessSyzygy.TrustClassId, ct, reader));
+        var names = await ChessVocabulary.BootstrapManyAsync(writer,
+        [
+            new(ChessVocabulary.PgnSourceId, "ChessPgn", ChessVocabulary.PgnTrustClass),
+            new(ChessVocabulary.AnalysisSourceId, "ChessAnalysis", ChessVocabulary.AnalysisTrustClass),
+            new(ChessTransitions.SourceId, "ChessTransitions", ChessTransitions.TrustClassId),
+            new(ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
+                ChessPositionOutcomes.TrustClassId),
+            new(ChessSyzygy.SourceId, ChessSyzygy.SourceName, ChessSyzygy.TrustClassId),
+        ], ct, reader);
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names, ct);
     }
 
@@ -284,8 +277,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         }
         if (novel == 0) return (0, 0);
 
-        await _writer.ApplyAsync(await record.BuildAsync(ct), ct);
-        await _writer.ApplyAsync(await analyze.BuildAsync(ct), ct);
+        await _writer.ApplyManyAsync(
+            [await record.BuildAsync(ct), await analyze.BuildAsync(ct)], ct);
         ChessTransitionObservations.MarkObserved(observedPositions);
         return (novel, novel);
     }

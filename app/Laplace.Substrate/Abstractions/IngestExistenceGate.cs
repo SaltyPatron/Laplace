@@ -35,9 +35,7 @@ internal static class IngestExistenceGate
         var shortcircuited = new List<(TRecord, long)>();
         var perFile = handler as DocumentIngestHandler;
         var roots = new List<(int Index, Hash128 RootId)>();
-        var presentFiles = perFile is null
-            ? null
-            : new List<(int Index, Hash128 RootId)>();
+        var presentFileRoots = new List<(int Index, Hash128 RootId)>();
         var rootIndex = new int[records.Count];
         Array.Fill(rootIndex, -1);
 
@@ -64,7 +62,7 @@ internal static class IngestExistenceGate
                 if (perFile is not null)
                 {
                     if (!perFile.IgnoreCompletedFiles)
-                        presentFiles!.Add((i, rootId));
+                        presentFileRoots.Add((i, rootId));
                     continue; // marker absent (or forced): compose for the marker deposit
                 }
                 ApplyWitness(records[i], rootId, handler, builder);
@@ -91,6 +89,7 @@ internal static class IngestExistenceGate
             var ids = new Hash128[roots.Count];
             for (int k = 0; k < roots.Count; k++) ids[k] = roots[k].RootId;
             byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
+            List<Hash128>? confirmed = null;
             for (int k = 0; k < roots.Count; k++)
             {
                 bool present = BitmapBits.IsSet(bm, k);
@@ -102,9 +101,9 @@ internal static class IngestExistenceGate
                 int i = roots[k].Index;
                 if (perFile is not null)
                 {
-                    reader.MarkProven([roots[k].RootId]);
+                    (confirmed ??= []).Add(roots[k].RootId);
                     if (!perFile.IgnoreCompletedFiles)
-                        presentFiles!.Add((i, roots[k].RootId));
+                        presentFileRoots.Add((i, roots[k].RootId));
                     continue; // marker absent (or forced): compose for the marker deposit
                 }
                 ApplyWitness(records[i], roots[k].RootId, handler, builder);
@@ -113,23 +112,26 @@ internal static class IngestExistenceGate
                 ReleaseNativeArtifacts(records[i], handler);
                 rootIndex[i] = -2;
             }
+            if (confirmed is { Count: > 0 }) reader.MarkProven(confirmed);
         }
 
-        // A content-presence bitmap can identify many already-realized documents in one
-        // call. Do not immediately turn that set back into one completion query per file:
-        // resolve every marker in the batch with the reader's set-based authority.
-        if (presentFiles is { Count: > 0 })
+        // Presence and file-completion are separate facts, but both are batch questions.
+        // The former already used one entities bitmap; the latter used to issue one marker
+        // query per present record in both the cached-root and fresh-bitmap branches. On a
+        // repeated document ingest that made database round trips proportional to rows even
+        // though ISubstrateReader exposes this set-valued operation explicitly.
+        if (perFile is not null && presentFileRoots.Count > 0)
         {
-            var markerIds = presentFiles.Select(static x => x.RootId).Distinct().ToArray();
+            var candidates = presentFileRoots.Select(static x => x.RootId).Distinct().ToArray();
             var completed = await reader.HasSourcesCompletedAsync(
-                markerIds, perFile!.LayerOrder, ct).ConfigureAwait(false);
-            foreach (var (index, rootId) in presentFiles)
-            {
-                if (!completed.Contains(rootId)) continue;
-                shortcircuited.Add((records[index], handler.UnitsPerRecord(records[index])));
-                ReleaseNativeArtifacts(records[index], handler);
-                rootIndex[index] = -2;
-            }
+                candidates, perFile.LayerOrder, ct).ConfigureAwait(false);
+            foreach (var (i, rootId) in presentFileRoots)
+                if (completed.Contains(rootId))
+                {
+                    shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
+                    rootIndex[i] = -2;
+                    ReleaseNativeArtifacts(records[i], handler);
+                }
         }
 
         var novel = new List<TRecord>(records.Count);

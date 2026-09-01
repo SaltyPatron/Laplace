@@ -82,16 +82,15 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);
         var host = new SubstrateTurnHost(ds, writer, reader, witnessWeight, defaultLearnContext);
-        var canonicalNames = new HashSet<string>(await ChessVocabulary.BootstrapAsync(writer, ct));
-        canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessTransitions.SourceId, "ChessTransitions",
-            ChessTransitions.TrustClassId, ct, reader));
-        canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
-            ChessPositionOutcomes.TrustClassId, ct, reader));
-        canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessSyzygy.SourceId, ChessSyzygy.SourceName,
-            ChessSyzygy.TrustClassId, ct, reader));
+        var canonicalNames = await ChessVocabulary.BootstrapManyAsync(writer,
+        [
+            new(ChessVocabulary.SourceId, ChessVocabulary.SourceName,
+                ChessVocabulary.SelfPlayTrustClass),
+            new(ChessTransitions.SourceId, "ChessTransitions", ChessTransitions.TrustClassId),
+            new(ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
+                ChessPositionOutcomes.TrustClassId),
+            new(ChessSyzygy.SourceId, ChessSyzygy.SourceName, ChessSyzygy.TrustClassId),
+        ], ct, reader);
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, canonicalNames, ct);
         return new ChessLiveGameHost(ds, writer, host);
     }

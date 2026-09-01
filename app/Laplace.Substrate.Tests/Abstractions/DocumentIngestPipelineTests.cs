@@ -74,6 +74,8 @@ public sealed class DocumentIngestPipelineTests
 
         Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN on present documents");
         Assert.Equal(0, reader.LegacyContentDescentCalls);
+        Assert.Equal(0, reader.ScalarSourceCompletedCalls);
+        Assert.Equal(1, reader.BatchedSourceCompletedCalls);
         Assert.True(ContentEntityCount(changes) <= ContentEntityCount(baseline));
         // Pillar-3a: the re-witness grind is gone — documents emit ZERO distributional
         // attestations, on present trees or otherwise (sequence = trajectory geometry).
@@ -123,6 +125,8 @@ public sealed class DocumentIngestPipelineTests
         // --force re-observes: files compose (content no-ops under the present bitmap)
         // and re-deposit their markers.
         Assert.Equal(records.Count, MarkerAttestationCount(changes));
+        Assert.Equal(0, reader.ScalarSourceCompletedCalls);
+        Assert.Equal(0, reader.BatchedSourceCompletedCalls);
     }
 
     // GH #596: invalid UTF-8 must not throw out of ResolveRoot / OpenAsync — one bad

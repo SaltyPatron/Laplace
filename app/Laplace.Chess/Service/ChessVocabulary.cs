@@ -295,6 +295,9 @@ public static class ChessVocabulary
 
     public const double Trust = SourceTrust.StructuredCorpus;
 
+    public readonly record struct BootstrapSource(
+        Hash128 SourceId, string SourceName, Hash128 TrustClassId);
+
     public static Task<IReadOnlyCollection<string>> BootstrapAsync(
     ISubstrateWriter writer, CancellationToken ct = default, ISubstrateReader? reader = null)
     => BootstrapAsync(writer, SourceId, SourceName, SelfPlayTrustClass, ct, reader);
@@ -302,29 +305,89 @@ public static class ChessVocabulary
     public static async Task<IReadOnlyCollection<string>> BootstrapAsync(
     ISubstrateWriter writer, Hash128 sourceId, string sourceName, Hash128 trustClassId,
     CancellationToken ct = default, ISubstrateReader? reader = null)
+        => await BootstrapManyAsync(
+            writer, [new BootstrapSource(sourceId, sourceName, trustClassId)], ct, reader)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Bootstraps every source used by one chess runtime in one presence probe and one
+    /// writer apply. A runtime consumes several evidence vendors together (PGN, analysis,
+    /// transitions, outcomes, Syzygy); probing and applying each vendor separately made
+    /// startup issue the same database operation once per source.
+    /// </summary>
+    public static async Task<IReadOnlyCollection<string>> BootstrapManyAsync(
+        ISubstrateWriter writer, IReadOnlyList<BootstrapSource> sources,
+        CancellationToken ct = default, ISubstrateReader? reader = null)
     {
-        var boot = new BootstrapIntentBuilder(sourceId, sourceName, trustClassId);
-        foreach (var t in ChessSeedManifest.TypeNodeNames)
-            boot.AddType(t);
-        foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(ChessSeedManifest.Relations))
-            boot.AddRelationType(r);
-        // Source entity already named ⇒ vocabulary for this lane was deposited. Skip the
-        // multi-second present-verify apply that was eating the process envelope on every
-        // re-ingest (measured ~3s × 2 bootstraps before INGEST_START).
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(sources);
+        if (sources.Count == 0) return Array.Empty<string>();
+
+        var unique = new List<BootstrapSource>(sources.Count);
+        var seen = new HashSet<Hash128>();
+        foreach (var source in sources)
+            if (seen.Add(source.SourceId)) unique.Add(source);
+
+        var builders = new BootstrapIntentBuilder[unique.Count];
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < unique.Count; i++)
+        {
+            var source = unique[i];
+            var boot = new BootstrapIntentBuilder(
+                source.SourceId, source.SourceName, source.TrustClassId);
+            foreach (var t in ChessSeedManifest.TypeNodeNames) boot.AddType(t);
+            foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(
+                         ChessSeedManifest.Relations))
+                boot.AddRelationType(r);
+            builders[i] = boot;
+            names.UnionWith(boot.CanonicalNames);
+        }
+
+        var present = new bool[unique.Count];
         if (reader is not null)
         {
-            if (reader.IsProvenPresent(sourceId))
-                return boot.CanonicalNames;
-            byte[] bm = await reader.EntitiesExistBitmapAsync(new[] { sourceId }, ct)
-                .ConfigureAwait(false);
-            if (BitmapBits.IsSet(bm, 0))
+            var probeIds = new List<Hash128>(unique.Count);
+            var probeSlots = new List<int>(unique.Count);
+            for (int i = 0; i < unique.Count; i++)
             {
-                reader.MarkProven(new[] { sourceId });
-                return boot.CanonicalNames;
+                if (reader.IsProvenPresent(unique[i].SourceId))
+                    present[i] = true;
+                else
+                {
+                    probeIds.Add(unique[i].SourceId);
+                    probeSlots.Add(i);
+                }
+            }
+
+            if (probeIds.Count > 0)
+            {
+                byte[] bitmap = await reader.EntitiesExistBitmapAsync(probeIds, ct)
+                    .ConfigureAwait(false);
+                var confirmed = new List<Hash128>(probeIds.Count);
+                for (int p = 0; p < probeIds.Count; p++)
+                    if (BitmapBits.IsSet(bitmap, p))
+                    {
+                        present[probeSlots[p]] = true;
+                        confirmed.Add(probeIds[p]);
+                    }
+                if (confirmed.Count > 0) reader.MarkProven(confirmed);
             }
         }
-        await writer.ApplyAsync(boot.Build(), ct).ConfigureAwait(false);
-        reader?.MarkProven(new[] { sourceId });
-        return boot.CanonicalNames;
+
+        var changes = new List<SubstrateChange>(unique.Count);
+        var deposited = new List<Hash128>(unique.Count);
+        for (int i = 0; i < unique.Count; i++)
+            if (!present[i])
+            {
+                changes.Add(builders[i].Build());
+                deposited.Add(unique[i].SourceId);
+            }
+
+        if (changes.Count > 0)
+        {
+            await writer.ApplyManyAsync(changes, ct).ConfigureAwait(false);
+            reader?.MarkProven(deposited);
+        }
+        return names;
     }
 }
