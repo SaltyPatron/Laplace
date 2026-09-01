@@ -7,6 +7,8 @@ namespace Laplace.Engine.Core.Tests;
 public sealed class IngestSizingTests
 {
     private const long TestBudgetBytes = 2L << 30;
+    private static long TestEnvelopeBytes => Math.Min(
+        TestBudgetBytes, IngestSizing.ResolveWorkingSetFlushEnvelopeBytes());
 
     [Fact]
     public void Resolve_14900KLikeTopology_MatchesApplyPartitions()
@@ -18,7 +20,7 @@ public sealed class IngestSizingTests
             plan.RecordBatchSize);
         Assert.Equal(IngestSizing.ResolveApplyIo(8).ProbeChunkIds, plan.ProbeChunkSize);
         Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
-            IngestSourceProfile.Default), plan.CommitRows);
+            IngestSourceProfile.Default, TestEnvelopeBytes), plan.CommitRows);
         Assert.Equal((plan.CommitRows + plan.RecordBatchSize - 1) / plan.RecordBatchSize,
             plan.MaxIntentsPerCommit);
         Assert.Equal(7 + 6 + 8, plan.DecomposeChannelCapacity);
@@ -51,7 +53,7 @@ public sealed class IngestSizingTests
             8, 6, 8, recordBatchOverride: 4096, workingSetBudgetBytes: TestBudgetBytes);
         Assert.Equal(4096, plan.RecordBatchSize);
         Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
-            IngestSourceProfile.Default), plan.CommitRows);
+            IngestSourceProfile.Default, TestEnvelopeBytes), plan.CommitRows);
     }
 
     [Fact]
@@ -67,9 +69,9 @@ public sealed class IngestSizingTests
             residentBytesPerComposeUnit: IngestSourceProfile.RelationTriple.ResidentBytesPerComposeUnit),
             plan.RecordBatchSize);
         Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
-            IngestSourceProfile.RelationTriple), plan.CommitRows);
+            IngestSourceProfile.RelationTriple, TestEnvelopeBytes), plan.CommitRows);
         Assert.Equal(plan.CommitRows, IngestSizing.ResolveWorkingSetProbeInterval(
-            plan.RecordBatchSize, IngestSourceProfile.RelationTriple));
+            plan.RecordBatchSize, IngestSourceProfile.RelationTriple, TestEnvelopeBytes));
     }
 
     [Fact]
@@ -98,18 +100,18 @@ public sealed class IngestSizingTests
     [Fact]
     public void ResolveWorkingSetProbeInterval_RawIntervalAboveFlushCap_ClampsToCap()
     {
-        // This profile drives the envelope-derived cap below one record while
-        // raw=4*1000. One record is the forward-progress floor; the probe interval
-        // must never outrun it.
+        // Make the envelope deliberately smaller than one record so the forward-progress
+        // floor is deterministic on every machine. The probe interval must never outrun it.
         var profile = new IngestSourceProfile(
             EstBytesPerRecord: 1_000_000,
             EstComposeUnitsPerRecord: 1_000);
-        int flushCap = IngestSizing.ResolveFlushEnvelopeRecordCap(profile);
+        long envelope = Math.Max(1, profile.UncomposedResidentBytesPerRecord - 1);
+        int flushCap = IngestSizing.ResolveFlushEnvelopeRecordCap(profile, envelope);
 
         Assert.Equal(1, flushCap);
         Assert.True(4 * profile.EstComposeUnitsPerRecord > flushCap);
         Assert.Equal(flushCap,
-            IngestSizing.ResolveWorkingSetProbeInterval(4, profile));
+            IngestSizing.ResolveWorkingSetProbeInterval(4, profile, envelope));
     }
 
     [Fact]
@@ -169,7 +171,7 @@ public sealed class IngestSizingTests
             residentBytesPerComposeUnit: IngestSourceProfile.Unicode.ResidentBytesPerComposeUnit),
             plan.RecordBatchSize);
         Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
-            IngestSourceProfile.Unicode), plan.CommitRows);
+            IngestSourceProfile.Unicode, TestEnvelopeBytes), plan.CommitRows);
     }
 
     [Fact]
@@ -271,7 +273,6 @@ public sealed class IngestSizingTests
         Assert.True((long)plan.ChunkCells * plan.Connections
             * MemoryTopology.ConsensusFoldTransitBytesPerCell <= 256L << 20);
     }
-
 
     [Fact]
     public void ResolveApplyIo_DerivesCountsFromSharedBytesAndConnections()
