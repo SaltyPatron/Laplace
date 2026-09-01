@@ -86,8 +86,18 @@ BEGIN
         consensus_leaf oid NOT NULL,
         UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
     TRUNCATE _evict_cells;
-    ALTER TABLE _evict_cells
-        ADD COLUMN IF NOT EXISTS consensus_leaf oid;
+    -- A backend may retain the pre-routing temp-table shape across an extension
+    -- update. Upgrade that shape once without emitting an IF NOT EXISTS notice
+    -- on every ordinary call in the same session.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_attribute a
+        WHERE a.attrelid = 'pg_temp._evict_cells'::regclass
+          AND a.attname = 'consensus_leaf'
+          AND NOT a.attisdropped
+    ) THEN
+        ALTER TABLE _evict_cells ADD COLUMN consensus_leaf oid;
+    END IF;
     ALTER TABLE _evict_cells
         ALTER COLUMN consensus_leaf SET NOT NULL;
     CREATE INDEX IF NOT EXISTS _evict_cells_leaf_idx

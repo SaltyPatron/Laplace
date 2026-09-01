@@ -251,3 +251,4 @@ SELECT laplace.laplace_score(laplace.laplace_score_inverse(968750000, 1.0), 1.0)
 ---------------------+----------------------
  t                   | t
 (1 row)
+
