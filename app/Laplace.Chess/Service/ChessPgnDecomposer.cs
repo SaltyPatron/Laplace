@@ -219,8 +219,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             int n = Math.Min(chunk, ids.Length - i);
             var slice = new Hash128[n];
             Array.Copy(ids, i, slice, 0, n);
-            // Bitmap path MarkProven-s hits; misses stay unproven and compose stages them.
-            _ = await reader.EntitiesExistBitmapAsync(slice, ct).ConfigureAwait(false);
+            // Position identity is tier 2 by construction.  Send that partition key to
+            // the native tier probe instead of making the id-only entity probe descend
+            // every LIST(tier) partition.  Unlike EntitiesExistBitmapAsync, the tiered
+            // primitive deliberately leaves cache ownership with its caller, so mark
+            // only positive bits.
+            byte[] bm = await reader.TierBatchExistenceProbeAsync(
+                slice, ChessCompose.PositionTier, ct).ConfigureAwait(false);
+            var proven = new List<Hash128>(n);
+            for (int j = 0; j < n; j++)
+                if (BitmapBits.IsSet(bm, j)) proven.Add(slice[j]);
+            if (proven.Count > 0) reader.MarkProven(proven);
         }
     }
 
@@ -251,7 +260,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         {
             var ids = new Hash128[toProbe.Count];
             for (int k = 0; k < toProbe.Count; k++) ids[k] = peeks[toProbe[k]].PlayingId;
-            byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
+            // A playing is emitted at Document (tier 4).  Keep the partition key
+            // attached all the way to the native C/SPI routing primitive.
+            byte[] bm = await reader.TierBatchExistenceProbeAsync(
+                ids, (short)EntityTier.Document, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(toProbe.Count);
             for (int k = 0; k < toProbe.Count; k++)
             {
@@ -301,12 +313,44 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         RecordGame(record, b);
         if (analyzeInline)
         {
-            ChessAnalyze.DeriveFromParsed(b, record);
+            // TryParseGame already resolved every SAN and retained the native move values.
+            // The fused calculated lanes used to ignore that work: ChessAnalyze resolved and
+            // replayed the SAN again, composed every interior board twice (as the previous
+            // move's `to` and the next move's `from`), then ChessPositionOutcomes replayed the
+            // game a third time and composed every board yet again for its constituents.
+            // Materialize the resolved line once in memory and share the exact same composed
+            // positions across both lanes. This is N+1 ChessCompose.Position calls and one
+            // cheap MoveApply walk, rather than ~3N full position compositions plus two SAN
+            // resolution/repetition-history walks per game.
+            var replay = MaterializeParsedReplay(record);
+            ChessAnalyze.DeriveFromParsed(b, record, replay);
             ChessTransitions.DepositFromParsed(b, record);
-            ChessPositionOutcomes.DepositFromParsed(b, record);
+            ChessPositionOutcomes.DepositFromParsed(b, record, replay);
             if (ChessTablebaseRuntime.Prober is { } prober)
                 ChessSyzygy.DeriveGame(b, ChessAnalyze.WitnessedFromParsed(record), prober);
         }
+    }
+
+    internal static ChessParsedReplay MaterializeParsedReplay(ChessGameRecord game)
+    {
+        var modality = new ChessModality();
+        if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } start)
+            return ChessParsedReplay.Empty;
+
+        int moveCount = game.ResolvedMoves.Length;
+        var boards = new Board[moveCount + 1];
+        var positions = new ChessComposed[moveCount + 1];
+        var board = start.Initial.Board;
+        boards[0] = board;
+        positions[0] = ChessCompose.Position(board);
+        for (int ply = 0; ply < moveCount; ply++)
+        {
+            board = board.Clone();
+            MoveApply.Make(board, game.ResolvedMoves[ply]);
+            boards[ply + 1] = board;
+            positions[ply + 1] = ChessCompose.Position(board);
+        }
+        return new ChessParsedReplay(boards, positions, start.StandardStart);
     }
 
     private static async IAsyncEnumerable<ChessGameRecord> StreamNovelGamesAsync(
@@ -354,7 +398,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         {
             var ids = new Hash128[toProbe.Count];
             for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].PlayingId;
-            byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
+            byte[] bm = await reader.TierBatchExistenceProbeAsync(
+                ids, (short)EntityTier.Document, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(toProbe.Count);
             for (int k = 0; k < toProbe.Count; k++)
             {
@@ -452,6 +497,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             WhiteName = whiteName,
             BlackName = blackName,
             Date = date,
+            StartFen = startFen,
             PositionIds = replay.PositionIds,
             ResolvedMoves = replay.Moves,
             MovingPieces = replay.MovingPieces,
@@ -940,6 +986,23 @@ internal sealed record ChessLineReplay(
     Hash128[] MoveIds);
 
 /// <summary>
+/// One compose-call lifetime materialization shared by the fused calculated chess lanes.
+/// It deliberately does not live in <see cref="ChessGameRecord"/>: novelty batches may retain
+/// thousands of parsed games while awaiting the database bitmap, whereas these board and
+/// substructure snapshots are only needed while composing one confirmed-novel game.
+/// </summary>
+internal sealed record ChessParsedReplay(
+    Board[] Boards,
+    ChessComposed[] Positions,
+    bool StandardStart)
+{
+    internal static readonly ChessParsedReplay Empty = new([], [], false);
+    internal bool IsCompleteFor(ChessGameRecord game) =>
+        Boards.Length == game.ResolvedMoves.Length + 1
+        && Positions.Length == Boards.Length;
+}
+
+/// <summary>
 /// Parsed PGN game: <see cref="LineId"/> = content (Merkle of start position + move ids);
 /// <see cref="EventId"/> = tournament/named event (many games share one);
 /// <see cref="PlayingId"/> = this game record (novelty + attestation context).
@@ -958,6 +1021,7 @@ public sealed record ChessGameRecord(
     internal string? WhiteName { get; init; }
     internal string? BlackName { get; init; }
     internal string? Date { get; init; }
+    internal string? StartFen { get; init; }
 
     internal Hash128[] PositionIds { get; init; } = [];
     internal ChessMove[] ResolvedMoves { get; init; } = [];

@@ -11,6 +11,8 @@ public sealed class ChessPgnDecomposerNovelGameTests
     {
         public readonly HashSet<Hash128> Present = new();
         public int BitmapProbeCalls;
+        public int TierProbeCalls;
+        public short? LastTier;
 
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
             => Task.FromResult(false);
@@ -26,6 +28,24 @@ public sealed class ChessPgnDecomposerNovelGameTests
             for (int i = 0; i < candidates.Count; i++)
                 if (Present.Contains(candidates[i])) bm[i >> 3] |= (byte)(1 << (i & 7));
             return Task.FromResult(bm);
+        }
+
+        public Task<byte[]> TierBatchExistenceProbeAsync(
+            IReadOnlyList<Hash128> candidates, short tier, CancellationToken ct = default)
+        {
+            TierProbeCalls++;
+            LastTier = tier;
+            var bm = new byte[(candidates.Count + 7) / 8];
+            for (int i = 0; i < candidates.Count; i++)
+                if (Present.Contains(candidates[i])) bm[i >> 3] |= (byte)(1 << (i & 7));
+            return Task.FromResult(bm);
+        }
+
+        public bool IsProvenPresent(Hash128 id) => Present.Contains(id);
+
+        public void MarkProven(IReadOnlyList<Hash128> ids)
+        {
+            foreach (var id in ids) Present.Add(id);
         }
     }
 
@@ -60,7 +80,9 @@ public sealed class ChessPgnDecomposerNovelGameTests
 
         Assert.Single(novel);
         Assert.Equal(b.PlayingId, novel[0].PlayingId);
-        Assert.Equal(1, reader.BitmapProbeCalls);
+        Assert.Equal(0, reader.BitmapProbeCalls);
+        Assert.Equal(1, reader.TierProbeCalls);
+        Assert.Equal((short)EntityTier.Document, reader.LastTier);
     }
 
     [Fact]
@@ -75,6 +97,23 @@ public sealed class ChessPgnDecomposerNovelGameTests
             novel.Add(g);
 
         Assert.Equal(2, novel.Count);
+    }
+
+    [Fact]
+    public async Task ProbeLinePositionsAsync_UsesKnownPositionTier_AndCachesOnlyHits()
+    {
+        var game = ChessPgnDecomposer.TryParseGame(GameA)!;
+        var reader = new FakeReader();
+        reader.Present.Add(game.PositionIds[0]);
+
+        await ChessPgnDecomposer.ProbeLinePositionsAsync(
+            [game], reader, CancellationToken.None);
+
+        Assert.Equal(0, reader.BitmapProbeCalls);
+        Assert.Equal(1, reader.TierProbeCalls);
+        Assert.Equal((short)ChessCompose.PositionTier, reader.LastTier);
+        Assert.True(reader.IsProvenPresent(game.PositionIds[0]));
+        Assert.Contains(game.PositionIds, id => !reader.IsProvenPresent(id));
     }
 
     [Fact]

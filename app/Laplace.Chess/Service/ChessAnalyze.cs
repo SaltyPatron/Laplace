@@ -24,10 +24,19 @@ public static class ChessAnalyze
     // Entry point for the analyzer decomposer: assemble DeriveGame's inputs from a parsed game
     // (the witnessed content), derive, and stamp the (game, version) marker the scan probes.
     internal static void DeriveFromParsed(SubstrateChangeBuilder b, ChessGameRecord parsed)
-        => DeriveFromWitnessed(b, WitnessedFromParsed(parsed));
+        => DeriveFromParsed(b, parsed, ChessPgnDecomposer.MaterializeParsedReplay(parsed));
+
+    internal static void DeriveFromParsed(
+        SubstrateChangeBuilder b, ChessGameRecord parsed, ChessParsedReplay replay)
+        => DeriveFromWitnessed(b, WitnessedFromParsed(parsed), replay);
 
     /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
     internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed, int engineDepth = 0)
+        => DeriveFromWitnessed(b, witnessed, replay: null, engineDepth);
+
+    private static void DeriveFromWitnessed(
+        SubstrateChangeBuilder b, ChessWitnessedGame witnessed,
+        ChessParsedReplay? replay, int engineDepth = 0)
     {
         var (lineId, playingId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens, spentSeconds) = witnessed;
 
@@ -41,7 +50,7 @@ public static class ChessAnalyze
 
         DeriveGame(b, lineId, playingId, result, moves, startFen, wp, bp,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
-                   spentSeconds);
+                   spentSeconds, replay);
 
         // Analyzer unit = PLAYING (not tournament Chess_Event). Marker per playing.
         b.AddEntity(ChessVocabulary.AnalysisMarkerId(playingId, Version), EntityTier.Document,
@@ -52,12 +61,11 @@ public static class ChessAnalyze
     {
         var (gameText, moves, result, lineId, _, playingId) = parsed;
         var walk = parsed.Walk;
-        string whiteName = PgnGames.TagStr(gameText, "White");
-        string blackName = PgnGames.TagStr(gameText, "Black");
+        string whiteName = parsed.WhiteName ?? PgnGames.TagStr(gameText, "White");
+        string blackName = parsed.BlackName ?? PgnGames.TagStr(gameText, "Black");
         Hash128? wp = ValidName(whiteName) ? ChessVocabulary.PlayerId(whiteName) : null;
         Hash128? bp = ValidName(blackName) ? ChessVocabulary.PlayerId(blackName) : null;
-        string? startFen = PgnGames.TagStr(gameText, "SetUp") == "1"
-            ? NullIfBlank(PgnGames.TagStr(gameText, "FEN")) : null;
+        string? startFen = parsed.StartFen;
 
         int mc = moves.Count;
         var clockTokens = PgnClocks.ClockTokens(gameText, mc);
@@ -88,7 +96,8 @@ public static class ChessAnalyze
         Hash128? whitePlayer, Hash128? blackPlayer,
         double[] clocks, double medianDrop,
         string?[]? clockTokens, string?[]? evalTokens, int[]? evals, string?[]? qualityTokens,
-        int engineDepth = 0, double[]? spentSeconds = null)
+        int engineDepth = 0, double[]? spentSeconds = null,
+        ChessParsedReplay? replay = null)
     {
         var m = new ChessModality();
         // Unreadable start = derive nothing. The recorder already refused this game, and
@@ -102,7 +111,7 @@ public static class ChessAnalyze
 
         AppendGame(b, m, initial, sans, result, whitePlayer, blackPlayer, lineId, eventId,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
-                   spentSeconds, standardStart);
+                   spentSeconds, standardStart, replay);
 
         // Watermark: this playing is now derived at the current analysis version.
         // Metadata on the trunk, not rated testimony -- see ChessVocabulary
@@ -164,7 +173,8 @@ public static class ChessAnalyze
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, Hash128 lineId, Hash128 eventId,
         double[] clocks, double medianDrop,
         string?[]? clockTokens, string?[]? evalTokens, int[]? evals, string?[]? qualityTokens,
-        int engineDepth, double[]? spentSeconds = null, bool standardStart = true)
+        int engineDepth, double[]? spentSeconds = null, bool standardStart = true,
+        ChessParsedReplay? replay = null)
     {
         var src = SourceId;
         double medianSpent = PgnClocks.MedianSpent(spentSeconds);
@@ -179,23 +189,55 @@ public static class ChessAnalyze
         // points (the positions before/after each move), resolved from the chess perfcache or
         // the identical compose fallback. They are not independently deposited SQL position
         // entities/physicalities merely because this game passed through them.
+        bool useReplay = replay is not null
+            && replay.Boards.Length == sans.Count + 1
+            && replay.Positions.Length == replay.Boards.Length;
         var state = initial;
         var line = new List<ChessNode>(sans.Count + 1);
-        var boards = new List<Board>(sans.Count + 1) { initial.Board };
+        var boards = useReplay
+            ? new List<Board>(replay!.Boards)
+            : new List<Board>(sans.Count + 1) { initial.Board };
         var played = new List<ChessMove>(sans.Count);
         var scratch = new List<ChessMove>(16);
         for (int ply = 0; ply < sans.Count; ply++)
         {
-            var mv = San.Resolve(state.Board, sans[ply], scratch);
-            if (mv is null) return;
-            int mover = m.SideToMove(state);
-            var from = ChessGraph.ComposePositionPoint(state.Board);
-            var next = m.Apply(state, mv.Value);
-            var to = ChessGraph.ComposePositionPoint(next.Board);
+            ChessMove mv;
+            int mover;
+            ChessNode from;
+            ChessNode to;
+            if (useReplay)
+            {
+                mv = replay!.Boards.Length > ply + 1 && ply < sans.Count
+                    ? replay.Boards[ply].WhiteToMove == replay.Boards[ply + 1].WhiteToMove
+                        ? default
+                        : default
+                    : default;
+                // Parsed replay positions are indexed by ply boundary. ResolvedMoves is not
+                // part of the hydrated witness contract, so recover the move only for motif
+                // consumers from the already-known board delta's SAN. The fused PGN caller
+                // supplies an exact replay and takes the dedicated overload below instead.
+                var resolved = San.Resolve(replay.Boards[ply], sans[ply], scratch);
+                if (resolved is null) return;
+                mv = resolved.Value;
+                mover = replay.Boards[ply].WhiteToMove ? 0 : 1;
+                from = replay.Positions[ply].Position;
+                to = replay.Positions[ply + 1].Position;
+            }
+            else
+            {
+                var resolved = San.Resolve(state.Board, sans[ply], scratch);
+                if (resolved is null) return;
+                mv = resolved.Value;
+                mover = m.SideToMove(state);
+                from = ChessGraph.ComposePositionPoint(state.Board);
+                var next = m.Apply(state, mv);
+                to = ChessGraph.ComposePositionPoint(next.Board);
+                state = next;
+                boards.Add(next.Board);
+            }
             if (line.Count == 0) line.Add(from);
             line.Add(to);
-            boards.Add(next.Board);
-            played.Add(mv.Value);
+            played.Add(mv);
 
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)
@@ -221,8 +263,6 @@ public static class ChessAnalyze
                     ChessGraph.AppendThinkOutcome(
                         b, lens, result.ForMover(mover), MetaWeight, src);
             }
-
-            state = next;
         }
 
         // A motif is a property of the played line/window. Do not manufacture an exact-board
