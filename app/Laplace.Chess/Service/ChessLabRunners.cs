@@ -104,6 +104,7 @@ public static class ChessLabRunners
         int depth = int.Parse(Config(slot.Job.Config, "depth", "4"));
         int maxPlies = int.Parse(Config(slot.Job.Config, "maxPlies", "160"));
         int budget = ResolveConcurrency(slot.Job.Config);
+        bool record = bool.TryParse(Config(slot.Job.Config, "record", "false"), out bool recordValue) && recordValue;
         var terms = new[]
         {
             EvalTerm.Material, EvalTerm.Pst, EvalTerm.BishopPair,
@@ -114,12 +115,13 @@ public static class ChessLabRunners
 
         var workDir = Path.Combine(LabDir, slot.Job.Id);
         Directory.CreateDirectory(workDir);
-        var liveHost = await lab.GetLiveHostAsync(ct);
+        var liveHost = record ? await lab.GetLiveHostAsync(ct) : null;
         var pgnSink = new ConcurrentBag<MatchPgnGame>();
 
         lab.Publish(slot, new ChessLabLogEvent("info",
             $"ladder depth {depth} × {games} games × {terms.Length} terms "
-            + $"(parallel terms, {perTerm} games/term-slot, {budget} core budget, recording to substrate)"));
+            + $"(parallel terms, {perTerm} games/term-slot, {budget} core budget, "
+            + (record ? "recording to substrate)" : "read-only)")));
         lab.UpdateSummary(slot, new ChessLabJobSummary(0, totalGames, "starting"));
 
         var rows = new IReadOnlyList<string>?[terms.Length];
@@ -172,11 +174,12 @@ public static class ChessLabRunners
         ChessPgnWriter.WriteFile(pgnPath, pgnSink, @event: "chess-lab/ladder");
         lab.AddArtifact(slot, "games.pgn", pgnPath);
 
-        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", totalGames));
+        lab.Publish(slot, new ChessLabMetricEvent("games_generated", totalGames));
+        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", record ? totalGames : 0));
         lab.Publish(slot, new ChessLabTableEvent("overlay ladder", ["term", "W-D-L", "Elo"],
             rows.Select(r => r!).ToList()));
         lab.UpdateSummary(slot, new ChessLabJobSummary(totalGames, totalGames,
-            $"complete · {totalGames} recorded"));
+            record ? $"complete · {totalGames} recorded" : $"complete · {totalGames} generated · read-only"));
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 
@@ -332,8 +335,10 @@ public static class ChessLabRunners
             Finish(lab, slot, ChessLabJobState.Failed, "no token");
             return;
         }
-        int depth = int.Parse(Config(slot.Job.Config, "depth", "8"));
-        int maxConcurrent = int.Parse(Config(slot.Job.Config, "maxConcurrent", "2"));
+        int depth = int.Parse(Config(slot.Job.Config, "depth",
+            LichessDefaults.SearchDepth.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        int maxConcurrent = int.Parse(Config(slot.Job.Config, "maxConcurrent",
+            LichessDefaults.MaxConcurrent.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         var host = await lab.GetLiveHostAsync(ct);
 
         await using var bot = new LichessBot(
@@ -372,12 +377,6 @@ public static class ChessLabRunners
             profiles.Add(await ChessGameFetcher.FetchProfileAsync(fideId, "fide", ct));
         lab.Publish(slot, ProfileTable(profiles));
         await AddProfileArtifactsAsync(lab, slot, profiles, ct);
-        if (fideId.Length == 0 && profiles[0].RealName is { Length: > 1 } realName)
-        {
-            var candidates = await ChessGameFetcher.SearchFideAsync(realName, 10, ct);
-            lab.Publish(slot, FideTable($"Possible FIDE identities for {realName}", candidates));
-            lab.Publish(slot, new ChessLabMetricEvent("fide_candidates", candidates.Count));
-        }
         if (ingest)
         {
             var liveHost = await lab.GetLiveHostAsync(ct);
@@ -416,12 +415,6 @@ public static class ChessLabRunners
 
         lab.Publish(slot, ProfileTable(profiles));
         await AddProfileArtifactsAsync(lab, slot, profiles, ct);
-        if (fideId.Length == 0 && online.RealName is { Length: > 1 } realName)
-        {
-            var candidates = await ChessGameFetcher.SearchFideAsync(realName, 25, ct);
-            lab.Publish(slot, FideTable($"Possible FIDE identities for {realName}", candidates));
-            lab.Publish(slot, new ChessLabMetricEvent("fide_candidates", candidates.Count));
-        }
 
         if (!ingest)
         {
