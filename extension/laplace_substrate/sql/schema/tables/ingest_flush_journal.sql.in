@@ -1,21 +1,58 @@
--- Idempotency tokens for the working-set write lane. One row per applied
--- working set (id = the working set's intent hash), claimed with
--- INSERT ... ON CONFLICT DO NOTHING inside the apply transaction: a retry
--- after commit-ambiguity finds the token and skips the additive lanes
--- (attestation count merges) that would otherwise double-apply.
+-- Idempotency tokens for the working-set write lane. One row per evidence
+-- working set, claimed inside the apply transaction. Evidence durability and
+-- derived-fold durability are deliberately separate facts: an apply may commit
+-- its additive attestations and then lose the owed consensus/mask continuation.
 CREATE TABLE IF NOT EXISTS ingest_flush_journal (
-    working_set_id  bytea        PRIMARY KEY CHECK (octet_length(working_set_id) = 16),
-    source_id       bytea        CHECK (source_id IS NULL OR octet_length(source_id) = 16),
-    applied_at      timestamptz  NOT NULL DEFAULT now()
+    working_set_id    bytea        PRIMARY KEY CHECK (octet_length(working_set_id) = 16),
+    source_id         bytea        CHECK (source_id IS NULL OR octet_length(source_id) = 16),
+    applied_at        timestamptz  NOT NULL DEFAULT now(),
+    folded            boolean      NOT NULL DEFAULT false,
+    folded_at         timestamptz,
+    fold_recoverable  boolean      NOT NULL DEFAULT false,
+    fold_type_ids     bytea[]
 );
 
--- Existing installations predate source ownership. Those historical NULL rows stay
--- conservative (they cannot be attributed safely); every new working set records the
--- decomposer source so source eviction can retract its replay claims along with its data.
+-- Existing installations predate source ownership and fold acknowledgement.
+-- Historical rows were created under the old "journal implies fold" contract;
+-- preserve that historical interpretation instead of scheduling a substrate-wide
+-- refold during upgrade. New rows default unfolded and become recoverable only
+-- after the accumulating writer durably records the relation scope backed by
+-- persisted testimony.
 ALTER TABLE ingest_flush_journal
     ADD COLUMN IF NOT EXISTS source_id bytea
     CHECK (source_id IS NULL OR octet_length(source_id) = 16);
+ALTER TABLE ingest_flush_journal
+    ADD COLUMN IF NOT EXISTS folded boolean;
+ALTER TABLE ingest_flush_journal
+    ADD COLUMN IF NOT EXISTS folded_at timestamptz;
+ALTER TABLE ingest_flush_journal
+    ADD COLUMN IF NOT EXISTS fold_recoverable boolean;
+ALTER TABLE ingest_flush_journal
+    ADD COLUMN IF NOT EXISTS fold_type_ids bytea[];
+
+UPDATE ingest_flush_journal
+   SET folded = true,
+       folded_at = COALESCE(folded_at, applied_at),
+       fold_recoverable = false
+ WHERE folded IS NULL;
+
+ALTER TABLE ingest_flush_journal
+    ALTER COLUMN folded SET DEFAULT false,
+    ALTER COLUMN folded SET NOT NULL,
+    ALTER COLUMN fold_recoverable SET DEFAULT false,
+    ALTER COLUMN fold_recoverable SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS ingest_flush_journal_source
     ON ingest_flush_journal (source_id)
     WHERE source_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ingest_flush_journal_unfolded_source
+    ON ingest_flush_journal (source_id, applied_at, working_set_id)
+    WHERE NOT folded;
+
+COMMENT ON COLUMN ingest_flush_journal.folded IS
+    'True only after the working set\'s derived consensus and highway-mask continuation completed or was reconstructed idempotently from durable evidence.';
+COMMENT ON COLUMN ingest_flush_journal.fold_recoverable IS
+    'True only when the persisted testimony needed for an idempotent evidence-derived refold is durable.';
+COMMENT ON COLUMN ingest_flush_journal.fold_type_ids IS
+    'Sorted distinct relation ids touched by the owed fold; NULL means the crash happened before scope publication and recovery must conservatively use the whole source.';
