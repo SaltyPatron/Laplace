@@ -397,33 +397,27 @@ public sealed class ChessSyzygyTests
 }
 
 /// <summary>
-/// ONE init/free for the whole class, not one per test method.
+/// ONE process-wide tablebase authority, shared with every real engine test.
 ///
-/// xUnit constructs a fresh instance of a test class for EVERY test method, so a ctor that
-/// called SyzygyNative.Init and a Dispose that called SyzygyNative.Free cycled the tablebase
-/// mapping once per [InlineData] case. That state is process-global by design — the
-/// SyzygyNative doc says "one loaded table set at a time" — and the vendored Fathom prober
-/// does not fully reset its statics in tb_free, so a subsequent tb_init leaves stale pointers
-/// behind. The next probe walks them and the process takes a SIGSEGV inside gen_captures:
-/// no managed exception, nothing catchable, and a crash position that moves between runs
-/// because it depends on how many map/unmap cycles ran first.
+/// The UCI tests execute full production search and therefore initialize
+/// ChessTablebaseRuntime. TestModuleInit points that same authority at the repository's
+/// deterministic fixture before any test runs. This fixture deliberately does not call
+/// SyzygyNative.Init or Free: initializing a second directory, or freeing the mapping while
+/// the runtime's Lazy still claims it is loaded, violates Fathom's process-global contract.
 ///
-/// IClassFixture gives exactly one instance for the class, which is what process-global state
-/// requires. If another test class ever needs the tablebases, promote this to a collection
-/// fixture rather than re-adding a per-test Init.
+/// Production resolution remains unchanged and continues to use the configured or /vault
+/// table set. Only the Laplace.Chess.Tests process receives the fixture path.
 /// </summary>
-public sealed class SyzygyTablebaseFixture : IDisposable
+public sealed class SyzygyTablebaseFixture
 {
     public SyzygyTablebaseFixture()
     {
-        Assert.True(LaplaceInstall.TryRepoRoot(out var root), "repo root not resolvable");
-        var dir = Path.Combine(root, "test-data", "syzygy");
-        Assert.True(Directory.Exists(dir), $"fixture dir missing: {dir}");
-        Assert.Equal(3, SyzygyNative.Init(dir));
+        Assert.Equal(3, ChessTablebaseRuntime.Largest);
+        Assert.Equal(
+            Path.GetFullPath(TestModuleInit.SyzygyFixtureDirectory),
+            ChessTablebaseRuntime.LoadedTableSetForTest);
         Assert.Equal(3, SyzygyNative.Largest());
     }
-
-    public void Dispose() => SyzygyNative.Free();
 }
 
 [Trait("Tier", "fast")]
