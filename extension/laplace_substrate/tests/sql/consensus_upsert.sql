@@ -49,9 +49,10 @@ BEGIN
     IF row1.rating <= neutral THEN
         RAISE EXCEPTION 'FAIL: confirming evidence must lift rating above neutral';
     END IF;
-    expect := laplace.laplace_glicko2_accumulate_games(
+    expect := laplace.laplace_glicko2_accumulate_period(
         consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
-        consensus.glicko2_neutral_mu(), phi, 2, 2 * s_conf, consensus.glicko2_tau());
+        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi]::bigint[],
+        ARRAY[2]::bigint[], ARRAY[2 * s_conf]::bigint[], consensus.glicko2_tau());
     IF row1.rating <> expect.rating OR row1.rd <> expect.rd
        OR row1.volatility <> expect.volatility THEN
         RAISE EXCEPTION 'FAIL: fresh fold diverges from the native scalar';
@@ -73,9 +74,10 @@ BEGIN
 
     -- 3) second batch folds against the stored prior: exact scalar parity,
     --    witness accumulation, GREATEST timestamp.
-    expect := laplace.laplace_glicko2_accumulate_games(
+    expect := laplace.laplace_glicko2_accumulate_period(
         row1.rating, row1.rd, row1.volatility,
-        consensus.glicko2_neutral_mu(), phi, 5, 5 * s_conf, consensus.glicko2_tau());
+        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi]::bigint[],
+        ARRAY[5]::bigint[], ARRAY[5 * s_conf]::bigint[], consensus.glicko2_tau());
     affected := consensus.upsert(
         ARRAY[subj], ARRAY[rel_hot], ARRAY[o1],
         ARRAY[phi], ARRAY[5]::bigint[], ARRAY[5 * s_conf]::bigint[], ARRAY[t2]);
@@ -151,11 +153,13 @@ BEGIN
             SELECT FROM fold_cases f
             JOIN laplace.consensus c ON c.id=laplace.consensus_id(f.s,t,f.o)
                 AND c.type_id=t AND c.subject_id=f.s
-            CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_games(
+            CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_period(
                 CASE WHEN phase=0 THEN consensus.glicko2_neutral_mu() ELSE f.r END,
                 CASE WHEN phase=0 THEN consensus.glicko2_initial_rd() ELSE f.rd END,
                 CASE WHEN phase=0 THEN consensus.glicko2_initial_volatility() ELSE f.vol END,
-                f.opp,f.phi,f.games,f.score,consensus.glicko2_tau()) expected
+                ARRAY[f.opp]::bigint[], ARRAY[f.phi]::bigint[],
+                ARRAY[f.games]::bigint[], ARRAY[f.score]::bigint[],
+                consensus.glicko2_tau()) expected
             WHERE (c.rating,c.rd,c.volatility) IS DISTINCT FROM
                 (expected.rating,expected.rd,expected.volatility)
                 OR c.witness_count <> (phase+1)*f.games

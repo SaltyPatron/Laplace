@@ -213,62 +213,6 @@ pg_laplace_score_inverse(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(laplace_score_inverse_fp(PG_GETARG_INT64(0), PG_GETARG_FLOAT8(1)));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_games);
-
-Datum
-pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
-{
-    glicko2_state_t         st;
-    int64_t                 games;
-    int64_t                 sum_score;
-    int64_t                 opp_rating, opp_rd, tau;
-    TupleDesc               tupdesc;
-    Datum                   values[3];
-    bool                    nulls[3] = { false, false, false };
-    HeapTuple               tuple;
-
-    glicko2_init(&st,
-                 PG_GETARG_INT64(0),
-                 PG_GETARG_INT64(1),
-                 PG_GETARG_INT64(2));
-    opp_rating = PG_GETARG_INT64(3);
-    opp_rd     = PG_GETARG_INT64(4);
-    games      = PG_GETARG_INT64(5);
-    sum_score  = PG_GETARG_INT64(6);
-    tau        = PG_ARGISNULL(7) ? LAPLACE_GLICKO2_DEFAULT_TAU
-                                 : PG_GETARG_INT64(7);
-
-    if (games <= 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-             errmsg("laplace_glicko2_accumulate_games: games must be > 0 (got %ld)",
-                    (long) games)));
-    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-             errmsg("function returning record called in context "
-                    "that cannot accept type record")));
-    BlessTupleDesc(tupdesc);
-
-    /* Closed-form uniform fold: bit-identical to materializing `games`
-     * observations of (opp_rating, opp_rd) with the same q/rem score split
-     * and running glicko2_update_period, without the O(games) buffer. */
-    if (glicko2_fold_uniform_period(&st, opp_rating, opp_rd,
-                                    games, sum_score, tau, 0) != 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-             errmsg("laplace_glicko2_accumulate_games: aggregate exceeds fixed-point capacity"),
-             errdetail("games=%ld sum_score=%ld", (long) games,
-                       (long) sum_score)));
-
-    values[0] = Int64GetDatum(st.rating);
-    values[1] = Int64GetDatum(st.rd);
-    values[2] = Int64GetDatum(st.volatility);
-
-    tuple = heap_form_tuple(tupdesc, values, nulls);
-    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
-}
-
 PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_period);
 
 Datum

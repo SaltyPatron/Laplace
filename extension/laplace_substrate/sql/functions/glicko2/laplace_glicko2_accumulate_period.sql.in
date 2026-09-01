@@ -1,3 +1,6 @@
+DROP FUNCTION IF EXISTS laplace.laplace_glicko2_accumulate_games(
+    bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint);
+
 CREATE OR REPLACE FUNCTION laplace.laplace_glicko2_accumulate_period(
     prior_rating     bigint,
     prior_rd         bigint,

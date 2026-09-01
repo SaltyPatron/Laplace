@@ -49,7 +49,7 @@ public sealed class WorkingSetQueryShapeTests
         Assert.Contains("FOR UPDATE OF c", native, StringComparison.Ordinal);
         Assert.Contains("upsert_merge_with_retry", native, StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_games",
+            "CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_period",
             native,
             StringComparison.Ordinal);
     }
