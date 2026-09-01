@@ -1,8 +1,17 @@
--- RETIRED: the keyed attestation bitmap probe is routed natively in
--- descent_probe.c. That implementation groups by relation type and executes the
--- cached native route; its former ordinals_sql argument is explicitly superseded
--- and ignored. Keeping a second temp-table + CREATE INDEX + ANALYZE + plpgsql loop
--- installed gives the same operation two implementations and lets callers drift
--- back onto the database-orchestrated path.
-DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[]);
+-- Id-only attestation presence is a diagnostic/preflight surface. It cannot prune
+-- LIST(type_id)->HASH(subject_id) because those keys are not supplied, so the hot
+-- ingest path must never use it; the native keyed bitmap route owns that operation.
+-- Keep this one fixed set function because intent_preflight still calls it.
+CREATE OR REPLACE FUNCTION laplace.attestations_present_ordinals(p_ids bytea[])
+    RETURNS TABLE(idx int)
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+AS $$
+    SELECT (u.ord - 1)::int
+    FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
+    JOIN laplace.attestations a ON a.id = u.id
+$$;
+
+-- RETIRED: keyed presence is implemented by descent_probe.c's native per-type
+-- routing. The former three-array plpgsql body built a temp table + index + ANALYZE
+-- and looped types, duplicating an operation the native path already owns.
 DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[], bytea[], bytea[]);
