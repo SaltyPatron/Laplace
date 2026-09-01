@@ -1,41 +1,27 @@
--- Profile testimony for one player and its directly linked provider identities.
--- Source and relation predicates are applied before any rendering or ordering: game
--- volume therefore cannot crowd profile data out of this read.
+-- Profile testimony asserted directly about the requested player identity.
+--
+-- This read deliberately does NOT walk CORRESPONDS_TO/name-equivalence peers.
+-- A player page is an exact-identity surface: provider facts asserted about some
+-- other entity remain on that entity until an independently governed referential
+-- identity decision explicitly materializes the requested view.  The previous
+-- implementation followed direct profile identity edges here, so one bad/name-
+-- derived CORRESPONDS_TO assertion could make a Chess.com username page present
+-- another provider's facts as though they belonged to the exact account.
+--
+-- Source and relation predicates are applied before rendering or ordering, so
+-- game volume cannot crowd profile data out of this read.
 CREATE OR REPLACE FUNCTION chess.player_profile_edges(p_player bytea)
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH identity_ids(id) AS MATERIALIZED (
-        SELECT p_player
-        UNION
-        SELECT a.object_id
-        FROM laplace.attestations a
-        WHERE a.subject_id = p_player
-          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
-          AND a.source_id = ANY (ARRAY[
-              laplace.source_id('LichessPlayerProfile'),
-              laplace.source_id('ChessComPlayerProfile'),
-              laplace.source_id('FidePlayerProfile')
-          ]::bytea[])
-        UNION
-        SELECT a.subject_id
-        FROM laplace.attestations a
-        WHERE a.object_id = p_player
-          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
-          AND a.source_id = ANY (ARRAY[
-              laplace.source_id('LichessPlayerProfile'),
-              laplace.source_id('ChessComPlayerProfile'),
-              laplace.source_id('FidePlayerProfile')
-          ]::bytea[])
-    )
-    SELECT DISTINCT i.id, a.type_id, a.object_id
-    FROM identity_ids i
-    JOIN laplace.attestations a ON a.subject_id = i.id
-    WHERE a.source_id = ANY (ARRAY[
+    SELECT DISTINCT p_player, a.type_id, a.object_id
+    FROM laplace.attestations a
+    WHERE a.subject_id = p_player
+      AND a.source_id = ANY (ARRAY[
               laplace.source_id('LichessPlayerProfile'),
               laplace.source_id('ChessComPlayerProfile'),
               laplace.source_id('FidePlayerProfile')
           ]::bytea[])
       AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_FACTS'))
-    ORDER BY i.id, a.type_id, a.object_id;
+    ORDER BY a.type_id, a.object_id;
 END;
