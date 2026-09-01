@@ -187,6 +187,19 @@ public static class ChessGraph
         return EmitNodes(b, board, nowUs, src);
     }
 
+    /// <summary>
+    /// Stage an already-composed position without repeating ChessCompose.Position. This is the
+    /// fused PGN path: one N+1 replay materialization can feed analysis, position-outcome facts,
+    /// and the line projection while each lane still deposits only the state it owns.
+    /// </summary>
+    internal static ChessComposed EmitComposed(
+        SubstrateChangeBuilder b, ChessComposed composed, Hash128 src)
+    {
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        StageNodes(b, composed, nowUs, src);
+        return composed;
+    }
+
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
     {
         var c = ChessCompose.Position(surface);
