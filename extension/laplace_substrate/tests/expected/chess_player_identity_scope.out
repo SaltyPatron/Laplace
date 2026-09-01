@@ -4,9 +4,7 @@ CREATE EXTENSION IF NOT EXISTS laplace_geom;
 NOTICE:  extension "laplace_geom" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 NOTICE:  extension "laplace_substrate" already exists, skipping
-
 BEGIN;
-
 -- #1405: an already-present playing can still carry a historical player-id
 -- encoding. Replaying that PGN must not double testimony just to repair the
 -- reference, so exact career reads admit only the deterministic ChessPgn
@@ -57,7 +55,6 @@ BEGIN
         RAISE EXCEPTION 'canonical game log should include legacy+current games, got %', n;
     END IF;
 END $$;
-
 SELECT 'chess player migration scope' AS probe, true AS ok;
             probe             | ok 
 ------------------------------+----
