@@ -692,6 +692,37 @@ public abstract class DecomposerMultiPhase : IDecomposer
         await foreach (var change in phase.DecomposeAsync(context, phaseOptions, ct))
             yield return change;
     }
+
+    /// <summary>
+    /// Run a real file-backed phase through the shared multi-phase executor while
+    /// publishing the same started/composed/committed journal protocol used by the
+    /// generic multi-file pipeline.
+    /// </summary>
+    protected async IAsyncEnumerable<SubstrateChange> RunPhaseAsync(
+        IDecomposer phase,
+        IDecomposerContext context,
+        DecomposerOptions options,
+        string fileLabel,
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
+        long bytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+        observability.OnFileStarted(phase.SourceName, fileLabel, bytes);
+        long records = 0, entities = 0, physicalities = 0, attestations = 0;
+        await foreach (var change in RunPhaseAsync(phase, context, options, ct))
+        {
+            records += change.Metadata.InputUnitsConsumed;
+            entities += change.Entities.Length;
+            physicalities += change.Physicalities.Length;
+            attestations += change.Attestations.Length;
+            yield return change;
+        }
+        observability.OnFileComposed(
+            phase.SourceName, fileLabel, null,
+            records, entities, physicalities, attestations);
+        yield return IngestBatchPipeline.BuildPeriodBoundary(phase.SourceId, fileLabel);
+    }
 }
 
 /// <summary>
