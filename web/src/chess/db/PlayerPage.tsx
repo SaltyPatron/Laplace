@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, LoadingText, Muted, Panel, Stack, Table, Td, Th } from '@ui';
 import { StatCard } from '../../explore/components/StatCard';
-import { chessPlayer, chessPlayerGames } from './api';
+import { chessGamePlies, chessPlayer, chessPlayerGames } from './api';
+import { GameBoard } from './GameBoard';
 import { OutcomeChip, RecordCell, recordText, scoreText } from './RecordBar';
-import type { ChessGameRow, ChessPlayerResponse, ChessRecord } from './types';
+import type { ChessGamePliesResponse, ChessGameRow, ChessPlayerResponse, ChessRecord } from './types';
 import styles from './ChessDb.module.css';
 
 const PAGE = 25;
@@ -25,6 +26,8 @@ export function PlayerPage() {
   const [err, setErr] = useState<string | null>(null);
   const [games, setGames] = useState<ChessGameRow[] | null>(null);
   const [gamesErr, setGamesErr] = useState<string | null>(null);
+  const [latestPlies, setLatestPlies] = useState<ChessGamePliesResponse | null>(null);
+  const [latestErr, setLatestErr] = useState<string | null>(null);
   const rawOffset = Number(params.get('offset') ?? 0);
   const offset = Number.isFinite(rawOffset) && rawOffset > 0
     ? Math.floor(rawOffset / PAGE) * PAGE
@@ -52,8 +55,23 @@ export function PlayerPage() {
     return () => { stale = true; };
   }, [idHex, offset]);
 
+  const latestGame = offset === 0 && games && games.length > 0 ? games[0] : null;
+  useEffect(() => {
+    let stale = false;
+    setLatestPlies(null);
+    setLatestErr(null);
+    if (!latestGame) return () => { stale = true; };
+    chessGamePlies(latestGame.id)
+      .then((p) => { if (!stale) setLatestPlies(p); })
+      .catch((e) => { if (!stale) setLatestErr(e instanceof Error ? e.message : String(e)); });
+    return () => { stale = true; };
+  }, [latestGame?.id]);
+
   if (err) return <ErrorText>{err}</ErrorText>;
   if (!player) return <LoadingText>Reading the career…</LoadingText>;
+
+  const latestWhite = latestGame?.as_white ? player.name : latestGame?.opponent ?? '';
+  const latestBlack = latestGame?.as_white ? latestGame?.opponent ?? '' : player.name;
 
   return (
     <Stack gap={4}>
@@ -154,6 +172,23 @@ export function PlayerPage() {
           </tbody>
         </Table>
       </Panel>
+
+      {latestGame ? (
+        <Panel title="Latest witnessed game">
+          <div className={styles.latestGameHeading}>
+            <div>
+              <strong>{latestWhite} {latestGame.result ?? 'vs'} {latestBlack}</strong>
+              <Muted>
+                {[latestGame.played_on, latestGame.event, latestGame.eco].filter(Boolean).join(' · ') || 'undated'}
+              </Muted>
+            </div>
+            <Link className={styles.playerLink} to={`/chess/games/${latestGame.id}`}>open full game ›</Link>
+          </div>
+          {latestErr ? <ErrorText>{latestErr}</ErrorText> : null}
+          {!latestErr && latestPlies === null ? <LoadingText>Replaying latest game…</LoadingText> : null}
+          {latestPlies ? <GameBoard data={latestPlies} white={latestWhite} black={latestBlack} /> : null}
+        </Panel>
+      ) : null}
 
       <Panel title="Games">
         {gamesErr ? <ErrorText>{gamesErr}</ErrorText> : null}
