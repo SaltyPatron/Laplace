@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Laplace.Chess.Service;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,24 @@ public sealed class ChessRuntimeContractTests : IClassFixture<ExploreFactory>
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
+        Assert.False(runtime.InitializationStarted);
+    }
+
+    [Fact]
+    public async Task EvalWithoutSubstrate_DoesNotResolveWriteRuntime()
+    {
+        using var client = _factory.CreateClient();
+        var runtime = _factory.Services.GetRequiredService<ChessRuntimeService>();
+        Assert.False(runtime.InitializationStarted);
+
+        using var response = await client.PostAsJsonAsync("/chess/eval", new
+        {
+            fen = ChessModality.StartFen,
+            depth = 1,
+            substrate = false,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(runtime.InitializationStarted);
     }
 
