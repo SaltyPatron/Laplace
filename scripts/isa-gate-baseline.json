@@ -703,7 +703,6 @@
       "extension/laplace_substrate/sql/functions/generation/foundry_vocab_crawl.sql.in::IS_LEMMA_OF": 1,
       "extension/laplace_substrate/sql/functions/generation/pos_class_transitions.sql.in::HAS_POS": 1,
       "extension/laplace_substrate/sql/functions/generation/pos_transition_plane.sql.in::HAS_POS": 1,
-      "extension/laplace_substrate/sql/functions/highway/highway_mask_deposit.sql.in::IS_A": 1,
       "extension/laplace_substrate/sql/functions/highway/highway_mask_refresh.sql.in::IS_A": 1,
       "extension/laplace_substrate/sql/functions/inspect/evidence_receipt.sql.in::CO_OCCURS_WITH": 1,
       "extension/laplace_substrate/sql/functions/inspect/evidence_receipt.sql.in::HAS_FEATURE": 1,
