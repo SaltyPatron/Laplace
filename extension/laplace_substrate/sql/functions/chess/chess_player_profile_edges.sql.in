@@ -11,7 +11,7 @@ BEGIN ATOMIC
         SELECT a.object_id
         FROM laplace.attestations a
         WHERE a.subject_id = p_player
-          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
           AND a.source_id = ANY (ARRAY[
               laplace.source_id('LichessPlayerProfile'),
               laplace.source_id('ChessComPlayerProfile'),
@@ -21,7 +21,7 @@ BEGIN ATOMIC
         SELECT a.subject_id
         FROM laplace.attestations a
         WHERE a.object_id = p_player
-          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
           AND a.source_id = ANY (ARRAY[
               laplace.source_id('LichessPlayerProfile'),
               laplace.source_id('ChessComPlayerProfile'),
@@ -36,11 +36,6 @@ BEGIN ATOMIC
               laplace.source_id('ChessComPlayerProfile'),
               laplace.source_id('FidePlayerProfile')
           ]::bytea[])
-      AND a.type_id = ANY (ARRAY[
-              laplace.relation_type_id('HAS_EXTERNAL_ID'),
-              laplace.relation_type_id('HAS_NAME_ALIAS'),
-              laplace.relation_type_id('HAS_FEATURE'),
-              laplace.relation_type_id('HAS_RATING')
-          ]::bytea[])
+      AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_FACTS'))
     ORDER BY i.id, a.type_id, a.object_id;
 END;

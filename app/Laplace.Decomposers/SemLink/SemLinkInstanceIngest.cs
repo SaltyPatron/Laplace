@@ -17,14 +17,12 @@ internal static class SemLinkInstanceIngest
 {
     internal const string FileName = "semlink-2";
 
-    private static readonly Hash128 AppearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
-    private static readonly Hash128 HasRole = RelationTypeRegistry.RelationTypeId("HAS_ROLE");
-    private static readonly Hash128 HasSense = RelationTypeRegistry.RelationTypeId("HAS_SENSE");
-    private static readonly Hash128 MemberOfVerbNet =
-        RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS");
-    private static readonly Hash128 EvokesFrame = RelationTypeRegistry.RelationTypeId("EVOKES_FRAME");
-    private static readonly Hash128 RoleCorrespondsTo =
-        RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO");
+    private static readonly Hash128 AppearsIn = SemLinkSource.AppearsInTypeId;
+    private static readonly Hash128 HasRole = SemLinkSource.HasRoleTypeId;
+    private static readonly Hash128 HasSense = SemLinkSource.HasSenseTypeId;
+    private static readonly Hash128 MemberOfVerbNet = SemLinkSource.MemberOfVerbNetClassTypeId;
+    private static readonly Hash128 EvokesFrame = SemLinkSource.EvokesFrameTypeId;
+    private static readonly Hash128 RoleCorrespondsTo = SemLinkSource.RoleCorrespondsToTypeId;
 
     internal readonly record struct Dependency(
         string Span, string? PropBankRole, string? VerbNetRole, string? FrameNetRole);

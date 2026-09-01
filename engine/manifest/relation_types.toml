@@ -2185,6 +2185,17 @@ members = ["IS_A", "IS_INSTANCE_OF"]
 name = "NAME_ALIAS_EDGE"
 members = ["HAS_NAME_ALIAS"]
 
+# Chess identity/profile reads share these exact governed relation rosters. Keeping
+# them here lets codegen emit foldable ids so profile volume never requires a broad
+# edge fetch or a second handwritten vocabulary in SQL.
+[[set]]
+name = "CHESS_PROFILE_IDENTITY"
+members = ["CORRESPONDS_TO"]
+
+[[set]]
+name = "CHESS_PROFILE_FACTS"
+members = ["HAS_EXTERNAL_ID", "HAS_NAME_ALIAS", "HAS_FEATURE", "HAS_RATING"]
+
 # PATH_TRAVERSABLE = PATH_UPWARD u PATH_LATERAL. converse.astar_path hand-listed exactly
 # these 13 as its default p_types, the same vocabulary consensus.relate_path listed in its
 # two arms -- the same walk, spelled twice, in two files. Declared once here; the union is

@@ -23,6 +23,16 @@ public readonly struct SemLinkSource : ISeedSource
 
     internal static readonly Hash128 RoleCorrespondsToTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[1]);
+    internal static readonly Hash128 AppearsInTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[2]);
+    internal static readonly Hash128 HasRoleTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[3]);
+    internal static readonly Hash128 HasSenseTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[4]);
+    internal static readonly Hash128 MemberOfVerbNetClassTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[5]);
+    internal static readonly Hash128 EvokesFrameTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[6]);
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         [

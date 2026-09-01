@@ -4,6 +4,8 @@ CREATE OR REPLACE FUNCTION consensus.relation_set_ids(p_set text)
     RETURNS bytea[]
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $set$
     SELECT CASE p_set
+        WHEN 'CHESS_PROFILE_FACTS' THEN ARRAY[laplace.relation_type_id('HAS_EXTERNAL_ID'), laplace.relation_type_id('HAS_FEATURE'), laplace.relation_type_id('HAS_NAME_ALIAS'), laplace.relation_type_id('HAS_RATING')]
+        WHEN 'CHESS_PROFILE_IDENTITY' THEN ARRAY[laplace.relation_type_id('CORRESPONDS_TO')]
         WHEN 'NAME_ALIAS_EDGE' THEN ARRAY[laplace.relation_type_id('HAS_NAME_ALIAS')]
         WHEN 'NON_SALIENT_STRUCTURAL' THEN ARRAY[laplace.relation_type_id('EVOKES_FRAME'), laplace.relation_type_id('FOLLOWS'), laplace.relation_type_id('HAS_EXAMPLE'), laplace.relation_type_id('HAS_LANGUAGE'), laplace.relation_type_id('HAS_LEX_CATEGORY'), laplace.relation_type_id('HAS_NAME_ALIAS'), laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('HAS_SYNSET_KEY'), laplace.relation_type_id('HAS_VERB_FRAME'), laplace.relation_type_id('IS_LEMMA_OF'), laplace.relation_type_id('IS_SENSE_OF'), laplace.relation_type_id('IS_TRANSLATION_OF'), laplace.relation_type_id('IS_TYPED_AS'), laplace.relation_type_id('PRECEDES')]
         WHEN 'PATH_LATERAL' THEN ARRAY[laplace.relation_type_id('ALSO_SEE'), laplace.relation_type_id('DERIVATIONALLY_RELATED'), laplace.relation_type_id('HAS_ATTRIBUTE'), laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('IN_VERB_GROUP_WITH'), laplace.relation_type_id('IS_ANTONYM_OF'), laplace.relation_type_id('IS_SIMILAR_TO'), laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('PERTAINS_TO')]
