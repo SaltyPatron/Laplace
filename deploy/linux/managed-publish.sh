@@ -1,12 +1,43 @@
 #!/usr/bin/env bash
-# CI transaction for the API payload and managed-service pointers. Prior releases
-# and backups are retained; no running STDIO client's directory is modified.
+# CI transaction for the API payload and managed-service pointers. Releases used
+# by active pointers or running clients are retained; unreachable payloads are
+# reclaimed before staging so repeated delivery cannot fill the application LV.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"
 HELPER=/usr/local/libexec/laplace-managed-deploy
 RECEIPT="$ROOT/build/.managed-publish-backup"
 source "$ROOT/deploy/linux/payload-sync.sh"
+
+release_in_use() {
+  local candidate="$1" link target proc_ref
+  for link in "$APP_DIR"/laplace-lichess "$APP_DIR"/laplace-mcp "$APP_DIR"/laplace-uci; do
+    [[ -L "$link" ]] || continue
+    target=$(readlink -f "$link" 2>/dev/null || true)
+    [[ "$target" == "$candidate"/* ]] && return 0
+  done
+  for proc_ref in /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root; do
+    target=$(readlink "$proc_ref" 2>/dev/null || true)
+    [[ "$target" == "$candidate"/* || "$target" == "$candidate" ]] && return 0
+  done
+  for proc_ref in /proc/[0-9]*/maps; do
+    [[ -r "$proc_ref" ]] || continue
+    grep -Fq " $candidate/" "$proc_ref" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+prune_unreferenced_releases() {
+  local releases="$APP_DIR/releases" candidate reclaimed=0
+  [[ -d "$releases" && ! -L "$releases" ]] || return 0
+  while IFS= read -r -d '' candidate; do
+    release_in_use "$candidate" && continue
+    find "$candidate" -depth -delete
+    echo "reclaimed unreferenced application release: $candidate"
+    reclaimed=$((reclaimed + 1))
+  done < <(find "$releases" -mindepth 1 -maxdepth 1 -type d -name 'runtime.*' -print0)
+  echo "application release retention: reclaimed=$reclaimed"
+}
 
 installed_policy() {
   [[ -x "$HELPER" ]] || {
@@ -78,6 +109,7 @@ case "${1:-}" in
   begin)
     ensure_host
     [[ ! -f "$RECEIPT" ]] || { echo "unresolved publish receipt" >&2; exit 1; }
+    prune_unreferenced_releases
     mkdir -p "$ROOT/build" /opt/laplace/app-backups
     backup="$(mktemp -d /opt/laplace/app-backups/managed.XXXXXX)"
     chmod 0700 "$backup"
