@@ -25,6 +25,10 @@
     container-type: size;
   }
 
+  .displayArea {
+    gap: 0;
+  }
+
   .evalCol {
     display: flex;
     flex-direction: column;
@@ -135,6 +139,11 @@
     user-select: none;
     touch-action: none;
     position: relative;
+  }
+
+  .displayArea .board {
+    width: min(100cqw, 100cqh);
+    height: min(100cqw, 100cqh);
   }
 
   .overlay {
@@ -295,5 +304,10 @@
   .board,
   .evalCol {
     height: min(100cqh, calc(100cqw - 4.2rem), 92vw);
+  }
+
+  .displayArea .board {
+    width: min(100cqw, 100cqh, 92vw);
+    height: min(100cqw, 100cqh, 92vw);
   }
 }
