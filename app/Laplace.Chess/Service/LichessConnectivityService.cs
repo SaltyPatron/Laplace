@@ -6,6 +6,15 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Chess.Service;
 
+public static class LichessDefaults
+{
+    // Live play is a latency-sensitive product surface. Search.Limits itself defaults to 6;
+    // forcing depth 8 here made ordinary Lichess moves take exponentially longer even when
+    // the substrate/perfcache had already supplied strong root evidence.
+    public const int SearchDepth = 6;
+    public const int MaxConcurrent = 2;
+}
+
 /// <summary>
 /// Lichess bot session: per-ply substrate fold before search; chat ring buffer per game.
 /// </summary>
@@ -13,7 +22,8 @@ public interface ILichessConnection : IAsyncDisposable
 {
     LichessConnectivityStatus Status();
     IReadOnlyList<LichessChatLine> ChatForGame(string gameId);
-    bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null);
+    bool Start(int depth = LichessDefaults.SearchDepth, int maxConcurrent = LichessDefaults.MaxConcurrent,
+        bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null);
     Task WaitForExitAsync(CancellationToken ct);
     Task StopAsync(CancellationToken ct);
 }
@@ -35,8 +45,8 @@ public sealed class LichessConnectivityService : ILichessConnection
     private string? _username;
     private string? _lastError;
     private bool _connected;
-    private int _depth = 8;
-    private int _maxConcurrent = 2;
+    private int _depth = LichessDefaults.SearchDepth;
+    private int _maxConcurrent = LichessDefaults.MaxConcurrent;
     private bool _substrate = true;
     private long _gamesRecorded;
 
@@ -82,7 +92,9 @@ public sealed class LichessConnectivityService : ILichessConnection
         return q.ToArray();
     }
 
-    public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null)
+    public bool Start(int depth = LichessDefaults.SearchDepth,
+        int maxConcurrent = LichessDefaults.MaxConcurrent,
+        bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null)
     {
         var token = LichessBot.ResolveToken();
         if (string.IsNullOrEmpty(token))
