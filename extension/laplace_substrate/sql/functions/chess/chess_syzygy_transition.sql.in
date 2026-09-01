@@ -14,8 +14,9 @@ BEGIN ATOMIC
     WITH chunks AS MATERIALIZED (
         SELECT p.entity_id, p.trajectory
         FROM laplace.physicalities p
+        JOIN laplace.entities e ON e.id = p.entity_id
+                               AND e.first_observed_by = laplace.source_id('ChessSyzygy')
         WHERE p.type = 3::smallint
-          AND p.source_id = laplace.source_id('ChessSyzygy')
           AND p.trajectory IS NOT NULL
           AND public.laplace_trajectory_constituent_ids(p.trajectory)
                 @> ARRAY[p_position]::bytea[]

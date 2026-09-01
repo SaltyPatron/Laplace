@@ -657,4 +657,64 @@ BEGIN
     RAISE NOTICE '✓ chess_read: chess_time_pressure_outcome serves the think-time lens dimension in display units';
 END $$;
 
+-- Syzygy transition chunks are Projection physicalities. Provenance belongs to
+-- their owning entity; physicalities deliberately have no source_id column.
+-- A decoy projection containing the same position must not be selected.
+DO $$
+DECLARE
+    syz_src bytea := laplace.source_id('ChessSyzygy');
+    other_src bytea := public.laplace_hash128_blake3('test/syzygy/other-source');
+    type_t bytea := public.laplace_hash128_blake3('Type');
+    pos bytea := public.laplace_hash128_blake3('test/syzygy/position');
+    good_move bytea := public.laplace_hash128_blake3('test/syzygy/good-move');
+    good_next bytea := public.laplace_hash128_blake3('test/syzygy/good-next');
+    bad_move bytea := public.laplace_hash128_blake3('test/syzygy/bad-move');
+    bad_next bytea := public.laplace_hash128_blake3('test/syzygy/bad-next');
+    good_chunk bytea := decode('ffffffffffffffffffffffffffffffff', 'hex');
+    bad_chunk bytea := decode('00000000000000000000000000000001', 'hex');
+    got_move bytea;
+    got_next bytea;
+    got_wdl integer;
+    got_dtz integer;
+    good_flags bigint := (4::bigint << 10) | (13::bigint << 16);
+    bad_flags bigint := (1::bigint << 10) | (4::bigint << 16);
+BEGIN
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+        (syz_src, 0, type_t, NULL), (other_src, 0, type_t, NULL),
+        (pos, 0, type_t, syz_src),
+        (good_move, 0, type_t, syz_src), (good_next, 0, type_t, syz_src),
+        (bad_move, 0, type_t, other_src), (bad_next, 0, type_t, other_src),
+        (good_chunk, 0, type_t, syz_src), (bad_chunk, 0, type_t, other_src)
+    ON CONFLICT (id, tier) DO NOTHING;
+
+    INSERT INTO laplace.physicalities
+        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('test/syzygy/good-physicality'), good_chunk, 3,
+         public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+         decode('00000000000000000000000000000000','hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(pos,       1, 1, good_flags),
+             public.laplace_mantissa_pack(good_move, 2, 1, good_flags | (1::bigint << 8)),
+             public.laplace_mantissa_pack(good_next, 3, 1, good_flags | (2::bigint << 8))]),
+         3, now()),
+        (public.laplace_hash128_blake3('test/syzygy/bad-physicality'), bad_chunk, 3,
+         public.ST_SetSRID(public.ST_MakePoint(2,2,2,2), 0),
+         decode('00000000000000000000000000000000','hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(pos,      1, 1, bad_flags),
+             public.laplace_mantissa_pack(bad_move, 2, 1, bad_flags | (1::bigint << 8)),
+             public.laplace_mantissa_pack(bad_next, 3, 1, bad_flags | (2::bigint << 8))]),
+         3, now());
+
+    SELECT move_id, next_position, wdl, dtz
+      INTO got_move, got_next, got_wdl, got_dtz
+      FROM chess.syzygy_transition(pos);
+    IF got_move <> good_move OR got_next <> good_next OR got_wdl <> 4 OR got_dtz <> -7 THEN
+        RAISE EXCEPTION 'FAIL: Syzygy transition ignored entity provenance: %/%/%/%',
+            encode(got_move, 'hex'), encode(got_next, 'hex'), got_wdl, got_dtz;
+    END IF;
+    RAISE NOTICE '✓ chess_read: Syzygy transition uses owning-entity provenance';
+END $$;
+
 ROLLBACK;
