@@ -59,7 +59,7 @@ SELECT
 INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
 SELECT id, 2::smallint, (SELECT id FROM test_fixtures LIMIT 1), NULL
 FROM test_fixtures
-ORDER BY id
+ORDER BY test_fixtures.id
 LIMIT 2;
 
 WITH keyed AS (
