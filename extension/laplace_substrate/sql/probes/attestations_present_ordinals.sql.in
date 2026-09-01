@@ -1,82 +1,17 @@
--- Keyed presence probe. Attestations are partitioned LIST(type_id) ->
--- HASH(subject_id); `id` is NOT a partition key, so an id-only join can never
--- prune -- every probed id would pay one index descent per leaf (~145x read
--- amplification; measured 2026-07-16: 4.2M ids in 1.2s against empty leaves ->
--- 165s at WordNet scale, growing with substrate size). The caller computed each
--- id FROM (subject, type, object, source, context), so it holds the partition
--- keys and passes them alongside.
---
--- TWO FAILED FORMS, both measured, so the next reader does not re-try either:
---
---  (1) Per-type loop that re-unnests the FULL arrays inside every iteration
---      (`WHERE u.t = v_type`): O(N_ids x N_types) materializations. On the OMW
---      seed this pinned one core at 100% for 5m28s / 4.1 GB RSS. Quadratic in a
---      batch's type diversity -- invisible on one type, lethal on many.
---
---  (2) Single SQL pass joining `a.type_id = u.t` (a COLUMN reference), 2026-07-21.
---      The claim was that runtime pruning would handle it. IT DOES NOT: with the
---      partition key column-valued the planner drops the nested loop and
---      HASH-JOINs the batch against an Append of EVERY leaf -- a full seq scan of
---      the entire attestations table to match 20k rows (EXPLAIN ANALYZE 2026-07-21:
---      `Append (actual rows=8,790,908)`, 2.6s, 202k buffers, across the 1,304
---      leaves that existed that day; 1,880 leaves as of 2026-08-06, so the cost
---      this guards against GREW -- the count is a dated observation, never a
---      constant to reason from, and the argument holds for "every leaf" at any
---      count).
---      THAT is the "boil the whole database" cost that grew with every source
---      ingested. A per-type LATERAL with the type as a runtime scalar prunes the
---      empty leaves ("never executed") but STILL seq-scans the matching type's 8
---      hash leaves, because a runtime value cannot prune the HASH sublevel.
---
--- Only a BOUND LITERAL fully prunes (LIST at plan time + HASH per row = one
--- descent per id). That is exactly what a plpgsql loop over the distinct types
--- gives -- bind v_type, and both statements plan against that type's <=8 leaves.
--- The loop's ONLY real cost was form (1)'s re-unnest, and that is removed the
--- same way consensus_upsert and attestation_merge remove it: unnest the batch
--- ONCE into an indexed temp table, then each per-type query reads only its slice
--- through the (t) index. O(N_ids) total scan work, one descent per id, and the
--- type is a literal so pruning is total.
-DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[]);
-CREATE OR REPLACE FUNCTION laplace.attestations_present_ordinals(
-    p_ids bytea[], p_type_ids bytea[], p_subject_ids bytea[])
+-- Id-only attestation presence is a diagnostic/preflight surface. It cannot prune
+-- LIST(type_id)->HASH(subject_id) because those keys are not supplied, so the hot
+-- ingest path must never use it; the native keyed bitmap route owns that operation.
+-- Keep this one fixed set function because intent_preflight still calls it.
+CREATE OR REPLACE FUNCTION laplace.attestations_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
-    -- VOLATILE, not STABLE: the body runs CREATE TEMP TABLE ... AS, and PostgreSQL
-    -- forbids CREATE TABLE AS in any non-volatile function -- a STABLE marking
-    -- throws 0A000 "CREATE TABLE AS is not allowed in a non-volatile function" on
-    -- the FIRST call, at execution, not definition (which is why pg_regress, that
-    -- only loads the SQL, never caught it). The siblings that use the same
-    -- unnest-once-into-temp idiom (consensus_upsert, attestation_merge) are
-    -- VOLATILE for exactly this reason. This function reads no state that a
-    -- caller could depend on being stable across the statement, so VOLATILE costs
-    -- nothing here -- it is a scan of committed rows, called once per probe chunk.
-    LANGUAGE plpgsql VOLATILE
- AS $$
-DECLARE
-    v_type bytea;
-BEGIN
-    -- Batch materialized ONCE. ON COMMIT DROP owns cleanup; the to_regclass
-    -- guard handles repeated calls inside one control transaction (chunked
-    -- probes share it), and avoids DROP IF EXISTS's NOTICE noise in pg_regress.
-    IF to_regclass('pg_temp._apo_batch') IS NOT NULL THEN
-        DROP TABLE _apo_batch;
-    END IF;
-    CREATE TEMP TABLE _apo_batch ON COMMIT DROP AS
-    SELECT (u.ord - 1)::int AS idx, u.id, u.t, u.s
-    FROM unnest(p_ids, p_type_ids, p_subject_ids) WITH ORDINALITY u(id, t, s, ord);
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+AS $$
+    SELECT (u.ord - 1)::int
+    FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
+    JOIN laplace.attestations a ON a.id = u.id
+$$;
 
-    -- Per-type slices read through this index -- O(N_type) per iteration, not a
-    -- full-batch rescan (the same pattern as consensus_upsert's _cu_batch_t).
-    CREATE INDEX _apo_batch_t ON _apo_batch (t);
-    ANALYZE _apo_batch;
-
-    FOR v_type IN SELECT DISTINCT t FROM _apo_batch LOOP
-        RETURN QUERY
-        SELECT b.idx
-        FROM _apo_batch b
-        JOIN laplace.attestations a
-          ON a.type_id = v_type          -- variable -> LIST prune at plan time
-         AND a.subject_id = b.s          -- HASH-leaf prune per row
-         AND a.id = b.id
-        WHERE b.t = v_type;
-    END LOOP;
-END $$;
+-- RETIRED: keyed presence is implemented by descent_probe.c's native per-type
+-- routing. The former three-array plpgsql body built a temp table + index + ANALYZE
+-- and looped types, duplicating an operation the native path already owns.
+DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[], bytea[], bytea[]);

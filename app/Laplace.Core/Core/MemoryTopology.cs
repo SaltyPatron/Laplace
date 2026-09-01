@@ -46,18 +46,22 @@ public static class MemoryTopology
         PostgresResourcePlan.Current.ClientBudgetBytes / WorkingSetResidentOwners);
 
     /// <summary>
-    /// COMPOSE-side flush envelope — the resident-memory ceiling for ONE working set
-    /// before it is closed, applied, and its builder + content bank reset. This is
-    /// Deliberately below <see cref="WorkingSetBudgetBytes"/>. Holding millions of
-    /// deferred tier trees plus a giant
-    /// content bank in a single working set collapses compose throughput (MEASURED
-    /// 30k → 1.8k rec/s as a ~4 GiB set filled with ~3M records before flushing) and
-    /// spikes GC. The default is one apply-partition share of the working-set budget,
-    /// so the exact topology controls the flush width.
+    /// Resident-memory ceiling for ONE working set before it is closed and handed to
+    /// apply. <see cref="WorkingSetBudgetBytes"/> is already one working-set owner's
+    /// share of the client-memory domain. Dividing that share by apply parallelism here
+    /// and then dividing it by the same connection fan again in ResolveApplyIo /
+    /// ResolveConsensusFold made the hot path scale as 1/p²: on a 12-P-core host one
+    /// logical working set was cut to 1/12 of its owned memory before its 12 database
+    /// lanes split it again. That produced tens-of-thousands-row executor calls against
+    /// million-row sets and recreated RBAR as repeated medium packets.
+    ///
+    /// Parallel connection transit is accounted when the apply/fold plan divides this
+    /// envelope among its live connections. When several independent working sets are
+    /// genuinely resident at once, callers use
+    /// IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(concurrentWorkingSets) to divide
+    /// this owner share exactly once across those sets.
     /// </summary>
-    public static long WorkingSetFlushEnvelopeBytes => Math.Max(
-            CopyStartupBytesPerConnection,
-            WorkingSetBudgetBytes / CpuTopology.ResolveApplyPartitions());
+    public static long WorkingSetFlushEnvelopeBytes => WorkingSetBudgetBytes;
 
     // ---- Postgres memory GUC derivations (single source for tune-pg) --------------------
     // All are functions of physical RAM. tune-pg emits these; nothing hardcodes a GB literal.
