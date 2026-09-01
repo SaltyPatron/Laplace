@@ -344,6 +344,66 @@ void glicko2_update_period(glicko2_state_t* st,
 
 
 
+int glicko2_fold_grouped_period(glicko2_state_t* st,
+                                const int64_t* opponent_ratings,
+                                const int64_t* opponent_phis,
+                                const int64_t* games,
+                                const int64_t* score_sums,
+                                size_t group_count,
+                                int64_t tau,
+                                int64_t now_ns)
+{
+    if (!st || !opponent_ratings || !opponent_phis || !games ||
+        !score_sums || group_count == 0)
+        return -1;
+
+    int64_t mu     = g1_to_mu(st->rating);
+    int64_t phi    = g1_to_phi(st->rd);
+    int64_t sigma  = st->volatility;
+    int64_t phi_sq = laplace_fp_mul(phi, phi);
+
+    __int128 v_inv_wide = 0;
+    __int128 delta_wide = 0;
+    __int128 total_games_wide = 0;
+
+    for (size_t i = 0; i < group_count; ++i) {
+        int64_t n = games[i];
+        if (n <= 0) return -1;
+
+        int64_t mu_j  = g1_to_mu(opponent_ratings[i]);
+        int64_t phi_j = g1_to_phi(opponent_phis[i]);
+        int64_t g_j   = laplace_glicko2_g(phi_j);
+        int64_t E_j   = laplace_glicko2_E(mu, mu_j, g_j);
+        int64_t g_sq  = laplace_fp_mul(g_j, g_j);
+        int64_t E_1mE = laplace_fp_mul(E_j, LAPLACE_FP_ONE - E_j);
+
+        v_inv_wide += (__int128)n * laplace_fp_mul(g_sq, E_1mE);
+
+        /* Score enters linearly, but fixed-point multiplication rounds per
+         * observation. q/rem reproduces exactly the observation sequence
+         * represented by an aggregate without allocating O(games) records. */
+        int64_t q = score_sums[i] / n;
+        __int128 rem_wide = (__int128)score_sums[i] - (__int128)q * (n - 1);
+        if (rem_wide > INT64_MAX || rem_wide < INT64_MIN)
+            return -1;
+        int64_t rem = (int64_t)rem_wide;
+        delta_wide += (__int128)(n - 1) * laplace_fp_mul(g_j, q - E_j)
+                    + laplace_fp_mul(g_j, rem - E_j);
+        total_games_wide += n;
+    }
+
+    if (v_inv_wide > INT64_MAX || v_inv_wide < INT64_MIN ||
+        delta_wide > INT64_MAX || delta_wide < INT64_MIN ||
+        total_games_wide > INT64_MAX ||
+        st->observation_count > INT64_MAX - (int64_t)total_games_wide)
+        return -1;
+
+    glicko2_finish_period(st, mu, phi, phi_sq, sigma,
+                          (int64_t) v_inv_wide, (int64_t) delta_wide,
+                          (size_t) total_games_wide, tau, now_ns, NULL);
+    return 0;
+}
+
 int glicko2_fold_uniform_period(glicko2_state_t* st,
                                 int64_t opponent_rating,
                                 int64_t opponent_phi,
@@ -352,43 +412,8 @@ int glicko2_fold_uniform_period(glicko2_state_t* st,
                                 int64_t tau,
                                 int64_t now_ns)
 {
-    if (!st || games <= 0 ||
-        st->observation_count > INT64_MAX - games)
-        return -1;
-
-    int64_t mu     = g1_to_mu(st->rating);
-    int64_t phi    = g1_to_phi(st->rd);
-    int64_t sigma  = st->volatility;
-    int64_t phi_sq = laplace_fp_mul(phi, phi);
-
-    int64_t mu_j  = g1_to_mu(opponent_rating);
-    int64_t phi_j = g1_to_phi(opponent_phi);
-    int64_t g_j   = laplace_glicko2_g(phi_j);
-    int64_t E_j   = laplace_glicko2_E(mu, mu_j, g_j);
-    int64_t g_sq  = laplace_fp_mul(g_j, g_j);
-    int64_t E_1mE = laplace_fp_mul(E_j, LAPLACE_FP_ONE - E_j);
-
-    
-    __int128 v_inv_wide = (__int128) games * laplace_fp_mul(g_sq, E_1mE);
-
-    
-
-    int64_t q = sum_score / games;
-    __int128 rem_wide = (__int128) sum_score - (__int128) q * (games - 1);
-    if (rem_wide > INT64_MAX || rem_wide < INT64_MIN)
-        return -1;
-    int64_t rem = (int64_t) rem_wide;
-    __int128 delta_wide = (__int128) (games - 1) * laplace_fp_mul(g_j, q - E_j)
-                        + laplace_fp_mul(g_j, rem - E_j);
-
-    if (v_inv_wide > INT64_MAX || v_inv_wide < INT64_MIN ||
-        delta_wide > INT64_MAX || delta_wide < INT64_MIN)
-        return -1;
-
-    glicko2_finish_period(st, mu, phi, phi_sq, sigma,
-                          (int64_t) v_inv_wide, (int64_t) delta_wide,
-                          (size_t) games, tau, now_ns, NULL);
-    return 0;
+    return glicko2_fold_grouped_period(st, &opponent_rating, &opponent_phi,
+                                       &games, &sum_score, 1, tau, now_ns);
 }
 
 void laplace_glicko2_update_period_traced(glicko2_state_t* st,

@@ -50,6 +50,20 @@ int glicko2_fold_uniform_period(glicko2_state_t* st,
                                 int64_t tau,
                                 int64_t now_ns);
 
+/* Exact closed-form rating-period update for observations grouped by identical
+ * (opponent_rating, opponent_phi). Each group's score_sum is the sum of its
+ * fixed-point game scores. This is mathematically identical to materializing
+ * every observation in one Glicko-2 rating period; unlike averaging opponent
+ * ratings, it preserves each opponent's nonlinear E() contribution. */
+int glicko2_fold_grouped_period(glicko2_state_t* st,
+                                const int64_t* opponent_ratings,
+                                const int64_t* opponent_phis,
+                                const int64_t* games,
+                                const int64_t* score_sums,
+                                size_t group_count,
+                                int64_t tau,
+                                int64_t now_ns);
+
 void glicko2_update(glicko2_state_t* st,
                     int64_t score,
                     int64_t source_credibility,

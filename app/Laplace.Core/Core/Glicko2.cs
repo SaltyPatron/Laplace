@@ -100,6 +100,33 @@ public static unsafe class Glicko2
         }
     }
 
+    public static void FoldGroupedPeriod(
+        ref Glicko2State state,
+        ReadOnlySpan<long> opponentRatingsFp1e9,
+        ReadOnlySpan<long> opponentPhisFp1e9,
+        ReadOnlySpan<long> games,
+        ReadOnlySpan<long> sumScoresFp1e9,
+        long tauFp1e9,
+        long nowUnixNs)
+    {
+        int count = opponentRatingsFp1e9.Length;
+        if (count == 0 || opponentPhisFp1e9.Length != count ||
+            games.Length != count || sumScoresFp1e9.Length != count)
+            throw new ArgumentException("grouped rating-period arrays must share a non-zero length");
+        fixed (Glicko2State* statePtr = &state)
+        fixed (long* ratingsPtr = opponentRatingsFp1e9)
+        fixed (long* phisPtr = opponentPhisFp1e9)
+        fixed (long* gamesPtr = games)
+        fixed (long* scoresPtr = sumScoresFp1e9)
+        {
+            int rc = NativeInterop.Glicko2FoldGroupedPeriod(
+                statePtr, ratingsPtr, phisPtr, gamesPtr, scoresPtr,
+                (nuint)count, tauFp1e9, nowUnixNs);
+            if (rc != 0)
+                throw new InvalidOperationException("grouped rating period exceeds fixed-point capacity");
+        }
+    }
+
 
     public static Glicko2State AccumulateGames(
         long priorRatingFp1e9,

@@ -269,6 +269,89 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_period);
+
+Datum
+pg_laplace_glicko2_accumulate_period(PG_FUNCTION_ARGS)
+{
+    glicko2_state_t st;
+
+    for (int arg = 0; arg <= 6; ++arg)
+        if (PG_ARGISNULL(arg))
+            ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("laplace_glicko2_accumulate_period: required argument "
+                        "%d is NULL", arg + 1)));
+
+    ArrayType *rating_array = PG_GETARG_ARRAYTYPE_P(3);
+    ArrayType *rd_array = PG_GETARG_ARRAYTYPE_P(4);
+    ArrayType *games_array = PG_GETARG_ARRAYTYPE_P(5);
+    ArrayType *scores_array = PG_GETARG_ARRAYTYPE_P(6);
+    Datum *rating_datums, *rd_datums, *games_datums, *score_datums;
+    bool *rating_nulls, *rd_nulls, *games_nulls, *score_nulls;
+    int rating_n, rd_n, games_n, score_n;
+    int64_t *ratings, *rds, *games, *scores;
+    int64_t tau;
+    TupleDesc tupdesc;
+    Datum values[3];
+    bool nulls[3] = {false, false, false};
+    HeapTuple tuple;
+
+    deconstruct_array(rating_array, INT8OID, 8, true, 'd',
+                      &rating_datums, &rating_nulls, &rating_n);
+    deconstruct_array(rd_array, INT8OID, 8, true, 'd',
+                      &rd_datums, &rd_nulls, &rd_n);
+    deconstruct_array(games_array, INT8OID, 8, true, 'd',
+                      &games_datums, &games_nulls, &games_n);
+    deconstruct_array(scores_array, INT8OID, 8, true, 'd',
+                      &score_datums, &score_nulls, &score_n);
+    if (rating_n == 0 || rd_n != rating_n || games_n != rating_n ||
+        score_n != rating_n)
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("laplace_glicko2_accumulate_period: grouped arrays must "
+                    "share a non-zero length")));
+
+    ratings = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    rds = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    games = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    scores = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    for (int i = 0; i < rating_n; ++i)
+    {
+        if (rating_nulls[i] || rd_nulls[i] || games_nulls[i] || score_nulls[i])
+            ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("laplace_glicko2_accumulate_period: grouped arrays "
+                        "must not contain NULL")));
+        ratings[i] = DatumGetInt64(rating_datums[i]);
+        rds[i] = DatumGetInt64(rd_datums[i]);
+        games[i] = DatumGetInt64(games_datums[i]);
+        scores[i] = DatumGetInt64(score_datums[i]);
+    }
+
+    glicko2_init(&st, PG_GETARG_INT64(0), PG_GETARG_INT64(1),
+                 PG_GETARG_INT64(2));
+    tau = PG_ARGISNULL(7) ? LAPLACE_GLICKO2_DEFAULT_TAU : PG_GETARG_INT64(7);
+    if (glicko2_fold_grouped_period(&st, ratings, rds, games, scores,
+                                    (size_t)rating_n, tau, 0) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+             errmsg("laplace_glicko2_accumulate_period: aggregate exceeds "
+                    "fixed-point capacity")));
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("function returning record called in context that cannot "
+                    "accept type record")));
+    BlessTupleDesc(tupdesc);
+    values[0] = Int64GetDatum(st.rating);
+    values[1] = Int64GetDatum(st.rd);
+    values[2] = Int64GetDatum(st.volatility);
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
 /*
  * Shared validation + SPI-wrapped invocation for the flat batch-presence
  * primitives (entities_exist_bitmap, tier_batch_existence_probe). Both are

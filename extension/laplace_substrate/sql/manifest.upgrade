@@ -47,6 +47,7 @@ functions/glicko2/laplace_glicko2_accumulate.sql.in
 functions/glicko2/laplace_score.sql.in
 functions/glicko2/laplace_score_inverse.sql.in
 functions/glicko2/laplace_glicko2_accumulate_games.sql.in
+functions/glicko2/laplace_glicko2_accumulate_period.sql.in
 functions/cascade/astar_path_raw.sql.in
 functions/trajectory/trajectory_point_count.sql.in
 functions/trajectory/trajectory_prefix_distance.sql.in

@@ -200,18 +200,29 @@ public class ConsensusAccumulatingWriterTests
     }
 
     [Fact]
-    public async Task Production_MixedPhiFailsLoud()
+    public async Task Production_MixedPeriodOrderIsDeterministic()
     {
-        var src = H(400); var relType = H(401); var subj = H(410); var obj = H(420);
-        await using var accumulator = new ConsensusAccumulatingWriter(new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            accumulator.ApplyManyAsync(new[] { Change(src, "acc-phi",
-                Obs(H(430), subj, relType, obj, src, 900_000_000, phi: PhiTrust),
-                Obs(H(431), subj, relType, obj, src, 800_000_000, phi: PhiCrank)) }));
+        var src = H(400); var relType = H(401);
+        var subjA = H(410); var subjB = H(411); var obj = H(420);
+        await EnsureScaffoldAsync(src, relType, subjA, subjB, obj);
+        await using var accumulator = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+        await accumulator.ApplyManyAsync(new[] { Change(src, "acc-period-order",
+            Obs(H(430), subjA, relType, obj, src, 900_000_000,
+                phi: PhiTrust, opponentRating: 1_600_000_000_000),
+            Obs(H(431), subjA, relType, obj, src, 200_000_000,
+                phi: PhiCrank, opponentRating: 1_900_000_000_000),
+            Obs(H(432), subjB, relType, obj, src, 200_000_000,
+                phi: PhiCrank, opponentRating: 1_900_000_000_000),
+            Obs(H(433), subjB, relType, obj, src, 900_000_000,
+                phi: PhiTrust, opponentRating: 1_600_000_000_000)) });
+
+        Assert.Equal(await ConsensusRowAsync(subjA, relType, obj),
+                     await ConsensusRowAsync(subjB, relType, obj));
     }
 
     [Fact]
-    public async Task Production_MixedOpponentRatingsUseGameWeightedPeriodMean()
+    public async Task Production_MixedOpponentsUseOneExactRatingPeriod()
     {
         var src = H(440); var relType = H(441); var subj = H(450); var obj = H(460);
         await EnsureScaffoldAsync(src, relType, subj, obj);
@@ -220,9 +231,11 @@ public class ConsensusAccumulatingWriterTests
             new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
         await accumulator.ApplyManyAsync(new[] { Change(src, "acc-opponents",
             Obs(H(470), subj, relType, obj, src, 1_000_000_000,
-                games: 1, opponentRating: 1_600_000_000_000),
+                phi: 40_000_000_000, games: 1,
+                opponentRating: 1_600_000_000_000),
             Obs(H(471), subj, relType, obj, src, 0,
-                games: 3, opponentRating: 1_800_000_000_000)) });
+                phi: 70_000_000_000, games: 3,
+                opponentRating: 1_800_000_000_000)) });
 
         var actual = await ConsensusRowAsync(subj, relType, obj);
         Assert.NotNull(actual);
@@ -230,12 +243,14 @@ public class ConsensusAccumulatingWriterTests
 
         await using var expectedCmd = _pg.DataSource.CreateCommand("""
             SELECT (r).rating, (r).rd, (r).volatility
-            FROM (SELECT laplace.laplace_glicko2_accumulate_games(
+            FROM (SELECT laplace.laplace_glicko2_accumulate_period(
                 consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(),
-                consensus.glicko2_initial_volatility(), 1750000000000::bigint,
-                $1, 4, 1000000000, consensus.glicko2_tau()) AS r) q
+                consensus.glicko2_initial_volatility(),
+                ARRAY[1600000000000, 1800000000000]::bigint[],
+                ARRAY[40000000000, 70000000000]::bigint[],
+                ARRAY[1, 3]::bigint[], ARRAY[1000000000, 0]::bigint[],
+                consensus.glicko2_tau()) AS r) q
             """);
-        expectedCmd.Parameters.AddWithValue(PhiTrust);
         await using var expected = await expectedCmd.ExecuteReaderAsync();
         Assert.True(await expected.ReadAsync());
         Assert.Equal(expected.GetInt64(0), actual.Value.rating);

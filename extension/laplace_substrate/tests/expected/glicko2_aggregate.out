@@ -198,6 +198,36 @@ FROM replay, batch;
  t                    | t                | t
 (1 row)
 
+WITH replay AS (
+    SELECT laplace.laplace_glicko2_accumulate(
+        1500000000000, 350000000000, 60000000,
+        opponent_rating, opponent_rd, score, 500000000
+    ) AS r
+    FROM (VALUES
+        (1600000000000::bigint, 40000000000::bigint, 1000000000::bigint),
+        (1800000000000::bigint, 70000000000::bigint, 0::bigint),
+        (1800000000000::bigint, 70000000000::bigint, 0::bigint),
+        (1800000000000::bigint, 70000000000::bigint, 0::bigint)
+    ) observations(opponent_rating, opponent_rd, score)
+), grouped AS (
+    SELECT laplace.laplace_glicko2_accumulate_period(
+        1500000000000, 350000000000, 60000000,
+        ARRAY[1600000000000, 1800000000000]::bigint[],
+        ARRAY[40000000000, 70000000000]::bigint[],
+        ARRAY[1, 3]::bigint[], ARRAY[1000000000, 0]::bigint[],
+        500000000
+    ) AS r
+)
+SELECT
+    (grouped.r).rating = (replay.r).rating AS grouped_rating_bit_equal,
+    (grouped.r).rd = (replay.r).rd AS grouped_rd_bit_equal,
+    (grouped.r).volatility = (replay.r).volatility AS grouped_volatility_bit_equal
+FROM replay, grouped;
+ grouped_rating_bit_equal | grouped_rd_bit_equal | grouped_volatility_bit_equal 
+--------------------------+----------------------+------------------------------
+ t                        | t                    | t
+(1 row)
+
 SELECT laplace.laplace_glicko2_accumulate_games(
     1500000000000, 350000000000, 60000000,
     1500000000000,  80000000000, 0, 0, 500000000);

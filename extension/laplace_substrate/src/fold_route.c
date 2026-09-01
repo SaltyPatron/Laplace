@@ -32,8 +32,8 @@
  *  per-batch ANALYZE, no volatility trap.
  *
  * Fold math stays one implementation per fact: both fold arms run the same
- * core (glicko2_init + glicko2_fold_uniform_period) the SQL scalar
- * (laplace_glicko2_accumulate_games) wraps — computed natively in one pass
+ * core (glicko2_init + glicko2_fold_grouped_period) the SQL scalar
+ * (laplace_glicko2_accumulate_period) wraps — computed natively in one pass
  * per type run, matched cells from their stored prior, novel cells from the
  * neutral prior. The scalar remains only in the collision MERGE fallback for
  * a concurrently-inserted cell (see UPSERT_MERGE_SQL).
@@ -660,19 +660,164 @@ typedef struct FoldMemo
     glicko2_state_t result;
 } FoldMemo;
 
+typedef struct PeriodArrays
+{
+    InArray offsets; /* zero-based, one entry per cell plus terminal */
+    InArray opponents;
+    InArray phis;
+    InArray games;
+    InArray sums;
+    bool exact;
+} PeriodArrays;
+
+typedef struct PeriodWindow
+{
+    ArrayType *starts;
+    ArrayType *ends;
+    ArrayType *opponents;
+    ArrayType *phis;
+    ArrayType *games;
+    ArrayType *sums;
+} PeriodWindow;
+
+static void
+read_period_arrays(FunctionCallInfo fcinfo, int cell_count,
+                   const char *label, PeriodArrays *periods)
+{
+    bool any = false;
+    bool all = true;
+
+    memset(periods, 0, sizeof(*periods));
+    for (int arg = 8; arg <= 12; ++arg)
+    {
+        bool present = PG_NARGS() > arg && !PG_ARGISNULL(arg);
+        any = any || present;
+        all = all && present;
+    }
+    if (!any) return;
+    if (!all)
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: exact rating-period arrays must be supplied together",
+                        label)));
+
+    in_array(fcinfo, 8, INT8OID, 8, true, 'd', false, label,
+             &periods->offsets);
+    in_array(fcinfo, 9, INT8OID, 8, true, 'd', false, label,
+             &periods->opponents);
+    in_array(fcinfo, 10, INT8OID, 8, true, 'd', false, label,
+             &periods->phis);
+    in_array(fcinfo, 11, INT8OID, 8, true, 'd', false, label,
+             &periods->games);
+    in_array(fcinfo, 12, INT8OID, 8, true, 'd', false, label,
+             &periods->sums);
+    if (periods->offsets.n != cell_count + 1 ||
+        periods->opponents.n != periods->phis.n ||
+        periods->games.n != periods->phis.n ||
+        periods->sums.n != periods->phis.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: invalid exact rating-period array lengths", label)));
+    if (DatumGetInt64(periods->offsets.elems[0]) != 0 ||
+        DatumGetInt64(periods->offsets.elems[cell_count]) != periods->games.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: rating-period offsets do not span grouped arrays",
+                        label)));
+    for (int i = 0; i < cell_count; ++i)
+    {
+        int64 start = DatumGetInt64(periods->offsets.elems[i]);
+        int64 end = DatumGetInt64(periods->offsets.elems[i + 1]);
+        if (start < 0 || end <= start || end > periods->games.n)
+            ereport(ERROR,
+                    (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                     errmsg("%s: cell %d has invalid rating-period range",
+                            label, i)));
+    }
+    periods->exact = true;
+}
+
+static PeriodWindow
+period_window(const PeriodArrays *periods, const InArray *cell_opponents,
+              const InArray *cell_phis, const InArray *cell_games,
+              const InArray *cell_sums, int cell_start, int cell_n)
+{
+    PeriodWindow window;
+    Datum *starts = (Datum *)palloc(sizeof(Datum) * cell_n);
+    Datum *ends = (Datum *)palloc(sizeof(Datum) * cell_n);
+    int group_start;
+    int group_n;
+
+    if (periods->exact)
+    {
+        int64 first = DatumGetInt64(periods->offsets.elems[cell_start]);
+        int64 terminal = DatumGetInt64(
+            periods->offsets.elems[cell_start + cell_n]);
+        group_start = (int)first;
+        group_n = (int)(terminal - first);
+        for (int i = 0; i < cell_n; ++i)
+        {
+            int64 begin = DatumGetInt64(
+                periods->offsets.elems[cell_start + i]) - first;
+            int64 end = DatumGetInt64(
+                periods->offsets.elems[cell_start + i + 1]) - first;
+            starts[i] = Int32GetDatum((int32)begin + 1);
+            ends[i] = Int32GetDatum((int32)end);
+        }
+        window.opponents = array_window(
+            periods->opponents.array, periods->opponents.elems, NULL,
+            periods->opponents.n, group_start, group_n,
+            INT8OID, 8, true, 'd');
+        window.phis = array_window(periods->phis.array, periods->phis.elems, NULL,
+                                   periods->phis.n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+        window.games = array_window(periods->games.array, periods->games.elems, NULL,
+                                    periods->games.n, group_start, group_n,
+                                    INT8OID, 8, true, 'd');
+        window.sums = array_window(periods->sums.array, periods->sums.elems, NULL,
+                                   periods->sums.n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+    }
+    else
+    {
+        group_start = cell_start;
+        group_n = cell_n;
+        for (int i = 0; i < cell_n; ++i)
+            starts[i] = ends[i] = Int32GetDatum(i + 1);
+        window.opponents = cell_opponents->n > 0
+            ? array_window(cell_opponents->array, cell_opponents->elems, NULL,
+                           cell_opponents->n, group_start, group_n,
+                           INT8OID, 8, true, 'd')
+            : neutral_opponent_array(cell_n);
+        window.phis = array_window(cell_phis->array, cell_phis->elems, NULL,
+                                   cell_phis->n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+        window.games = array_window(cell_games->array, cell_games->elems, NULL,
+                                    cell_games->n, group_start, group_n,
+                                    INT8OID, 8, true, 'd');
+        window.sums = array_window(cell_sums->array, cell_sums->elems, NULL,
+                                   cell_sums->n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+    }
+    window.starts = construct_array(starts, cell_n, INT4OID, 4, true, 'i');
+    window.ends = construct_array(ends, cell_n, INT4OID, 4, true, 'i');
+    return window;
+}
+
 /* Fold one type run natively — matched cells from their stored prior
  * (`priors`: the FOR UPDATE read of this run; ord is 1-based within the run),
  * novel cells from the neutral prior. One tight native pass instead of a
  * record-returning SQL function crossing the executor once per matched row.
  * The novel half was already native (GH #565); this completes the symmetry.
  *
- * Bit parity with the SQL scalar is by construction: the scalar's body is
- * glicko2_init + glicko2_fold_uniform_period, and consensus.glicko2_neutral_mu()
+ * Bit parity with the SQL scalars is by construction: their bodies use
+ * glicko2_init plus the same uniform/grouped period kernels, and consensus.glicko2_neutral_mu()
  * / consensus.glicko2_tau() are defined as exactly CONSENSUS_FOLD_NEUTRAL_MU /
  * LAPLACE_GLICKO2_DEFAULT_TAU (asserted by tests/sql/consensus_upsert.sql). */
 static void
 fold_run_states(const InArray *phis, const InArray *opps,
                 const InArray *games, const InArray *sums,
+                const PeriodArrays *periods,
                 int run_start, int run_n, const FoldPriorStates *priors,
                 const char *label, FoldStateArrays *out)
 {
@@ -695,8 +840,10 @@ fold_run_states(const InArray *phis, const InArray *opps,
     {
         glicko2_state_t st;
         int64 input[7];
-        FoldMemo *entry;
-        bool found;
+        FoldMemo *entry = NULL;
+        bool found = false;
+        int period_start = -1;
+        int period_group_n = 1;
         int64 phi = DatumGetInt64(phis->elems[run_start + i]);
         /* The opponent this witness presents. opps->n == 0 means the caller did
          * not supply ratings, which folds against neutral exactly as before
@@ -706,6 +853,26 @@ fold_run_states(const InArray *phis, const InArray *opps,
                     : CONSENSUS_FOLD_NEUTRAL_MU;
         int64 n_games = DatumGetInt64(games->elems[run_start + i]);
         int64 sum = DatumGetInt64(sums->elems[run_start + i]);
+
+        if (periods->exact)
+        {
+            int cell = run_start + i;
+            int64 start64 = DatumGetInt64(periods->offsets.elems[cell]);
+            int64 end64 = DatumGetInt64(periods->offsets.elems[cell + 1]);
+            period_start = (int)start64;
+            period_group_n = (int)(end64 - start64);
+            if (period_group_n == 1)
+            {
+                opp = DatumGetInt64(periods->opponents.elems[period_start]);
+                phi = DatumGetInt64(periods->phis.elems[period_start]);
+                if (DatumGetInt64(periods->games.elems[period_start]) != n_games ||
+                    DatumGetInt64(periods->sums.elems[period_start]) != sum)
+                    ereport(ERROR,
+                            (errcode(ERRCODE_DATA_EXCEPTION),
+                             errmsg("%s: grouped period totals do not match cell totals",
+                                    label)));
+            }
+        }
 
         if (n_games <= 0)
             ereport(ERROR,
@@ -720,26 +887,75 @@ fold_run_states(const InArray *phis, const InArray *opps,
             glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
                          CONSENSUS_FOLD_INITIAL_RD,
                          CONSENSUS_FOLD_INITIAL_VOLATILITY);
-        input[0] = st.rating;
-        input[1] = st.rd;
-        input[2] = st.volatility;
-        input[3] = opp;
-        input[4] = phi;
-        input[5] = n_games;
-        input[6] = sum;
-        entry = hash_search(memo, input, HASH_ENTER, &found);
-        if (found)
-            st = entry->result;
-        else
+        if (period_group_n == 1)
         {
-            if (consensus_fold_apply_partial(&st, opp, phi, n_games, sum,
-                                             LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
+            input[0] = st.rating;
+            input[1] = st.rd;
+            input[2] = st.volatility;
+            input[3] = opp;
+            input[4] = phi;
+            input[5] = n_games;
+            input[6] = sum;
+            entry = hash_search(memo, input, HASH_ENTER, &found);
+            if (found)
+                st = entry->result;
+            else if (consensus_fold_apply_partial(
+                         &st, opp, phi, n_games, sum,
+                         LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
                 ereport(ERROR,
                         (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                          errmsg("%s: aggregate exceeds fixed-point capacity", label),
                          errdetail("games=%ld sum_score=%ld",
                                    (long) n_games, (long) sum)));
-            entry->result = st;
+            if (!found) entry->result = st;
+        }
+        else
+        {
+            int start = period_start;
+            int group_n = period_group_n;
+            int64 *group_opps = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 *group_phis = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 *group_games = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 *group_sums = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 exact_games = 0;
+            int64 exact_sum = 0;
+
+            for (int g = 0; g < group_n; ++g)
+            {
+                group_opps[g] = DatumGetInt64(periods->opponents.elems[start + g]);
+                group_phis[g] = DatumGetInt64(periods->phis.elems[start + g]);
+                group_games[g] = DatumGetInt64(periods->games.elems[start + g]);
+                group_sums[g] = DatumGetInt64(periods->sums.elems[start + g]);
+                if (group_games[g] <= 0 ||
+                    exact_games > INT64_MAX - group_games[g])
+                    ereport(ERROR,
+                            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                             errmsg("%s: invalid grouped game count", label)));
+                exact_games += group_games[g];
+                if ((group_sums[g] > 0 && exact_sum > INT64_MAX - group_sums[g]) ||
+                    (group_sums[g] < 0 && exact_sum < INT64_MIN - group_sums[g]))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                             errmsg("%s: grouped score sum exceeds capacity", label)));
+                exact_sum += group_sums[g];
+            }
+            if (exact_games != n_games || exact_sum != sum)
+                ereport(ERROR,
+                        (errcode(ERRCODE_DATA_EXCEPTION),
+                         errmsg("%s: grouped period totals do not match cell totals",
+                                label)));
+            int fold_rc = glicko2_fold_grouped_period(
+                &st, group_opps, group_phis, group_games, group_sums,
+                (size_t)group_n, LAPLACE_GLICKO2_DEFAULT_TAU, 0);
+            pfree(group_opps);
+            pfree(group_phis);
+            pfree(group_games);
+            pfree(group_sums);
+            if (fold_rc != 0)
+                ereport(ERROR,
+                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                         errmsg("%s: exact rating period exceeds fixed-point capacity",
+                                label)));
         }
         seen[i] = BoolGetDatum(matched[i]);
         ratings[i] = Int64GetDatum(st.rating);
@@ -995,23 +1211,26 @@ static const char *UPSERT_MERGE_SQL =
     "USING unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
     "             $5::int8[], $6::int8[], $7::timestamptz[], "
     "             $8::bool[], $9::int8[], $10::int8[], $11::int8[], "
-    "             $12::int8[]) "
+    "             $12::int8[], $13::int4[], $14::int4[]) "
     "      AS b(id, s, o, phi, games, score_sum, ts, seen, new_rating, "
-    "           new_rd, new_volatility, opp_rating) "
+    "           new_rd, new_volatility, opp_rating, group_start, group_end) "
     "ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
     "WHEN MATCHED THEN UPDATE SET "
     "  rating = CASE WHEN b.seen THEN b.new_rating ELSE "
-    "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, b.opp_rating, "
-    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rating END, "
+    "      (laplace.laplace_glicko2_accumulate_period("
+    "           c.rating, c.rd, c.volatility, $15[b.group_start:b.group_end], "
+    "           $16[b.group_start:b.group_end], $17[b.group_start:b.group_end], "
+    "           $18[b.group_start:b.group_end], consensus.glicko2_tau())).rating END, "
     "  rd = CASE WHEN b.seen THEN b.new_rd ELSE "
-    "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, b.opp_rating, "
-    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rd END, "
+    "      (laplace.laplace_glicko2_accumulate_period("
+    "           c.rating, c.rd, c.volatility, $15[b.group_start:b.group_end], "
+    "           $16[b.group_start:b.group_end], $17[b.group_start:b.group_end], "
+    "           $18[b.group_start:b.group_end], consensus.glicko2_tau())).rd END, "
     "  volatility = CASE WHEN b.seen THEN b.new_volatility ELSE "
-    "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, b.opp_rating, "
-    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).volatility END, "
+    "      (laplace.laplace_glicko2_accumulate_period("
+    "           c.rating, c.rd, c.volatility, $15[b.group_start:b.group_end], "
+    "           $16[b.group_start:b.group_end], $17[b.group_start:b.group_end], "
+    "           $18[b.group_start:b.group_end], consensus.glicko2_tau())).volatility END, "
     "  witness_count = c.witness_count + b.games, "
     "  last_observed_at = GREATEST(c.last_observed_at, b.ts) "
     "WHEN NOT MATCHED THEN INSERT "
@@ -1188,6 +1407,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     const char *label = "consensus_upsert";
     InArray     subjects, types, objects, phis, games, sums, ts;
     InArray     opps;
+    PeriodArrays periods;
     Datum      *cell_ids;
     ArrayType  *cell_id_array;
     int64       affected = 0;
@@ -1206,6 +1426,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     memset(&opps, 0, sizeof(opps));
     if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
         in_array(fcinfo, 7, INT8OID, 8, true, 'd', false, label, &opps);
+    read_period_arrays(fcinfo, subjects.n, label, &periods);
     if (opps.n > 0 && opps.n != subjects.n)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
@@ -1276,17 +1497,19 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         ArrayType     *run_subjects;
         FoldPriorStates *priors;
         FoldStateArrays folds;
+        PeriodWindow    period_run;
         Datum          write_vals[9];
-        Datum          vals[12];
+        Datum          vals[18];
         uint64         matched_n;
         static const Oid write_args[9] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
-        static const Oid args[12] =
+        static const Oid args[18] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              INT8ARRAYOID, INT8ARRAYOID, 1185,
              BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
-             INT8ARRAYOID};
+             INT8ARRAYOID, INT4ARRAYOID, INT4ARRAYOID, INT8ARRAYOID,
+             INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
 
         while (j < subjects.n &&
                memcmp(bytea16(types.elems[j], label), type16, 16) == 0)
@@ -1305,7 +1528,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         priors = read_run_priors(type16, types.elems[run_start], cell_ids,
                                  &subjects, run_start, run_n, label);
         matched_n = priors->matched_n;
-        fold_run_states(&phis, &opps, &games, &sums, run_start, run_n,
+        fold_run_states(&phis, &opps, &games, &sums, &periods, run_start, run_n,
                         priors, label, &folds);
 
         matched_plan = typed_plan(&upsert_matched_plans,
@@ -1315,7 +1538,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                                 "consensus_upsert novel plans", type16,
                                 UPSERT_NOVEL_SQL, 9, write_args);
         merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                                type16, UPSERT_MERGE_SQL, 12, args);
+                                type16, UPSERT_MERGE_SQL, 18, args);
         vals[0] = PointerGetDatum(run_ids);
         vals[1] = PointerGetDatum(run_subjects);
         vals[2] = PointerGetDatum(array_window(objects.array, objects.elems,
@@ -1343,6 +1566,14 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
             ? array_window(opps.array, opps.elems, NULL, opps.n,
                            run_start, run_n, INT8OID, 8, true, 'd')
             : neutral_opponent_array(run_n));
+        period_run = period_window(&periods, &opps, &phis, &games, &sums,
+                                   run_start, run_n);
+        vals[12] = PointerGetDatum(period_run.starts);
+        vals[13] = PointerGetDatum(period_run.ends);
+        vals[14] = PointerGetDatum(period_run.opponents);
+        vals[15] = PointerGetDatum(period_run.phis);
+        vals[16] = PointerGetDatum(period_run.games);
+        vals[17] = PointerGetDatum(period_run.sums);
         write_vals[0] = vals[0];
         write_vals[1] = vals[1];
         write_vals[2] = vals[2];
@@ -1374,26 +1605,29 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     Datum          type_datum;
     InArray        subjects, objects, phis, games, sums, ts;
     InArray        opps;
+    PeriodArrays   periods;
     Datum         *cell_ids;
     ArrayType     *cell_id_array;
     FoldPriorStates *priors;
     FoldStateArrays folds;
+    PeriodWindow    period_run;
     HTAB          *seen;
     HASHCTL        ctl;
     SPIPlanPtr     matched_plan;
     SPIPlanPtr     novel_plan;
     SPIPlanPtr     merge_plan;
     Datum          write_vals[9];
-    Datum          vals[12];
+    Datum          vals[18];
     uint64         matched_n;
     static const Oid write_args[9] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
-    static const Oid args[12] =
+    static const Oid args[18] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID, INT8ARRAYOID, 1185,
          BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
-         INT8ARRAYOID};
+         INT8ARRAYOID, INT4ARRAYOID, INT4ARRAYOID, INT8ARRAYOID,
+         INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
     int i;
 
     if (PG_ARGISNULL(0))
@@ -1411,6 +1645,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     memset(&opps, 0, sizeof(opps));
     if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
         in_array(fcinfo, 7, INT8OID, 8, true, 'd', false, label, &opps);
+    read_period_arrays(fcinfo, subjects.n, label, &periods);
     if (opps.n > 0 && opps.n != subjects.n)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
@@ -1465,7 +1700,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     priors = read_run_priors(type16, type_datum, cell_ids, &subjects,
                              0, subjects.n, label);
     matched_n = priors->matched_n;
-    fold_run_states(&phis, &opps, &games, &sums, 0, subjects.n,
+    fold_run_states(&phis, &opps, &games, &sums, &periods, 0, subjects.n,
                     priors, label, &folds);
 
     matched_plan = typed_plan(&upsert_matched_plans,
@@ -1475,7 +1710,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                             "consensus_upsert novel plans", type16,
                             UPSERT_NOVEL_SQL, 9, write_args);
     merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                            type16, UPSERT_MERGE_SQL, 12, args);
+                            type16, UPSERT_MERGE_SQL, 18, args);
     vals[0] = PointerGetDatum(cell_id_array);
     vals[1] = PointerGetDatum(subjects.array);
     vals[2] = PointerGetDatum(objects.array);
@@ -1489,6 +1724,14 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     vals[10] = PointerGetDatum(folds.volatility_array);
     vals[11] = PointerGetDatum(
         opps.n > 0 ? opps.array : neutral_opponent_array((int) subjects.n));
+    period_run = period_window(&periods, &opps, &phis, &games, &sums,
+                               0, subjects.n);
+    vals[12] = PointerGetDatum(period_run.starts);
+    vals[13] = PointerGetDatum(period_run.ends);
+    vals[14] = PointerGetDatum(period_run.opponents);
+    vals[15] = PointerGetDatum(period_run.phis);
+    vals[16] = PointerGetDatum(period_run.games);
+    vals[17] = PointerGetDatum(period_run.sums);
     write_vals[0] = vals[0];
     write_vals[1] = vals[1];
     write_vals[2] = vals[2];

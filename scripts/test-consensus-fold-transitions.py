@@ -16,8 +16,8 @@ from psycopg2 import sql
 
 ROOT = Path(__file__).resolve().parents[1]
 SIGNATURES = (
-    'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[])',
-    'consensus.upsert(bytea[],bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[])')
+    'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[],bigint[],bigint[],bigint[],bigint[],bigint[])',
+    'consensus.upsert(bytea[],bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[],bigint[],bigint[],bigint[],bigint[],bigint[])')
 
 
 def main():
