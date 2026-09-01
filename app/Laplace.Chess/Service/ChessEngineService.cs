@@ -48,10 +48,12 @@ public sealed record ChessPlayMoveResult(
 public sealed class ChessEngineService : IAsyncDisposable
 {
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
+    private readonly NpgsqlDataSource? _readOnlyDataSource;
     private ChessLiveGameHost? _liveHost;
     private readonly ILogger _log;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly SemaphoreSlim _writeInitGate = new(1, 1);
     private NpgsqlDataSource? _ds;
     private SubstrateTurnHost? _host;
     private ChessModality? _modality;
@@ -67,7 +69,7 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public ChessEngineService(
         double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
-        : this(witnessWeight, _ => Task.FromResult(liveHost), log)
+        : this(witnessWeight, liveHost.DataSource, _ => Task.FromResult(liveHost), log)
     {
         _liveHost = liveHost;
     }
@@ -76,7 +78,24 @@ public sealed class ChessEngineService : IAsyncDisposable
         double witnessWeight,
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost, ILogger? log = null)
     {
-        _getLiveHost = getLiveHost;
+        _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
+        _trainWeight = witnessWeight;
+        _log = log ?? NullLogger.Instance;
+    }
+
+    /// <summary>
+    /// Production composition: pure chess inference borrows an existing server-enforced
+    /// read-only serving datasource. The live host factory is retained only for operations
+    /// that explicitly cross the recording/training boundary.
+    /// </summary>
+    public ChessEngineService(
+        double witnessWeight,
+        NpgsqlDataSource readOnlyDataSource,
+        Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
+        ILogger? log = null)
+    {
+        _readOnlyDataSource = readOnlyDataSource ?? throw new ArgumentNullException(nameof(readOnlyDataSource));
+        _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
         _trainWeight = witnessWeight;
         _log = log ?? NullLogger.Instance;
     }
@@ -87,38 +106,61 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public string NewGameFen() => ChessModality.StartFen;
 
+    private async Task<ChessLiveGameHost> LiveHostAsync(CancellationToken ct)
+        => _liveHost ??= await _getLiveHost(ct).ConfigureAwait(false);
 
-
-
-
+    private async Task<SubstrateTurnHost> WriteHostAsync(CancellationToken ct)
+    {
+        if (_host is not null) return _host;
+        await _writeInitGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_host is not null) return _host;
+            var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
+            _host = new SubstrateTurnHost(
+                liveHost.DataSource, liveHost.Writer,
+                new NpgsqlSubstrateReader(liveHost.DataSource), _trainWeight);
+            return _host;
+        }
+        finally { _writeInitGate.Release(); }
+    }
 
     private async Task<ModalityEngine<ChessState, ChessMove>> EngineAsync(CancellationToken ct)
     {
         if (_engine is not null) return _engine;
-        await _initGate.WaitAsync(ct);
+        await _initGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             if (_engine is not null) return _engine;
-            var liveHost = _liveHost ??= await _getLiveHost(ct);
-            var ds = liveHost.DataSource;
-            // Share the live runtime's datasource/writer, but retain the self-play
-            // provenance context for engine training writes. The live host's turn
-            // host deliberately records under chess/live/game.
-            var host = new SubstrateTurnHost(
-                ds, liveHost.Writer, new NpgsqlSubstrateReader(ds), _trainWeight);
+
+            // Pure inference must not resolve ChessLiveGameHost. Production supplies the
+            // API process's existing server-enforced read-only serving datasource. The
+            // live-host fallback exists only for standalone/legacy callers that explicitly
+            // constructed this service around an already write-capable chess runtime.
+            NpgsqlDataSource ds;
+            if (_readOnlyDataSource is not null)
+            {
+                ds = _readOnlyDataSource;
+            }
+            else
+            {
+                var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
+                ds = liveHost.DataSource;
+            }
+
+            var host = new SubstrateTurnReadHost(ds);
             LoadPerfcache();
             var modality = _modality ??= new ChessModality();
-            var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
-            _ds = ds; _host = host; _engine = engine;
+            var engine = new ModalityEngine<ChessState, ChessMove>(
+                modality, ChessVocabulary.MoveType, host, host);
+            _ds = ds;
+            _engine = engine;
             ScheduleLearnedRefresh();
-            _log.LogInformation("chess engine initialized from shared live runtime substrate host");
+            _log.LogInformation("chess inference initialized on read-only substrate host");
             return engine;
         }
         finally { _initGate.Release(); }
     }
-
-
-
 
     private static void LoadPerfcache() => CodepointPerfcache.LoadDefault();
 
@@ -232,11 +274,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         return await BestMoveSearchAsync(fen, depth: 4, substrate: true, moves: null, ct)
             .ConfigureAwait(false);
     }
-
-
-
-
-
 
     private SubstrateRootBias? _rootBias;
     private SubstrateBoardEvaluator? _boardEvaluator;
@@ -379,14 +416,14 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     public async Task RunStrongSelfPlayAsync(
-    int games, int depth, int maxPlies, int openingPlies, int reportEvery,
-    Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
+        int games, int depth, int maxPlies, int openingPlies, int reportEvery,
+        Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
     {
         await EngineAsync(ct);
+        var writeHost = await WriteHostAsync(ct).ConfigureAwait(false);
         var rng = new Random();
         for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
         {
-
             if ((g - 1) % Math.Max(1, reportEvery) == 0)
                 _boardEvaluator = new SubstrateBoardEvaluator(_ds!);
             var search = new Search(
@@ -418,7 +455,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             var edges = new RecordedEdge[subjectKeys.Count];
             for (int i = 0; i < edges.Length; i++)
                 edges[i] = new RecordedEdge(subjectKeys[i], objectKeys[i], null, outcome.ForMover(movers[i]));
-            await _host!.LearnGameAsync(edges, adjudicated, ct);
+            await writeHost.LearnGameAsync(edges, adjudicated, ct);
 
             RecordGame(new PlayedGame<ChessMove>(edges, outcome, plies, adjudicated));
             if (onReport is not null && (g % Math.Max(1, reportEvery) == 0 || g == games)) onReport(Status());
@@ -430,7 +467,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         string tenantId = "public", string? userId = null, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        var liveHost = _liveHost!;
+        var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
         var humanName = string.IsNullOrWhiteSpace(userId)
             ? tenantId == "public" ? "Browser player" : tenantId
             : userId;
@@ -484,7 +521,8 @@ public sealed class ChessEngineService : IAsyncDisposable
         Guid sessionId, string fen, string uci, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        if (_liveHost!.GetPlaySession(sessionId) is not { } session)
+        var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
+        if (liveHost.GetPlaySession(sessionId) is not { } session)
             return new ChessPlayMoveResult(fen, false, "session expired", Legal: false, Ply: 0);
 
         var state = session.State ?? _modality!.FromFen(fen);
@@ -505,15 +543,15 @@ public sealed class ChessEngineService : IAsyncDisposable
 
         if (session.RecordToSubstrate)
         {
-            await _liveHost.RecordPlayPlyAsync(
+            await liveHost.RecordPlayPlyAsync(
                 sessionId, session.PlyCount, fromKey, toKey, uci, moverId, ct);
-            await _liveHost.RecordPlayPlyAnalysisAsync(
+            await liveHost.RecordPlayPlyAnalysisAsync(
                 sessionId, session.PlyCount,
                 new ChessLivePlyAnalysis(Motifs: motifs), ct);
         }
 
         if (status != "ongoing")
-            await _liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
+            await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
 
         return new ChessPlayMoveResult(next.Board.ToFen(), status != "ongoing", status, Legal: true,
             Ply: session.PlyCount, Motifs: motifs);
@@ -523,7 +561,8 @@ public sealed class ChessEngineService : IAsyncDisposable
         Guid sessionId, string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        if (_liveHost!.GetPlaySession(sessionId) is not { } session)
+        var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
+        if (liveHost.GetPlaySession(sessionId) is not { } session)
             return new ChessBestMove(null, fen, 0, false, false, "session expired");
 
         var state = session.State ?? _modality!.FromFen(fen);
@@ -548,16 +587,16 @@ public sealed class ChessEngineService : IAsyncDisposable
 
         if (session.RecordToSubstrate)
         {
-            await _liveHost.RecordPlayPlyAsync(
+            await liveHost.RecordPlayPlyAsync(
                 sessionId, session.PlyCount, fromKey, toKey, mv.ToUci(), ChessVocabulary.LaplacePlayerId, ct);
-            await _liveHost.RecordPlayPlyAnalysisAsync(
+            await liveHost.RecordPlayPlyAnalysisAsync(
                 sessionId, session.PlyCount,
                 new ChessLivePlyAnalysis(result.Score, result.Depth, result.Nodes, pv, motifs), ct);
         }
         ReturnEngine(search);
 
         if (status != "ongoing")
-            await _liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
+            await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
 
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
@@ -567,7 +606,7 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task FinishPlaySessionAsync(
         Guid sessionId, string status, bool adjudicated = false, CancellationToken ct = default)
     {
-        var liveHost = _liveHost ??= await _getLiveHost(ct);
+        var liveHost = await LiveHostAsync(ct).ConfigureAwait(false);
         await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated, ct);
     }
 
@@ -591,8 +630,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
         return new ChessApplyResult(next.Board.ToFen(), status != "ongoing", status, Legal: true, Motifs: motifs);
     }
-
-
 
     private IReadOnlyList<LearnedSquare>? _learnedCells;
 
@@ -645,16 +682,17 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     public async Task RunSelfPlayAsync(
-    int games, double temperature, int maxPlies, int reportEvery,
-    Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
+        int games, double temperature, int maxPlies, int reportEvery,
+        Action<ChessTrainStatus>? onReport, CancellationToken ct = default)
     {
         var engine = await EngineAsync(ct);
+        var writeHost = await WriteHostAsync(ct).ConfigureAwait(false);
         var rng = new Random();
         lock (_statLock) { _trainTemp = temperature; _trainMaxPlies = maxPlies; }
         for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
         {
             var played = await engine.PlayGameAsync(_modality!.Initial(), temperature, rng, maxPlies, ct);
-            await _host!.LearnGameAsync(played.Edges, played.Adjudicated, ct);
+            await writeHost.LearnGameAsync(played.Edges, played.Adjudicated, ct);
             RecordGame(played);
             if (onReport is not null && (g % Math.Max(1, reportEvery) == 0 || g == games))
                 onReport(Status());
@@ -664,6 +702,7 @@ public sealed class ChessEngineService : IAsyncDisposable
     private async Task TrainLoopAsync(int maxGames, CancellationToken ct)
     {
         var engine = await EngineAsync(ct);
+        var writeHost = await WriteHostAsync(ct).ConfigureAwait(false);
         var rng = new Random();
         int played = 0;
         while (!ct.IsCancellationRequested && (maxGames <= 0 || played < maxGames))
@@ -671,7 +710,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             try
             {
                 var g = await engine.PlayGameAsync(_modality!.Initial(), _trainTemp, rng, _trainMaxPlies, ct);
-                await _host!.LearnGameAsync(g.Edges, g.Adjudicated, ct);
+                await writeHost.LearnGameAsync(g.Edges, g.Adjudicated, ct);
                 RecordGame(g);
                 played++;
             }
@@ -701,6 +740,7 @@ public sealed class ChessEngineService : IAsyncDisposable
     {
         StopTraining();
         if (_trainTask is not null) { try { await _trainTask; } catch { } }
+        _writeInitGate.Dispose();
         _initGate.Dispose();
     }
 }
