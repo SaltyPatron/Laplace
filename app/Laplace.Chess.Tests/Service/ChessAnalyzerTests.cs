@@ -39,6 +39,27 @@ public sealed class ChessAnalyzerTests
     }
 
     [Fact]
+    public void ParsedReplay_ReusesParsedPositions_AndStagesOutcomePositionTrees()
+    {
+        CodepointPerfcache.LoadDefault();
+        var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
+        var replay = ChessPgnDecomposer.MaterializeParsedReplay(parsed);
+
+        Assert.True(replay.IsCompleteFor(parsed));
+        Assert.Equal(parsed.PositionIds, replay.Positions.Select(p => p.Position.Id).ToArray());
+
+        var b = new SubstrateChangeBuilder(ChessPositionOutcomes.SourceId, "test/position-outcomes/replay");
+        ChessPositionOutcomes.DepositFromParsed(b, parsed, replay);
+        var change = b.SetInputUnitsConsumed(1).Build();
+
+        foreach (var position in replay.Positions)
+            Assert.Contains(change.Entities,
+                e => e.Id == position.Position.Id && e.TypeId == ChessVocabulary.PositionType);
+        Assert.Contains(change.Entities,
+            e => e.Id == ChessPositionOutcomes.MarkerId(parsed.PlayingId));
+    }
+
+    [Fact]
     public void Analyzer_EmitsOneLineTrajectoryWithoutPositionTrees()
     {
         var change = Analyze(Game);
