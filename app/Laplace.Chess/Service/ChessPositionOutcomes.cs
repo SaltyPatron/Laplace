@@ -45,6 +45,25 @@ public static class ChessPositionOutcomes
         AddMarker(b, game.PlayingId);
     }
 
+    /// <summary>
+    /// Fused PGN path: reuse the N+1 positions already composed for this parsed game. The
+    /// PositionOutcomes lane still stages the position/substructure content it owns before
+    /// attaching its outcome evidence; it simply does not run ChessCompose.Position again.
+    /// </summary>
+    internal static void DepositFromParsed(
+        SubstrateChangeBuilder b, ChessGameRecord game, ChessParsedReplay replay)
+    {
+        if (!replay.IsCompleteFor(game))
+        {
+            DepositFromParsed(b, game);
+            return;
+        }
+
+        foreach (var position in replay.Positions)
+            AppendComposed(b, ChessGraph.EmitComposed(b, position, SourceId), game.Result);
+        AddMarker(b, game.PlayingId);
+    }
+
     internal static void Deposit(SubstrateChangeBuilder b, ChessWitnessedGame game)
     {
         var modality = new ChessModality();
