@@ -1,0 +1,592 @@
+name: apply-1292-writer-once
+
+on:
+  push:
+    branches:
+      - fix/journal-visible-fold-completion-1292
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/journal-visible-fold-completion-1292
+          fetch-depth: 1
+
+      - name: Wire journal acknowledgement and crash recovery into writer lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_one(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{path}: expected one replacement site, found {n}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # One additional long-lived connection is not allowed to materialize out
+          # of thin air. Budget the fold-recovery session guard without shrinking
+          # either the COPY or fold fan: it is an owner, not fan capacity.
+          replace_one(
+              'app/Laplace.Core/Core/PostgresResourcePlan.cs',
+              '''        const int observabilityConnections = 3;''',
+              '''        const int observabilityConnections = 4;''')
+          replace_one(
+              'app/Laplace.Core/Core/PostgresResourcePlan.cs',
+              '''        // file-journal pump and the run-journal writer each open one more while the
+        // fans are already at full width. Omitting them made 1 + 2p exactly equal to
+''',
+              '''        // file-journal pump and the run-journal writer each open one more while the
+        // fans are already at full width. The fourth owner is the fold-recovery
+        // session guard held across evidence -> consensus/mask continuation; it is
+        // deliberately outside both fans. Omitting these owners made 1 + 2p equal to
+''')
+
+          # Remove the temporary impossible overload from the helper before compile.
+          replace_one(
+              'app/Laplace.Substrate/Crud/Npgsql/NpgsqlFoldJournal.cs',
+              '''    internal static Hash128[] RelationScope(
+        Dictionary<(Hash128 S, Hash128 T, Hash128? O), object>? _)
+        => throw new NotSupportedException("Use RelationScope(IEnumerable<Hash128>)");
+
+''',
+              '')
+
+          writer = 'app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs'
+
+          replace_one(
+              writer,
+              '''    private long _foldSpanStarted;
+    private int _inflightApplies;
+    private volatile bool _disposing;
+''',
+              '''    private long _foldSpanStarted;
+    private int _inflightApplies;
+    private volatile bool _disposing;
+
+    // One shared session guard spans the WHOLE bulk evidence -> fold continuation
+    // window. ops.recover_unfolded_* takes the same named advisory lock exclusively,
+    // so evidence-derived reconstruction can never race a live writer. This owner is
+    // explicitly budgeted by PostgresResourcePlan; it is not borrowed from a fan.
+    private NpgsqlFoldRecoveryGuard? _foldRecoveryGuard;
+    private readonly object _foldSourceLock = new();
+    private readonly HashSet<Hash128> _foldSources = new();
+''')
+
+          old_apply = '''    private async Task<ApplyResult> ApplyCoreAsync(
+        IReadOnlyList<SubstrateChange> changes, bool workingSet, bool append,
+        Hash128 sourceId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+        Interlocked.Increment(ref _inflightApplies);
+        try
+        {
+            if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+
+            var delta = BuildDelta(changes);
+
+            // A fold that already failed in the background poisons the run
+            // NOW, before any more evidence lands.
+            await ObserveFoldFailureAsync();
+
+            // Evidence lands FIRST; the fold runs only after it succeeds, so a
+            // retried batch folds exactly once (a throw below leaves consensus
+            // untouched for this batch).
+            var forwarded = ForwardChanges(changes);
+            var result = append
+                ? await _inner.AppendAsync(forwarded, sourceId, ct)
+                : workingSet
+                    ? await _inner.ApplyWorkingSetAsync(forwarded, ct)
+                    : await _inner.ApplyManyAsync(forwarded, ct);
+
+            // INVARIANT: one fold per claimed flush-journal token. A journal
+            // hit means a prior apply of this exact working set committed —
+            // and that apply's own flow folded this same delta right after its
+            // evidence landed. The fold is additive, not idempotent, so
+            // folding a replay would double-count the batch's testimony in
+            // consensus; a journal hit must no-op evidence AND fold. The
+            // guard sits OUTSIDE the bulk/inline split: an enqueued fold is
+            // still a fold, so a replay must not reach the queue either.
+            if (delta is { Count: > 0 } && !result.JournalReplayHit)
+            {
+                // Evidence has committed and its replay journal will suppress this delta
+                // forever. From here the fold is an owed continuation, not cancellable
+                // speculative work; completion/drain owns surfacing any failure.
+                if (_bulkRun) await EnqueueFoldAsync(delta, CancellationToken.None);
+                else await UpsertDeltaAsync(delta, CancellationToken.None);
+            }
+
+            return result;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inflightApplies);
+        }
+    }
+'''
+          new_apply = '''    private async Task<ApplyResult> ApplyCoreAsync(
+        IReadOnlyList<SubstrateChange> changes, bool workingSet, bool append,
+        Hash128 sourceId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+        Interlocked.Increment(ref _inflightApplies);
+        NpgsqlFoldRecoveryGuard? standaloneGuard = null;
+        try
+        {
+            if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
+
+            Hash128? journalToken = null;
+            Hash128? journalSource = null;
+            if (workingSet && changes.Count > 0)
+            {
+                journalToken = NpgsqlFoldJournal.WorkingSetToken(changes);
+                journalSource = changes[0].Metadata.SourceId;
+                lock (_foldSourceLock) _foldSources.Add(journalSource.Value);
+
+                // Online/standalone working-set applies have no BeginBulkRun owner,
+                // so hold the same recovery guard locally through evidence + fold + ack.
+                if (!_bulkRun)
+                    standaloneGuard = await NpgsqlFoldRecoveryGuard.AcquireSharedAsync(
+                        _ds, _log, ct).ConfigureAwait(false);
+            }
+
+            var delta = BuildDelta(changes);
+
+            // A fold that already failed in the background poisons the run NOW,
+            // before any more evidence lands. CompleteBulkRun can later repair and
+            // clear that poison only from durable evidence.
+            await ObserveFoldFailureAsync();
+
+            // Evidence lands FIRST. The flush journal therefore proves evidence
+            // durability only; its separate folded bit remains false until every
+            // consensus AND mask task for this delta commits.
+            var forwarded = ForwardChanges(changes);
+            var result = append
+                ? await _inner.AppendAsync(forwarded, sourceId, ct)
+                : workingSet
+                    ? await _inner.ApplyWorkingSetAsync(forwarded, ct)
+                    : await _inner.ApplyManyAsync(forwarded, ct);
+
+            Hash128[] foldTypes = delta is null
+                ? Array.Empty<Hash128>()
+                : NpgsqlFoldJournal.RelationScope(delta.Keys.Select(static key => key.T));
+
+            if (journalToken is { } token && journalSource is { } source
+                && !result.JournalReplayHit)
+            {
+                // Scope is published AFTER evidence durability. A crash before this
+                // UPDATE leaves NULL scope, which recovery treats conservatively as
+                // "all relations witnessed by this source". Consensus-only/no-evidence
+                // folds are intentionally not marked recoverable: there is no durable
+                // testimony from which an exact partial-fold repair can be derived.
+                bool recoverable = _persistEvidence || delta is null;
+                await NpgsqlFoldJournal.RecordScopeAsync(
+                    _ds, token, source, foldTypes, recoverable,
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+
+            if (delta is { Count: > 0 } && !result.JournalReplayHit)
+            {
+                // From evidence commit onward the fold is an owed continuation, not
+                // cancellable speculative work. Bulk mode queues it; online mode awaits
+                // it. The acknowledgement is part of that same tracked continuation.
+                if (_bulkRun)
+                    await EnqueueFoldAsync(
+                        delta, journalToken, journalSource, CancellationToken.None)
+                        .ConfigureAwait(false);
+                else
+                {
+                    await UpsertDeltaAsync(delta, CancellationToken.None).ConfigureAwait(false);
+                    if (journalToken is { } inlineToken && journalSource is { } inlineSource)
+                        await NpgsqlFoldJournal.MarkCompletedAsync(
+                            _ds, inlineToken, inlineSource, CancellationToken.None)
+                            .ConfigureAwait(false);
+                }
+            }
+            else if (!result.JournalReplayHit
+                     && journalToken is { } emptyToken
+                     && journalSource is { } emptySource)
+            {
+                // No testimony means no derived continuation is owed, but the state
+                // transition is still explicit rather than inferred from an empty delta.
+                await NpgsqlFoldJournal.MarkCompletedAsync(
+                    _ds, emptyToken, emptySource, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            if (result.JournalReplayHit && !_bulkRun && journalSource is { } replaySource)
+            {
+                // A replay token no longer means the fold landed. Release our shared
+                // guard before taking recovery exclusive, then reconstruct idempotently.
+                if (standaloneGuard is not null)
+                {
+                    await standaloneGuard.DisposeAsync().ConfigureAwait(false);
+                    standaloneGuard = null;
+                }
+                if (_persistEvidence)
+                    await NpgsqlFoldJournal.RecoverSourceAsync(
+                        _ds, replaySource, _log, CancellationToken.None)
+                        .ConfigureAwait(false);
+                long remaining = await NpgsqlFoldJournal.CountUnfoldedSourceAsync(
+                    _ds, replaySource, CancellationToken.None).ConfigureAwait(false);
+                if (remaining != 0)
+                    throw new InvalidOperationException(
+                        $"working-set replay for {replaySource} still has {remaining} unfinished fold token(s); "
+                        + "the outstanding token is not evidence-recoverable");
+            }
+
+            return result;
+        }
+        finally
+        {
+            if (standaloneGuard is not null)
+                await standaloneGuard.DisposeAsync().ConfigureAwait(false);
+            Interlocked.Decrement(ref _inflightApplies);
+        }
+    }
+'''
+          replace_one(writer, old_apply, new_apply)
+
+          old_enqueue = '''    private async Task EnqueueFoldAsync(
+        Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
+    {
+        await _foldDepth.WaitAsync(ct);
+        Task dispatched;
+        try
+        {
+            Interlocked.CompareExchange(
+                ref _foldSpanStarted,
+                System.Diagnostics.Stopwatch.GetTimestamp(),
+                comparand: 0);
+            dispatched = DispatchDeltaAsync(delta, ct);
+        }
+        catch
+        {
+            _foldDepth.Release();
+            throw;
+        }
+
+        var tracked = Release(dispatched);
+        lock (_foldChainLock) _outstanding.Add(tracked);
+
+        async Task Release(Task fold)
+        {
+            try { await fold.ConfigureAwait(false); }
+            finally { _foldDepth.Release(); }
+        }
+    }
+'''
+          new_enqueue = '''    private async Task EnqueueFoldAsync(
+        Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta,
+        Hash128? journalToken, Hash128? journalSource, CancellationToken ct)
+    {
+        await _foldDepth.WaitAsync(ct);
+        Task dispatched;
+        try
+        {
+            Interlocked.CompareExchange(
+                ref _foldSpanStarted,
+                System.Diagnostics.Stopwatch.GetTimestamp(),
+                comparand: 0);
+            dispatched = DispatchDeltaAsync(delta, ct);
+        }
+        catch
+        {
+            _foldDepth.Release();
+            throw;
+        }
+
+        var tracked = ReleaseAndAcknowledge(dispatched);
+        lock (_foldChainLock) _outstanding.Add(tracked);
+
+        async Task ReleaseAndAcknowledge(Task fold)
+        {
+            try
+            {
+                await fold.ConfigureAwait(false);
+                if (journalToken is { } token && journalSource is { } source)
+                    await NpgsqlFoldJournal.MarkCompletedAsync(
+                        _ds, token, source, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                _foldDepth.Release();
+            }
+        }
+    }
+'''
+          replace_one(writer, old_enqueue, new_enqueue)
+
+          old_begin = '''    public Task BeginBulkRunAsync(CancellationToken ct = default)
+    {
+        Interlocked.Exchange(ref _consensusBackendTicks, 0);
+        Interlocked.Exchange(ref _highwayMaskBackendTicks, 0);
+        Interlocked.Exchange(ref _consensusUpsertCalls, 0);
+        Interlocked.Exchange(ref _highwayMaskCalls, 0);
+        Interlocked.Exchange(ref _highwayMaskPairs, 0);
+        LastFoldDrainWallClock = TimeSpan.Zero;
+        LastWriterMaintenanceWallClock = TimeSpan.Zero;
+        LastFoldSpanWallClock = TimeSpan.Zero;
+        Interlocked.Exchange(ref _foldSpanStarted, 0);
+        _bulkRun = true;
+        FoldSizing.Log();
+        return _inner.BeginBulkRunAsync(ct);
+    }
+'''
+          new_begin = '''    public async Task BeginBulkRunAsync(CancellationToken ct = default)
+    {
+        if (_foldRecoveryGuard is not null)
+            throw new InvalidOperationException("bulk fold recovery guard is already held");
+
+        // A process crash releases its session guard automatically. Repair only when
+        // the substrate is quiescent enough to take recovery exclusive immediately;
+        // another live ingest returns -1 and remains concurrent rather than being
+        // serialized behind this startup check.
+        await NpgsqlFoldJournal.RecoverAllQuiescentAsync(_ds, _log, ct).ConfigureAwait(false);
+        var guard = await NpgsqlFoldRecoveryGuard.AcquireSharedAsync(
+            _ds, _log, ct).ConfigureAwait(false);
+        _foldRecoveryGuard = guard;
+
+        try
+        {
+            Interlocked.Exchange(ref _consensusBackendTicks, 0);
+            Interlocked.Exchange(ref _highwayMaskBackendTicks, 0);
+            Interlocked.Exchange(ref _consensusUpsertCalls, 0);
+            Interlocked.Exchange(ref _highwayMaskCalls, 0);
+            Interlocked.Exchange(ref _highwayMaskPairs, 0);
+            LastFoldDrainWallClock = TimeSpan.Zero;
+            LastWriterMaintenanceWallClock = TimeSpan.Zero;
+            LastFoldSpanWallClock = TimeSpan.Zero;
+            Interlocked.Exchange(ref _foldSpanStarted, 0);
+            lock (_foldSourceLock) _foldSources.Clear();
+            foreach (var deposited in _depositedMaskPairs) deposited.Clear();
+            _bulkRun = true;
+            FoldSizing.Log();
+            await _inner.BeginBulkRunAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            _bulkRun = false;
+            _foldRecoveryGuard = null;
+            await guard.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+'''
+          replace_one(writer, old_begin, new_begin)
+
+          old_complete = '''    public async Task CompleteBulkRunAsync(
+        Action<BulkRunCompletionPhase>? onPhase,
+        CancellationToken ct = default)
+    {
+        // Folds drain before the inner writer releases its run-scoped state.
+        Exception? foldFailure = null;
+        var phaseSw = System.Diagnostics.Stopwatch.StartNew();
+        onPhase?.Invoke(BulkRunCompletionPhase.ConsensusDrain);
+        try
+        {
+            await DrainFoldsAsync();
+        }
+        catch (Exception ex)
+        {
+            foldFailure = ex;
+        }
+        LastFoldDrainWallClock = phaseSw.Elapsed;
+        LastFoldSpanWallClock = _foldSpanStarted == 0
+            ? TimeSpan.Zero
+            : System.Diagnostics.Stopwatch.GetElapsedTime(_foldSpanStarted);
+        bool wasBulk = _bulkRun;
+        _bulkRun = false;
+        Exception? completionFailure = null;
+        phaseSw.Restart();
+        onPhase?.Invoke(BulkRunCompletionPhase.WriterMaintenance);
+        try
+        {
+            await _inner.CompleteBulkRunAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            completionFailure = ex;
+        }
+        LastWriterMaintenanceWallClock = phaseSw.Elapsed;
+
+        // NO terminal mask pass (2026-07-21). Masks are deposited inline by every
+        // fold, in every lane — see UpsertDeltaAsync. There is nothing left to
+        // defer: by the time the last fold drains above, every pair this run
+        // touched has already had its bits OR'd in, spread across the run instead
+        // of landing as one serial recompute after the loader finishes.
+        //
+        // highway_mask_dirty / highway_mask_drain() survive as the REPAIR verbs
+        // (per-source evict has to CLEAR bits, which an OR-accumulate deposit
+        // cannot do), alongside highway_mask_rebuild for highway bit renumbering.
+        // Nothing on the ingest hot path populates or drains the queue.
+        _ = wasBulk;
+
+        if (foldFailure is not null && completionFailure is not null)
+            throw new AggregateException(foldFailure, completionFailure);
+        if (completionFailure is not null)
+            ExceptionDispatchInfo.Capture(completionFailure).Throw();
+        if (foldFailure is not null)
+            ExceptionDispatchInfo.Capture(foldFailure).Throw();
+    }
+'''
+          new_complete = '''    public async Task CompleteBulkRunAsync(
+        Action<BulkRunCompletionPhase>? onPhase,
+        CancellationToken ct = default)
+    {
+        // Folds drain before recovery: a false token may represent a partially
+        // committed type/mask lane, and reconstruction must not race the tail of
+        // that same continuation.
+        Exception? foldFailure = null;
+        Exception? recoveryFailure = null;
+        var phaseSw = System.Diagnostics.Stopwatch.StartNew();
+        onPhase?.Invoke(BulkRunCompletionPhase.ConsensusDrain);
+        try
+        {
+            await DrainFoldsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            foldFailure = ex;
+        }
+        LastFoldDrainWallClock = phaseSw.Elapsed;
+        LastFoldSpanWallClock = _foldSpanStarted == 0
+            ? TimeSpan.Zero
+            : System.Diagnostics.Stopwatch.GetElapsedTime(_foldSpanStarted);
+        _bulkRun = false;
+
+        // Release this run's shared guard only AFTER every live fold task is
+        // terminal. Recovery then takes the same guard exclusively and rebuilds
+        // any token whose acknowledgement did not make it to durable state.
+        var guard = _foldRecoveryGuard;
+        _foldRecoveryGuard = null;
+        if (guard is not null)
+            await guard.DisposeAsync().ConfigureAwait(false);
+
+        Hash128[] sources;
+        lock (_foldSourceLock) sources = _foldSources.ToArray();
+        try
+        {
+            foreach (var source in sources)
+            {
+                await NpgsqlFoldJournal.RecoverSourceAsync(
+                    _ds, source, _log, CancellationToken.None).ConfigureAwait(false);
+                long remaining = await NpgsqlFoldJournal.CountUnfoldedSourceAsync(
+                    _ds, source, CancellationToken.None).ConfigureAwait(false);
+                if (remaining != 0)
+                    throw new InvalidOperationException(
+                        $"source {source} still has {remaining} unfinished fold token(s); "
+                        + "at least one token is not evidence-recoverable");
+            }
+
+            if (foldFailure is not null)
+            {
+                _log.LogWarning(
+                    foldFailure,
+                    "queued fold failed after evidence commit; durable evidence was refolded and journal acknowledgement repaired");
+                ResetRecoveredFoldFailures();
+                foldFailure = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            recoveryFailure = ex;
+        }
+
+        Exception? completionFailure = null;
+        phaseSw.Restart();
+        onPhase?.Invoke(BulkRunCompletionPhase.WriterMaintenance);
+        try
+        {
+            await _inner.CompleteBulkRunAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            completionFailure = ex;
+        }
+        LastWriterMaintenanceWallClock = phaseSw.Elapsed;
+
+        var failures = new List<Exception>(3);
+        if (foldFailure is not null) failures.Add(foldFailure);
+        if (recoveryFailure is not null) failures.Add(recoveryFailure);
+        if (completionFailure is not null) failures.Add(completionFailure);
+        if (failures.Count == 1)
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1)
+            throw new AggregateException(failures);
+    }
+
+    private void ResetRecoveredFoldFailures()
+    {
+        // DrainFolds has already driven every task terminal. Once evidence-derived
+        // recovery reconstructs both consensus and masks, retaining those completed
+        // fault objects would falsely poison the next run on this writer instance.
+        lock (_foldChainLock)
+            _outstanding.RemoveAll(static task => task.IsCompleted);
+        lock (_laneLock)
+        {
+            foreach (var key in _typeLanes.Where(static kv => kv.Value.IsCompleted)
+                                          .Select(static kv => kv.Key).ToArray())
+                _typeLanes.Remove(key);
+            for (int i = 0; i < _maskLanes.Length; i++)
+                if (_maskLanes[i].IsCompleted)
+                    _maskLanes[i] = Task.CompletedTask;
+        }
+    }
+'''
+          replace_one(writer, old_complete, new_complete)
+
+          old_dispose = '''        try
+        {
+            await DrainFoldsAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "dispose: queued consensus fold failed");
+        }
+        _foldDepth.Dispose();
+        _foldConnections.Dispose();
+'''
+          new_dispose = '''        try
+        {
+            await DrainFoldsAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "dispose: queued consensus fold failed; next quiescent bulk start will recover durable unfinished tokens");
+        }
+        finally
+        {
+            var guard = _foldRecoveryGuard;
+            _foldRecoveryGuard = null;
+            if (guard is not null)
+                await guard.DisposeAsync().ConfigureAwait(false);
+        }
+        _foldDepth.Dispose();
+        _foldConnections.Dispose();
+'''
+          replace_one(writer, old_dispose, new_dispose)
+          PY
+
+          git diff --check
+          dotnet build app/Laplace.Substrate/Laplace.Substrate.csproj --configuration Release
+
+          git rm .github/workflows/apply-1292-writer-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/Laplace.Core/Core/PostgresResourcePlan.cs \
+                  app/Laplace.Substrate/Crud/Npgsql/NpgsqlFoldJournal.cs \
+                  app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs
+          git diff --cached --check
+          git commit -m 'Make fold completion journal-visible and recoverable'
+          git push origin HEAD:fix/journal-visible-fold-completion-1292
