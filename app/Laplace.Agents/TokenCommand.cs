@@ -57,6 +57,14 @@ public static class TokenCommand
                 "An interactive login prompt will hang here — authenticate once outside Laplace first.");
         }
 
+        // WaitForExit(timeout) proves the CHILD has exited, but it does not guarantee that
+        // asynchronous OutputDataReceived/ErrorDataReceived callbacks have drained the redirected
+        // pipes. A fast command such as `dotnet --version` can therefore exit 0 while `stdout` is
+        // still empty, which made a valid token printer nondeterministically look like it emitted
+        // no credential. The parameterless wait returns immediately for the exited child and,
+        // critically, waits for the async stream handlers to finish before we inspect the buffers.
+        process.WaitForExit();
+
         if (process.ExitCode != 0)
             throw new AgentException(
                 $"token_command '{argv[0]}' exited {process.ExitCode}: " +
