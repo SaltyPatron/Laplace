@@ -4,6 +4,7 @@ import { Button, Muted, SegmentedControl } from '@ui';
 import { Board } from '../play/Board';
 import type { ChessGamePliesResponse, ChessPlyRow } from './types';
 import styles from './ChessDb.module.css';
+import layout from './GameBoard.module.css';
 
 /** Playback speeds. "clock" replays the recorded think times; the rest are fixed intervals. */
 type Speed = 'clock' | 'fast' | 'normal' | 'slow';
@@ -113,14 +114,14 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
   const botClock = clockFor(!flip);
 
   return (
-    <div className={styles.replay}>
+    <div className={layout.replay}>
       <div className={styles.boardCol}>
         <div className={styles.clockRow}>
           <span className={styles.sideName}>{topName}</span>
           {hasClocks ? <span className={styles.clock}>{mmss(topClock)}</span> : null}
         </div>
 
-        <div className={styles.replayBoard}>
+        <div className={layout.replayBoard}>
           <Board
             fen={fen}
             legal={[]}
