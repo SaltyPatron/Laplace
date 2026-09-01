@@ -16,11 +16,9 @@ SELECT * FROM (VALUES
     ('unknown',  decode(repeat('db', 16), 'hex')),
     ('type',     decode(repeat('dc', 16), 'hex'))
 ) v(name, id);
-SELECT 6
 INSERT INTO laplace.entities (id, tier, type_id)
 SELECT id, 2::smallint, (SELECT id FROM deposit_fixtures WHERE name = 'type')
 FROM deposit_fixtures WHERE name IN ('entity_a', 'entity_b');
-INSERT 0 2
 -- The dynamic relation has no highway slot. Its IS_A object does.
 INSERT INTO laplace.consensus
     (id, subject_id, type_id, object_id, rating, rd, volatility,
@@ -31,7 +29,6 @@ VALUES
      laplace.relation_type_id('IS_A'),
      laplace.relation_type_id('HAS_PART'),
      1500000000000, 350000000000, 60000000, 1, now());
-INSERT 0 1
 WITH f AS (SELECT name, id FROM deposit_fixtures)
 SELECT consensus.highway_mask_deposit(
     ARRAY[(SELECT id FROM f WHERE name = 'entity_a'),
