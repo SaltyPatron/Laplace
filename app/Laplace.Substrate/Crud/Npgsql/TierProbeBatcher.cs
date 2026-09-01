@@ -4,20 +4,22 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Coalesces concurrent compose-side tier probes. A multi-file ingest deliberately owns
-/// several independent working sets; memory-heavy sources may close each set after only a
-/// handful of records. Without this boundary, every file worker issues its own identical
-/// tier round trip. The batcher preserves each caller's positional bitmap while sending one
-/// distinct-id probe per tier for the workers that arrive together.
+/// Coalesces concurrent array-in presence probes by their physical routing key. A multi-file
+/// ingest deliberately owns several independent working sets; memory-heavy sources may close
+/// each set after only a handful of records. Without this boundary, every file worker opens a
+/// connection for its own tiny root or tier probe. The unkeyed entity-root path uses one shared
+/// lane; tier descent uses one lane per tier. In both cases the batcher preserves each caller's
+/// positional bitmap while sending one distinct-id array to the native probe for workers that
+/// arrive together.
 /// </summary>
-internal sealed class TierProbeBatcher
+internal sealed class PresenceProbeBatcher<TKey> where TKey : notnull
 {
-    private readonly Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> _probe;
-    private readonly ConcurrentDictionary<short, Lane> _lanes = new();
+    private readonly Func<IReadOnlyList<Hash128>, TKey, CancellationToken, Task<byte[]>> _probe;
+    private readonly ConcurrentDictionary<TKey, Lane> _lanes = new();
     private readonly int _maxProbeIds;
 
-    internal TierProbeBatcher(
-        Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> probe,
+    internal PresenceProbeBatcher(
+        Func<IReadOnlyList<Hash128>, TKey, CancellationToken, Task<byte[]>> probe,
         int? maxProbeIds = null)
     {
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
@@ -26,7 +28,7 @@ internal sealed class TierProbeBatcher
     }
 
     internal Task<byte[]> ProbeAsync(
-        IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default)
+        IReadOnlyList<Hash128> ids, TKey key, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ids);
         if (ids.Count == 0) return Task.FromResult(Array.Empty<byte>());
@@ -38,7 +40,7 @@ internal sealed class TierProbeBatcher
         for (int i = 0; i < ids.Count; i++) snapshot[i] = ids[i];
 
         var request = new Request(snapshot, ct);
-        _lanes.GetOrAdd(tier, t => new Lane(t, _probe, _maxProbeIds)).Enqueue(request);
+        _lanes.GetOrAdd(key, value => new Lane(value, _probe, _maxProbeIds)).Enqueue(request);
         return request.Completion.Task;
     }
 
@@ -51,8 +53,8 @@ internal sealed class TierProbeBatcher
     }
 
     private sealed class Lane(
-        short tier,
-        Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> probe,
+        TKey key,
+        Func<IReadOnlyList<Hash128>, TKey, CancellationToken, Task<byte[]>> probe,
         int maxProbeIds)
     {
         private readonly ConcurrentQueue<Request> _pending = new();
@@ -135,7 +137,7 @@ internal sealed class TierProbeBatcher
                 // No individual caller owns the shared query's cancellation. A cancelled
                 // request is cancelled on demultiplex; another live worker must still receive
                 // the answer it shares with that request.
-                byte[] combined = await probe(distinct, tier, CancellationToken.None)
+                byte[] combined = await probe(distinct, key, CancellationToken.None)
                     .ConfigureAwait(false);
                 for (int r = 0; r < live.Length; r++)
                 {

@@ -6,8 +6,11 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 public sealed class NpgsqlSubstrateReader : ISubstrateReader
 {
+    private const byte EntityPresenceLane = 0;
+
     private readonly NpgsqlDataSource _ds;
-    private readonly TierProbeBatcher _tierProbes;
+    private readonly PresenceProbeBatcher<byte> _entityProbes;
+    private readonly PresenceProbeBatcher<short> _tierProbes;
     private readonly IngestSizing.ApplyIoPlan _cachePlan;
 
     public NpgsqlDataSource DataSource => _ds;
@@ -16,7 +19,10 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _cachePlan = IngestSizing.ResolveApplyIo(IngestTopology.Current.ApplyPartitions);
-        _tierProbes = new TierProbeBatcher(
+        _entityProbes = new PresenceProbeBatcher<byte>(
+            (ids, _, ct) => EntitiesExistBitmapDirectAsync(ids, ct),
+            _cachePlan.ProbeChunkIds);
+        _tierProbes = new PresenceProbeBatcher<short>(
             TierBatchExistenceProbeDirectAsync, _cachePlan.ProbeChunkIds);
     }
 
@@ -238,17 +244,15 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         if (dbUnknownIdx.Count == 0) return bm;
 
-        var byteaArray = new byte[dbUnknownIdx.Count][];
-        for (int u = 0; u < dbUnknownIdx.Count; u++) byteaArray[u] = candidates[dbUnknownIdx[u]].ToBytes();
+        var dbUnknown = new Hash128[dbUnknownIdx.Count];
+        for (int u = 0; u < dbUnknownIdx.Count; u++) dbUnknown[u] = candidates[dbUnknownIdx[u]];
 
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.entities_exist_bitmap($1)";
-        var p = cmd.Parameters.AddWithValue(byteaArray);
-        p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-        await cmd.PrepareAsync(ct);
-        var result = await cmd.ExecuteScalarAsync(ct);
-        var dbBm = result as byte[] ?? Array.Empty<byte>();
+        // Every compose worker shares this reader. Root gates therefore join one
+        // array-in native probe instead of opening one connection per working set.
+        // The batcher deduplicates identities and restores each caller's positional
+        // bitmap; the native function still owns the actual committed-row decision.
+        var dbBm = await _entityProbes.ProbeAsync(dbUnknown, EntityPresenceLane, ct)
+            .ConfigureAwait(false);
 
         for (int u = 0; u < dbUnknownIdx.Count; u++)
         {
@@ -260,6 +264,22 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             }
         }
         return bm;
+    }
+
+    private async Task<byte[]> EntitiesExistBitmapDirectAsync(
+        IReadOnlyList<Hash128> ids, CancellationToken ct)
+    {
+        var byteaArray = new byte[ids.Count][];
+        for (int i = 0; i < ids.Count; i++) byteaArray[i] = ids[i].ToBytes();
+
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.entities_exist_bitmap($1)";
+        var p = cmd.Parameters.AddWithValue(byteaArray);
+        p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        await cmd.PrepareAsync(ct);
+        return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) as byte[]
+            ?? new byte[BitmapBits.ByteLength(ids.Count)];
     }
 
     public void MarkProven(IReadOnlyList<Hash128> ids)

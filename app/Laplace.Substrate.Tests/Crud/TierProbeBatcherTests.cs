@@ -14,7 +14,7 @@ public sealed class TierProbeBatcherTests
         var probed = new System.Collections.Concurrent.ConcurrentBag<Hash128>();
         short probedTier = -1;
         var present = new HashSet<Hash128> { Id(2), Id(3) };
-        var batcher = new TierProbeBatcher((ids, tier, _) =>
+        var batcher = new PresenceProbeBatcher<short>((ids, tier, _) =>
         {
             Interlocked.Increment(ref calls);
             foreach (var id in ids) probed.Add(id);
@@ -47,7 +47,7 @@ public sealed class TierProbeBatcherTests
     public async Task DifferentTiers_NeverShareAProbe()
     {
         var tiers = new System.Collections.Concurrent.ConcurrentBag<short>();
-        var batcher = new TierProbeBatcher((ids, tier, _) =>
+        var batcher = new PresenceProbeBatcher<short>((ids, tier, _) =>
         {
             tiers.Add(tier);
             return Task.FromResult(new byte[BitmapBits.ByteLength(ids.Count)]);
@@ -66,7 +66,7 @@ public sealed class TierProbeBatcherTests
     public async Task SameTier_CoalescesUpToTheByteDerivedIdBudget()
     {
         var widths = new System.Collections.Concurrent.ConcurrentBag<int>();
-        var batcher = new TierProbeBatcher((ids, _, _) =>
+        var batcher = new PresenceProbeBatcher<short>((ids, _, _) =>
         {
             widths.Add(ids.Count);
             return Task.FromResult(new byte[BitmapBits.ByteLength(ids.Count)]);
@@ -86,7 +86,7 @@ public sealed class TierProbeBatcherTests
     {
         using var cancelled = new CancellationTokenSource();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var batcher = new TierProbeBatcher(async (ids, _, _) =>
+        var batcher = new PresenceProbeBatcher<short>(async (ids, _, _) =>
         {
             await release.Task;
             var bitmap = new byte[BitmapBits.ByteLength(ids.Count)];
