@@ -232,7 +232,10 @@ public sealed class ChessSyzygyTests
         Assert.Contains(change.Physicalities,
             p => p.EntityId == ChessSyzygy.EndgameLineId(
                 ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(EndgameGame)!).LineId));
-        Assert.Empty(change.Attestations);
+        Assert.Equal(4, change.Attestations.Count(
+            a => a.TypeId == ChessVocabulary.HasWdlType && a.ContextId is null));
+        Assert.Equal(4, change.Attestations.Count(
+            a => a.TypeId == ChessVocabulary.HasDtzType && a.ContextId is null));
     }
 
     [Fact]
@@ -292,7 +295,15 @@ public sealed class ChessSyzygyTests
             e => e.Id == ids[1] && e.TypeId == ChessVocabulary.MoveType);
         Assert.Contains(change.Entities,
             e => e.Id == ids[2] && e.TypeId == ChessVocabulary.PositionType);
-        Assert.Empty(change.Attestations);
+        var verdicts = change.Attestations
+            .Where(a => a.SubjectId == ids[0] && a.ContextId is null)
+            .ToList();
+        Assert.Contains(verdicts, a => a.TypeId == ChessVocabulary.HasWdlType);
+        Assert.Contains(verdicts, a => a.TypeId == ChessVocabulary.HasDtzType);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.SubjectId == ids[1]
+                 && (a.TypeId == ChessVocabulary.HasWdlType
+                     || a.TypeId == ChessVocabulary.HasDtzType));
     }
 
     [Theory]

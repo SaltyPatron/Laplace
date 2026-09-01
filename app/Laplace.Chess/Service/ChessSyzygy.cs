@@ -20,6 +20,8 @@ public readonly record struct SyzygyChunkRef(Hash128 Id, double[] Coord);
 
 public readonly record struct SyzygyGraphNode(ChessNode Node, Hash128 TypeId);
 
+public readonly record struct SyzygyPositionVerdict(Hash128 PositionId, int Wdl, int Dtz);
+
 /// <summary>
 /// One fully composed storage leaf. Preparing it once at extraction time discards the
 /// thousands of FEN strings that produced it and keeps only the content-addressed graph
@@ -27,7 +29,8 @@ public readonly record struct SyzygyGraphNode(ChessNode Node, Hash128 TypeId);
 /// </summary>
 public sealed record SyzygyTransitionChunk(
     Hash128 Id, double[] Coord, double[] Trajectory, int NConstituents,
-    IReadOnlyList<SyzygyGraphNode> Nodes)
+    IReadOnlyList<SyzygyGraphNode> Nodes,
+    IReadOnlyList<SyzygyPositionVerdict> Verdicts)
 {
     public SyzygyChunkRef Reference => new(Id, Coord);
 }
@@ -225,6 +228,7 @@ public static class ChessSyzygy
         var coords = new List<double>(products.Count * 12);
         var flags = new List<ulong>(products.Count * 3);
         var nodes = new Dictionary<Hash128, SyzygyGraphNode>(products.Count * 2);
+        var verdicts = new List<SyzygyPositionVerdict>(products.Count);
         foreach (var product in products)
         {
             if (!TryTransition(product, out var from, out var move, out var to))
@@ -238,6 +242,8 @@ public static class ChessSyzygy
             flags.Add(PackTransitionFlags(0, product.Wdl, product.Dtz));
             flags.Add(PackTransitionFlags(1, product.Wdl, product.Dtz));
             flags.Add(PackTransitionFlags(2, product.Wdl, product.Dtz));
+            verdicts.Add(new SyzygyPositionVerdict(
+                from.Position.Id, product.Wdl, product.Dtz));
 
             // A packed transition is an index over reusable Laplace objects, not an
             // opaque sidecar.  Persist every referenced position/move and the bounded
@@ -260,7 +266,8 @@ public static class ChessSyzygy
             Math4d.KarcherMean(CollectionsMarshal.AsSpan(coords)),
             Trajectory.Build(CollectionsMarshal.AsSpan(ids), CollectionsMarshal.AsSpan(flags)),
             ids.Count,
-            nodes.Values.ToArray());
+            nodes.Values.ToArray(),
+            verdicts);
     }
 
     internal static void DeriveTransitionChunk(
@@ -269,6 +276,29 @@ public static class ChessSyzygy
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         foreach (var graphNode in chunk.Nodes)
             DeriveGraphNode(b, graphNode, nowUs);
+
+        // The vertex flags are the compact exact-read accelerator.  They do not replace
+        // governed, source-separable position-grain testimony: consensus and ordinary
+        // substrate reads must see the tablebase verdict without decoding a projection.
+        // Emit each small value vocabulary once per chunk, then attach the resolved typed
+        // facts to every pre-state.  Repeated values and reruns converge by content/id.
+        var wdlValues = new Dictionary<int, Hash128>();
+        var dtzValues = new Dictionary<int, Hash128>();
+        foreach (var verdict in chunk.Verdicts)
+        {
+            Hash128 wdlId = ResolveValue(
+                b, wdlValues, verdict.Wdl, static value => WdlToken(value));
+            Hash128 dtzId = ResolveValue(
+                b, dtzValues, verdict.Dtz,
+                static value => value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                verdict.PositionId, ChessVocabulary.HasWdlType, wdlId,
+                SourceId, contextId: null, Weight));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                verdict.PositionId, ChessVocabulary.HasDtzType, dtzId,
+                SourceId, contextId: null, Weight));
+        }
+
         b.AddEntity(chunk.Id, ChessCompose.SegmentTier, ChessVocabulary.AnalysisMarkerType, SourceId);
         b.AddPhysicality(new PhysicalityRow(
             PhysicalityId.Compute(chunk.Id, PhysicalityType.Projection),
@@ -276,6 +306,17 @@ public static class ChessSyzygy
             chunk.Coord[0], chunk.Coord[1], chunk.Coord[2], chunk.Coord[3],
             Hilbert128.Encode(chunk.Coord), chunk.Trajectory,
             chunk.NConstituents, null, null, nowUs));
+    }
+
+    private static Hash128 ResolveValue(
+        SubstrateChangeBuilder b, Dictionary<int, Hash128> values, int value,
+        Func<int, string> surface)
+    {
+        if (values.TryGetValue(value, out var id)) return id;
+        id = ContentEmitter.Emit(b, surface(value), SourceId)
+             ?? throw new InvalidOperationException("Syzygy value composition produced no root");
+        values.Add(value, id);
+        return id;
     }
 
     private static void AddGraphNode(
