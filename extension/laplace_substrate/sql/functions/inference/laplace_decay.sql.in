@@ -1,19 +1,7 @@
+-- RETIRED: consensus is derived from durable attestations. A function that
+-- directly mutates one consensus leaf creates state no witness can reproduce and
+-- bypasses the canonical fold/refold law. No caller exists in SQL, C, app,
+-- scripts, or tests; keep the upgrade surface as DROP-only so old installations
+-- lose the hazardous alternate implementation.
+DROP FUNCTION IF EXISTS generation.decay(bytea, bytea, bytea, float8);
 DROP FUNCTION IF EXISTS laplace.laplace_decay(bytea, bytea, bytea, float8);
-CREATE OR REPLACE FUNCTION generation.decay(
-    p_subject  bytea, p_type  bytea, p_object  bytea,
-    p_decay_factor float8 DEFAULT 0.95)
-RETURNS void
-LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    v_id bytea := laplace.consensus_id(p_subject, p_type, p_object);
-    v_leaf regclass;
-BEGIN
-    v_leaf := consensus.partition_leaf(p_type, p_subject);
-    EXECUTE format($q$
-        UPDATE ONLY %s
-        SET rd = LEAST((rd / $1)::bigint, consensus.glicko2_initial_rd())
-        WHERE id = $2 AND type_id = $3 AND subject_id = $4
-    $q$, v_leaf)
-    USING p_decay_factor, v_id, p_type, p_subject;
-END;
-$$;
