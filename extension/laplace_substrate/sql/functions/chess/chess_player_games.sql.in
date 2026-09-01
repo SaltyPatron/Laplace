@@ -12,6 +12,13 @@ CREATE OR REPLACE FUNCTION chess.player_games(
     -- verbatim (ON_DATE / HAS_EVENT / HAS_ECO / HAS_RESULT) plus the opposite
     -- colour edge for the opponent -- witnessed record only, nothing derived.
     --
+    -- PLAYER-ID MIGRATION LAW (#1405): the playing novelty gate prevents an
+    -- already-present PGN from being re-witnessed merely because the governed
+    -- player-id encoding changed. Admit the exact requested id plus ONLY its
+    -- deterministic ChessPgn legacy-id bridge. CORRESPONDS_TO is symmetric, so
+    -- use two indexed arms rather than an OR. Provider/profile identity edges
+    -- never enter this scope; equal human-readable names are not identity.
+    --
     -- GH #736: a game-log row identifies a PLAYING, so the key column is the
     -- EVENT id. Colour headers subject on the shared LINE with context = the
     -- playing, which means every join below threads BOTH the line and the
@@ -29,13 +36,31 @@ CREATE OR REPLACE FUNCTION chess.player_games(
     -- Everything else renders once, for the page only: opponent, event, eco and
     -- result ids go into a single array and come back through one realize_batch.
     -- Per-row realize.label() here is what made a 1300-game career take 18s.
-    WITH mine AS MATERIALIZED (
+    WITH identity_ids AS MATERIALIZED (
+        SELECT p_player AS id
+        UNION
+        SELECT a.object_id
+        FROM laplace.attestations a
+        WHERE a.subject_id = p_player
+          AND a.object_id IS NOT NULL
+          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.source_id = laplace.source_id('ChessPgn')
+          AND a.context_id IS NULL
+        UNION
+        SELECT a.subject_id
+        FROM laplace.attestations a
+        WHERE a.object_id = p_player
+          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.source_id = laplace.source_id('ChessPgn')
+          AND a.context_id IS NULL
+    ),
+    mine AS MATERIALIZED (
         SELECT a.subject_id AS line,
                a.context_id AS event,
                (a.type_id = laplace.relation_type_id('HAS_WHITE')) AS white
         FROM laplace.attestations a
-        WHERE a.object_id = p_player
-          AND a.context_id IS NOT NULL
+        JOIN identity_ids i ON i.id = a.object_id
+        WHERE a.context_id IS NOT NULL
           AND a.type_id IN (laplace.relation_type_id('HAS_WHITE'),
                             laplace.relation_type_id('HAS_BLACK'))
     ),
