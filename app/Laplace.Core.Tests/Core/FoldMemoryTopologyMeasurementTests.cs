@@ -4,30 +4,29 @@ using Xunit;
 namespace Laplace.Core.Tests;
 
 /// <summary>
-/// MemoryTopology's fold constants size the ingest memory envelope, and
-/// ConsensusFoldTransitBytesPerCell DIVIDES that envelope to produce chunkCells — the
-/// number of cells one consensus_upsert call carries. Measured on the live foundation
-/// seed, that call is the single most expensive statement in the whole ingest
-/// (consensus.upsert_type: 3,189s over 1,058 calls, mean 3,014ms, against 1,121s for all
-/// COPY combined), so a constant that is wrong by 2x makes the chunk size wrong by 2x on
-/// the exact statement that dominates the run.
-///
-/// Both constants carried an accounting rationale in their comments and no measurement.
-/// This is the same gap IngestRecordSizeMeasurementTests exists to close for
-/// bytes-per-record: "a constant declared per source that nothing ever checked".
-///
-/// These do not assert an exact figure — allocator behaviour is not a fixed number. They
-/// assert the constants are CONSERVATIVE (at least what the shape actually costs, so the
-/// envelope cannot be under-reserved into an OOM) and not absurdly conservative (which
-/// silently shrinks every chunk and slows the dominant statement).
+/// MemoryTopology's fold constants size the ingest memory envelope. This test must
+/// mirror the CURRENT retained accumulator shape; a stale surrogate is worse than no
+/// measurement because it gives a precise-looking justification to the wrong batch size.
 /// </summary>
 public sealed class FoldMemoryTopologyMeasurementTests
 {
-    // The accumulator's real shape: Dictionary<(Hash128, Hash128, Hash128?), Delta>
-    // where Delta is four int64s (ConsensusAccumulatingWriter.Delta).
+    private readonly record struct PeriodKey(long OpponentRatingFp1e9, long PhiFp1e9);
+
+    private struct PeriodAggregate
+    {
+        public long Games;
+        public long SumScoreFp1e9;
+    }
+
+    // Mirrors ConsensusAccumulatingWriter.Delta as of the grouped-rating-period path:
+    // two inline structs, an optional dictionary reference, and three aggregate longs.
+    // The previous test modeled four longs and therefore stopped measuring production
+    // when exact grouped periods were added.
     private struct Delta
     {
-        public long PhiFp1e9;
+        public PeriodKey FirstPeriod;
+        public PeriodAggregate FirstAggregate;
+        public Dictionary<PeriodKey, PeriodAggregate>? AdditionalPeriods;
         public long Games;
         public long SumScoreFp1e9;
         public long MaxTsUnixUs;
@@ -35,7 +34,6 @@ public sealed class FoldMemoryTopologyMeasurementTests
 
     private static long MeasureBytesPerEntry(int entries)
     {
-        // Settle, then measure only what the dictionary itself retains.
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         long before = GC.GetTotalMemory(forceFullCollection: true);
 
@@ -43,7 +41,14 @@ public sealed class FoldMemoryTopologyMeasurementTests
         for (int i = 0; i < entries; i++)
         {
             var h = new Hash128((ulong)i, (ulong)~i);
-            map[(h, h, h)] = new Delta { Games = 1, SumScoreFp1e9 = i };
+            map[(h, h, h)] = new Delta
+            {
+                FirstPeriod = new PeriodKey(Glicko2.DefaultRatingFp1e9, 30_000_000_000L),
+                FirstAggregate = new PeriodAggregate { Games = 1, SumScoreFp1e9 = i },
+                Games = 1,
+                SumScoreFp1e9 = i,
+                MaxTsUnixUs = i,
+            };
         }
 
         long after = GC.GetTotalMemory(forceFullCollection: true);
@@ -60,22 +65,18 @@ public sealed class FoldMemoryTopologyMeasurementTests
         Assert.True(
             MemoryTopology.ConsensusFoldBytesPerRelation >= measured,
             $"ConsensusFoldBytesPerRelation is {MemoryTopology.ConsensusFoldBytesPerRelation} but "
-            + $"one accumulated relation measures {measured} bytes: the fold envelope is "
-            + "under-reserved and the run can exhaust memory before back-pressure engages");
+            + $"the current accumulated relation shape measures {measured} bytes: the fold "
+            + "envelope is under-reserved and can outrun back-pressure");
         Assert.True(
-            MemoryTopology.ConsensusFoldBytesPerRelation <= measured * 4,
+            MemoryTopology.ConsensusFoldBytesPerRelation <= measured * 2,
             $"ConsensusFoldBytesPerRelation is {MemoryTopology.ConsensusFoldBytesPerRelation} "
-            + $"against a measured {measured} bytes/entry — over 4x reserves memory nothing "
-            + "uses and shrinks every fold chunk for no reason");
+            + $"against a measured {measured} bytes/entry — over 2x silently halves "
+            + "accumulator capacity and multiplies calls to the dominant fold statement");
     }
 
     [Fact]
     public void TransitBytesPerCell_ExceedsResidentBytes_BecauseItAlsoCoversTheWire()
     {
-        // Transit covers the resident accumulator PLUS the managed arrays, the Npgsql write
-        // buffer, the server-side arrays and the per-type slices. It must therefore be
-        // strictly larger than the resident cost, or the envelope is counting the wire for
-        // free.
         Assert.True(
             MemoryTopology.ConsensusFoldTransitBytesPerCell
                 > MemoryTopology.ConsensusFoldBytesPerRelation,
