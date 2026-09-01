@@ -10,6 +10,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_audio_decomposer.cpp
     test_media_decode.cpp
     test_glicko2.cpp
+    test_glicko2_extreme.cpp
     test_score.cpp
     test_codepoint_table.cpp
     test_modality_number_table.cpp
