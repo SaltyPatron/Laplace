@@ -312,8 +312,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 b.AddEntity(
                     ChessTransitions.MarkerId(playingId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, ChessTransitions.SourceId);
-                ChessPositionOutcomes.DepositSurfaces(
-                    b, session.Plies.Select(static ply => ply.FromKey).ToArray(),
+                ChessPositionOutcomes.DepositTrajectory(
+                    b, session.Plies.Select(static ply => ply.FromKey)
+                        .Append(session.Plies[^1].ToKey).ToArray(),
                     result, playingId);
                 if (ChessTablebaseRuntime.Prober is { } prober)
                     ChessSyzygy.DeriveGame(b, witnessed, prober);
