@@ -165,13 +165,36 @@ internal static class CopyTupleParser
                 long rowStart = off;
                 Hash128 id = default, entityId = default;
                 Hilbert128 hilbert = default;
-                WalkRow(p, len, ref off, PhysicalityFields, "physicalities", (field, valOff, valLen) =>
+                // This is the million-row document hot path. WalkRow's capturing
+                // callback allocated one closure/delegate for every physicality;
+                // the parser only needs three fixed fields, so extract them in
+                // one allocation-free pass over the same validated COPY row.
+                if (off + 2 > len)
+                    throw Corrupt("physicalities", off, "truncated field count");
+                int fields = (p[off] << 8) | p[off + 1];
+                if (fields != PhysicalityFields)
+                    throw Corrupt("physicalities", off,
+                        $"field count {fields}, expected {PhysicalityFields}");
+                off += 2;
+                for (int field = 0; field < fields; field++)
                 {
-                    if (field == 0) id = ReadHash(p, valOff, valLen, "physicalities.id");
-                    else if (field == 1) entityId = ReadHash(p, valOff, valLen, "physicalities.entity_id");
+                    if (off + 4 > len)
+                        throw Corrupt("physicalities", off,
+                            $"truncated length prefix at field {field}");
+                    int valLen = (p[off] << 24) | (p[off + 1] << 16)
+                        | (p[off + 2] << 8) | p[off + 3];
+                    off += 4;
+                    if (valLen == -1) continue;
+                    if (valLen < 0 || off + valLen > len)
+                        throw Corrupt("physicalities", off,
+                            $"field {field} length {valLen} overruns blob");
+                    if (field == 0) id = ReadHash(p, off, valLen, "physicalities.id");
+                    else if (field == 1)
+                        entityId = ReadHash(p, off, valLen, "physicalities.entity_id");
                     else if (field == 4)
-                        hilbert = ReadHilbert(p, valOff, valLen, "physicalities.hilbert_index");
-                });
+                        hilbert = ReadHilbert(p, off, valLen, "physicalities.hilbert_index");
+                    off += valLen;
+                }
                 result.Ids.Add(id);
                 result.EntityIds.Add(entityId);
                 result.HilbertKeys.Add(hilbert);

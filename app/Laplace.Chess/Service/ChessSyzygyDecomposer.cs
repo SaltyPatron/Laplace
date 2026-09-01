@@ -37,11 +37,11 @@ public sealed class ChessSyzygyDecomposer
     protected override double SourceTrust => TC.StandardsDerived;
     protected override string BatchLabelPrefix => "chess/syzygy";
 
-    // One pipeline record is a prepared leaf of up to 2,048 transitions, not one PGN
-    // game. Its packed trajectory is about 192 KiB and its extraction-side graph buffers
-    // briefly add another few hundred KiB. Sizing it as a 1.2 KiB chess record let the
-    // generic pending queue retain thousands of these leaves at once.
-    public override int EstimatedBytesPerRecord => 512 * 1_024;
+    // One pipeline record is a prepared leaf of up to 2,048 transitions, including the
+    // reusable position/move physicalities referenced by its packed transition graph.
+    // Bound the generic pending queue by the real multi-MiB working set instead of letting
+    // it retain hundreds of fully decomposed endgame leaves.
+    public override int EstimatedBytesPerRecord => 8 * 1_024 * 1_024;
     public override int EstimatedComposeUnitsPerRecord => 1;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();

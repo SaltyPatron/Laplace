@@ -254,7 +254,7 @@ public sealed class ChessSyzygyTests
     }
 
     [Fact]
-    public void MaterialGraph_StoresExactPositionMovePosition_WithoutPerPositionRows()
+    public void MaterialGraph_StoresExactPositionMovePosition_AsResolvableLaplaceObjects()
     {
         var modality = new ChessModality();
         var board = Board.FromFen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
@@ -272,7 +272,8 @@ public sealed class ChessSyzygyTests
         ChessSyzygy.DeriveTransitionChunk(b, record.PreparedChunk!);
         var change = b.SetInputUnitsConsumed(1).Build();
 
-        var trajectory = Assert.Single(change.Physicalities);
+        var trajectory = Assert.Single(
+            change.Physicalities, static p => p.Type == PhysicalityType.Projection);
         var ids = Trajectory.Constituents(trajectory.TrajectoryXyzm!);
         var next = board.Clone();
         MoveApply.Make(next, move);
@@ -282,7 +283,15 @@ public sealed class ChessSyzygyTests
             ChessCompose.MoveId(board.Squares[move.From], move),
             ChessCompose.PositionId(next),
         ], ids);
-        Assert.Single(change.Entities);
+        Assert.All(ids, id => Assert.Contains(change.Entities, e => e.Id == id));
+        Assert.All(ids, id => Assert.Contains(change.Physicalities,
+            p => p.EntityId == id && p.Type == PhysicalityType.Content));
+        Assert.Contains(change.Entities,
+            e => e.Id == ids[0] && e.TypeId == ChessVocabulary.PositionType);
+        Assert.Contains(change.Entities,
+            e => e.Id == ids[1] && e.TypeId == ChessVocabulary.MoveType);
+        Assert.Contains(change.Entities,
+            e => e.Id == ids[2] && e.TypeId == ChessVocabulary.PositionType);
         Assert.Empty(change.Attestations);
     }
 

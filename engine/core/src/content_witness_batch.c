@@ -307,12 +307,71 @@ int laplace_content_word_segment(
 
 void content_witness_reset(void) { }
 
+/* One document can emit close to a million compositional nodes.  The old emit
+ * loop allocated child_ids, flags, and trajectory separately for every node,
+ * then freed all three immediately after intent_stage_add_physicality copied
+ * the row.  That made the native bulk path perform millions of allocator
+ * operations for a large file even though only the widest node determines the
+ * required temporary capacity.
+ *
+ * Keep one grow-only workspace for the whole tree emission.  It is scratch
+ * only: identities, traversal order, trajectory construction, and the bytes
+ * copied into the IntentStage are unchanged. */
+typedef struct {
+    hash128_t* child_ids;
+    uint64_t*  flags;
+    double*    trajectory;
+    size_t     capacity;
+} emit_scratch_t;
+
+static void emit_scratch_free(emit_scratch_t* scratch) {
+    if (!scratch) return;
+    free(scratch->child_ids);
+    free(scratch->flags);
+    free(scratch->trajectory);
+    memset(scratch, 0, sizeof(*scratch));
+}
+
+static int emit_scratch_reserve(emit_scratch_t* scratch, size_t required) {
+    if (required <= scratch->capacity) return 0;
+
+    size_t capacity = scratch->capacity > 0 ? scratch->capacity : 8;
+    while (capacity < required) {
+        if (capacity > SIZE_MAX / 2) {
+            capacity = required;
+            break;
+        }
+        capacity *= 2;
+    }
+    if (capacity > SIZE_MAX / sizeof(hash128_t)
+        || capacity > SIZE_MAX / sizeof(uint64_t)
+        || capacity > SIZE_MAX / (4 * sizeof(double))) return -1;
+
+    hash128_t* child_ids = (hash128_t*)realloc(
+        scratch->child_ids, capacity * sizeof(hash128_t));
+    if (!child_ids) return -1;
+    scratch->child_ids = child_ids;
+
+    uint64_t* flags = (uint64_t*)realloc(
+        scratch->flags, capacity * sizeof(uint64_t));
+    if (!flags) return -1;
+    scratch->flags = flags;
+
+    double* trajectory = (double*)realloc(
+        scratch->trajectory, capacity * 4 * sizeof(double));
+    if (!trajectory) return -1;
+    scratch->trajectory = trajectory;
+    scratch->capacity = capacity;
+    return 0;
+}
+
 static int emit_node(
     intent_stage_t*    stage,
     const tier_tree_t* tree,
     uint32_t           idx,
     const hash128_t*   source_id,
-    int64_t            now_us) {
+    int64_t            now_us,
+    emit_scratch_t*    scratch) {
     tier_node_view_t node;
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
     if (node.tier == 0) return 0;
@@ -334,26 +393,17 @@ static int emit_node(
      * seeding of the same content -- see .scratchpad/02 Issue 25 residual. */
     size_t n_traj = (m > 1) ? m : 0;
     if (n_traj > 0) {
-        hash128_t* child_ids = (hash128_t*)malloc(m * sizeof(hash128_t));
-        uint64_t*  flags     = (uint64_t*)malloc(m * sizeof(uint64_t));
-        if (!child_ids || !flags) {
-            free(child_ids); free(flags); free(traj);
-            return -2;
-        }
+        if (emit_scratch_reserve(scratch, m) != 0) return -2;
         for (uint32_t ci = 0; ci < m; ++ci) {
             tier_node_view_t ch;
             tier_tree_get_node(tree, collapse_idx(tree, node.first_child_idx + ci), &ch);
-            child_ids[ci] = ch.id;
-            flags[ci] = laplace_vertex_flags(
+            scratch->child_ids[ci] = ch.id;
+            scratch->flags[ci] = laplace_vertex_flags(
                 ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);
         }
-        traj = (double*)malloc(m * 4 * sizeof(double));
-        if (!traj || trajectory_build_flagged(child_ids, flags, m, traj) != 0) {
-            free(child_ids); free(flags); free(traj);
-            return -2;
-        }
-        free(child_ids);
-        free(flags);
+        traj = scratch->trajectory;
+        if (trajectory_build_flagged(
+                scratch->child_ids, scratch->flags, m, traj) != 0) return -2;
     }
 
     hash128_t phys_id;
@@ -364,10 +414,8 @@ static int emit_node(
             stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)n_traj,
             (int32_t)n_traj, 1, 0.0, 1, 0, now_us) != 0) {
-        free(traj);
         return -2;
     }
-    free(traj);
     return 0;
 }
 
@@ -408,6 +456,7 @@ int content_witness_emit_tree(
     if (intent_stage_witness_seen(stage, &root.id)) return 0;
 
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+    emit_scratch_t scratch = {0};
 
     if (existing_bitmap && bitmap_bits > 0) {
         uint32_t* novel = (uint32_t*)malloc(nc * sizeof(uint32_t));
@@ -418,19 +467,23 @@ int content_witness_emit_tree(
             free(novel);
             return -2;
         }
+        int rc = 0;
         for (size_t k = 0; k < novel_n; ++k) {
-            int rc = emit_node(stage, tree, novel[k], source_id, now_us);
-            if (rc != 0) { free(novel); return rc; }
+            rc = emit_node(stage, tree, novel[k], source_id, now_us, &scratch);
+            if (rc != 0) break;
         }
         free(novel);
-        return 0;
+        emit_scratch_free(&scratch);
+        return rc;
     }
 
+    int rc = 0;
     for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        int rc = emit_node(stage, tree, idx, source_id, now_us);
-        if (rc != 0) return rc;
+        rc = emit_node(stage, tree, idx, source_id, now_us, &scratch);
+        if (rc != 0) break;
     }
-    return 0;
+    emit_scratch_free(&scratch);
+    return rc;
 }
 
 int content_witness_batch_add(
@@ -454,4 +507,3 @@ int content_witness_batch_add(
     tier_tree_free(tree);
     return rc;
 }
-

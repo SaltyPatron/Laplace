@@ -18,13 +18,16 @@ public readonly record struct SyzygyVerdict(
 
 public readonly record struct SyzygyChunkRef(Hash128 Id, double[] Coord);
 
+public readonly record struct SyzygyGraphNode(ChessNode Node, Hash128 TypeId);
+
 /// <summary>
 /// One fully composed storage leaf. Preparing it once at extraction time discards the
 /// thousands of FEN strings that produced it and keeps only the content-addressed graph
 /// trajectory needed by apply.
 /// </summary>
 public sealed record SyzygyTransitionChunk(
-    Hash128 Id, double[] Coord, double[] Trajectory, int NConstituents)
+    Hash128 Id, double[] Coord, double[] Trajectory, int NConstituents,
+    IReadOnlyList<SyzygyGraphNode> Nodes)
 {
     public SyzygyChunkRef Reference => new(Id, Coord);
 }
@@ -221,30 +224,51 @@ public static class ChessSyzygy
         var ids = new List<Hash128>(products.Count * 3);
         var coords = new List<double>(products.Count * 12);
         var flags = new List<ulong>(products.Count * 3);
+        var nodes = new Dictionary<Hash128, SyzygyGraphNode>(products.Count * 2);
         foreach (var product in products)
         {
             if (!TryTransition(product, out var from, out var move, out var to))
                 throw InvalidTransition(product);
             facts.Add(Hash128.OfCanonical(
-                $"chess/syzygy/transition/{from.Id}/{move.Id}/{to.Id}/{product.Wdl}/{product.Dtz}"));
-            ids.Add(from.Id); ids.Add(move.Id); ids.Add(to.Id);
-            coords.AddRange(from.Coord); coords.AddRange(move.Coord); coords.AddRange(to.Coord);
+                $"chess/syzygy/transition/{from.Position.Id}/{move.Move.Id}/{to.Position.Id}/{product.Wdl}/{product.Dtz}"));
+            ids.Add(from.Position.Id); ids.Add(move.Move.Id); ids.Add(to.Position.Id);
+            coords.AddRange(from.Position.Coord);
+            coords.AddRange(move.Move.Coord);
+            coords.AddRange(to.Position.Coord);
             flags.Add(PackTransitionFlags(0, product.Wdl, product.Dtz));
             flags.Add(PackTransitionFlags(1, product.Wdl, product.Dtz));
             flags.Add(PackTransitionFlags(2, product.Wdl, product.Dtz));
+
+            // A packed transition is an index over reusable Laplace objects, not an
+            // opaque sidecar.  Persist every referenced position/move and the bounded
+            // atom vocabulary that physically composes it in the SAME change as the
+            // chunk.  The builder deduplicates repeated atoms and transpositions within
+            // the chunk; content identity deduplicates them across chunks/materials.
+            AddGraphNode(nodes, from.Position, ChessVocabulary.PositionType);
+            AddGraphNode(nodes, to.Position, ChessVocabulary.PositionType);
+            AddGraphNode(nodes, move.Move, ChessVocabulary.MoveType);
+            foreach (var node in from.Substructures)
+                AddGraphNode(nodes, node, ChessVocabulary.SubstructureType);
+            foreach (var node in to.Substructures)
+                AddGraphNode(nodes, node, ChessVocabulary.SubstructureType);
+            foreach (var node in move.Fields)
+                AddGraphNode(nodes, node, ChessVocabulary.SubstructureType);
         }
         if (facts.Count == 0) return null;
         return new SyzygyTransitionChunk(
             Hash128.Merkle(ChessCompose.SegmentTier, CollectionsMarshal.AsSpan(facts)),
             Math4d.KarcherMean(CollectionsMarshal.AsSpan(coords)),
             Trajectory.Build(CollectionsMarshal.AsSpan(ids), CollectionsMarshal.AsSpan(flags)),
-            ids.Count);
+            ids.Count,
+            nodes.Values.ToArray());
     }
 
     internal static void DeriveTransitionChunk(
         SubstrateChangeBuilder b, SyzygyTransitionChunk chunk)
     {
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        foreach (var graphNode in chunk.Nodes)
+            DeriveGraphNode(b, graphNode, nowUs);
         b.AddEntity(chunk.Id, ChessCompose.SegmentTier, ChessVocabulary.AnalysisMarkerType, SourceId);
         b.AddPhysicality(new PhysicalityRow(
             PhysicalityId.Compute(chunk.Id, PhysicalityType.Projection),
@@ -252,6 +276,31 @@ public static class ChessSyzygy
             chunk.Coord[0], chunk.Coord[1], chunk.Coord[2], chunk.Coord[3],
             Hilbert128.Encode(chunk.Coord), chunk.Trajectory,
             chunk.NConstituents, null, null, nowUs));
+    }
+
+    private static void AddGraphNode(
+        Dictionary<Hash128, SyzygyGraphNode> nodes, ChessNode node, Hash128 typeId)
+    {
+        if (nodes.TryGetValue(node.Id, out var prior))
+        {
+            if (prior.TypeId != typeId)
+                throw new InvalidDataException(
+                    $"Syzygy graph node {node.Id} resolved as two types ({prior.TypeId}, {typeId}).");
+            return;
+        }
+        nodes.Add(node.Id, new SyzygyGraphNode(node, typeId));
+    }
+
+    private static void DeriveGraphNode(
+        SubstrateChangeBuilder b, SyzygyGraphNode graphNode, long nowUs)
+    {
+        var node = graphNode.Node;
+        b.AddEntity(node.Id, node.Tier, graphNode.TypeId, SourceId);
+        if (!b.TrySeePhysicality(node.PhysId)) return;
+        b.AddPhysicalityPreSeen(new PhysicalityRow(
+            node.PhysId, node.Id, SourceId, PhysicalityType.Content,
+            node.Coord[0], node.Coord[1], node.Coord[2], node.Coord[3], node.Hb,
+            node.Trajectory, node.NConstituents, null, null, nowUs));
     }
 
     private static InvalidDataException InvalidTransition(SyzygyProduct product) => new(
@@ -300,9 +349,11 @@ public static class ChessSyzygy
     }
 
     private static bool TryTransition(
-        SyzygyProduct product, out ChessNode from, out ChessNode move, out ChessNode to)
+        SyzygyProduct product, out ChessComposed from, out ChessMoveComposed move,
+        out ChessComposed to)
     {
-        from = move = to = default;
+        from = to = null!;
+        move = null!;
         if (product.From < 0 || product.To < 0) return false;
         Board board;
         if (!PositionContent.TryFenFromSurface(product.Surface, out string fen)) return false;
@@ -320,11 +371,11 @@ public static class ChessSyzygy
         }
         if (selected is not { } best) return false;
         Piece moving = board.Squares[best.From];
-        from = ChessCompose.Position(board).Position;
-        move = ChessCompose.Move(moving, best).Move;
+        from = ChessCompose.Position(board);
+        move = ChessCompose.Move(moving, best);
         var next = board.Clone();
         MoveApply.Make(next, best);
-        to = ChessCompose.Position(next).Position;
+        to = ChessCompose.Position(next);
         return true;
     }
 
