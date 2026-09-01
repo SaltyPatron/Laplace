@@ -52,11 +52,11 @@ CREATE OR REPLACE FUNCTION chess.player_games(
         FROM dated WHERE date_id IS NOT NULL
     ),
     date_text AS MATERIALIZED (
-        SELECT p.id, t.txt
+        SELECT p.id, p.txt
         FROM date_batch b,
-             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
-        WHERE p.i = t.j
+             LATERAL ROWS FROM (
+                 unnest(b.ids), unnest(realize.batch(b.ids))
+             ) AS p(id, txt)
     ),
     page AS MATERIALIZED (
         SELECT d.line, d.event, d.white, dt.txt AS played_on
@@ -95,11 +95,11 @@ CREATE OR REPLACE FUNCTION chess.player_games(
         WHERE s IS NOT NULL
     ),
     surface_text AS MATERIALIZED (
-        SELECT p.id, t.txt
+        SELECT p.id, p.txt
         FROM surface_batch b,
-             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
-        WHERE p.i = t.j
+             LATERAL ROWS FROM (
+                 unnest(b.ids), unnest(realize.batch(b.ids))
+             ) AS p(id, txt)
     )
     SELECT f.event,
            f.played_on,

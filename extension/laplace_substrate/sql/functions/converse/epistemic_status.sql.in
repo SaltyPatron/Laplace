@@ -46,24 +46,23 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea 
          object_ids AS MATERIALIZED (
             SELECT array_agg(DISTINCT object_id ORDER BY object_id) AS a FROM rels),
          rendered AS (
-            SELECT i.id,NULLIF(r.s,'') AS rendered,z.s AS realized
+            SELECT i.id,NULLIF(i.rendered,'') AS rendered,i.realized
             FROM object_ids,
-              LATERAL unnest(object_ids.a) WITH ORDINALITY i(id,ord),
-              LATERAL unnest(realize.render_text_batch(object_ids.a))
-                WITH ORDINALITY r(s,ord),
-              LATERAL unnest(realize.batch(object_ids.a,(SELECT id FROM lang)))
-                WITH ORDINALITY z(s,ord)
-            WHERE i.ord=r.ord AND i.ord=z.ord
+              LATERAL ROWS FROM (
+                unnest(object_ids.a),
+                unnest(realize.render_text_batch(object_ids.a)),
+                unnest(realize.batch(object_ids.a,(SELECT id FROM lang)))
+              ) i(id, rendered, realized)
          ),
          type_ids AS MATERIALIZED (
             SELECT array_agg(DISTINCT type_id ORDER BY type_id) AS a FROM rels),
          type_labels AS (
-            SELECT i.id,t.s AS type_label
+            SELECT i.id,i.type_label
             FROM type_ids,
-              LATERAL unnest(type_ids.a) WITH ORDINALITY i(id,ord),
-              LATERAL unnest(lexical.type_label_batch(type_ids.a))
-                WITH ORDINALITY t(s,ord)
-            WHERE i.ord=t.ord
+              LATERAL ROWS FROM (
+                unnest(type_ids.a),
+                unnest(lexical.type_label_batch(type_ids.a))
+              ) i(id, type_label)
          )
     SELECT td.type_label,
            COALESCE(rd.rendered, rd.realized),

@@ -65,11 +65,11 @@ BEGIN ATOMIC
         FROM page
     ),
     surfaced AS (
-        SELECT q.id, t.txt
+        SELECT q.id, q.txt
         FROM batch b,
-             LATERAL unnest(b.ids) WITH ORDINALITY AS q(id, i),
-             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
-        WHERE q.i = t.j
+             LATERAL ROWS FROM (
+                 unnest(b.ids), unnest(realize.batch(b.ids))
+             ) AS q(id, txt)
     )
     SELECT page.player,
            COALESCE(NULLIF(s.txt, ''), encode(page.player, 'hex')),

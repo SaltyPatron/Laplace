@@ -92,11 +92,11 @@ BEGIN
         FROM unnest(p_vocab) v(id) LEFT JOIN cat ON cat.id = v.id
         WHERE cat.id IS NULL
     ), rendered AS MATERIALIZED (
-        SELECT i.id, t.s
+        SELECT i.id, i.s
         FROM missing m,
-             LATERAL unnest(m.ids) WITH ORDINALITY AS i(id, ord),
-             LATERAL unnest(realize.render_text_batch(m.ids)) WITH ORDINALITY AS t(s, ord)
-        WHERE i.ord = t.ord
+             LATERAL ROWS FROM (
+                 unnest(m.ids), unnest(realize.render_text_batch(m.ids))
+             ) AS i(id, s)
     )
     SELECT (v.ord::int4 - 1)
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)

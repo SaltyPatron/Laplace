@@ -851,6 +851,8 @@ fold_run_states(const InArray *phis, const InArray *opps,
         int64 opp = (opps != NULL && opps->n > 0)
                     ? DatumGetInt64(opps->elems[run_start + i])
                     : CONSENSUS_FOLD_NEUTRAL_MU;
+        if (opp == 0)
+            opp = CONSENSUS_FOLD_NEUTRAL_MU;
         int64 n_games = DatumGetInt64(games->elems[run_start + i]);
         int64 sum = DatumGetInt64(sums->elems[run_start + i]);
 
@@ -923,6 +925,8 @@ fold_run_states(const InArray *phis, const InArray *opps,
             for (int g = 0; g < group_n; ++g)
             {
                 group_opps[g] = DatumGetInt64(periods->opponents.elems[start + g]);
+                if (group_opps[g] == 0)
+                    group_opps[g] = CONSENSUS_FOLD_NEUTRAL_MU;
                 group_phis[g] = DatumGetInt64(periods->phis.elems[start + g]);
                 group_games[g] = DatumGetInt64(periods->games.elems[start + g]);
                 group_sums[g] = DatumGetInt64(periods->sums.elems[start + g]);

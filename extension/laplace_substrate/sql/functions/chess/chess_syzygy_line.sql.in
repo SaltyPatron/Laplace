@@ -85,11 +85,11 @@ surfaces AS MATERIALIZED (
     WHERE s IS NOT NULL
 ),
 label AS MATERIALIZED (
-    SELECT p.id, t.txt
+    SELECT p.id, p.txt
     FROM surfaces b,
-         LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-         LATERAL unnest(realize.batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
-    WHERE p.i = t.j
+         LATERAL ROWS FROM (
+             unnest(b.ids), unnest(realize.batch(b.ids, NULL))
+         ) AS p(id, txt)
 )
 SELECT o.pos,
        COALESCE(

@@ -80,12 +80,12 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
         -- string_agg below keeps the exact DISTINCT + ORDER BY label semantics of
         -- the old inline expression, so output is byte-identical.
         SELECT i.id AS source_id,
-               regexp_replace(r.txt,
+               regexp_replace(i.txt,
                    '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1') AS label
         FROM src_ids,
-          LATERAL unnest(src_ids.a) WITH ORDINALITY i(id,ord),
-          LATERAL unnest(realize.render_batch(src_ids.a)) WITH ORDINALITY r(txt,ord)
-        WHERE i.ord=r.ord
+          LATERAL ROWS FROM (
+            unnest(src_ids.a), unnest(realize.render_batch(src_ids.a))
+          ) i(id,txt)
     ), folded AS (
         SELECT f.type_id, f.object_id,
                sum(f.obs) AS witness_count,

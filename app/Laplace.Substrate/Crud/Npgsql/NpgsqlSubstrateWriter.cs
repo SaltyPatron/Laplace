@@ -151,7 +151,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                     int n = Math.Min(maxAttsPerMarshal, atts.Length - chunkStart);
                     for (int i = 0; i < n; i++)
                     {
-                        stagedRows[i] = StageAttestation(atts[chunkStart + i]);
+                        var a = atts[chunkStart + i];
+                        stagedRows[i] = StageAttestation(a);
                         int off = i * 32;
                         System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
                             masksFlat.AsSpan(off), a.HighwayMask.W0);

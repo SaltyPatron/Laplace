@@ -451,6 +451,7 @@ functions/chess/chess_ranked.sql.in
 functions/chess/chess_players_by_initial.sql.in
 functions/chess/chess_player_search_candidates.sql.in
 functions/chess/chess_head_to_head.sql.in
+functions/chess/repair_player_ratings.sql.in
 functions/chess/chess_line.sql.in
 functions/converse/infer.sql.in
 functions/chess/chess_opening_preference.sql.in

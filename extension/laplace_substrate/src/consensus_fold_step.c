@@ -43,6 +43,7 @@ typedef struct {
 } ConsensusFoldState;
 
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_step);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_step_v2);
 
 
 
@@ -54,8 +55,8 @@ PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_step);
 
 
 
-Datum
-pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
+static Datum
+consensus_fold_step(FunctionCallInfo fcinfo, bool current)
 {
     MemoryContext           aggcontext;
     ConsensusFoldState* state;
@@ -73,10 +74,7 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
     }
 
     is_seed = PG_GETARG_BOOL(1);
-    /* The current aggregate carries opponent rating and RD. Keep accepting the
-     * installed legacy arity during an in-place upgrade; that overload has no
-     * opponent rating and therefore retains the historical neutral value. */
-    games   = PG_GETARG_INT64(PG_NARGS() >= 10 ? 7 : 6);
+    games = PG_GETARG_INT64(current ? 7 : 6);
 
     if (is_seed) {
         if (state->any)
@@ -95,10 +93,11 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
     }
 
     {
-        bool current = PG_NARGS() >= 10;
         int64_t opponent_rating = current
             ? PG_GETARG_INT64(5)
             : CONSENSUS_FOLD_NEUTRAL_MU;
+        if (opponent_rating == 0)
+            opponent_rating = CONSENSUS_FOLD_NEUTRAL_MU;
         int64_t phi       = PG_GETARG_INT64(current ? 6 : 5);
         int64_t sum_score = PG_GETARG_INT64(current ? 8 : 7);
         int tau_arg       = current ? 9 : 8;
@@ -135,6 +134,18 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_POINTER(state);
+}
+
+Datum
+pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
+{
+    return consensus_fold_step(fcinfo, false);
+}
+
+Datum
+pg_laplace_consensus_fold_step_v2(PG_FUNCTION_ARGS)
+{
+    return consensus_fold_step(fcinfo, true);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_fold_final);

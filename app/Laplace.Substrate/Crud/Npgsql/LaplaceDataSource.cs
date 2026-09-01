@@ -45,6 +45,14 @@ public static class LaplaceDataSource
     /// </summary>
     public const int ServingCommandTimeoutSeconds = 30;
 
+    // Ingest fans out briefly, then spends long CPU-only intervals composing the next
+    // unit.  Keeping every fan-out connection alive for Npgsql's five-minute default
+    // is why completed COMMIT/bitmap lanes remain visible as dozens of idle backends.
+    // Prune surplus owners after one serving-command window; MinPoolSize=0 means the
+    // pool owns no permanent PostgreSQL sessions.
+    public const int PoolIdleLifetimeSeconds = ServingCommandTimeoutSeconds;
+    public const int PoolPruningIntervalSeconds = 5;
+
     /// <summary>
     /// Resolve the connection string for <paramref name="access"/>, applying that
     /// policy's tuning on top of the installed base string.
@@ -73,6 +81,9 @@ public static class LaplaceDataSource
             var ing = new NpgsqlConnectionStringBuilder(basis)
             {
                 MaxPoolSize = PostgresResourcePlan.Current.IngestConnectionOwners,
+                MinPoolSize = 0,
+                ConnectionIdleLifetime = PoolIdleLifetimeSeconds,
+                ConnectionPruningInterval = PoolPruningIntervalSeconds,
                 MaxAutoPrepare = 0,
             };
             return ing.ConnectionString;
@@ -80,6 +91,9 @@ public static class LaplaceDataSource
 
         var b = new NpgsqlConnectionStringBuilder(basis);
         b.MaxPoolSize = PostgresResourcePlan.Current.ServingConnectionOwners;
+        b.MinPoolSize = 0;
+        b.ConnectionIdleLifetime = PoolIdleLifetimeSeconds;
+        b.ConnectionPruningInterval = PoolPruningIntervalSeconds;
 
         // LAPLACE_DB carries `Command Timeout=0` (unbounded) for the ingest CLI. A
         // request/response path must never inherit it: a slow substrate query would

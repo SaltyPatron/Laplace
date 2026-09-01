@@ -81,9 +81,9 @@ public sealed record AttestationRow(
     long ScoreFp1e9,
     long OpponentRdFp1e9,
     // The opponent's RATING, the half that never existed (GH #1321). Defaulted so
-    // every existing construction site still compiles; the ingest path sets it
-    // from laplace_attestation_witness_opponent_rating(), and a row that leaves it
-    // 0 folds against neutral exactly as the whole substrate did before.
+    // every existing construction site still compiles. Zero is reserved for evidence
+    // written by the broken pre-GH-1321 managed staging boundary and is repaired to the
+    // witnessed opponent rating (or neutral when the source did not publish one).
     long OpponentRatingFp1e9 = 1_500_000_000_000,
     long? SumScoreFp1e9 = null,
     Mask256 HighwayMask = default);

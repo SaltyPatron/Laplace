@@ -229,11 +229,11 @@ CREATE OR REPLACE FUNCTION generation.model_attention_row(
          LATERAL generation.model_row_topk(q.slice_id, k.slice_id, laplace.word_id(p_word), p_k) t
     ), ids AS MATERIALIZED (SELECT array_agg(token) AS a FROM ranked),
     rendered AS MATERIALIZED (
-      SELECT i.id, s.txt
+      SELECT i.id, i.txt
       FROM ids,
-           LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
-           LATERAL unnest(realize.render_text_batch(ids.a)) WITH ORDINALITY AS s(txt, ord)
-      WHERE i.ord = s.ord
+           LATERAL ROWS FROM (
+             unnest(ids.a), unnest(realize.render_text_batch(ids.a))
+           ) AS i(id, txt)
     )
     SELECT s.txt, t.token, t.score FROM ranked t JOIN rendered s ON s.id = t.token
     $fn$;

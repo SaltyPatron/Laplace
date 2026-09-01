@@ -33,11 +33,11 @@ CREATE OR REPLACE FUNCTION generation.corpus_word_vocab(p_size int, p_trajs int 
         GROUP BY ((rn - 1) / GREATEST(p_size, 1))
     ),
     rendered AS MATERIALIZED (
-        SELECT i.id, t.s
+        SELECT i.id, i.s
         FROM pages p,
-             LATERAL unnest(p.ids) WITH ORDINALITY AS i(id, ord),
-             LATERAL unnest(realize.render_text_batch(p.ids)) WITH ORDINALITY AS t(s, ord)
-        WHERE i.ord = t.ord
+             LATERAL ROWS FROM (
+                 unnest(p.ids), unnest(realize.render_text_batch(p.ids))
+             ) AS i(id, s)
     )
     SELECT xr.s, xw.c
     FROM ranked xw

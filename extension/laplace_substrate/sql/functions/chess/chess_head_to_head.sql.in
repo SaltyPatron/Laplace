@@ -33,11 +33,11 @@ CREATE OR REPLACE FUNCTION chess.head_to_head(p_player bytea, p_limit integer DE
         FROM rec
     ),
     named AS (
-        SELECT p.id, t.txt
+        SELECT p.id, p.txt
         FROM batch b,
-             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
-        WHERE p.i = t.j
+             LATERAL ROWS FROM (
+                 unnest(b.ids), unnest(realize.batch(b.ids))
+             ) AS p(id, txt)
     )
     SELECT rec.opponent,
            COALESCE(NULLIF(n.txt, ''), encode(rec.opponent, 'hex')),

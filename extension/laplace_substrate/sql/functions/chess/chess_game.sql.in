@@ -82,11 +82,11 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
         WHERE s IS NOT NULL
     ),
     surface_text AS MATERIALIZED (
-        SELECT p.id, t.txt
+        SELECT p.id, p.txt
         FROM surface_batch b,
-             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
-        WHERE p.i = t.j
+             LATERAL ROWS FROM (
+                 unnest(b.ids), unnest(realize.batch(b.ids))
+             ) AS p(id, txt)
     )
     SELECT h.white_id,
            COALESCE(NULLIF(w.txt, ''), encode(h.white_id, 'hex')),

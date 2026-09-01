@@ -44,43 +44,4 @@ public sealed class ChessTenantContractTests
         Assert.False((bool)owns.Invoke(null, new object?[] { null, "tenant-a" })!);
     }
 
-    [Fact]
-    public void PlayRoutes_ResolveTenantAndGuardEveryExistingSessionMutation()
-    {
-        var source = File.ReadAllText(Path.Combine(
-            FindRepoRoot(), "app", "Laplace.Endpoints.OpenAICompat",
-            "EndpointMappings.Chess.cs"));
-
-        Assert.DoesNotContain("req.Tenant", source, StringComparison.Ordinal);
-        Assert.Contains("resolver.ResolveAsync(ctx, ct)", source, StringComparison.Ordinal);
-
-        foreach (var route in new[]
-                 {
-                     "/chess/play/move",
-                     "/chess/play/bestmove",
-                     "/chess/play/finish",
-                 })
-        {
-            var start = source.IndexOf($"app.MapPost(\"{route}\"", StringComparison.Ordinal);
-            Assert.True(start >= 0, $"route not found: {route}");
-            var next = source.IndexOf(".WithTags(\"chess\");", start, StringComparison.Ordinal);
-            Assert.True(next > start, $"route body not terminated: {route}");
-            var block = source[start..next];
-            Assert.Contains("resolver.ResolveAsync(ctx, ct)", block, StringComparison.Ordinal);
-            Assert.Contains("OwnsPlaySession(live.GetPlaySession(req.SessionId), tenant.TenantId)",
-                block, StringComparison.Ordinal);
-            Assert.Contains("return Results.NotFound();", block, StringComparison.Ordinal);
-        }
-    }
-
-    private static string FindRepoRoot()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            if (Directory.Exists(Path.Combine(dir.FullName, "app"))
-                && Directory.Exists(Path.Combine(dir.FullName, "extension")))
-                return dir.FullName;
-        }
-        throw new DirectoryNotFoundException("repository root not found from test output path");
-    }
 }

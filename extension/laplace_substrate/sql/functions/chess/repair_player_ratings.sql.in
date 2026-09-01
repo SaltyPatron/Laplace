@@ -1,0 +1,123 @@
+-- Repair chess opponent ratings lost at the managed/native staging boundary.
+-- Evidence contains the opponent identity (PLAYED_BY) and both players' per-game
+-- HAS_RATING facts under the same playing context. Reconstruct the missing rating
+-- set-wise, then rebuild only the affected derived cells from durable evidence.
+CREATE OR REPLACE PROCEDURE chess.repair_player_ratings()
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_outcome bytea := laplace.relation_type_id('OUTCOME');
+    v_played  bytea := laplace.relation_type_id('PLAYED_BY');
+    v_rating  bytea := laplace.relation_type_id('HAS_RATING');
+    v_repaired bigint;
+    v_refolded bigint;
+BEGIN
+    -- This is one statement so extension installation does not create extension-
+    -- owned scratch tables, and so populated upgrades never spill a second copy
+    -- of the affected evidence.  The updated CTE carries the new rating into the
+    -- refold because data-modifying CTEs otherwise share the statement snapshot.
+    WITH ids AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT r.object_id ORDER BY r.object_id),
+                        '{}'::bytea[]) AS values
+        FROM laplace.attestations target
+        JOIN laplace.attestations pairing
+          ON pairing.subject_id = target.subject_id
+         AND pairing.context_id = target.context_id
+         AND pairing.type_id = v_played
+        JOIN laplace.attestations r
+          ON r.subject_id = pairing.object_id
+         AND r.context_id = target.context_id
+         AND r.type_id = v_rating
+        WHERE target.type_id = ANY(ARRAY[v_outcome, v_played])
+          AND target.opponent_rating_fp1e9 = 0
+          AND r.object_id IS NOT NULL
+    ), rendered AS MATERIALIZED (
+        SELECT paired.id, paired.value
+        FROM ids,
+             LATERAL ROWS FROM (
+                 unnest(ids.values),
+                 unnest(realize.batch(ids.values))
+             ) paired(id, value)
+    ), rating_values AS MATERIALIZED (
+        SELECT id AS rating_id, value::bigint AS rating
+        FROM rendered
+        WHERE value ~ '^[0-9]{3,5}$'
+    ), resolved AS MATERIALIZED (
+        SELECT target.id, target.type_id, target.subject_id, target.object_id,
+               COALESCE(max(rv.rating) * 1000000000,
+                        consensus.glicko2_neutral_mu()) AS opponent_rating
+        FROM laplace.attestations target
+        LEFT JOIN laplace.attestations pairing
+          ON pairing.subject_id = target.subject_id
+         AND pairing.context_id = target.context_id
+         AND pairing.type_id = v_played
+        LEFT JOIN laplace.attestations r
+          ON r.subject_id = pairing.object_id
+         AND r.context_id = target.context_id
+         AND r.type_id = v_rating
+        LEFT JOIN rating_values rv ON rv.rating_id = r.object_id
+        WHERE target.type_id = ANY(ARRAY[v_outcome, v_played])
+          AND target.opponent_rating_fp1e9 = 0
+        GROUP BY target.id, target.type_id, target.subject_id, target.object_id
+    ), updated AS MATERIALIZED (
+        UPDATE laplace.attestations target
+        SET opponent_rating_fp1e9 = resolved.opponent_rating
+        FROM resolved
+        WHERE target.id = resolved.id
+          AND target.type_id = resolved.type_id
+          AND target.subject_id = resolved.subject_id
+        RETURNING target.id, target.subject_id, target.type_id, target.object_id,
+                  target.opponent_rating_fp1e9
+    ), cells AS MATERIALIZED (
+        SELECT DISTINCT subject_id, type_id, object_id
+        FROM updated
+    ), folded AS MATERIALIZED (
+        SELECT cells.subject_id, cells.type_id, cells.object_id,
+               laplace.consensus_fold(
+                   false, NULL::bigint, NULL::bigint, NULL::bigint,
+                   COALESCE(changed.opponent_rating_fp1e9,
+                            evidence.opponent_rating_fp1e9),
+                   evidence.opponent_rd_fp1e9,
+                   GREATEST(evidence.observation_count, 1),
+                   evidence.sum_score_fp1e9,
+                   consensus.glicko2_tau()
+                   ORDER BY evidence.last_observed_at, evidence.id) AS acc,
+               max(evidence.last_observed_at) AS last_ts
+        FROM cells
+        JOIN laplace.attestations evidence
+          ON evidence.type_id = cells.type_id
+         AND evidence.subject_id = cells.subject_id
+         AND evidence.object_id IS NOT DISTINCT FROM cells.object_id
+        LEFT JOIN updated changed
+          ON changed.id = evidence.id
+         AND changed.type_id = evidence.type_id
+         AND changed.subject_id = evidence.subject_id
+        GROUP BY cells.subject_id, cells.type_id, cells.object_id
+    ), upserted AS (
+        INSERT INTO laplace.consensus AS target
+        (id, subject_id, type_id, object_id, rating, rd, volatility,
+         witness_count, last_observed_at)
+        SELECT laplace.consensus_id(f.subject_id, f.type_id, f.object_id),
+               f.subject_id, f.type_id, f.object_id,
+               (f.acc).rating, (f.acc).rd, (f.acc).volatility,
+               (f.acc).witness_count, f.last_ts
+        FROM folded f
+        ON CONFLICT (id, type_id, subject_id) DO UPDATE
+        SET object_id = EXCLUDED.object_id,
+            rating = EXCLUDED.rating,
+            rd = EXCLUDED.rd,
+            volatility = EXCLUDED.volatility,
+            witness_count = EXCLUDED.witness_count,
+            last_observed_at = EXCLUDED.last_observed_at
+        RETURNING 1
+    )
+    SELECT (SELECT count(*) FROM updated),
+           (SELECT count(*) FROM upserted)
+    INTO v_repaired, v_refolded;
+
+    RAISE LOG 'repair_player_ratings: repaired % evidence rows and refolded % cells',
+        v_repaired, v_refolded;
+END;
+$$;
+
+CALL chess.repair_player_ratings();

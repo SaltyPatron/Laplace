@@ -2,6 +2,8 @@ DO $do$
 DECLARE
     aggregate_exists boolean := to_regprocedure(
         'consensus_fold(boolean,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint)') IS NOT NULL;
+    legacy_aggregate_exists boolean := to_regprocedure(
+        'consensus_fold(boolean,bigint,bigint,bigint,bigint,bigint,bigint,bigint)') IS NOT NULL;
     result_type_exists boolean := to_regtype('consensus_fold_result') IS NOT NULL;
 BEGIN
     IF NOT result_type_exists THEN
@@ -11,6 +13,10 @@ BEGIN
     EXECUTE $c$ CREATE OR REPLACE FUNCTION consensus_fold_step(
             internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint)
         RETURNS internal LANGUAGE C PARALLEL RESTRICTED
+        AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_step_v2' $c$;
+    EXECUTE $c$ CREATE OR REPLACE FUNCTION consensus_fold_step(
+            internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint)
+        RETURNS internal LANGUAGE C PARALLEL RESTRICTED
         AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_step' $c$;
     EXECUTE $c$ CREATE OR REPLACE FUNCTION consensus_fold_final(internal)
         RETURNS consensus_fold_result LANGUAGE C PARALLEL RESTRICTED
@@ -18,6 +24,14 @@ BEGIN
     IF NOT aggregate_exists THEN
         EXECUTE $c$ CREATE AGGREGATE consensus_fold(
                 boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint) (
+            SFUNC     = consensus_fold_step,
+            STYPE     = internal,
+            FINALFUNC = consensus_fold_final
+        ) $c$;
+    END IF;
+    IF NOT legacy_aggregate_exists THEN
+        EXECUTE $c$ CREATE AGGREGATE consensus_fold(
+                boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint) (
             SFUNC     = consensus_fold_step,
             STYPE     = internal,
             FINALFUNC = consensus_fold_final

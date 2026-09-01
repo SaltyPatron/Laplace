@@ -19,6 +19,7 @@ DECLARE
     s_draw   bigint := 500000000;
     mu_conf bigint; mu_ref bigint; mu_draw bigint;
     mu_trust bigint; mu_crank bigint; mu_many bigint; mu_one bigint;
+    mu_vs_high bigint; mu_vs_low bigint; mu_zero bigint; mu_neutral bigint;
     sc_trust bigint; sc_crank bigint; sc_many bigint;
     n_prov   bigint;
     neutral bigint := 1500000000000;
@@ -71,6 +72,20 @@ BEGIN
     IF abs(mu_draw - neutral) > 5000000000 THEN RAISE EXCEPTION 'FAIL: draw moved μ off neutral (% vs %)', mu_draw, neutral; END IF;
     IF mu_trust <= mu_crank THEN RAISE EXCEPTION 'FAIL: trusted witness did not move μ more than crank (% <= %)', mu_trust, mu_crank; END IF;
     IF mu_many  <= mu_one   THEN RAISE EXCEPTION 'FAIL: more occurrences did not move μ more (% <= %)', mu_many, mu_one; END IF;
+
+    -- The current fold consumes opponent rating as well as RD. A win over a
+    -- stronger opponent must carry more information than the same result against
+    -- a weaker one; legacy zero evidence is normalized to neutral during repair.
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint,
+        2200000000000, phi_trust, 1::bigint, s_conf, NULL::bigint)).rating INTO mu_vs_high;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint,
+        800000000000, phi_trust, 1::bigint, s_conf, NULL::bigint)).rating INTO mu_vs_low;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint,
+        0, phi_trust, 1::bigint, s_conf, NULL::bigint)).rating INTO mu_zero;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint,
+        neutral, phi_trust, 1::bigint, s_conf, NULL::bigint)).rating INTO mu_neutral;
+    IF mu_vs_high <= mu_vs_low THEN RAISE EXCEPTION 'FAIL: opponent rating does not affect fold'; END IF;
+    IF mu_zero <> mu_neutral THEN RAISE EXCEPTION 'FAIL: legacy zero opponent was not normalized'; END IF;
 
     -- Graduated scoped_consensus: the refold reads the persisted per-row fold
     -- inputs (sum_score_fp1e9, opponent_rd_fp1e9), so a scoped refold of this

@@ -30,10 +30,10 @@ CREATE OR REPLACE FUNCTION taxonomy.tree(
     ), ids AS MATERIALIZED (
       SELECT array_agg(DISTINCT id ORDER BY id) AS a FROM raw
     ), labels AS MATERIALIZED (
-      SELECT i.id, l.txt FROM ids,
-        LATERAL unnest(ids.a) WITH ORDINALITY i(id, ord),
-        LATERAL unnest(realize.label_batch(ids.a)) WITH ORDINALITY l(txt, ord)
-      WHERE i.ord=l.ord
+      SELECT i.id, i.txt FROM ids,
+        LATERAL ROWS FROM (
+          unnest(ids.a), unnest(realize.label_batch(ids.a))
+        ) i(id, txt)
     )
     SELECT r.dir, r.ord, r.id, l.txt, r.eff_mu
     FROM raw r JOIN labels l ON l.id=r.id

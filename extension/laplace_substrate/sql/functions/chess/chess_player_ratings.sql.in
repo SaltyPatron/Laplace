@@ -26,11 +26,11 @@ CREATE OR REPLACE FUNCTION chess.player_ratings(p_player bytea)
         SELECT COALESCE(array_agg(rating_id ORDER BY rating_id), '{}'::bytea[]) AS ids FROM raw
     ),
     named AS (
-        SELECT p.id, t.txt
+        SELECT p.id, p.txt
         FROM batch b,
-             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
-        WHERE p.i = t.j
+             LATERAL ROWS FROM (
+                 unnest(b.ids), unnest(realize.batch(b.ids))
+             ) AS p(id, txt)
     )
     SELECT n.txt::integer, raw.games
     FROM raw JOIN named n ON n.id = raw.rating_id

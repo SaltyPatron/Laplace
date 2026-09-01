@@ -48,11 +48,11 @@ BEGIN ATOMIC
     named AS (
         -- Name the bounded page once. Resolving one player at a time made the
         -- otherwise-indexed roster spend nearly all of its time in rendering.
-        SELECT p.id, t.txt
+        SELECT p.id, p.txt
         FROM batch b,
-             LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
-        WHERE p.i = t.j
+             LATERAL ROWS FROM (
+                 unnest(b.ids), unnest(realize.batch(b.ids))
+             ) AS p(id, txt)
     )
     SELECT (p_offset + row_number() OVER (
                ORDER BY

@@ -76,12 +76,16 @@ public sealed class ConsensusMutationRoutingTests
             .ToArray();
 
         Assert.Equal([
+            "extension/laplace_substrate/sql/functions/chess/repair_player_ratings.sql.in",
             "extension/laplace_substrate/sql/functions/ops/evict_source.sql.in",
             "extension/laplace_substrate/sql/functions/ops/refold_source.sql.in",
         ], writers);
 
-        var evict = File.ReadAllText(Path.Combine(RepoRoot, writers[0]));
-        var refold = File.ReadAllText(Path.Combine(RepoRoot, writers[1]));
+        var repair = File.ReadAllText(Path.Combine(RepoRoot, writers[0]));
+        var evict = File.ReadAllText(Path.Combine(RepoRoot, writers[1]));
+        var refold = File.ReadAllText(Path.Combine(RepoRoot, writers[2]));
+        Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", repair,
+            StringComparison.Ordinal);
         Assert.DoesNotMatch(@"\b(?:UPDATE|DELETE\s+FROM)\s+laplace\.consensus\b", evict);
         Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", evict,
             StringComparison.Ordinal);
