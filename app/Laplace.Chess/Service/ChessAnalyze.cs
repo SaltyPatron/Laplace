@@ -90,7 +90,7 @@ public static class ChessAnalyze
     // movetext; token arrays are indexed by ply (sparse allowed); `evals` are centipawns (mover
     // POV pre-sign). GH #736: line-grain facts (opening/motif) subject onto the LINE; per-playing
     // testimony carries ctx = the EVENT.
-    public static void DeriveGame(
+    internal static void DeriveGame(
         SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result,
         IReadOnlyList<string> sans, string? startFen,
         Hash128? whitePlayer, Hash128? blackPlayer,
