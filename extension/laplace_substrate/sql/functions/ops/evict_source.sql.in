@@ -223,6 +223,7 @@ BEGIN
                 FROM (
                     SELECT t.subject_id, t.object_id,
                            laplace.consensus_fold(false, NULL, NULL, NULL,
+                               a.opponent_rating_fp1e9,
                                a.opponent_rd_fp1e9,
                                GREATEST(a.observation_count, 1),
                                a.sum_score_fp1e9,

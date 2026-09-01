@@ -882,8 +882,10 @@ internal sealed class SubstrateTools : IMcpTools
             }
             if (!_plainBootstrapped)
             {
-                _plainWriter.ApplyAsync(UserPromptContent.BuildBootstrapChange()).GetAwaiter().GetResult();
-                _plainWriter.ApplyAsync(ResponseContent.BuildBootstrapChange()).GetAwaiter().GetResult();
+                _plainWriter.ApplyManyAsync([
+                    UserPromptContent.BuildBootstrapChange(),
+                    ResponseContent.BuildBootstrapChange(),
+                ]).GetAwaiter().GetResult();
                 _plainBootstrapped = true;
             }
         }

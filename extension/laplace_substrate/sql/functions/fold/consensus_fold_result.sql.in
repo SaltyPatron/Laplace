@@ -1,18 +1,15 @@
 DO $do$
 DECLARE
     aggregate_exists boolean := to_regprocedure(
-        'consensus_fold(boolean,bigint,bigint,bigint,bigint,bigint,bigint,bigint)') IS NOT NULL;
+        'consensus_fold(boolean,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint)') IS NOT NULL;
+    result_type_exists boolean := to_regtype('consensus_fold_result') IS NOT NULL;
 BEGIN
-    IF NOT aggregate_exists THEN
-        EXECUTE 'DROP FUNCTION IF EXISTS consensus_fold_step('
-             || 'internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint)';
-        EXECUTE 'DROP FUNCTION IF EXISTS consensus_fold_final(internal)';
-        EXECUTE 'DROP TYPE IF EXISTS consensus_fold_result';
+    IF NOT result_type_exists THEN
         EXECUTE $c$ CREATE TYPE consensus_fold_result AS (
             rating bigint, rd bigint, volatility bigint, witness_count bigint) $c$;
     END IF;
     EXECUTE $c$ CREATE OR REPLACE FUNCTION consensus_fold_step(
-            internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint)
+            internal, boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint)
         RETURNS internal LANGUAGE C PARALLEL RESTRICTED
         AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_step' $c$;
     EXECUTE $c$ CREATE OR REPLACE FUNCTION consensus_fold_final(internal)
@@ -20,7 +17,7 @@ BEGIN
         AS 'MODULE_PATHNAME', 'pg_laplace_consensus_fold_final' $c$;
     IF NOT aggregate_exists THEN
         EXECUTE $c$ CREATE AGGREGATE consensus_fold(
-                boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint) (
+                boolean, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint) (
             SFUNC     = consensus_fold_step,
             STYPE     = internal,
             FINALFUNC = consensus_fold_final

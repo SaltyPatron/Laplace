@@ -73,7 +73,10 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
     }
 
     is_seed = PG_GETARG_BOOL(1);
-    games   = PG_GETARG_INT64(6);
+    /* The current aggregate carries opponent rating and RD. Keep accepting the
+     * installed legacy arity during an in-place upgrade; that overload has no
+     * opponent rating and therefore retains the historical neutral value. */
+    games   = PG_GETARG_INT64(PG_NARGS() >= 10 ? 7 : 6);
 
     if (is_seed) {
         if (state->any)
@@ -92,14 +95,15 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
     }
 
     {
-        int64_t sum_score = PG_GETARG_INT64(7);
-        int64_t phi       = PG_GETARG_INT64(5);
-        /* Neutral until the aggregate signature carries the per-witness rating;
-         * explicit here so the constant is visible at the call site rather than
-         * buried in consensus_fold_apply_partial (GH #1321). */
-        int64_t opponent_rating = CONSENSUS_FOLD_NEUTRAL_MU;
-        int64_t tau       = PG_ARGISNULL(8) ? LAPLACE_GLICKO2_DEFAULT_TAU
-                                            : PG_GETARG_INT64(8);
+        bool current = PG_NARGS() >= 10;
+        int64_t opponent_rating = current
+            ? PG_GETARG_INT64(5)
+            : CONSENSUS_FOLD_NEUTRAL_MU;
+        int64_t phi       = PG_GETARG_INT64(current ? 6 : 5);
+        int64_t sum_score = PG_GETARG_INT64(current ? 8 : 7);
+        int tau_arg       = current ? 9 : 8;
+        int64_t tau       = PG_ARGISNULL(tau_arg) ? LAPLACE_GLICKO2_DEFAULT_TAU
+                                                  : PG_GETARG_INT64(tau_arg);
 
         if (games <= 0)
             ereport(ERROR,

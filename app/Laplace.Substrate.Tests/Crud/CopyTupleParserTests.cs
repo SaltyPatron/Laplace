@@ -15,6 +15,20 @@ public class CopyTupleParserTests
 {
     private static Hash128 H(int seed) => Hash128.Blake3(BitConverter.GetBytes(seed));
 
+    [Fact]
+    public void ManagedAttestationStage_PreservesOpponentRating()
+    {
+        const long opponentRating = 2_837_000_000_000L;
+        var row = new AttestationRow(
+            H(901), H(902), H(903), H(904), H(905), H(906),
+            AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1,
+            1_000_000_000L, 30_000_000_000L, opponentRating);
+
+        var staged = NpgsqlSubstrateWriter.StageAttestation(row);
+
+        Assert.Equal(opponentRating, staged.OpponentRatingFp1e9);
+    }
+
     private static List<(IntPtr Ptr, long Len)> Blobs(IntentStage s, IntentStageTable t)
     {
         var (ptr, len) = s.TupleBuffer(t);

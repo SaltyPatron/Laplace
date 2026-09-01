@@ -33,7 +33,11 @@ internal static class IngestExistenceGate
         }
 
         var shortcircuited = new List<(TRecord, long)>();
+        var perFile = handler as DocumentIngestHandler;
         var roots = new List<(int Index, Hash128 RootId)>();
+        var presentFiles = perFile is null
+            ? null
+            : new List<(int Index, Hash128 RootId)>();
         var rootIndex = new int[records.Count];
         Array.Fill(rootIndex, -1);
 
@@ -43,8 +47,6 @@ internal static class IngestExistenceGate
         // or COMPOSES (marker absent: content emission no-ops under the bitmap and
         // WalkWitness deposits the marker + metadata). --force (ReObservePresent)
         // bypasses the marker skip and re-observes.
-        var perFile = handler as DocumentIngestHandler;
-
         for (int i = 0; i < records.Count; i++)
         {
             if (!TryResolveRoot(records[i], handler, out var rootId, out var unresolvable))
@@ -61,13 +63,8 @@ internal static class IngestExistenceGate
             {
                 if (perFile is not null)
                 {
-                    if (!perFile.IgnoreCompletedFiles
-                        && await reader.HasSourceCompletedAsync(rootId, perFile.LayerOrder, ct)
-                            .ConfigureAwait(false))
-                    {
-                        shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
-                        rootIndex[i] = -2;
-                    }
+                    if (!perFile.IgnoreCompletedFiles)
+                        presentFiles!.Add((i, rootId));
                     continue; // marker absent (or forced): compose for the marker deposit
                 }
                 ApplyWitness(records[i], rootId, handler, builder);
@@ -106,13 +103,8 @@ internal static class IngestExistenceGate
                 if (perFile is not null)
                 {
                     reader.MarkProven([roots[k].RootId]);
-                    if (!perFile.IgnoreCompletedFiles
-                        && await reader.HasSourceCompletedAsync(roots[k].RootId, perFile.LayerOrder, ct)
-                            .ConfigureAwait(false))
-                    {
-                        shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
-                        rootIndex[i] = -2;
-                    }
+                    if (!perFile.IgnoreCompletedFiles)
+                        presentFiles!.Add((i, roots[k].RootId));
                     continue; // marker absent (or forced): compose for the marker deposit
                 }
                 ApplyWitness(records[i], roots[k].RootId, handler, builder);
@@ -120,6 +112,23 @@ internal static class IngestExistenceGate
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
                 ReleaseNativeArtifacts(records[i], handler);
                 rootIndex[i] = -2;
+            }
+        }
+
+        // A content-presence bitmap can identify many already-realized documents in one
+        // call. Do not immediately turn that set back into one completion query per file:
+        // resolve every marker in the batch with the reader's set-based authority.
+        if (presentFiles is { Count: > 0 })
+        {
+            var markerIds = presentFiles.Select(static x => x.RootId).Distinct().ToArray();
+            var completed = await reader.HasSourcesCompletedAsync(
+                markerIds, perFile!.LayerOrder, ct).ConfigureAwait(false);
+            foreach (var (index, rootId) in presentFiles)
+            {
+                if (!completed.Contains(rootId)) continue;
+                shortcircuited.Add((records[index], handler.UnitsPerRecord(records[index])));
+                ReleaseNativeArtifacts(records[index], handler);
+                rootIndex[index] = -2;
             }
         }
 

@@ -155,25 +155,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                     int n = Math.Min(maxAttsPerMarshal, atts.Length - chunkStart);
                     for (int i = 0; i < n; i++)
                     {
-                        var a = atts[chunkStart + i];
-                        stagedRows[i] = new AttestationStagedNative
-                        {
-                            Id = a.Id, SubjectId = a.SubjectId, TypeId = a.TypeId,
-                            ObjectId = a.ObjectId ?? default, SourceId = a.SourceId,
-                            ContextId = a.ContextId ?? default,
-                            ObjectIsNull = (byte)(a.ObjectId is null ? 1 : 0),
-                            ContextIsNull = (byte)(a.ContextId is null ? 1 : 0),
-                            Outcome = (short)a.Outcome,
-                            LastObservedAtUnixUs = a.LastObservedAtUnixUs,
-                            ObservationCount = a.ObservationCount,
-                            // Fold inputs persist on the evidence row: the native
-                            // stage computes sum_score for per-row deposits as
-                            // score x games, so only aggregated rows pass a total.
-                            ScoreFp1e9 = a.ScoreFp1e9,
-                            OpponentRdFp1e9 = a.OpponentRdFp1e9,
-                            SumScoreFp1e9 = a.SumScoreFp1e9 ?? 0,
-                            IsAggregated = (byte)(a.SumScoreFp1e9 is null ? 0 : 1),
-                        };
+                        stagedRows[i] = StageAttestation(atts[chunkStart + i]);
                         int off = i * 32;
                         System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
                             masksFlat.AsSpan(off), a.HighwayMask.W0);
@@ -270,5 +252,22 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             PhysicalitiesSkippedAtMerge: physicalitiesSkipped,
             JournalReplayHit: journalReplayHit);
     }
+
+    internal static AttestationStagedNative StageAttestation(AttestationRow a) => new()
+    {
+        Id = a.Id, SubjectId = a.SubjectId, TypeId = a.TypeId,
+        ObjectId = a.ObjectId ?? default, SourceId = a.SourceId,
+        ContextId = a.ContextId ?? default,
+        ObjectIsNull = (byte)(a.ObjectId is null ? 1 : 0),
+        ContextIsNull = (byte)(a.ContextId is null ? 1 : 0),
+        Outcome = (short)a.Outcome,
+        LastObservedAtUnixUs = a.LastObservedAtUnixUs,
+        ObservationCount = a.ObservationCount,
+        ScoreFp1e9 = a.ScoreFp1e9,
+        OpponentRdFp1e9 = a.OpponentRdFp1e9,
+        OpponentRatingFp1e9 = a.OpponentRatingFp1e9,
+        SumScoreFp1e9 = a.SumScoreFp1e9 ?? 0,
+        IsAggregated = (byte)(a.SumScoreFp1e9 is null ? 0 : 1),
+    };
 
 }

@@ -42,16 +42,15 @@ public sealed class AgentTraceDecomposer
         {
             if (!BootstrappedProviders.TryAdd(provider, 0)) continue;
             var scope = AgentTraceEmitter.ProviderScope.Resolve(provider);
-            foreach (var change in ConversationContent.BuildTenantBootstrapChanges(scope.Tenant))
-                await context.Writer.ApplyAsync(change, ct);
-
             var toolBoot = new BootstrapIntentBuilder(
                 scope.ToolSource, $"ToolResult@{provider}",
                 SubstrateCanonicalIds.TrustClass("ToolResultContent"));
             foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(
                          [AgentRelations.Surface(AgentRelation.AppearsIn)]))
                 toolBoot.AddRelationType(r);
-            await context.Writer.ApplyAsync(toolBoot.Build(), ct);
+            var changes = ConversationContent.BuildTenantBootstrapChanges(scope.Tenant).ToList();
+            changes.Add(toolBoot.Build());
+            await context.Writer.ApplyManyAsync(changes, ct);
 
             _canonicalNames.Add(SubstrateCanonicalKeys.Source(scope.Tenant.PromptSourceName));
             _canonicalNames.Add(SubstrateCanonicalKeys.Source(scope.Tenant.ResponseSourceName));

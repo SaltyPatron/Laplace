@@ -101,6 +101,8 @@ public sealed class DocumentIngestPipelineTests
 
         Assert.Equal(0, ContentEntityCount(changes));
         Assert.Equal(0, AttestationCount(changes));
+        Assert.Equal(0, reader.ScalarSourceCompletedCalls);
+        Assert.Equal(1, reader.BatchedSourceCompletedCalls);
     }
 
     [Fact]

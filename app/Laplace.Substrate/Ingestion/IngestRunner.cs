@@ -1272,6 +1272,20 @@ public sealed class IngestRunner
             SubstrateChange change, CancellationToken ct = default)
         {
             var result = await inner.ApplyAsync(change, ct).ConfigureAwait(false);
+            Account(result, [change]);
+            return result;
+        }
+
+        public async Task<ApplyResult> ApplyManyAsync(
+            IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
+        {
+            var result = await inner.ApplyManyAsync(changes, ct).ConfigureAwait(false);
+            Account(result, changes);
+            return result;
+        }
+
+        private void Account(ApplyResult result, IReadOnlyList<SubstrateChange> changes)
+        {
             Interlocked.Add(ref counters._entitiesInserted, result.EntitiesInserted);
             Interlocked.Add(ref counters._physicalitiesInserted, result.PhysicalitiesInserted);
             Interlocked.Add(ref counters._attestationsInserted, result.AttestationsInserted);
@@ -1279,8 +1293,8 @@ public sealed class IngestRunner
             Interlocked.Add(ref counters._bootstrapPhysicalitiesInserted, result.PhysicalitiesInserted);
             Interlocked.Add(ref counters._bootstrapAttestationsInserted, result.AttestationsInserted);
             Interlocked.Add(ref counters._roundTrips, result.RoundTrips);
-            counters.EntityAdmission.Observe(change);
-            return result;
+            for (int i = 0; i < changes.Count; i++)
+                counters.EntityAdmission.Observe(changes[i]);
         }
     }
 

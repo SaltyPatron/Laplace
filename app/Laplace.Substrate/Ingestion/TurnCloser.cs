@@ -103,8 +103,8 @@ public sealed class TurnCloser : IAsyncDisposable
             if (!_scopes.TryGetValue(tenant, out var scope))
             {
                 scope = ConversationContent.Resolve(tenant);
-                foreach (var change in ConversationContent.BuildTenantBootstrapChanges(scope))
-                    await _writer.ApplyAsync(change, ct);
+                await _writer.ApplyManyAsync(
+                    ConversationContent.BuildTenantBootstrapChanges(scope), ct);
                 _scopes[tenant] = scope;
             }
 
