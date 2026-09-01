@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using global::Npgsql;
-using global::NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -377,18 +376,10 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 var ids = new byte[count][];
                 for (int i = 0; i < count; i++) ids[i] = group[offset + i].Id.ToBytes();
 
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = """
-                    SELECT a.id
-                    FROM laplace.attestations a
-                    WHERE a.type_id = @type
-                      AND a.id = ANY(@ids::bytea[])
-                    """;
-                cmd.Parameters.Add("type", NpgsqlDbType.Bytea).Value = typeGroup.Key.ToBytes();
-                cmd.Parameters.Add("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = ids;
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
-                    present.Add(Hash128.FromBytes(reader.GetFieldValue<byte[]>(0)));
+                var found = await NpgsqlAttestationReads.PresentIdsAsync(
+                    conn, typeGroup.Key.ToBytes(), ids, ct).ConfigureAwait(false);
+                foreach (var id in found)
+                    present.Add(Hash128.FromBytes(id));
             }
         }
         return present;
