@@ -798,10 +798,8 @@
       "extension/laplace_substrate/sql/functions/chess/laplace_chess_position_ready.sql.in::position_ready": 1,
       "extension/laplace_substrate/sql/functions/converse/converse_tiered.sql.in::tiered": 1,
       "extension/laplace_substrate/sql/functions/converse/structural_locale.sql.in::locale": 1,
-      "extension/laplace_substrate/sql/functions/inference/laplace_decay.sql.in::decay": 1,
       "extension/laplace_substrate/sql/functions/inference/laplace_distill.sql.in::distill": 1,
-      "extension/laplace_substrate/sql/functions/inference/laplace_forward_step.sql.in::forward_step": 1,
-      "extension/laplace_substrate/sql/functions/inference/laplace_prune.sql.in::prune": 1
+      "extension/laplace_substrate/sql/functions/inference/laplace_forward_step.sql.in::forward_step": 1
     },
     "g8_band_literalism": {
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
