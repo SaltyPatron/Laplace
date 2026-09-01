@@ -6,6 +6,7 @@
 - [INVENTIONS.md](INVENTIONS.md) — mechanism catalog.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — description of the current source tree, with code citations.
 - [INVENTORY.md](INVENTORY.md) — source-generated counts and file listings.
+- [plan/EXECUTION_TO_FINISH.md](plan/EXECUTION_TO_FINISH.md) — current forward-only implementation order from source estate through native execution, reseed, product navigation, cognition, and domain acceptance.
 - [plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md) — product design for conversation, code, model consensus, and export.
 - [plan/DECOMPOSER_NORMALIZATION_STATUS.md](plan/DECOMPOSER_NORMALIZATION_STATUS.md) — merged decomposer implementation inventory and remaining product work.
 - [plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md](plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md) — authoritative decomposer outcome-to-issue map, source disposition, acceptance fixtures, and release sequence.
