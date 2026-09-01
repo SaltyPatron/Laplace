@@ -4,8 +4,12 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.Lichess;
 
-internal sealed record LichessOptions(int Depth = 8, int MaxConcurrent = 2, bool Substrate = true,
-    int Port = 5189, IReadOnlySet<string>? Speeds = null)
+internal sealed record LichessOptions(
+    int Depth = LichessDefaults.SearchDepth,
+    int MaxConcurrent = LichessDefaults.MaxConcurrent,
+    bool Substrate = true,
+    int Port = 5189,
+    IReadOnlySet<string>? Speeds = null)
 {
     public static LichessOptions FromEnvironment()
     {
@@ -13,7 +17,9 @@ internal sealed record LichessOptions(int Depth = 8, int MaxConcurrent = 2, bool
             ? int.Parse(text, System.Globalization.CultureInfo.InvariantCulture) : fallback;
         var speeds = Environment.GetEnvironmentVariable("LAPLACE_LICHESS_SPEEDS")?
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return new(Number("LAPLACE_LICHESS_DEPTH", 8), Number("LAPLACE_LICHESS_MAX_CONCURRENT", 2),
+        return new(
+            Number("LAPLACE_LICHESS_DEPTH", LichessDefaults.SearchDepth),
+            Number("LAPLACE_LICHESS_MAX_CONCURRENT", LichessDefaults.MaxConcurrent),
             Environment.GetEnvironmentVariable("LAPLACE_LICHESS_SUBSTRATE") != "false",
             Speeds: speeds is { Length: > 0 } ? speeds.ToHashSet(StringComparer.OrdinalIgnoreCase) : null);
     }

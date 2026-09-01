@@ -146,11 +146,58 @@ public sealed class ChessGameFetcherTests
     public void CompleteArchive_HasNoProviderLimit_AndLimitedArchiveFailsClosed()
     {
         Assert.Null(ChessGameFetcher.ResolveArchiveLimit(true, "1000"));
-        Assert.DoesNotContain("max=", ChessGameFetcher.LichessGamesUrl("Magnus Carlsen", null));
+        string all = ChessGameFetcher.LichessGamesUrl("Magnus Carlsen", null);
+        string limited = ChessGameFetcher.LichessGamesUrl("Magnus Carlsen", 1000);
+        Assert.DoesNotContain("max=", all);
+        Assert.Contains("sort=dateAsc", all);
         Assert.Equal(1000, ChessGameFetcher.ResolveArchiveLimit(false, "1000"));
-        Assert.Contains("max=1000", ChessGameFetcher.LichessGamesUrl("Magnus Carlsen", 1000));
+        Assert.Contains("sort=dateAsc", limited);
+        Assert.Contains("max=1000", limited);
         Assert.Throws<ArgumentException>(() => ChessGameFetcher.ResolveArchiveLimit(false, ""));
         Assert.Throws<ArgumentException>(() => ChessGameFetcher.ResolveArchiveLimit(false, "0"));
+    }
+
+    [Fact]
+    public void ChessComArchives_AreOldestFirst()
+    {
+        var actual = ChessGameFetcher.ChronologicalArchiveUrls(new[]
+        {
+            "https://api.chess.com/pub/player/x/games/2026/08",
+            "https://api.chess.com/pub/player/x/games/1972/11",
+            "https://api.chess.com/pub/player/x/games/2001/01",
+        });
+
+        Assert.Equal(new[]
+        {
+            "https://api.chess.com/pub/player/x/games/1972/11",
+            "https://api.chess.com/pub/player/x/games/2001/01",
+            "https://api.chess.com/pub/player/x/games/2026/08",
+        }, actual);
+    }
+
+    [Fact]
+    public void ChessComMonthlyGames_AreCanonicalizedOldestFirst()
+    {
+        static string Game(string date, string time, string site) => $"""
+            [Event "Chronology"]
+            [Site "{site}"]
+            [UTCDate "{date}"]
+            [UTCTime "{time}"]
+            [White "White"]
+            [Black "Black"]
+            [Result "1-0"]
+
+            1. e4 e5 1-0
+            """;
+
+        string late = Game("2024.05.03", "18:00:00", "late");
+        string earliest = Game("2024.05.02", "23:59:59", "earliest");
+        string sameDayEarly = Game("2024.05.03", "09:00:00", "same-day-early");
+        string unknown = Game("????.??.??", "??:??:??", "unknown");
+
+        var expected = new[] { earliest, sameDayEarly, late, unknown };
+        Assert.Equal(expected, ChessGameFetcher.ChronologicalGames(new[] { unknown, late, earliest, sameDayEarly }));
+        Assert.Equal(expected, ChessGameFetcher.ChronologicalGames(new[] { sameDayEarly, earliest, late, unknown }));
     }
 
     [Fact]

@@ -47,6 +47,14 @@ elif [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
   export CTEST_PARALLEL_LEVEL="$nproc_n"
 fi
 
+# Managed processes load app-local native libraries before the OS loader path. A native-only
+# source change can therefore leave stale .so files beside already-built .NET outputs even
+# when build/engine contains the exact new artifact. Synchronize that closure before any
+# profile that can execute managed/native code. Policy is source-only and needs no build.
+if [[ "$MODE" != policy ]]; then
+  bash scripts/sync-managed-native-artifacts.sh
+fi
+
 run_profile() {
   python3 scripts/test-profile-registry.py run --profile "$1"
 }

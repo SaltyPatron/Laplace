@@ -46,10 +46,10 @@ public static class ChessGameFetcher
         log?.Invoke($"chess.com archives: {archUrl}");
         var archJson = await GetStringWithRetryAsync(archUrl, ct);
         using var doc = JsonDocument.Parse(archJson);
-        var archives = doc.RootElement.GetProperty("archives").EnumerateArray()
-            .Select(e => e.GetString()!).ToList();
-        archives.Reverse();
-        log?.Invoke($"  {archives.Count} monthly archives (newest first)"
+        var archives = ChronologicalArchiveUrls(
+            doc.RootElement.GetProperty("archives").EnumerateArray()
+                .Select(e => e.GetString()!));
+        log?.Invoke($"  {archives.Count} monthly archives (oldest first)"
             + (minTcSeconds > 0 ? $", min base TC {minTcSeconds}s" : ""));
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
@@ -61,7 +61,7 @@ public static class ChessGameFetcher
                 ct.ThrowIfCancellationRequested();
                 var pgn = await GetStringWithRetryAsync($"{a}/pgn", ct);
                 if (string.IsNullOrWhiteSpace(pgn)) continue;
-                foreach (var game in SplitGames(pgn))
+                foreach (var game in ChronologicalGames(SplitGames(pgn)))
                 {
                     if (minTcSeconds > 0 && BaseTcSeconds(game) < minTcSeconds) continue;
                     await w.WriteAsync(game);
@@ -73,6 +73,50 @@ public static class ChessGameFetcher
             }
         }
         return kept;
+    }
+
+    internal static IReadOnlyList<string> ChronologicalArchiveUrls(IEnumerable<string> archives)
+        => archives.Where(static a => !string.IsNullOrWhiteSpace(a))
+            .OrderBy(static a => a, StringComparer.Ordinal)
+            .ToArray();
+
+    internal static IReadOnlyList<string> ChronologicalGames(IEnumerable<string> games)
+        => games.OrderBy(GameDateKey, StringComparer.Ordinal)
+            .ThenBy(GameTimeKey, StringComparer.Ordinal)
+            .ThenBy(static game => PgnGames.TagStr(game, "Site"), StringComparer.Ordinal)
+            .ThenBy(static game => PgnGames.TagStr(game, "White"), StringComparer.Ordinal)
+            .ThenBy(static game => PgnGames.TagStr(game, "Black"), StringComparer.Ordinal)
+            .ThenBy(static game => PgnGames.TagStr(game, "Result"), StringComparer.Ordinal)
+            .ThenBy(static game => game, StringComparer.Ordinal)
+            .ToArray();
+
+    private static string GameDateKey(string game)
+    {
+        string? value = PgnGames.TagStr(game, "UTCDate");
+        if (string.IsNullOrWhiteSpace(value)) value = PgnGames.TagStr(game, "Date");
+        if (string.IsNullOrWhiteSpace(value)) return "9999.99.99";
+        string[] parts = value.Split('.');
+        if (parts.Length != 3) return "9999.99.99";
+        return $"{ChronologyPart(parts[0], 4, "9999")}.{ChronologyPart(parts[1], 2, "99")}.{ChronologyPart(parts[2], 2, "99")}";
+    }
+
+    private static string GameTimeKey(string game)
+    {
+        string? value = PgnGames.TagStr(game, "UTCTime");
+        if (string.IsNullOrWhiteSpace(value)) value = PgnGames.TagStr(game, "StartTime");
+        if (string.IsNullOrWhiteSpace(value)) return "99:99:99";
+        string[] parts = value.Split(':');
+        if (parts.Length < 2) return "99:99:99";
+        string sec = parts.Length > 2 ? ChronologyPart(parts[2], 2, "99") : "99";
+        return $"{ChronologyPart(parts[0], 2, "99")}:{ChronologyPart(parts[1], 2, "99")}:{sec}";
+    }
+
+    private static string ChronologyPart(string value, int width, string unknown)
+    {
+        value = value.Trim();
+        return value.Length > 0 && value.All(char.IsDigit)
+            ? value.PadLeft(width, '0')
+            : unknown;
     }
 
     private static IEnumerable<string> SplitGames(string bundle)
@@ -115,8 +159,8 @@ public static class ChessGameFetcher
         await using (var src = await resp.Content.ReadAsStreamAsync(ct))
         await using (var dst = File.Create(outPath))
             await src.CopyToAsync(dst, ct);
-        // Do not materialize a potentially multi-gigabyte all-games export merely to count it.
-        // The PGN parser streams the completed file one game at a time.
+        // `sort=dateAsc` makes the streamed provider order itself the chronology contract;
+        // do not materialize a potentially multi-gigabyte all-games export just to reorder it.
         return PgnGames.StreamGames(outPath).Count();
     }
 
@@ -380,8 +424,8 @@ public static class ChessGameFetcher
     internal static string LichessGamesUrl(string user, int? max)
     {
         ValidateLimit(max);
-        string url = $"https://lichess.org/api/games/user/{Uri.EscapeDataString(user)}";
-        return max is { } limit ? $"{url}?max={limit}" : url;
+        string url = $"https://lichess.org/api/games/user/{Uri.EscapeDataString(user)}?sort=dateAsc";
+        return max is { } limit ? $"{url}&max={limit}" : url;
     }
 
     internal static int FideCandidateScore(string query, string candidate)
