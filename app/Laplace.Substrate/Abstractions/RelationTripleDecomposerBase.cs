@@ -26,6 +26,8 @@ public abstract class RelationTripleDecomposerBase<TSource, TScope> : RelationTr
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
 
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
+
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 

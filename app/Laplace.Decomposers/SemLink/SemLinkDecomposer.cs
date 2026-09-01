@@ -39,12 +39,28 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
         long cap = options.MaxInputUnits;
         long consumed = 0;
 
+        string? annotatedInstances = SemLinkInstanceIngest.ResolvePath(instancesDir);
+        if (annotatedInstances is not null)
+        {
+            var phaseOpts = RemainingOptions(options, cap, consumed);
+            var phase = new SemLinkInstancePhase(annotatedInstances);
+            await foreach (var change in RunTrackedPhaseAsync(
+                phase, "semlink/annotated-instances", annotatedInstances,
+                context, phaseOpts, ct))
+            {
+                consumed += change.Metadata.InputUnitsConsumed;
+                yield return change;
+                if (cap > 0 && consumed >= cap) yield break;
+            }
+        }
+
         foreach (var (path, kind, label) in JsonDocumentSpecs(instancesDir))
         {
             if (cap > 0 && consumed >= cap) yield break;
             var phaseOpts = RemainingOptions(options, cap, consumed);
             var phase = new SemLinkJsonDocumentPhase(path, kind, label);
-            await foreach (var change in RunPhaseAsync(phase, context, phaseOpts, ct))
+            await foreach (var change in RunTrackedPhaseAsync(
+                phase, label, path, context, phaseOpts, ct))
             {
                 consumed += change.Metadata.InputUnitsConsumed;
                 yield return change;
@@ -59,7 +75,9 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
             if (cap > 0 && consumed >= cap) yield break;
             var phaseOpts = RemainingOptions(options, cap, consumed);
             var phase = new PredicateMatrixPhase(pmPath, options.Languages);
-            await foreach (var change in RunPhaseAsync(phase, context, phaseOpts, ct))
+            await foreach (var change in RunTrackedPhaseAsync(
+                phase, "semlink/predicate-matrix", pmPath,
+                context, phaseOpts, ct))
             {
                 consumed += change.Metadata.InputUnitsConsumed;
                 yield return change;
@@ -75,7 +93,9 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
         {
             var phaseOpts = RemainingOptions(options, cap, consumed);
             var phase = new SemLinkRoleMappingPhase(roleMappingPath);
-            await foreach (var change in RunPhaseAsync(phase, context, phaseOpts, ct))
+            await foreach (var change in RunTrackedPhaseAsync(
+                phase, "semlink/vn-fn-role-mapping", roleMappingPath,
+                context, phaseOpts, ct))
             {
                 consumed += change.Metadata.InputUnitsConsumed;
                 yield return change;
@@ -93,6 +113,15 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
         var files = new List<IngestFileSpec>();
         long total = 0;
+        string? annotatedInstances = SemLinkInstanceIngest.ResolvePath(instancesDir);
+        if (annotatedInstances is not null)
+        {
+            long units = await SemLinkInstanceIngest.EstimateUnitCountAsync(
+                annotatedInstances, ct) ?? 0;
+            files.Add(new IngestFileSpec(
+                "semlink/annotated-instances", annotatedInstances, units));
+            total += units;
+        }
         foreach (var (path, _, label) in JsonDocumentSpecs(instancesDir))
         {
             long units = await SemLinkJsonPairStream.CountRecordsAsync(path, ct) ?? 0;
@@ -116,7 +145,8 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
         }
         if (files.Count == 0) return null;
         if (options.MaxInputUnits > 0) total = Math.Min(total, options.MaxInputUnits);
-        return new IngestInventory("records", total, files);
+        return new IngestInventory(
+            "records", total, files, TracksFileCompletion: true);
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -169,7 +199,8 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
     private static string ResolveInstancesDir(string ecosystemPath)
     {
         foreach (var c in InstanceDirCandidates(ecosystemPath))
-            if (HasJsonMappings(c) || HasPredicateMatrix(c))
+            if (HasJsonMappings(c) || HasPredicateMatrix(c)
+                || SemLinkInstanceIngest.ResolvePath(c) is not null)
                 return c;
         return ecosystemPath;
     }
@@ -190,4 +221,36 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
 
     private static bool HasPredicateMatrix(string dir) =>
         PredicateMatrixIngest.ExistsLocally(dir);
+
+    /// <summary>
+    /// Multi-phase input files previously appeared only in the inventory denominator: the
+    /// file journal stayed 0/0 and could not say whether Predicate Matrix or a SemLink
+    /// component actually produced anything. Track each real phase through the same
+    /// started/composed/committed protocol as the generic multi-file driver.
+    /// </summary>
+    private async IAsyncEnumerable<SubstrateChange> RunTrackedPhaseAsync(
+        IDecomposer phase,
+        string fileLabel,
+        string path,
+        IDecomposerContext context,
+        DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var obs = Laplace.Ingestion.IngestObservabilityScope.Current;
+        long bytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+        obs.OnFileStarted(phase.SourceName, fileLabel, bytes);
+        long records = 0, entities = 0, physicalities = 0, attestations = 0;
+        await foreach (var change in RunPhaseAsync(phase, context, options, ct))
+        {
+            records += change.Metadata.InputUnitsConsumed;
+            entities += change.Entities.Length;
+            physicalities += change.Physicalities.Length;
+            attestations += change.Attestations.Length;
+            yield return change;
+        }
+        obs.OnFileComposed(
+            phase.SourceName, fileLabel, null,
+            records, entities, physicalities, attestations);
+        yield return IngestBatchPipeline.BuildPeriodBoundary(phase.SourceId, fileLabel);
+    }
 }

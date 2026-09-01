@@ -89,7 +89,10 @@ rolled AS (
     FROM rolled_numbered
 ),
 matched AS (
-    SELECT COALESCE(r.journal_name, x.labels[r.rn])                 AS source,
+    SELECT COALESCE(
+               r.journal_name,
+               regexp_replace(
+                   x.labels[r.rn], '^substrate/source/(.+)/v1$', '\1')) AS source,
            r.source_id,
            (r.evidence_approx > 0 OR r.has_entities)                AS ingested,
            true                                                     AS known,
@@ -102,8 +105,10 @@ matched AS (
            r.throughput_rows_per_s,
            r.throughput_baseline_rows_per_s,
            r.throughput_slowdown_ratio
-    -- The journal's recorded name beats realize.render(): render returns a source's
-    -- canonical path, which is correct and useless as an operator-facing lane label.
+    -- The journal's recorded name beats realize.render(). A carried sub-source such as
+    -- PredicateMatrix has no independent run row, so strip only the governed source
+    -- envelope from its rendered identity rather than exposing
+    -- "substrate/source/PredicateMatrixDecomposer/v1" as the operator label.
     FROM rolled_numbered r CROSS JOIN rendered x
     WHERE p_source IS NULL
        OR r.journal_name = p_source

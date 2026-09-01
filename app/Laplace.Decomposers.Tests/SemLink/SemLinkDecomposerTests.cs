@@ -24,6 +24,10 @@ public sealed class SemLinkDecomposerTests
     private const string PbWnJson =
         """{"give.01": "30-02244956-v", "speak.01": "30-00941990-v"}""";
 
+    private const string AnnotatedInstance =
+        "wsj_0001.parse 0 8 join 22.1-2-1 Cause_to_amalgamate join.01 None "
+        + "0:2-ARG0=Agent;Agent 7:0-ARGM-MOD 8:0-rel 9:1-ARG1=Patient;Part_1";
+
     private const string PredicateMatrixHeader =
         "1_ID_LANG\t1_ID_POS\t2_ID_PRED\t3_ID_ROLE\t4_VN_CLASS\t5_VN_CLASS_NUMBER\t6_VN_SUBCLASS\t7_VN_SUBCLASS_NUMBER\t8_VN_LEMA\t9_VN_ROLE\t10_WN_SENSE\t11_MCR_iliOffset\t12_FN_FRAME\t13_FN_LE\t14_FN_FRAME_ELEMENT\t15_PB_ROLESET\t16_PB_ARG\t18_MCR_BC\t19_MCR_DOMAIN\t20_MCR_SUMO\t21_MCR_TO\t22_MCR_LEXNAME\t23_MCR_BLC\t24_WN_SENSEFREC\t25_WN_SYNSET_REL_NUM\t26_ESO_CLASS\t27_ESO_ROLE";
 
@@ -200,6 +204,64 @@ public sealed class SemLinkDecomposerTests
         try
         {
             Assert.Equal(1L, await SemLinkRoleMappingIngest.EstimateUnitCountAsync(path, default));
+        }
+        finally { try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void AnnotatedInstance_ParsesEverySemanticAndSourcePositionField()
+    {
+        Assert.True(SemLinkInstanceIngest.TryParse(AnnotatedInstance, out var row));
+        Assert.Equal("wsj_0001.parse", row.SourceFile);
+        Assert.Equal(0, row.SentenceOrdinal);
+        Assert.Equal(8, row.TokenOrdinal);
+        Assert.Equal("join", row.Lemma);
+        Assert.Equal("22.1-2-1", row.VerbNetClass);
+        Assert.Equal("Cause_to_amalgamate", row.FrameNetFrame);
+        Assert.Equal("join.01", row.PropBankRoleset);
+        Assert.Null(row.OntoNotesSenseGroup);
+        Assert.Equal(4, row.Dependencies.Length);
+        Assert.Equal("0:2", row.Dependencies[0].Span);
+        Assert.Equal("ARG0", row.Dependencies[0].PropBankRole);
+        Assert.Equal("Agent", row.Dependencies[0].VerbNetRole);
+        Assert.Equal("Agent", row.Dependencies[0].FrameNetRole);
+        Assert.Null(row.Dependencies[2].PropBankRole);
+    }
+
+    [Fact]
+    public async Task AnnotatedInstance_EmitsOccurrenceScopedPbVnFnAndArgumentEvidence()
+    {
+        string path = Path.Combine(
+            Path.GetTempPath(), "sl-instance-" + Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(path, AnnotatedInstance + Environment.NewLine);
+        try
+        {
+            var entities = new List<EntityRow>();
+            var atts = new List<AttestationRow>();
+            var phase = new SemLinkInstancePhase(path);
+            await foreach (var change in phase.DecomposeAsync(
+                new FakeContext(new NullWriter()), DecomposerOptions.Default))
+            {
+                entities.AddRange(change.Entities.ToArray());
+                atts.AddRange(change.Attestations.ToArray());
+            }
+
+            Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.SourceFile);
+            Assert.Contains(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
+                && a.ContextId is not null);
+            Assert.Contains(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME")
+                && a.ContextId is not null);
+            Assert.Contains(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
+                && a.ContextId is not null);
+            Assert.Contains(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_ROLE")
+                && a.ContextId is not null);
+            Assert.Contains(atts, a =>
+                a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
+                && a.ContextId is not null);
         }
         finally { try { File.Delete(path); } catch { } }
     }

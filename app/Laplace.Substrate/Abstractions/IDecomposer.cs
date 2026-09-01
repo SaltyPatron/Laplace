@@ -44,4 +44,9 @@ public interface IDecomposer : IAsyncDisposable
         new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
 
     IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
+
+    /// <summary>The governed relation vocabulary this witness can emit. Stats uses this
+    /// declaration to print one exact, machine-readable content receipt per relation;
+    /// it must come from the same source manifest that Initialize registers.</summary>
+    IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
 }

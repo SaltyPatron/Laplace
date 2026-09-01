@@ -831,6 +831,9 @@ internal static class IngestCommands
             NpgsqlIngestOps.ContentCountForSourceNameAsync(conn, sourceKey);
         Task<long> RelationEvidence(string relationType, string? sourceKey = null) =>
             NpgsqlIngestOps.EvidenceCountForRelationAsync(conn, relationType, sourceKey);
+        Task<long> RelationEvidenceForSourceId(string relationType, Hash128 sourceId) =>
+            NpgsqlIngestOps.EvidenceCountForRelationAndSourceIdAsync(
+                conn, relationType, sourceId.ToBytes());
 
         Console.WriteLine("substrate counts (pg_class.reltuples ESTIMATE — not count(*); run ANALYZE, ops.evidence_count(), or ops.substrate_counts() for exact):");
         {
@@ -884,6 +887,34 @@ internal static class IngestCommands
         long content = await ContentForSource(srcKey);
         bool layerOk = await NpgsqlIngestOps.LayerMarkedCompleteAsync(conn, decomposer.LayerOrder, srcKey);
         Console.WriteLine($"  witness [{srcKey}] L{decomposer.LayerOrder}: {att:N0} attestations, {content:N0} content, layer_complete={layerOk}");
+
+        // Executable source-content receipt. This is generated from the SAME static/runtime
+        // manifest Initialize registered, then counted by the source id actually stamped on
+        // evidence. It therefore exposes declared-but-empty relations as evidence=0 instead
+        // of letting a broad source total or a hand-picked smoke relation stand in for them.
+        foreach (string relation in decomposer.DeclaredRelations.Distinct(StringComparer.Ordinal))
+        {
+            long evidence = await RelationEvidenceForSourceId(relation, decomposer.SourceId);
+            Console.WriteLine(
+                $"SEED_CONTENT_RECEIPT source={srcKey} source_id={decomposer.SourceId} "
+                + $"relation={relation} evidence={evidence}");
+        }
+
+        // Predicate Matrix is a distinct witness carried by the SemLink seed operation.
+        // Reporting only SemLinkDecomposer hid 641k PM attestations and made it impossible
+        // to distinguish "SemLink ran" from "the matrix was actually admitted".
+        if (srcKey == "SemLinkDecomposer")
+        {
+            foreach (string relation in PredicateMatrixSource.Relations.Distinct(StringComparer.Ordinal))
+            {
+                long evidence = await RelationEvidenceForSourceId(
+                    relation, PredicateMatrixSource.SourceId);
+                Console.WriteLine(
+                    $"SEED_CONTENT_RECEIPT source=PredicateMatrixDecomposer "
+                    + $"parent=SemLinkDecomposer source_id={PredicateMatrixSource.SourceId} "
+                    + $"relation={relation} evidence={evidence}");
+            }
+        }
 
         if (decomposer.LayerOrder == 10)
         {

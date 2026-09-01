@@ -2465,9 +2465,21 @@ public static class NpgsqlSubstrateReads
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT encode(p.subject_id, 'hex'), realize.render(p.type_id),
-                   realize.render(p.object_id)
-            FROM chess.player_profile_edges(@id) p
+            WITH profile AS MATERIALIZED (
+                SELECT p.*,
+                       row_number() OVER (
+                           ORDER BY p.subject_id, p.type_id, p.object_id) AS rn
+                FROM chess.player_profile_edges(@id) p
+            ), rendered AS MATERIALIZED (
+                SELECT realize.render_batch(array_agg(type_id ORDER BY rn)) AS relations,
+                       realize.render_batch(array_agg(object_id ORDER BY rn)) AS values
+                FROM profile
+            )
+            SELECT encode(p.subject_id, 'hex'),
+                   r.relations[p.rn::integer], r.values[p.rn::integer]
+            FROM profile p
+            CROSS JOIN rendered r
+            ORDER BY p.rn
             """,
             static r => new ChessProfileEdgeRow(
                 r.GetString(0), r.GetString(1), r.IsDBNull(2) ? "" : r.GetString(2)),

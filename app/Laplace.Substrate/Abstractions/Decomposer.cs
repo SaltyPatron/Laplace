@@ -217,6 +217,8 @@ public abstract class Decomposer<TRecord> : IDecomposer
     // IDecomposer references, silently registering zero readback names.
     public virtual IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
+    public virtual IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
+
     protected IngestSourceProfile PipelineProfile =>
         new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
 
@@ -651,6 +653,8 @@ public abstract class DecomposerMultiPhase : IDecomposer
     // class so derived overrides stay reachable through IDecomposer.
     public virtual IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
+    public virtual IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
+
     protected abstract IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct);
 
@@ -704,6 +708,8 @@ public abstract class DecomposerMultiPhase<TSource, TScope> : DecomposerMultiPha
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
 
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
+
     public int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 
@@ -742,6 +748,8 @@ public abstract class Decomposer<TRecord, TSource, TScope> : Decomposer<TRecord>
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
 
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
+
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 
@@ -777,6 +785,8 @@ public abstract class DecomposerMultiFile<TRecord, TSource, TScope> : Decomposer
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
 
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
+
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 
@@ -808,6 +818,8 @@ public abstract class ComposeDecomposer<TRecord, TSource, TScope> : ComposeDecom
     public sealed override Hash128 SourceId => TSource.SourceId;
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
@@ -841,6 +853,8 @@ public abstract class ComposeDecomposerMultiFile<TRecord, TSource, TScope>
     public sealed override Hash128 SourceId => TSource.SourceId;
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 
@@ -873,6 +887,8 @@ public abstract class GrammarComposeDecomposerMultiFile<TSource, TScope>
     public sealed override Hash128 SourceId => TSource.SourceId;
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 
@@ -905,6 +921,8 @@ public abstract class GrammarIngestDecomposer<TSource, TScope> : GrammarIngestDe
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
 
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
+
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 
@@ -936,6 +954,8 @@ public abstract class GrammarComposeDecomposer<TSource, TScope> : GrammarCompose
     public sealed override Hash128 SourceId => TSource.SourceId;
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
+
+    public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;

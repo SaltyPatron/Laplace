@@ -14,7 +14,12 @@ public readonly struct SemLinkSource : ISeedSource
         SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
-        ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"];
+        [
+            "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO",
+            // Annotated SemLink 2 instances, not merely its aggregate JSON maps.
+            "APPEARS_IN", "HAS_ROLE", "HAS_SENSE",
+            "MEMBER_OF_VERBNET_CLASS", "EVOKES_FRAME",
+        ];
 
     internal static readonly Hash128 RoleCorrespondsToTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[1]);
