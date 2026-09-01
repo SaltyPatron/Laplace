@@ -24,9 +24,11 @@ interface ChatLine {
   text: string;
 }
 
+const DEFAULT_LICHESS_DEPTH = 6;
+
 export function LichessPanel() {
   const [status, setStatus] = useState<LichessStatus | null>(null);
-  const [depth, setDepth] = useState(8);
+  const [depth, setDepth] = useState(DEFAULT_LICHESS_DEPTH);
   const [maxConcurrent, setMaxConcurrent] = useState(2);
   const [substrate, setSubstrate] = useState(true);
   const [operatorToken, setOperatorToken] = useState('');
@@ -144,7 +146,7 @@ export function LichessPanel() {
           />
         </Field>
 
-        <Field label="Search depth" help="Max iterative depth; clock budget on Lichess can stop search earlier. Default 8.">
+        <Field label="Search depth" help="Max iterative depth; clock budget can stop search earlier. Interactive default 6; substrate/perfcache evidence still biases the root before conventional search expands.">
           <Input
             type="number"
             min={1}
