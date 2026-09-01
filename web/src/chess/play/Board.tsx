@@ -64,6 +64,8 @@ export interface BoardProps {
   matedKing?: string | null;
   checkedKing?: string | null;
   readOnly?: boolean;
+  /** Hide engine/eval/interaction chrome when the board is used as a factual game replay. */
+  displayOnly?: boolean;
   footer?: ReactNode;
   onPointerDown: (e: PointerEvent, sq: string) => void;
   onPointerUp: (e: PointerEvent, sq: string) => void;
@@ -73,7 +75,7 @@ export interface BoardProps {
 export function Board({
   fen, legal, sel, drag, marks, userArrows, showPick, botBestTo,
   whiteEval, evalFrac, evalDetail, evalPending = false, boardRef, flip = false, lastMove, matedKing, checkedKing,
-  readOnly = false, footer,
+  readOnly = false, displayOnly = false, footer,
   onPointerDown, onPointerUp, onDragMove,
 }: BoardProps) {
   const board = parseBoard(fen);
@@ -117,37 +119,39 @@ export function Board({
   return (
     <>
       <div className={styles.wrap}>
-        <div className={styles.area}>
-          <div className={styles.evalCol}>
-            <div className={styles.evalBarSlot}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    className={cn(styles.evalBar, evalPending && styles.evalBarPending)}
-                    role="meter"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.round(evalFrac * 100)}
-                    aria-label={evalDetail}
-                  >
+        <div className={cn(styles.area, displayOnly && styles.displayArea)}>
+          {!displayOnly ? (
+            <div className={styles.evalCol}>
+              <div className={styles.evalBarSlot}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
                     <div
-                      className={styles.evalWhite}
-                      style={
-                        flip
-                          ? { top: 0, bottom: 'auto', height: `${evalFrac * 100}%` }
-                          : { bottom: 0, top: 'auto', height: `${evalFrac * 100}%` }
-                      }
-                    />
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>{evalDetail}</TooltipContent>
-              </Tooltip>
+                      className={cn(styles.evalBar, evalPending && styles.evalBarPending)}
+                      role="meter"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(evalFrac * 100)}
+                      aria-label={evalDetail}
+                    >
+                      <div
+                        className={styles.evalWhite}
+                        style={
+                          flip
+                            ? { top: 0, bottom: 'auto', height: `${evalFrac * 100}%` }
+                            : { bottom: 0, top: 'auto', height: `${evalFrac * 100}%` }
+                        }
+                      />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>{evalDetail}</TooltipContent>
+                </Tooltip>
+              </div>
+              <div className={styles.evalReadout}>
+                <b>{whiteEval}</b>
+                <span>white&rsquo;s view</span>
+              </div>
             </div>
-            <div className={styles.evalReadout}>
-              <b>{whiteEval}</b>
-              <span>white&rsquo;s view</span>
-            </div>
-          </div>
+          ) : null}
           <div
             className={styles.board}
             role="grid"
@@ -222,13 +226,15 @@ export function Board({
             </svg>
           </div>
         </div>
-        <div className={styles.legend}>
-          <span><b className={shared.lgStar}>★</b> bot&rsquo;s pick</span>
-          <span className={styles.lgScale}><i /> weaker → stronger move</span>
-          <span><b>±</b> = substrate move edge vs even (1500 prior)</span>
-          <span>eval bar = engine score in pawns (white&rsquo;s view)</span>
-          <span>right-drag = arrow · right-click = mark</span>
-        </div>
+        {!displayOnly ? (
+          <div className={styles.legend}>
+            <span><b className={shared.lgStar}>★</b> bot&rsquo;s pick</span>
+            <span className={styles.lgScale}><i /> weaker → stronger move</span>
+            <span><b>±</b> = substrate move edge vs even (1500 prior)</span>
+            <span>eval bar = engine score in pawns (white&rsquo;s view)</span>
+            <span>right-drag = arrow · right-click = mark</span>
+          </div>
+        ) : null}
         {footer ? <div className={styles.footer}>{footer}</div> : null}
       </div>
       {drag && (
