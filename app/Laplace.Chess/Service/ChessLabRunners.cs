@@ -68,9 +68,12 @@ public static class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("search_depth", depth));
         lab.Publish(slot, new ChessLabMetricEvent("transition_trunk_reads", exactBias.RootReads));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_roots", exactBias.RootsWithExactEvidence));
-        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.RootsWithExactEvidence));
-        lab.Publish(slot, new ChessLabMetricEvent("transition_perfcache_hits", exactBias.TransitionFloorHits));
-        lab.Publish(slot, new ChessLabMetricEvent("transition_perfcache_misses", exactBias.TransitionFloorMisses));
+        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_roots", exactBias.RootsWithMoveEvidence));
+        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.ExactTransitionSignals));
+        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_signals", exactBias.MovePhysicalitySignals));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_perfcache_hits", exactBias.TransitionPerfcacheHits));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_novel_hits", exactBias.TransitionNovelHits));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_compositions", exactBias.TransitionCompositions));
         lab.Publish(slot, new ChessLabMetricEvent("child_structure_reads", boardEvaluator.PositionReads));
         lab.Publish(slot, new ChessLabMetricEvent("child_structure_signals", boardEvaluator.PositionsWithEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("position_atoms_loaded", boardEvaluator.LoadedAtoms));

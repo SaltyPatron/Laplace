@@ -47,8 +47,9 @@ public sealed class ChessTransitionFloorTests
             // Every written key resolves to its own value — not merely "some hit".
             foreach (var (key, to) in pairs)
             {
-                Assert.True(ChessTransitionFloor.TryLookup(key, out var got));
+                Assert.True(ChessTransitionFloor.TryLookup(key, out var got, out var source));
                 Assert.Equal(to, got);
+                Assert.Equal(ChessTransitionFloor.LookupSource.Persistent, source);
             }
         }
         finally
@@ -70,13 +71,35 @@ public sealed class ChessTransitionFloorTests
 
             // A miss must be a miss. The binary search walks lo/hi past both ends here,
             // which is where an off-by-one would surface as a false hit.
-            Assert.False(ChessTransitionFloor.TryLookup(K("absent"), out var got));
+            Assert.False(ChessTransitionFloor.TryLookup(
+                K("absent"), out var got, out var source));
             Assert.Equal(default, got);
+            Assert.Equal(ChessTransitionFloor.LookupSource.None, source);
         }
         finally
         {
             ChessTransitionFloor.Unload();
             File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RememberedTransitionIsReportedAsProcessLocalNotPersistentRom()
+    {
+        ChessTransitionFloor.Unload();
+        var key = K("novel");
+        var to = V("novel");
+        try
+        {
+            ChessTransitionFloor.Remember(key, to);
+
+            Assert.True(ChessTransitionFloor.TryLookup(key, out var got, out var source));
+            Assert.Equal(to, got);
+            Assert.Equal(ChessTransitionFloor.LookupSource.Novel, source);
+        }
+        finally
+        {
+            ChessTransitionFloor.Unload();
         }
     }
 

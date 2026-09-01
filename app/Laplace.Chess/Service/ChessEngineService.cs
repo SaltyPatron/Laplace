@@ -222,17 +222,15 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)
     {
-        var engine = await EngineAsync(ct);
-        var state = _modality!.FromFen(fen);
-        if (_modality!.Terminal(state) is { } term)
-            return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
-
-        var cands = await engine.ScoreMovesAsync(state, ct);
-        var chosen = ModalityEngine<ChessState, ChessMove>.Select(cands, temperature, Rng());
-        var next = chosen.Next;
-        var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
-        return new ChessBestMove(chosen.Action.ToUci(), next.Board.ToFen(), chosen.EffMu / 1e9,
-            chosen.Rated, status != "ongoing", status);
+        // The historical implementation selected directly from one-ply consensus and used
+        // reservoir randomness when every legal edge had the neutral prior.  That was the
+        // path behind the 0-200 substrate-lift result: it bypassed material, tactics, Syzygy,
+        // and deeper board trajectories.  There is one playing decision path now.  Keep this
+        // API shape for callers, but route it through the same full search used by HTTP, UCI,
+        // connected play, Lichess, and the lift experiment.
+        _ = temperature;
+        return await BestMoveSearchAsync(fen, depth: 4, substrate: true, moves: null, ct)
+            .ConfigureAwait(false);
     }
 
 

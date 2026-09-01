@@ -192,7 +192,7 @@ internal static class ChessCommands
             Console.WriteLine($"  recorded {recorder.Host.GamesCompleted} games to substrate (chess/cli/substrate-test)");
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
-        Console.WriteLine($"  search depth={depth}, transition reads={exactBias.RootReads:N0}, exact-evidence roots={exactBias.RootsWithExactEvidence:N0}, structure reads={boardEvaluator.PositionReads:N0}, structure hits={boardEvaluator.PositionsWithEvidence:N0}, position atoms={boardEvaluator.LoadedAtoms:N0}, syzygy={ChessTablebaseRuntime.Largest}-men");
+        Console.WriteLine($"  search depth={depth}, transition reads={exactBias.RootReads:N0}, exact-evidence roots={exactBias.RootsWithExactEvidence:N0}, exact signals={exactBias.ExactTransitionSignals:N0}, move-physicality signals={exactBias.MovePhysicalitySignals:N0}, transition ROM={exactBias.TransitionPerfcacheHits:N0}, transition novel={exactBias.TransitionNovelHits:N0}, transition composed={exactBias.TransitionCompositions:N0}, structure reads={boardEvaluator.PositionReads:N0}, structure hits={boardEvaluator.PositionsWithEvidence:N0}, position atoms={boardEvaluator.LoadedAtoms:N0}, syzygy={ChessTablebaseRuntime.Largest}-men");
         Console.WriteLine(r.EloDiff > 5
             ? "  => the substrate measurably raises the classical floor at this mode/scale."
             : "  => no clear lift at this mode/scale — try --openings, more games, deeper, or a larger --cp-per-point.");
