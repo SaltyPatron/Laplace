@@ -1871,24 +1871,47 @@ public static class NpgsqlSubstrateReads
     public readonly record struct FastLabelRow(string IdHex, string? Label, short? Tier);
 
     /// <summary>
-    /// Batch label + tier, one round trip. A graph crawl has already resolved identity;
-    /// labeling must not recursively realize every unnamed node's composition tree.
-    /// That turned a 90 ms, 256-edge Magnus crawl into a 9.1 second API response and
-    /// made the display appear to crawl the entity back through itself. Canonical names
-    /// are direct indexed lookups; unnamed content keeps a stable hash label and can be
-    /// opened explicitly for decomposition by the entity viewer.
+    /// Batch label + tier, one round trip. Resolve names for the entire survivor set and
+    /// render the bounded (tier &lt;= 3) subset once. This preserves the actual substrate
+    /// labels/text without returning to the former scalar-per-node composition walk: a
+    /// graph may contain high-tier games/documents, but those are named rather than
+    /// recursively reconstructed inside the visualization response.
     /// </summary>
     public static Task<IReadOnlyList<FastLabelRow>> LabelsFastAsync(
         NpgsqlConnection conn, byte[][] ids, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT encode(x.id, 'hex'),
+            WITH inp AS MATERIALIZED (
+                SELECT x.id, x.ord, e.tier
+                FROM unnest(@ids::bytea[]) WITH ORDINALITY AS x(id, ord)
+                LEFT JOIN laplace.entities e ON e.id = x.id
+            ), names AS MATERIALIZED (
+                SELECT realize.resolve_name_batch(@ids::bytea[]) AS labels
+            ), shallow_ids AS MATERIALIZED (
+                SELECT COALESCE(
+                           array_agg(i.id ORDER BY i.ord) FILTER (WHERE i.tier <= 3),
+                           '{}'::bytea[]) AS ids
+                FROM inp i
+            ), shallow_labels AS MATERIALIZED (
+                SELECT s.ids, realize.render_text_batch(s.ids, 3) AS labels
+                FROM shallow_ids s
+            ), shallow AS MATERIALIZED (
+                SELECT s.ids[n] AS id, s.labels[n] AS label
+                FROM shallow_labels s,
+                     generate_subscripts(s.ids, 1) AS n
+            )
+            SELECT encode(i.id, 'hex'),
                    COALESCE(
-                       NULLIF((SELECT n.name FROM laplace.canonical_names n WHERE n.id = x.id), ''),
-                       left(encode(x.id, 'hex'), 16)),
-                   e.tier
-            FROM unnest(@ids::bytea[]) AS x(id)
-            LEFT JOIN laplace.entities e ON e.id = x.id
+                       NULLIF(n.name, ''),
+                       NULLIF(names.labels[i.ord], ''),
+                       NULLIF(shallow.label, ''),
+                       left(encode(i.id, 'hex'), 16)),
+                   i.tier
+            FROM inp i
+            CROSS JOIN names
+            LEFT JOIN shallow ON shallow.id = i.id
+            LEFT JOIN laplace.canonical_names n ON n.id = i.id
+            ORDER BY i.ord
             """,
             static r => new FastLabelRow(
                 r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetInt16(2)),

@@ -316,6 +316,29 @@ public sealed class ReadPathArchitectureGateTests
     }
 
     [Fact]
+    public void ConsensusWeb_LabelsSurvivorsInBoundedBatches()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var reads = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate",
+            "Crud", "Npgsql", "NpgsqlSubstrateReads.cs"));
+        var start = reads.IndexOf("LabelsFastAsync(", StringComparison.Ordinal);
+        var end = reads.IndexOf("public readonly record struct EdgesRawRow", start,
+            StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "LabelsFastAsync implementation was not found");
+        var labels = reads[start..end];
+
+        Assert.Contains("realize.resolve_name_batch(@ids::bytea[])", labels,
+            StringComparison.Ordinal);
+        Assert.Contains("realize.render_text_batch(s.ids, 3)", labels,
+            StringComparison.Ordinal);
+        Assert.Contains("WHERE i.tier <= 3", labels, StringComparison.Ordinal);
+        Assert.DoesNotContain("realize.resolve_name(x.id)", labels,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("realize.render_text_fast(x.id", labels,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GenerationWalk_DerivesCapacityFromTheRequestedFrontier()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
