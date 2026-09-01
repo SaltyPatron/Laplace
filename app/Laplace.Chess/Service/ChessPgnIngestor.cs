@@ -165,6 +165,9 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 ChessVocabulary.EmitPlayer(b, playerId, identityName, sourceId, weight);
                 players++;
 
+                // Provider-reported display/real names are attributable aliases on THIS
+                // provider identity.  A matching human-readable name is candidate referential
+                // evidence, not permission to mint a second player and assert identity.
                 foreach (string alias in profile.Aliases
                              .Append(profile.DisplayName)
                              .Append(profile.RealName ?? "")
@@ -187,26 +190,12 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     AddProfileValue(b, playerId, ChessVocabulary.FeatureType,
                         value, sourceId, weight, $"fact:{kind}");
 
-                if (!string.IsNullOrWhiteSpace(profile.RealName)
-                    && !PlayerAlias.Canonical(profile.RealName).Equals(
-                        PlayerAlias.Canonical(identityName), StringComparison.Ordinal))
-                {
-                    var realId = ChessVocabulary.PlayerId(profile.RealName);
-                    ChessVocabulary.EmitPlayer(b, realId, profile.RealName, sourceId, weight);
-                    if (identityLinks.Add((playerId, realId, sourceId)))
-                        b.AddAttestation(NativeAttestation.CategoricalResolved(
-                            playerId, ChessVocabulary.CorrespondsToType, realId,
-                            sourceId, null, weight));
-                }
-
                 planned.Add((profile, playerId, sourceId, weight, b));
             }
 
-            // A provider account plus one explicitly selected FIDE identity is one ingest
-            // fact. Put the bridge in the provider's original change so evidence, profile
-            // metadata and association commit and fold together. The former second apply
-            // reused the same source-unit label after the profile had already committed;
-            // the bridge could disappear while the job still reported "2 profiles".
+            // Cross-provider identity is asserted only when the caller explicitly supplied
+            // one FIDE profile together with the online profile.  Name equality / RealName
+            // never creates this edge: equal names produce candidate referents, not identity.
             var fideProfiles = planned.Where(static p =>
                 p.Profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)).ToArray();
             if (fideProfiles.Length == 1)
