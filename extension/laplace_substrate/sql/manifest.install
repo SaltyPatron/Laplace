@@ -444,6 +444,7 @@ functions/chess/chess_outcome.sql.in
 functions/chess/chess_player_id.sql.in
 functions/chess/chess_player_record.sql.in
 functions/chess/chess_player_ratings.sql.in
+functions/chess/chess_player_profile_edges.sql.in
 functions/chess/chess_player_games.sql.in
 functions/chess/chess_game.sql.in
 functions/chess/chess_time_pressure_outcome.sql.in

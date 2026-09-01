@@ -2465,27 +2465,9 @@ public static class NpgsqlSubstrateReads
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            WITH identity_ids(id) AS (
-                SELECT @id::bytea
-                UNION
-                SELECT c.object_id
-                FROM consensus.consensus_out(@id) c
-                WHERE c.type_id = laplace.relation_type_id('CORRESPONDS_TO')
-                UNION
-                SELECT c.subject_id
-                FROM consensus.consensus_in(@id) c
-                WHERE c.type_id = laplace.relation_type_id('CORRESPONDS_TO')
-            )
-            SELECT encode(i.id, 'hex'), lexical.type_label(c.type_id), realize.render(c.object_id)
-            FROM identity_ids i
-            CROSS JOIN LATERAL consensus.consensus_out(i.id) c
-            WHERE c.type_id = ANY(ARRAY[
-                laplace.relation_type_id('HAS_EXTERNAL_ID'),
-                laplace.relation_type_id('HAS_NAME_ALIAS'),
-                laplace.relation_type_id('HAS_FEATURE'),
-                laplace.relation_type_id('HAS_RATING')
-            ]::bytea[])
-            ORDER BY i.id, c.type_id, c.object_id
+            SELECT encode(p.subject_id, 'hex'), realize.render(p.type_id),
+                   realize.render(p.object_id)
+            FROM chess.player_profile_edges(@id) p
             """,
             static r => new ChessProfileEdgeRow(
                 r.GetString(0), r.GetString(1), r.IsDBNull(2) ? "" : r.GetString(2)),

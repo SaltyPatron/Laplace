@@ -1,0 +1,46 @@
+-- Profile testimony for one player and its directly linked provider identities.
+-- Source and relation predicates are applied before any rendering or ordering: game
+-- volume therefore cannot crowd profile data out of this read.
+CREATE OR REPLACE FUNCTION chess.player_profile_edges(p_player bytea)
+    RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH identity_ids(id) AS MATERIALIZED (
+        SELECT p_player
+        UNION
+        SELECT a.object_id
+        FROM laplace.attestations a
+        WHERE a.subject_id = p_player
+          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.source_id = ANY (ARRAY[
+              laplace.source_id('LichessPlayerProfile'),
+              laplace.source_id('ChessComPlayerProfile'),
+              laplace.source_id('FidePlayerProfile')
+          ]::bytea[])
+        UNION
+        SELECT a.subject_id
+        FROM laplace.attestations a
+        WHERE a.object_id = p_player
+          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.source_id = ANY (ARRAY[
+              laplace.source_id('LichessPlayerProfile'),
+              laplace.source_id('ChessComPlayerProfile'),
+              laplace.source_id('FidePlayerProfile')
+          ]::bytea[])
+    )
+    SELECT DISTINCT i.id, a.type_id, a.object_id
+    FROM identity_ids i
+    JOIN laplace.attestations a ON a.subject_id = i.id
+    WHERE a.source_id = ANY (ARRAY[
+              laplace.source_id('LichessPlayerProfile'),
+              laplace.source_id('ChessComPlayerProfile'),
+              laplace.source_id('FidePlayerProfile')
+          ]::bytea[])
+      AND a.type_id = ANY (ARRAY[
+              laplace.relation_type_id('HAS_EXTERNAL_ID'),
+              laplace.relation_type_id('HAS_NAME_ALIAS'),
+              laplace.relation_type_id('HAS_FEATURE'),
+              laplace.relation_type_id('HAS_RATING')
+          ]::bytea[])
+    ORDER BY i.id, a.type_id, a.object_id;
+END;
