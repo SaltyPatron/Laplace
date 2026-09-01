@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -12,7 +13,14 @@ namespace Laplace.Chess.Service;
 /// use. This is the loop-closer for games the lab plays via external engines (cutechess drives
 /// the laplace-uci binary, which cannot record its own games) — the PGN artifact feeds straight
 /// back into consensus instead of waiting for a manual `laplace ingest chess` run.
-/// Novelty-gated on content-addressed game ids, so re-ingesting an artifact is a no-op.
+///
+/// Playing novelty controls whether immutable game content/calculated lanes need to be deposited.
+/// It does NOT suppress schema/identity repair of the source record. An already-present playing
+/// is replayed through the current ChessPgn recorder, then only exact playing-scoped attestations
+/// missing from durable evidence are admitted. This is the migration law required when the
+/// playing/header/player projection evolves: rows already present are never re-witnessed, while
+/// missing current-shape testimony is repaired from the source artifact that originally asserted
+/// the game.
 /// </summary>
 public sealed class ChessPgnIngestor : IAsyncDisposable
 {
@@ -98,7 +106,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         await Gate.WaitAsync(ct);
         try
         {
-            int parsed = 0, novel = 0, applied = 0;
+            int parsed = 0, novel = 0, applied = 0, repaired = 0;
             var chunk = new List<ChessGameRecord>(ChunkSize);
 
             foreach (var gameText in PgnGames.StreamGames(pgnPath))
@@ -108,18 +116,21 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 parsed++;
                 chunk.Add(game);
                 if (chunk.Count < ChunkSize) continue;
-                (int n, int a) = await ApplyChunkAsync(chunk, ct);
-                novel += n; applied += a;
+                (int n, int a, int r) = await ApplyChunkAsync(chunk, ct);
+                novel += n; applied += a; repaired += r;
                 chunk.Clear();
             }
             if (chunk.Count > 0)
             {
-                (int n, int a) = await ApplyChunkAsync(chunk, ct);
-                novel += n; applied += a;
+                (int n, int a, int r) = await ApplyChunkAsync(chunk, ct);
+                novel += n; applied += a; repaired += r;
             }
 
-            log?.Invoke($"ingested {applied}/{parsed} games from {Path.GetFileName(pgnPath)}"
-                        + (parsed > novel ? $" ({parsed - novel} already present)" : ""));
+            log?.Invoke($"ingested {applied}/{parsed} new games from {Path.GetFileName(pgnPath)}"
+                        + (parsed > novel ? $" ({parsed - novel} already present)" : "")
+                        + (repaired > 0
+                            ? $"; repaired current playing testimony for {repaired} already-present games"
+                            : ""));
             return new Result(parsed, novel, applied);
         }
         finally
@@ -166,7 +177,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 players++;
 
                 // Provider-reported display/real names are attributable aliases on THIS
-                // provider identity.  A matching human-readable name is candidate referential
+                // provider identity. A matching human-readable name is candidate referential
                 // evidence, not permission to mint a second player and assert identity.
                 foreach (string alias in profile.Aliases
                              .Append(profile.DisplayName)
@@ -194,7 +205,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             }
 
             // Cross-provider identity is asserted only when the caller explicitly supplied
-            // one FIDE profile together with the online profile.  Name equality / RealName
+            // one FIDE profile together with the online profile. Name equality / RealName
             // never creates this edge: equal names produce candidate referents, not identity.
             var fideProfiles = planned.Where(static p =>
                 p.Profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -242,20 +253,25 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             _ => throw new ArgumentException($"unsupported chess profile provider '{provider}'"),
         };
 
-    private async Task<(int Novel, int Applied)> ApplyChunkAsync(
+    private async Task<(int Novel, int Applied, int Repaired)> ApplyChunkAsync(
         List<ChessGameRecord> chunk, CancellationToken ct)
     {
-        // Batch the whole chunk into two builders — witnessed layer (ChessPgn) and calculated
-        // layer (ChessAnalysis, derived from the in-memory parse) — and apply each ONCE.
-        // Per-game round-trips against a bulk writer are the wrong point for that algorithm.
+        // Novel content still takes the fused record+calculated path. Already-present playings
+        // take a separate repair lane: rebuild the CURRENT source-record projection in memory,
+        // retain only exact playing-grain attestation ids absent from durable evidence, and apply
+        // those rows once. This repairs schema/identity evolution without treating a replay of the
+        // same PGN as a second observation.
         var record = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/ingest");
         var analyze = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "chess/lab/ingest");
+        var repair = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/repair-playing");
         int novel = 0;
+        var novelIds = new HashSet<Hash128>();
         var observedPositions = new HashSet<Hash128>();
         var observedMoves = new HashSet<Hash128>();
         await foreach (var game in ChessPgnDecomposer.FilterNovelAsync(chunk, _reader, ct))
         {
             novel++;
+            novelIds.Add(game.PlayingId);
             ChessPgnDecomposer.RecordGame(game, record);
             ChessAnalyze.DeriveFromParsed(analyze, game);
             ChessTransitions.DepositFromParsed(analyze, game);
@@ -267,12 +283,135 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             foreach (var moveId in game.MoveIds)
                 observedMoves.Add(moveId);
         }
-        if (novel == 0) return (0, 0);
 
-        await _writer.ApplyManyAsync(
-            [await record.BuildAsync(ct), await analyze.BuildAsync(ct)], ct);
+        var repairPlayings = new HashSet<Hash128>();
+        foreach (var game in chunk)
+        {
+            if (novelIds.Contains(game.PlayingId)) continue;
+            repairPlayings.Add(game.PlayingId);
+            // RecordGame is deliberately reused so the repair derives the exact same ids and
+            // fold inputs as a fresh ingest. The filter below admits only playing-scoped rows;
+            // line-grain opening/move testimony is not replayed.
+            ChessPgnDecomposer.RecordGame(game, repair);
+        }
+
+        var changes = new List<SubstrateChange>(3);
+        if (novel > 0)
+        {
+            changes.Add(await record.BuildAsync(ct));
+            changes.Add(await analyze.BuildAsync(ct));
+        }
+
+        int repairedGames = 0;
+        if (repairPlayings.Count > 0)
+        {
+            var repairBuilt = await repair.BuildAsync(ct);
+            var filtered = await MissingPlayingWitnessesAsync(repairBuilt, repairPlayings, ct);
+            if (filtered.Change is { } repairChange)
+            {
+                changes.Add(repairChange);
+                repairedGames = filtered.Games;
+            }
+        }
+
+        if (changes.Count == 0) return (novel, 0, 0);
+
+        await _writer.ApplyManyAsync(changes, ct);
         ChessTransitionObservations.MarkObserved(observedPositions, observedMoves);
-        return (novel, novel);
+        return (novel, novel, repairedGames);
+    }
+
+    private async Task<(SubstrateChange? Change, int Games)> MissingPlayingWitnessesAsync(
+        SubstrateChange change, HashSet<Hash128> playingIds, CancellationToken ct)
+    {
+        var candidates = change.Attestations
+            .Where(a => IsPlayingWitness(a, playingIds))
+            .ToArray();
+        if (candidates.Length == 0) return (null, 0);
+
+        var present = await ReadPresentAttestationIdsAsync(candidates, ct);
+        var missing = candidates.Where(a => !present.Contains(a.Id)).ToArray();
+        if (missing.Length == 0) return (null, 0);
+
+        var repairedPlayings = new HashSet<Hash128>();
+        foreach (var row in missing)
+        {
+            if (row.ContextId is { } context && playingIds.Contains(context))
+                repairedPlayings.Add(context);
+            else if (row.ContextId is null && playingIds.Contains(row.SubjectId))
+                repairedPlayings.Add(row.SubjectId);
+        }
+
+        // Keep the builder's entities/physicalities/content stages: an old playing can be present
+        // while one current projection object (player alias, metadata token, event handle) is not.
+        // Those rows are content-addressed/idempotent. Only testimony needs the exact-presence
+        // filter, because attestation merge is additive and re-witnessing would be corruption.
+        var filtered = change with
+        {
+            Attestations = missing.ToImmutableArray(),
+            CountsAsUnit = false,
+        };
+        return (filtered, repairedPlayings.Count);
+    }
+
+    private async Task<HashSet<Hash128>> ReadPresentAttestationIdsAsync(
+        IReadOnlyList<AttestationRow> rows, CancellationToken ct)
+    {
+        var present = new HashSet<Hash128>();
+        if (rows.Count == 0) return present;
+
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        int probeChunk = Math.Max(1,
+            IngestSizing.ResolveApplyIo(IngestTopology.Current.ApplyPartitions).ProbeChunkIds);
+
+        // type_id is the LIST partition key. Group by it before probing so PostgreSQL opens one
+        // relation family at a time rather than turning a migration read into an all-partition
+        // scan. Chunk width comes from the same measured apply-I/O sizing used by ingest.
+        foreach (var typeGroup in rows.GroupBy(static row => row.TypeId))
+        {
+            var group = typeGroup.ToArray();
+            for (int offset = 0; offset < group.Length; offset += probeChunk)
+            {
+                int count = Math.Min(probeChunk, group.Length - offset);
+                var ids = new byte[count][];
+                for (int i = 0; i < count; i++) ids[i] = group[offset + i].Id.ToBytes();
+
+                var found = await NpgsqlAttestationReads.PresentIdsAsync(
+                    conn, typeGroup.Key.ToBytes(), ids, ct).ConfigureAwait(false);
+                foreach (var id in found)
+                    present.Add(Hash128.FromBytes(id));
+            }
+        }
+        return present;
+    }
+
+    private static bool IsPlayingWitness(AttestationRow row, HashSet<Hash128> playingIds)
+    {
+        if (row.ContextId is { } context && playingIds.Contains(context))
+        {
+            var type = row.TypeId;
+            return type == ChessVocabulary.HasWhiteType
+                || type == ChessVocabulary.HasBlackType
+                || type == ChessVocabulary.HasEventType
+                || type == ChessVocabulary.OnDateType
+                || type == ChessVocabulary.EcoCodeType
+                || type == ChessVocabulary.HasTerminationType
+                || type == ChessVocabulary.HasResultType
+                || type == ChessVocabulary.HasTimeControlType
+                || type == ChessVocabulary.HasTcClassType
+                || type == ChessVocabulary.HasSetupType
+                || type == ChessVocabulary.HasRatingType
+                || type == ChessVocabulary.OutcomeType
+                || type == ChessVocabulary.PlayedByType;
+        }
+
+        // Current record grain has two structural rows with no context because the PLAYING is
+        // itself their subject: playing→line and playing→event. They are safe to repair by exact
+        // attestation id for the same reason as the context-bound headers above.
+        return row.ContextId is null
+            && playingIds.Contains(row.SubjectId)
+            && (row.TypeId == ChessVocabulary.PlaysLineType
+                || row.TypeId == ChessVocabulary.HasEventType);
     }
 
     public async ValueTask DisposeAsync()
