@@ -7,6 +7,7 @@ DECLARE
     result_type_exists boolean := to_regtype('consensus_fold_result') IS NOT NULL;
 BEGIN
     IF NOT result_type_exists THEN
+        EXECUTE 'DROP FUNCTION IF EXISTS consensus_fold_final(internal)';
         EXECUTE $c$ CREATE TYPE consensus_fold_result AS (
             rating bigint, rd bigint, volatility bigint, witness_count bigint) $c$;
     END IF;

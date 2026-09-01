@@ -757,8 +757,11 @@ phase_sync_extension() {
     rm -f "$upd_log"
     [[ "$rc" -eq 0 ]] || { echo "::error::laplace_substrate UPDATE to $avail failed" >&2; exit "$rc"; }
     echo "OK upgraded laplace_substrate $installed -> $avail in place"
-    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
-      -c "CALL chess.repair_player_ratings()"
+    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c \
+      "CALL chess.repair_player_ratings(
+         laplace.relation_type_id('OUTCOME'),
+         laplace.relation_type_id('PLAYED_BY'),
+         laplace.relation_type_id('HAS_RATING'))"
   else
     echo "OK laplace_substrate already at $avail"
   fi
