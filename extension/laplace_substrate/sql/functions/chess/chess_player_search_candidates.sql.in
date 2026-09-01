@@ -5,14 +5,28 @@ CREATE FUNCTION chess.player_search_candidates(p_queries text[], p_limit integer
                   rating double precision, rd double precision, eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    -- A partial player query cannot be a content-address lookup: "Karpov" does
-    -- not contain the missing given name needed to mint Karpov's player id. Use
-    -- the existing trajectory constituent GIN to make a bounded candidate set,
-    -- then let the endpoint perform human-name/fuzzy ranking over that set.
-    WITH forms(value) AS MATERIALIZED (
+    -- Exact content-address resolution wins.  A caller that supplied an exact
+    -- username/name has already named one Chess_Player; broad constituent search
+    -- after that point changes a lookup into a guess.  Preserve input order so
+    -- the caller's literal form wins over its derived canonical/compact forms.
+    WITH exact AS MATERIALIZED (
+        SELECT e.id AS player
+        FROM unnest(p_queries) WITH ORDINALITY AS q(value, ord)
+        JOIN laplace.entities e
+          ON e.id = chess.player_id(q.value)
+         AND e.type_id = laplace.entity_type_id('Chess_Player')
+        WHERE length(q.value) > 0
+        ORDER BY q.ord
+        LIMIT 1
+    ),
+    -- Only a failed exact lookup is allowed to enter the fuzzy/indexed path.
+    -- "Karpov" cannot content-address "Karpov, Anatoly" because the missing
+    -- given name is not present; this is where trajectory constituents belong.
+    forms(value) AS MATERIALIZED (
         SELECT DISTINCT v
         FROM unnest(p_queries) q(v)
         WHERE length(v) >= 2
+          AND NOT EXISTS (SELECT 1 FROM exact)
     ),
     required AS MATERIALIZED (
         SELECT f.value,
@@ -31,6 +45,8 @@ BEGIN ATOMIC
         WHERE cardinality(r.ids) >= 2
     ),
     players AS MATERIALIZED (
+        SELECT x.player FROM exact x
+        UNION
         SELECT DISTINCT c.subject_id AS player
         FROM laplace.consensus c
         JOIN name_ids n ON n.name_id = c.object_id
@@ -40,6 +56,7 @@ BEGIN ATOMIC
         WHERE c.type_id = ANY (
             consensus.relation_family_ids('HAS_NAME')
             || consensus.relation_family_ids('HAS_NAME_ALIAS'))
+          AND NOT EXISTS (SELECT 1 FROM exact)
     ),
     rated AS MATERIALIZED (
         SELECT p.player,
@@ -55,9 +72,8 @@ BEGIN ATOMIC
             ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.id
             LIMIT 1
         ) o ON true
-        -- Profile-only FIDE identities are searchable before a game archive is
-        -- associated with them.  Rated careers still lead an equally relevant
-        -- candidate set; the endpoint's human-name score remains authoritative.
+        -- Profile-only identities are still valid exact results.  Strength only
+        -- ranks the fuzzy candidate set after exact resolution has failed.
         ORDER BY (o.rating IS NOT NULL) DESC,
                  consensus.eff_mu(
                      COALESCE(o.rating, consensus.glicko2_neutral_mu()),
