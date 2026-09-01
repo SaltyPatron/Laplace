@@ -1,87 +1,56 @@
--- ops.refold_source — the NON-DESTRUCTIVE half of evict_source (GH #1176).
+-- Evidence-derived consensus reconstruction and unfinished-fold recovery.
 --
--- THE INCIDENT THIS REPAIRS, measured 2026-08-21: the conceptnet ingest (run
--- 32502815485) applied all 651 units and then died mid-fold on pool exhaustion
--- (#1271). The ledger says applied; the folds never drained. Result: relation
--- aa43543b… holds 163,585 attestations but 28,793 consensus rows; 3d5f97dc…
--- 108,863 vs 66,789 — lanes whose folds finished are exact. Per-file resume
--- true-skips the files (their HasLayerCompleted markers exist), so re-running
--- repairs nothing, and until this procedure existed the ONLY recovery was
--- evict + full re-ingest: destroying 963,549 evidence rows to rebuild rows
--- that are all still present.
---
--- Consensus is DERIVED state: every cell is exactly the consensus_fold of its
--- surviving attestations. evict_source already proves it — its step (b) refolds
--- every touched cell in place after deleting testimony. This is the complete
--- rebuild form of that arm with NOTHING deleted: enumerate the cells the source's
--- testimony touches, refold each from ALL evidence, one uniform period, canonical
--- order (last_observed_at, id), neutral-prior seed, and UPSERT the derived row.
--- The INSERT half matters: an interrupted first fold can leave durable evidence
--- with no consensus row at all, and UPDATE-only repair cannot reconstruct it.
--- Idempotent by construction — a second run recomputes identical values. Touches
--- only laplace.consensus rows whose evidence justifies them; never mutates evidence.
---
--- Batched COMMITs exactly like evict_source, so a canceled repair keeps every
--- relation already refolded. No SET clause (a procedure carrying one may not
--- COMMIT); references schema-qualified instead — the ops.evict_source rule.
---
--- Run (operator, via the measurement lane like evict):
---   CALL ops.refold_source('ConceptNetDecomposer');
-DROP PROCEDURE IF EXISTS ops.refold_source(text, boolean);
+-- Consensus is derived state: for a touched cell, the authoritative repair is
+-- the canonical consensus_fold of every surviving attestation, never replaying
+-- the additive delta that may already have committed partially.  The relation
+-- helper below is one transaction-safe primitive used by both the operator
+-- procedure and the automatic ingest-journal recovery path.
 
-CREATE OR REPLACE PROCEDURE ops.refold_source(
-    p_source_name text,
-    p_dry_run     boolean DEFAULT false)
-    LANGUAGE plpgsql AS $$
+DROP FUNCTION IF EXISTS ops.refold_source_relation(bytea, bytea);
+CREATE OR REPLACE FUNCTION ops.refold_source_relation(
+    p_source_id bytea,
+    p_type_id   bytea)
+RETURNS bigint
+LANGUAGE plpgsql VOLATILE
+AS $$
 DECLARE
-    src            bytea;
-    rels           bytea[];
-    rel            bytea;
-    n_cells        bigint;
-    n              bigint;
-    refold_total   bigint := 0;
-    t0             timestamptz := clock_timestamp();
+    rebuilt bigint := 0;
 BEGIN
-    src := laplace.source_id(p_source_name);
-    IF src IS NULL THEN
-        RAISE EXCEPTION 'refold_source: unknown source %', p_source_name;
+    IF p_source_id IS NULL OR octet_length(p_source_id) <> 16 THEN
+        RAISE EXCEPTION 'refold_source_relation: source id must be 16 bytes';
+    END IF;
+    IF p_type_id IS NULL OR octet_length(p_type_id) <> 16 THEN
+        RAISE EXCEPTION 'refold_source_relation: relation id must be 16 bytes';
     END IF;
 
-    SELECT array_agg(DISTINCT a.type_id) INTO rels
-    FROM laplace.attestations a WHERE a.source_id = src;
-    IF rels IS NULL THEN
-        RAISE LOG 'refold_source: % has no testimony — nothing to refold', p_source_name;
-        RETURN;
-    END IF;
-
-    CREATE TEMP TABLE IF NOT EXISTS _refold_cells (
-        subject_id bytea NOT NULL,
-        object_id  bytea,
-        UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
-
-    FOREACH rel IN ARRAY rels LOOP
-        TRUNCATE _refold_cells;
-        EXECUTE format($q$
-            INSERT INTO _refold_cells (subject_id, object_id)
+    -- Literalize the LIST partition key while keeping source identity bound.
+    -- The touched-cell set comes only from this source; each touched cell is then
+    -- reconstructed from ALL surviving testimony for that relation.
+    EXECUTE format($q$
+        WITH touched AS MATERIALIZED (
             SELECT DISTINCT a.subject_id, a.object_id
             FROM laplace.attestations a
-            WHERE a.source_id = %L::bytea AND a.type_id = %L::bytea
-            ON CONFLICT DO NOTHING
-        $q$, src, rel);
-        GET DIAGNOSTICS n_cells = ROW_COUNT;
-
-        IF p_dry_run THEN
-            RAISE LOG 'refold_source: WOULD refold % cell(s) of relation %',
-                n_cells, encode(rel, 'hex');
-            CONTINUE;
-        END IF;
-
-        -- Total reconstruction from evidence, not update-in-place. A source can
-        -- have committed attestations before the first consensus insert for a cell
-        -- (#1349/#1292), so the recovery primitive must materialize missing derived
-        -- rows as well as replace stale ones. Identity stays canonical and the
-        -- partitioned-table conflict target is the declared consensus PK.
-        EXECUTE format($q$
+            WHERE a.source_id = $1
+              AND a.type_id = %L::bytea
+        ),
+        folded AS MATERIALIZED (
+            SELECT t.subject_id, t.object_id,
+                   laplace.consensus_fold(false, NULL, NULL, NULL,
+                       a.opponent_rating_fp1e9,
+                       a.opponent_rd_fp1e9,
+                       GREATEST(a.observation_count, 1),
+                       a.sum_score_fp1e9,
+                       consensus.glicko2_tau()
+                       ORDER BY a.last_observed_at, a.id) AS acc,
+                   max(a.last_observed_at) AS last_ts
+            FROM touched t
+            JOIN laplace.attestations a
+              ON a.type_id = %L::bytea
+             AND a.subject_id = t.subject_id
+             AND a.object_id IS NOT DISTINCT FROM t.object_id
+            GROUP BY t.subject_id, t.object_id
+        ),
+        upserted AS (
             INSERT INTO laplace.consensus
                 (id, subject_id, type_id, object_id,
                  rating, rd, volatility, witness_count, last_observed_at)
@@ -89,23 +58,7 @@ BEGIN
                    f.subject_id, %L::bytea, f.object_id,
                    (f.acc).rating, (f.acc).rd, (f.acc).volatility,
                    (f.acc).witness_count, f.last_ts
-            FROM (
-                SELECT t.subject_id, t.object_id,
-                       laplace.consensus_fold(false, NULL, NULL, NULL,
-                           a.opponent_rating_fp1e9,
-                           a.opponent_rd_fp1e9,
-                           GREATEST(a.observation_count, 1),
-                           a.sum_score_fp1e9,
-                           consensus.glicko2_tau()
-                           ORDER BY a.last_observed_at, a.id) AS acc,
-                       max(a.last_observed_at) AS last_ts
-                FROM _refold_cells t
-                JOIN laplace.attestations a
-                  ON a.type_id = %L::bytea
-                 AND a.subject_id = t.subject_id
-                 AND a.object_id IS NOT DISTINCT FROM t.object_id
-                GROUP BY t.subject_id, t.object_id
-            ) f
+            FROM folded f
             ON CONFLICT (id, type_id, subject_id) DO UPDATE
             SET object_id        = EXCLUDED.object_id,
                 rating           = EXCLUDED.rating,
@@ -113,15 +66,242 @@ BEGIN
                 volatility       = EXCLUDED.volatility,
                 witness_count    = EXCLUDED.witness_count,
                 last_observed_at = EXCLUDED.last_observed_at
-        $q$, rel, rel, rel);
-        GET DIAGNOSTICS n = ROW_COUNT;
+            RETURNING 1
+        )
+        SELECT count(*) FROM upserted
+    $q$, p_type_id, p_type_id, p_type_id, p_type_id)
+    USING p_source_id
+    INTO rebuilt;
+
+    RETURN COALESCE(rebuilt, 0);
+END;
+$$;
+
+-- Automatic recovery for one source.  It is intentionally a FUNCTION, not the
+-- operator procedure below: one statement/transaction holds the exclusive
+-- recovery advisory lock from the first evidence-derived refold through exact
+-- highway-mask reconstruction and the final journal acknowledgement.  Normal
+-- accumulating writers hold the same lock SHARED for their whole run, so this
+-- cannot race an evidence/fold continuation from another process.
+DROP FUNCTION IF EXISTS ops.recover_unfolded_source(bytea);
+CREATE OR REPLACE FUNCTION ops.recover_unfolded_source(p_source_id bytea)
+RETURNS bigint
+LANGUAGE plpgsql VOLATILE
+AS $$
+DECLARE
+    rels               bytea[];
+    rel                bytea;
+    broad_scope        boolean := false;
+    ids                bytea[];
+    acked              bigint := 0;
+    rebuilt            bigint := 0;
+    masks              bigint := 0;
+BEGIN
+    IF p_source_id IS NULL OR octet_length(p_source_id) <> 16 THEN
+        RAISE EXCEPTION 'recover_unfolded_source: source id must be 16 bytes';
+    END IF;
+
+    -- Cheap no-op path does not contend with active ingest runs.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM laplace.ingest_flush_journal j
+        WHERE j.source_id = p_source_id
+          AND NOT j.folded
+          AND j.fold_recoverable
+    ) THEN
+        RETURN 0;
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended('laplace_fold_recovery', 0));
+
+    -- Recheck after the wait: another recovery may have completed first.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM laplace.ingest_flush_journal j
+        WHERE j.source_id = p_source_id
+          AND NOT j.folded
+          AND j.fold_recoverable
+    ) THEN
+        RETURN 0;
+    END IF;
+
+    SELECT bool_or(j.fold_type_ids IS NULL)
+      INTO broad_scope
+      FROM laplace.ingest_flush_journal j
+     WHERE j.source_id = p_source_id
+       AND NOT j.folded
+       AND j.fold_recoverable;
+
+    IF broad_scope THEN
+        -- A crash between evidence commit and scope publication is still
+        -- recoverable; it merely widens repair to every relation this source
+        -- has durable testimony under.
+        SELECT array_agg(DISTINCT a.type_id ORDER BY a.type_id)
+          INTO rels
+          FROM laplace.attestations a
+         WHERE a.source_id = p_source_id;
+    ELSE
+        SELECT array_agg(DISTINCT u.type_id ORDER BY u.type_id)
+          INTO rels
+          FROM laplace.ingest_flush_journal j
+          CROSS JOIN LATERAL unnest(j.fold_type_ids) AS u(type_id)
+         WHERE j.source_id = p_source_id
+           AND NOT j.folded
+           AND j.fold_recoverable;
+    END IF;
+
+    CREATE TEMP TABLE IF NOT EXISTS _fold_recovery_mask_ids (
+        id bytea PRIMARY KEY CHECK (octet_length(id) = 16)
+    ) ON COMMIT DELETE ROWS;
+    TRUNCATE _fold_recovery_mask_ids;
+
+    IF rels IS NOT NULL THEN
+        FOREACH rel IN ARRAY rels LOOP
+            rebuilt := rebuilt + ops.refold_source_relation(p_source_id, rel);
+
+            -- The original continuation also deposits highway membership.  A
+            -- crashed mask lane is therefore part of the same incomplete token.
+            -- Queue the exact subject/object set now and refresh it below from
+            -- reconstructed consensus; recompute is idempotent and can clear as
+            -- well as set bits, unlike OR-only deposit replay.
+            INSERT INTO _fold_recovery_mask_ids(id)
+            SELECT a.subject_id
+              FROM laplace.attestations a
+             WHERE a.source_id = p_source_id
+               AND a.type_id = rel
+            UNION
+            SELECT a.object_id
+              FROM laplace.attestations a
+             WHERE a.source_id = p_source_id
+               AND a.type_id = rel
+               AND a.object_id IS NOT NULL
+            ON CONFLICT DO NOTHING;
+        END LOOP;
+    END IF;
+
+    -- Keep the repair's array residency bounded.  The recovery transaction is
+    -- exceptional and correctness-first, but it still must not manufacture a
+    -- multi-million-id CLR/PostgreSQL array merely because a source is large.
+    LOOP
+        SELECT array_agg(q.id ORDER BY q.id)
+          INTO ids
+          FROM (
+              SELECT id FROM _fold_recovery_mask_ids ORDER BY id LIMIT 32768
+          ) q;
+        EXIT WHEN ids IS NULL OR cardinality(ids) = 0;
+
+        masks := masks + consensus.highway_mask_refresh(ids);
+        DELETE FROM _fold_recovery_mask_ids WHERE id = ANY(ids);
+    END LOOP;
+
+    UPDATE laplace.ingest_flush_journal j
+       SET folded = true,
+           folded_at = clock_timestamp()
+     WHERE j.source_id = p_source_id
+       AND NOT j.folded
+       AND j.fold_recoverable;
+    GET DIAGNOSTICS acked = ROW_COUNT;
+
+    RAISE LOG 'recover_unfolded_source: source % rebuilt % consensus row(s), refreshed % mask row(s), acknowledged % token(s)',
+        encode(p_source_id, 'hex'), rebuilt, masks, acked;
+    RETURN acked;
+END;
+$$;
+
+-- Startup repair is opportunistic rather than a concurrency gate.  If another
+-- current writer holds the shared recovery guard, return -1 immediately and let
+-- both runs proceed.  A truly abandoned journal has no live shared holder, so a
+-- later startup acquires the exclusive xact lock and repairs every recoverable
+-- source left by the crashed process.
+DROP FUNCTION IF EXISTS ops.recover_unfolded_all_quiescent();
+CREATE OR REPLACE FUNCTION ops.recover_unfolded_all_quiescent()
+RETURNS bigint
+LANGUAGE plpgsql VOLATILE
+AS $$
+DECLARE
+    src bytea;
+    n bigint;
+    total bigint := 0;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM laplace.ingest_flush_journal
+        WHERE NOT folded AND fold_recoverable
+    ) THEN
+        RETURN 0;
+    END IF;
+
+    IF NOT pg_try_advisory_xact_lock(hashtextextended('laplace_fold_recovery', 0)) THEN
+        RETURN -1;
+    END IF;
+
+    FOR src IN
+        SELECT DISTINCT source_id
+        FROM laplace.ingest_flush_journal
+        WHERE NOT folded
+          AND fold_recoverable
+          AND source_id IS NOT NULL
+        ORDER BY source_id
+    LOOP
+        n := ops.recover_unfolded_source(src);
+        total := total + n;
+    END LOOP;
+    RETURN total;
+END;
+$$;
+
+-- Operator-facing source refold, retained as a relation-at-a-time procedure with
+-- progress/commit behavior.  It now delegates the actual reconstruction law to
+-- the same helper automatic crash recovery uses, so the two paths cannot drift.
+DROP PROCEDURE IF EXISTS ops.refold_source(text, boolean);
+CREATE OR REPLACE PROCEDURE ops.refold_source(
+    p_source_name text,
+    p_dry_run     boolean DEFAULT false)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    src          bytea;
+    rels         bytea[];
+    rel          bytea;
+    n_cells      bigint;
+    n            bigint;
+    refold_total bigint := 0;
+    t0           timestamptz := clock_timestamp();
+BEGIN
+    src := laplace.source_id(p_source_name);
+    IF src IS NULL THEN
+        RAISE EXCEPTION 'refold_source: unknown source %', p_source_name;
+    END IF;
+
+    SELECT array_agg(DISTINCT a.type_id ORDER BY a.type_id)
+      INTO rels
+      FROM laplace.attestations a
+     WHERE a.source_id = src;
+    IF rels IS NULL THEN
+        RAISE LOG 'refold_source: % has no testimony — nothing to refold', p_source_name;
+        RETURN;
+    END IF;
+
+    FOREACH rel IN ARRAY rels LOOP
+        SELECT count(*) INTO n_cells
+        FROM (
+            SELECT DISTINCT a.subject_id, a.object_id
+            FROM laplace.attestations a
+            WHERE a.source_id = src AND a.type_id = rel
+        ) q;
+
+        IF p_dry_run THEN
+            RAISE LOG 'refold_source: WOULD refold % cell(s) of relation %',
+                n_cells, encode(rel, 'hex');
+            CONTINUE;
+        END IF;
+
+        n := ops.refold_source_relation(src, rel);
         refold_total := refold_total + n;
         RAISE LOG 'refold_source: relation % — % cell(s) touched, % consensus row(s) rebuilt',
             encode(rel, 'hex'), n_cells, n;
         COMMIT;
     END LOOP;
 
-    DROP TABLE IF EXISTS _refold_cells;
     RAISE LOG 'refold_source: % — % row(s) rebuilt across % relation(s) in %s',
         p_source_name, refold_total, array_length(rels, 1),
         round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
