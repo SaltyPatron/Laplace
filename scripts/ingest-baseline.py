@@ -63,7 +63,11 @@ def _psql(sql: str, *, source: str | None = None) -> str:
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip()
         raise RuntimeError(f"psql failed for {db}@{host}: {detail}")
-    return proc.stdout.strip()
+    # psql emits empty trailing fields as trailing separators. strip() removes tabs
+    # as whitespace and therefore changes a valid seven-column status row into five
+    # columns whenever baseline/ratio are NULL (the first-run/unbaselined case).
+    # Remove record terminators only; field separators are data.
+    return proc.stdout.rstrip("\r\n")
 
 
 def _status(source: str) -> dict[str, str | float | bool | None]:
@@ -90,7 +94,9 @@ FROM ops.source_status(:'source');
         "source": src,
         "last_run_status": run_status or None,
         "throughput_status": verdict or None,
-        "throughput_compared": compared == "t",
+        # throughput_compared::text is "true"/"false". Accept the compact psql
+        # spelling too so this reader remains correct if the explicit cast is removed.
+        "throughput_compared": compared in ("t", "true", "1"),
         "rows_per_s": float(rate) if rate else None,
         "baseline_rows_per_s": float(baseline) if baseline else None,
         "slowdown_ratio": float(ratio) if ratio else None,
