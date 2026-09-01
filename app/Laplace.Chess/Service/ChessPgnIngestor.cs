@@ -263,6 +263,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         var analyze = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "chess/lab/ingest");
         int novel = 0;
         var observedPositions = new HashSet<Hash128>();
+        var observedMoves = new HashSet<Hash128>();
         await foreach (var game in ChessPgnDecomposer.FilterNovelAsync(chunk, _reader, ct))
         {
             novel++;
@@ -274,12 +275,14 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 ChessSyzygy.DeriveGame(analyze, ChessAnalyze.WitnessedFromParsed(game), prober);
             for (int i = 0; i + 1 < game.PositionIds.Length; i++)
                 observedPositions.Add(game.PositionIds[i]);
+            foreach (var moveId in game.MoveIds)
+                observedMoves.Add(moveId);
         }
         if (novel == 0) return (0, 0);
 
         await _writer.ApplyManyAsync(
             [await record.BuildAsync(ct), await analyze.BuildAsync(ct)], ct);
-        ChessTransitionObservations.MarkObserved(observedPositions);
+        ChessTransitionObservations.MarkObserved(observedPositions, observedMoves);
         return (novel, novel);
     }
 

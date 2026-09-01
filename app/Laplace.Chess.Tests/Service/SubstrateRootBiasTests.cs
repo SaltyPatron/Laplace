@@ -60,6 +60,32 @@ public sealed class SubstrateRootBiasTests
         Assert.Equal(1, bias.MovePhysicalitySignals);
     }
 
+    [Fact]
+    public void ReusesFrontierUntilRelevantOnlineEvidenceChanges()
+    {
+        var fixture = Start("e2e4");
+        int reads = 0;
+        long version = 0;
+        var bias = new SubstrateRootBias(
+            (firstIds, firstType, secondIds, secondType) =>
+            {
+                reads++;
+                return (Present(firstIds, fixture.TransitionEdge, +10), Empty());
+            },
+            cpPerPoint: 8d, capCp: 150, shrinkK0: 0d,
+            version: (_, _) => version);
+
+        _ = bias.Bonus(fixture.Board, fixture.Moves);
+        _ = bias.Bonus(fixture.Board, fixture.Moves);
+        Assert.Equal(1, reads);
+        Assert.Equal(1, bias.BackendReads);
+
+        version++;
+        _ = bias.Bonus(fixture.Board, fixture.Moves);
+        Assert.Equal(2, reads);
+        Assert.Equal(2, bias.BackendReads);
+    }
+
     private static SubstrateRootBias Bias(
         Func<IReadOnlyCollection<Hash128>, Hash128,
             IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row>> read)

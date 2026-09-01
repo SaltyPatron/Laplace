@@ -19,6 +19,12 @@ public sealed class SearchTests
         }
     }
 
+    private sealed class UniformBias(int centipawns) : IRootBias
+    {
+        public int[] Bonus(Board root, IReadOnlyList<ChessMove> moves)
+            => Enumerable.Repeat(centipawns, moves.Count).ToArray();
+    }
+
     [Fact]
     public void RootBias_SteersSelection_TheSubstrateSeam()
     {
@@ -36,6 +42,30 @@ public sealed class SearchTests
         var withZero = new Search(EvalTerm.All, new FavorBias("a1a1", 0)).Think(b, new Search.Limits(MaxDepth: 3));
         var pure = new Search().Think(b, new Search.Limits(MaxDepth: 3));
         Assert.Equal(pure.BestMove!.Value.ToUci(), withZero.BestMove!.Value.ToUci());
+    }
+
+    [Fact]
+    public void RootSteeringScore_IsNotReusedAsInteriorPositionTruth()
+    {
+        var root = Board.FromFen(ChessModality.StartFen);
+        var bias = new UniformBias(100);
+        var reused = new Search(EvalTerm.All, bias, ttBits: 12);
+
+        // Prime every child as a separately steered decision root. Those scores must not
+        // become context-free values when the parent subsequently reaches the same boards.
+        foreach (var move in MoveGen.Legal(root))
+        {
+            var child = root.Clone();
+            MoveApply.Make(child, move);
+            _ = reused.Think(child, new Search.Limits(MaxDepth: 1));
+        }
+
+        var actual = reused.Think(root, new Search.Limits(MaxDepth: 2));
+        var expected = new Search(EvalTerm.All, bias, ttBits: 12)
+            .Think(root, new Search.Limits(MaxDepth: 2));
+
+        Assert.Equal(expected.BestMove, actual.BestMove);
+        Assert.Equal(expected.Score, actual.Score);
     }
 
     private static Search.Result Think(string fen, int depth)

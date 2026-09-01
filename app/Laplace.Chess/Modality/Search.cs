@@ -35,7 +35,7 @@ public sealed class Search
     private const int Mate = 30_000;
     private const int MateThreshold = Mate - 1_000;
 
-    private const byte FlagExact = 0, FlagLower = 1, FlagUpper = 2;
+    private const byte FlagExact = 0, FlagLower = 1, FlagUpper = 2, FlagRootSteered = 3;
 
     private struct TtEntry
     {
@@ -327,7 +327,13 @@ public sealed class Search
 
         if (ply == 0) _rootBestMove = bestMove;
 
-        byte flag = best <= alphaOrig ? FlagUpper : best >= beta ? FlagLower : FlagExact;
+        // Root steering answers which action this forward pass should select; it is not a
+        // context-free value of the board. The same board can reappear as an interior
+        // transposition in a later search. Retain the selected move for PV/order reuse, but
+        // keep the steered score out of the exact/lower/upper lookup above.
+        byte flag = ply == 0 && _rootBonusByUci is not null
+            ? FlagRootSteered
+            : best <= alphaOrig ? FlagUpper : best >= beta ? FlagLower : FlagExact;
         e.Key = key; e.Score = ScoreToTt(best, ply); e.Depth = (short)depth;
         e.Flag = flag; e.Move = bestMove; e.Valid = true;
         return best;

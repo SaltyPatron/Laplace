@@ -67,6 +67,7 @@ public static class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("elo_diff", r.EloDiff));
         lab.Publish(slot, new ChessLabMetricEvent("search_depth", depth));
         lab.Publish(slot, new ChessLabMetricEvent("transition_trunk_reads", exactBias.RootReads));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_backend_reads", exactBias.BackendReads));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_roots", exactBias.RootsWithExactEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("move_physicality_roots", exactBias.RootsWithMoveEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.ExactTransitionSignals));

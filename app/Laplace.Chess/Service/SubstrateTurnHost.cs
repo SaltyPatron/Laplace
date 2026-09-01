@@ -178,7 +178,9 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var change = await b.BuildAsync(ct);
         await _writer.ApplyAsync(change, ct);
-        ChessTransitionObservations.MarkObserved(line.Take(line.Count - 1).Select(static n => n.Id));
+        ChessTransitionObservations.MarkObserved(
+            line.Take(line.Count - 1).Select(static n => n.Id),
+            moves.Select(static n => n.Id));
     }
 
     private static PlyOutcome WhiteOutcome(

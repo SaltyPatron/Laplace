@@ -334,7 +334,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             var change = await b.BuildAsync(ct);
             await _writer.ApplyAsync(change, ct);
             if (session.PositionIds.Count > 1)
-                ChessTransitionObservations.MarkObserved(session.PositionIds.Take(session.PositionIds.Count - 1));
+                ChessTransitionObservations.MarkObserved(
+                    session.PositionIds.Take(session.PositionIds.Count - 1), session.MoveIds);
             InvalidateLearnedPst();
             GamesCompleted++;
         }
