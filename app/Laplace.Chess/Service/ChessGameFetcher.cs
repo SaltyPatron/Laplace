@@ -289,9 +289,9 @@ public static class ChessGameFetcher
         AddRating(text, ratings, "rapid", @"(\d{3,4})\s+RAPID\b");
         AddRating(text, ratings, "blitz", @"(\d{3,4})\s+BLITZ\b");
         string? avatar = HtmlAttribute(html,
-            @"<meta[^>]+property\s*=\s*['\"]og:image['\"][^>]+content\s*=\s*['\"]([^'\"]+)")
+            @"<meta[^>]+property\s*=\s*['""]og:image['""][^>]+content\s*=\s*['""]([^'""]+)")
             ?? HtmlAttribute(html,
-                @"<img[^>]+(?:class\s*=\s*['\"][^'\"]*(?:profile|player)[^'\"]*['\"])[^>]+src\s*=\s*['\"]([^'\"]+)");
+                @"<img[^>]+(?:class\s*=\s*['""][^'""]*(?:profile|player)[^'""]*['""])[^>]+src\s*=\s*['""]([^'""]+)");
         return new ChessPlayerProfile(
             "fide", fideId, name, name, null,
             Match(text, @"FIDE title\s+(.+?)\s+(?:World Rank|Titles|Period)\b"),
@@ -353,17 +353,17 @@ public static class ChessGameFetcher
         foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
         {
             string body = row.Groups[1].Value;
-            var profile = Regex.Match(body, @"href\s*=\s*['\"][^'\"]*/profile/(\d+)[^'\"]*['\"][^>]*>(.*?)</a>",
+            var profile = Regex.Match(body, @"href\s*=\s*['""][^'""]*/profile/(\d+)[^'""]*['""][^>]*>(.*?)</a>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
             if (!profile.Success) continue;
-            var ratings = Regex.Matches(body, @"data-label\s*=\s*['\"]Rtg['\"][^>]*>(.*?)</td>",
+            var ratings = Regex.Matches(body, @"data-label\s*=\s*['""]Rtg['""][^>]*>(.*?)</td>",
                     RegexOptions.IgnoreCase | RegexOptions.Singleline)
                 .Select(static m => IntText(m.Groups[1].Value)).ToArray();
             result.Add(new FidePlayerCandidate(
                 profile.Groups[1].Value,
                 CleanHtml(profile.Groups[2].Value),
                 CleanHtml(HtmlCell(body, "title") ?? ""),
-                Regex.Match(body, @"<img[^>]+alt=['\"]([A-Z]{3})['\"]", RegexOptions.IgnoreCase).Groups[1].Value.ToUpperInvariant(),
+                Regex.Match(body, @"<img[^>]+alt=['""]([A-Z]{3})['""]", RegexOptions.IgnoreCase).Groups[1].Value.ToUpperInvariant(),
                 ratings.ElementAtOrDefault(0), ratings.ElementAtOrDefault(1), ratings.ElementAtOrDefault(2),
                 IntText(HtmlCell(body, "B-Year") ?? ""), null));
         }
@@ -376,12 +376,12 @@ public static class ChessGameFetcher
         foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
         {
             string body = row.Groups[1].Value;
-            var profile = Regex.Match(body, @"href\s*=\s*['\"][^'\"]*/profile/(\d+)[^'\"]*['\"][^>]*>(.*?)</a>",
+            var profile = Regex.Match(body, @"href\s*=\s*['""][^'""]*/profile/(\d+)[^'""]*['""][^>]*>(.*?)</a>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
             if (!profile.Success) continue;
-            int rating = IntText(Regex.Match(body, @"class\s*=\s*['\"]?rating_column['\"]?[^>]*>(.*?)</td>",
+            int rating = IntText(Regex.Match(body, @"class\s*=\s*['""]?rating_column['""]?[^>]*>(.*?)</td>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
-            int rank = IntText(Regex.Match(body, @"class\s*=\s*['\"]rank_span['\"][^>]*>(.*?)</span>",
+            int rank = IntText(Regex.Match(body, @"class\s*=\s*['""]rank_span['""][^>]*>(.*?)</span>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
             var mode = cohort.EndsWith("_rapid", StringComparison.Ordinal) ? "rapid"
                 : cohort.EndsWith("_blitz", StringComparison.Ordinal) ? "blitz" : "standard";
@@ -391,7 +391,7 @@ public static class ChessGameFetcher
                 mode == "standard" ? rating : 0,
                 mode == "rapid" ? rating : 0,
                 mode == "blitz" ? rating : 0,
-                IntText(Regex.Match(body, @"class\s*=\s*['\"]?bday_column['\"]?[^>]*>(.*?)</td>",
+                IntText(Regex.Match(body, @"class\s*=\s*['""]?bday_column['""]?[^>]*>(.*?)</td>",
                     RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value), rank));
         }
         return result;
@@ -444,10 +444,10 @@ public static class ChessGameFetcher
 
     private static string FideFederation(string row)
     {
-        var alt = Regex.Match(row, @"<img[^>]+alt=['\"]([A-Z]{3})['\"]", RegexOptions.IgnoreCase);
+        var alt = Regex.Match(row, @"<img[^>]+alt=['""]([A-Z]{3})['""]", RegexOptions.IgnoreCase);
         if (alt.Success) return alt.Groups[1].Value.ToUpperInvariant();
         var text = Regex.Match(row,
-            @"class\s*=\s*['\"]?flag-wrapper['\"]?[^>]*>.*?<img[^>]*>\s*([A-Z]{3})\b",
+            @"class\s*=\s*['""]?flag-wrapper['""]?[^>]*>.*?<img[^>]*>\s*([A-Z]{3})\b",
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
         return text.Success ? text.Groups[1].Value.ToUpperInvariant() : "";
     }
@@ -468,7 +468,7 @@ public static class ChessGameFetcher
     private static string? HtmlCell(string row, string label)
     {
         var match = Regex.Match(row,
-            @"data-label\s*=\s*['\"]" + Regex.Escape(label) + @"['\"][^>]*>(.*?)</td>",
+            @"data-label\s*=\s*['""]" + Regex.Escape(label) + @"['""][^>]*>(.*?)</td>",
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
         return match.Success ? match.Groups[1].Value : null;
     }
