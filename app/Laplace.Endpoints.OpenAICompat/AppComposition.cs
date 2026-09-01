@@ -85,6 +85,7 @@ internal static class AppComposition
         services.AddServerHostedService(sp => sp.GetRequiredService<ChessRuntimeService>());
         services.AddSingleton(sp => new ChessEngineService(
             chessWeight,
+            sp.GetRequiredService<SubstrateClient>().ChessReadOnlyDataSource,
             sp.GetRequiredService<ChessRuntimeService>().GetAsync,
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton(sp => new ChessLabService(
