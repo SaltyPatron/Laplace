@@ -43,14 +43,14 @@ CREATE OR REPLACE FUNCTION chess.player_games(
         FROM laplace.attestations a
         WHERE a.subject_id = p_player
           AND a.object_id IS NOT NULL
-          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
           AND a.source_id = laplace.source_id('ChessPgn')
           AND a.context_id IS NULL
         UNION
         SELECT a.subject_id
         FROM laplace.attestations a
         WHERE a.object_id = p_player
-          AND a.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND a.type_id = ANY (consensus.relation_set_ids('CHESS_PROFILE_IDENTITY'))
           AND a.source_id = laplace.source_id('ChessPgn')
           AND a.context_id IS NULL
     ),
