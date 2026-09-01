@@ -55,9 +55,11 @@ int probe_wdl(const ProbePos& p) {
 }
 
 int probe_root(const ProbePos& p, int* wdl, int* dtz) {
+    int from = -1, to = -1, promotes = -1;
     return laplace_syzygy_probe_root(
         p.white, p.black, p.kings, p.queens, p.rooks, p.bishops, p.knights,
-        p.pawns, 0, p.white_to_move ? 1 : 0, wdl, dtz);
+        p.pawns, 0, p.white_to_move ? 1 : 0, wdl, dtz,
+        &from, &to, &promotes);
 }
 
 class LaplaceCoreSyzygyFixture : public ::testing::Test {

@@ -143,6 +143,31 @@ public class Glicko2FoldParityTests
     }
 
     [Fact]
+    public void GroupedPeriod_BitEqualsMixedOpponentObservationExpansion()
+    {
+        long[] ratings = [1_600_000_000_000L, 1_800_000_000_000L];
+        long[] phis = [40_000_000_000L, 70_000_000_000L];
+        long[] games = [1, 3];
+        long[] sums = [Glicko2.ScoreWin, Glicko2.ScoreLoss];
+        var actual = Glicko2.Init(
+            Glicko2.DefaultRatingFp1e9, Glicko2.DefaultRdFp1e9,
+            Glicko2.DefaultVolatilityFp1e9);
+        var expected = actual;
+        Glicko2Observation[] observations =
+        [
+            new() { OpponentRatingFp1e9 = ratings[0], OpponentRdFp1e9 = phis[0], ScoreFp1e9 = Glicko2.ScoreWin },
+            new() { OpponentRatingFp1e9 = ratings[1], OpponentRdFp1e9 = phis[1], ScoreFp1e9 = Glicko2.ScoreLoss },
+            new() { OpponentRatingFp1e9 = ratings[1], OpponentRdFp1e9 = phis[1], ScoreFp1e9 = Glicko2.ScoreLoss },
+            new() { OpponentRatingFp1e9 = ratings[1], OpponentRdFp1e9 = phis[1], ScoreFp1e9 = Glicko2.ScoreLoss },
+        ];
+
+        Glicko2.UpdatePeriod(ref expected, observations, Glicko2.DefaultTauFp1e9, 0);
+        Glicko2.FoldGroupedPeriod(ref actual, ratings, phis, games, sums,
+                                 Glicko2.DefaultTauFp1e9, 0);
+        AssertStatesEqual(expected, actual);
+    }
+
+    [Fact]
     public void Init_MatchesManualStateConstruction()
     {
         var st = Glicko2.Init(1_600_000_000_000L, 200_000_000_000L, 58_000_000L);

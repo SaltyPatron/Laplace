@@ -338,3 +338,49 @@ TEST(LaplaceCoreGlicko2, FoldUniformAcceptsLargeRepresentableAggregate) {
         games, sum, 500000000LL, 0));
     EXPECT_EQ(state.observation_count, games);
 }
+
+TEST(LaplaceCoreGlicko2, GroupedPeriodMatchesMixedOpponentObservationLoop) {
+    const int64_t ratings[] = {1600LL * 1000000000LL, 1800LL * 1000000000LL};
+    const int64_t phis[] = {40LL * 1000000000LL, 70LL * 1000000000LL};
+    const int64_t games[] = {2, 3};
+    const int64_t sums[] = {1500000000LL, 1000000000LL};
+    const int64_t tau = LAPLACE_GLICKO2_DEFAULT_TAU;
+
+    glicko2_observation_t obs[] = {
+        {ratings[0], phis[0], 750000000LL},
+        {ratings[0], phis[0], 750000000LL},
+        {ratings[1], phis[1], 333333333LL},
+        {ratings[1], phis[1], 333333333LL},
+        {ratings[1], phis[1], 333333334LL},
+    };
+    glicko2_state_t expected, actual;
+    glicko2_init(&expected, 1500LL * 1000000000LL,
+                 350LL * 1000000000LL, 60000000LL);
+    actual = expected;
+    glicko2_update_period(&expected, obs, 5, tau, 0);
+    ASSERT_EQ(0, glicko2_fold_grouped_period(
+        &actual, ratings, phis, games, sums, 2, tau, 0));
+    EXPECT_EQ(expected.rating, actual.rating);
+    EXPECT_EQ(expected.rd, actual.rd);
+    EXPECT_EQ(expected.volatility, actual.volatility);
+    EXPECT_EQ(expected.observation_count, actual.observation_count);
+}
+
+TEST(LaplaceCoreGlicko2, AveragedOpponentIsNotAnExactRatingPeriod) {
+    const int64_t ratings[] = {1200LL * 1000000000LL, 2200LL * 1000000000LL};
+    const int64_t phis[] = {30LL * 1000000000LL, 30LL * 1000000000LL};
+    const int64_t games[] = {1, 3};
+    const int64_t sums[] = {1000000000LL, 0};
+    glicko2_state_t exact, averaged;
+    glicko2_init(&exact, 1500LL * 1000000000LL,
+                 350LL * 1000000000LL, 60000000LL);
+    averaged = exact;
+    ASSERT_EQ(0, glicko2_fold_grouped_period(
+        &exact, ratings, phis, games, sums, 2,
+        LAPLACE_GLICKO2_DEFAULT_TAU, 0));
+    ASSERT_EQ(0, glicko2_fold_uniform_period(
+        &averaged, 1950LL * 1000000000LL, phis[0], 4,
+        1000000000LL, LAPLACE_GLICKO2_DEFAULT_TAU, 0));
+    EXPECT_NE(exact.rating, averaged.rating);
+    EXPECT_NE(exact.rd, averaged.rd);
+}

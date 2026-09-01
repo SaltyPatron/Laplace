@@ -83,8 +83,15 @@ BEGIN
     CREATE TEMP TABLE IF NOT EXISTS _evict_cells (
         subject_id bytea NOT NULL,
         object_id  bytea,
+        consensus_leaf oid NOT NULL,
         UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
     TRUNCATE _evict_cells;
+    ALTER TABLE _evict_cells
+        ADD COLUMN IF NOT EXISTS consensus_leaf oid;
+    ALTER TABLE _evict_cells
+        ALTER COLUMN consensus_leaf SET NOT NULL;
+    CREATE INDEX IF NOT EXISTS _evict_cells_leaf_idx
+        ON _evict_cells (consensus_leaf);
 
     -- File checkpoints are keyed by file identity, not the decomposer source. The
     -- ingest journals are the ownership edge source eviction uses to find them.
@@ -177,12 +184,14 @@ BEGIN
                           SELECT d.object_id FROM del d WHERE d.object_id IS NOT NULL) u
                     ON CONFLICT (id) DO NOTHING),
                 cells AS (
-                    INSERT INTO _evict_cells (subject_id, object_id)
-                    SELECT DISTINCT d.subject_id, d.object_id FROM del d
+                    INSERT INTO _evict_cells (subject_id, object_id, consensus_leaf)
+                    SELECT DISTINCT d.subject_id, d.object_id,
+                           consensus.partition_leaf(%L::bytea, d.subject_id)::oid
+                    FROM del d
                     ON CONFLICT DO NOTHING
                     RETURNING 1)
                 SELECT (SELECT count(*) FROM del), (SELECT count(*) FROM cells)
-            $q$, rel, p_batch, rel)
+            $q$, rel, p_batch, rel, rel)
             INTO n_del, n_cells
             USING p_source;
 
@@ -194,12 +203,13 @@ BEGIN
             --     (last_observed_at, id), neutral-prior seed — the consensus_fold
             --     aggregate is the SQL surface of the ingest fold's native scalar.
             EXECUTE format($q$
-                UPDATE laplace.consensus c
-                SET rating           = (f.acc).rating,
-                    rd               = (f.acc).rd,
-                    volatility       = (f.acc).volatility,
-                    witness_count    = (f.acc).witness_count,
-                    last_observed_at = f.last_ts
+                INSERT INTO laplace.consensus AS c
+                    (id, subject_id, type_id, object_id,
+                     rating, rd, volatility, witness_count, last_observed_at)
+                SELECT laplace.consensus_id(f.subject_id, %L::bytea, f.object_id),
+                       f.subject_id, %L::bytea, f.object_id,
+                       (f.acc).rating, (f.acc).rd, (f.acc).volatility,
+                       (f.acc).witness_count, f.last_ts
                 FROM (
                     SELECT t.subject_id, t.object_id,
                            laplace.consensus_fold(false, NULL, NULL, NULL,
@@ -216,28 +226,37 @@ BEGIN
                      AND a.object_id IS NOT DISTINCT FROM t.object_id
                     GROUP BY t.subject_id, t.object_id
                 ) f
-                WHERE c.type_id = %L::bytea
-                  AND c.subject_id = f.subject_id
-                  AND c.id = laplace.consensus_id(f.subject_id, %L::bytea, f.object_id)
+                ON CONFLICT (id, type_id, subject_id) DO UPDATE
+                SET object_id        = EXCLUDED.object_id,
+                    rating           = EXCLUDED.rating,
+                    rd               = EXCLUDED.rd,
+                    volatility       = EXCLUDED.volatility,
+                    witness_count    = EXCLUDED.witness_count,
+                    last_observed_at = EXCLUDED.last_observed_at
             $q$, rel, rel, rel);
             GET DIAGNOSTICS n = ROW_COUNT;
             refold_total := refold_total + n;
 
             -- (c) zero-survivor cells are DELETED, not zeroed.
-            EXECUTE format($q$
-                DELETE FROM laplace.consensus c
-                USING _evict_cells t
-                WHERE c.type_id = %L::bytea
-                  AND c.subject_id = t.subject_id
-                  AND c.id = laplace.consensus_id(t.subject_id, %L::bytea, t.object_id)
-                  AND NOT EXISTS (
-                      SELECT 1 FROM laplace.attestations a
-                      WHERE a.type_id = %L::bytea
-                        AND a.subject_id = t.subject_id
-                        AND a.object_id IS NOT DISTINCT FROM t.object_id)
-            $q$, rel, rel, rel);
-            GET DIAGNOSTICS n = ROW_COUNT;
-            culled_total := culled_total + n;
+            FOR leaf IN
+                SELECT DISTINCT consensus_leaf FROM _evict_cells
+            LOOP
+                EXECUTE format($q$
+                    DELETE FROM ONLY %s c
+                    USING _evict_cells t
+                    WHERE t.consensus_leaf = %s::oid
+                      AND c.type_id = %L::bytea
+                      AND c.subject_id = t.subject_id
+                      AND c.id = laplace.consensus_id(t.subject_id, %L::bytea, t.object_id)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM laplace.attestations a
+                          WHERE a.type_id = %L::bytea
+                            AND a.subject_id = t.subject_id
+                            AND a.object_id IS NOT DISTINCT FROM t.object_id)
+                $q$, leaf::regclass, leaf, rel, rel, rel);
+                GET DIAGNOSTICS n = ROW_COUNT;
+                culled_total := culled_total + n;
+            END LOOP;
 
             RAISE LOG 'evict_source: relation % — batch of % evidence row(s) over % cell(s) (running: % deleted, % refolded, % culled) — %s elapsed',
                 encode(rel, 'hex'), n_del, n_cells,

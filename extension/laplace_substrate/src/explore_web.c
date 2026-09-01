@@ -4,7 +4,7 @@
  * Unlike generation.foundry_crawl(vocab / tier-2 emit only), this:
  *   - walks undirected consensus (out ∪ in) via one batched frontier probe/hop
  *   - admits every tier
- *   - beams ≤ fanout NEW nodes per hop (pool-safe: one SPI connection)
+ *   - admits ≤ fanout NEW nodes per frontier member (pool-safe: one SPI connection)
  *   - emits typed edges for the retained subgraph
  *
  * C# then labels endpoints with render_text_fast / label_or_hex in one query.
@@ -208,9 +208,17 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("explore_web: hops exceeds the smallint result coordinate")));
 	if (PG_ARGISNULL(3))
 	{
-		int64 derived = 1 + (int64) hops * (int64) fanout;
-		if (derived > PG_INT32_MAX)
-			ereport(ERROR, (errmsg("explore_web: derived node budget exceeds int32")));
+		int64 derived = 1;
+		int64 width = 1;
+
+		/* Per-frontier fanout is a tree capacity, not the old linear beam. */
+		for (int i = 0; i < hops; i++)
+		{
+			if (fanout != 0 && width > (PG_INT32_MAX - derived) / fanout)
+				ereport(ERROR, (errmsg("explore_web: derived node budget exceeds int32; provide max_nodes explicitly")));
+			width *= fanout;
+			derived += width;
+		}
 		max_nodes = (int32) derived;
 	}
 	else
@@ -286,17 +294,15 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		int			n_cands = 0;
 		int			n_next = 0;
 		int			room = max_nodes - n_seen;
-		int			admit_n;
 		int			admit_target = fanout < room ? fanout : room;
 		int			probe_limit = n_seen + admit_target;
 		int64		required_cands = (int64) n_front * (int64) probe_limit;
 
 		/* SQL returns one ranked, neighbour-distinct head per frontier member. At
 		 * most n_seen entries in any head can already be retained, so
-		 * n_seen+admit_target proves enough room for the requested number of new
-		 * nodes. The exact union is n_front*probe_limit; C ranks and deduplicates
-		 * that union globally. This replaces the former fixed multiplier and
-		 * ceiling probability guess. */
+		 * n_seen+admit_target proves enough room for fanout new nodes from each
+		 * frontier member. The exact union is n_front*probe_limit; C applies the
+		 * per-root quota while globally deduplicating newly discovered nodes. */
 		if ((uint64) required_cands > (uint64) (MaxAllocSize / sizeof(EdgeCand))
 			|| required_cands > PG_INT32_MAX)
 			ereport(ERROR, (errmsg("explore_web: candidate budget exceeds PostgreSQL allocation capacity")));
@@ -403,61 +409,60 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 
 		qsort(cands, n_cands, sizeof(EdgeCand), cand_cmp_desc);
 
-		/* Dedup candidates by nbr (keep strongest edge). */
+		/* Preserve a fanout quota for every frontier member. The old global quota
+		 * made a wide first level consume the whole next level. Shared neighbours
+		 * still enter once, through their strongest eligible parent. */
 		{
 			HTAB	   *picked;
+			HTAB	   *per_root;
 			HASHCTL		pctl;
-			EdgeCand   *uniq;
-			int			n_uniq = 0;
 
 			memset(&pctl, 0, sizeof(pctl));
 			pctl.keysize = 16;
 			pctl.entrysize = sizeof(SeenNode);
 			picked = hash_create("explore_web cand", n_cands, &pctl,
 								 HASH_ELEM | HASH_BLOBS);
-			uniq = (EdgeCand *) palloc(sizeof(EdgeCand) * n_cands);
+			per_root = hash_create("explore_web root quota", n_front, &pctl,
+								   HASH_ELEM | HASH_BLOBS);
 
-			for (int i = 0; i < n_cands; i++)
+			for (int i = 0; i < n_cands && n_seen < max_nodes; i++)
 			{
-				bool		found;
-
-				hash_search(picked, &cands[i].nbr, HASH_ENTER, &found);
-				if (found)
-					continue;
-				uniq[n_uniq++] = cands[i];
-			}
-			hash_destroy(picked);
-
-			admit_n = n_uniq;
-			if (admit_n > fanout)
-				admit_n = fanout;
-			if (admit_n > room)
-				admit_n = room;
-
-			for (int i = 0; i < admit_n; i++)
-			{
+				SeenNode   *quota;
 				SeenNode   *ne;
+				bool		quota_found;
 				bool		found;
 				EdgeOut		edge;
 
-				ne = (SeenNode *) hash_search(seen, &uniq[i].nbr, HASH_ENTER, &found);
+				quota = (SeenNode *) hash_search(per_root, &cands[i].from,
+												 HASH_ENTER, &quota_found);
+				if (!quota_found)
+					quota->hop = 0;
+				if (quota->hop >= fanout)
+					continue;
+				hash_search(picked, &cands[i].nbr, HASH_ENTER, &found);
+				if (found)
+					continue;
+
+				ne = (SeenNode *) hash_search(seen, &cands[i].nbr, HASH_ENTER, &found);
 				if (found)
 					continue;
 				ne->hop = hop;
+				quota->hop++;
 				n_seen++;
 				if (n_next < max_nodes)
-					next_frontier[n_next++] = uniq[i].nbr;
+					next_frontier[n_next++] = cands[i].nbr;
 
-				edge.source = uniq[i].outbound ? uniq[i].from : uniq[i].nbr;
-				edge.type_id = uniq[i].type_id;
-				edge.object = uniq[i].outbound ? uniq[i].nbr : uniq[i].from;
+				edge.source = cands[i].outbound ? cands[i].from : cands[i].nbr;
+				edge.type_id = cands[i].type_id;
+				edge.object = cands[i].outbound ? cands[i].nbr : cands[i].from;
 				edge.hop = (int16) hop;
-				edge.rating = uniq[i].rating;
-				edge.rd = uniq[i].rd;
-				edge.witnesses = uniq[i].witnesses;
+				edge.rating = cands[i].rating;
+				edge.rd = cands[i].rd;
+				edge.witnesses = cands[i].witnesses;
 				emit_edge(rsinfo, &edge);
 			}
-			pfree(uniq);
+			hash_destroy(per_root);
+			hash_destroy(picked);
 		}
 
 		/* Swap frontiers. */

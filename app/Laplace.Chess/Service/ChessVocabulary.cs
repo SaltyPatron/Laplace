@@ -1,6 +1,7 @@
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using System.Text;
 
 namespace Laplace.Chess.Service;
 
@@ -244,9 +245,52 @@ public static class ChessVocabulary
     {
         b.AddEntity(playerId, EntityTier.Word, PlayerType, sourceId);
         if (ContentEmitter.Emit(b, name, sourceId) is { } nameId)
+        {
             b.AddAttestation(NativeAttestation.Categorical(
                 playerId, "HAS_NAME_ALIAS", nameId, sourceId, null, witnessWeight));
+
+            AppendPlayerPhysicality(b, playerId, name, sourceId, nameId);
+        }
         return playerId;
+    }
+
+    /// <summary>
+    /// Give a governed player identity its stored player → name composition. This is also
+    /// the testimony-free repair path for players recorded before the composition existed.
+    /// </summary>
+    public static void AppendPlayerPhysicality(
+        SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,
+        Hash128? expectedNameRoot = null)
+    {
+        /* The governed player handle is not the content hash of its display name,
+         * but it still owns a physical composition: player -> witnessed name root.
+         * Without this row a player can accumulate tens of thousands of games and
+         * consensus cells while remaining a geometry-less leaf in the explorer.
+         * The name root carries its own complete text ladder, so expanding this one
+         * edge continues naturally from player -> word -> grapheme -> codepoint. */
+        Hash128 physId = PhysicalityId.Compute(playerId, PhysicalityType.Content);
+        if (!b.TrySeePhysicality(physId)) return;
+
+        byte[] utf8 = Encoding.UTF8.GetBytes(name);
+        if (!TextEntityBuilder.TryDecomposeRoot(
+                utf8, out var nameRoot, out _, out var x, out var y, out var z, out var m)
+            || (expectedNameRoot is { } expected && nameRoot != expected))
+            throw new InvalidOperationException(
+                $"player name '{name}' did not reproduce its deposited content root");
+
+        double[] coord = [x, y, z, m];
+        b.AddPhysicalityPreSeen(new PhysicalityRow(
+            Id: physId,
+            EntityId: playerId,
+            SourceId: sourceId,
+            Type: PhysicalityType.Content,
+            CoordX: x, CoordY: y, CoordZ: z, CoordM: m,
+            HilbertIndex: Hilbert128.Encode(coord),
+            TrajectoryXyzm: Trajectory.Build([nameRoot]),
+            NConstituents: 1,
+            AlignmentResidual: null,
+            SourceDim: null,
+            ObservedAtUnixUs: IngestClock.NowUnixUs()));
     }
 
     public const double Trust = SourceTrust.StructuredCorpus;

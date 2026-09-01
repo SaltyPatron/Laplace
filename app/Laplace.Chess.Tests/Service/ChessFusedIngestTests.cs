@@ -36,9 +36,14 @@ public sealed class ChessFusedIngestTests
         Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
 
-        // Derived layer present in the SAME change: one line trajectory referencing typed
-        // perfcache position points, without duplicating every board as a SQL tree.
-        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
+        // Derived layer present in the SAME change: the line trajectory references ordinary
+        // typed position content. The perfcache accelerates composition; it does not replace
+        // the canonical entities/physicalities or leave trajectory children unresolved.
+        var positions = change.Entities
+            .Where(e => e.TypeId == ChessVocabulary.PositionType)
+            .Select(e => e.Id)
+            .ToHashSet();
+        Assert.NotEmpty(positions);
         Assert.False(change.Physicalities.IsDefaultOrEmpty || change.Physicalities.Length == 0,
             "fused pass must compose position geometry");
         Assert.Contains(change.Attestations, a =>
@@ -52,6 +57,9 @@ public sealed class ChessFusedIngestTests
             p => p.EntityId == lineId && p.Type == PhysicalityType.Projection);
         Assert.NotNull(gameTraj.TrajectoryXyzm);
         Assert.True(gameTraj.NConstituents > 0);
+        Assert.Equal(Trajectory.Constituents(gameTraj.TrajectoryXyzm!).ToHashSet(), positions);
+        Assert.All(positions, id => Assert.Single(change.Physicalities,
+            p => p.EntityId == id && p.Type == PhysicalityType.Content));
     }
 
     [Fact]

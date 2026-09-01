@@ -9,14 +9,18 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Reusable board-structure evidence.  A witnessed result is expressed once for every
-/// constituent of every pre-move board, in White's fixed point of view.  The subjects are the
-/// bounded chess atom vocabulary (piece-square, side, castling and en-passant), so repeated
-/// games fold onto the same cells instead of minting a game-sized read-time web.
+/// Reusable board-structure evidence. A witnessed result is expressed once for every
+/// constituent of every board in the played trajectory, in White's fixed point of view. The
+/// board and its constituents are ordinary Laplace content entities with lossless physicalities;
+/// the compose floor only accelerates their deterministic geometry. The evidence subjects are
+/// the finite chess atom vocabulary (piece-square, side, castling and en-passant), so repeated
+/// games converge on the same cells instead of minting a game-sized read-time web.
 /// </summary>
 public static class ChessPositionOutcomes
 {
-    public const int Version = 1;
+    // v2 includes the terminal board. v1 deposited only pre-move boards, leaving every completed
+    // line's final trajectory constituent without its content entity/physicality.
+    public const int Version = 2;
     public const string SourceName = "ChessPositionOutcomes";
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;
@@ -37,6 +41,7 @@ public static class ChessPositionOutcomes
             AppendBoard(b, state.Board, game.Result);
             state = modality.Apply(state, game.ResolvedMoves[ply]);
         }
+        AppendBoard(b, state.Board, game.Result);
         AddMarker(b, game.PlayingId);
     }
 
@@ -53,14 +58,15 @@ public static class ChessPositionOutcomes
             AppendBoard(b, state.Board, game.Result);
             state = modality.Apply(state, move.Value);
         }
+        AppendBoard(b, state.Board, game.Result);
         AddMarker(b, game.PlayingId);
     }
 
-    internal static void DepositSurfaces(
-        SubstrateChangeBuilder b, IReadOnlyList<string> preMoveSurfaces,
+    internal static void DepositTrajectory(
+        SubstrateChangeBuilder b, IReadOnlyList<string> positionSurfaces,
         GameOutcome result, Hash128 playingId)
     {
-        foreach (string surface in preMoveSurfaces)
+        foreach (string surface in positionSurfaces)
             AppendComposed(b, ChessGraph.EmitComposed(b, surface, SourceId), result);
         AddMarker(b, playingId);
     }

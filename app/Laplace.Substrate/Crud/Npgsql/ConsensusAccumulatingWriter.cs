@@ -41,7 +41,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
         await using var probe = connection.CreateCommand();
         probe.CommandText = "SELECT to_regprocedure("
-            + "'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[])') "
+            + "'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[],bigint[],bigint[],bigint[],bigint[],bigint[])') "
             + "IS NOT NULL";
         bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
         Interlocked.CompareExchange(ref _directConsensusRoute, supported ? 1 : 0, -1);
@@ -221,15 +221,30 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     /// ref INTO the dictionary's own storage — so the merge stays in-place and
     /// allocation-free, with one hash lookup per attestation instead of two.
     /// </summary>
+    private readonly record struct PeriodKey(long OpponentRatingFp1e9, long PhiFp1e9)
+        : IComparable<PeriodKey>
+    {
+        public int CompareTo(PeriodKey other)
+        {
+            int c = OpponentRatingFp1e9.CompareTo(other.OpponentRatingFp1e9);
+            return c != 0 ? c : PhiFp1e9.CompareTo(other.PhiFp1e9);
+        }
+    }
+
+    private struct PeriodAggregate
+    {
+        public long Games;
+        public long SumScoreFp1e9;
+    }
+
     private struct Delta
     {
-        public long PhiFp1e9;
-        // The opponent this witness presents (GH #1321). Pinned per cell for the
-        // same reason PhiFp1e9 is: attestation identity fixes (subject, type,
-        // object, source, context), so every row merging into a cell in one batch
-        // came from the same source under the same relation and therefore the same
-        // witness_weight — which produces both halves.
-        public long OpponentRatingFp1e9;
+        // Keep the overwhelmingly-common single witness shape inline. A dictionary
+        // is allocated only when one cell's rating period genuinely contains a
+        // second (opponent rating, opponent RD) pair.
+        public PeriodKey FirstPeriod;
+        public PeriodAggregate FirstAggregate;
+        public Dictionary<PeriodKey, PeriodAggregate>? AdditionalPeriods;
         public long Games;
         public long SumScoreFp1e9;
         public long MaxTsUnixUs;
@@ -364,8 +379,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             {
                 ref var d = ref CollectionsMarshal.GetValueRefOrAddDefault(delta, key, out bool existed);
                 if (!existed) d = src;
-                else FoldInto(ref d, src.PhiFp1e9, src.OpponentRatingFp1e9,
-                              src.Games, src.SumScoreFp1e9, src.MaxTsUnixUs);
+                else FoldDelta(ref d, in src);
             }
         }
         return delta.Count == 0 ? null : delta;
@@ -415,10 +429,14 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 ref var d = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out bool existed);
                 if (!existed)
                 {
-                    d.PhiFp1e9 = a.OpponentRdFp1e9;
-                    d.OpponentRatingFp1e9 = a.OpponentRatingFp1e9;
-                    d.Games = a.ObservationCount;
-                    d.SumScoreFp1e9 = AttestationMergeMath.RowScoreTotal(a);
+                    d.FirstPeriod = new(a.OpponentRatingFp1e9, a.OpponentRdFp1e9);
+                    d.FirstAggregate = new()
+                    {
+                        Games = a.ObservationCount,
+                        SumScoreFp1e9 = AttestationMergeMath.RowScoreTotal(a),
+                    };
+                    d.Games = d.FirstAggregate.Games;
+                    d.SumScoreFp1e9 = d.FirstAggregate.SumScoreFp1e9;
                     d.MaxTsUnixUs = a.LastObservedAtUnixUs;
                 }
                 else
@@ -436,17 +454,81 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     private static void FoldInto(ref Delta d, long phi, long oppRating, long games, long score, long tsUnixUs)
     {
-        if (d.PhiFp1e9 != phi)
-            throw new InvalidOperationException(
-                $"fold invariant violated: cell observed with φ={phi} "
-                + $"after φ={d.PhiFp1e9} in the same batch");
-        if (d.OpponentRatingFp1e9 != oppRating)
-            throw new InvalidOperationException(
-                $"fold invariant violated: cell observed with opponent={oppRating} "
-                + $"after opponent={d.OpponentRatingFp1e9} in the same batch");
+        AddPeriod(ref d, new(oppRating, phi), games, score);
         d.Games = AttestationMergeMath.SafeAddGames(d.Games, games);
         d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(d.SumScoreFp1e9, score);
         if (tsUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = tsUnixUs;
+    }
+
+    private static void FoldDelta(ref Delta d, in Delta src)
+    {
+        AddPeriod(ref d, src.FirstPeriod, src.FirstAggregate.Games,
+                  src.FirstAggregate.SumScoreFp1e9);
+        if (src.AdditionalPeriods is not null)
+            foreach (var (key, value) in src.AdditionalPeriods)
+                AddPeriod(ref d, key, value.Games, value.SumScoreFp1e9);
+        d.Games = AttestationMergeMath.SafeAddGames(d.Games, src.Games);
+        d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(
+            d.SumScoreFp1e9, src.SumScoreFp1e9);
+        if (src.MaxTsUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = src.MaxTsUnixUs;
+    }
+
+    private static void AddPeriod(
+        ref Delta d, PeriodKey key, long games, long sumScoreFp1e9)
+    {
+        if (key == d.FirstPeriod)
+        {
+            d.FirstAggregate.Games = AttestationMergeMath.SafeAddGames(
+                d.FirstAggregate.Games, games);
+            d.FirstAggregate.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(
+                d.FirstAggregate.SumScoreFp1e9, sumScoreFp1e9);
+            return;
+        }
+
+        d.AdditionalPeriods ??= new();
+        ref var aggregate = ref CollectionsMarshal.GetValueRefOrAddDefault(
+            d.AdditionalPeriods, key, out bool existed);
+        if (!existed)
+            aggregate = new() { Games = games, SumScoreFp1e9 = sumScoreFp1e9 };
+        else
+        {
+            aggregate.Games = AttestationMergeMath.SafeAddGames(aggregate.Games, games);
+            aggregate.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(
+                aggregate.SumScoreFp1e9, sumScoreFp1e9);
+        }
+    }
+
+    private static int PeriodCount(in Delta d) => 1 + (d.AdditionalPeriods?.Count ?? 0);
+
+    private static void WritePeriods(
+        in Delta d, long[] opponentRatings, long[] phis, long[] games,
+        long[] sums, ref int at)
+    {
+        if (d.AdditionalPeriods is null)
+        {
+            opponentRatings[at] = d.FirstPeriod.OpponentRatingFp1e9;
+            phis[at] = d.FirstPeriod.PhiFp1e9;
+            games[at] = d.FirstAggregate.Games;
+            sums[at++] = d.FirstAggregate.SumScoreFp1e9;
+            return;
+        }
+
+        // Stable physical payload independent of input order, dictionary order,
+        // which parallel shard became the merge target, and batch worker count.
+        var periods = new KeyValuePair<PeriodKey, PeriodAggregate>[
+            d.AdditionalPeriods.Count + 1];
+        periods[0] = new(d.FirstPeriod, d.FirstAggregate);
+        int copied = 1;
+        foreach (var period in d.AdditionalPeriods)
+            periods[copied++] = period;
+        Array.Sort(periods, static (x, y) => x.Key.CompareTo(y.Key));
+        foreach (var (key, aggregate) in periods)
+        {
+            opponentRatings[at] = key.OpponentRatingFp1e9;
+            phis[at] = key.PhiFp1e9;
+            games[at] = aggregate.Games;
+            sums[at++] = aggregate.SumScoreFp1e9;
+        }
     }
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
@@ -702,8 +784,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 up.Transaction = tx;
                 up.CommandTimeout = 0;
                 up.CommandText = directRoute
-                    ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8)"
-                    : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7, $8)";
+                    ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
+                    : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
                 up.Parameters.Add(new NpgsqlParameter
                 {
                     Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
@@ -718,6 +800,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                 await up.PrepareAsync(token);
                 long segFolded = 0;
                 for (int off = seg.Off; off < seg.Off + seg.Len; off += FoldSizing.ChunkCells)
@@ -730,17 +817,30 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     var games = new long[m];
                     var sums = new long[m];
                     var ts = new DateTime[m];
+                    int periodCount = 0;
+                    for (int i = 0; i < m; i++)
+                        periodCount = checked(periodCount + PeriodCount(in cells[off + i].D));
+                    var periodOffsets = new long[m + 1];
+                    var periodOpps = new long[periodCount];
+                    var periodPhis = new long[periodCount];
+                    var periodGames = new long[periodCount];
+                    var periodSums = new long[periodCount];
+                    int periodAt = 0;
                     for (int i = 0; i < m; i++)
                     {
                         var cell = cells[off + i];
                         subjects[i] = cell.Key.S.ToBytes();
                         objects[i] = cell.Key.O?.ToBytes()!;
-                        phis[i] = cell.D.PhiFp1e9;
-                        opps[i] = cell.D.OpponentRatingFp1e9;
+                        phis[i] = cell.D.FirstPeriod.PhiFp1e9;
+                        opps[i] = cell.D.FirstPeriod.OpponentRatingFp1e9;
                         games[i] = cell.D.Games;
                         sums[i] = cell.D.SumScoreFp1e9;
                         ts[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);
+                        periodOffsets[i] = periodAt;
+                        WritePeriods(in cell.D, periodOpps, periodPhis,
+                                     periodGames, periodSums, ref periodAt);
                     }
+                    periodOffsets[m] = periodAt;
                     if (directRoute)
                     {
                         up.Parameters[0].Value = run.Type.ToBytes();
@@ -751,6 +851,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         up.Parameters[5].Value = sums;
                         up.Parameters[6].Value = ts;
                         up.Parameters[7].Value = opps;
+                        up.Parameters[8].Value = periodOffsets;
+                        up.Parameters[9].Value = periodOpps;
+                        up.Parameters[10].Value = periodPhis;
+                        up.Parameters[11].Value = periodGames;
+                        up.Parameters[12].Value = periodSums;
                     }
                     else
                     {
@@ -764,6 +869,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         up.Parameters[5].Value = sums;
                         up.Parameters[6].Value = ts;
                         up.Parameters[7].Value = opps;
+                        up.Parameters[8].Value = periodOffsets;
+                        up.Parameters[9].Value = periodOpps;
+                        up.Parameters[10].Value = periodPhis;
+                        up.Parameters[11].Value = periodGames;
+                        up.Parameters[12].Value = periodSums;
                     }
                     segFolded += (long)(await up.ExecuteScalarAsync(token) ?? 0L);
                 }

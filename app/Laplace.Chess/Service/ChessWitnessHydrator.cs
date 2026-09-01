@@ -220,6 +220,34 @@ internal static class ChessWitnessHydrator
         }
     }
 
+    /// <summary>
+    /// Existing governed players whose game/profile testimony predates the player → name
+    /// physicality. Keyset paging reads each missing identity once; no game testimony is
+    /// replayed and no name attestation is deposited again.
+    /// </summary>
+    internal static async IAsyncEnumerable<(Hash128 PlayerId, string Name)>
+        StreamPlayersMissingPhysicalityAsync(
+            NpgsqlDataSource ds, int chunkSize,
+            [EnumeratorCancellation] CancellationToken ct)
+    {
+        chunkSize = Math.Max(1, chunkSize);
+        byte[] after = Array.Empty<byte>();
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var page = await NpgsqlSubstrateReads.ChessPlayersMissingPhysicalityPageAsync(
+                    ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Content,
+                    after, chunkSize, ct)
+                .ConfigureAwait(false);
+            if (page.Count == 0) yield break;
+
+            after = page[^1].PlayerId;
+            foreach (var row in page)
+                if (!string.IsNullOrWhiteSpace(row.Name))
+                    yield return (Hash128.FromBytes(row.PlayerId), row.Name);
+        }
+    }
+
     internal static async IAsyncEnumerable<Hash128> FilterUnanalyzedEventIdsAsync(
         IReadOnlyList<Hash128> eventIds, ISubstrateReader? reader,
         [EnumeratorCancellation] CancellationToken ct)

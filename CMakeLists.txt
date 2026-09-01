@@ -136,16 +136,17 @@ install(CODE "
       set -u
       headers='\${_laplace_install_root}/include/laplace'
       share='\${_laplace_install_root}/share/laplace'
-      paths=\"\$headers \$share\"
-      for p in \$paths; do
-        [ -e \\\"\$p\\\" ] || continue
-        find \\\"\$p\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find \\\"\$p\\\" -type f ! -name managed-services-ca.crt -exec chmod 0664 {} + 2>/dev/null || true
-      done
+      if [ -e \\\"\$headers\\\" ]; then
+        find \\\"\$headers\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
+        find \\\"\$headers\\\" -type f -exec chmod 0664 {} + 2>/dev/null || true
+      fi
       set -e
       rm -rf \\\"\$headers\\\"
+      # share/laplace also contains the root-managed public LAN CA. Native
+      # installation owns only its generated perfcache payloads, so clean that
+      # namespace rather than deleting every entry and maintaining exceptions.
       if [ -d \\\"\$share\\\" ]; then
-        find \\\"\$share\\\" -mindepth 1 ! -name managed-services-ca.crt -delete
+        find \\\"\$share\\\" -maxdepth 1 -type f -name 'laplace_*.bin' -delete
       fi
       rm -f \${_laplace_install_root}/lib/liblaplace_*.so* 2>/dev/null || true
       rm -f \${_laplace_install_root}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true

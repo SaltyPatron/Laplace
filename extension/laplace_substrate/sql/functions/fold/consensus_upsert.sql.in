@@ -2,7 +2,8 @@
 --
 -- NATIVE (2026-07-21, GH #565): the body lives in C (src/fold_route.c).
 -- Consensus is content: dedup it the way ingest dedups laplace.entities. The batch is
--- split by what it IS, per relation type. Phase 1 performs an adaptive keyed batch read;
+-- split by what it IS, per relation type. Phase 1 partitions the batch with
+-- PostgreSQL's own HASH support function and reads each row from its exact leaf;
 -- phase 3 sends matched rows through the primary-key conflict arbiter and novel rows
 -- through target-free inserts. The historical MERGE survives only as the bounded
 -- concurrent-insert collision fallback. Existing cells re-fold from stored state;
@@ -22,20 +23,22 @@
 --
 -- The native routing groups the batch by type in C and executes one SESSION-CACHED
 -- prepared statements per type whose type_id is a LITERAL in the plan text (HTAB
--- of type -> SPI_keepplan'd plans in TopMemoryContext). The prior read exposes the
--- complete input set for an indexed or hash plan; matched persistence uses ON CONFLICT on the declared PK, and novel
+-- of type -> SPI_keepplan'd plans in TopMemoryContext). The prior read groups
+-- subjects by physical HASH remainder once and gives each exact leaf its own
+-- indexed/hash-capable batch; matched persistence uses ON CONFLICT on the declared PK, and novel
 -- persistence never reads the target. There is no temp table, per-batch ANALYZE, or
 -- UPDATE-then-NOT-EXISTS double probe.
--- The function-local settings replan against the actual batch, materialize only
--- the input set, and leave all three join/access methods available. PostgreSQL can
--- therefore use indexed probes for a small batch or hash the input and visit each
--- owning leaf once for a corpus-sized matched batch. Disabling hash joins forced
--- the post-#1388 CILI run through millions of otherwise-fast index descents.
+-- The function-local settings replan against the actual leaf batch and leave all
+-- three join/access methods available. There is no parent Append below the type
+-- partition and therefore no rows-times-eight probe shape: each subject appears
+-- in exactly one statement against exactly one physical relation. PostgreSQL can
+-- use indexed probes for a small leaf batch or scan that one owning leaf once for
+-- a corpus-sized matched batch.
 -- These settings restore the caller's values on return, including errors.
 --
 -- One implementation per fact, preserved:
---  * the Glicko fold runs the SAME core (glicko2_init + glicko2_fold_uniform_period)
---    the scalar laplace_glicko2_accumulate_games wraps — computed in one native
+--  * the Glicko fold runs the SAME core (glicko2_init + glicko2_fold_grouped_period)
+--    the scalar laplace_glicko2_accumulate_period wraps — computed in one native
 --    pass per type run for BOTH arms: matched cells fold from their stored prior
 --    (read and row-locked by a per-type FOR UPDATE probe), novel cells from the
 --    neutral prior; the rating period IS the batch. The scalar remains in the
@@ -54,7 +57,8 @@
 -- Contract with the caller (ConsensusAccumulatingWriter) — unchanged:
 --   * arrays are parallel and CLIENT-DEDUPED per call — one row per
 --     (subject, type, object) cell;
---   * phi is uniform per cell per call (the writer's merge invariant);
+--   * each cell carries exact grouped (opponent rating, phi, games, score sum)
+--     rating-period inputs through the flat group arrays and offsets;
 --   * rows arrive sorted by (type, subject, id) — partition-key order; the
 --     router only needs same-type rows ADJACENT and remains correct (merely
 --     one extra plan execution) if they are not.
@@ -63,7 +67,9 @@ DROP FUNCTION IF EXISTS laplace.consensus_upsert(bytea[], bytea[], bytea[], bigi
 -- via CREATE OR REPLACE would leave the old arity resident as a separate
 -- overload, and a 7-argument call would then be ambiguous.
 DROP FUNCTION IF EXISTS consensus.upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
+DROP FUNCTION IF EXISTS consensus.upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);
 DROP FUNCTION IF EXISTS consensus.upsert_type(bytea, bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
+DROP FUNCTION IF EXISTS consensus.upsert_type(bytea, bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);
 CREATE OR REPLACE FUNCTION consensus.upsert(
     p_subjects bytea[],
     p_types    bytea[],
@@ -75,7 +81,15 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     -- The opponent each witness presents (GH #1321). DEFAULT NULL so every
     -- existing caller keeps folding against neutral, unchanged, until it starts
     -- passing attestations.opponent_rating_fp1e9.
-    p_opp_ratings bigint[] DEFAULT NULL)
+    p_opp_ratings bigint[] DEFAULT NULL,
+    -- Exact rating-period groups are flat arrays. offsets has one entry per
+    -- cell plus a terminal entry; each cell owns [offsets[i], offsets[i+1]).
+    -- Omitting all five preserves the historical one-opponent-per-cell API.
+    p_period_offsets bigint[] DEFAULT NULL,
+    p_period_opp_ratings bigint[] DEFAULT NULL,
+    p_period_phis bigint[] DEFAULT NULL,
+    p_period_games bigint[] DEFAULT NULL,
+    p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert'
     LANGUAGE C VOLATILE
@@ -95,7 +109,12 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     p_games    bigint[],
     p_sums     bigint[],
     p_ts       timestamptz[],
-    p_opp_ratings bigint[] DEFAULT NULL)
+    p_opp_ratings bigint[] DEFAULT NULL,
+    p_period_offsets bigint[] DEFAULT NULL,
+    p_period_opp_ratings bigint[] DEFAULT NULL,
+    p_period_phis bigint[] DEFAULT NULL,
+    p_period_games bigint[] DEFAULT NULL,
+    p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_type'
     LANGUAGE C VOLATILE
@@ -104,3 +123,14 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     SET enable_hashjoin = on
     SET enable_mergejoin = on
     SET enable_seqscan = on;
+
+-- The physical owner of one consensus key, resolved by the same PostgreSQL
+-- partition support function as the native ingest writer.  This is the single
+-- routing authority for the rare non-ingest mutations (decay, source eviction):
+-- callers mutate ONLY the returned leaf and never plan against the parent.
+CREATE OR REPLACE FUNCTION consensus.partition_leaf(
+    p_type bytea,
+    p_subject bytea)
+    RETURNS regclass
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_partition_leaf'
+    LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;

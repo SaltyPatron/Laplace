@@ -42,6 +42,35 @@ public sealed class ChessSyzygyTests
         }
     }
 
+    private sealed class DelayedRootProber : ISyzygyProber
+    {
+        public int Largest => 3;
+        public int WdlCalls;
+        public int RootCalls;
+
+        public int? ProbeWdl(Board board)
+        {
+            Interlocked.Increment(ref WdlCalls);
+            throw new InvalidOperationException("material extraction must not decode WDL twice");
+        }
+
+        public SyzygyVerdict? Probe(Board board)
+        {
+            Interlocked.Increment(ref RootCalls);
+            // Vary completion time from board content so a completion-order stream is
+            // observably different from the canonical placement walk.
+            int delay = 1 + (int)(ChessCompose.PositionId(board).Lo % 5);
+            Thread.Sleep(delay);
+            var move = MoveGen.Legal(board).FirstOrDefault();
+            if (move == default) return null;
+            return new SyzygyVerdict(
+                SyzygyNative.Draw, 0,
+                Board.RankOf(move.From) * 8 + Board.FileOf(move.From),
+                Board.RankOf(move.To) * 8 + Board.FileOf(move.To),
+                move.IsPromotion ? 1 : 0);
+        }
+    }
+
     private static SubstrateChange Derive(ISyzygyProber prober, string pgn)
     {
         var parsed = ChessPgnDecomposer.TryParseGame(pgn)!;
@@ -164,6 +193,34 @@ public sealed class ChessSyzygyTests
     }
 
     [Fact]
+    public async Task MaterialExtraction_ParallelProbePreservesCanonicalPlacementOrder()
+    {
+        var expected = new List<string>();
+        Assert.True(SyzygyTableUnpack.TryParseMaterial("KQvK", out var pieces));
+        var modality = new ChessModality();
+        await foreach (var board in SyzygyTableUnpack.EnumerateBoardsAsync(pieces, CancellationToken.None))
+        {
+            if (MoveGen.Legal(board).Count == 0) continue;
+            expected.Add(modality.StateKey(new ChessState(board)));
+            if (expected.Count == 64) break;
+        }
+
+        var prober = new DelayedRootProber();
+        var actual = new List<string>();
+        await foreach (var product in SyzygyTableUnpack.ExtractMaterialAsync(
+                           "KQvK", prober, workers: 4,
+                           ct: CancellationToken.None))
+        {
+            actual.Add(product.Surface);
+            if (actual.Count == expected.Count) break;
+        }
+
+        Assert.Equal(expected, actual);
+        Assert.Equal(0, prober.WdlCalls);
+        Assert.True(prober.RootCalls >= actual.Count);
+    }
+
+    [Fact]
     public void DeriveGame_DepositsDeduplicatedTransitionGraph()
     {
         var prober = new FakeProber(3, new SyzygyVerdict(SyzygyNative.Win, 12));
@@ -211,7 +268,8 @@ public sealed class ChessSyzygyTests
         var b = new SubstrateChangeBuilder(ChessSyzygy.SourceId, "test/syzygy-material");
 
         Assert.NotNull(record.Chunk);
-        Assert.True(ChessSyzygy.DeriveTransitionChunk(b, [product], record.Chunk.Value.Id));
+        Assert.NotNull(record.PreparedChunk);
+        ChessSyzygy.DeriveTransitionChunk(b, record.PreparedChunk!);
         var change = b.SetInputUnitsConsumed(1).Build();
 
         var trajectory = Assert.Single(change.Physicalities);
@@ -339,33 +397,27 @@ public sealed class ChessSyzygyTests
 }
 
 /// <summary>
-/// ONE init/free for the whole class, not one per test method.
+/// ONE process-wide tablebase authority, shared with every real engine test.
 ///
-/// xUnit constructs a fresh instance of a test class for EVERY test method, so a ctor that
-/// called SyzygyNative.Init and a Dispose that called SyzygyNative.Free cycled the tablebase
-/// mapping once per [InlineData] case. That state is process-global by design — the
-/// SyzygyNative doc says "one loaded table set at a time" — and the vendored Fathom prober
-/// does not fully reset its statics in tb_free, so a subsequent tb_init leaves stale pointers
-/// behind. The next probe walks them and the process takes a SIGSEGV inside gen_captures:
-/// no managed exception, nothing catchable, and a crash position that moves between runs
-/// because it depends on how many map/unmap cycles ran first.
+/// The UCI tests execute full production search and therefore initialize
+/// ChessTablebaseRuntime. TestModuleInit points that same authority at the repository's
+/// deterministic fixture before any test runs. This fixture deliberately does not call
+/// SyzygyNative.Init or Free: initializing a second directory, or freeing the mapping while
+/// the runtime's Lazy still claims it is loaded, violates Fathom's process-global contract.
 ///
-/// IClassFixture gives exactly one instance for the class, which is what process-global state
-/// requires. If another test class ever needs the tablebases, promote this to a collection
-/// fixture rather than re-adding a per-test Init.
+/// Production resolution remains unchanged and continues to use the configured or /vault
+/// table set. Only the Laplace.Chess.Tests process receives the fixture path.
 /// </summary>
-public sealed class SyzygyTablebaseFixture : IDisposable
+public sealed class SyzygyTablebaseFixture
 {
     public SyzygyTablebaseFixture()
     {
-        Assert.True(LaplaceInstall.TryRepoRoot(out var root), "repo root not resolvable");
-        var dir = Path.Combine(root, "test-data", "syzygy");
-        Assert.True(Directory.Exists(dir), $"fixture dir missing: {dir}");
-        Assert.Equal(3, SyzygyNative.Init(dir));
+        Assert.Equal(3, ChessTablebaseRuntime.Largest);
+        Assert.Equal(
+            Path.GetFullPath(TestModuleInit.SyzygyFixtureDirectory),
+            ChessTablebaseRuntime.LoadedTableSetForTest);
         Assert.Equal(3, SyzygyNative.Largest());
     }
-
-    public void Dispose() => SyzygyNative.Free();
 }
 
 [Trait("Tier", "fast")]

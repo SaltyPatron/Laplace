@@ -28,8 +28,9 @@ public class ScoreLawRoundTripTests
     private async Task<long> FoldRatingAsync(long phi, long games, long sumFp)
     {
         await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT (laplace.laplace_glicko2_accumulate_games("
-          + "1500000000000,350000000000,60000000,1500000000000,$1,$2,$3,500000000)).rating");
+            "SELECT (laplace.laplace_glicko2_accumulate_period("
+          + "1500000000000,350000000000,60000000,ARRAY[1500000000000]::bigint[],"
+          + "ARRAY[$1]::bigint[],ARRAY[$2]::bigint[],ARRAY[$3]::bigint[],500000000)).rating");
         cmd.Parameters.AddWithValue(phi);
         cmd.Parameters.AddWithValue(games);
         cmd.Parameters.AddWithValue(sumFp);

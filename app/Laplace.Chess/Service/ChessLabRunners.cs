@@ -68,10 +68,16 @@ public static class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("search_depth", depth));
         lab.Publish(slot, new ChessLabMetricEvent("transition_trunk_reads", exactBias.RootReads));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_roots", exactBias.RootsWithExactEvidence));
-        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.RootsWithExactEvidence));
+        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_roots", exactBias.RootsWithMoveEvidence));
+        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.ExactTransitionSignals));
+        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_signals", exactBias.MovePhysicalitySignals));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_perfcache_hits", exactBias.TransitionPerfcacheHits));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_novel_hits", exactBias.TransitionNovelHits));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_compositions", exactBias.TransitionCompositions));
         lab.Publish(slot, new ChessLabMetricEvent("child_structure_reads", boardEvaluator.PositionReads));
         lab.Publish(slot, new ChessLabMetricEvent("child_structure_signals", boardEvaluator.PositionsWithEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("position_atoms_loaded", boardEvaluator.LoadedAtoms));
+        lab.Publish(slot, new ChessLabMetricEvent("position_evidence_generation", boardEvaluator.EvidenceGeneration));
         lab.Publish(slot, new ChessLabMetricEvent("syzygy_max_men", ChessTablebaseRuntime.Largest));
         lab.Publish(slot, new ChessLabMetricEvent("substrate_epoch", ChessTransitionObservations.Epoch));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
@@ -343,12 +349,13 @@ public static class ChessLabRunners
 
     public static async Task RunLichessFetchAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
-        string user = Config(slot.Job.Config, "user", "");
+        string user = Config(slot.Job.Config, "user", "").Trim();
         string site = Config(slot.Job.Config, "site", "lichess");
-        bool all = Config(slot.Job.Config, "all", "true") == "true";
-        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
-        int? max = !all && int.TryParse(Config(slot.Job.Config, "max", ""), out var m) ? m : null;
+        bool all = bool.TryParse(Config(slot.Job.Config, "all", "true"), out bool allValue) && allValue;
+        bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
+        int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
+        if (user.Length == 0) throw new ArgumentException("A provider username is required.");
         var outPath = Path.Combine(
             LabDir, slot.Job.Id, $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn");
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
@@ -398,7 +405,7 @@ public static class ChessLabRunners
         string user = Config(slot.Job.Config, "user", "").Trim();
         string site = Config(slot.Job.Config, "site", "lichess");
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
-        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
+        bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
 
         var online = await ChessGameFetcher.FetchProfileAsync(user, site, ct);

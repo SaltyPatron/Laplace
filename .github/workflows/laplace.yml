@@ -217,6 +217,8 @@ jobs:
         run: bash deploy/linux/managed-publish.sh preflight
       - name: Install exact build
         run: bash scripts/pipeline.sh install
+      - name: Reconcile and prove managed host after install
+        run: bash deploy/linux/managed-publish.sh preflight
 
   db-ops:
     name: DB lifecycle — migrate, extension sync and runtime configuration

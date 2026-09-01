@@ -11,6 +11,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -173,6 +174,19 @@ class HostTests(unittest.TestCase):
         self.assertNotIn("bootstrap", self.host.sudoers_policy())
         self.assertNotIn("ALL=(ALL)", self.host.sudoers_policy())
         self.assertNotIn("*", self.host.sudoers_policy())
+
+    def test_reconciliation_restores_public_ca_from_private_authority_before_success(self):
+        self.bootstrap()
+        authority = self.host.STATE / "tls/ca.crt"
+        public = self.host.ROOT / "share/laplace/managed-services-ca.crt"
+        expected = authority.read_bytes()
+        public.write_text("stale public certificate\n")
+        self.assertIn("public_ca_copy_drift", self.host.host_status()["issues"])
+
+        self.reconcile()
+
+        self.assertEqual(expected, public.read_bytes())
+        self.assertTrue(self.host.host_status()["healthy"])
 
     def test_status_is_readonly_and_reports_missing_maintenance_and_permissions(self):
         self.bootstrap()
@@ -343,14 +357,19 @@ class EntryPointTests(unittest.TestCase):
         self.assertNotIn("laplace-managed-deploy host-status", host_check)
         self.assertNotIn('sudo python3 deploy/linux/laplace-managed-deploy bootstrap', publish)
         deploy = workflow.split("  deploy:\n", 1)[1].split("  db-ops:\n", 1)[0]
-        self.assertLess(deploy.index("wait-for-quiet-substrate.sh"), deploy.index("managed-publish.sh preflight"))
-        self.assertLess(deploy.index("managed-publish.sh preflight"), deploy.index("pipeline.sh install"))
+        reconciliations = [match.start() for match in re.finditer("managed-publish.sh preflight", deploy)]
+        install = deploy.index("pipeline.sh install")
+        self.assertEqual(2, len(reconciliations))
+        self.assertLess(deploy.index("wait-for-quiet-substrate.sh"), reconciliations[0])
+        self.assertLess(reconciliations[0], install)
+        self.assertLess(install, reconciliations[1])
 
     def test_native_install_cleanup_preserves_root_managed_public_ca(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()
         cleanup = cmake.split('message(STATUS \\"Laplace pre-install cleanup', 1)[1].split('add_subdirectory(engine)', 1)[0]
-        self.assertIn("! -name managed-services-ca.crt -delete", cleanup)
-        self.assertNotIn("rm -rf \\$paths", cleanup)
+        self.assertIn("-maxdepth 1 -type f -name 'laplace_*.bin' -delete", cleanup)
+        self.assertNotIn("managed-services-ca.crt", cleanup)
+        self.assertNotIn("find \\\"\\$share\\\" -mindepth 1", cleanup)
 
 
 if __name__ == "__main__":

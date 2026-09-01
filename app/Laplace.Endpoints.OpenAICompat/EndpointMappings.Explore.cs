@@ -329,15 +329,15 @@ internal static class ExploreEndpoints
             {
                 var normalizedHops = Math.Max(0, hops ?? 2);
                 var normalizedFanout = Math.Max(0, fanout ?? 10);
-                var derivedNodes = 1L + (long)normalizedHops * normalizedFanout;
-                if (max_nodes is null && derivedNodes > int.MaxValue)
+                var derivedNodes = DeriveGraphNodeCapacity(normalizedHops, normalizedFanout);
+                if (max_nodes is null && derivedNodes is null)
                     return EndpointJson.BadRequest(
                         "invalid_request_error",
                         "The derived graph node capacity exceeds the supported integer coordinate range; provide max_nodes explicitly.");
 
                 var graph = await substrate.ExploreConsensusGraphAsync(
                     idHex, normalizedHops, normalizedFanout,
-                    Math.Max(0, max_nodes ?? (int)derivedNodes), ct);
+                    Math.Max(0, max_nodes ?? derivedNodes!.Value), ct);
                 if (graph is null)
                     return EndpointJson.BadRequest("invalid_request_error", "Invalid entity id hex.");
 
@@ -355,6 +355,22 @@ internal static class ExploreEndpoints
         .Produces<ExploreGraphDetailResponse>()
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    private static int? DeriveGraphNodeCapacity(int hops, int fanout)
+    {
+        if (hops <= 0 || fanout <= 0) return 1;
+        if (fanout == 1) return hops == int.MaxValue ? null : hops + 1;
+
+        long total = 1;
+        long width = 1;
+        for (var hop = 0; hop < hops; hop++)
+        {
+            if (width > (int.MaxValue - total) / fanout) return null;
+            width *= fanout;
+            total += width;
+        }
+        return (int)total;
     }
 
     // The edit-distance-1 neighbourhood of a lowercase word: deletions,

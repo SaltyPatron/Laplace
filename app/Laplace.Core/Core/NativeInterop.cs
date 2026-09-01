@@ -309,6 +309,17 @@ public static unsafe partial class NativeInterop
         long tau,
         long nowNs);
 
+    [LibraryImport(Library, EntryPoint = "glicko2_fold_grouped_period")]
+    internal static partial int Glicko2FoldGroupedPeriod(
+        Glicko2State* state,
+        long* opponentRatingsFp1e9,
+        long* opponentPhisFp1e9,
+        long* games,
+        long* sumScoresFp1e9,
+        nuint groupCount,
+        long tau,
+        long nowNs);
+
     [LibraryImport(Library, EntryPoint = "laplace_glicko2_neutral_mu_fp")]
     internal static partial long Glicko2NeutralMuFp();
 

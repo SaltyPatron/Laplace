@@ -157,7 +157,8 @@ public static class NativeAttestation
 
     public static AttestationRow Aggregated(
         Hash128 subject, Hash128 typeId, Hash128? obj, Hash128 sourceId, Hash128? contextId,
-        long games, long sumScoreFp1e9, double witnessWeight)
+        long games, long sumScoreFp1e9, double witnessWeight,
+        long? opponentRatingFp1e9 = null)
     {
         unsafe
         {
@@ -178,7 +179,10 @@ public static class NativeAttestation
                 0,
                 &staged);
             if (rc != 0) throw new InvalidOperationException($"attestation build failed: {rc}");
-            return ToRow(staged);
+            var row = ToRow(staged);
+            return opponentRatingFp1e9 is { } opponentRating
+                ? row with { OpponentRatingFp1e9 = opponentRating }
+                : row;
         }
     }
 

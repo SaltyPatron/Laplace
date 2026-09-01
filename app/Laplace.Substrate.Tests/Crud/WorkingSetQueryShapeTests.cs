@@ -38,9 +38,8 @@ public sealed class WorkingSetQueryShapeTests
 
         Assert.Contains("consensus.attestation_merge_type($1, $2, $3, $4, $5, $6)",
             apply, StringComparison.Ordinal);
-        // $8 is the per-witness opponent rating (GH #1321). This assertion is the
-        // reason the writer and the SQL signature cannot drift apart silently.
-        Assert.Contains("consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8)",
+        // $9-$13 carry exact per-cell rating-period group offsets and values.
+        Assert.Contains("consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
             fold, StringComparison.Ordinal);
         Assert.DoesNotContain("types[i] =", apply, StringComparison.Ordinal);
         Assert.DoesNotContain("types[i] =", fold, StringComparison.Ordinal);
@@ -50,7 +49,7 @@ public sealed class WorkingSetQueryShapeTests
         Assert.Contains("FOR UPDATE OF c", native, StringComparison.Ordinal);
         Assert.Contains("upsert_merge_with_retry", native, StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_games",
+            "CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_period",
             native,
             StringComparison.Ordinal);
     }

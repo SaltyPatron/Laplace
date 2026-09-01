@@ -1861,8 +1861,8 @@ public static class NpgsqlSubstrateReads
         string SourceIdHex, string TypeIdHex, string ObjectIdHex, short Hop, decimal EffMu, long WitnessCount);
 
     /// <summary>
-    /// Native SPI beam (pg_laplace_explore_web) — one connection, undirected consensus
-    /// probe, at most <paramref name="fanout"/> new nodes per hop, all tiers.
+    /// Native SPI web expansion (pg_laplace_explore_web) — one connection, undirected
+    /// consensus probe, at most <paramref name="fanout"/> new nodes per frontier parent.
     /// </summary>
     public static Task<IReadOnlyList<ExploreWebEdgeRow>> ExploreWebAsync(
         NpgsqlConnection conn, byte[] seed, int hops, int fanout, int maxNodes, int timeoutSeconds,
@@ -2422,15 +2422,20 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH p AS (SELECT chess.player_id(@name) AS id)
             SELECT encode(p.id, 'hex'), converse.label_or_hex(p.id),
-                   e.witness_count,
-                   round((e.rating / 1e9)::numeric, 3)::double precision,
-                   round((e.rd / 1e9)::numeric, 3)::double precision,
-                   consensus.eff_mu_display(e.rating, e.rd)::double precision
+                   COALESCE(o.witness_count, 0),
+                   round((COALESCE(o.rating, consensus.glicko2_neutral_mu()) / 1e9)::numeric, 3)::double precision,
+                   round((COALESCE(o.rd, consensus.glicko2_initial_rd()) / 1e9)::numeric, 3)::double precision,
+                   consensus.eff_mu_display(
+                       COALESCE(o.rating, consensus.glicko2_neutral_mu()),
+                       COALESCE(o.rd, consensus.glicko2_initial_rd()))::double precision
             FROM p
-            CROSS JOIN LATERAL consensus.edges_raw(
+            JOIN laplace.entities pe
+              ON pe.id = p.id
+             AND pe.type_id = laplace.entity_type_id('Chess_Player')
+            LEFT JOIN LATERAL consensus.edges_raw(
                 p.id, 'out',
                 ARRAY[laplace.relation_type_id('OUTCOME')],
-                1, true, 'eff_mu') e
+                1, true, 'eff_mu') o ON true
             """,
             static r => new ChessPlayerStrengthRow(
                 r.GetString(0), r.GetString(1),
@@ -2850,28 +2855,6 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessMoveRow(
         byte[] NextPosition, double EffMu, double Rd, long WitnessCount);
 
-    public readonly record struct ChessTrajectorySuccessorRow(
-        byte[] NextPosition, long Seen);
-
-    /// <summary>
-    /// Exact next-position candidates projected from ordered line trajectories. This is
-    /// structure, not a second MOVE testimony population.
-    /// </summary>
-    public static Task<IReadOnlyList<ChessTrajectorySuccessorRow>> ChessTrajectorySuccessorsAsync(
-        NpgsqlDataSource dataSource, byte[] rootId, int limit, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT successor_id, seen
-            FROM structural.geometry_successors_typed(@root, @limit, 1, false, 3::smallint)
-            """,
-            static r => new ChessTrajectorySuccessorRow(
-                (byte[])r[0], r.GetInt64(1)),
-            p =>
-            {
-                p.Add("root", NpgsqlDbType.Bytea).Value = rootId;
-                p.AddWithValue("limit", limit);
-            }, ct: ct, label: "chess_trajectory_successors", onError: onError);
-
     /// <summary><c>chess.moves(root, limit)</c>.</summary>
     public static Task<IReadOnlyList<ChessMoveRow>> ChessMovesAsync(
         NpgsqlDataSource dataSource, byte[] rootId, int limit, CancellationToken ct,
@@ -3200,6 +3183,68 @@ public static class NpgsqlSubstrateReads
                     afterId.Length == 0 ? Array.Empty<byte>() : afterId;
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "chess_line_id_page", onError: onError);
+
+    public readonly record struct ChessPlayerPlacementRow(byte[] PlayerId, string? Name);
+
+    public static async Task<long> CountChessPlayersMissingPhysicalityAsync(
+        NpgsqlDataSource dataSource, byte[] playerTypeId, short physicalityType,
+        CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var n = await NpgsqlRead.ExecuteScalarAsync<long>(dataSource, """
+            SELECT count(*)
+            FROM laplace.entities e
+            WHERE e.type_id = @player_type
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM laplace.physicalities p
+                  WHERE p.entity_id = e.id AND p.type = @physicality_type)
+            """,
+            p =>
+            {
+                p.Add("player_type", NpgsqlDbType.Bytea).Value = playerTypeId;
+                p.AddWithValue("physicality_type", physicalityType);
+            }, ct: ct, label: "chess_count_players_missing_physicality", onError: onError)
+            .ConfigureAwait(false);
+        return n;
+    }
+
+    /// <summary>
+    /// Keyset page of governed chess players that have no content physicality. Names are
+    /// resolved only for the already-bounded page; a nameless row is returned with NULL so
+    /// the caller still advances its keyset instead of looping on it forever.
+    /// </summary>
+    public static Task<IReadOnlyList<ChessPlayerPlacementRow>> ChessPlayersMissingPhysicalityPageAsync(
+        NpgsqlDataSource dataSource, byte[] playerTypeId, short physicalityType,
+        byte[] afterId, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            WITH candidates AS MATERIALIZED (
+                SELECT e.id
+                FROM laplace.entities e
+                WHERE e.type_id = @player_type
+                  AND (octet_length(@after) = 0 OR e.id > @after)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM laplace.physicalities p
+                      WHERE p.entity_id = e.id AND p.type = @physicality_type)
+                ORDER BY e.id
+                LIMIT @limit
+            )
+            SELECT c.id, NULLIF(realize.resolve_name(c.id), '')
+            FROM candidates c
+            ORDER BY c.id
+            """,
+            static r => new ChessPlayerPlacementRow(
+                (byte[])r[0], r.IsDBNull(1) ? null : r.GetString(1)),
+            p =>
+            {
+                p.Add("player_type", NpgsqlDbType.Bytea).Value = playerTypeId;
+                p.AddWithValue("physicality_type", physicalityType);
+                p.Add("after", NpgsqlDbType.Bytea).Value =
+                    afterId.Length == 0 ? Array.Empty<byte>() : afterId;
+                p.AddWithValue("limit", Math.Max(1, limit));
+            }, ct: ct, label: "chess_players_missing_physicality", onError: onError,
+            timeoutSeconds: 60);
 
     public readonly record struct AttestationEdgeRow(
         byte[] SubjectId, byte[] ObjectId);

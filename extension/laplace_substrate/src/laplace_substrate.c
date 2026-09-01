@@ -213,58 +213,85 @@ pg_laplace_score_inverse(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(laplace_score_inverse_fp(PG_GETARG_INT64(0), PG_GETARG_FLOAT8(1)));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_games);
+PG_FUNCTION_INFO_V1(pg_laplace_glicko2_accumulate_period);
 
 Datum
-pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
+pg_laplace_glicko2_accumulate_period(PG_FUNCTION_ARGS)
 {
-    glicko2_state_t         st;
-    int64_t                 games;
-    int64_t                 sum_score;
-    int64_t                 opp_rating, opp_rd, tau;
-    TupleDesc               tupdesc;
-    Datum                   values[3];
-    bool                    nulls[3] = { false, false, false };
-    HeapTuple               tuple;
+    glicko2_state_t st;
 
-    glicko2_init(&st,
-                 PG_GETARG_INT64(0),
-                 PG_GETARG_INT64(1),
-                 PG_GETARG_INT64(2));
-    opp_rating = PG_GETARG_INT64(3);
-    opp_rd     = PG_GETARG_INT64(4);
-    games      = PG_GETARG_INT64(5);
-    sum_score  = PG_GETARG_INT64(6);
-    tau        = PG_ARGISNULL(7) ? LAPLACE_GLICKO2_DEFAULT_TAU
-                                 : PG_GETARG_INT64(7);
+    for (int arg = 0; arg <= 6; ++arg)
+        if (PG_ARGISNULL(arg))
+            ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("laplace_glicko2_accumulate_period: required argument "
+                        "%d is NULL", arg + 1)));
 
-    if (games <= 0)
+    ArrayType *rating_array = PG_GETARG_ARRAYTYPE_P(3);
+    ArrayType *rd_array = PG_GETARG_ARRAYTYPE_P(4);
+    ArrayType *games_array = PG_GETARG_ARRAYTYPE_P(5);
+    ArrayType *scores_array = PG_GETARG_ARRAYTYPE_P(6);
+    Datum *rating_datums, *rd_datums, *games_datums, *score_datums;
+    bool *rating_nulls, *rd_nulls, *games_nulls, *score_nulls;
+    int rating_n, rd_n, games_n, score_n;
+    int64_t *ratings, *rds, *games, *scores;
+    int64_t tau;
+    TupleDesc tupdesc;
+    Datum values[3];
+    bool nulls[3] = {false, false, false};
+    HeapTuple tuple;
+
+    deconstruct_array(rating_array, INT8OID, 8, true, 'd',
+                      &rating_datums, &rating_nulls, &rating_n);
+    deconstruct_array(rd_array, INT8OID, 8, true, 'd',
+                      &rd_datums, &rd_nulls, &rd_n);
+    deconstruct_array(games_array, INT8OID, 8, true, 'd',
+                      &games_datums, &games_nulls, &games_n);
+    deconstruct_array(scores_array, INT8OID, 8, true, 'd',
+                      &score_datums, &score_nulls, &score_n);
+    if (rating_n == 0 || rd_n != rating_n || games_n != rating_n ||
+        score_n != rating_n)
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-             errmsg("laplace_glicko2_accumulate_games: games must be > 0 (got %ld)",
-                    (long) games)));
+            (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+             errmsg("laplace_glicko2_accumulate_period: grouped arrays must "
+                    "share a non-zero length")));
+
+    ratings = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    rds = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    games = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    scores = (int64_t *)palloc(sizeof(int64_t) * rating_n);
+    for (int i = 0; i < rating_n; ++i)
+    {
+        if (rating_nulls[i] || rd_nulls[i] || games_nulls[i] || score_nulls[i])
+            ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("laplace_glicko2_accumulate_period: grouped arrays "
+                        "must not contain NULL")));
+        ratings[i] = DatumGetInt64(rating_datums[i]);
+        rds[i] = DatumGetInt64(rd_datums[i]);
+        games[i] = DatumGetInt64(games_datums[i]);
+        scores[i] = DatumGetInt64(score_datums[i]);
+    }
+
+    glicko2_init(&st, PG_GETARG_INT64(0), PG_GETARG_INT64(1),
+                 PG_GETARG_INT64(2));
+    tau = PG_ARGISNULL(7) ? LAPLACE_GLICKO2_DEFAULT_TAU : PG_GETARG_INT64(7);
+    if (glicko2_fold_grouped_period(&st, ratings, rds, games, scores,
+                                    (size_t)rating_n, tau, 0) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+             errmsg("laplace_glicko2_accumulate_period: aggregate exceeds "
+                    "fixed-point capacity")));
+
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-             errmsg("function returning record called in context "
-                    "that cannot accept type record")));
+             errmsg("function returning record called in context that cannot "
+                    "accept type record")));
     BlessTupleDesc(tupdesc);
-
-    /* Closed-form uniform fold: bit-identical to materializing `games`
-     * observations of (opp_rating, opp_rd) with the same q/rem score split
-     * and running glicko2_update_period, without the O(games) buffer. */
-    if (glicko2_fold_uniform_period(&st, opp_rating, opp_rd,
-                                    games, sum_score, tau, 0) != 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-             errmsg("laplace_glicko2_accumulate_games: aggregate exceeds fixed-point capacity"),
-             errdetail("games=%ld sum_score=%ld", (long) games,
-                       (long) sum_score)));
-
     values[0] = Int64GetDatum(st.rating);
     values[1] = Int64GetDatum(st.rd);
     values[2] = Int64GetDatum(st.volatility);
-
     tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }

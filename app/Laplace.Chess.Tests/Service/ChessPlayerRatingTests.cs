@@ -75,6 +75,27 @@ public sealed class ChessPlayerRatingTests
     }
 
     [Fact]
+    public void ImportedRatingsSetTheActualOpponentForBothPlayers()
+    {
+        var rated = WhiteWins.Replace(
+            "[Result \"1-0\"]",
+            "[WhiteElo \"1725\"]\n[BlackElo \"1850\"]\n[Result \"1-0\"]",
+            StringComparison.Ordinal);
+        var change = Compose(rated);
+
+        long aliceOpponent = 1850L * Glicko2.FpScale;
+        long bobOpponent = 1725L * Glicko2.FpScale;
+        Assert.Equal(aliceOpponent, Single(change, Alice, Outcome).OpponentRatingFp1e9);
+        Assert.Equal(bobOpponent, Single(change, Bob, Outcome).OpponentRatingFp1e9);
+        Assert.Equal(aliceOpponent, Assert.Single(change.Attestations,
+            a => a.SubjectId == Alice && a.TypeId == PlayedBy && a.ObjectId == Bob)
+            .OpponentRatingFp1e9);
+        Assert.Equal(bobOpponent, Assert.Single(change.Attestations,
+            a => a.SubjectId == Bob && a.TypeId == PlayedBy && a.ObjectId == Alice)
+            .OpponentRatingFp1e9);
+    }
+
+    [Fact]
     public void ProvenanceStaysPerGame()
     {
         var change = Compose(WhiteWins);

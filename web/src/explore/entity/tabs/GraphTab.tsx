@@ -106,8 +106,8 @@ export function GraphTab({
       {needsGate ? (
         <GatePrompt
           serviceId="visualization.deep_export"
-          label="Expand multi-hop consensus fanout (beam crawl)."
-          units={Math.max(1, hops * fanout)}
+          label="Expand the multi-hop consensus web."
+          units={Math.max(1, Math.min(nodeCapacity, hops * fanout))}
           receipt={receipt}
           onReady={() => void expand()}
         />
@@ -146,11 +146,11 @@ export function GraphTab({
       />
       {truncated ? (
         <Muted className={styles.note}>
-          Capacity reached at {maxNodes || nodeCapacity} nodes (≤{fanout} strongest unseen nodes per hop).
+          Capacity reached at {maxNodes || nodeCapacity} nodes (≤{fanout} strongest unseen nodes per parent).
         </Muted>
       ) : (
         <Muted className={styles.note}>
-          Multi-hop crawl: ≤{fanout} strongest unseen nodes per hop · capacity {nodeCapacity} · revisits suppressed.
+          Multi-hop web: ≤{fanout} strongest unseen nodes per parent · capacity {nodeCapacity} · revisits suppressed.
         </Muted>
       )}
       {busy && !web ? <LoadingText>Crawling consensus neighborhood…</LoadingText> : null}

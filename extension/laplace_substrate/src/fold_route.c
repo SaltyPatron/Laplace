@@ -24,15 +24,16 @@
  *  disjoint rows), then execute a SESSION-CACHED prepared plan per type whose
  *  type_id is a hex LITERAL in the plan text, kept in an HTAB of
  *  type_id -> SPI_keepplan'd SPIPlanPtr in TopMemoryContext. Plan-time LIST
- *  pruning excludes unrelated types. Consensus phase 1 exposes one materialized
- *  input set to an adaptive indexed/hash join; phase 3 persists matched rows through the primary-key conflict
+ *  pruning excludes unrelated types. Consensus phase 1 additionally applies
+ *  PostgreSQL's HASH partition function in C and gives each exact leaf only the
+ *  rows it owns; phase 3 persists matched rows through the primary-key conflict
  *  arbiter and novel rows as target-free inserts. The old MERGE remains only
  *  as a bounded concurrent-insert collision fallback. No temp table, no
  *  per-batch ANALYZE, no volatility trap.
  *
  * Fold math stays one implementation per fact: both fold arms run the same
- * core (glicko2_init + glicko2_fold_uniform_period) the SQL scalar
- * (laplace_glicko2_accumulate_games) wraps — computed natively in one pass
+ * core (glicko2_init + glicko2_fold_grouped_period) the SQL scalar
+ * (laplace_glicko2_accumulate_period) wraps — computed natively in one pass
  * per type run, matched cells from their stored prior, novel cells from the
  * neutral prior. The scalar remains only in the collision MERGE fallback for
  * a concurrently-inserted cell (see UPSERT_MERGE_SQL).
@@ -43,13 +44,19 @@
  */
 #include "postgres.h"
 
+#include "access/table.h"
 #include "access/xact.h"
+#include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
+#include "partitioning/partbounds.h"
+#include "partitioning/partdesc.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/partcache.h"
 #include "utils/resowner.h"
 
 #include "laplace/core/hash128.h"
@@ -61,6 +68,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge);
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_type);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_partition_leaf);
 
 /* ------------------------------------------------------------------ */
 /* Session plan cache: one HTAB per statement family, keyed by type id */
@@ -76,7 +84,25 @@ static HTAB *merge_plans = NULL;          /* attestations matched MERGE       */
 static HTAB *upsert_matched_plans = NULL; /* consensus PK-arbitrated updates  */
 static HTAB *upsert_novel_plans = NULL;   /* consensus target-free inserts    */
 static HTAB *upsert_merge_plans = NULL;   /* collision-only MERGE fallback    */
-static HTAB *upsert_prior_plans = NULL;   /* consensus prior-state FOR UPDATE */
+
+/* The substrate contract is LIST(type_id) -> HASH(subject_id, 8). A prior
+ * lookup must use BOTH pieces of routing information. Literal type pruning
+ * alone still left eight leaves beneath the selected LIST partition, and a
+ * join whose subject key came from unnest could probe/scan all eight for each
+ * input row. Keep one exact-leaf plan per type/remainder instead. */
+#define CONSENSUS_HASH_LEAVES 8
+
+typedef struct PriorRouteEntry
+{
+    char       type_id[16];
+    Oid        hash_parent_oid;
+    Oid        leaf_oids[CONSENSUS_HASH_LEAVES];
+    SPIPlanPtr leaf_plans[CONSENSUS_HASH_LEAVES];
+} PriorRouteEntry;
+
+static HTAB *upsert_prior_routes = NULL;
+
+static const uint8_t *bytea16(Datum d, const char *label);
 
 static HTAB *
 plan_htab(HTAB **slot, const char *name)
@@ -145,6 +171,214 @@ typed_plan(HTAB **slot, const char *name, const uint8_t *type16,
         pfree(sql.data);
     }
     return entry->plan;
+}
+
+static HTAB *
+prior_route_htab(void)
+{
+    if (upsert_prior_routes == NULL)
+    {
+        HASHCTL ctl;
+
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = 16;
+        ctl.entrysize = sizeof(PriorRouteEntry);
+        ctl.hcxt = TopMemoryContext;
+        upsert_prior_routes = hash_create("consensus exact prior routes", 256,
+                                          &ctl,
+                                          HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+    return upsert_prior_routes;
+}
+
+/* Resolve the concrete HASH leaves that own one relation type. Named relation
+ * types resolve to their dedicated LIST child; dynamic types resolve to the
+ * DEFAULT child. Both have the same HASH(8) contract. Resolution happens once
+ * per backend/type and the prepared plans retain normal PostgreSQL dependency
+ * invalidation. */
+static PriorRouteEntry *
+prior_route(const uint8_t *type16, Datum type_datum, const char *label)
+{
+    PriorRouteEntry *entry;
+    bool             found;
+
+    entry = (PriorRouteEntry *) hash_search(prior_route_htab(), type16,
+                                             HASH_ENTER, &found);
+    if (!found)
+    {
+        Oid                namespace_oid;
+        Oid                root_oid;
+        Oid                hash_parent_oid;
+        Relation           root;
+        Relation           hash_parent;
+        PartitionKey       key;
+        PartitionDesc      desc;
+        PartitionBoundInfo bounds;
+        bool               equal;
+        int                datum_index;
+        int                part_index;
+        int                remainder;
+
+        memset(((char *) entry) + sizeof(entry->type_id), 0,
+               sizeof(*entry) - sizeof(entry->type_id));
+        namespace_oid = get_namespace_oid("laplace", false);
+        root_oid = get_relname_relid("consensus", namespace_oid);
+        if (!OidIsValid(root_oid))
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                     errmsg("%s: laplace.consensus does not exist", label)));
+
+        root = table_open(root_oid, AccessShareLock);
+        key = RelationGetPartitionKey(root);
+        desc = RelationGetPartitionDesc(root, false);
+        if (key == NULL || key->strategy != PARTITION_STRATEGY_LIST ||
+            key->partnatts != 1 || desc == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                     errmsg("%s: laplace.consensus must be LIST(type_id) partitioned",
+                            label)));
+        bounds = desc->boundinfo;
+        datum_index = partition_list_bsearch(key->partsupfunc,
+                                              key->partcollation,
+                                              bounds, type_datum, &equal);
+        part_index = equal ? bounds->indexes[datum_index]
+                           : bounds->default_index;
+        if (part_index < 0 || part_index >= desc->nparts)
+            ereport(ERROR,
+                    (errcode(ERRCODE_CHECK_VIOLATION),
+                     errmsg("%s: relation type has no consensus partition", label)));
+        hash_parent_oid = desc->oids[part_index];
+        table_close(root, AccessShareLock);
+
+        hash_parent = table_open(hash_parent_oid, AccessShareLock);
+        key = RelationGetPartitionKey(hash_parent);
+        desc = RelationGetPartitionDesc(hash_parent, false);
+        if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
+            key->partnatts != 1 || desc == NULL ||
+            desc->nparts != CONSENSUS_HASH_LEAVES ||
+            desc->boundinfo->nindexes != CONSENSUS_HASH_LEAVES)
+            ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                     errmsg("%s: consensus relation partition must be HASH(subject_id, %d)",
+                            label, CONSENSUS_HASH_LEAVES)));
+        for (remainder = 0; remainder < CONSENSUS_HASH_LEAVES; remainder++)
+        {
+            part_index = desc->boundinfo->indexes[remainder];
+            if (part_index < 0 || part_index >= desc->nparts)
+                ereport(ERROR,
+                        (errcode(ERRCODE_CHECK_VIOLATION),
+                         errmsg("%s: consensus HASH partition is missing remainder %d",
+                                label, remainder)));
+            entry->leaf_oids[remainder] = desc->oids[part_index];
+        }
+        entry->hash_parent_oid = hash_parent_oid;
+        table_close(hash_parent, AccessShareLock);
+    }
+    return entry;
+}
+
+/* Return the one physical consensus leaf that owns (type, subject).  Repair
+ * and inference SQL occasionally need to mutate derived state outside the
+ * ingest upsert.  Giving those callers the same native partition router keeps
+ * them from issuing parent UPDATE/DELETE statements whose plans open every
+ * HASH child.  This is routing metadata only; it never reads or changes a
+ * consensus row. */
+Datum
+pg_laplace_consensus_partition_leaf(PG_FUNCTION_ARGS)
+{
+    const char      *label = "consensus.partition_leaf";
+    Datum            type_datum;
+    const uint8_t   *type16;
+    PriorRouteEntry *route;
+    Relation         hash_parent;
+    PartitionKey     key;
+    Datum            values[1];
+    bool             nulls[1] = {false};
+    uint64           hash;
+    int              remainder;
+
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: type and subject must not be NULL", label)));
+
+    type_datum = PG_GETARG_DATUM(0);
+    type16 = bytea16(type_datum, label);
+    (void) bytea16(PG_GETARG_DATUM(1), label);
+    route = prior_route(type16, type_datum, label);
+
+    hash_parent = table_open(route->hash_parent_oid, AccessShareLock);
+    key = RelationGetPartitionKey(hash_parent);
+    if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
+        key->partnatts != 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                 errmsg("%s: cached consensus route is no longer HASH partitioned",
+                        label)));
+    values[0] = PG_GETARG_DATUM(1);
+    hash = compute_partition_hash_value(
+        1, key->partsupfunc, key->partcollation, values, nulls);
+    table_close(hash_parent, AccessShareLock);
+
+    remainder = (int) (hash % CONSENSUS_HASH_LEAVES);
+    PG_RETURN_OID(route->leaf_oids[remainder]);
+}
+
+static SPIPlanPtr
+prior_leaf_plan(PriorRouteEntry *route, int remainder,
+                const uint8_t *type16, const char *label)
+{
+    SPIPlanPtr plan = route->leaf_plans[remainder];
+
+    if (plan == NULL)
+    {
+        static const Oid argtypes[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
+        char             hex[33];
+        char            *namespace_name;
+        char            *relation_name;
+        char            *qualified_name;
+        StringInfoData   sql;
+        int              i;
+
+        namespace_name = get_namespace_name(
+            get_rel_namespace(route->leaf_oids[remainder]));
+        relation_name = get_rel_name(route->leaf_oids[remainder]);
+        if (namespace_name == NULL || relation_name == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                     errmsg("%s: consensus HASH leaf disappeared", label)));
+        qualified_name = quote_qualified_identifier(namespace_name,
+                                                     relation_name);
+        for (i = 0; i < 16; i++)
+            snprintf(hex + i * 2, 3, "%02x", type16[i]);
+
+        initStringInfo(&sql);
+        appendStringInfo(&sql,
+            "WITH locked AS MATERIALIZED ("
+            "  SELECT c.id, c.subject_id, c.rating, c.rd, c.volatility "
+            "  FROM ONLY %s c "
+            "  WHERE c.type_id = '\\x%s'::bytea "
+            "    AND c.id = ANY($1::bytea[]) "
+            "  FOR UPDATE OF c) "
+            "SELECT b.ord, locked.rating, locked.rd, locked.volatility "
+            "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY "
+            "     AS b(id, s, ord) "
+            "JOIN locked ON locked.subject_id = b.s AND locked.id = b.id",
+            qualified_name, hex);
+        plan = SPI_prepare(sql.data, 2, (Oid *) argtypes);
+        if (plan == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior SPI_prepare failed: %s",
+                            label, SPI_result_code_string(SPI_result))));
+        if (SPI_keepplan(plan) != 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior SPI_keepplan failed", label)));
+        route->leaf_plans[remainder] = plan;
+        pfree(sql.data);
+    }
+    return plan;
 }
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +492,164 @@ typedef struct FoldStateArrays
     ArrayType *volatility_array;
 } FoldStateArrays;
 
+typedef struct FoldPriorStates
+{
+    bool   *matched;
+    Datum  *ratings;
+    Datum  *rds;
+    Datum  *volatilities;
+    int     n;
+    uint64  matched_n;
+} FoldPriorStates;
+
+typedef struct PriorLeafBatch
+{
+    Datum *ids;
+    Datum *subjects;
+    int   *positions;
+    int    n;
+    int    fill;
+} PriorLeafBatch;
+
+static FoldPriorStates *
+fold_prior_states_create(int n)
+{
+    FoldPriorStates *states = (FoldPriorStates *) palloc(sizeof(*states));
+
+    states->matched = (bool *) palloc0(sizeof(bool) * n);
+    states->ratings = (Datum *) palloc(sizeof(Datum) * n);
+    states->rds = (Datum *) palloc(sizeof(Datum) * n);
+    states->volatilities = (Datum *) palloc(sizeof(Datum) * n);
+    states->n = n;
+    states->matched_n = 0;
+    return states;
+}
+
+static void
+fold_prior_states_add(FoldPriorStates *states, SPITupleTable *rows,
+                      uint64 nrows, const int *positions, int npositions,
+                      const char *label)
+{
+    uint64 r;
+
+    for (r = 0; r < nrows; r++)
+    {
+        HeapTuple tup = rows->vals[r];
+        TupleDesc desc = rows->tupdesc;
+        bool      null_ord, null_rating, null_rd, null_vol;
+        int64     leaf_ord = DatumGetInt64(
+            SPI_getbinval(tup, desc, 1, &null_ord));
+        Datum     prior_rating = SPI_getbinval(tup, desc, 2, &null_rating);
+        Datum     prior_rd = SPI_getbinval(tup, desc, 3, &null_rd);
+        Datum     prior_vol = SPI_getbinval(tup, desc, 4, &null_vol);
+        int       position;
+
+        if (null_ord || null_rating || null_rd || null_vol ||
+            leaf_ord < 1 || leaf_ord > (int64) npositions)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior read returned an invalid row",
+                            label)));
+        position = positions[leaf_ord - 1];
+        if (position < 0 || position >= states->n || states->matched[position])
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior read returned duplicate routing",
+                            label)));
+        states->matched[position] = true;
+        states->ratings[position] = prior_rating;
+        states->rds[position] = prior_rd;
+        states->volatilities[position] = prior_vol;
+        states->matched_n++;
+    }
+}
+
+/* Route each subject through PostgreSQL's own partition support function,
+ * then read its stored state from exactly the one physical leaf that owns it.
+ * The batch is partitioned once in native memory. Every exact-leaf statement
+ * can choose an index, merge, or hash access path without an Append and without
+ * multiplying the input by the number of HASH leaves. */
+static FoldPriorStates *
+read_run_priors(const uint8_t *type16, Datum type_datum,
+                const Datum *cell_ids, const InArray *subjects,
+                int run_start, int run_n, const char *label)
+{
+    PriorRouteEntry *route = prior_route(type16, type_datum, label);
+    Relation         hash_parent;
+    PartitionKey     key;
+    PriorLeafBatch   batches[CONSENSUS_HASH_LEAVES];
+    FoldPriorStates *states = fold_prior_states_create(run_n);
+    bool              nulls[1] = {false};
+    int              *remainder_by_row = (int *) palloc(sizeof(int) * run_n);
+    int               i;
+
+    memset(batches, 0, sizeof(batches));
+    hash_parent = table_open(route->hash_parent_oid, AccessShareLock);
+    key = RelationGetPartitionKey(hash_parent);
+    if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
+        key->partnatts != 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                 errmsg("%s: cached consensus route is no longer HASH partitioned",
+                        label)));
+
+    for (i = 0; i < run_n; i++)
+    {
+        Datum  value[1] = {subjects->elems[run_start + i]};
+        uint64 hash = compute_partition_hash_value(
+            1, key->partsupfunc, key->partcollation, value, nulls);
+        int remainder = (int) (hash % CONSENSUS_HASH_LEAVES);
+
+        remainder_by_row[i] = remainder;
+        batches[remainder].n++;
+    }
+    table_close(hash_parent, AccessShareLock);
+
+    for (i = 0; i < CONSENSUS_HASH_LEAVES; i++)
+    {
+        if (batches[i].n == 0)
+            continue;
+        batches[i].ids = (Datum *) palloc(sizeof(Datum) * batches[i].n);
+        batches[i].subjects = (Datum *) palloc(sizeof(Datum) * batches[i].n);
+        batches[i].positions = (int *) palloc(sizeof(int) * batches[i].n);
+    }
+    for (i = 0; i < run_n; i++)
+    {
+        PriorLeafBatch *batch = &batches[remainder_by_row[i]];
+        int             at = batch->fill++;
+
+        batch->ids[at] = cell_ids[run_start + i];
+        batch->subjects[at] = subjects->elems[run_start + i];
+        batch->positions[at] = i;
+    }
+
+    for (i = 0; i < CONSENSUS_HASH_LEAVES; i++)
+    {
+        PriorLeafBatch *batch = &batches[i];
+        Datum           vals[2];
+        SPIPlanPtr      plan;
+        int             rc;
+
+        if (batch->n == 0)
+            continue;
+        plan = prior_leaf_plan(route, i, type16, label);
+        vals[0] = PointerGetDatum(construct_array(
+            batch->ids, batch->n, BYTEAOID, -1, false, 'i'));
+        vals[1] = PointerGetDatum(construct_array(
+            batch->subjects, batch->n, BYTEAOID, -1, false, 'i'));
+        rc = SPI_execute_plan(plan, vals, NULL, false, 0);
+        if (rc != SPI_OK_SELECT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf prior SELECT failed: %s",
+                            label, SPI_result_code_string(rc))));
+        fold_prior_states_add(states, SPI_tuptable, SPI_processed,
+                              batch->positions, batch->n, label);
+        SPI_freetuptable(SPI_tuptable);
+    }
+    return states;
+}
+
 /* Fold is pure in these seven fixed-point inputs and the constant tau. Many
  * novel corpus cells share all seven; calculate each distinct state transition
  * once per batch, not once per edge. Never key only by evidence: matched cells
@@ -268,28 +660,172 @@ typedef struct FoldMemo
     glicko2_state_t result;
 } FoldMemo;
 
+typedef struct PeriodArrays
+{
+    InArray offsets; /* zero-based, one entry per cell plus terminal */
+    InArray opponents;
+    InArray phis;
+    InArray games;
+    InArray sums;
+    bool exact;
+} PeriodArrays;
+
+typedef struct PeriodWindow
+{
+    ArrayType *starts;
+    ArrayType *ends;
+    ArrayType *opponents;
+    ArrayType *phis;
+    ArrayType *games;
+    ArrayType *sums;
+} PeriodWindow;
+
+static void
+read_period_arrays(FunctionCallInfo fcinfo, int cell_count,
+                   const char *label, PeriodArrays *periods)
+{
+    bool any = false;
+    bool all = true;
+
+    memset(periods, 0, sizeof(*periods));
+    for (int arg = 8; arg <= 12; ++arg)
+    {
+        bool present = PG_NARGS() > arg && !PG_ARGISNULL(arg);
+        any = any || present;
+        all = all && present;
+    }
+    if (!any) return;
+    if (!all)
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: exact rating-period arrays must be supplied together",
+                        label)));
+
+    in_array(fcinfo, 8, INT8OID, 8, true, 'd', false, label,
+             &periods->offsets);
+    in_array(fcinfo, 9, INT8OID, 8, true, 'd', false, label,
+             &periods->opponents);
+    in_array(fcinfo, 10, INT8OID, 8, true, 'd', false, label,
+             &periods->phis);
+    in_array(fcinfo, 11, INT8OID, 8, true, 'd', false, label,
+             &periods->games);
+    in_array(fcinfo, 12, INT8OID, 8, true, 'd', false, label,
+             &periods->sums);
+    if (periods->offsets.n != cell_count + 1 ||
+        periods->opponents.n != periods->phis.n ||
+        periods->games.n != periods->phis.n ||
+        periods->sums.n != periods->phis.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: invalid exact rating-period array lengths", label)));
+    if (DatumGetInt64(periods->offsets.elems[0]) != 0 ||
+        DatumGetInt64(periods->offsets.elems[cell_count]) != periods->games.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: rating-period offsets do not span grouped arrays",
+                        label)));
+    for (int i = 0; i < cell_count; ++i)
+    {
+        int64 start = DatumGetInt64(periods->offsets.elems[i]);
+        int64 end = DatumGetInt64(periods->offsets.elems[i + 1]);
+        if (start < 0 || end <= start || end > periods->games.n)
+            ereport(ERROR,
+                    (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                     errmsg("%s: cell %d has invalid rating-period range",
+                            label, i)));
+    }
+    periods->exact = true;
+}
+
+static PeriodWindow
+period_window(const PeriodArrays *periods, const InArray *cell_opponents,
+              const InArray *cell_phis, const InArray *cell_games,
+              const InArray *cell_sums, int cell_start, int cell_n)
+{
+    PeriodWindow window;
+    Datum *starts = (Datum *)palloc(sizeof(Datum) * cell_n);
+    Datum *ends = (Datum *)palloc(sizeof(Datum) * cell_n);
+    int group_start;
+    int group_n;
+
+    if (periods->exact)
+    {
+        int64 first = DatumGetInt64(periods->offsets.elems[cell_start]);
+        int64 terminal = DatumGetInt64(
+            periods->offsets.elems[cell_start + cell_n]);
+        group_start = (int)first;
+        group_n = (int)(terminal - first);
+        for (int i = 0; i < cell_n; ++i)
+        {
+            int64 begin = DatumGetInt64(
+                periods->offsets.elems[cell_start + i]) - first;
+            int64 end = DatumGetInt64(
+                periods->offsets.elems[cell_start + i + 1]) - first;
+            starts[i] = Int32GetDatum((int32)begin + 1);
+            ends[i] = Int32GetDatum((int32)end);
+        }
+        window.opponents = array_window(
+            periods->opponents.array, periods->opponents.elems, NULL,
+            periods->opponents.n, group_start, group_n,
+            INT8OID, 8, true, 'd');
+        window.phis = array_window(periods->phis.array, periods->phis.elems, NULL,
+                                   periods->phis.n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+        window.games = array_window(periods->games.array, periods->games.elems, NULL,
+                                    periods->games.n, group_start, group_n,
+                                    INT8OID, 8, true, 'd');
+        window.sums = array_window(periods->sums.array, periods->sums.elems, NULL,
+                                   periods->sums.n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+    }
+    else
+    {
+        group_start = cell_start;
+        group_n = cell_n;
+        for (int i = 0; i < cell_n; ++i)
+            starts[i] = ends[i] = Int32GetDatum(i + 1);
+        window.opponents = cell_opponents->n > 0
+            ? array_window(cell_opponents->array, cell_opponents->elems, NULL,
+                           cell_opponents->n, group_start, group_n,
+                           INT8OID, 8, true, 'd')
+            : neutral_opponent_array(cell_n);
+        window.phis = array_window(cell_phis->array, cell_phis->elems, NULL,
+                                   cell_phis->n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+        window.games = array_window(cell_games->array, cell_games->elems, NULL,
+                                    cell_games->n, group_start, group_n,
+                                    INT8OID, 8, true, 'd');
+        window.sums = array_window(cell_sums->array, cell_sums->elems, NULL,
+                                   cell_sums->n, group_start, group_n,
+                                   INT8OID, 8, true, 'd');
+    }
+    window.starts = construct_array(starts, cell_n, INT4OID, 4, true, 'i');
+    window.ends = construct_array(ends, cell_n, INT4OID, 4, true, 'i');
+    return window;
+}
+
 /* Fold one type run natively — matched cells from their stored prior
  * (`priors`: the FOR UPDATE read of this run; ord is 1-based within the run),
  * novel cells from the neutral prior. One tight native pass instead of a
  * record-returning SQL function crossing the executor once per matched row.
  * The novel half was already native (GH #565); this completes the symmetry.
  *
- * Bit parity with the SQL scalar is by construction: the scalar's body is
- * glicko2_init + glicko2_fold_uniform_period, and consensus.glicko2_neutral_mu()
+ * Bit parity with the SQL scalars is by construction: their bodies use
+ * glicko2_init plus the same uniform/grouped period kernels, and consensus.glicko2_neutral_mu()
  * / consensus.glicko2_tau() are defined as exactly CONSENSUS_FOLD_NEUTRAL_MU /
  * LAPLACE_GLICKO2_DEFAULT_TAU (asserted by tests/sql/consensus_upsert.sql). */
 static void
 fold_run_states(const InArray *phis, const InArray *opps,
                 const InArray *games, const InArray *sums,
-                int run_start, int run_n, SPITupleTable *priors,
-                uint64 n_prior, const char *label, FoldStateArrays *out)
+                const PeriodArrays *periods,
+                int run_start, int run_n, const FoldPriorStates *priors,
+                const char *label, FoldStateArrays *out)
 {
-    bool   *matched = (bool *) palloc0(sizeof(bool) * run_n);
+    bool   *matched = priors->matched;
     Datum  *seen = (Datum *) palloc(sizeof(Datum) * run_n);
-    Datum  *ratings = (Datum *) palloc(sizeof(Datum) * run_n);
-    Datum  *rds = (Datum *) palloc(sizeof(Datum) * run_n);
-    Datum  *volatilities = (Datum *) palloc(sizeof(Datum) * run_n);
-    uint64  r;
+    Datum  *ratings = priors->ratings;
+    Datum  *rds = priors->rds;
+    Datum  *volatilities = priors->volatilities;
     int     i;
     HASHCTL memo_ctl;
     HTAB *memo;
@@ -300,35 +836,14 @@ fold_run_states(const InArray *phis, const InArray *opps,
     memo = hash_create("batch consensus fold transitions", Min(run_n, 128),
                        &memo_ctl, HASH_ELEM | HASH_BLOBS);
 
-    for (r = 0; r < n_prior; r++)
-    {
-        HeapTuple tup = priors->vals[r];
-        TupleDesc desc = priors->tupdesc;
-        bool      null_ord, null_rating, null_rd, null_vol;
-        int64     ord = DatumGetInt64(SPI_getbinval(tup, desc, 1, &null_ord));
-        Datum     prior_rating = SPI_getbinval(tup, desc, 2, &null_rating);
-        Datum     prior_rd = SPI_getbinval(tup, desc, 3, &null_rd);
-        Datum     prior_vol = SPI_getbinval(tup, desc, 4, &null_vol);
-
-        if (null_ord || null_rating || null_rd || null_vol ||
-            ord < 1 || ord > (int64) run_n || matched[ord - 1])
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: prior-state read returned an invalid row",
-                            label)));
-        matched[ord - 1] = true;
-        /* park the prior in the output slots; the fold pass consumes it */
-        ratings[ord - 1] = prior_rating;
-        rds[ord - 1] = prior_rd;
-        volatilities[ord - 1] = prior_vol;
-    }
-
     for (i = 0; i < run_n; i++)
     {
         glicko2_state_t st;
         int64 input[7];
-        FoldMemo *entry;
-        bool found;
+        FoldMemo *entry = NULL;
+        bool found = false;
+        int period_start = -1;
+        int period_group_n = 1;
         int64 phi = DatumGetInt64(phis->elems[run_start + i]);
         /* The opponent this witness presents. opps->n == 0 means the caller did
          * not supply ratings, which folds against neutral exactly as before
@@ -338,6 +853,26 @@ fold_run_states(const InArray *phis, const InArray *opps,
                     : CONSENSUS_FOLD_NEUTRAL_MU;
         int64 n_games = DatumGetInt64(games->elems[run_start + i]);
         int64 sum = DatumGetInt64(sums->elems[run_start + i]);
+
+        if (periods->exact)
+        {
+            int cell = run_start + i;
+            int64 start64 = DatumGetInt64(periods->offsets.elems[cell]);
+            int64 end64 = DatumGetInt64(periods->offsets.elems[cell + 1]);
+            period_start = (int)start64;
+            period_group_n = (int)(end64 - start64);
+            if (period_group_n == 1)
+            {
+                opp = DatumGetInt64(periods->opponents.elems[period_start]);
+                phi = DatumGetInt64(periods->phis.elems[period_start]);
+                if (DatumGetInt64(periods->games.elems[period_start]) != n_games ||
+                    DatumGetInt64(periods->sums.elems[period_start]) != sum)
+                    ereport(ERROR,
+                            (errcode(ERRCODE_DATA_EXCEPTION),
+                             errmsg("%s: grouped period totals do not match cell totals",
+                                    label)));
+            }
+        }
 
         if (n_games <= 0)
             ereport(ERROR,
@@ -352,26 +887,75 @@ fold_run_states(const InArray *phis, const InArray *opps,
             glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
                          CONSENSUS_FOLD_INITIAL_RD,
                          CONSENSUS_FOLD_INITIAL_VOLATILITY);
-        input[0] = st.rating;
-        input[1] = st.rd;
-        input[2] = st.volatility;
-        input[3] = opp;
-        input[4] = phi;
-        input[5] = n_games;
-        input[6] = sum;
-        entry = hash_search(memo, input, HASH_ENTER, &found);
-        if (found)
-            st = entry->result;
-        else
+        if (period_group_n == 1)
         {
-            if (consensus_fold_apply_partial(&st, opp, phi, n_games, sum,
-                                             LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
+            input[0] = st.rating;
+            input[1] = st.rd;
+            input[2] = st.volatility;
+            input[3] = opp;
+            input[4] = phi;
+            input[5] = n_games;
+            input[6] = sum;
+            entry = hash_search(memo, input, HASH_ENTER, &found);
+            if (found)
+                st = entry->result;
+            else if (consensus_fold_apply_partial(
+                         &st, opp, phi, n_games, sum,
+                         LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
                 ereport(ERROR,
                         (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                          errmsg("%s: aggregate exceeds fixed-point capacity", label),
                          errdetail("games=%ld sum_score=%ld",
                                    (long) n_games, (long) sum)));
-            entry->result = st;
+            if (!found) entry->result = st;
+        }
+        else
+        {
+            int start = period_start;
+            int group_n = period_group_n;
+            int64 *group_opps = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 *group_phis = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 *group_games = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 *group_sums = (int64 *)palloc(sizeof(int64) * group_n);
+            int64 exact_games = 0;
+            int64 exact_sum = 0;
+
+            for (int g = 0; g < group_n; ++g)
+            {
+                group_opps[g] = DatumGetInt64(periods->opponents.elems[start + g]);
+                group_phis[g] = DatumGetInt64(periods->phis.elems[start + g]);
+                group_games[g] = DatumGetInt64(periods->games.elems[start + g]);
+                group_sums[g] = DatumGetInt64(periods->sums.elems[start + g]);
+                if (group_games[g] <= 0 ||
+                    exact_games > INT64_MAX - group_games[g])
+                    ereport(ERROR,
+                            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                             errmsg("%s: invalid grouped game count", label)));
+                exact_games += group_games[g];
+                if ((group_sums[g] > 0 && exact_sum > INT64_MAX - group_sums[g]) ||
+                    (group_sums[g] < 0 && exact_sum < INT64_MIN - group_sums[g]))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                             errmsg("%s: grouped score sum exceeds capacity", label)));
+                exact_sum += group_sums[g];
+            }
+            if (exact_games != n_games || exact_sum != sum)
+                ereport(ERROR,
+                        (errcode(ERRCODE_DATA_EXCEPTION),
+                         errmsg("%s: grouped period totals do not match cell totals",
+                                label)));
+            int fold_rc = glicko2_fold_grouped_period(
+                &st, group_opps, group_phis, group_games, group_sums,
+                (size_t)group_n, LAPLACE_GLICKO2_DEFAULT_TAU, 0);
+            pfree(group_opps);
+            pfree(group_phis);
+            pfree(group_games);
+            pfree(group_sums);
+            if (fold_rc != 0)
+                ereport(ERROR,
+                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                         errmsg("%s: exact rating period exceeds fixed-point capacity",
+                                label)));
         }
         seen[i] = BoolGetDatum(matched[i]);
         ratings[i] = Int64GetDatum(st.rating);
@@ -554,11 +1138,10 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 /* The fold is now three phases per type run, all literal-routed and
  * session-plan-cached:
  *
- *  1. PRIOR_SELECT_SQL reads — and row-locks — the stored Glicko state of
- *     every cell of the run that already exists. FOR UPDATE is what makes the
- *     native fold safe: a locked row cannot change between this read and the
- *     MERGE, so folding from the read state IS folding from the merge-time
- *     state.
+ *  1. read_run_priors partitions the input by PostgreSQL's own HASH support
+ *     function, then reads and row-locks each stored cell from its exact owning
+ *     leaf. A locked row cannot change between this read and persistence, so
+ *     folding from the read state IS folding from the write-time state.
  *  2. fold_run_states() computes every outgoing (rating, rd, volatility) in
  *     one tight native pass — matched cells from their stored prior, novel
  *     cells from the neutral prior. Before this, only the novel half was
@@ -579,20 +1162,6 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
  * fallback lazy: it executes only for rows re-classified after a concurrent-
  * insert collision (see upsert_merge_with_retry), so the (f()).col triple
  * evaluation sits on a path whose executions round to zero. */
-static const char *PRIOR_SELECT_SQL =
-    /* Materialize the input ONCE and expose the whole set to PostgreSQL. For a
-     * small batch against a large leaf the planner chooses indexed probes; for
-     * CILI-sized matched batches it hashes the input and scans each of the eight
-     * owning leaves once. The former correlated LATERAL forced one index descent
-     * through every HASH leaf per row: no sequential scans, but still O(rows x
-     * leaves), which is the 3-minute HAS_SYNSET_KEY call observed after #1388. */
-    "WITH b AS MATERIALIZED ("
-    "  SELECT id, s, ord FROM unnest($1::bytea[], $2::bytea[]) "
-    "       WITH ORDINALITY AS u(id, s, ord)) "
-    "SELECT b.ord, c.rating, c.rd, c.volatility "
-    "FROM b JOIN laplace.consensus c "
-    "  ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
-    "FOR UPDATE OF c";
 
 /* Phase 3 has no target join on the ordinary path. Phase 1 already classified
  * and row-locked every existing cell. Persist those rows through the declared
@@ -642,23 +1211,26 @@ static const char *UPSERT_MERGE_SQL =
     "USING unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
     "             $5::int8[], $6::int8[], $7::timestamptz[], "
     "             $8::bool[], $9::int8[], $10::int8[], $11::int8[], "
-    "             $12::int8[]) "
+    "             $12::int8[], $13::int4[], $14::int4[]) "
     "      AS b(id, s, o, phi, games, score_sum, ts, seen, new_rating, "
-    "           new_rd, new_volatility, opp_rating) "
+    "           new_rd, new_volatility, opp_rating, group_start, group_end) "
     "ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
     "WHEN MATCHED THEN UPDATE SET "
     "  rating = CASE WHEN b.seen THEN b.new_rating ELSE "
-    "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, b.opp_rating, "
-    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rating END, "
+    "      (laplace.laplace_glicko2_accumulate_period("
+    "           c.rating, c.rd, c.volatility, $15[b.group_start:b.group_end], "
+    "           $16[b.group_start:b.group_end], $17[b.group_start:b.group_end], "
+    "           $18[b.group_start:b.group_end], consensus.glicko2_tau())).rating END, "
     "  rd = CASE WHEN b.seen THEN b.new_rd ELSE "
-    "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, b.opp_rating, "
-    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rd END, "
+    "      (laplace.laplace_glicko2_accumulate_period("
+    "           c.rating, c.rd, c.volatility, $15[b.group_start:b.group_end], "
+    "           $16[b.group_start:b.group_end], $17[b.group_start:b.group_end], "
+    "           $18[b.group_start:b.group_end], consensus.glicko2_tau())).rd END, "
     "  volatility = CASE WHEN b.seen THEN b.new_volatility ELSE "
-    "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, b.opp_rating, "
-    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).volatility END, "
+    "      (laplace.laplace_glicko2_accumulate_period("
+    "           c.rating, c.rd, c.volatility, $15[b.group_start:b.group_end], "
+    "           $16[b.group_start:b.group_end], $17[b.group_start:b.group_end], "
+    "           $18[b.group_start:b.group_end], consensus.glicko2_tau())).volatility END, "
     "  witness_count = c.witness_count + b.games, "
     "  last_observed_at = GREATEST(c.last_observed_at, b.ts) "
     "WHEN NOT MATCHED THEN INSERT "
@@ -835,6 +1407,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     const char *label = "consensus_upsert";
     InArray     subjects, types, objects, phis, games, sums, ts;
     InArray     opps;
+    PeriodArrays periods;
     Datum      *cell_ids;
     ArrayType  *cell_id_array;
     int64       affected = 0;
@@ -853,6 +1426,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     memset(&opps, 0, sizeof(opps));
     if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
         in_array(fcinfo, 7, INT8OID, 8, true, 'd', false, label, &opps);
+    read_period_arrays(fcinfo, subjects.n, label, &periods);
     if (opps.n > 0 && opps.n != subjects.n)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
@@ -916,27 +1490,26 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         const uint8_t *type16 = bytea16(types.elems[run_start], label);
         int            run_n = 0;
         int            j = run_start;
-        SPIPlanPtr     prior_plan;
         SPIPlanPtr     matched_plan;
         SPIPlanPtr     novel_plan;
         SPIPlanPtr     merge_plan;
         ArrayType     *run_ids;
         ArrayType     *run_subjects;
+        FoldPriorStates *priors;
         FoldStateArrays folds;
-        Datum          pvals[2];
+        PeriodWindow    period_run;
         Datum          write_vals[9];
-        Datum          vals[12];
+        Datum          vals[18];
         uint64         matched_n;
-        static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
         static const Oid write_args[9] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
-        static const Oid args[12] =
+        static const Oid args[18] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              INT8ARRAYOID, INT8ARRAYOID, 1185,
              BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
-             INT8ARRAYOID};
-        int            rc;
+             INT8ARRAYOID, INT4ARRAYOID, INT4ARRAYOID, INT8ARRAYOID,
+             INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
 
         while (j < subjects.n &&
                memcmp(bytea16(types.elems[j], label), type16, 16) == 0)
@@ -952,19 +1525,11 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                                     subjects.n, run_start, run_n,
                                     BYTEAOID, -1, false, 'i');
 
-        prior_plan = typed_plan(&upsert_prior_plans, "consensus_upsert prior plans",
-                                type16, PRIOR_SELECT_SQL, 2, prior_args);
-        pvals[0] = PointerGetDatum(run_ids);
-        pvals[1] = PointerGetDatum(run_subjects);
-        rc = SPI_execute_plan(prior_plan, pvals, NULL, false, 0);
-        if (rc != SPI_OK_SELECT)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: prior-state SELECT failed: %s",
-                            label, SPI_result_code_string(rc))));
-        matched_n = SPI_processed;
-        fold_run_states(&phis, &opps, &games, &sums, run_start, run_n,
-                        SPI_tuptable, matched_n, label, &folds);
+        priors = read_run_priors(type16, types.elems[run_start], cell_ids,
+                                 &subjects, run_start, run_n, label);
+        matched_n = priors->matched_n;
+        fold_run_states(&phis, &opps, &games, &sums, &periods, run_start, run_n,
+                        priors, label, &folds);
 
         matched_plan = typed_plan(&upsert_matched_plans,
                                   "consensus_upsert matched plans", type16,
@@ -973,7 +1538,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                                 "consensus_upsert novel plans", type16,
                                 UPSERT_NOVEL_SQL, 9, write_args);
         merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                                type16, UPSERT_MERGE_SQL, 12, args);
+                                type16, UPSERT_MERGE_SQL, 18, args);
         vals[0] = PointerGetDatum(run_ids);
         vals[1] = PointerGetDatum(run_subjects);
         vals[2] = PointerGetDatum(array_window(objects.array, objects.elems,
@@ -1001,6 +1566,14 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
             ? array_window(opps.array, opps.elems, NULL, opps.n,
                            run_start, run_n, INT8OID, 8, true, 'd')
             : neutral_opponent_array(run_n));
+        period_run = period_window(&periods, &opps, &phis, &games, &sums,
+                                   run_start, run_n);
+        vals[12] = PointerGetDatum(period_run.starts);
+        vals[13] = PointerGetDatum(period_run.ends);
+        vals[14] = PointerGetDatum(period_run.opponents);
+        vals[15] = PointerGetDatum(period_run.phis);
+        vals[16] = PointerGetDatum(period_run.games);
+        vals[17] = PointerGetDatum(period_run.sums);
         write_vals[0] = vals[0];
         write_vals[1] = vals[1];
         write_vals[2] = vals[2];
@@ -1029,38 +1602,40 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
 {
     const char    *label = "consensus_upsert_type";
     const uint8_t *type16;
+    Datum          type_datum;
     InArray        subjects, objects, phis, games, sums, ts;
     InArray        opps;
+    PeriodArrays   periods;
     Datum         *cell_ids;
     ArrayType     *cell_id_array;
+    FoldPriorStates *priors;
     FoldStateArrays folds;
+    PeriodWindow    period_run;
     HTAB          *seen;
     HASHCTL        ctl;
-    SPIPlanPtr     prior_plan;
     SPIPlanPtr     matched_plan;
     SPIPlanPtr     novel_plan;
     SPIPlanPtr     merge_plan;
-    Datum          pvals[2];
     Datum          write_vals[9];
-    Datum          vals[12];
+    Datum          vals[18];
     uint64         matched_n;
-    static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
     static const Oid write_args[9] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          1185, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
-    static const Oid args[12] =
+    static const Oid args[18] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID, INT8ARRAYOID, 1185,
          BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
-         INT8ARRAYOID};
+         INT8ARRAYOID, INT4ARRAYOID, INT4ARRAYOID, INT8ARRAYOID,
+         INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
     int i;
-    int rc;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                  errmsg("%s: type must not be NULL", label)));
-    type16 = bytea16(PG_GETARG_DATUM(0), label);
+    type_datum = PG_GETARG_DATUM(0);
+    type16 = bytea16(type_datum, label);
     in_array(fcinfo, 1, BYTEAOID, -1, false, 'i', false, label, &subjects);
     in_array(fcinfo, 2, BYTEAOID, -1, false, 'i', true, label, &objects);
     in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &phis);
@@ -1070,6 +1645,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     memset(&opps, 0, sizeof(opps));
     if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
         in_array(fcinfo, 7, INT8OID, 8, true, 'd', false, label, &opps);
+    read_period_arrays(fcinfo, subjects.n, label, &periods);
     if (opps.n > 0 && opps.n != subjects.n)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
@@ -1121,19 +1697,11 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
-    prior_plan = typed_plan(&upsert_prior_plans, "consensus_upsert prior plans",
-                            type16, PRIOR_SELECT_SQL, 2, prior_args);
-    pvals[0] = PointerGetDatum(cell_id_array);
-    pvals[1] = PointerGetDatum(subjects.array);
-    rc = SPI_execute_plan(prior_plan, pvals, NULL, false, 0);
-    if (rc != SPI_OK_SELECT)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("%s: prior-state SELECT failed: %s",
-                        label, SPI_result_code_string(rc))));
-    matched_n = SPI_processed;
-    fold_run_states(&phis, &opps, &games, &sums, 0, subjects.n,
-                    SPI_tuptable, matched_n, label, &folds);
+    priors = read_run_priors(type16, type_datum, cell_ids, &subjects,
+                             0, subjects.n, label);
+    matched_n = priors->matched_n;
+    fold_run_states(&phis, &opps, &games, &sums, &periods, 0, subjects.n,
+                    priors, label, &folds);
 
     matched_plan = typed_plan(&upsert_matched_plans,
                               "consensus_upsert matched plans", type16,
@@ -1142,7 +1710,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                             "consensus_upsert novel plans", type16,
                             UPSERT_NOVEL_SQL, 9, write_args);
     merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                            type16, UPSERT_MERGE_SQL, 12, args);
+                            type16, UPSERT_MERGE_SQL, 18, args);
     vals[0] = PointerGetDatum(cell_id_array);
     vals[1] = PointerGetDatum(subjects.array);
     vals[2] = PointerGetDatum(objects.array);
@@ -1156,6 +1724,14 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     vals[10] = PointerGetDatum(folds.volatility_array);
     vals[11] = PointerGetDatum(
         opps.n > 0 ? opps.array : neutral_opponent_array((int) subjects.n));
+    period_run = period_window(&periods, &opps, &phis, &games, &sums,
+                               0, subjects.n);
+    vals[12] = PointerGetDatum(period_run.starts);
+    vals[13] = PointerGetDatum(period_run.ends);
+    vals[14] = PointerGetDatum(period_run.opponents);
+    vals[15] = PointerGetDatum(period_run.phis);
+    vals[16] = PointerGetDatum(period_run.games);
+    vals[17] = PointerGetDatum(period_run.sums);
     write_vals[0] = vals[0];
     write_vals[1] = vals[1];
     write_vals[2] = vals[2];

@@ -155,29 +155,68 @@ internal sealed partial class SubstrateClient
     {
         if (string.IsNullOrWhiteSpace(reference)) return null;
 
+        var requested = reference.Trim();
+
         // GH #575: FEN → composed position id before the lexical resolve arms.
         if (ChessPositionRef.TryComposeHex(reference) is { } fenHex)
             reference = fenHex;
 
         try
         {
-            await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            var resolved = await NpgsqlSubstrateReads.ExploreResolveAsync(conn, reference, ct);
-            if (resolved is not { } value) return null;
+            NpgsqlSubstrateReads.ExploreResolveRow? resolved;
+            await using (var conn = await _dataSource.OpenConnectionAsync(ct))
+            {
+                resolved = await NpgsqlSubstrateReads.ExploreResolveAsync(conn, reference, ct);
+                if (resolved is { Exists: true } value)
+                {
+                    var facts = await ReadSalientFactsAsync(conn, value.Id, 3, ct);
+                    return new ExploreResolveResponse(
+                        IdHex: Convert.ToHexStringLower(value.Id),
+                        Label: value.Label,
+                        RefKind: value.RefKind,
+                        Exists: true,
+                        PreviewFacts: facts);
+                }
+            }
 
-            var facts = await ReadSalientFactsAsync(conn, value.Id, 3, ct);
+            // A provider handle, surname, forename, or FIDE name-order spelling is a
+            // legitimate warehouse reference.  Player identities are governed handles,
+            // not lexical word ids, so the lexical resolver cannot discover them.  Reuse
+            // the indexed name-trajectory candidate path and its single human-name ranker;
+            // do not add a rendered corpus scan or a second player matching law here.
+            // Hex/FEN references remain exact and never fall through to name matching.
+            if (!LooksLikeEntityHex(reference))
+            {
+                var players = await ChessPlayersAsync(
+                    1, 0, requested, null, "relevance", "desc", ct);
+                if (players.Players.FirstOrDefault() is { } player)
+                {
+                    var playerId = Convert.FromHexString(player.IdHex);
+                    await using var conn = await _dataSource.OpenConnectionAsync(ct);
+                    var facts = await ReadSalientFactsAsync(conn, playerId, 3, ct);
+                    return new ExploreResolveResponse(
+                        player.IdHex, player.Name, "chess_player", true, facts);
+                }
+            }
+
+            if (resolved is not { } unresolved) return null;
+
             return new ExploreResolveResponse(
-                IdHex: Convert.ToHexStringLower(value.Id),
-                Label: value.Label,
-                RefKind: value.RefKind,
-                Exists: value.Exists,
-                PreviewFacts: facts);
+                IdHex: Convert.ToHexStringLower(unresolved.Id),
+                Label: unresolved.Label,
+                RefKind: unresolved.RefKind,
+                Exists: false,
+                PreviewFacts: []);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
             throw new SubstrateUnavailableException("Explore resolve query failed.", ex);
         }
     }
+
+    private static bool LooksLikeEntityHex(string value) =>
+        value.Length == 32 && value.All(static ch =>
+            ch is >= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F');
 
     public async Task<ExploreEntityPreviewResponse?> ExploreEntityPreviewAsync(string idHex, CancellationToken ct)
     {
@@ -466,8 +505,9 @@ internal sealed partial class SubstrateClient
         var seed = TryParseIdHex(idHex);
         if (seed is null) return null;
 
-        // Native SPI beam (pg_laplace_explore_web): one connection, undirected
-        // consensus probe, ≤fanout new nodes/hop, all tiers. Labels via render_text_fast.
+        // Native SPI web expansion (pg_laplace_explore_web): one connection,
+        // undirected consensus probe, ≤fanout new nodes/frontier parent, all tiers.
+        // Labels via render_text_fast.
         hops = Math.Max(0, hops);
         fanout = Math.Max(0, fanout);
         maxNodes = Math.Max(0, maxNodes);

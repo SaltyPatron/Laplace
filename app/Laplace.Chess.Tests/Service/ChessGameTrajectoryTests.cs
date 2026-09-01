@@ -65,7 +65,7 @@ public sealed class ChessGameTrajectoryTests
     }
 
     [Fact]
-    public void Trajectory_ReferencesPerfcachePositionsWithoutDepositingSqlTrees()
+    public void Trajectory_ReferencesDeduplicatedPositionContentWithLosslessPhysicality()
     {
         var change = Compose();
         var recovered = Trajectory.Constituents(
@@ -75,8 +75,22 @@ public sealed class ChessGameTrajectoryTests
             .Select(e => e.Id)
             .ToHashSet();
 
-        Assert.NotEmpty(recovered);
-        Assert.Empty(deposited);
+        // The compose-floor blob accelerates these exact identities and coordinates; it is not
+        // their only storage. Every board in the line, including the terminal board, remains a
+        // first-class content entity with the typed-atom trajectory needed to reconstruct it.
+        Assert.Equal(Parsed().PositionIds, recovered);
+        Assert.Equal(recovered.ToHashSet(), deposited);
+        Assert.Equal(deposited.Count, change.Physicalities.Count(p =>
+            p.Type == PhysicalityType.Content && deposited.Contains(p.EntityId)));
+
+        foreach (var position in change.Entities.Where(e => deposited.Contains(e.Id)))
+        {
+            var physicality = Assert.Single(change.Physicalities, p =>
+                p.EntityId == position.Id && p.Type == PhysicalityType.Content);
+            var constituents = Trajectory.Constituents(physicality.TrajectoryXyzm!);
+            Assert.Equal(physicality.NConstituents, constituents.Length);
+            Assert.Equal(position.Id, Hash128.Merkle(position.Tier, constituents));
+        }
     }
 
     [Fact]

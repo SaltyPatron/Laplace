@@ -114,9 +114,10 @@ WITH replay AS (
     FROM generate_series(1, 5)
 ),
 batch AS (
-    SELECT laplace.laplace_glicko2_accumulate_games(
+    SELECT laplace.laplace_glicko2_accumulate_period(
         1500000000000, 350000000000, 60000000,
-        1500000000000,  80000000000, 5, 2500000000, 500000000
+        ARRAY[1500000000000]::bigint[], ARRAY[80000000000]::bigint[],
+        ARRAY[5]::bigint[], ARRAY[2500000000]::bigint[], 500000000
     ) AS r
 )
 SELECT
@@ -134,9 +135,10 @@ WITH replay AS (
                  (3, 333333335::bigint)) AS s(ord, score)
 ),
 batch AS (
-    SELECT laplace.laplace_glicko2_accumulate_games(
+    SELECT laplace.laplace_glicko2_accumulate_period(
         1480000000000, 200000000000, 60000000,
-        1500000000000, 120000000000, 3, 1000000001, 500000000
+        ARRAY[1500000000000]::bigint[], ARRAY[120000000000]::bigint[],
+        ARRAY[3]::bigint[], ARRAY[1000000001]::bigint[], 500000000
     ) AS r
 )
 SELECT
@@ -153,9 +155,10 @@ WITH replay AS (
     FROM generate_series(1, 1)
 ),
 batch AS (
-    SELECT laplace.laplace_glicko2_accumulate_games(
+    SELECT laplace.laplace_glicko2_accumulate_period(
         1520000000000, 180000000000, 60000000,
-        1500000000000,  90000000000, 1, 700000000, 500000000
+        ARRAY[1500000000000]::bigint[], ARRAY[90000000000]::bigint[],
+        ARRAY[1]::bigint[], ARRAY[700000000]::bigint[], 500000000
     ) AS r
 )
 SELECT
@@ -164,9 +167,36 @@ SELECT
     (batch.r).volatility = (replay.r).volatility AS one_volatility_bit_equal
 FROM replay, batch;
 
-SELECT laplace.laplace_glicko2_accumulate_games(
+WITH replay AS (
+    SELECT laplace.laplace_glicko2_accumulate(
+        1500000000000, 350000000000, 60000000,
+        opponent_rating, opponent_rd, score, 500000000
+    ) AS r
+    FROM (VALUES
+        (1600000000000::bigint, 40000000000::bigint, 1000000000::bigint),
+        (1800000000000::bigint, 70000000000::bigint, 0::bigint),
+        (1800000000000::bigint, 70000000000::bigint, 0::bigint),
+        (1800000000000::bigint, 70000000000::bigint, 0::bigint)
+    ) observations(opponent_rating, opponent_rd, score)
+), grouped AS (
+    SELECT laplace.laplace_glicko2_accumulate_period(
+        1500000000000, 350000000000, 60000000,
+        ARRAY[1600000000000, 1800000000000]::bigint[],
+        ARRAY[40000000000, 70000000000]::bigint[],
+        ARRAY[1, 3]::bigint[], ARRAY[1000000000, 0]::bigint[],
+        500000000
+    ) AS r
+)
+SELECT
+    (grouped.r).rating = (replay.r).rating AS grouped_rating_bit_equal,
+    (grouped.r).rd = (replay.r).rd AS grouped_rd_bit_equal,
+    (grouped.r).volatility = (replay.r).volatility AS grouped_volatility_bit_equal
+FROM replay, grouped;
+
+SELECT laplace.laplace_glicko2_accumulate_period(
     1500000000000, 350000000000, 60000000,
-    1500000000000,  80000000000, 0, 0, 500000000);
+    ARRAY[1500000000000]::bigint[], ARRAY[80000000000]::bigint[],
+    ARRAY[0]::bigint[], ARRAY[0]::bigint[], 500000000);
 
 SELECT laplace.laplace_score(0.0, 1.0)   = 500000000 AS zero_is_midpoint,
        laplace.laplace_score(15.0, 1.0)  = 968750000 AS fifteen_pinned,

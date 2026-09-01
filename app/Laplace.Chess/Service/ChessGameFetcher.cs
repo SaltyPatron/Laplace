@@ -21,7 +21,7 @@ public static class ChessGameFetcher
 
     public static Task<int> FetchAsync(
         string user, string site, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)
-        => site.ToLowerInvariant() switch
+        => NormalizeSite(site) switch
         {
             "lichess" => FetchLichessAsync(user, max, outPath, log, ct),
             "chesscom" or "chess.com" or "chess" => FetchChessComAsync(user, max, minTcSeconds, outPath, log, ct),
@@ -30,7 +30,7 @@ public static class ChessGameFetcher
 
     public static Task<ChessPlayerProfile> FetchProfileAsync(
         string identifier, string site, CancellationToken ct)
-        => site.ToLowerInvariant() switch
+        => NormalizeSite(site) switch
         {
             "lichess" => FetchLichessProfileAsync(identifier, ct),
             "chesscom" or "chess.com" or "chess" => FetchChessComProfileAsync(identifier, ct),
@@ -41,6 +41,7 @@ public static class ChessGameFetcher
     public static async Task<int> FetchChessComAsync(
         string user, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)
     {
+        ValidateLimit(max);
         var archUrl = $"https://api.chess.com/pub/player/{Uri.EscapeDataString(user)}/games/archives";
         log?.Invoke($"chess.com archives: {archUrl}");
         var archJson = await GetStringWithRetryAsync(archUrl, ct);
@@ -103,8 +104,8 @@ public static class ChessGameFetcher
     public static async Task<int> FetchLichessAsync(
         string user, int? max, string outPath, Action<string>? log, CancellationToken ct)
     {
-        var url = $"https://lichess.org/api/games/user/{Uri.EscapeDataString(user)}";
-        if (max is { } m) url += $"?max={m}";
+        ValidateLimit(max);
+        var url = LichessGamesUrl(user, max);
         log?.Invoke($"lichess: {url}");
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Accept.ParseAdd("application/x-chess-pgn");
@@ -123,20 +124,36 @@ public static class ChessGameFetcher
     {
         string json = await GetStringWithRetryAsync(
             $"https://lichess.org/api/user/{Uri.EscapeDataString(user)}", ct);
+        return ParseLichessProfile(json, user);
+    }
+
+    internal static ChessPlayerProfile ParseLichessProfile(string json, string requestedUser)
+    {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
-        string username = String(root, "username") ?? String(root, "id") ?? user;
+        string username = String(root, "username") ?? String(root, "id") ?? requestedUser;
         JsonElement profile = root.TryGetProperty("profile", out var p) ? p : default;
+        string? firstName = profile.ValueKind == JsonValueKind.Object ? String(profile, "firstName") : null;
+        string? lastName = profile.ValueKind == JsonValueKind.Object ? String(profile, "lastName") : null;
+        string? realName = profile.ValueKind == JsonValueKind.Object ? String(profile, "realName") : null;
+        if (string.IsNullOrWhiteSpace(realName))
+            realName = string.Join(' ', new[] { firstName, lastName }
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!));
+        if (string.IsNullOrWhiteSpace(realName)) realName = null;
         var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (root.TryGetProperty("perfs", out var perfs))
             foreach (string key in new[] { "standard", "classical", "rapid", "blitz", "bullet" })
                 if (perfs.TryGetProperty(key, out var perf) && perf.TryGetProperty("rating", out var rating)
                     && rating.TryGetInt32(out int value))
                     ratings[key] = value;
-        if (profile.ValueKind == JsonValueKind.Object
-            && profile.TryGetProperty("fideRating", out var fideRating)
-            && fideRating.TryGetInt32(out int fideValue))
-            ratings["fide"] = fideValue;
+        if (profile.ValueKind == JsonValueKind.Object)
+            foreach (var (property, label) in new[]
+            {
+                ("fideRating", "fide"), ("uscfRating", "uscf"), ("ecfRating", "ecf"),
+            })
+                if (profile.TryGetProperty(property, out var rating) && rating.TryGetInt32(out int value))
+                    ratings[label] = value;
 
         var links = new List<string> { $"https://lichess.org/@/{username}" };
         if (profile.ValueKind == JsonValueKind.Object && profile.TryGetProperty("links", out var linkValue))
@@ -152,12 +169,13 @@ public static class ChessGameFetcher
 
         return new ChessPlayerProfile(
             "lichess", username, username,
-            profile.ValueKind == JsonValueKind.Object ? String(profile, "realName") : null,
+            realName,
             profile.ValueKind == JsonValueKind.Object ? String(profile, "bio") : null,
             String(root, "title"),
             profile.ValueKind == JsonValueKind.Object ? String(profile, "country") : null,
             null,
             null,
+            PlayerAliases(username, realName),
             links.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), ratings,
             Facts(root, "createdAt", "seenAt", "playTime", "disabled", "tosViolation"));
     }
@@ -167,10 +185,17 @@ public static class ChessGameFetcher
         string escaped = Uri.EscapeDataString(user);
         string json = await GetStringWithRetryAsync($"https://api.chess.com/pub/player/{escaped}", ct);
         string statsJson = await GetStringWithRetryAsync($"https://api.chess.com/pub/player/{escaped}/stats", ct);
+        return ParseChessComProfile(json, statsJson, user);
+    }
+
+    internal static ChessPlayerProfile ParseChessComProfile(
+        string json, string statsJson, string requestedUser)
+    {
         using var doc = JsonDocument.Parse(json);
         using var statsDoc = JsonDocument.Parse(statsJson);
         var root = doc.RootElement;
-        string username = String(root, "username") ?? user;
+        string username = String(root, "username") ?? requestedUser;
+        string? realName = String(root, "name");
         var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, label) in new[]
         {
@@ -186,11 +211,17 @@ public static class ChessGameFetcher
         var links = new List<string>();
         if (String(root, "url") is { } url) links.Add(url);
         if (String(root, "country") is { } country) links.Add(country);
+        if (String(root, "twitch_url") is { } twitch) links.Add(twitch);
+        if (root.TryGetProperty("streaming_platforms", out var platforms)
+            && platforms.ValueKind == JsonValueKind.Array)
+            foreach (var platform in platforms.EnumerateArray())
+                if (String(platform, "url") is { } streamUrl) links.Add(streamUrl);
         return new ChessPlayerProfile(
-            "chesscom", username, username, String(root, "name"), null,
+            "chesscom", username, username, realName, null,
             String(root, "title"), String(root, "country"), null,
-            String(root, "avatar"), links, ratings,
-            Facts(root, "player_id", "status", "location", "joined", "last_online",
+            String(root, "avatar"), PlayerAliases(username, realName),
+            links.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), ratings,
+            Facts(root, "player_id", "@id", "status", "location", "joined", "last_online",
                 "followers", "is_streamer", "twitch_url", "league", "verified"));
     }
 
@@ -213,12 +244,16 @@ public static class ChessGameFetcher
         AddRating(text, ratings, "standard", @"(\d{3,4})\s+STANDARD\b");
         AddRating(text, ratings, "rapid", @"(\d{3,4})\s+RAPID\b");
         AddRating(text, ratings, "blitz", @"(\d{3,4})\s+BLITZ\b");
+        string? avatar = HtmlAttribute(html,
+            @"<meta[^>]+property\s*=\s*['""]og:image['""][^>]+content\s*=\s*['""]([^'""]+)")
+            ?? HtmlAttribute(html,
+                @"<img[^>]+(?:class\s*=\s*['""][^'""]*(?:profile|player)[^'""]*['""])[^>]+src\s*=\s*['""]([^'""]+)");
         return new ChessPlayerProfile(
             "fide", fideId, name, name, null,
             Match(text, @"FIDE title\s+(.+?)\s+(?:World Rank|Titles|Period)\b"),
             Match(text, @"FIDE ID\s+\d+\s+Federation\s+(.+?)\s+B-Year\b")
                 ?? Match(text, @"(?<!Chess )Federation\s+(.+?)\s+(?:B-Year|Gender|FIDE title)\b"),
-            fideId, null, [url], ratings,
+            fideId, avatar, PlayerAliases(name), [url], ratings,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["birth_year"] = Match(text, @"B-Year\s+(\d{4})\b") ?? "",
@@ -233,13 +268,18 @@ public static class ChessGameFetcher
     {
         query = query.Trim();
         if (query.Length < 2) throw new ArgumentException("FIDE search needs at least two characters.", nameof(query));
-        string url = "https://ratings.fide.com/incl_search_l.php?search="
-            + Uri.EscapeDataString(query) + "&simple=1";
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.Referrer = new Uri("https://ratings.fide.com/");
-        req.Headers.Add("X-Requested-With", "XMLHttpRequest");
-        string html = await SendStringWithRetryAsync(req, ct);
-        return ParseFideSearch(html)
+        var candidates = new Dictionary<string, FidePlayerCandidate>(StringComparer.Ordinal);
+        foreach (string term in FideSearchTerms(query))
+        {
+            string url = "https://ratings.fide.com/incl_search_l.php?search="
+                + Uri.EscapeDataString(term) + "&simple=1";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Referrer = new Uri("https://ratings.fide.com/");
+            req.Headers.Add("X-Requested-With", "XMLHttpRequest");
+            foreach (var candidate in ParseFideSearch(await SendStringWithRetryAsync(req, ct)))
+                candidates[candidate.FideId] = candidate;
+        }
+        return candidates.Values
             .OrderBy(candidate => FideCandidateScore(query, candidate.Name))
             .ThenByDescending(static candidate => candidate.Standard)
             .Take(Math.Clamp(limit, 1, 100)).ToArray();
@@ -269,7 +309,7 @@ public static class ChessGameFetcher
         foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
         {
             string body = row.Groups[1].Value;
-            var profile = Regex.Match(body, @"href\s*=\s*['""]?/profile/(\d+)['""]?[^>]*>(.*?)</a>",
+            var profile = Regex.Match(body, @"href\s*=\s*['""][^'""]*/profile/(\d+)[^'""]*['""][^>]*>(.*?)</a>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
             if (!profile.Success) continue;
             var ratings = Regex.Matches(body, @"data-label\s*=\s*['""]Rtg['""][^>]*>(.*?)</td>",
@@ -292,7 +332,7 @@ public static class ChessGameFetcher
         foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
         {
             string body = row.Groups[1].Value;
-            var profile = Regex.Match(body, @"href\s*=\s*['""]?/profile/(\d+)['""]?[^>]*>(.*?)</a>",
+            var profile = Regex.Match(body, @"href\s*=\s*['""][^'""]*/profile/(\d+)[^'""]*['""][^>]*>(.*?)</a>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
             if (!profile.Success) continue;
             int rating = IntText(Regex.Match(body, @"class\s*=\s*['""]?rating_column['""]?[^>]*>(.*?)</td>",
@@ -313,7 +353,38 @@ public static class ChessGameFetcher
         return result;
     }
 
-    private static int FideCandidateScore(string query, string candidate)
+    internal static IReadOnlyList<string> FideSearchTerms(string query)
+    {
+        query = Regex.Replace(query.Trim(), @"\s+", " ");
+        var terms = new List<string> { query };
+        string canonical = PlayerAlias.Canonical(query);
+        if (!canonical.Equals(query, StringComparison.OrdinalIgnoreCase)) terms.Add(canonical);
+        string[] names = canonical.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (names.Length >= 2)
+        {
+            string surnameFirst = $"{names[^1]}, {string.Join(' ', names[..^1])}";
+            if (!terms.Contains(surnameFirst, StringComparer.OrdinalIgnoreCase)) terms.Add(surnameFirst);
+        }
+        return terms;
+    }
+
+    internal static int? ResolveArchiveLimit(bool all, string? configuredLimit)
+    {
+        if (all) return null;
+        if (!int.TryParse(configuredLimit, out int limit) || limit <= 0)
+            throw new ArgumentException("A positive game limit is required when Ingest all games is off.",
+                nameof(configuredLimit));
+        return limit;
+    }
+
+    internal static string LichessGamesUrl(string user, int? max)
+    {
+        ValidateLimit(max);
+        string url = $"https://lichess.org/api/games/user/{Uri.EscapeDataString(user)}";
+        return max is { } limit ? $"{url}?max={limit}" : url;
+    }
+
+    internal static int FideCandidateScore(string query, string candidate)
     {
         string q = PlayerAlias.Canonical(query);
         string name = PlayerAlias.Canonical(candidate);
@@ -391,9 +462,34 @@ public static class ChessGameFetcher
         return Regex.Replace(System.Net.WebUtility.HtmlDecode(value), @"\s+", " ").Trim();
     }
 
+    private static string? HtmlAttribute(string html, string pattern)
+    {
+        var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        return match.Success ? System.Net.WebUtility.HtmlDecode(match.Groups[1].Value).Trim() : null;
+    }
+
+    private static IReadOnlyList<string> PlayerAliases(params string?[] values)
+    {
+        var aliases = values.Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!.Trim()).ToList();
+        foreach (string value in aliases.ToArray())
+        {
+            string canonical = PlayerAlias.Canonical(value);
+            if (canonical.Length > 0) aliases.Add(canonical);
+        }
+        return aliases.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     private static void AddRating(string text, Dictionary<string, int> ratings, string key, string pattern)
     {
         if (int.TryParse(Match(text, pattern), out int value)) ratings[key] = value;
+    }
+
+    private static string NormalizeSite(string site) => site.Trim().ToLowerInvariant();
+
+    private static void ValidateLimit(int? max)
+    {
+        if (max is <= 0) throw new ArgumentOutOfRangeException(nameof(max), "Game limit must be positive.");
     }
 
     private static async Task<string> GetStringWithRetryAsync(string url, CancellationToken ct)
@@ -442,6 +538,7 @@ public sealed record ChessPlayerProfile(
     string? Federation,
     string? FideId,
     string? AvatarUrl,
+    IReadOnlyList<string> Aliases,
     IReadOnlyList<string> Links,
     IReadOnlyDictionary<string, int> Ratings,
     IReadOnlyDictionary<string, string> Facts);

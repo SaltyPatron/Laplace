@@ -242,9 +242,10 @@ BEGIN
 
     -- (II): mixed cell refolds to the canonical fold of its surviving row — the
     -- same native scalar, neutral prior
-    expect := laplace.laplace_glicko2_accumulate_games(
+    expect := laplace.laplace_glicko2_accumulate_period(
         consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
-        consensus.glicko2_neutral_mu(), phi_w, 3, 3 * s_conf, consensus.glicko2_tau());
+        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi_w]::bigint[],
+        ARRAY[3]::bigint[], ARRAY[3 * s_conf]::bigint[], consensus.glicko2_tau());
     SELECT * INTO row_c FROM laplace.consensus
     WHERE subject_id = subj AND type_id = rel_p AND object_id = o2;
     IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: mixed cell culled'; END IF;
@@ -258,9 +259,10 @@ BEGIN
     END IF;
 
     -- (IV): same law on a HOT relation; the refolded row stays in its hash leaf
-    expect := laplace.laplace_glicko2_accumulate_games(
+    expect := laplace.laplace_glicko2_accumulate_period(
         consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
-        consensus.glicko2_neutral_mu(), phi_w, 2, 2 * s_conf, consensus.glicko2_tau());
+        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi_w]::bigint[],
+        ARRAY[2]::bigint[], ARRAY[2 * s_conf]::bigint[], consensus.glicko2_tau());
     SELECT * INTO row_c FROM laplace.consensus
     WHERE subject_id = subj AND type_id = rel_hot AND object_id = o4;
     IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: hot mixed cell culled'; END IF;
@@ -276,12 +278,14 @@ BEGIN
 
     -- (VI): canonical order pin — survivors refold by (last_observed_at, id),
     -- t1 then t3, regardless of the deleted t2 period between them
-    step := laplace.laplace_glicko2_accumulate_games(
+    step := laplace.laplace_glicko2_accumulate_period(
         consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
-        consensus.glicko2_neutral_mu(), phi_w, 1, win, consensus.glicko2_tau());
-    expect := laplace.laplace_glicko2_accumulate_games(
+        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi_w]::bigint[],
+        ARRAY[1]::bigint[], ARRAY[win]::bigint[], consensus.glicko2_tau());
+    expect := laplace.laplace_glicko2_accumulate_period(
         step.rating, step.rd, step.volatility,
-        consensus.glicko2_neutral_mu(), phi_w, 2, s_conf, consensus.glicko2_tau());
+        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi_w]::bigint[],
+        ARRAY[2]::bigint[], ARRAY[s_conf]::bigint[], consensus.glicko2_tau());
     SELECT * INTO row_c FROM laplace.consensus
     WHERE subject_id = subj AND type_id = rel_p AND object_id = o5;
     IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: interleaved cell culled'; END IF;

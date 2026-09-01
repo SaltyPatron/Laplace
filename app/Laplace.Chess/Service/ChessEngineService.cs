@@ -143,21 +143,13 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Opening explorer over exact successors projected from line trajectories. Player
-    /// repertoire is read through playing→line provenance rather than per-ply MOVE evidence.
-    ///
-    /// MEASURED 2026-08-21: the deployed pre-repair corpus held 0 MOVE attestations because
-    /// the typed-trajectory refactor stopped materializing its bounded transition cells.
-    /// Current record paths restore position→position MOVE observations as games arrive;
-    /// an older corpus still needs replay before those rows exist. Until then chess.moves()
-    /// returns nothing and this path is carried by trajectory successors alone. Do NOT make
-    /// chess.moves synthesise rows to look populated: tried in #1274, reverted in #1276 --
-    /// a synthetic row flips hasRating true with eff_mu 0 and every move reported -1500.
-    ///
-    /// LATENCY, measured after the revert: geometry_successors_typed on the START position
-    /// alone is 136.7s (the position is a constituent of ~1.64M projection trajectories, so
-    /// the containment probe unpacks the corpus to count 20 successors). Explore's ~145s on
-    /// hot positions is that surface, not the join #1276 removed.
+    /// Opening explorer over the exact position --MOVE--&gt; position cells deposited for
+    /// every witnessed ply. These cells are the content-addressed transition index: one
+    /// deterministic state edge, independently witnessed by its playing contexts and rated
+    /// by consensus. Reading the same fact by unpacking every complete game trajectory made
+    /// the initial position inspect roughly 1.64 million containers (136.7 seconds measured),
+    /// so the request path must use the keyed transition relation directly.
+    /// Player repertoire remains a provenance-scoped projection through playing contexts.
     /// </summary>
     public async Task<ChessExploreResponse> ExploreAsync(
         string fen, string? player = null, int limit = 12, CancellationToken ct = default)
@@ -182,8 +174,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         }
 
         int candidateLimit = Math.Max(limit, legal.Count);
-        var successorTask = NpgsqlSubstrateReads.ChessTrajectorySuccessorsAsync(
-            _ds!, rootId.ToBytes(), candidateLimit, ct);
         var materializedTask = NpgsqlSubstrateReads.ChessMovesAsync(
             _ds!, rootId.ToBytes(), candidateLimit, ct);
         Task<IReadOnlyList<NpgsqlSubstrateReads.ChessPlayerMoveRow>>? playerTask = null;
@@ -192,7 +182,6 @@ public sealed class ChessEngineService : IAsyncDisposable
                 _ds!, rootId.ToBytes(), ChessVocabulary.PlayerId(player).ToBytes(),
                 state.Board.WhiteToMove, candidateLimit, ct);
 
-        var successorRows = await successorTask;
         var materializedRows = await materializedTask;
         var rows = new List<ChessExploreMove>(candidateLimit);
         var playerStats = new Dictionary<Hash128, (long Games, double Score)>();
@@ -204,31 +193,10 @@ public sealed class ChessEngineService : IAsyncDisposable
                 playerStats[Hash128.FromBytes(pr.NextPosition)] = (pr.Games, pr.Score);
         }
 
-        var materialized = materializedRows.ToDictionary(
-            static r => Hash128.FromBytes(r.NextPosition));
-        var seenChildren = new HashSet<Hash128>();
-        foreach (var sr in successorRows)
-        {
-            var childId = Hash128.FromBytes(sr.NextPosition);
-            if (!byChild.TryGetValue(childId, out var mv)) continue;
-            seenChildren.Add(childId);
-            var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
-            bool hasRating = materialized.TryGetValue(childId, out var mr);
-            rows.Add(new ChessExploreMove(
-                mv.Uci, mv.San,
-                hasRating ? mr.EffMu - GlickoPriors.NeutralMu / 1e9 : 0d,
-                hasRating ? mr.Rd : 0d,
-                Math.Max(sr.Seen, hasRating ? mr.WitnessCount : 0L),
-                ps.Games,
-                ps.Games > 0 ? ps.Score : null));
-        }
-
-        // Compatibility with explicitly promoted/hot MOVE cells deposited before this
-        // normalization: do not hide one merely because no line trajectory is resident.
         foreach (var mr in materializedRows)
         {
             var childId = Hash128.FromBytes(mr.NextPosition);
-            if (!seenChildren.Add(childId) || !byChild.TryGetValue(childId, out var mv)) continue;
+            if (!byChild.TryGetValue(childId, out var mv)) continue;
             var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
             rows.Add(new ChessExploreMove(
                 mv.Uci, mv.San, mr.EffMu - GlickoPriors.NeutralMu / 1e9,
@@ -254,17 +222,15 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)
     {
-        var engine = await EngineAsync(ct);
-        var state = _modality!.FromFen(fen);
-        if (_modality!.Terminal(state) is { } term)
-            return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
-
-        var cands = await engine.ScoreMovesAsync(state, ct);
-        var chosen = ModalityEngine<ChessState, ChessMove>.Select(cands, temperature, Rng());
-        var next = chosen.Next;
-        var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
-        return new ChessBestMove(chosen.Action.ToUci(), next.Board.ToFen(), chosen.EffMu / 1e9,
-            chosen.Rated, status != "ongoing", status);
+        // The historical implementation selected directly from one-ply consensus and used
+        // reservoir randomness when every legal edge had the neutral prior.  That was the
+        // path behind the 0-200 substrate-lift result: it bypassed material, tactics, Syzygy,
+        // and deeper board trajectories.  There is one playing decision path now.  Keep this
+        // API shape for callers, but route it through the same full search used by HTTP, UCI,
+        // connected play, Lichess, and the lift experiment.
+        _ = temperature;
+        return await BestMoveSearchAsync(fen, depth: 4, substrate: true, moves: null, ct)
+            .ConfigureAwait(false);
     }
 
 

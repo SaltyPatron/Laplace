@@ -34,19 +34,7 @@ internal sealed class ExploreDecomposeService
 
         var utf8 = Encoding.UTF8.GetBytes(text);
         var root = tree.GetNode(tree.NaturalUnitIndex());
-        var nodes = new List<DecomposeNodeRow>((int)tree.NodeCount);
-
-        for (uint i = 0; i < tree.NodeCount; i++)
-        {
-            var n = tree.GetNode(i);
-            nodes.Add(new DecomposeNodeRow(
-                Ordinal: i,
-                IdHex: Convert.ToHexStringLower(n.Id.ToBytes()),
-                Label: Encoding.UTF8.GetString(utf8, (int)n.TextRangeOff, (int)n.TextRangeLen),
-                Tier: n.Tier,
-                TextOffset: (int)n.TextRangeOff,
-                TextLength: (int)n.TextRangeLen));
-        }
+        var nodes = EmittedDecomposition(tree, utf8);
 
         return new DecomposeResponse(
             Text: text,
@@ -77,18 +65,7 @@ internal sealed class ExploreDecomposeService
         double cx, cy, cz, cm;
         unsafe { cx = unit.Coord[0]; cy = unit.Coord[1]; cz = unit.Coord[2]; cm = unit.Coord[3]; }
 
-        var decomposition = new List<DecomposeNodeRow>((int)tree.NodeCount);
-        for (uint i = 0; i < tree.NodeCount; i++)
-        {
-            var n = tree.GetNode(i);
-            decomposition.Add(new DecomposeNodeRow(
-                Ordinal: i,
-                IdHex: Convert.ToHexStringLower(n.Id.ToBytes()),
-                Label: Encoding.UTF8.GetString(utf8, (int)n.TextRangeOff, (int)n.TextRangeLen),
-                Tier: n.Tier,
-                TextOffset: (int)n.TextRangeOff,
-                TextLength: (int)n.TextRangeLen));
-        }
+        var decomposition = EmittedDecomposition(tree, utf8);
 
         var wkt = BuildTrajectoryWkt(tree, tier: 1) ?? BuildTrajectoryWkt(tree, tier: 0);
 
@@ -97,6 +74,30 @@ internal sealed class ExploreDecomposeService
             Cx: cx, Cy: cy, Cz: cz, Cm: cm,
             TrajectoryWkt: wkt,
             Decomposition: decomposition);
+    }
+
+    private static IReadOnlyList<DecomposeNodeRow> EmittedDecomposition(
+        TierTree tree, byte[] utf8)
+    {
+        var rows = new List<DecomposeNodeRow>(tree.NodeCount);
+        for (uint i = 0; i < tree.NodeCount; i++)
+        {
+            var n = tree.GetNode(i);
+            // Tier is a floor. Single-child, span-identical wrappers collapse to
+            // their child and are not stored substrate nodes. Showing those internal
+            // parser frames made one word appear to contain itself at tiers 3 and 4
+            // (and every one-codepoint grapheme appear twice), even though all rows
+            // shared the same identity. Display exactly the nodes the content spine emits.
+            if (n.Tier != 0 && !tree.ShouldEmitCompositional(i)) continue;
+            rows.Add(new DecomposeNodeRow(
+                Ordinal: i,
+                IdHex: Convert.ToHexStringLower(n.Id.ToBytes()),
+                Label: Encoding.UTF8.GetString(utf8, (int)n.TextRangeOff, (int)n.TextRangeLen),
+                Tier: n.Tier,
+                TextOffset: (int)n.TextRangeOff,
+                TextLength: (int)n.TextRangeLen));
+        }
+        return rows;
     }
 
     private static string? BuildTrajectoryWkt(TierTree tree, byte tier)

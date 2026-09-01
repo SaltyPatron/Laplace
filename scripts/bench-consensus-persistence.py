@@ -67,7 +67,7 @@ def main():
                     array_agg('2026-01-01'::timestamptz) ts
                 FROM inputs GROUP BY t""", (args.rows,args.distinct_inputs))
             fold = 'SELECT consensus.upsert_type(t,ss,oo,phis,games,sums,ts) FROM batch'
-            q.execute("SELECT pg_get_functiondef('consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[])'::regprocedure)")
+            q.execute("SELECT pg_get_functiondef('consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[],bigint[],bigint[],bigint[],bigint[],bigint[])'::regprocedure)")
             original = q.fetchone()[0]
             candidate = None
             if args.candidate_module:

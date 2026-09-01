@@ -9,6 +9,10 @@ DECLARE
     n2            bytea := public.laplace_hash128_blake3('test/explore/n2');
     n3            bytea := public.laplace_hash128_blake3('test/explore/n3');
     n4            bytea := public.laplace_hash128_blake3('test/explore/n4');
+    m1            bytea := public.laplace_hash128_blake3('test/explore/m1');
+    m2            bytea := public.laplace_hash128_blake3('test/explore/m2');
+    m3            bytea := public.laplace_hash128_blake3('test/explore/m3');
+    m4            bytea := public.laplace_hash128_blake3('test/explore/m4');
     rel_a         bytea := laplace.relation_type_id('IS_A');
     rel_b         bytea := laplace.relation_type_id('HAS_PART');
     rel_dynamic   bytea := public.laplace_hash128_blake3('test/explore/REL_DYNAMIC');
@@ -26,12 +30,16 @@ DECLARE
     snapshot_b    text[];
     zero_rows     bigint;
     revisit_rows  bigint;
+    branch_rows   bigint;
+    wrong_branches bigint;
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
            (s1, 0, type_t, src), (s2, 0, type_t, src),
            (n1, 0, type_t, src), (n2, 0, type_t, src),
            (n3, 0, type_t, src), (n4, 0, type_t, src),
+           (m1, 0, type_t, src), (m2, 0, type_t, src),
+           (m3, 0, type_t, src), (m4, 0, type_t, src),
            (rel_dynamic, 0, type_t, src)
     ON CONFLICT DO NOTHING;
 
@@ -55,7 +63,15 @@ BEGIN
       (laplace.consensus_id(s2, rel_b, n4), s2, rel_b, n4,
        neutral + 150000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
       (laplace.consensus_id(n4, rel_a, s2), n4, rel_a, s2,
-       neutral + 150000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00');
+       neutral + 150000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
+      (laplace.consensus_id(n1, rel_a, m1), n1, rel_a, m1,
+       neutral + 140000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
+      (laplace.consensus_id(n1, rel_b, m2), n1, rel_b, m2,
+       neutral + 130000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
+      (laplace.consensus_id(n2, rel_a, m3), n2, rel_a, m3,
+       neutral + 120000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
+      (laplace.consensus_id(n2, rel_b, m4), n2, rel_b, m4,
+       neutral + 110000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00');
 
     -- The frontier executor must be the set form of the established scalar
     -- contract, not a subtly different scan hidden behind a batch signature.
@@ -171,7 +187,29 @@ BEGIN
         RAISE EXCEPTION 'FAIL: multi-hop crawl emitted % back-links to its seed', revisit_rows;
     END IF;
 
-    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self/revisit suppression, and total tie order all hold';
+    -- Fanout belongs to EACH frontier member. With n1 and n2 retained at hop 1,
+    -- both must contribute their two children at hop 2. The old global beam
+    -- returned only two of these four and made the web stop after its first star.
+    SELECT count(*) INTO branch_rows
+    FROM consensus.explore_web(s1, 2, 2) w
+    WHERE w.hop = 2;
+    IF branch_rows <> 4 THEN
+        RAISE EXCEPTION 'FAIL: per-parent fanout expected 4 hop-2 discoveries, got %', branch_rows;
+    END IF;
+
+    SELECT count(*) INTO wrong_branches
+    FROM (
+        SELECT w.source_id, count(*) AS children
+        FROM consensus.explore_web(s1, 2, 2) w
+        WHERE w.hop = 2 AND w.source_id IN (n1, n2)
+        GROUP BY w.source_id
+        HAVING count(*) <> 2
+    ) q;
+    IF wrong_branches <> 0 THEN
+        RAISE EXCEPTION 'FAIL: % hop-1 parents did not receive their own fanout quota', wrong_branches;
+    END IF;
+
+    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, per-parent expansion, self/revisit suppression, and total tie order all hold';
 END $$;
-NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self/revisit suppression, and total tie order all hold
+NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, per-parent expansion, self/revisit suppression, and total tie order all hold
 ROLLBACK;

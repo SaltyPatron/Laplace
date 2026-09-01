@@ -12,6 +12,8 @@ namespace Laplace.Engine.Core;
 /// </summary>
 public static unsafe class ChessTransitionFloor
 {
+    public enum LookupSource : byte { None, Persistent, Novel }
+
     public const uint Magic = 0x5448434Cu; // 'LCHT'
     public const uint Version = 1;
     public const int HeaderSize = 64;
@@ -143,17 +145,39 @@ public static unsafe class ChessTransitionFloor
     public static int NovelCount => Novel.Count;
 
     public static bool TryLookup(Hash128 key, out Hash128 toId)
+        => TryLookup(key, out toId, out _);
+
+    /// <summary>
+    /// Resolve one deterministic transition and report whether it came from the installed
+    /// memory-mapped catalog or from a transition composed earlier in this process.  Keeping
+    /// those two sources distinct makes the runtime receipt prove that the generated catalog
+    /// is actually serving decisions instead of counting process-local saturation as a ROM hit.
+    /// </summary>
+    public static bool TryLookup(Hash128 key, out Hash128 toId, out LookupSource source)
     {
-        if (Novel.TryGetValue(key, out toId)) return true;
+        if (Novel.TryGetValue(key, out toId))
+        {
+            source = LookupSource.Novel;
+            return true;
+        }
         toId = default;
-        if (_base == null || _count == 0) return false;
+        if (_base == null || _count == 0)
+        {
+            source = LookupSource.None;
+            return false;
+        }
         long lo = 0, hi = _count - 1;
         while (lo <= hi)
         {
             long mid = lo + ((hi - lo) >> 1);
             var rec = (TransitionRec*)(_base + HeaderSize + mid * RecordSize);
             int cmp = Compare(rec->Key, key);
-            if (cmp == 0) { toId = rec->To; return true; }
+            if (cmp == 0)
+            {
+                toId = rec->To;
+                source = LookupSource.Persistent;
+                return true;
+            }
             if (cmp < 0) lo = mid + 1;
             else
             {
@@ -161,6 +185,7 @@ public static unsafe class ChessTransitionFloor
                 hi = mid - 1;
             }
         }
+        source = LookupSource.None;
         return false;
     }
 

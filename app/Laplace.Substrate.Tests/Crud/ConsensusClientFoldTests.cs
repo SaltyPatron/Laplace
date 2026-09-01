@@ -8,7 +8,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// The inline fold (consensus_upsert at apply time) must be numerically exact
 /// against the native glicko-2 scalar it dispatches to. Parity is checked the
 /// strongest way available: apply a batch through the writer, then recompute
-/// every edge with laplace_glicko2_accumulate_games() directly and demand
+/// every edge with laplace_glicko2_accumulate_period() directly and demand
 /// exact int64 equality on rating/rd/volatility, plus witness accumulation and
 /// last_observed_at semantics across a second batch folding against priors
 /// (the rating period IS the batch).
@@ -45,8 +45,9 @@ public class ConsensusClientFoldTests
         long priorRating, long priorRd, long priorVol, long phi, long games, long sumScore)
     {
         await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT (r).rating, (r).rd, (r).volatility FROM (SELECT laplace.laplace_glicko2_accumulate_games("
-            + "$1, $2, $3, consensus.glicko2_neutral_mu(), $4, $5, $6, consensus.glicko2_tau()) AS r) s");
+            "SELECT (r).rating, (r).rd, (r).volatility FROM (SELECT laplace.laplace_glicko2_accumulate_period("
+            + "$1, $2, $3, ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[$4]::bigint[], "
+            + "ARRAY[$5]::bigint[], ARRAY[$6]::bigint[], consensus.glicko2_tau()) AS r) s");
         cmd.Parameters.AddWithValue(priorRating);
         cmd.Parameters.AddWithValue(priorRd);
         cmd.Parameters.AddWithValue(priorVol);
