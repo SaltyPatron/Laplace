@@ -35,60 +35,73 @@ public sealed class CrushAdapter : IAgentTraceAdapter
             || !SqliteSniff.HasTable(conn, "messages"))
             yield break;
 
-        var sessions = new List<(string Id, string? Title, long Created, long Updated, double Cost,
-            long PromptTokens, long CompletionTokens)>();
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT id, title, created_at, updated_at, cost, "
-                + "prompt_tokens, completion_tokens FROM sessions";
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                sessions.Add((r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
-                    r.IsDBNull(2) ? 0 : r.GetInt64(2), r.IsDBNull(3) ? 0 : r.GetInt64(3),
-                    r.IsDBNull(4) ? 0 : r.GetDouble(4),
-                    r.IsDBNull(5) ? 0 : r.GetInt64(5), r.IsDBNull(6) ? 0 : r.GetInt64(6)));
-        }
+        // One ordered join replaces the old query-per-session loop. This is a foreign
+        // SQLite codec, but it is still on the ingest critical path: thousands of
+        // project sessions must not mean thousands of commands before compose begins.
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT s.id, s.title, s.created_at, s.updated_at, s.cost, "
+            + "s.prompt_tokens, s.completion_tokens, "
+            + "m.role, m.parts, m.model, m.created_at "
+            + "FROM sessions s LEFT JOIN messages m ON m.session_id = s.id "
+            + "ORDER BY s.id, m.created_at, m.id";
+        using var r = cmd.ExecuteReader();
 
-        foreach (var s in sessions)
-        {
-            ct.ThrowIfCancellationRequested();
-            var turns = new List<AgentTurn>();
-            var callsById = new Dictionary<string, (int TurnAt, AgentToolCall Call)>(StringComparer.Ordinal);
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "SELECT role, parts, model, created_at FROM messages "
-                    + "WHERE session_id = $s ORDER BY created_at, id";
-                cmd.Parameters.AddWithValue("$s", s.Id);
-                using var r = cmd.ExecuteReader();
-                while (r.Read())
-                {
-                    string role = AgentRoles.Normalize(r.GetString(0));
-                    long created = r.IsDBNull(3) ? 0 : r.GetInt64(3);
-                    long ts = created > 10_000_000_000L ? created * 1000 : created * 1_000_000;
-                    string? model = r.IsDBNull(2) ? null : r.GetString(2);
-                    if (BuildTurn(turns, callsById, role, r.IsDBNull(1) ? "[]" : r.GetString(1),
-                            model, ts) is { } turn)
-                        turns.Add(turn);
-                }
-            }
-            if (turns.Count == 0) continue;
+        string? sessionId = null, title = null;
+        long sessionCreated = 0, sessionUpdated = 0, promptTokens = 0, completionTokens = 0;
+        double cost = 0;
+        var turns = new List<AgentTurn>();
+        var callsById = new Dictionary<string, (int TurnAt, AgentToolCall Call)>(StringComparer.Ordinal);
 
+        AgentSession? FlushSession()
+        {
+            if (sessionId is null || turns.Count == 0) return null;
             var meta = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (s.Cost > 0)
-                meta["totalCost"] = s.Cost.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (s.PromptTokens > 0) meta["prompt_tokens"] = s.PromptTokens.ToString();
-            if (s.CompletionTokens > 0) meta["completion_tokens"] = s.CompletionTokens.ToString();
-
-            yield return new AgentSession(
-                ProviderKey, AgentTraceEmitter.SanitizeKey(s.Id),
-                s.Created > 10_000_000_000L ? s.Created * 1000 : s.Created * 1_000_000,
-                s.Updated > 10_000_000_000L ? s.Updated * 1000 : s.Updated * 1_000_000,
+            if (cost > 0)
+                meta["totalCost"] = cost.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (promptTokens > 0) meta["prompt_tokens"] = promptTokens.ToString();
+            if (completionTokens > 0) meta["completion_tokens"] = completionTokens.ToString();
+            var result = new AgentSession(
+                ProviderKey, AgentTraceEmitter.SanitizeKey(sessionId),
+                sessionCreated > 10_000_000_000L ? sessionCreated * 1000 : sessionCreated * 1_000_000,
+                sessionUpdated > 10_000_000_000L ? sessionUpdated * 1000 : sessionUpdated * 1_000_000,
                 turns)
             {
-                Title = s.Title,
+                Title = title,
                 Meta = meta,
             };
+            turns = new List<AgentTurn>();
+            callsById = new Dictionary<string, (int TurnAt, AgentToolCall Call)>(StringComparer.Ordinal);
+            return result;
         }
+
+        while (r.Read())
+        {
+            ct.ThrowIfCancellationRequested();
+            string rowSessionId = r.GetString(0);
+            if (!StringComparer.Ordinal.Equals(sessionId, rowSessionId))
+            {
+                if (FlushSession() is { } session) yield return session;
+                sessionId = rowSessionId;
+                title = r.IsDBNull(1) ? null : r.GetString(1);
+                sessionCreated = r.IsDBNull(2) ? 0 : r.GetInt64(2);
+                sessionUpdated = r.IsDBNull(3) ? 0 : r.GetInt64(3);
+                cost = r.IsDBNull(4) ? 0 : r.GetDouble(4);
+                promptTokens = r.IsDBNull(5) ? 0 : r.GetInt64(5);
+                completionTokens = r.IsDBNull(6) ? 0 : r.GetInt64(6);
+            }
+
+            if (r.IsDBNull(7)) continue;
+            string role = AgentRoles.Normalize(r.GetString(7));
+            long created = r.IsDBNull(10) ? 0 : r.GetInt64(10);
+            long ts = created > 10_000_000_000L ? created * 1000 : created * 1_000_000;
+            string? model = r.IsDBNull(9) ? null : r.GetString(9);
+            if (BuildTurn(turns, callsById, role, r.IsDBNull(8) ? "[]" : r.GetString(8),
+                    model, ts) is { } turn)
+                turns.Add(turn);
+        }
+
+        if (FlushSession() is { } finalSession) yield return finalSession;
     }
 
     private static AgentTurn? BuildTurn(

@@ -362,6 +362,8 @@ public sealed class IngestMutexGateTests
             "Npgsql", "ConsensusAccumulatingWriter.cs"));
         var installer = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
             "sql", "functions", "highway", "highway_mask_deposit.sql.in"));
+        var native = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
+            "src", "highway_mask.c"));
 
         // The gate is that the caller and the installed surface agree -- NOT that they
         // agree on `laplace.`. This previously pinned the pre-migration name in both
@@ -378,9 +380,15 @@ public sealed class IngestMutexGateTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("PERFORM pg_advisory_xact_lock", installer,
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("ORDER BY e.id, e.tier", installer,
+        Assert.Contains("AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_deposit'", installer,
             StringComparison.Ordinal);
-        Assert.Contains("FOR NO KEY UPDATE OF e", installer,
+        Assert.Contains("LANGUAGE C VOLATILE", installer,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("LANGUAGE plpgsql", installer,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY e.id, e.tier", native,
+            StringComparison.Ordinal);
+        Assert.Contains("FOR NO KEY UPDATE OF e", native,
             StringComparison.Ordinal);
     }
 

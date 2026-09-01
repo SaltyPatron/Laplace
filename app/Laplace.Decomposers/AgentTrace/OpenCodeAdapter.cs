@@ -55,57 +55,77 @@ public sealed class OpenCodeAdapter : IAgentTraceAdapter
         using var conn = SqliteSniff.OpenReadOnly(dbPath);
         if (conn is null) yield break;
 
-        var sessions = new List<(string Id, string? Title, long Created, long Updated, string? ModelJson)>();
-        using (var cmd = conn.CreateCommand())
+        // One ordered join streams the complete container. The old shape issued one
+        // message query per session and then one part query per message (and attempted
+        // those part queries while the message reader was still open). Large OpenCode
+        // histories therefore paid O(sessions + messages) SQLite commands before any
+        // substrate work began. Group the joined rows here; SQLite owns the scan/order
+        // once and the codec only reconstructs its nested JSON records.
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT s.id, s.title, s.time_created, s.time_updated, "
+            + "m.id, m.data, m.time_created, p.data "
+            + "FROM session s "
+            + "LEFT JOIN message m ON m.session_id = s.id "
+            + "LEFT JOIN part p ON p.message_id = m.id "
+            + "ORDER BY s.id, m.time_created, m.id, p.id";
+        using var r = cmd.ExecuteReader();
+
+        string? sessionId = null, title = null, messageId = null, messageJson = null;
+        long sessionCreated = 0, sessionUpdated = 0, messageTs = 0;
+        var turns = new List<AgentTurn>();
+        var parts = new List<string>();
+
+        void FlushMessage()
         {
-            cmd.CommandText = "SELECT id, title, time_created, time_updated, model FROM session";
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                sessions.Add((r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
-                    r.IsDBNull(2) ? 0 : r.GetInt64(2), r.IsDBNull(3) ? 0 : r.GetInt64(3),
-                    r.IsDBNull(4) ? null : r.GetString(4)));
+            if (messageId is not null
+                && BuildTurn(turns.Count, messageJson ?? "{}", parts, messageTs) is { } turn)
+                turns.Add(turn);
+            messageId = null;
+            messageJson = null;
+            messageTs = 0;
+            parts.Clear();
         }
 
-        foreach (var s in sessions)
+        AgentSession? FlushSession()
+        {
+            FlushMessage();
+            if (sessionId is null || turns.Count == 0) return null;
+            var result = new AgentSession(
+                ProviderKey, AgentTraceEmitter.SanitizeKey(sessionId),
+                AdapterJson.MsUs(sessionCreated), AdapterJson.MsUs(sessionUpdated), turns)
+            {
+                Title = title,
+            };
+            turns = new List<AgentTurn>();
+            return result;
+        }
+
+        while (r.Read())
         {
             ct.ThrowIfCancellationRequested();
-            var turns = new List<AgentTurn>();
-            using (var cmd = conn.CreateCommand())
+            string rowSessionId = r.GetString(0);
+            if (!StringComparer.Ordinal.Equals(sessionId, rowSessionId))
             {
-                cmd.CommandText =
-                    "SELECT m.id, m.data, m.time_created FROM message m "
-                    + "WHERE m.session_id = $s ORDER BY m.time_created, m.id";
-                cmd.Parameters.AddWithValue("$s", s.Id);
-                using var r = cmd.ExecuteReader();
-                while (r.Read())
-                {
-                    string messageId = r.GetString(0);
-                    string data = r.IsDBNull(1) ? "{}" : r.GetString(1);
-                    long ts = AdapterJson.MsUs(r.IsDBNull(2) ? null : r.GetInt64(2));
-                    var parts = ReadDbParts(conn, messageId);
-                    if (BuildTurn(turns.Count, data, parts, ts) is { } turn) turns.Add(turn);
-                }
+                if (FlushSession() is { } session) yield return session;
+                sessionId = rowSessionId;
+                title = r.IsDBNull(1) ? null : r.GetString(1);
+                sessionCreated = r.IsDBNull(2) ? 0 : r.GetInt64(2);
+                sessionUpdated = r.IsDBNull(3) ? 0 : r.GetInt64(3);
             }
-            if (turns.Count == 0) continue;
-            yield return new AgentSession(
-                ProviderKey, AgentTraceEmitter.SanitizeKey(s.Id),
-                AdapterJson.MsUs(s.Created), AdapterJson.MsUs(s.Updated), turns)
-            {
-                Title = s.Title,
-            };
-        }
-    }
 
-    private static List<string> ReadDbParts(SqliteConnection conn, string messageId)
-    {
-        var parts = new List<string>();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT data FROM part WHERE message_id = $m ORDER BY id";
-        cmd.Parameters.AddWithValue("$m", messageId);
-        using var r = cmd.ExecuteReader();
-        while (r.Read())
-            if (!r.IsDBNull(0)) parts.Add(r.GetString(0));
-        return parts;
+            string? rowMessageId = r.IsDBNull(4) ? null : r.GetString(4);
+            if (!StringComparer.Ordinal.Equals(messageId, rowMessageId))
+            {
+                FlushMessage();
+                messageId = rowMessageId;
+                messageJson = r.IsDBNull(5) ? "{}" : r.GetString(5);
+                messageTs = AdapterJson.MsUs(r.IsDBNull(6) ? null : r.GetInt64(6));
+            }
+            if (!r.IsDBNull(7)) parts.Add(r.GetString(7));
+        }
+
+        if (FlushSession() is { } finalSession) yield return finalSession;
     }
 
     // ── flat-JSON era ─────────────────────────────────────────────────────────────

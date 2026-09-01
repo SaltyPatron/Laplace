@@ -1,0 +1,126 @@
+-- Native deposit laws: canonical lookup, dynamic IS_A-family fallback,
+-- duplicate collapse, OR accumulation, accurate update count, and strict ids.
+CREATE EXTENSION IF NOT EXISTS postgis;
+NOTICE:  extension "postgis" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+NOTICE:  extension "laplace_geom" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+NOTICE:  extension "laplace_substrate" already exists, skipping
+BEGIN;
+CREATE TEMP TABLE deposit_fixtures AS
+SELECT * FROM (VALUES
+    ('entity_a', decode(repeat('a7', 16), 'hex')),
+    ('entity_b', decode(repeat('a8', 16), 'hex')),
+    ('missing',  decode(repeat('a9', 16), 'hex')),
+    ('dynamic',  decode(repeat('da', 16), 'hex')),
+    ('unknown',  decode(repeat('db', 16), 'hex')),
+    ('type',     decode(repeat('dc', 16), 'hex'))
+) v(name, id);
+SELECT 6
+INSERT INTO laplace.entities (id, tier, type_id)
+SELECT id, 2::smallint, (SELECT id FROM deposit_fixtures WHERE name = 'type')
+FROM deposit_fixtures WHERE name IN ('entity_a', 'entity_b');
+INSERT 0 2
+-- The dynamic relation has no highway slot. Its IS_A object does.
+INSERT INTO laplace.consensus
+    (id, subject_id, type_id, object_id, rating, rd, volatility,
+     witness_count, last_observed_at)
+VALUES
+    (decode(repeat('ed', 16), 'hex'),
+     (SELECT id FROM deposit_fixtures WHERE name = 'dynamic'),
+     laplace.relation_type_id('IS_A'),
+     laplace.relation_type_id('HAS_PART'),
+     1500000000000, 350000000000, 60000000, 1, now());
+INSERT 0 1
+WITH f AS (SELECT name, id FROM deposit_fixtures)
+SELECT consensus.highway_mask_deposit(
+    ARRAY[(SELECT id FROM f WHERE name = 'entity_a'),
+          (SELECT id FROM f WHERE name = 'entity_a'),
+          (SELECT id FROM f WHERE name = 'entity_a'),
+          (SELECT id FROM f WHERE name = 'entity_b'),
+          (SELECT id FROM f WHERE name = 'entity_b'),
+          (SELECT id FROM f WHERE name = 'missing')],
+    ARRAY[laplace.relation_type_id('IS_A'),
+          laplace.relation_type_id('HAS_PART'),
+          laplace.relation_type_id('IS_A'),
+          (SELECT id FROM f WHERE name = 'dynamic'),
+          (SELECT id FROM f WHERE name = 'unknown'),
+          laplace.relation_type_id('IS_A')]) AS first_updated;
+ first_updated 
+---------------
+             2
+(1 row)
+
+SELECT f.name, consensus.highway_mask_bits(e.highway_mask) @>
+       CASE f.name
+         WHEN 'entity_a' THEN ARRAY[consensus.relation_highway_bit(laplace.relation_type_id('IS_A')),
+                                    consensus.relation_highway_bit(laplace.relation_type_id('HAS_PART'))]
+         ELSE ARRAY[consensus.relation_highway_bit(laplace.relation_type_id('HAS_PART'))]
+       END AS expected_bits
+FROM laplace.entities e
+JOIN deposit_fixtures f ON f.id = e.id
+ORDER BY f.name;
+   name   | expected_bits 
+----------+---------------
+ entity_a | t
+ entity_b | t
+(2 rows)
+
+WITH f AS (SELECT name, id FROM deposit_fixtures)
+SELECT consensus.highway_mask_deposit(
+    ARRAY[(SELECT id FROM f WHERE name = 'entity_a'),
+          (SELECT id FROM f WHERE name = 'entity_b')],
+    ARRAY[laplace.relation_type_id('IS_A'),
+          (SELECT id FROM f WHERE name = 'dynamic')]) AS repeat_updated;
+ repeat_updated 
+----------------
+              0
+(1 row)
+
+WITH f AS (SELECT name, id FROM deposit_fixtures)
+SELECT consensus.highway_mask_deposit(
+    ARRAY[(SELECT id FROM f WHERE name = 'entity_b')],
+    ARRAY[laplace.relation_type_id('IS_A')]) AS or_updated;
+ or_updated 
+------------
+          1
+(1 row)
+
+SELECT consensus.highway_mask_bits(e.highway_mask) @>
+       ARRAY[consensus.relation_highway_bit(laplace.relation_type_id('IS_A')),
+             consensus.relation_highway_bit(laplace.relation_type_id('HAS_PART'))]
+       AS or_preserved
+FROM laplace.entities e
+JOIN deposit_fixtures f ON f.id = e.id
+WHERE f.name = 'entity_b';
+ or_preserved 
+--------------
+ t
+(1 row)
+
+SELECT consensus.highway_mask_deposit(NULL, NULL) AS null_arrays_updated;
+ null_arrays_updated 
+---------------------
+                   0
+(1 row)
+
+DO $$
+BEGIN
+    BEGIN
+        PERFORM consensus.highway_mask_deposit(
+            ARRAY[decode('00', 'hex')],
+            ARRAY[laplace.relation_type_id('IS_A')]);
+        RAISE EXCEPTION 'malformed entity id was accepted';
+    EXCEPTION WHEN string_data_length_mismatch THEN
+        NULL;
+    END;
+    BEGIN
+        PERFORM consensus.highway_mask_deposit(
+            ARRAY[(SELECT id FROM deposit_fixtures WHERE name = 'entity_a')],
+            ARRAY[decode(repeat('00', 17), 'hex')]);
+        RAISE EXCEPTION 'malformed type id was accepted';
+    EXCEPTION WHEN string_data_length_mismatch THEN
+        NULL;
+    END;
+END $$;
+ROLLBACK;

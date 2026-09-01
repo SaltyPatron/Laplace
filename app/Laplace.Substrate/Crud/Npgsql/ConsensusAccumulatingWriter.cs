@@ -903,8 +903,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             var todo = pairs;
 
             // SORT BY ENTITY ID BEFORE CHUNKING — the transaction-scope half of the
-            // deadlock fix, and the half #729 missed. The SQL-side ordered locking
-            // (highway_mask_deposit's `locked` CTE) makes acquisition ascending
+            // deadlock fix, and the half #729 missed. The native ordered locking
+            // inside highway_mask_deposit makes acquisition ascending
             // WITHIN one statement, but this transaction runs a SEQUENCE of chunk
             // statements while holding every prior chunk's locks — and chunks cut
             // from an unordered set interleave id ranges arbitrarily between
@@ -919,11 +919,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
             // ONE statement per chunk, on ONE connection, ONE TRANSACTION PER CHUNK.
             //
-            // highway_mask_deposit already does the whole job set-based: DISTINCT
-            // over the pairs, one probe per DISTINCT type, GROUP BY entity, then a
-            // single UPDATE ... FROM. This writer now partitions work by a stable
+            // highway_mask_deposit reduces pairs, relation bits, and entity masks in
+            // native memory before its indexed row probe and keyed storage update.
+            // This writer now partitions work by a stable
             // entity shard BEFORE statements are built, so concurrent shard calls are
-            // row-disjoint. SQL acquires any externally-overlapping target rows in a
+            // row-disjoint. Native code acquires any externally-overlapping target rows in a
             // deterministic order; it no longer collapses the disjoint ingest calls
             // behind one global advisory lock.
             //

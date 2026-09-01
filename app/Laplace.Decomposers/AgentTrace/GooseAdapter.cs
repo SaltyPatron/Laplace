@@ -167,58 +167,65 @@ public sealed class GooseAdapter : IAgentTraceAdapter
             || !SqliteSniff.HasTable(conn, "messages"))
             yield break;
 
-        var sessions = new List<(string Id, string? Desc, string? Cwd, string? Model)>();
-        using (var cmd = conn.CreateCommand())
+        // Stream sessions and their messages in one ordered scan. Previously every
+        // session reopened a parameterized messages command, making container decode
+        // O(session count) database round trips before ingestion even started.
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT s.id, s.description, s.working_dir, s.model_config_json, "
+            + "m.role, m.content_json, m.created_timestamp "
+            + "FROM sessions s LEFT JOIN messages m ON m.session_id = s.id "
+            + "ORDER BY s.id, m.created_timestamp, m.id";
+        using var r = cmd.ExecuteReader();
+
+        string? sessionId = null, title = null, cwd = null, model = null;
+        long firstUs = 0, lastUs = 0;
+        var turns = new List<AgentTurn>();
+
+        AgentSession? FlushSession()
         {
-            cmd.CommandText = "SELECT id, description, working_dir, model_config_json FROM sessions";
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                sessions.Add((r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
-                    r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3)));
+            if (sessionId is null || turns.Count == 0) return null;
+            var result = new AgentSession(
+                ProviderKey, AgentTraceEmitter.SanitizeKey(sessionId), firstUs, lastUs, turns)
+            {
+                Title = title,
+                Cwd = cwd,
+            };
+            turns = new List<AgentTurn>();
+            firstUs = lastUs = 0;
+            return result;
         }
 
-        foreach (var s in sessions)
+        while (r.Read())
         {
             ct.ThrowIfCancellationRequested();
-            string? model = null;
-            if (s.Model is not null)
+            string rowSessionId = r.GetString(0);
+            if (!StringComparer.Ordinal.Equals(sessionId, rowSessionId))
             {
-                using var modelDoc = JsonAstDocument.TryParse(s.Model);
-                model = modelDoc?.Root.String("model");
-            }
-
-            var turns = new List<AgentTurn>();
-            long firstUs = 0, lastUs = 0;
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText =
-                    "SELECT role, content_json, created_timestamp FROM messages "
-                    + "WHERE session_id = $s ORDER BY created_timestamp, id";
-                cmd.Parameters.AddWithValue("$s", s.Id);
-                using var r = cmd.ExecuteReader();
-                while (r.Read())
+                if (FlushSession() is { } session) yield return session;
+                sessionId = rowSessionId;
+                title = r.IsDBNull(1) ? null : r.GetString(1);
+                cwd = r.IsDBNull(2) ? null : r.GetString(2);
+                model = null;
+                if (!r.IsDBNull(3))
                 {
-                    long raw = r.IsDBNull(2) ? 0 : r.GetInt64(2);
-                    long ts = raw > 10_000_000_000L ? raw * 1000 : raw * 1_000_000;
-                    string wrapper = $"{{\"role\":\"{r.GetString(0)}\",\"created\":0,\"content\":"
-                                     + (r.IsDBNull(1) ? "[]" : r.GetString(1)) + "}";
-                    using var doc = JsonAstDocument.TryParse(wrapper);
-                    if (doc is null) continue;
-                    if (BuildTurn(turns, doc.Root) is { } turn)
-                    {
-                        turn = turn with { TimestampUnixUs = ts, Model = model };
-                        if (ts > 0) { if (firstUs == 0) firstUs = ts; lastUs = ts; }
-                        turns.Add(turn);
-                    }
+                    using var modelDoc = JsonAstDocument.TryParse(r.GetString(3));
+                    model = modelDoc?.Root.String("model");
                 }
             }
-            if (turns.Count == 0) continue;
-            yield return new AgentSession(
-                ProviderKey, AgentTraceEmitter.SanitizeKey(s.Id), firstUs, lastUs, turns)
-            {
-                Title = s.Desc,
-                Cwd = s.Cwd,
-            };
+
+            if (r.IsDBNull(4)) continue;
+            long raw = r.IsDBNull(6) ? 0 : r.GetInt64(6);
+            long ts = raw > 10_000_000_000L ? raw * 1000 : raw * 1_000_000;
+            string wrapper = $"{{\"role\":\"{r.GetString(4)}\",\"created\":0,\"content\":"
+                             + (r.IsDBNull(5) ? "[]" : r.GetString(5)) + "}";
+            using var doc = JsonAstDocument.TryParse(wrapper);
+            if (doc is null || BuildTurn(turns, doc.Root) is not { } turn) continue;
+            turn = turn with { TimestampUnixUs = ts, Model = model };
+            if (ts > 0) { if (firstUs == 0) firstUs = ts; lastUs = ts; }
+            turns.Add(turn);
         }
+
+        if (FlushSession() is { } finalSession) yield return finalSession;
     }
 }
