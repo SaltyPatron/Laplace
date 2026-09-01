@@ -18,8 +18,10 @@ public sealed class StaticSubstrateIsaGateTests
             "entities_present_ordinals.sql.in");
         var physicalities = Read("extension", "laplace_substrate", "sql", "probes",
             "physicalities_present_ordinals.sql.in");
+        var attestations = Read("extension", "laplace_substrate", "sql", "probes",
+            "attestations_present_ordinals.sql.in");
 
-        foreach (var sql in new[] { entities, physicalities })
+        foreach (var sql in new[] { entities, physicalities, attestations })
         {
             Assert.Contains("PARALLEL RESTRICTED", sql, StringComparison.Ordinal);
             Assert.DoesNotContain("PARALLEL SAFE", sql, StringComparison.Ordinal);
@@ -30,6 +32,11 @@ public sealed class StaticSubstrateIsaGateTests
 
         Assert.DoesNotContain("p_tiers smallint[]", entities, StringComparison.Ordinal);
         Assert.DoesNotContain("p_hilberts bytea[]", physicalities, StringComparison.Ordinal);
+        Assert.DoesNotContain("p_type_ids bytea[]", attestations, StringComparison.Ordinal);
+        Assert.Contains(
+            "DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[], bytea[], bytea[])",
+            attestations,
+            StringComparison.Ordinal);
     }
 
     [Theory]
