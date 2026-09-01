@@ -769,23 +769,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 bool directRoute = await SupportsDirectConsensusRouteAsync(conn, token);
                 bool epochBump = await SupportsApplyWriteEpochAsync(conn, token);
                 await using var tx = await conn.BeginTransactionAsync(token);
-                // The write-epoch bump rides the same batch — no extra round trip
-                // (this command carries no positional parameters, which Npgsql
-                // forbids in multi-statement commands), nextval before the fold's
-                // writes as the sequence's law requires.
-                if (epochBump)
-                {
-                    await using var epoch = conn.CreateCommand();
-                    epoch.Transaction = tx;
-                    epoch.CommandText = "SELECT nextval('laplace.apply_write_epoch')";
-                    await epoch.ExecuteNonQueryAsync(token);
-                }
                 await using var up = conn.CreateCommand();
                 up.Transaction = tx;
                 up.CommandTimeout = 0;
-                up.CommandText = directRoute
+                string foldSql = directRoute
                     ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
                     : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
+                // Keep the epoch and fold in one server statement.  The former
+                // two-command shape paid a client/server round trip per consensus
+                // chunk solely to bump the sequence. MATERIALIZED makes nextval
+                // execute before the write function while retaining positional
+                // parameters and a preparable single statement.
+                up.CommandText = epochBump
+                    ? "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
+                        + foldSql + " FROM epoch"
+                    : foldSql;
                 up.Parameters.Add(new NpgsqlParameter
                 {
                     Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
@@ -965,23 +963,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     await using var conn = await _ds.OpenConnectionAsync(ct);
                     bool epochBump = await SupportsApplyWriteEpochAsync(conn, ct);
                     await using var tx = await conn.BeginTransactionAsync(ct);
-                    // Deposit transactions are write-lane transactions too: bump the
-                    // epoch before the OR-accumulate. Its own command, unlike the
-                    // fold segment's piggyback, because the deposit statement uses
-                    // positional parameters and Npgsql forbids those in
-                    // multi-statement commands — one cheap extra round trip per
-                    // deposit transaction (the support probe itself is cached).
-                    if (epochBump)
-                    {
-                        await using var bump = conn.CreateCommand();
-                        bump.Transaction = tx;
-                        bump.CommandText = "SELECT nextval('laplace.apply_write_epoch')";
-                        await bump.ExecuteNonQueryAsync(ct);
-                    }
                     await using var mask = conn.CreateCommand();
                     mask.Transaction = tx;
                     mask.CommandTimeout = 0;
-                    mask.CommandText = "SELECT consensus.highway_mask_deposit($1, $2)";
+                    const string depositSql =
+                        "SELECT consensus.highway_mask_deposit($1, $2)";
+                    mask.CommandText = epochBump
+                        ? "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
+                            + depositSql + " FROM epoch"
+                        : depositSql;
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     await mask.PrepareAsync(ct);

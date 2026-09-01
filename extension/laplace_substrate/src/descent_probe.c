@@ -37,6 +37,68 @@ typedef struct AttestTypePlan
 
 static HTAB *attest_type_plans = NULL;
 
+/* Entities are LIST(tier), with tier 2 further HASH(id).  The keyed entity
+ * probes used to hand their arrays to a PL/pgSQL function which created and
+ * indexed a temp table on every call, then looped over distinct tiers.  Tier
+ * cardinality is tiny and the native caller already owns the parallel tier
+ * array, so cache one literal-tier plan per backend instead.  A literal tier
+ * prunes the LIST parent at plan time; the id value runtime-prunes tier 2's
+ * HASH child. */
+typedef struct EntityTierPlan
+{
+    int32      tier;            /* fixed-width hash key; avoids struct padding */
+    SPIPlanPtr plan;
+} EntityTierPlan;
+
+static HTAB *entity_tier_plans = NULL;
+
+static SPIPlanPtr
+entity_tier_probe_plan(int16 tier)
+{
+    EntityTierPlan *entry;
+    bool            found;
+    int32           key = (int32) tier;
+
+    if (entity_tier_plans == NULL)
+    {
+        HASHCTL ctl;
+
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = sizeof(int32);
+        ctl.entrysize = sizeof(EntityTierPlan);
+        ctl.hcxt = TopMemoryContext;
+        entity_tier_plans = hash_create("entity tier probe plans", 8,
+                                        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+
+    entry = (EntityTierPlan *) hash_search(entity_tier_plans, &key,
+                                            HASH_ENTER, &found);
+    if (!found)
+    {
+        char       sql[384];
+        Oid        argtypes[2] = { BYTEAARRAYOID, INT4ARRAYOID };
+        SPIPlanPtr plan;
+
+        snprintf(sql, sizeof(sql),
+                 "SELECT u.ord FROM unnest($1::bytea[], $2::int[]) AS u(id, ord) "
+                 "JOIN laplace.entities e "
+                 "ON e.tier = %d::smallint AND e.id = u.id",
+                 (int) tier);
+        plan = SPI_prepare_cursor(sql, 2, argtypes, CURSOR_OPT_PARALLEL_OK);
+        if (plan == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("entity_tier_probe_plan: SPI_prepare failed: %s",
+                            SPI_result_code_string(SPI_result))));
+        if (SPI_keepplan(plan) != 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("entity_tier_probe_plan: SPI_keepplan failed")));
+        entry->plan = plan;
+    }
+    return entry->plan;
+}
+
 /* Resolve (build once, then cache) the per-type presence plan. Must be called
  * inside an SPI connection. The plan takes ($1 ids[], $2 subjects[], $3 ords[])
  * and returns, for each row whose (type,subject,id) exists, the caller-supplied
@@ -108,6 +170,18 @@ cmp_probe_by_type(const void *a, const void *b, void *arg)
     bytea       *tb = DatumGetByteaPP(types[ib]);
 
     return memcmp(VARDATA_ANY(ta), VARDATA_ANY(tb), 16);
+}
+
+static int
+cmp_probe_by_tier(const void *a, const void *b, void *arg)
+{
+    const Datum *tiers = (const Datum *) arg;
+    int          ia = *(const int *) a;
+    int          ib = *(const int *) b;
+    int16        ta = DatumGetInt16(tiers[ia]);
+    int16        tb = DatumGetInt16(tiers[ib]);
+
+    return (ta > tb) - (ta < tb);
 }
 
 static inline void
@@ -486,20 +560,17 @@ laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_
 static int
 batch_presence_core_tiered(ArrayType *ids_array, ArrayType *tiers_array,
                            uint8_t *bm, int candidate_count,
-                           const char *ordinals_sql, bool use_perfcache)
+                           bool use_perfcache)
 {
     Datum      *elems, *t_elems;
     bool       *nulls, *t_nulls;
     int         nelems, t_n;
     int        *remap;
     Datum      *probe_elems, *probe_tiers;
+    int        *order;
     int         probe_n = 0;
     int         i;
-    Oid         argtypes[2];
-    Datum       args[2];
-    ArrayType  *probe_array, *tiers_sub;
-    uint8_t    *sub_bm;
-    int         spi_rc;
+    int         spi_rc = SPI_OK_SELECT;
 
     if (candidate_count <= 0)
         return SPI_OK_SELECT;
@@ -516,6 +587,7 @@ batch_presence_core_tiered(ArrayType *ids_array, ArrayType *tiers_array,
     remap = (int *) palloc(sizeof(int) * candidate_count);
     probe_elems = (Datum *) palloc(sizeof(Datum) * candidate_count);
     probe_tiers = (Datum *) palloc(sizeof(Datum) * candidate_count);
+    order = (int *) palloc(sizeof(int) * candidate_count);
 
     for (i = 0; i < candidate_count; i++)
     {
@@ -542,6 +614,7 @@ batch_presence_core_tiered(ArrayType *ids_array, ArrayType *tiers_array,
         remap[probe_n] = i;
         probe_elems[probe_n] = elems[i];
         probe_tiers[probe_n] = t_elems[i];
+        order[probe_n] = probe_n;
         probe_n++;
     }
 
@@ -551,32 +624,71 @@ batch_presence_core_tiered(ArrayType *ids_array, ArrayType *tiers_array,
         goto done;
     }
 
-    probe_array = construct_array(probe_elems, probe_n, BYTEAOID, -1, false, 'i');
-    tiers_sub = construct_array(probe_tiers, probe_n, INT2OID, 2, true, 's');
-    sub_bm = (uint8_t *) palloc0((probe_n + 7) / 8);
-    argtypes[0] = BYTEAARRAYOID;
-    argtypes[1] = INT2ARRAYOID;
-    args[0] = PointerGetDatum(probe_array);
-    args[1] = PointerGetDatum(tiers_sub);
+    /* Sort only integer positions, leaving the deconstructed Datums owned by
+     * their input arrays.  O(N log N), then one plan execution per tier. */
+    qsort_arg(order, probe_n, sizeof(int), cmp_probe_by_tier, probe_tiers);
 
-    spi_rc = spi_mark_present_ordinals(
-        ordinals_sql,
-        2, argtypes, args, sub_bm, probe_n);
-
-    if (spi_rc == SPI_OK_SELECT)
+    for (i = 0; i < probe_n; )
     {
-        for (i = 0; i < probe_n; i++)
+        int16       tier = DatumGetInt16(probe_tiers[order[i]]);
+        int         end = i + 1;
+        int         run_n;
+        Datum      *run_ids;
+        Datum      *run_ords;
+        ArrayType  *ids_run;
+        ArrayType  *ords_run;
+        Datum       vals[2];
+        SPIPlanPtr  plan;
+        int         j;
+
+        while (end < probe_n && DatumGetInt16(probe_tiers[order[end]]) == tier)
+            end++;
+        run_n = end - i;
+        run_ids = (Datum *) palloc(sizeof(Datum) * run_n);
+        run_ords = (Datum *) palloc(sizeof(Datum) * run_n);
+        for (j = 0; j < run_n; j++)
         {
-            if ((sub_bm[i >> 3] & (1u << (i & 7u))) != 0)
-                bitmap_set(bm, remap[i]);
+            int probe_idx = order[i + j];
+            run_ids[j] = probe_elems[probe_idx];
+            run_ords[j] = Int32GetDatum(remap[probe_idx]);
         }
+        ids_run = construct_array(run_ids, run_n, BYTEAOID, -1, false, 'i');
+        ords_run = construct_array(run_ords, run_n, INT4OID, 4, true, 'i');
+        vals[0] = PointerGetDatum(ids_run);
+        vals[1] = PointerGetDatum(ords_run);
+        plan = entity_tier_probe_plan(tier);
+
+        spi_rc = SPI_execute_plan(plan, vals, NULL, true, 0);
+        if (spi_rc != SPI_OK_SELECT)
+        {
+            pfree(ids_run);
+            pfree(ords_run);
+            pfree(run_ids);
+            pfree(run_ords);
+            break;
+        }
+        for (uint64 row = 0; row < SPI_processed; row++)
+        {
+            bool  isnull;
+            Datum d = SPI_getbinval(SPI_tuptable->vals[row],
+                                    SPI_tuptable->tupdesc, 1, &isnull);
+            if (!isnull)
+            {
+                int pos = DatumGetInt32(d);
+                if (pos >= 0 && pos < candidate_count)
+                    bitmap_set(bm, pos);
+            }
+        }
+
+        pfree(ids_run);
+        pfree(ords_run);
+        pfree(run_ids);
+        pfree(run_ords);
+        i = end;
     }
 
-    pfree(sub_bm);
-    pfree(probe_array);
-    pfree(tiers_sub);
-
 done:
+    pfree(order);
     pfree(remap);
     pfree(probe_elems);
     pfree(probe_tiers);
@@ -689,7 +801,6 @@ laplace_entities_stored_bitmap_keyed(ArrayType *ids_array, ArrayType *tiers_arra
 {
     /* Stored-row semantics: perfcache OFF (see 1-arg comment). */
     return batch_presence_core_tiered(ids_array, tiers_array, bm, candidate_count,
-                                      "SELECT idx FROM laplace.entities_present_ordinals($1, $2)",
                                       false);
 }
 
@@ -699,7 +810,6 @@ laplace_tier_batch_existence_probe_keyed(ArrayType *ids_array, ArrayType *tiers_
 {
     /* Descent resolvability semantics: perfcache ON (identical to 1-arg). */
     return batch_presence_core_tiered(ids_array, tiers_array, bm, candidate_count,
-                                      "SELECT idx FROM laplace.entities_present_ordinals($1, $2)",
                                       true);
 }
 
