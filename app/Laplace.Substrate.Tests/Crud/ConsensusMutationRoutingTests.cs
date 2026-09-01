@@ -24,24 +24,30 @@ public sealed class ConsensusMutationRoutingTests
     }
 
     [Fact]
-    public void DecayAndPruneMutateConcreteLeavesOnly()
+    public void DecayAndPruneAreDropOnlyRetiredSurfaces()
     {
         var decay = Read("extension", "laplace_substrate", "sql", "functions",
             "inference", "laplace_decay.sql.in");
         var prune = Read("extension", "laplace_substrate", "sql", "functions",
             "inference", "laplace_prune.sql.in");
 
-        Assert.Contains("consensus.partition_leaf(p_type, p_subject)", decay,
+        Assert.Contains("DROP FUNCTION IF EXISTS generation.decay", decay,
             StringComparison.Ordinal);
-        Assert.Contains("UPDATE ONLY %s", decay, StringComparison.Ordinal);
-        Assert.DoesNotContain("UPDATE laplace.consensus", decay,
+        Assert.Contains("DROP FUNCTION IF EXISTS laplace.laplace_decay", decay,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE OR REPLACE FUNCTION", decay,
             StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", decay, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INSERT INTO ", decay, StringComparison.OrdinalIgnoreCase);
 
-        Assert.Contains("pg_partition_tree('laplace.consensus'::regclass)", prune,
+        Assert.Contains("DROP FUNCTION IF EXISTS generation.prune", prune,
             StringComparison.Ordinal);
-        Assert.Contains("DELETE FROM ONLY %s", prune, StringComparison.Ordinal);
-        Assert.DoesNotContain("DELETE FROM laplace.consensus", prune,
+        Assert.Contains("DROP FUNCTION IF EXISTS laplace.laplace_prune", prune,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE OR REPLACE FUNCTION", prune,
             StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM ", prune, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", prune, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
