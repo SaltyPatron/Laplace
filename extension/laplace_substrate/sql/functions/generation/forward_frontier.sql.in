@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION generation.forward_route_trace(
         p_prompt text,
         p_hops int DEFAULT 2,
         p_fanout int DEFAULT 8,
-        p_max_nodes int DEFAULT 256)
+        p_max_nodes int DEFAULT NULL)
     RETURNS TABLE(source_id bytea, type_id bytea, object_id bytea,
                   hop smallint, rating bigint, rd bigint,
                   witness_count bigint)
@@ -41,11 +41,14 @@ END;
 -- topic collapse is performed. forward_route_trace owns the typed native crawl,
 -- so execution and the auditable ROUTE/SCAN receipt are the same edge set. The
 -- returned hop is an execution coordinate, not a model layer or confidence score.
+-- A NULL node budget delegates capacity to consensus.explore_web, which derives
+-- the exact fanout tree from the seed count/hops/fanout and rejects only actual
+-- PostgreSQL allocation overflow. The forward pass does not invent a second cap.
 CREATE OR REPLACE FUNCTION generation.forward_frontier(
         p_prompt text,
         p_hops int DEFAULT 2,
         p_fanout int DEFAULT 8,
-        p_max_nodes int DEFAULT 256)
+        p_max_nodes int DEFAULT NULL)
     RETURNS TABLE(entity bytea, hop smallint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
