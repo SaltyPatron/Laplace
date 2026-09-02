@@ -97,23 +97,28 @@ class TestProfileRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(registry.RegistryError, "live suites"):
             registry.validate_document(doc)
 
-    def test_required_zero_selection_fails_before_execution(self):
+    def test_required_zero_discovery_fails_before_execution(self):
         with tempfile.TemporaryDirectory(prefix="test-profile-receipt-") as td:
             receipt = Path(td) / "receipt.json"
-            with patch.object(registry, "selected_count", return_value=(0, "")), \
+            with patch.object(registry, "discovered_count", return_value=(0, "")), \
                  patch.object(registry, "_run") as execute:
                 rc = registry.run_profile("dev-native", REGISTRY_PATH, receipt)
             self.assertEqual(1, rc)
             execute.assert_not_called()
             saved = json.loads(receipt.read_text(encoding="utf-8"))
             self.assertEqual("failed", saved["status"])
+            self.assertEqual(0, saved["discovered"])
             self.assertEqual(0, saved["selected"])
-            self.assertEqual("failed-zero-selection", saved["suites"][0]["status"])
+            self.assertEqual("failed-zero-discovery", saved["suites"][0]["status"])
 
-    def test_result_count_drift_fails_closed(self):
+    def test_dotnet_runtime_filtered_selection_can_be_smaller_than_discovery(self):
         suite = registry.load_validated()["managed-dev"]
-        with self.assertRaisesRegex(registry.RegistryError, "selection/result drift"):
-            registry._result_counts(suite, 3, "Total: 2\nSkipped: 0\n")
+        # `--list-tests` can discover excluded Tier=db/live/perf tests. The
+        # filtered runtime total is therefore authoritative selection, not a loss.
+        self.assertEqual(
+            (2, 0),
+            registry._result_counts(suite, 300, "Passed: 2\nFailed: 0\nSkipped: 0\nTotal: 2\n"),
+        )
 
     def test_dotnet_runtime_expansion_counts_actual_results(self):
         suite = registry.load_validated()["managed-dev"]
@@ -123,6 +128,30 @@ class TestProfileRegistryTests(unittest.TestCase):
                 suite, 2, "Passed: 3\nFailed: 0\nSkipped: 1\nTotal: 4\n"
             ),
         )
+
+    def test_required_dotnet_zero_filtered_selection_fails_after_runtime_selection(self):
+        with tempfile.TemporaryDirectory(prefix="test-profile-receipt-") as td:
+            receipt = Path(td) / "receipt.json"
+
+            def discover(suite):
+                return (3, "all discovered") if suite["runner"] == "dotnet" else (1, "declared")
+
+            def execute(command, env, timeout):
+                if command[:2] == ["dotnet", "test"]:
+                    return 0, "No test matches the given testcase filter\n", 5
+                return 0, "", 5
+
+            with patch.object(registry, "discovered_count", side_effect=discover), \
+                 patch.object(registry, "_run", side_effect=execute):
+                rc = registry.run_profile("dev-managed", REGISTRY_PATH, receipt)
+
+            self.assertEqual(1, rc)
+            saved = json.loads(receipt.read_text(encoding="utf-8"))
+            managed = saved["suites"][0]
+            self.assertEqual(3, managed["discovered"])
+            self.assertEqual(0, managed["selected"])
+            self.assertEqual(0, managed["executed"])
+            self.assertEqual("failed-zero-selection", managed["status"])
 
     def test_dotnet_discovery_counts_interleaved_solution_output(self):
         output = """Test run for A.Tests.dll
@@ -148,13 +177,14 @@ No test matches the given testcase filter `Tier=db` in C.Tests.dll
             receipt = Path(td) / "receipt.json"
             output = "Passed: 3\nFailed: 0\nSkipped: 1\nTotal: 4\n"
             with patch.object(
-                registry, "selected_count",
+                registry, "discovered_count",
                 side_effect=lambda suite: (2, "") if suite["runner"] == "dotnet" else (1, ""),
             ), patch.object(registry, "_run", return_value=(0, output, 5)):
                 rc = registry.run_profile("dev-managed", REGISTRY_PATH, receipt)
             self.assertEqual(0, rc)
             saved = json.loads(receipt.read_text(encoding="utf-8"))
             self.assertEqual("success", saved["status"])
+            self.assertEqual(4, saved["discovered"])
             self.assertEqual(6, saved["selected"])
             self.assertEqual(5, saved["executed"])
             self.assertEqual(1, saved["skipped"])
@@ -164,16 +194,17 @@ No test matches the given testcase filter `Tier=db` in C.Tests.dll
     def test_receipt_contains_source_artifact_counts_and_suite_results(self):
         records = [{
             "id": "fixture", "profile": "dev-native", "runner": "script",
-            "selected": 1, "executed": 1, "skipped": 0,
+            "discovered": 1, "selected": 1, "executed": 1, "skipped": 0,
             "status": "success", "elapsed_ms": 4,
         }]
         receipt = registry._finish_receipt("dev-native", 1.0, records, "success")
         for key in (
             "schema_version", "profile", "source_sha", "built_native_sha256",
             "installed_native_sha256", "started_at_unix_ms", "ended_at_unix_ms",
-            "elapsed_ms", "selected", "executed", "skipped", "status", "suites",
+            "elapsed_ms", "discovered", "selected", "executed", "skipped", "status", "suites",
         ):
             self.assertIn(key, receipt)
+        self.assertEqual(1, receipt["discovered"])
         self.assertEqual(1, receipt["selected"])
         self.assertEqual(1, receipt["executed"])
 
