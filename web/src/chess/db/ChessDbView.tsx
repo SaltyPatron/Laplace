@@ -12,7 +12,7 @@ import styles from './ChessDb.module.css';
  */
 export function ChessDbView() {
   return (
-    <div className={styles.dbPage}>
+    <div className={styles.dbPage} data-chess-scroll-root>
       <Routes>
         <Route index element={<PlayersIndex />} />
         <Route path="laplace" element={<LaplaceGames />} />
