@@ -5,7 +5,8 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
         p_seed bigint DEFAULT NULL, p_hops int DEFAULT 2,
         p_fanout int DEFAULT 8, p_prior_frontier bytea[] DEFAULT NULL)
     RETURNS TABLE(step int, entity text, stride_used int)
-    LANGUAGE sql VOLATILE AS $$
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
     WITH ctx AS MATERIALIZED (
         SELECT array_agg(id ORDER BY ord) AS ids
         FROM converse.prompt_state(p_prompt) WHERE id IS NOT NULL
@@ -22,10 +23,13 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     ), walked AS MATERIALIZED (
         SELECT g.*
         FROM ctx CROSS JOIN frontier,
-             generation.forward_walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_top_k,
-                              COALESCE(p_seed,
-                                  laplace.hash128_lo(public.laplace_hash128_blake3(
-                                      convert_to(p_prompt, 'UTF8')))), frontier.ids) g
+             generation.forward_walk_continuations(
+                 ctx.ids, p_steps, p_max_stride, p_spread, p_top_k,
+                 COALESCE(
+                     p_seed,
+                     laplace.hash128_lo(public.laplace_hash128_blake3(
+                         convert_to(p_prompt, 'UTF8')))),
+                 frontier.ids) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,
@@ -36,13 +40,15 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
                realize.render_text_batch(separators) AS separators
         FROM ids
     )
-    SELECT w.step, t.entities[rn] || COALESCE(t.separators[rn], ''), w.stride_used
+    SELECT w.step,
+           t.entities[rn] || COALESCE(t.separators[rn], ''),
+           w.stride_used
     FROM (SELECT w.*, row_number() OVER (ORDER BY step) AS rn FROM walked w) w
-    CROSS JOIN txt t
-$$;
+    CROSS JOIN txt t;
+END;
 
--- Stable compatibility surface for protocol callers. Hop/fan-out defaults are
--- owned by forward_text so this does not become another inference program.
+-- Compatibility surface for protocol callers. Hop/fan-out defaults are owned by
+-- forward_text so this does not become another inference program.
 CREATE OR REPLACE FUNCTION generation.walk_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
