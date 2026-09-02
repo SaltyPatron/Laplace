@@ -484,6 +484,19 @@ BEGIN
         END IF;
     END IF;
 
+    -- An empty dynamic pass is an absence of an admissible continuation, not a
+    -- request to resurrect the retired static/template success path. Keep the
+    -- dynamic route authoritative and make its WHY-NOT visible instead of
+    -- returning NULL/empty text. If a topic exists but cannot be realized, the
+    -- shared display projection emits the explicit abstention marker rather than
+    -- leaking the canonical hash as prose.
+    IF (out IS NULL OR btrim(out) = '') AND shape IS NULL THEN
+        out := converse.chat_scaffold(
+            lang, 'no_forward',
+            CASE WHEN topic IS NULL THEN NULL
+                 ELSE COALESCE(xl, converse.label_or_hex(topic)) END);
+    END IF;
+
     -- RECORD session carry; the OODA close (turn witnessing) is the caller's duty.
     IF p_session IS NOT NULL THEN
         PERFORM generation.session_record_prompt(p_session, p_prompt, resolved);
