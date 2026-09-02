@@ -166,6 +166,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
 
             foreach (var profile in profiles)
             {
+                if (profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)
+                    && (profile.ProviderId.Length is < 4 or > 12 || !profile.ProviderId.All(char.IsDigit)))
+                    throw new InvalidDataException(
+                        $"FIDE provider identity must be a 4-12 digit FIDE id, got '{profile.ProviderId}'.");
+
                 var (sourceId, _, _, weight) = ProfileSource(profile.Provider);
 
                 var b = new SubstrateChangeBuilder(sourceId,
@@ -216,9 +221,17 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 {
                     if (online.Profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)) continue;
                     if (identityLinks.Add((online.PlayerId, fide, online.SourceId)))
+                    {
+                        var associationContext = ContentEmitter.Emit(
+                            online.Builder,
+                            $"explicit-profile-association:{online.Profile.Provider}:{online.Profile.ProviderId}:fide:{fideProfiles[0].Profile.ProviderId}",
+                            online.SourceId)
+                            ?? throw new InvalidOperationException(
+                                "could not materialize explicit profile-association context");
                         online.Builder.AddAttestation(NativeAttestation.CategoricalResolved(
                             online.PlayerId, ChessVocabulary.CorrespondsToType, fide,
-                            online.SourceId, null, online.Weight));
+                            online.SourceId, associationContext, online.Weight));
+                    }
                 }
             }
 
