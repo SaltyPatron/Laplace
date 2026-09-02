@@ -1,0 +1,174 @@
+-- structural.browse_named_entities(query_members, exact_root, offset, limit, capacity)
+--
+-- The universal browser's NAME lane.  A typed surface is already decomposed by the
+-- same native text spine used everywhere else; this operation receives those content
+-- ids and asks which canonical entities are named by a composition containing ALL of
+-- them.  There is no rendered substring scan and no domain-private player lookup:
+--
+--   query word ids
+--      -> indexed trajectory containment (physicalities_constituents_gin)
+--      -> HAS_NAME / HAS_NAME_ALIAS consensus families
+--      -> canonical subject entities
+--      -> consensus standing
+--
+-- The expensive human realization is deliberately NOT in this function.  It returns
+-- ids/type ids after the bounded rank so API/CLI/SQL callers can use the same result
+-- universe and a serving layer can batch-realize only survivors.
+--
+-- Capacity is an execution/frontier budget, not a claim that omitted entities do not
+-- exist.  candidate_truncated tells the caller when the selected name frontier hit the
+-- budget.  offset/limit page the ranked survivors inside that declared frontier.
+DROP FUNCTION IF EXISTS structural.browse_named_entities(bytea[], bytea, int, int, int);
+CREATE OR REPLACE FUNCTION structural.browse_named_entities(
+    p_members  bytea[],
+    p_exact    bytea DEFAULT NULL,
+    p_offset   int   DEFAULT 0,
+    p_limit    int   DEFAULT 40,
+    p_capacity int   DEFAULT 2048)
+    RETURNS TABLE(
+        entity_id bytea,
+        tier smallint,
+        type_id bytea,
+        matched_name_id bytea,
+        match_kind text,
+        rating bigint,
+        rd bigint,
+        eff_mu numeric,
+        witness_count bigint,
+        candidate_name_count bigint,
+        candidate_truncated boolean,
+        matched_entity_count bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH norm AS MATERIALIZED (
+        SELECT COALESCE(
+                   (SELECT array_agg(DISTINCT m.id ORDER BY m.id)
+                    FROM unnest(COALESCE(p_members, '{}'::bytea[])) AS m(id)
+                    WHERE m.id IS NOT NULL),
+                   '{}'::bytea[]) AS members,
+               GREATEST(COALESCE(p_offset, 0), 0) AS off,
+               GREATEST(COALESCE(p_limit, 0), 0) AS lim,
+               GREATEST(COALESCE(p_capacity, 0), 0) AS cap
+    ),
+    -- Keep the trajectory predicate syntactically identical to the expression GIN
+    -- index.  The query-member set is normally one or a handful of ids, not a large
+    -- frontier; this is the exact all-members containment operation.
+    named_edges AS MATERIALIZED (
+        SELECT c.subject_id AS entity_id,
+               c.object_id AS matched_name_id,
+               c.rating,
+               c.rd,
+               consensus.eff_mu_display(c.rating, c.rd) AS eff_mu,
+               c.witness_count,
+               row_number() OVER (
+                   PARTITION BY c.subject_id
+                   ORDER BY consensus.eff_mu(c.rating, c.rd) DESC,
+                            c.witness_count DESC,
+                            c.object_id) AS entity_name_rank
+        FROM norm n
+        JOIN laplace.physicalities p
+          ON cardinality(n.members) > 0
+         AND p.type = 1
+         AND p.trajectory IS NOT NULL
+         AND public.laplace_trajectory_constituent_ids(p.trajectory) @> n.members
+        JOIN laplace.consensus c
+          ON c.object_id = p.entity_id
+         AND c.type_id = ANY (
+               consensus.relation_family_ids('HAS_NAME')
+               || consensus.relation_family_ids('HAS_NAME_ALIAS'))
+        WHERE NOT consensus.refuted(c.rating, c.rd)
+    ),
+    -- One best witnessed name edge per canonical entity, then rank the entities.  Ask
+    -- for cap+1 so truncation is observable rather than silently pretending the
+    -- frontier is complete.
+    named_frontier AS MATERIALIZED (
+        SELECT ne.entity_id, ne.matched_name_id,
+               'name'::text AS match_kind,
+               ne.rating, ne.rd, ne.eff_mu, ne.witness_count,
+               0 AS priority
+        FROM named_edges ne, norm n
+        WHERE ne.entity_name_rank = 1
+          AND n.cap > 0
+        ORDER BY ne.eff_mu DESC,
+                 ne.witness_count DESC,
+                 ne.entity_id
+        LIMIT (SELECT cap + 1 FROM norm)
+    ),
+    frontier_stats AS MATERIALIZED (
+        SELECT LEAST(count(*), (SELECT cap FROM norm))::bigint AS candidate_name_count,
+               count(*) > (SELECT cap FROM norm) AS candidate_truncated
+        FROM named_frontier
+    ),
+    named_kept AS MATERIALIZED (
+        SELECT nf.*
+        FROM named_frontier nf, norm n
+        ORDER BY nf.eff_mu DESC,
+                 nf.witness_count DESC,
+                 nf.entity_id
+        LIMIT (SELECT cap FROM norm)
+    ),
+    -- The exact decomposed surface remains a legitimate content entity in the same
+    -- result set.  It is not allowed to suppress a named entity: Browse returns a set.
+    direct AS MATERIALIZED (
+        SELECT e.id AS entity_id,
+               e.id AS matched_name_id,
+               'surface'::text AS match_kind,
+               NULL::bigint AS rating,
+               NULL::bigint AS rd,
+               NULL::numeric AS eff_mu,
+               0::bigint AS witness_count,
+               1 AS priority
+        FROM laplace.entities e
+        WHERE p_exact IS NOT NULL
+          AND e.id = p_exact
+    ),
+    combined AS MATERIALIZED (
+        SELECT * FROM named_kept
+        UNION ALL
+        SELECT * FROM direct
+    ),
+    dedup AS MATERIALIZED (
+        SELECT x.entity_id, x.matched_name_id, x.match_kind,
+               x.rating, x.rd, x.eff_mu, x.witness_count, x.priority
+        FROM (
+            SELECT c.*,
+                   row_number() OVER (
+                       PARTITION BY c.entity_id
+                       ORDER BY c.priority,
+                                c.eff_mu DESC NULLS LAST,
+                                c.witness_count DESC,
+                                c.matched_name_id) AS rn
+            FROM combined c
+        ) x
+        WHERE x.rn = 1
+    ),
+    ranked AS MATERIALIZED (
+        SELECT d.*, e.tier, e.type_id,
+               count(*) OVER ()::bigint AS matched_entity_count,
+               row_number() OVER (
+                   ORDER BY d.priority,
+                            d.eff_mu DESC NULLS LAST,
+                            d.witness_count DESC,
+                            d.entity_id) AS ord
+        FROM dedup d
+        JOIN laplace.entities e ON e.id = d.entity_id
+    )
+    SELECT r.entity_id,
+           r.tier,
+           r.type_id,
+           r.matched_name_id,
+           r.match_kind,
+           r.rating,
+           r.rd,
+           r.eff_mu,
+           r.witness_count,
+           fs.candidate_name_count,
+           fs.candidate_truncated,
+           r.matched_entity_count
+    FROM ranked r
+    CROSS JOIN frontier_stats fs
+    CROSS JOIN norm n
+    WHERE r.ord > n.off
+      AND r.ord <= n.off + n.lim
+    ORDER BY r.ord;
+END;
