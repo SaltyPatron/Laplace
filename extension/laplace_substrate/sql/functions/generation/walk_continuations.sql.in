@@ -1,4 +1,9 @@
 DROP FUNCTION IF EXISTS laplace.walk_continuations(bytea[], int, int, float8, int, bigint);
+-- PostgreSQL stores argument names as part of the function definition and refuses
+-- CREATE OR REPLACE when a same-signature upgrade renames one (the installed
+-- surface used p_breadth; the routed implementation names the actual operand
+-- p_spread). Drop the compatibility signature explicitly before recreating it.
+DROP FUNCTION IF EXISTS generation.walk_continuations(bytea[], int, int, float8, int, bigint);
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
