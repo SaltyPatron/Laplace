@@ -26,10 +26,11 @@ test('Explore tab opens the substrate browser and keeps Warehouse addressable', 
   await page.goto('/explore');
   await expect(page.getByRole('heading', { name: 'Browse Laplace like a reference site' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Find a starting point in the substrate' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Browse', exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Warehouse', exact: true })).toBeVisible();
+  const exploreNav = page.locator('aside');
+  await expect(exploreNav.getByRole('link', { name: 'Browse', exact: true })).toBeVisible();
+  await expect(exploreNav.getByRole('link', { name: 'Warehouse', exact: true })).toBeVisible();
 
-  await page.getByRole('link', { name: 'Warehouse', exact: true }).click();
+  await exploreNav.getByRole('link', { name: 'Warehouse', exact: true }).click();
   await expect(page).toHaveURL('/explore/warehouse');
   await expect(page.getByRole('heading', { name: 'Substrate warehouse' })).toBeVisible();
 });
