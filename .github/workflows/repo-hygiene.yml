@@ -110,3 +110,51 @@ jobs:
           # Evidence should survive even if one diagnostic surface is not readable by the
           # runner account; this job is a receipt, not another gate on the incident.
           exit 0
+
+  diagnose-app-storage:
+    name: Diagnose application volume exhaustion
+    if: github.event_name == 'pull_request' && github.head_ref == 'diag/app-storage'
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 10
+    steps:
+      - name: Filesystem, release and process ownership receipts
+        shell: bash
+        run: |
+          set +e
+          echo '=== filesystems ==='
+          df -hT / /opt /opt/laplace /opt/laplace/app /opt/laplace/app/releases 2>&1 || true
+          df -i /opt/laplace/app/releases 2>&1 || true
+          echo
+          echo '=== top /opt/laplace consumers ==='
+          du -x -h -d 3 /opt/laplace 2>/dev/null | sort -h | tail -n 120 || true
+          echo
+          echo '=== application releases ==='
+          for d in /opt/laplace/app/releases/runtime.*; do
+            [ -d "$d" ] || continue
+            printf '%s\t' "$d"
+            du -sh "$d" 2>/dev/null | cut -f1
+            printf 'links:'
+            for link in /opt/laplace/app/laplace-lichess /opt/laplace/app/laplace-mcp /opt/laplace/app/laplace-uci; do
+              [ -L "$link" ] || continue
+              target=$(readlink -f "$link" 2>/dev/null || true)
+              [[ "$target" == "$d"/* ]] && printf ' %s' "$link"
+            done
+            echo
+            printf 'pids:'
+            for pid in /proc/[0-9]*; do
+              [ -r "$pid/maps" ] || continue
+              grep -Fq " $d/" "$pid/maps" 2>/dev/null && printf ' %s' "${pid##*/}"
+            done
+            echo
+          done
+          echo
+          echo '=== application backups ==='
+          find /opt/laplace/app-backups -mindepth 1 -maxdepth 1 -type d -name 'managed.*' -printf '%T@ %p\n' 2>/dev/null \
+            | sort -n | while read -r ts d; do du -sh "$d" 2>/dev/null; done || true
+          echo
+          echo '=== deleted-but-open files ==='
+          lsof +L1 /opt/laplace 2>/dev/null | tail -n 200 || true
+          echo
+          echo '=== managed processes ==='
+          ps -eo pid,ppid,lstart,rss,comm,args | grep -E 'laplace|dotnet' | grep -v grep || true
+          exit 0
