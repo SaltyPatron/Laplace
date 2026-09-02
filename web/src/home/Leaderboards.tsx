@@ -13,6 +13,10 @@ const HOME_BANDS = [1, 2, 4, 5];
  * salience band — so the landing shows who's on top of each, live, exactly the
  * way a sports front page leads with the leaderboard rather than attendance
  * totals. Each row links to the subject entity in Explore.
+ *
+ * The API currently supplies conservative standing (rating - 2*RD) and witness
+ * count. Do not relabel those coordinates as the underlying rating or as games:
+ * generic relation witnesses may come from any admitted source/modality.
  */
 export function Leaderboards() {
   const [bands, setBands] = useState<BandLeaders[] | null>(null);
@@ -30,7 +34,7 @@ export function Leaderboards() {
     <section className={styles.leaders} aria-label="League leaders">
       <div className={styles.head}>
         <span className={styles.title}>League leaders</span>
-        <Muted className={styles.sub}>strongest consensus per arena — rating and games, live</Muted>
+        <Muted className={styles.sub}>strongest consensus per arena — conservative standing and witnesses, live</Muted>
       </div>
 
       <div className={styles.grid}>
@@ -50,8 +54,15 @@ export function Leaderboards() {
                       <span className={styles.object} title={row.object}>{row.object}</span>
                     </span>
                     <span className={styles.stat}>
-                      <span className={styles.mu}>{row.eff_mu.toFixed(0)}</span>
-                      <span className={styles.wit}>{row.witnesses}g</span>
+                      <span
+                        className={styles.mu}
+                        title="Conservative standing (rating − 2×RD); not the underlying rating"
+                      >
+                        {row.eff_mu.toFixed(0)}
+                      </span>
+                      <span className={styles.wit} title="Witnessed observations">
+                        {row.witnesses.toLocaleString()} wit
+                      </span>
                     </span>
                   </li>
                 ))}
