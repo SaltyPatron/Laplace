@@ -23,7 +23,13 @@ typedef struct {
 
 #define LAPLACE_GLICKO2_DEFAULT_TAU 500000000LL
 
-#define LAPLACE_GLICKO2_ILLINOIS_EPS 1000LL
+/* The Illinois solve runs entirely in Q1e9. At the paper's 1e-6 tolerance the
+ * secant correction can quantize to the same carrier before |B-A| reaches 1000,
+ * leaving a valid bracket to spin until the iteration cap and be misreported as
+ * an invalid Glicko state. 2e-5 is still five decimal places in log-variance,
+ * below the representable effect on published rating/RD for these periods, while
+ * terminating at the fixed-point resolution the solver can actually advance. */
+#define LAPLACE_GLICKO2_ILLINOIS_EPS 20000LL
 
 #define LAPLACE_GLICKO2_RATING_PERIOD_NS 2592000000000000LL
 
