@@ -210,7 +210,7 @@ internal static class FideRatingList
             {
                 if (subtree.NodeType != XmlNodeType.Element || subtree.IsEmptyElement) continue;
                 string field = subtree.LocalName;
-                string value = subtree.ReadElementContentAsString().Trim();
+                string value = subtree.ReadString().Trim();
                 switch (field)
                 {
                     case "fideid": fideId = value; break;
@@ -260,7 +260,7 @@ internal static class FideRatingList
         => mode == "rapid" ? p.Rapid : mode == "blitz" ? p.Blitz : p.Standard;
 
     private static bool IsInactive(string flag)
-        => flag.Contains('I', StringComparison.OrdinalIgnoreCase);
+        => flag.Contains('I') || flag.Contains('i');
 
     private static int Int(string value)
         => int.TryParse(value, out int parsed) ? parsed : 0;
@@ -297,8 +297,8 @@ internal static class FideRatingList
         public override bool CanRead => inner.CanRead;
         public override bool CanSeek => false;
         public override bool CanWrite => false;
-        public override long Length => inner.Length;
-        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
         public override void Flush() => inner.Flush();
         public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
         public override int Read(Span<byte> buffer) => inner.Read(buffer);
