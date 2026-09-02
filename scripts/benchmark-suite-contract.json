@@ -1,0 +1,44 @@
+{
+  "schema": "laplace.benchmark-suite-contract/v1",
+  "registry": "scripts/benchmark-profiles.json",
+  "runner": "scripts/benchmark_suite.py",
+  "workflow": ".github/workflows/benchmark-evidence.yml",
+  "trigger": "workflow_dispatch",
+  "source_core_mutability": "none_except_temporary_outputs",
+  "artifact_binding": {
+    "core": "build/engine/core/liblaplace_core.so",
+    "t0": "build/engine/core/perfcache/laplace_t0_perfcache.bin",
+    "require_sha256": true,
+    "require_build_tree_loader_precedence": true
+  },
+  "scaling": {
+    "must_measure": true,
+    "may_not_extrapolate_single_worker": true,
+    "physical_cores_before_smt": true,
+    "require_affinity_receipt": true,
+    "require_speedup_and_efficiency": true
+  },
+  "sparse_complexity": {
+    "representative_form": "O(log N)+O(K)",
+    "require_N_definition": true,
+    "require_K_definition": true,
+    "require_address_provider": true,
+    "require_actual_selected_algorithm": true,
+    "permit_O1_address_provider": true,
+    "forbid_unqualified_universal_claim": true
+  },
+  "accelerators": {
+    "semantic_authority": false,
+    "world_residency_required": false,
+    "require_provider_identity": true,
+    "require_selected_K": true,
+    "require_transfer_bytes": true,
+    "require_device_memory": true,
+    "require_result_parity": true
+  },
+  "power": {
+    "psu_nameplate_is_measured_draw": false,
+    "rapl_is_whole_system_energy": false,
+    "whole_system_requires_admitted_meter": true
+  }
+}
