@@ -117,6 +117,16 @@ internal interface ISubstrateClient
 
     Task<ExploreResolveResponse?> ExploreResolveAsync(string reference, CancellationToken ct);
 
+    Task<ExploreBrowseResponse> ExploreBrowseAsync(
+        string query,
+        string queryRootIdHex,
+        IReadOnlyList<string> queryMemberIdsHex,
+        int offset,
+        int limit,
+        int candidateCapacity,
+        CancellationToken ct) =>
+        throw new NotSupportedException("This substrate client does not implement Browse.");
+
     Task<ExploreEntityPreviewResponse?> ExploreEntityPreviewAsync(string idHex, CancellationToken ct);
 
     Task<ExploreEntityResponse?> ExploreEntityAsync(
