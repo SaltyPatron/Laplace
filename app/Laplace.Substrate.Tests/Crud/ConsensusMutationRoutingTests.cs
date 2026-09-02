@@ -68,6 +68,32 @@ public sealed class ConsensusMutationRoutingTests
     }
 
     [Fact]
+    public void ChessRatingRepairHealsEvidenceAheadOfConsensusWithoutZeroOpponentMarker()
+    {
+        var sql = Read("extension", "laplace_substrate", "sql", "functions",
+            "chess", "repair_player_ratings.sql.in");
+
+        // The old procedure returned as soon as no opponent_rating=0 row existed.
+        // That cannot repair a fold which failed after evidence committed, because
+        // the evidence can already contain a correct real opponent rating.
+        Assert.DoesNotContain("IF NOT FOUND THEN\n        RETURN", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("current.id IS NULL", sql, StringComparison.Ordinal);
+        Assert.Contains("current.witness_count IS DISTINCT FROM", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("SUM(GREATEST(evidence.observation_count, 1))", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("current.last_observed_at IS DISTINCT FROM", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("MAX(evidence.last_observed_at)", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("pairing.context_id IS NOT DISTINCT FROM evidence.context_id", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", sql,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProductionConsensusMutationAuthorityHasNoOtherSqlWriters()
     {
         var sqlRoot = Path.Combine(RepoRoot, "extension", "laplace_substrate", "sql");
