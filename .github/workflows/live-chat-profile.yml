@@ -51,19 +51,36 @@ jobs:
           measure route "SELECT count(*) FROM generation.forward_route_trace('dog', 2, 8, NULL)"
           measure frontier "SELECT count(*) FROM generation.forward_frontier('dog', 2, 8, NULL)"
           measure proposal_word "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[laplace.word_id('dog')]::bytea[], NULL)"
+
+          # Materialize the exact step-1 operands once so S7 can be timed without
+          # charging it for S4 route construction or S6 proposal generation.
+          "$psql" -X -w -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TEMP TABLE _chat_profile_input AS
+          SELECT
+              ARRAY(SELECT t.object_id
+                      FROM generation.trajectory_continuations(
+                               ARRAY[laplace.word_id('dog')]::bytea[], NULL) t) AS candidates,
+              ARRAY(SELECT f.entity
+                      FROM generation.forward_frontier('dog', 2, 8, NULL) f) AS frontier;
+          SQL
+          measure steer_word "SELECT count(*) FROM _chat_profile_input i CROSS JOIN LATERAL generation.steer_candidates(i.candidates, i.frontier)"
+          measure steer_input_sizes "SELECT cardinality(candidates), cardinality(frontier) FROM _chat_profile_input"
+
+          # Materialize the actual first elected constituent, then measure the next
+          # exact-context proposal and the unigram fallback independently. This shows
+          # whether S6 is paying several GIN probes per emitted constituent.
+          "$psql" -X -w -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TEMP TABLE _chat_profile_first AS
+          WITH i AS (SELECT * FROM _chat_profile_input)
+          SELECT w.entity
+          FROM i CROSS JOIN LATERAL generation.forward_walk_continuations(
+              ARRAY[laplace.word_id('dog')]::bytea[], 1, 5, 0.6, 10, 42, i.frontier) w
+          WHERE w.step = 1;
+          SQL
+          measure proposal_bigram "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[laplace.word_id('dog'), (SELECT entity FROM _chat_profile_first)]::bytea[], NULL)"
+          measure proposal_first_unigram "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[(SELECT entity FROM _chat_profile_first)]::bytea[], NULL)"
+
           measure forward_1 "SELECT count(*) FROM generation.forward_text('dog', 1, 5, 0.6, 10, 42, 2, 8, NULL)"
           measure forward_2 "SELECT count(*) FROM generation.forward_text('dog', 2, 5, 0.6, 10, 42, 2, 8, NULL)"
           measure forward_4 "SELECT count(*) FROM generation.forward_text('dog', 4, 5, 0.6, 10, 42, 2, 8, NULL)"
           measure forward_8 "SELECT count(*) FROM generation.forward_text('dog', 8, 5, 0.6, 10, 42, 2, 8, NULL)"
-
-          echo '===== CHAT_PROFILE pg_stat_statements ====='
-          "$psql" -X -w -tAX -F'|' -c "
-            SELECT calls, round(total_exec_time::numeric,1), round(mean_exec_time::numeric,1),
-                   left(regexp_replace(query, E'[\\n\\r\\t ]+', ' ', 'g'), 220)
-              FROM pg_stat_statements
-             WHERE query ILIKE '%trajectory_continuations%'
-                OR query ILIKE '%steer_candidates%'
-                OR query ILIKE '%forward_route_trace%'
-                OR query ILIKE '%explore_web%'
-             ORDER BY total_exec_time DESC
-             LIMIT 30" || true
