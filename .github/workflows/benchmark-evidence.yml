@@ -57,6 +57,15 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     steps:
+      - name: Create immutable evidence directory first
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/laplace-benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$receipt"
+          mkdir -p "$receipt"
+          printf 'LAPLACE_BENCH_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
+
       - name: Resolve and checkout exact revision
         shell: bash
         env:
@@ -66,10 +75,12 @@ jobs:
           set -euo pipefail
           target="${REQUESTED_REF:-}"
           [[ -n "$target" ]] || target="$DISPATCH_SHA"
+          printf 'requested_ref=%s\n' "$target" > "$LAPLACE_BENCH_RECEIPT/request.env"
           git fetch --no-tags --prune origin "$target"
           resolved="$(git rev-parse FETCH_HEAD)"
           git checkout --force "$resolved"
           printf 'LAPLACE_BENCH_SHA=%s\n' "$resolved" >> "$GITHUB_ENV"
+          printf 'resolved_sha=%s\n' "$resolved" >> "$LAPLACE_BENCH_RECEIPT/request.env"
 
       - uses: ./.github/actions/setup-laplace-env
 
@@ -88,26 +99,7 @@ jobs:
             exit 2
           }
 
-      - name: Build exact revision without installing it
-        shell: bash
-        env:
-          FORCE_REBUILD: ${{ inputs.force_rebuild }}
-        run: |
-          set -euo pipefail
-          args=()
-          [[ "$FORCE_REBUILD" != true ]] || args+=(--force-rebuild)
-          bash scripts/pipeline.sh "${args[@]}" build
-
-      - name: Create immutable evidence directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          receipt="$RUNNER_TEMP/laplace-benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          rm -rf "$receipt"
-          mkdir -p "$receipt"
-          printf 'LAPLACE_BENCH_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
-
-      - name: Record source, runner, hardware, storage, and accelerator provenance
+      - name: Record source, runner, and hardware provenance
         shell: bash
         run: |
           set -euo pipefail
@@ -142,15 +134,45 @@ jobs:
           else
             printf 'nvidia-smi unavailable\n' > "$out/nvidia-smi-before.txt"
           fi
-          {
-            for zone in /sys/class/powercap/intel-rapl:*; do
-              [[ -d "$zone" ]] || continue
-              name="$(cat "$zone/name" 2>/dev/null || basename "$zone")"
-              energy="$(cat "$zone/energy_uj" 2>/dev/null || true)"
-              max="$(cat "$zone/max_energy_range_uj" 2>/dev/null || true)"
-              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max"
-            done
-          } > "$out/rapl-before.tsv"
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            [[ -r "$f" ]] || continue
+            printf '%s\t%s\n' "$f" "$(cat "$f")"
+          done > "$out/cpu-governors.tsv"
+
+      - name: Build exact revision without installing it
+        shell: bash
+        env:
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+        run: |
+          set -o pipefail
+          args=()
+          [[ "$FORCE_REBUILD" != true ]] || args+=(--force-rebuild)
+          bash scripts/pipeline.sh "${args[@]}" build 2>&1 \
+            | tee "$LAPLACE_BENCH_RECEIPT/build.log"
+
+      - name: Prepare Release CLI outside measured interval
+        if: inputs.suite == 'moby' || inputs.suite == 'core+moby'
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
+            | tee "$LAPLACE_BENCH_RECEIPT/cli-release-build.log"
+
+      - name: Record exact core library linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$LAPLACE_BENCH_RECEIPT/core-linkage.txt"
+          : > "$out"
+          found=0
+          while IFS= read -r lib; do
+            found=1
+            printf '== %s ==\n' "$lib" >> "$out"
+            sha256sum "$lib" >> "$out"
+            ldd "$lib" >> "$out" 2>&1 || true
+            printf '\n' >> "$out"
+          done < <(find build -type f -name 'liblaplace_core.so' -print | sort)
+          [[ "$found" -eq 1 ]] || printf 'liblaplace_core.so not found under build/\n' >> "$out"
 
       - name: Run single-thread core composition benchmark
         if: inputs.suite == 'core' || inputs.suite == 'core+moby'
@@ -160,9 +182,22 @@ jobs:
           CORPUS_DIR: ${{ inputs.corpus_dir }}
         run: |
           set -euo pipefail
+          capture_rapl() {
+            local path="$1"
+            : > "$path"
+            for zone in /sys/class/powercap/intel-rapl:*; do
+              [[ -d "$zone" ]] || continue
+              name="$(cat "$zone/name" 2>/dev/null || basename "$zone")"
+              energy="$(cat "$zone/energy_uj" 2>/dev/null || true)"
+              max="$(cat "$zone/max_energy_range_uj" 2>/dev/null || true)"
+              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max" >> "$path"
+            done
+          }
           corpus="${CORPUS_DIR:-$GITHUB_WORKSPACE}"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/core-rapl-before.tsv"
           python3 scripts/bench-compose.py "$corpus" --repeats "$REPEATS" \
             | tee "$LAPLACE_BENCH_RECEIPT/core-compose.log"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/core-rapl-after.tsv"
 
       - name: Run Moby Dick bit-perfect engine roundtrip
         if: inputs.suite == 'moby' || inputs.suite == 'core+moby'
@@ -171,33 +206,37 @@ jobs:
           MOBY_PATH: ${{ inputs.moby_path }}
         run: |
           set -euo pipefail
-          [[ -f "$MOBY_PATH" ]] || {
-            echo "::error::Moby fixture does not exist: $MOBY_PATH"
-            exit 2
-          }
-          out="$LAPLACE_BENCH_RECEIPT/moby-roundtrip.out"
-          dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release -- \
-            roundtrip "$MOBY_PATH" "$out" \
-            | tee "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log"
-          cmp -- "$MOBY_PATH" "$out"
-          sha256sum -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-sha256.txt"
-          wc -c -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-bytes.txt"
-
-      - name: Record post-run power and accelerator state
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$LAPLACE_BENCH_RECEIPT"
-          {
+          capture_rapl() {
+            local path="$1"
+            : > "$path"
             for zone in /sys/class/powercap/intel-rapl:*; do
               [[ -d "$zone" ]] || continue
               name="$(cat "$zone/name" 2>/dev/null || basename "$zone")"
               energy="$(cat "$zone/energy_uj" 2>/dev/null || true)"
               max="$(cat "$zone/max_energy_range_uj" 2>/dev/null || true)"
-              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max"
+              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max" >> "$path"
             done
-          } > "$out/rapl-after.tsv"
+          }
+          [[ -f "$MOBY_PATH" ]] || {
+            echo "::error::Moby fixture does not exist: $MOBY_PATH"
+            exit 2
+          }
+          out="$LAPLACE_BENCH_RECEIPT/moby-roundtrip.out"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/moby-rapl-before.tsv"
+          dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-build -- \
+            roundtrip "$MOBY_PATH" "$out" \
+            | tee "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/moby-rapl-after.tsv"
+          cmp -- "$MOBY_PATH" "$out"
+          sha256sum -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-sha256.txt"
+          wc -c -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-bytes.txt"
+
+      - name: Record post-run accelerator state and seal manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$LAPLACE_BENCH_RECEIPT"
           if command -v nvidia-smi >/dev/null 2>&1; then
             nvidia-smi -q > "$out/nvidia-smi-after.txt" 2>&1 || true
             nvidia-smi --query-gpu=name,uuid,pstate,power.draw,power.limit,memory.used,utilization.gpu,utilization.memory \
@@ -210,10 +249,11 @@ jobs:
         if: always()
         shell: bash
         run: |
+          sha="${LAPLACE_BENCH_SHA:-unresolved}"
           {
             echo '## Laplace manual benchmark evidence'
             echo
-            echo "- Commit: \`$LAPLACE_BENCH_SHA\`"
+            echo "- Commit: \`$sha\`"
             echo "- Runner: \`$RUNNER_NAME\`"
             echo "- Suite: \`${{ inputs.suite }}\`"
             echo "- Artifact: \`laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
