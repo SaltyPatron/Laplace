@@ -38,16 +38,16 @@ SELECT public.laplace_hash128_blake3('test/chess-fold-debt/played-evidence'),
 FROM _repair_ids;
 INSERT 0 1
 
--- Simulate evidence committed while the post-evidence fold failed: consensus
--- exists but is one witness and one timestamp behind. No opponent rating is zero,
--- so the historical repair's old early-return path would have done nothing.
+-- Reproduce the live warehouse failure class: the derived row has the SAME
+-- witness count and timestamp as durable evidence, but its Glicko carrier is
+-- wildly corrupt. Cardinality/time-only debt detection cannot see this state.
 INSERT INTO laplace.consensus
     (id, subject_id, type_id, object_id, rating, rd, volatility,
      witness_count, last_observed_at)
 SELECT laplace.consensus_id(player_id, outcome_t, result_id),
        player_id, outcome_t, result_id,
-       1500000000000, 350000000000, 60000000,
-       1, '2026-01-01 00:00:00+00'::timestamptz
+       10398275800000000, 350000000000, 60000000,
+       2, '2026-01-02 03:04:05+00'::timestamptz
 FROM _repair_ids;
 INSERT 0 1
 
@@ -60,6 +60,10 @@ CALL
 DO $$
 DECLARE
     r record;
+    expected_rating bigint;
+    expected_rd bigint;
+    expected_volatility bigint;
+    expected_witnesses bigint;
 BEGIN
     SELECT c.* INTO STRICT r
     FROM _repair_ids i
@@ -68,19 +72,42 @@ BEGIN
      AND c.type_id = i.outcome_t
      AND c.subject_id = i.player_id;
 
-    IF r.witness_count <> 2 THEN
-        RAISE EXCEPTION 'FAIL: fold-debt repair witness_count %, expected 2', r.witness_count;
+    SELECT (q.acc).rating, (q.acc).rd, (q.acc).volatility, (q.acc).witness_count
+    INTO STRICT expected_rating, expected_rd, expected_volatility, expected_witnesses
+    FROM (
+        SELECT laplace.consensus_fold(
+                   false, NULL::bigint, NULL::bigint, NULL::bigint,
+                   e.opponent_rating_fp1e9,
+                   e.opponent_rd_fp1e9,
+                   GREATEST(e.observation_count, 1),
+                   e.sum_score_fp1e9,
+                   consensus.glicko2_tau()
+                   ORDER BY e.last_observed_at, e.id) AS acc
+        FROM _repair_ids i
+        JOIN laplace.attestations e
+          ON e.subject_id = i.player_id
+         AND e.type_id = i.outcome_t
+         AND e.object_id = i.result_id
+    ) q;
+
+    IF ROW(r.rating, r.rd, r.volatility, r.witness_count)
+       IS DISTINCT FROM
+       ROW(expected_rating, expected_rd, expected_volatility, expected_witnesses) THEN
+        RAISE EXCEPTION 'FAIL: count-complete corrupt consensus was not rebuilt exactly from evidence';
+    END IF;
+    IF r.rating = 10398275800000000 THEN
+        RAISE EXCEPTION 'FAIL: runaway rating survived full chess refold';
     END IF;
     IF r.last_observed_at <> '2026-01-02 03:04:05+00'::timestamptz THEN
-        RAISE EXCEPTION 'FAIL: fold-debt repair timestamp %', r.last_observed_at;
+        RAISE EXCEPTION 'FAIL: chess rating repair timestamp %', r.last_observed_at;
     END IF;
     IF r.rd <= 0 OR r.volatility <= 0 THEN
-        RAISE EXCEPTION 'FAIL: fold-debt repair emitted illegal Glicko state rd=% volatility=%',
+        RAISE EXCEPTION 'FAIL: chess rating repair emitted illegal Glicko state rd=% volatility=%',
             r.rd, r.volatility;
     END IF;
-    RAISE NOTICE 'chess fold debt repaired from durable evidence';
+    RAISE NOTICE 'count-complete runaway chess rating rebuilt exactly from durable evidence';
 END $$;
-NOTICE:  chess fold debt repaired from durable evidence
+NOTICE:  count-complete runaway chess rating rebuilt exactly from durable evidence
 DO
 
 CREATE TEMP TABLE _repair_snapshot AS
@@ -111,9 +138,9 @@ BEGIN
               IS DISTINCT FROM
               ROW(s.rating, s.rd, s.volatility, s.witness_count, s.last_observed_at)
     ) THEN
-        RAISE EXCEPTION 'FAIL: second fold-debt repair changed an already repaired cell';
+        RAISE EXCEPTION 'FAIL: second chess rating repair changed an already repaired cell';
     END IF;
-    RAISE NOTICE 'chess fold debt repair replay is idempotent';
+    RAISE NOTICE 'full chess rating repair replay is idempotent';
 END $$;
-NOTICE:  chess fold debt repair replay is idempotent
+NOTICE:  full chess rating repair replay is idempotent
 DO
