@@ -29,6 +29,8 @@
 ## Additional design and implementation context
 
 - [plan/README.md](plan/README.md) — product and workstream design index.
+- [guides/knowledge-arena.md](guides/knowledge-arena.md) — Knowledge Golf, Highway Race, Laplace Degree, relays, Constraint Crossing, sequence-aware Graphle, Witness Hunt, red/blue/white orchestration, COMBINE, and trajectory-game laws over one pinned substrate world.
+- [guides/chess-forward-pass-proof.md](guides/chess-forward-pass-proof.md) — one cross-modal Chess Forward Pass, material/structure/PGN/book/lexical planes, pinned Stockfish 18 comparator/teacher roles, and the cumulative Elo/ablation proof ladder.
 - [decisions/](decisions/) — architectural decision records.
 - [guides/](guides/) — operational guides.
 
