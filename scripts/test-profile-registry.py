@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Single executable authority for Laplace test profiles.
 
-Profiles are selected before execution from scripts/test-profiles.json. Required
-suites are enumerated first; selected=0 is a hard failure. Every run writes one
-machine-readable receipt and, under Actions, the same facts to GITHUB_STEP_SUMMARY.
+Profiles are enumerated before execution from scripts/test-profiles.json. CTest
+can enumerate its exact label-selected set before execution. `dotnet test
+--list-tests`, however, is only discovery: the .NET test host can list tests that
+its later `--filter` execution excludes. The receipt therefore keeps dotnet
+`discovered` distinct from the authoritative filtered runtime `selected` count.
+A required suite with no discovered tests fails before execution; a required
+dotnet suite whose filter actually selects zero tests fails immediately after
+that runtime selection is observed. Every run writes one machine-readable
+receipt and, under Actions, the same facts to GITHUB_STEP_SUMMARY.
 """
 from __future__ import annotations
 
@@ -243,7 +249,12 @@ def _count_dotnet_list(output: str) -> int:
     # Solution-level discovery writes one stream per test assembly concurrently.
     # A later assembly's unindented "Test run for"/"No test matches" line can
     # therefore appear between another assembly's heading and its indented test
-    # names.  Do not model the merged stream as one contiguous heading block.
+    # names. Do not model the merged stream as one contiguous heading block.
+    #
+    # More importantly, this is DISCOVERY only. `dotnet test --list-tests` does
+    # not give us a trustworthy filtered selection count for the later --filter
+    # execution, so never compare this number to filtered runtime totals as if
+    # they represented the same set.
     if "The following Tests are available:" not in output:
         return 0
     return sum(
@@ -252,7 +263,7 @@ def _count_dotnet_list(output: str) -> int:
     )
 
 
-def selected_count(suite: dict[str, Any]) -> tuple[int, str]:
+def discovered_count(suite: dict[str, Any]) -> tuple[int, str]:
     if suite["runner"] in {"script", "browser"}:
         return 1, "declared executable suite"
     rc, output, _ = _run(
@@ -260,7 +271,7 @@ def selected_count(suite: dict[str, Any]) -> tuple[int, str]:
         TIMEOUT_SECONDS[suite["timeout_class"]],
     )
     if rc != 0:
-        raise RegistryError(f"selection failed for {suite['id']}:\n{output}")
+        raise RegistryError(f"discovery failed for {suite['id']}:\n{output}")
     if suite["runner"] == "ctest":
         match = re.findall(r"Total Tests:\s*(\d+)", output)
         count = int(match[-1]) if match else 0
@@ -277,13 +288,18 @@ def _result_counts(
     if suite["runner"] == "ctest":
         skipped = sum(1 for line in output.splitlines() if "***Skipped" in line)
         return max(0, selected - skipped), skipped
+
+    # For dotnet, runtime totals ARE the authoritative filtered selection. The
+    # preceding --list-tests result is deliberately not compared to this value:
+    # it is full discovery, and theories may also expand one discovered test into
+    # multiple runtime cases. Keep the two coordinates separately in the receipt.
     totals = [int(value) for value in re.findall(r"Total:\s*(\d+)", output)]
     skips = [int(value) for value in re.findall(r"Skipped:\s*(\d+)", output)]
     observed = sum(totals)
     skipped = sum(skips)
-    if observed < selected:
+    if skipped > observed:
         raise RegistryError(
-            f"{suite['id']} selection/result drift: selected={selected} result_total={observed}"
+            f"{suite['id']} invalid dotnet result counts: total={observed} skipped={skipped}"
         )
     return max(0, observed - skipped), skipped
 
@@ -327,16 +343,18 @@ def _append_summary(receipt: dict[str, Any]) -> None:
         return
     with open(destination, "a", encoding="utf-8") as out:
         out.write(f"\n### Test profile `{receipt['profile']}` — {receipt['status']}\n\n")
-        out.write("| suite | selected | executed | skipped | status | ms |\n")
-        out.write("|---|---:|---:|---:|---|---:|\n")
+        out.write("| suite | discovered | selected | executed | skipped | status | ms |\n")
+        out.write("|---|---:|---:|---:|---:|---|---:|\n")
         for suite in receipt["suites"]:
             out.write(
-                f"| `{suite['id']}` | {suite['selected']} | {suite['executed']} | "
-                f"{suite['skipped']} | {suite['status']} | {suite['elapsed_ms']} |\n"
+                f"| `{suite['id']}` | {suite['discovered']} | {suite['selected']} | "
+                f"{suite['executed']} | {suite['skipped']} | {suite['status']} | "
+                f"{suite['elapsed_ms']} |\n"
             )
         out.write(
-            f"\nsource `{receipt['source_sha']}` · selected={receipt['selected']} · "
-            f"executed={receipt['executed']} · skipped={receipt['skipped']}\n"
+            f"\nsource `{receipt['source_sha']}` · discovered={receipt['discovered']} · "
+            f"selected={receipt['selected']} · executed={receipt['executed']} · "
+            f"skipped={receipt['skipped']}\n"
         )
 
 
@@ -354,6 +372,7 @@ def _finish_receipt(
         "started_at_unix_ms": int(started_wall * 1000),
         "ended_at_unix_ms": int(ended_wall * 1000),
         "elapsed_ms": int((ended_wall - started_wall) * 1000),
+        "discovered": sum(item["discovered"] for item in records),
         "selected": sum(item["selected"] for item in records),
         "executed": sum(item["executed"] for item in records),
         "skipped": sum(item["skipped"] for item in records),
@@ -369,27 +388,32 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
     records: list[dict[str, Any]] = []
 
     for suite in chosen:
-        selected, _ = selected_count(suite)
+        discovered, _ = discovered_count(suite)
+        # CTest label selection is honored by `ctest -N`, and script/browser
+        # suites are one declared executable. Dotnet list-tests is discovery only;
+        # its selected count becomes authoritative when the filtered run reports
+        # runtime totals below.
+        preselected = 0 if suite["runner"] == "dotnet" else discovered
         record = {
             "id": suite["id"],
             "profile": suite["profile"],
             "runner": suite["runner"],
-            "discovered": selected,
-            "selected": selected,
+            "discovered": discovered,
+            "selected": preselected,
             "executed": 0,
             "skipped": 0,
             "status": "selected",
             "elapsed_ms": 0,
         }
         records.append(record)
-        if suite["required"] and selected == 0:
-            record["status"] = "failed-zero-selection"
+        if suite["required"] and discovered == 0:
+            record["status"] = "failed-zero-discovery"
             receipt = _finish_receipt(request, started_wall, records, "failed")
             target = receipt_path or DEFAULT_RECEIPT_DIR / f"{request}.json"
             _write_receipt(target, receipt)
             _append_summary(receipt)
             print(
-                f"test-profile: ERROR required suite {suite['id']} selected=0",
+                f"test-profile: ERROR required suite {suite['id']} discovered=0",
                 file=sys.stderr,
             )
             return 1
@@ -403,16 +427,27 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
         )
         sys.stdout.write(output)
         record["elapsed_ms"] = elapsed_ms
+        zero_selected = False
         try:
             executed, skipped = _result_counts(suite, record["selected"], output)
             if suite["runner"] == "dotnet":
                 record["selected"] = executed + skipped
+                zero_selected = suite["required"] and record["selected"] == 0
+                if zero_selected:
+                    print(
+                        f"test-profile: ERROR required suite {suite['id']} filtered selection=0",
+                        file=sys.stderr,
+                    )
+                    rc = 1
         except RegistryError as exc:
             print(f"test-profile: ERROR {exc}", file=sys.stderr)
             executed, skipped, rc = 0, 0, 1
         record["executed"] = executed
         record["skipped"] = skipped
-        record["status"] = "success" if rc == 0 else "failed"
+        if zero_selected:
+            record["status"] = "failed-zero-selection"
+        else:
+            record["status"] = "success" if rc == 0 else "failed"
         if rc != 0:
             status = "failed"
             break
@@ -422,8 +457,9 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
     _write_receipt(target, receipt)
     _append_summary(receipt)
     print(
-        f"TEST_PROFILE profile={request} status={status} selected={receipt['selected']} "
-        f"executed={receipt['executed']} skipped={receipt['skipped']} receipt={target}"
+        f"TEST_PROFILE profile={request} status={status} discovered={receipt['discovered']} "
+        f"selected={receipt['selected']} executed={receipt['executed']} "
+        f"skipped={receipt['skipped']} receipt={target}"
     )
     return 0 if status == "success" else 1
 
