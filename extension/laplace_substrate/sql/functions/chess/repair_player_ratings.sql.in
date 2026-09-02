@@ -1,13 +1,13 @@
 -- Repair chess opponent ratings lost at the managed/native staging boundary AND
--- heal derived OUTCOME fold debt left by an evidence-first apply whose consensus
--- continuation failed. Evidence is durable authority; consensus is rebuildable.
+-- rebuild every chess player rating cell from durable evidence after Glicko math
+-- changes. Evidence is durable authority; consensus is rebuildable.
 --
 -- The first repair reconstructs a missing opponent rating from PLAYED_BY plus
--- HAS_RATING testimony under the same playing context. The second repair is
--- deliberately independent of that historical defect: a failed fold can leave
--- perfectly rated evidence ahead of consensus, so missing/stale player OUTCOME
--- cells are detected from durable witness cardinality/time and refolded even
--- when no opponent_rating_fp1e9 = 0 rows remain.
+-- HAS_RATING testimony under the same playing context. The second repair does
+-- NOT try to infer corruption from witness_count/timestamp alone: the runaway
+-- incident proved a consensus row can have the correct cardinality and timestamp
+-- while its rating/RD/volatility are mathematically corrupt. Therefore deployment
+-- canonically refolds the complete chess player OUTCOME + PLAYED_BY surface.
 --
 -- This is called by deployment after ALTER EXTENSION so its indexed temporary
 -- work tables are not captured as extension members.
@@ -19,7 +19,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     v_repaired bigint := 0;
-    v_fold_debt bigint := 0;
+    v_scope bigint := 0;
     v_refolded bigint := 0;
 BEGIN
     CREATE TEMP TABLE _chess_rating_values (
@@ -33,16 +33,9 @@ BEGIN
         UNIQUE NULLS NOT DISTINCT (subject_id, type_id, object_id)
     ) ON COMMIT DROP;
 
-    -- Historical GH #1321 repair scope: any chess rating-bearing evidence row
-    -- that still carries the old zero opponent marker. These cells must be
-    -- refolded after the testimony itself is corrected.
-    INSERT INTO _chess_rating_cells(subject_id, type_id, object_id)
-    SELECT DISTINCT a.subject_id, a.type_id, a.object_id
-    FROM laplace.attestations a
-    WHERE a.type_id = ANY(ARRAY[p_outcome, p_played])
-      AND a.opponent_rating_fp1e9 = 0
-    ON CONFLICT DO NOTHING;
-
+    -- Historical GH #1321 repair: managed staging once persisted a literal zero
+    -- instead of the opponent's rating. Recover it from the opponent identity and
+    -- that opponent's HAS_RATING testimony in the same playing context.
     INSERT INTO _chess_rating_values(rating_id, rating)
     WITH ids AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT r.object_id ORDER BY r.object_id),
@@ -97,51 +90,39 @@ BEGIN
       AND target.subject_id = resolved.subject_id;
     GET DIAGNOSTICS v_repaired = ROW_COUNT;
 
-    -- Evidence-first apply means the journal/evidence transaction can commit
-    -- before the consensus continuation. If the fold then throws (for example
-    -- the 2026-09-01 zero-volatility Glicko failure), retry may true-skip the
-    -- evidence token and leave derived consensus permanently behind. Detect
-    -- that debt from the authoritative player OUTCOME testimony itself.
-    --
-    -- PLAYED_BY under the same context makes this chess-player-specific rather
-    -- than sweeping every unrelated OUTCOME relation in the universal substrate.
-    -- A healthy consensus row has exactly the fold's game count and max evidence
-    -- timestamp; consensus_fold_step adds `games` to witness_count verbatim.
+    -- COMPLETE replay scope, intentionally independent of the current consensus
+    -- values. A corrupt fold can preserve witness_count and last_observed_at, so
+    -- those fields are not a corruption oracle. PLAYED_BY is chess-specific; an
+    -- OUTCOME row qualifies only when the same player/context has PLAYED_BY
+    -- testimony, which excludes unrelated OUTCOME uses in the universal substrate.
     INSERT INTO _chess_rating_cells(subject_id, type_id, object_id)
-    SELECT evidence.subject_id, evidence.type_id, evidence.object_id
+    SELECT DISTINCT evidence.subject_id, evidence.type_id, evidence.object_id
     FROM laplace.attestations evidence
-    LEFT JOIN laplace.consensus current
-      ON current.id = laplace.consensus_id(
-            evidence.subject_id, evidence.type_id, evidence.object_id)
-     AND current.type_id = evidence.type_id
-     AND current.subject_id = evidence.subject_id
-    WHERE evidence.type_id = p_outcome
-      AND EXISTS (
-          SELECT 1
-          FROM laplace.attestations pairing
-          WHERE pairing.subject_id = evidence.subject_id
-            AND pairing.context_id IS NOT DISTINCT FROM evidence.context_id
-            AND pairing.type_id = p_played
-      )
-    GROUP BY evidence.subject_id, evidence.type_id, evidence.object_id,
-             current.id, current.witness_count, current.last_observed_at
-    HAVING current.id IS NULL
-        OR current.witness_count IS DISTINCT FROM
-           SUM(GREATEST(evidence.observation_count, 1))
-        OR current.last_observed_at IS DISTINCT FROM
-           MAX(evidence.last_observed_at)
+    WHERE evidence.type_id = p_played
+       OR (
+           evidence.type_id = p_outcome
+           AND EXISTS (
+               SELECT 1
+               FROM laplace.attestations pairing
+               WHERE pairing.subject_id = evidence.subject_id
+                 AND pairing.context_id IS NOT DISTINCT FROM evidence.context_id
+                 AND pairing.type_id = p_played
+           )
+       )
     ON CONFLICT DO NOTHING;
-    GET DIAGNOSTICS v_fold_debt = ROW_COUNT;
+    GET DIAGNOSTICS v_scope = ROW_COUNT;
 
-    IF NOT EXISTS (SELECT 1 FROM _chess_rating_cells) THEN
-        RAISE LOG 'repair_player_ratings: no opponent-rating repair or player OUTCOME fold debt';
+    IF v_scope = 0 THEN
+        RAISE LOG 'repair_player_ratings: no chess player rating evidence to refold; repaired % legacy opponent-rating row(s)',
+            v_repaired;
         RETURN;
     END IF;
 
-    -- Total reconstruction from durable evidence. This is idempotent: unlike
-    -- replaying an additive delta, re-running the aggregate recomputes the same
-    -- cell from the same testimony and can materialize a row whose first fold
-    -- never committed.
+    -- Total reconstruction from durable evidence in canonical event order. This
+    -- is idempotent and heals all three failure shapes:
+    --   * missing consensus after evidence-first fold failure,
+    --   * stale consensus with incomplete witness cardinality,
+    --   * count-complete but mathematically corrupt rating/RD/volatility.
     INSERT INTO laplace.consensus AS target
         (id, subject_id, type_id, object_id, rating, rd, volatility,
          witness_count, last_observed_at)
@@ -173,10 +154,15 @@ BEGIN
         rd = EXCLUDED.rd,
         volatility = EXCLUDED.volatility,
         witness_count = EXCLUDED.witness_count,
-        last_observed_at = EXCLUDED.last_observed_at;
+        last_observed_at = EXCLUDED.last_observed_at
+    WHERE ROW(target.object_id, target.rating, target.rd, target.volatility,
+              target.witness_count, target.last_observed_at)
+          IS DISTINCT FROM
+          ROW(EXCLUDED.object_id, EXCLUDED.rating, EXCLUDED.rd, EXCLUDED.volatility,
+              EXCLUDED.witness_count, EXCLUDED.last_observed_at);
     GET DIAGNOSTICS v_refolded = ROW_COUNT;
 
-    RAISE LOG 'repair_player_ratings: repaired % evidence rows, detected % additional OUTCOME fold-debt cells, refolded % cells',
-        v_repaired, v_fold_debt, v_refolded;
+    RAISE LOG 'repair_player_ratings: repaired % legacy opponent-rating evidence row(s), replayed % chess rating cell(s), corrected/materialized % consensus row(s)',
+        v_repaired, v_scope, v_refolded;
 END;
 $$;
