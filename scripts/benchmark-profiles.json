@@ -4,7 +4,7 @@
     {
       "id": "core-single",
       "kind": "core-single",
-      "description": "Single-thread UTF-8 -> UAX29/Merkle/tier-tree/glome composition throughput over a fixed real corpus.",
+      "description": "Single-thread UTF-8 -> UAX29/Merkle/tier-tree/glome composition throughput over a fixed real corpus; scalar primitive floor.",
       "execution_boundary": "built-source",
       "mutability": "none",
       "resource_shape": "one logical CPU",
@@ -13,11 +13,20 @@
     {
       "id": "core-scale",
       "kind": "core-scale",
-      "description": "Measured whole-machine scaling over the same core composition operation with explicit CPU affinity and physical-core/SMT points.",
+      "description": "Diagnostic lower bound for one finite unique corpus under coarse whole-file scheduling; not whole-machine capacity and not single-semantic-DAG parallelism.",
       "execution_boundary": "built-source",
       "mutability": "none",
-      "resource_shape": "explicit worker/CPU affinity curve",
+      "resource_shape": "one finite corpus partitioned by indivisible whole input files across explicit CPU affinity points",
       "receipt_schema": "laplace.benchmark.core-scale/v1"
+    },
+    {
+      "id": "core-scale-streams",
+      "kind": "core-scale-streams",
+      "description": "Aggregate independent-stream saturation: every pinned worker executes one complete real-corpus stream so measured work grows with worker count; not proof of one-object internal parallelism.",
+      "execution_boundary": "built-source",
+      "mutability": "none",
+      "resource_shape": "replicated independent corpus streams over explicit physical-core/SMT affinity points",
+      "receipt_schema": "laplace.benchmark.core-scale-streams/v1"
     },
     {
       "id": "moby-roundtrip",
@@ -37,8 +46,8 @@
     },
     {
       "id": "throughput",
-      "description": "Core floor plus measured physical-core/SMT scaling curve.",
-      "profiles": ["core-single", "core-scale"]
+      "description": "Single-thread floor plus measured aggregate independent-stream physical-core/SMT saturation; does not claim single-DAG parallelism.",
+      "profiles": ["core-single", "core-scale-streams"]
     },
     {
       "id": "core",
@@ -47,8 +56,8 @@
     },
     {
       "id": "scale",
-      "description": "Whole-machine composition scaling only.",
-      "profiles": ["core-scale"]
+      "description": "Aggregate independent-stream whole-machine saturation only; fixed-work single-DAG scaling remains #1451.",
+      "profiles": ["core-scale-streams"]
     },
     {
       "id": "moby",
@@ -57,8 +66,8 @@
     },
     {
       "id": "all",
-      "description": "All currently implemented source/core benchmark profiles.",
-      "profiles": ["core-single", "core-scale", "moby-roundtrip"]
+      "description": "All implemented source/core profiles: scalar floor, aggregate stream saturation, file-grain diagnostic, and Moby roundtrip. Single-semantic-DAG frontier scaling remains #1451.",
+      "profiles": ["core-single", "core-scale-streams", "core-scale", "moby-roundtrip"]
     }
   ]
 }

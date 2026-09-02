@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "scripts/benchmark-profiles.json"
 DEFAULT_CORE = ROOT / "build/engine/core/liblaplace_core.so"
 DEFAULT_T0 = ROOT / "build/engine/core/perfcache/laplace_t0_perfcache.bin"
-VALID_KINDS = {"core-single", "core-scale", "moby-roundtrip"}
+VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip"}
 
 
 def sha256(path: Path) -> str:
@@ -87,10 +87,14 @@ def validate_registry(registry: dict[str, Any]) -> None:
         if unknown:
             raise ValueError(f"suite {suite_id} references unknown profiles {sorted(unknown)}")
 
-    if not (ROOT / "scripts/bench-compose.py").is_file():
-        raise ValueError("single-thread benchmark harness is missing")
-    if not (ROOT / "scripts/bench-compose-scale.py").is_file():
-        raise ValueError("scaling benchmark harness is missing")
+    harnesses = {
+        "core-single": ROOT / "scripts/bench-compose.py",
+        "core-scale": ROOT / "scripts/bench-compose-scale.py",
+        "core-scale-streams": ROOT / "scripts/bench-compose-stream-scale.py",
+    }
+    for name, path in harnesses.items():
+        if not path.is_file():
+            raise ValueError(f"{name} benchmark harness is missing: {path.relative_to(ROOT)}")
 
 
 def profile_map(registry: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -181,9 +185,8 @@ def exact_env(core: Path, t0: Path) -> dict[str, str]:
         str(ROOT / "build/engine/dynamics"),
         str(ROOT / "build/engine/synthesis"),
     ]
-    existing = env.get("LD_LIBRARY_PATH")
-    if existing:
-        native_paths.append(existing)
+    if env.get("LD_LIBRARY_PATH"):
+        native_paths.append(env["LD_LIBRARY_PATH"])
     env["LD_LIBRARY_PATH"] = ":".join(native_paths)
     return env
 
@@ -239,6 +242,24 @@ def parse_moby(log_path: Path, source: Path, output: Path) -> dict[str, Any]:
     }
 
 
+def scaling_command(kind: str, corpus_dir: Path, repeats: int, receipt_dir: Path, scale_workers: str | None) -> tuple[list[str], Path]:
+    if kind == "core-scale":
+        script = "scripts/bench-compose-scale.py"
+        json_path = receipt_dir / "core-scale.json"
+    elif kind == "core-scale-streams":
+        script = "scripts/bench-compose-stream-scale.py"
+        json_path = receipt_dir / "core-scale-streams.json"
+    else:
+        raise ValueError(f"not a scaling benchmark kind: {kind}")
+    command = [
+        sys.executable, script, str(corpus_dir),
+        "--repeats", str(repeats), "--json", str(json_path),
+    ]
+    if scale_workers:
+        command.extend(["--workers", scale_workers])
+    return command, json_path
+
+
 def run_profile(
     profile: dict[str, Any],
     receipt_dir: Path,
@@ -251,17 +272,13 @@ def run_profile(
     profile_id = profile["id"]
     kind = profile["kind"]
     log_path = receipt_dir / f"{profile_id}.log"
+    result_json: Path | None = None
     before = capture_rapl()
+
     if kind == "core-single":
         command = [sys.executable, "scripts/bench-compose.py", str(corpus_dir), "--repeats", str(repeats)]
-    elif kind == "core-scale":
-        json_path = receipt_dir / "core-scale.json"
-        command = [
-            sys.executable, "scripts/bench-compose-scale.py", str(corpus_dir),
-            "--repeats", str(repeats), "--json", str(json_path),
-        ]
-        if scale_workers:
-            command.extend(["--workers", scale_workers])
+    elif kind in {"core-scale", "core-scale-streams"}:
+        command, result_json = scaling_command(kind, corpus_dir, repeats, receipt_dir, scale_workers)
     elif kind == "moby-roundtrip":
         if not moby_path.is_file():
             raise FileNotFoundError(f"Moby fixture not found: {moby_path}")
@@ -281,8 +298,11 @@ def run_profile(
 
     if kind == "core-single":
         result = parse_core_single(log_path)
-    elif kind == "core-scale":
-        result = json.loads((receipt_dir / "core-scale.json").read_text(encoding="utf-8"))
+    elif kind in {"core-scale", "core-scale-streams"}:
+        assert result_json is not None
+        result = json.loads(result_json.read_text(encoding="utf-8"))
+        if kind == "core-scale":
+            result.setdefault("scaling_mode", "unique-corpus-makespan")
     else:
         result = parse_moby(log_path, moby_path, receipt_dir / "moby-roundtrip.out")
 
@@ -383,7 +403,7 @@ def main() -> int:
     if args.command == "list":
         validate_registry(registry)
         for suite in registry["suites"]:
-            print(f"{suite['id']:<12} {','.join(suite['profiles']):<40} {suite['description']}")
+            print(f"{suite['id']:<12} {','.join(suite['profiles']):<48} {suite['description']}")
         return 0
     return run_suite(args)
 

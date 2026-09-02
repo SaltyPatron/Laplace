@@ -23,19 +23,27 @@ class BenchmarkSuiteTests(unittest.TestCase):
     def setUpClass(cls):
         cls.suite = load_module("benchmark_suite", "scripts/benchmark_suite.py")
         cls.scale = load_module("bench_compose_scale", "scripts/bench-compose-scale.py")
+        cls.stream = load_module("bench_compose_stream_scale", "scripts/bench-compose-stream-scale.py")
         cls.registry = json.loads((ROOT / "scripts/benchmark-profiles.json").read_text(encoding="utf-8"))
 
     def test_registry_validates_and_every_suite_resolves(self):
         self.suite.validate_registry(self.registry)
         profiles = {item["id"] for item in self.registry["profiles"]}
-        self.assertEqual({"core-single", "core-scale", "moby-roundtrip"}, profiles)
+        self.assertEqual(
+            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip"},
+            profiles,
+        )
         for suite in self.registry["suites"]:
             self.assertTrue(set(suite["profiles"]) <= profiles)
 
-    def test_throughput_suite_measures_single_and_scaled_core(self):
+    def test_throughput_uses_stream_scaling_while_all_preserves_makespan(self):
         suites = {item["id"]: item for item in self.registry["suites"]}
-        self.assertEqual(["core-single", "core-scale"], suites["throughput"]["profiles"])
+        self.assertEqual(["core-single", "core-scale-streams"], suites["throughput"]["profiles"])
+        self.assertEqual(["core-scale-streams"], suites["scale"]["profiles"])
+        self.assertNotIn("core-scale", suites["throughput"]["profiles"])
+        self.assertIn("core-scale-streams", suites["all"]["profiles"])
         self.assertIn("core-scale", suites["all"]["profiles"])
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "all"}, set(suites))
 
     def test_scaling_points_include_physical_and_logical_boundaries(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))
@@ -59,6 +67,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn("python3 scripts/benchmark_suite.py \"${args[@]}\"", commands)
         self.assertNotIn("python3 scripts/bench-compose.py", commands)
         self.assertNotIn("python3 scripts/bench-compose-scale.py", commands)
+        self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", commands)
         self.assertEqual("laplace-shared-workspace", workflow["concurrency"]["group"])
         self.assertEqual("false", workflow["concurrency"]["cancel-in-progress"])
 
@@ -76,8 +85,9 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn('env["LAPLACE_T0"] = str(t0)', text)
         self.assertIn('env["LAPLACE_PERFCACHE_BIN"] = str(t0)', text)
         self.assertIn('env["LD_LIBRARY_PATH"]', text)
+        self.assertIn("bench-compose-stream-scale.py", text)
 
-    def test_scale_harness_does_not_extrapolate_single_thread_result(self):
+    def test_makespan_scale_harness_does_not_extrapolate_single_thread_result(self):
         text = (ROOT / "scripts/bench-compose-scale.py").read_text(encoding="utf-8")
         self.assertIn("os.sched_setaffinity", text)
         self.assertIn("content_witness_tree_build", text)
@@ -85,6 +95,23 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn("parallel_efficiency", text)
         self.assertNotIn("464800", text)
         self.assertNotIn("3.4M", text)
+
+    def test_stream_scale_executes_real_work_per_worker(self):
+        text = (ROOT / "scripts/bench-compose-stream-scale.py").read_text(encoding="utf-8")
+        self.assertIn("replicated-independent-streams", text)
+        self.assertIn("scale._worker", text)
+        self.assertIn("corpus_codepoints * workers", text)
+        self.assertIn("total_codepoints_executed", text)
+        self.assertIn("nodes_per_worker", text)
+        self.assertNotIn("464800", text)
+        self.assertNotIn("3.4M", text)
+
+    def test_first_scaling_receipt_is_documented_as_makespan_not_serialization(self):
+        text = (ROOT / "docs/benchmarks/SCALING_MODES.md").read_text(encoding="utf-8")
+        self.assertIn("33608791817", text)
+        self.assertIn("41,601,961", text)
+        self.assertIn("unique-corpus makespan", text.lower())
+        self.assertIn("independent-stream", text.lower())
 
 
 if __name__ == "__main__":
