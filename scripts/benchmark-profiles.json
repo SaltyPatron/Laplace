@@ -60,11 +60,6 @@
       "profiles": ["core-scale-streams"]
     },
     {
-      "id": "makespan",
-      "description": "Unique finite-corpus makespan scaling with indivisible document work units.",
-      "profiles": ["core-scale"]
-    },
-    {
       "id": "moby",
       "description": "Bit-perfect Moby Dick roundtrip only.",
       "profiles": ["moby-roundtrip"]
