@@ -16,14 +16,23 @@ internal sealed partial class SubstrateClient
         int candidateCapacity,
         CancellationToken ct)
     {
-        var root = TryParseIdHex(queryRootIdHex)
+        // A canonical id is already resolved. Do not decompose its hexadecimal spelling
+        // into text and then search the name lane for those characters: that would turn a
+        // direct address into an unrelated content query. The endpoint still uses the same
+        // Browse result shape, but the candidate member set is empty and only the direct
+        // canonical entity arm can match.
+        var directId = LooksLikeEntityHex(query);
+        var rootHex = directId ? query.ToLowerInvariant() : queryRootIdHex.ToLowerInvariant();
+        var root = TryParseIdHex(rootHex)
             ?? throw new ArgumentException("Browse root id must be a 128-bit entity id.", nameof(queryRootIdHex));
 
-        var normalizedMemberHex = queryMemberIdsHex
-            .Where(static h => !string.IsNullOrWhiteSpace(h))
-            .Select(static h => h.ToLowerInvariant())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var normalizedMemberHex = directId
+            ? []
+            : queryMemberIdsHex
+                .Where(static h => !string.IsNullOrWhiteSpace(h))
+                .Select(static h => h.ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         var members = normalizedMemberHex
             .Select(TryParseIdHex)
             .Where(static id => id is not null)
@@ -60,7 +69,7 @@ internal sealed partial class SubstrateClient
                 Query: query,
                 Hits: hits,
                 Receipt: new ExploreBrowseReceipt(
-                    QueryRootIdHex: queryRootIdHex.ToLowerInvariant(),
+                    QueryRootIdHex: rootHex,
                     QueryMemberIdsHex: normalizedMemberHex,
                     CandidateNames: rows.Count == 0 ? 0 : first.CandidateNames,
                     CandidateCapacity: candidateCapacity,
