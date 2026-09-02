@@ -137,9 +137,13 @@ public sealed class ChessLabService
                 case ChessLabJobKind.PlayerProfile:
                     await ChessLabRunners.RunPlayerProfileAsync(this, slot, ct); return;
                 case ChessLabJobKind.FideSearch:
-                    await ChessLabRunners.RunFideSearchAsync(this, slot, ct); return;
+                    await FideLabRunners.RunSearchAsync(this, slot, ct);
+                    Finish(slot, ChessLabJobState.Completed, null);
+                    return;
                 case ChessLabJobKind.FideRoster:
-                    await ChessLabRunners.RunFideRosterAsync(this, slot, ct); return;
+                    await FideLabRunners.RunRosterAsync(this, slot, ct);
+                    Finish(slot, ChessLabJobState.Completed, null);
+                    return;
                 default:
                     Finish(slot, ChessLabJobState.Failed, "unknown job kind");
                     return;
