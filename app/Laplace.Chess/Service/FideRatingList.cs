@@ -210,6 +210,7 @@ internal static class FideRatingList
             {
                 if (subtree.NodeType != XmlNodeType.Element || subtree.IsEmptyElement) continue;
                 string field = subtree.LocalName;
+                if (field.Equals("player", StringComparison.OrdinalIgnoreCase)) continue;
                 string value = subtree.ReadString().Trim();
                 switch (field)
                 {
