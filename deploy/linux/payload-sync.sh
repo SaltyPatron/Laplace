@@ -46,16 +46,16 @@ laplace_current_runtime_dir() {
 
 # Stage one immutable service closure. A release is never mutated after publication,
 # so unchanged files may safely be hardlinked from the currently selected release.
-# rsync --link-dest compares the staged source byte/metadata contract and links only
-# matching files; changed files are copied normally. This preserves old clients while
-# avoiding the impossible requirement that the application LV hold two complete copies
-# of every unchanged .NET/native dependency during each atomic cutover.
+# Build timestamps are not identity: deterministic rebuilds can produce byte-identical
+# dependencies with fresh mtimes. --checksum --no-times makes content, not timestamp,
+# decide whether --link-dest can reuse the immutable inode. Changed bytes are copied.
 laplace_stage_runtime_payload() {
   local app_dir="$1" service="$2" stable_link="$3" source_dir="$4" destination_dir="$5"
   local reference=""
   reference="$(laplace_current_runtime_dir "$app_dir" "$service" "$stable_link" 2>/dev/null || true)"
   if [[ -n "$reference" ]]; then
-    laplace_sync_payload "$source_dir" "$destination_dir" --link-dest="$reference"
+    laplace_sync_payload "$source_dir" "$destination_dir" \
+      --checksum --no-times --link-dest="$reference"
   else
     laplace_sync_payload "$source_dir" "$destination_dir"
   fi
