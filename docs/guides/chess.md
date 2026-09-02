@@ -5,6 +5,10 @@ The normative chess contract is
 This guide describes how to discover and operate the installed surface without embedding
 live counts or issue status.
 
+For the cross-modal Chess Forward Pass, material/structure/PGN/book/lexical provider split,
+Stockfish 18 comparator/teacher role, and cumulative strength/ablation protocol, see
+[chess-forward-pass-proof.md](chess-forward-pass-proof.md).
+
 ## Verify the environment
 
 Connect to `laplace`, set `search_path = laplace, public`, then inspect:
