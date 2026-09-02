@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { ErrorText, Input, LoadingText, Muted, Panel, Table, Td, Th } from '@ui';
 import { Link, useSearchParams } from 'react-router-dom';
 import { exploreCatalog } from '../api';
-import { SearchBar } from '../components/SearchBar';
 import { StatCard } from '../components/StatCard';
 import type { ExploreCatalogResponse } from '../types';
 import styles from './WarehouseHome.module.css';
@@ -40,8 +39,7 @@ export function WarehouseHome() {
     <div className={styles.home}>
       <header className={styles.hero}>
         <h2>Substrate warehouse</h2>
-        <Muted>Witnessed consensus at every tier — browse, inspect, export for training.</Muted>
-        <SearchBar />
+        <Muted>Witness/source inventory and consensus accounting. <Link to="/explore">Open Browse</Link> to discover and traverse canonical entities.</Muted>
       </header>
 
       <div className={styles.statGrid}>
