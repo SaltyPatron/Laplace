@@ -13,14 +13,12 @@ namespace Laplace.Chess.Service.Tests;
 /// Hilbert/centroid = locality prefilter only; Frechet on the realized position-coord
 /// polyline (what <c>structural.entity_curve(line)</c> builds once a trajectory is deposited).
 /// Never Frechet on packed <c>physicalities.trajectory</c>.
+///
+/// The compose-time geometry contract owns a disposable PostgreSQL database because it
+/// needs installed PostGIS/laplace_geom functions but no product data. The separate
+/// entity_curve assertion intentionally inspects the installed seeded product and is
+/// therefore Tier=live. A Tier=db test must never quietly open the shared `laplace` DB.
 /// </summary>
-// Tier=db, not "integration". EVERY test here needs a live PostgreSQL: the Frechet and
-// angular-distance helpers take an NpgsqlConnection and the geometry they assert is
-// computed server-side. CI's unit filter is `Tier!=perf & Tier!=db`, which "integration"
-// passes — so this class ran in the unit lane and failed with 3D000 "database laplace does
-// not exist" the moment the box was legitimately empty between a recreate and a seed.
-// A test that cannot run without production data is not a unit test and must not gate one.
-[Trait("Tier", "db")]
 public sealed class ChessLineGeometryGateTests
 {
     // Same QGD pair as ChessLineIdentityTests — path identity vs destination collision.
@@ -28,6 +26,7 @@ public sealed class ChessLineGeometryGateTests
     private static readonly string[] QgdTransposedSans = ["c4", "e6", "d4", "d5"];
 
     [Fact]
+    [Trait("Tier", "db")]
     public void ComposeTime_Transposition_FrechetSeparates_HilbertIsNotIdentity()
     {
         var direct = Walk(QgdDirectSans);
@@ -43,8 +42,8 @@ public sealed class ChessLineGeometryGateTests
         var hB = Hilbert128.Encode(cB);
         bool hilbertEqual = hA.CompareToBytewise(hB) == 0;
 
-        using var conn = OpenLive();
-        conn.Open();
+        using var db = DisposableGeometryDb.Create();
+        var conn = db.Connection;
         double ang = AngularDistance(conn, cA, cB);
         double frechet = FrechetCurves(conn, direct.Coords, transposed.Coords);
         double packedBogus = FrechetPackedTrajectory(conn, direct.PositionIds, transposed.PositionIds);
@@ -63,6 +62,7 @@ public sealed class ChessLineGeometryGateTests
     }
 
     [SkippableFact]
+    [Trait("Tier", "live")]
     public void LiveDb_PositionCoordsMatchCompose_AndEntityCurveWhenPresent()
     {
         var direct = Walk(QgdDirectSans);
@@ -247,6 +247,68 @@ public sealed class ChessLineGeometryGateTests
 
     private static NpgsqlConnection OpenLive()
         => new(LaplaceInstall.PostgresConnectionString());
+
+    /// <summary>
+    /// Owns exactly one throwaway database for the compose-time PostgreSQL geometry
+    /// wrapper test. It never connects the Tier=db case to the shared `laplace`
+    /// database and always drops its database after the test.
+    /// </summary>
+    private sealed class DisposableGeometryDb : IDisposable
+    {
+        private readonly string _databaseName;
+        public NpgsqlConnection Connection { get; }
+
+        private DisposableGeometryDb(string databaseName, NpgsqlConnection connection)
+        {
+            _databaseName = databaseName;
+            Connection = connection;
+        }
+
+        public static DisposableGeometryDb Create()
+        {
+            string databaseName = "laplace_chess_geom_" + Guid.NewGuid().ToString("N");
+            using (var admin = new NpgsqlConnection(LaplaceInstall.PostgresConnectionString("postgres")))
+            {
+                admin.Open();
+                using var create = new NpgsqlCommand($"CREATE DATABASE {databaseName}", admin);
+                create.ExecuteNonQuery();
+            }
+
+            NpgsqlConnection? connection = null;
+            try
+            {
+                connection = new NpgsqlConnection(LaplaceInstall.PostgresConnectionString(databaseName));
+                connection.Open();
+                using var extensions = new NpgsqlCommand(
+                    "CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS laplace_geom;",
+                    connection);
+                extensions.CommandTimeout = 60;
+                extensions.ExecuteNonQuery();
+                return new DisposableGeometryDb(databaseName, connection);
+            }
+            catch
+            {
+                connection?.Dispose();
+                Drop(databaseName);
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            Connection.Dispose();
+            Drop(_databaseName);
+        }
+
+        private static void Drop(string databaseName)
+        {
+            using var admin = new NpgsqlConnection(LaplaceInstall.PostgresConnectionString("postgres"));
+            admin.Open();
+            using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS {databaseName} WITH (FORCE)", admin);
+            drop.CommandTimeout = 30;
+            drop.ExecuteNonQuery();
+        }
+    }
 
     private sealed record LineWalk(Hash128 LineId, List<Hash128> PositionIds, List<double[]> Coords);
 }

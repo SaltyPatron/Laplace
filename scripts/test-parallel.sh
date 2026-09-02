@@ -62,6 +62,15 @@ run_profile() {
 if [[ "$MODE" == app ]]; then
   run_profile dev-managed
   run_profile db
+elif [[ "$MODE" == live ]]; then
+  # Keep the registry as the one executable test authority. If it fails, collect
+  # a read-only endpoint receipt only after the authoritative verdict is already
+  # red, then propagate the same failure. This turns an opaque chained-curl 503
+  # into endpoint-specific evidence without adding a second success criterion.
+  if ! run_profile live; then
+    bash scripts/diagnose-live-endpoints.sh || true
+    exit 1
+  fi
 else
   run_profile "$MODE"
 fi

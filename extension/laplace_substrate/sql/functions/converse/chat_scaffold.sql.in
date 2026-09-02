@@ -73,7 +73,8 @@ BEGIN
     -- Other languages: no English verbs. Band name (still English from the
     -- catalog) is omitted so the line is not a mixed-language lie. An empty
     -- forward pass uses a language-neutral absence marker instead of pretending
-    -- a translation exists.
+    -- a translation exists. The topic arrived from the selected realization;
+    -- do not add a second case-folding policy merely to decorate an abstention.
     RETURN CASE p_key
         WHEN 'parts'      THEN initcap(t) || ': ' || l || '.'
         WHEN 'kinds'      THEN initcap(t) || ': ' || l || '.'
@@ -81,7 +82,7 @@ BEGIN
         WHEN 'core'       THEN initcap(t) || '.'
         WHEN 'no_edges'   THEN initcap(t) || '.'
         WHEN 'no_type'    THEN initcap(t) || '.'
-        WHEN 'no_forward' THEN CASE WHEN t = '' THEN '∅' ELSE initcap(t) || ': ∅' END
+        WHEN 'no_forward' THEN CASE WHEN t = '' THEN '∅' ELSE t || ': ∅' END
         WHEN 'band'       THEN l || '.'
         ELSE NULL
     END;

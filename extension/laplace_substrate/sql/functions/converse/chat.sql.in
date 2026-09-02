@@ -487,14 +487,12 @@ BEGIN
     -- An empty dynamic pass is an absence of an admissible continuation, not a
     -- request to resurrect the retired static/template success path. Keep the
     -- dynamic route authoritative and make its WHY-NOT visible instead of
-    -- returning NULL/empty text. If a topic exists but cannot be realized, the
-    -- shared display projection emits the explicit abstention marker rather than
-    -- leaking the canonical hash as prose.
+    -- returning NULL/empty text. `xl` is the one elected-topic realization
+    -- already computed above. If it is NULL, do not perform a second scalar
+    -- realization, do not leak the canonical hash, and let the scaffold emit the
+    -- explicit topic-neutral abstention for this forward pass.
     IF (out IS NULL OR btrim(out) = '') AND shape IS NULL THEN
-        out := converse.chat_scaffold(
-            lang, 'no_forward',
-            CASE WHEN topic IS NULL THEN NULL
-                 ELSE COALESCE(xl, converse.label_or_hex(topic)) END);
+        out := converse.chat_scaffold(lang, 'no_forward', xl);
     END IF;
 
     -- RECORD session carry; the OODA close (turn witnessing) is the caller's duty.

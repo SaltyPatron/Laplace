@@ -73,19 +73,18 @@ public sealed class FideCurrentMarkupTests
 
     [Fact]
     [Trait("Tier", "live")]
-    public async Task OfficialFideSearchProfileAndRosterAreUsable()
+    public async Task OfficialFideProfileRatingListSearchAndRosterAreUsable()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
-        var exact = await ChessGameFetcher.SearchFideAsync("2016192", 25, timeout.Token);
-        var exactPlayer = Assert.Single(exact);
-        Assert.Equal("2016192", exactPlayer.FideId);
-        Assert.Contains("Nakamura", exactPlayer.Name, StringComparison.OrdinalIgnoreCase);
+        var exact = await ChessGameFetcher.FetchFideProfileAsync("2016192", timeout.Token);
+        Assert.Equal("2016192", exact.ProviderId);
+        Assert.Contains("Nakamura", exact.DisplayName, StringComparison.OrdinalIgnoreCase);
 
-        var byName = await ChessGameFetcher.SearchFideAsync("Hikaru", 25, timeout.Token);
+        var byName = await FideRatingList.SearchAsync("Hikaru", 25, timeout.Token);
         Assert.Contains(byName, p => p.FideId == "2016192");
 
-        var top = await ChessGameFetcher.FetchFideTopAsync("open", 10, timeout.Token);
+        var top = await FideRatingList.TopAsync("open", 10, timeout.Token);
         Assert.NotEmpty(top);
         Assert.All(top, p => Assert.Matches("^[0-9]{4,12}$", p.FideId));
     }

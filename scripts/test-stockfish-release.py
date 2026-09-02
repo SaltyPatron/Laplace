@@ -7,6 +7,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("stockfish_install", ROOT / "scripts/install-stockfish.py")
@@ -68,7 +69,7 @@ class StockfishReleaseTests(unittest.TestCase):
         previous = link.resolve()
         self.lock["test"]["sha256"] = "0" * 64
         self.write_lock()
-        with self.assertRaisesRegex(ValueError, "checksum"):
+        with self.assertRaisesRegex(ValueError, "drift|checksum"):
             self.install()
         self.assertEqual(previous, link.resolve())
 
@@ -104,6 +105,41 @@ class StockfishReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "drift"):
             self.install()
         self.assertEqual("changed by operator", link.read_text())
+
+    def test_verified_reuse_materializes_exact_release_without_network(self):
+        source_prefix = self.base / "source"
+        destination_prefix = self.base / "destination"
+        installer.install(source_prefix, "test", self.archive)
+        source_binary = (source_prefix / "bin/stockfish").resolve()
+
+        with patch.object(installer, "urlopen", side_effect=AssertionError("network must not be used")):
+            installer.install(destination_prefix, "test", reuse_prefix=source_prefix)
+
+        destination_binary = (destination_prefix / "bin/stockfish").resolve()
+        self.assertNotEqual(source_binary, destination_binary)
+        self.assertEqual(installer.digest(source_binary), installer.digest(destination_binary))
+        receipt = json.loads((destination_binary.parent.parent / "receipt.json").read_text())
+        self.assertEqual(self.lock["test"]["sha256"], receipt["archive_sha256"])
+        self.assertEqual("18", receipt["version"])
+        self.assertEqual(str(source_prefix), receipt["reused_from"])
+
+    def test_drifted_reuse_source_fails_closed_without_network_fallback(self):
+        source_prefix = self.base / "source"
+        destination_prefix = self.base / "destination"
+        installer.install(source_prefix, "test", self.archive)
+        (source_prefix / "bin/stockfish").resolve().write_text("tampered")
+
+        with patch.object(installer, "urlopen", side_effect=AssertionError("network fallback must not hide drift")):
+            with self.assertRaisesRegex(ValueError, "drift"):
+                installer.install(destination_prefix, "test", reuse_prefix=source_prefix)
+        self.assertFalse((destination_prefix / "bin/stockfish").exists())
+
+    def test_missing_reuse_source_may_use_explicit_offline_archive(self):
+        destination_prefix = self.base / "destination"
+        installer.install(
+            destination_prefix, "test", archive=self.archive,
+            reuse_prefix=self.base / "missing-source")
+        self.assertTrue((destination_prefix / "bin/stockfish").is_symlink())
 
     def test_first_migration_rollback_restores_distro_config_and_keeps_other_changes(self):
         config = self.prefix / "app/laplace-api.env"
