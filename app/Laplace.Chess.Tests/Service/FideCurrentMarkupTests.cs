@@ -72,7 +72,6 @@ public sealed class FideCurrentMarkupTests
     }
 
     [Fact]
-    [Trait("Tier", "live")]
     public async Task OfficialFideSearchProfileAndRosterAreUsable()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
