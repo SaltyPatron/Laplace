@@ -300,9 +300,6 @@ functions/generation/foundry_vocab_crawl.sql.in
 functions/generation/walk_continuations.sql.in
 functions/generation/trajectory_continuations.sql.in
 functions/generation/steer_candidates.sql.in
-functions/generation/walk_text.sql.in
-functions/generation/generate.sql.in
-functions/generation/continue_text.sql.in
 functions/generation/variant_walk.sql.in
 functions/generation/respell_variant.sql.in
 functions/generation/recall_trajectories.sql.in
@@ -315,6 +312,10 @@ functions/consensus/consensus_neighbors_undirected.sql.in
 functions/consensus/foundry_crawl_neighbors.sql.in
 functions/consensus/explore_web_neighbors.sql.in
 functions/consensus/explore_web.sql.in
+functions/generation/forward_frontier.sql.in
+functions/generation/walk_text.sql.in
+functions/generation/generate.sql.in
+functions/generation/continue_text.sql.in
 functions/consensus/consensus_step_edge.sql.in
 functions/consensus/entity_exists.sql.in
 functions/realize/realize_synset_lemma.sql.in

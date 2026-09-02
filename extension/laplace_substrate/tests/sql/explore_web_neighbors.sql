@@ -33,6 +33,7 @@ DECLARE
     revisit_rows  bigint;
     branch_rows   bigint;
     wrong_branches bigint;
+    multi_seed_rows bigint;
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
@@ -208,6 +209,16 @@ BEGIN
     ) q;
     IF wrong_branches <> 0 THEN
         RAISE EXCEPTION 'FAIL: % hop-1 parents did not receive their own fanout quota', wrong_branches;
+    END IF;
+
+    -- Multiple resolved prompt constituents enter one native crawl. Each seed
+    -- receives its own per-parent quota; the array form is the canonical
+    -- implementation used by the scalar compatibility wrapper above it.
+    SELECT count(*) INTO multi_seed_rows
+    FROM consensus.explore_web(ARRAY[s1, s2], 1, 2, 16) w
+    WHERE w.hop = 1;
+    IF multi_seed_rows <> 4 THEN
+        RAISE EXCEPTION 'FAIL: two-seed fanout expected 4 discoveries, got %', multi_seed_rows;
     END IF;
 
     RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, per-parent expansion, self/revisit suppression, and total tie order all hold';

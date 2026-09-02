@@ -93,7 +93,7 @@ BEGIN ATOMIC
              ) AS q(id, txt)
     )
     SELECT r.player,
-           COALESCE(NULLIF(s.txt, ''), encode(r.player, 'hex')),
+           COALESCE(NULLIF(s.txt, ''), 'Unrealized player'),
            r.games,
            round((r.rating / 1e9)::numeric, 3)::double precision,
            round((r.rd / 1e9)::numeric, 3)::double precision,

@@ -132,7 +132,7 @@ CREATE OR REPLACE FUNCTION chess.player_games(
            ec.txt,
            f.white,
            f.opponent_id,
-           COALESCE(NULLIF(op.txt, ''), encode(f.opponent_id, 'hex')),
+           COALESCE(NULLIF(op.txt, ''), 'Unrealized player'),
            rs.txt,
            chess.outcome(f.white, f.result_id)
     FROM facts f

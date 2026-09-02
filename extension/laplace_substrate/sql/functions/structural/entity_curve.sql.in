@@ -2,10 +2,11 @@ DROP FUNCTION IF EXISTS laplace.entity_curve(bytea);
 CREATE OR REPLACE FUNCTION structural.entity_curve(p_entity bytea, p_type smallint) RETURNS geometry
     LANGUAGE sql STABLE
  AS $$
-    SELECT public.ST_MakeLine(w.coord ORDER BY c.ordinal)
+    SELECT public.ST_MakeLine(p.coord ORDER BY c.ordinal)
     FROM generation.trajectory_unpacked_points(p_entity, p_type)
          WITH ORDINALITY AS c(child_id, run_length, ctier, ordinal)
-    JOIN laplace.v_word_points w ON w.id = c.child_id
+    JOIN laplace.physicalities p
+      ON p.entity_id = c.child_id AND p.type = 1 AND p.coord IS NOT NULL
 $$;
 
 -- Content-lane default, BEGIN ATOMIC so the delegation records pg_depend (GH #764).

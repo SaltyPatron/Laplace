@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
     SELECT o.type_id, o.object_id,
            labels.types[o.ord],
            COALESCE(NULLIF(labels.l[o.ord], ''),
-                    left(encode(o.object_id, 'hex'), 16)),
+                    'Unrealized entity'),
            o.eff_mu,
            o.witness_count
     FROM ordered o, labels

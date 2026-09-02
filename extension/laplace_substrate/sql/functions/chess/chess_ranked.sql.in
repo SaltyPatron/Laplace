@@ -62,7 +62,7 @@ BEGIN ATOMIC
                         THEN page.sort_value END DESC,
                    page.player))::bigint,
            page.player,
-           COALESCE(NULLIF(n.txt, ''), encode(page.player, 'hex')),
+           COALESCE(NULLIF(n.txt, ''), 'Unrealized player'),
            page.games,
            round((page.rating / 1e9)::numeric, 3)::double precision,
            round((page.rd / 1e9)::numeric, 3)::double precision,

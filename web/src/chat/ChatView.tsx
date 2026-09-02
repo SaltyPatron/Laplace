@@ -5,7 +5,6 @@ import {
   Button,
   ConsensusBadge,
   Muted,
-  SegmentedControl,
   TextArea,
 } from '@ui';
 
@@ -28,7 +27,7 @@ export function ChatView() {
 
   const { tenant, quoteId, model, messages, pendingQuote, exploreSeedPrompt } = useAppStore();
 
-  const { setModel, setQuoteId, pushMessage, updateLastAssistant, setPendingQuote, setExploreSeedPrompt, clearConversation } = useAppStore();
+  const { setQuoteId, pushMessage, updateLastAssistant, setPendingQuote, setExploreSeedPrompt, clearConversation } = useAppStore();
 
   const [input, setInput] = useState('');
 
@@ -328,25 +327,10 @@ export function ChatView() {
 
       <section className={styles.main}>
 
-        {/* Two ways of answering exist, and they differ in substance: read the
-            folded consensus, or descend the trajectory graph. The five OpenAI-
-            shaped model ids this control used to list all resolved to the same
-            boolean, so the names promised distinctions that were not there. */}
         <div className={styles.toolbar}>
-
-          <SegmentedControl
-            label="Reply from"
-            value={model.includes('converse') ? 'recall facts' : 'free-associate'}
-            options={['recall facts', 'free-associate']}
-            onValueChange={(v) =>
-              setModel(v === 'recall facts' ? 'laplace-converse-001' : 'laplace-completions-001')
-            }
-          />
-
           <Muted className={styles.modeHint}>
-            {model.includes('converse')
-              ? 'Looks up what the witnesses actually said — every line carries its rating and witness count.'
-              : 'Composes freely by walking the graph from your prompt — creative, not a lookup.'}
+            One witnessed forward pass: resolve every constituent, route typed relations,
+            follow physical trajectories, then update the frontier after each selection.
           </Muted>
 
           <Button variant="ghost" onClick={clearConversation}>Clear</Button>

@@ -54,13 +54,13 @@ BEGIN
     labels AS (
         -- Full-mesh resolution via ONE realize_batch over the <= p_k survivors
         -- (was: scalar realize per neighbour): synset/ILI hubs resolve through
-        -- the name/synset-lemma/translation arms to the real word; hex stays
-        -- only as the genuine last resort so the node still plots.
+        -- the name/synset-lemma/translation arms to the real word. Unresolved
+        -- identities receive an honest marker rather than fabricated content.
         SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
         FROM curves c
     )
     SELECT c.entity_id,
-           COALESCE(NULLIF(labels.l[c.ord], ''), left(encode(c.entity_id, 'hex'), 16)),
+           COALESCE(NULLIF(labels.l[c.ord], ''), 'Unrealized entity'),
            ST_X(c.coord), ST_Y(c.coord), ST_Z(c.coord), ST_M(c.coord),
            c.radius_origin,
            c.geo,

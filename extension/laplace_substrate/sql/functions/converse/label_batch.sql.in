@@ -31,8 +31,7 @@ BEGIN ATOMIC
         FROM inp i CROSS JOIN batches b
     )
     SELECT COALESCE(array_agg(
-               COALESCE(c.name, NULLIF(c.rendered, ''),
-                        encode(c.id, 'hex') || '…')
+               COALESCE(c.name, NULLIF(c.rendered, ''))
                ORDER BY c.ord), '{}'::text[])
     FROM cleaned c;
 END;
@@ -41,5 +40,8 @@ CREATE OR REPLACE FUNCTION converse.label_or_hex_batch(p_ids bytea[])
     RETURNS text[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT realize.label_batch(p_ids);
+    SELECT COALESCE(array_agg(
+               COALESCE(l.label, 'unrealized entity') ORDER BY l.ord),
+               '{}'::text[])
+    FROM unnest(realize.label_batch(p_ids)) WITH ORDINALITY AS l(label, ord);
 END;

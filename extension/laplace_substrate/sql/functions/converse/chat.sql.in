@@ -59,7 +59,7 @@ BEGIN
     -- p_topic remains an already-decoded instruction and bypasses compilation.
     -- The compiler abstains when it cannot prove a route, in which case the
     -- existing orientation/fallback path below is unchanged.
-    IF shape IS NULL AND p_topic IS NULL THEN
+    IF shape = 'what_is' AND p_topic IS NULL THEN
         SELECT x.reply, x.container_id
           INTO out, resolved
         FROM converse.execute_prompt(p_prompt, p_lang) x
@@ -172,7 +172,17 @@ BEGIN
     END IF;
 
     IF topic IS NULL THEN
-        out := converse.converse(p_prompt);
+        IF shape IS NULL THEN
+            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
+              FROM converse.session_trajectory(p_session, 8) st;
+            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
+              FROM generation.forward_text(
+                    p_prompt, 40, 5, 0.6, 10,
+                    hashtextextended(COALESCE(p_session::text, '') || p_prompt, 0),
+                    2, 8, ctx_arr) g;
+        ELSE
+            out := converse.converse(p_prompt);
+        END IF;
     ELSE
         resolved := topic;  xl := realize.realize(topic, lang);
         topic2 := p_topic2;
@@ -379,6 +389,21 @@ BEGIN
             SELECT string_agg(reply, ' ') INTO out
               FROM converse.recall_intent(shape, topic, topic2, p_type_name);
 
+        ELSIF shape IS NULL THEN
+            -- The default speaking path is the canonical dynamic pass. Every
+            -- prompt constituent and its witnessed sense enters a native
+            -- both-direction hop/fan-out route; exact trajectories propose;
+            -- rated consensus steers; each selected constituent advances the
+            -- live frontier before the next proposal. Static recall/templates
+            -- remain explicit named shapes only.
+            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
+              FROM converse.session_trajectory(p_session, 8) st;
+            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
+              FROM generation.forward_text(
+                    p_prompt, 40, 5, 0.6, 10,
+                    hashtextextended(COALESCE(p_session::text, '') || p_prompt, 0),
+                    2, 8, ctx_arr) g;
+
         ELSIF shape = 'walk' THEN
             -- Phase 2 wiring (#751, after PR #884): converse_compose is the
             -- steered lane -- sequence proposes, the turn's semantic frontier
@@ -453,7 +478,7 @@ BEGIN
                         ELSE converse.converse(p_prompt) END;
         END IF;
 
-        IF out IS NULL OR out = '' THEN
+        IF (out IS NULL OR out = '') AND shape IS NOT NULL THEN
             out := CASE WHEN xl IS NOT NULL THEN converse.about(topic, lang)
                         ELSE converse.converse(p_prompt) END;
         END IF;

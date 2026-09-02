@@ -1493,7 +1493,7 @@ public static class NpgsqlSubstrateReads
                 CASE
                     WHEN @target ~ '^[0-9a-f]{32}$' THEN COALESCE(
                         NULLIF(realize.render_text_fast(r.id, 8), ''),
-                        left(encode(r.id, 'hex'), 16))
+                        'Unrealized entity')
                     ELSE @target
                 END,
                 encode(e.type_id, 'hex'),
@@ -1715,7 +1715,7 @@ public static class NpgsqlSubstrateReads
                    COALESCE(
                        NULLIF(realize._synset_lemma(s.synset_id, converse.word_language(@id)), ''),
                        NULLIF(realize.render_text_fast(s.synset_id, 8), ''),
-                       left(encode(s.synset_id, 'hex'), 16)),
+                       'Unrealized sense'),
                    s.eff_mu, s.witnesses
             FROM lexical.senses(@id) s
             """,
@@ -1734,7 +1734,7 @@ public static class NpgsqlSubstrateReads
             SELECT c.ordinal, encode(c.child_id, 'hex'), c.run_length, c.flags,
                    COALESCE(
                        NULLIF(realize.render_text_fast(c.child_id, 8), ''),
-                       left(encode(c.child_id, 'hex'), 16))
+                       'Unrealized entity')
             FROM realize.constituents(@id) c
             """,
             static r => new EntityConstituentRow(r.GetInt32(0), r.GetString(1), r.GetInt32(2), r.GetInt64(3), r.GetString(4)),
@@ -1788,16 +1788,17 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT c.ordinal,
-                   public.ST_X(w.coord), public.ST_Y(w.coord),
-                   public.ST_Z(w.coord), public.ST_M(w.coord),
+                   public.ST_X(p.coord), public.ST_Y(p.coord),
+                   public.ST_Z(p.coord), public.ST_M(p.coord),
                    encode(c.child_id, 'hex'),
                    COALESCE(
                        NULLIF(realize.render_text_fast(c.child_id, 8), ''),
-                       left(encode(c.child_id, 'hex'), 16)),
-                   w.radius_origin
+                       'Unrealized entity'),
+                   p.radius_origin
             FROM realize.constituents(@id) c
-            JOIN laplace.v_word_points w ON w.id = c.child_id
-            WHERE w.coord IS NOT NULL
+            JOIN laplace.physicalities p
+              ON p.entity_id = c.child_id AND p.type = 1
+            WHERE p.coord IS NOT NULL
             ORDER BY c.ordinal
             """,
             static r => new RealizedTrajectoryVertexRow(
@@ -1821,7 +1822,7 @@ public static class NpgsqlSubstrateReads
         // rows (22.8s mean over 13 calls in pg_stat_statements), which is the warehouse
         // page's "Explore entity query failed" whenever it tips past the 30s serving
         // timeout. Depth 3 alone: still 6.2s. realize.batch on the same ids: 25.4s.
-        // A composition is not a surface: render only low tiers, name or hex the rest.
+        // A composition is not a surface: render only low tiers and abstain on the rest.
         // This shape: 269ms cold, 33ms warm.
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(c.subject_id, 'hex'),
@@ -1830,7 +1831,7 @@ public static class NpgsqlSubstrateReads
                        NULLIF(realize.resolve_name(c.subject_id), ''),
                        CASE WHEN e.tier <= 3
                             THEN NULLIF(realize.render_text_fast(c.subject_id, 3), '') END,
-                       left(encode(c.subject_id, 'hex'), 16)),
+                       'Unrealized entity'),
                    consensus.eff_mu_display(c.rating, c.rd), c.witness_count
             FROM consensus.consensus_in(@id, @limit) c
             JOIN laplace.entities e ON e.id = c.subject_id
@@ -1904,8 +1905,7 @@ public static class NpgsqlSubstrateReads
                    COALESCE(
                        NULLIF(n.name, ''),
                        NULLIF(names.labels[i.ord], ''),
-                       NULLIF(shallow.label, ''),
-                       left(encode(i.id, 'hex'), 16)),
+                       NULLIF(shallow.label, '')),
                    i.tier
             FROM inp i
             CROSS JOIN names

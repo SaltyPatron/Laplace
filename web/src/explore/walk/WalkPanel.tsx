@@ -26,7 +26,7 @@ export function WalkPanel() {
   const setWalkPath = useExploreStore((s) => s.setWalkPath);
   const [prompt, setPrompt] = useState('dog');
   const [depth, setDepth] = useState(4);
-  const [beam, setBeam] = useState(5);
+  const [fanout, setFanout] = useState(5);
   const [trace, setTrace] = useState<ExplainStep[]>([]);
   const [unlocked, setUnlocked] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -39,14 +39,14 @@ export function WalkPanel() {
     try {
       const res = await apiPost<{ trace: ExplainStep[] }>(
         '/v1/explain/report',
-        { prompt, depth, beam, academic: false },
+        { prompt, depth, beam: fanout, academic: false },
         opts,
       );
       const steps = res.trace ?? [];
       setTrace(steps);
       setWalkPath(steps.map((s, i) => ({
         idHex: s.entityIdHex ?? `walk-${i}`,
-        label: s.entityLabel ?? s.entityIdHex ?? `step ${i}`,
+        label: s.entityLabel ?? `Unrealized step ${i + 1}`,
       })));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -56,18 +56,18 @@ export function WalkPanel() {
   return (
     <Panel title="Explain walk">
       {!unlocked ? (
-        <GatePrompt serviceId="explain.trace" label="Beam search trace over consensus graph." onReady={() => setUnlocked(true)} />
+        <GatePrompt serviceId="explain.trace" label="Typed relation walk over the consensus graph." onReady={() => setUnlocked(true)} />
       ) : (
         <Stack gap={4}>
           <div className={styles.controls}>
             <Field label="prompt" layout="row" htmlFor="walk-prompt">
               <Input id="walk-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="Prompt" />
             </Field>
-            <Field label="depth" layout="row" htmlFor="walk-depth">
+            <Field label="hop limit" layout="row" htmlFor="walk-depth">
               <Input id="walk-depth" type="number" min={1} max={8} value={depth} onChange={(e) => setDepth(Number(e.target.value))} />
             </Field>
-            <Field label="beam" layout="row" htmlFor="walk-beam">
-              <Input id="walk-beam" type="number" min={1} max={16} value={beam} onChange={(e) => setBeam(Number(e.target.value))} />
+            <Field label="fan-out / parent" layout="row" htmlFor="walk-fanout">
+              <Input id="walk-fanout" type="number" min={1} max={16} value={fanout} onChange={(e) => setFanout(Number(e.target.value))} />
             </Field>
             <Button type="button" onClick={() => void run()}>Run walk</Button>
           </div>
@@ -75,7 +75,7 @@ export function WalkPanel() {
           <ol className={styles.trace}>
             {trace.map((s, i) => (
               <li key={i}>
-                d{s.depth} {s.entityLabel ?? s.entityIdHex ?? '—'} path μ {formatMu(s.pathMu)}
+                d{s.depth} {s.entityLabel ?? 'Unrealized entity'} path μ {formatMu(s.pathMu)}
                 {s.witnesses != null ? ` (${s.witnesses} wit)` : ''}
               </li>
             ))}

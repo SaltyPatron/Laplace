@@ -6,17 +6,15 @@ CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
     -- A label is a NAME/surface, never a definition. Order: the entity's
-    -- resolved name, else its own rendered+cleaned surface, else a stable hex id.
+    -- resolved name, else its own rendered+cleaned surface. An unresolved label
+    -- abstains; a content hash is an internal identity handle, not a surface.
     -- The name lookup now goes through realize.resolve_name() -- the single, family-aware
     -- primitive that consults HAS_NAME (primary) + HAS_NAME_ALIAS + the
     -- synset-lemma path and abstains rather than guessing -- instead of this
     -- function's former HAS_NAME_ALIAS-only argmax, which ignored the primary
     -- HAS_NAME edge entirely. (The former HAS_DEFINITION fallback made every
     -- surface-less entity realize.render as its gloss, which polluted every consumer;
-    -- that is gone. The trailing hex arm is retained for now so callers that
-    -- expect a non-null display string keep working -- full abstention here is a
-    -- follow-up once converse.label_or_hex() owns the id-display decision and the goldens
-    -- are regenerated on a live DB.)
+    -- that is gone.)
     SELECT COALESCE(
         realize.resolve_name(p_id),
         NULLIF(
@@ -36,6 +34,5 @@ CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
                     '^ud/feature/(.+)$', '\1'),
                 '^tiny-codes/concept/(.+)/v1$', '\1'),
             '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$', ''),
-            ''),
-        encode(p_id, 'hex') || '…')
+            ''))
 $$;

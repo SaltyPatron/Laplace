@@ -2,7 +2,8 @@
  * explore_web.c — SPI beam crawl for the explore consensus-web viz.
  *
  * Unlike generation.foundry_crawl(vocab / tier-2 emit only), this:
- *   - walks undirected consensus (out ∪ in) via one batched frontier probe/hop
+ *   - walks undirected consensus (out ∪ in) from one or more seeds via one
+ *     batched frontier probe/hop
  *   - admits every tier
  *   - admits ≤ fanout NEW nodes per frontier member (pool-safe: one SPI connection)
  *   - emits typed edges for the retained subgraph
@@ -176,8 +177,10 @@ Datum
 pg_laplace_explore_web(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-	bytea	   *seed_b;
-	hash128_t	seed;
+	ArrayType  *seeds_a;
+	Datum	   *seed_datums;
+	bool	   *seed_nulls;
+	int			n_seed_datums;
 	int32		hops;
 	int32		fanout;
 	int32		max_nodes;
@@ -196,9 +199,12 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	bool		spi_top = false;
 
 	if (PG_ARGISNULL(0))
-		ereport(ERROR, (errmsg("explore_web: seed must not be NULL")));
-	seed_b = PG_GETARG_BYTEA_PP(0);
-	seed = datum_to_hash128(PointerGetDatum(seed_b));
+		ereport(ERROR, (errmsg("explore_web: seeds must not be NULL")));
+	seeds_a = PG_GETARG_ARRAYTYPE_P(0);
+	if (ARR_NDIM(seeds_a) != 1 || ARR_ELEMTYPE(seeds_a) != BYTEAOID)
+		ereport(ERROR, (errmsg("explore_web: seeds must be a 1-D bytea array")));
+	deconstruct_array(seeds_a, BYTEAOID, -1, false, TYPALIGN_INT,
+					  &seed_datums, &seed_nulls, &n_seed_datums);
 
 	hops = PG_ARGISNULL(1) ? 2 : PG_GETARG_INT32(1);
 	fanout = PG_ARGISNULL(2) ? 10 : PG_GETARG_INT32(2);
@@ -208,8 +214,8 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("explore_web: hops exceeds the smallint result coordinate")));
 	if (PG_ARGISNULL(3))
 	{
-		int64 derived = 1;
-		int64 width = 1;
+		int64 derived = n_seed_datums;
+		int64 width = n_seed_datums;
 
 		/* Per-frontier fanout is a tree capacity, not the old linear beam. */
 		for (int i = 0; i < hops; i++)
@@ -227,7 +233,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("explore_web: max_nodes must be >= 0")));
 
 	InitMaterializedSRF(fcinfo, 0);
-	if (hops == 0 || fanout == 0 || max_nodes == 0)
+	if (n_seed_datums == 0 || hops == 0 || fanout == 0 || max_nodes == 0)
 		return (Datum) 0;
 	if ((Size) max_nodes > MaxAllocSize / sizeof(hash128_t)
 		|| (Size) max_nodes > MaxAllocSize / sizeof(Datum)
@@ -279,14 +285,28 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	cand_cap = 0;
 	cands = NULL;
 
+	for (int i = 0; i < n_seed_datums; i++)
 	{
 		SeenNode   *e;
 		bool		found;
+		hash128_t	seed;
+		bytea	   *seed_b;
 
+		if (seed_nulls[i])
+			continue;
+		seed_b = DatumGetByteaPP(seed_datums[i]);
+		if (VARSIZE_ANY_EXHDR(seed_b) != 16)
+			ereport(ERROR, (errmsg("explore_web: seed ids must be 16 bytes")));
+		seed = datum_to_hash128(seed_datums[i]);
 		e = (SeenNode *) hash_search(seen, &seed, HASH_ENTER, &found);
+		if (found)
+			continue;
+		if (n_seen >= max_nodes)
+			ereport(ERROR,
+					(errmsg("explore_web: max_nodes is smaller than the distinct seed set")));
 		e->hop = 0;
-		n_seen = 1;
 		frontier[n_front++] = seed;
+		n_seen++;
 	}
 
 	for (int hop = 1; hop <= hops && n_front > 0 && n_seen < max_nodes; hop++)

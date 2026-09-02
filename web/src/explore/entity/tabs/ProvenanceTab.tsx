@@ -82,13 +82,13 @@ export function ProvenanceTab({ entity }: { entity: ExploreEntityResponse }) {
                           <IconButton
                             type="button"
                             variant="ghost"
-                            aria-label={`Copy ${item.object_id}`}
+                            aria-label={`Copy reference for ${item.object_label}`}
                             onClick={() => void copyText(item.object_id)}
                           >
                             ⧉
                           </IconButton>
                         </TooltipTrigger>
-                        <TooltipContent>Copy {item.object_id}</TooltipContent>
+                        <TooltipContent>Copy object reference</TooltipContent>
                       </Tooltip>
                     </Td>
                   </tr>

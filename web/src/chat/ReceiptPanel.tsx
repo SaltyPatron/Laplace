@@ -236,7 +236,7 @@ export function ReceiptPanel() {
 
         <h2>Evidence</h2>
 
-        <Muted>Grouped provenance receipts — open objects in Explore or copy ids.</Muted>
+        <Muted>Grouped provenance receipts — open objects in Explore or copy a stable reference.</Muted>
 
         <LookupRow
 
@@ -404,7 +404,7 @@ export function ReceiptPanel() {
 
                                   variant="ghost"
 
-                                  aria-label={`Copy ${item.object_id}`}
+                                  aria-label={`Copy reference for ${item.object_label}`}
 
                                   onClick={() => void copyText(item.object_id)}
 
@@ -416,7 +416,7 @@ export function ReceiptPanel() {
 
                               </TooltipTrigger>
 
-                              <TooltipContent>Copy {item.object_id}</TooltipContent>
+                              <TooltipContent>Copy object reference</TooltipContent>
 
                             </Tooltip>
 
@@ -447,4 +447,3 @@ export function ReceiptPanel() {
   );
 
 }
-

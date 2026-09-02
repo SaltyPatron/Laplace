@@ -164,6 +164,21 @@ BEGIN
         RAISE EXCEPTION 'FAIL: same (data, prompt, seed) produced different streams';
     END IF;
 
+    -- Proposal context and semantic frontier are independent operands. A routed
+    -- frontier must not be appended to the ordered suffix used by S6.
+    IF EXISTS (
+        SELECT 1 FROM (
+            SELECT g1.step, g1.entity AS t1, g2.entity AS t2
+            FROM generation.forward_walk_continuations(
+                     ARRAY[w_the], 6, 3, 0.7, 4, 42,
+                     ARRAY[w_the, w_capital]) g1
+            JOIN generation.forward_walk_continuations(
+                     ARRAY[w_the], 6, 3, 0.7, 4, 42,
+                     ARRAY[w_the, w_capital]) g2 USING (step)
+        ) z WHERE z.t1 <> z.t2) THEN
+        RAISE EXCEPTION 'FAIL: routed live frontier is not deterministic';
+    END IF;
+
     -- Consensus floor: a dead-end context continues through COMPLETES_TO with
     -- stride_used = 0.
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)

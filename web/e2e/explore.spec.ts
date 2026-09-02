@@ -47,7 +47,10 @@ test('Glome canvas mounts after unlock', async ({ page }) => {
   // the glome tab still gates the nearest-neighbor overlay behind its own prompt.
   await page.getByRole('button', { name: 'glome' }).click();
   await page.getByRole('button', { name: /Unlock \(nn\)/ }).click();
-  await expect(page.locator('canvas')).toBeVisible({ timeout: 15_000 });
+  const panes = page.locator('canvas');
+  await expect(panes).toHaveCount(2, { timeout: 15_000 });
+  await expect(panes.first()).toBeVisible();
+  await expect(panes.nth(1)).toBeVisible();
 });
 
 test('Gated expand shows GatePrompt when billing bypass is off', async ({ page }) => {

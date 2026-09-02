@@ -49,6 +49,14 @@ export function GlomeTab({
 
   const [selectedOrdinal, setSelectedOrdinal] = useState<number | null>(null);
 
+  const constituentLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const c of entity.constituents ?? []) {
+      if (c.child_label) labels.set(c.child_id_hex, c.child_label);
+    }
+    return labels;
+  }, [entity.constituents]);
+
   useEffect(() => {
     setSelectedOrdinal(null);
   }, [entity.id_hex]);
@@ -71,7 +79,7 @@ export function GlomeTab({
   const packedNodes = useMemo((): GlomeNode[] => {
     return packed.map((v) => ({
       id: `packed-${v.ordinal}-${v.child_id_hex}`,
-      label: v.child_id_hex.slice(0, 12),
+      label: constituentLabels.get(v.child_id_hex) ?? 'Unrealized entity',
       x: v.x,
       y: v.y,
       z: v.z,
@@ -82,7 +90,7 @@ export function GlomeTab({
       kind: 'constituent' as const,
       color: ordinalColor(v.ordinal, maxOrd),
     }));
-  }, [packed, maxOrd]);
+  }, [packed, maxOrd, constituentLabels]);
 
   const packedTrajectory = useMemo(
     () => packedNodes
@@ -100,7 +108,7 @@ export function GlomeTab({
   const placementConstituents = useMemo((): GlomeNode[] => {
     return realized.map((v) => ({
       id: `real-${v.ordinal}-${v.child_id_hex}`,
-      label: v.child_label || v.child_id_hex.slice(0, 12),
+      label: v.child_label || 'Unrealized entity',
       x: v.x,
       y: v.y,
       z: v.z,
@@ -133,11 +141,13 @@ export function GlomeTab({
       return selectedOrdinal >= start && selectedOrdinal <= end;
     });
     return {
-      label: r?.child_label ?? p?.child_id_hex.slice(0, 16) ?? `ord ${selectedOrdinal}`,
+      label: r?.child_label
+        ?? (p ? constituentLabels.get(p.child_id_hex) : null)
+        ?? 'Unrealized entity',
       ordinal: selectedOrdinal,
       runLength: p?.run_length ?? 1,
     };
-  }, [selectedOrdinal, realized, packed]);
+  }, [selectedOrdinal, realized, packed, constituentLabels]);
 
   // Packed highlight: RLE vertex covering the expanded ordinal.
   const packedHighlightOrdinal = useMemo(() => {

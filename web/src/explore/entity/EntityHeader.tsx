@@ -33,9 +33,9 @@ export function EntityHeader({
       <div className={styles.titleBlock}>
         <h2>{preview.label}</h2>
         <Muted className={styles.meta}>
-          {preview.id_hex} · tier {preview.tier ?? '—'} · {preview.type ?? 'unknown'}{' '}
+          tier {preview.tier ?? '—'} · {preview.type ?? 'unknown'}{' '}
           <Button variant="ghost" size="sm" onClick={onCopyId}>
-            {copied ? 'Copied' : 'Copy id'}
+            {copied ? 'Reference copied' : 'Copy reference'}
           </Button>
         </Muted>
         <PlayerCard preview={preview} />

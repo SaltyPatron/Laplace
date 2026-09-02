@@ -1,6 +1,7 @@
 DROP FUNCTION IF EXISTS laplace.explore_web(bytea, int, int, int);
+DROP FUNCTION IF EXISTS consensus.explore_web(bytea, int, int, int);
 CREATE OR REPLACE FUNCTION consensus.explore_web(
-    p_seed bytea,
+    p_seeds bytea[],
     p_hops int DEFAULT 2,
     p_fanout int DEFAULT 10,
     p_max_nodes int DEFAULT NULL)
@@ -14,3 +15,24 @@ CREATE OR REPLACE FUNCTION consensus.explore_web(
         witness_count bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_explore_web'
     LANGUAGE C STABLE;
+
+-- Scalar convenience delegates to the canonical multi-seed crawl. It is not a
+-- second traversal implementation.
+CREATE OR REPLACE FUNCTION consensus.explore_web(
+    p_seed bytea,
+    p_hops int DEFAULT 2,
+    p_fanout int DEFAULT 10,
+    p_max_nodes int DEFAULT NULL)
+    RETURNS TABLE(
+        source_id bytea,
+        type_id bytea,
+        object_id bytea,
+        hop smallint,
+        rating bigint,
+        rd bigint,
+        witness_count bigint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT * FROM consensus.explore_web(
+        ARRAY[p_seed], p_hops, p_fanout, p_max_nodes);
+END;

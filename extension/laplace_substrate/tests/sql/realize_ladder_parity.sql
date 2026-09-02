@@ -68,13 +68,19 @@ SELECT array_length(lbl.l, 1) = 4                     AS length_matches_input,
 FROM lbl;
 
 -- 3. Abstention is preserved through the batch: unwitnessed content is NULL in
--- both, never '<hex...>' styled as a label. label_or_hex is the only place that
--- decides to show a raw id. (IS NOT DISTINCT FROM, not `=`: array equality with
+-- both, never '<hex...>' styled as a label. The legacy label_or_hex name now
+-- returns an explicit abstention marker, never a raw id. (IS NOT DISTINCT FROM, not `=`: array equality with
 -- a NULL element yields NULL, which would make `=` a silent pass.)
 SELECT (realize.batch(ARRAY[laplace.word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
                                                                  AS batch_abstains,
        realize.realize(laplace.word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
                                                                  AS scalar_abstains;
+
+SELECT converse.label_or_hex(laplace.word_id('test/realize/never-witnessed-xyzzy'))
+           = 'unrealized entity' AS scalar_display_abstains,
+       (converse.label_or_hex_batch(
+           ARRAY[laplace.word_id('test/realize/never-witnessed-xyzzy')]))[1]
+           = 'unrealized entity' AS batch_display_abstains;
 
 -- 4. Degenerate inputs do not throw — the serving surface calls this with
 -- whatever survived a filter, including nothing.
@@ -83,7 +89,7 @@ SELECT realize.batch(ARRAY[]::bytea[], NULL) IS NOT DISTINCT FROM ARRAY[]::text[
 
 -- 5. Every display projection is byte-for-byte equal to its scalar contract.
 -- These are separate ladders: realize abstains, render has canonical/codepoint/
--- recursive/hex fallback, label cleans internal keys, and type labels normalize.
+-- recursive surfaces and then abstains, label cleans internal keys, and type labels normalize.
 WITH ids AS (SELECT array_agg(p.id ORDER BY p.ord) AS a FROM probe p),
      b AS (SELECT realize.resolve_name_batch(a,NULL::bytea) AS names,
                   realize.render_batch(a) AS rendered,

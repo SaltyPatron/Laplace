@@ -52,7 +52,6 @@ export function StructureTab({
                   <Th>Ord</Th>
                   <Th>Tier</Th>
                   <Th>Label</Th>
-                  <Th>Id</Th>
                 </tr>
               </thead>
               <tbody>
@@ -60,10 +59,7 @@ export function StructureTab({
                   <tr key={n.ordinal}>
                     <Td>{n.ordinal}</Td>
                     <Td>{n.tier}</Td>
-                    <Td>{n.label}</Td>
-                    <Td>
-                      <EntityLink idHex={n.id_hex} label={n.id_hex.slice(0, 8)} />
-                    </Td>
+                    <Td><EntityLink idHex={n.id_hex} label={n.label || 'Unrealized entity'} /></Td>
                   </tr>
                 ))}
               </tbody>

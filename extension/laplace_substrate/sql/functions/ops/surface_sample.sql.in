@@ -53,8 +53,8 @@ BEGIN ATOMIC
         SELECT realize.batch(i.a, NULL) AS l FROM ids i
     )
     SELECT k.id,
-           COALESCE(NULLIF(lbl.l[k.ix * 2 - 1], ''), left(encode(k.id, 'hex'), 16)),
-           COALESCE(NULLIF(lbl.l[k.ix * 2], ''), left(encode(k.type_id, 'hex'), 16)),
+           COALESCE(NULLIF(lbl.l[k.ix * 2 - 1], ''), 'Unrealized entity'),
+           COALESCE(NULLIF(lbl.l[k.ix * 2], ''), 'Unrealized type'),
            k.observations
     FROM numbered k CROSS JOIN lbl
     ORDER BY k.observations DESC, k.id;

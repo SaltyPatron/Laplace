@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION chess.head_to_head(p_player bytea, p_limit integer DE
              ) AS p(id, txt)
     )
     SELECT rec.opponent,
-           COALESCE(NULLIF(n.txt, ''), encode(rec.opponent, 'hex')),
+           COALESCE(NULLIF(n.txt, ''), 'Unrealized player'),
            rec.games,
            -- DISPLAY units, never raw fp1e9: consensus.eff_mu_display is the one scaling law
            -- (functions/mu/consensus.eff_mu_display.sql.in), rating/rd take the same /1e9 round.

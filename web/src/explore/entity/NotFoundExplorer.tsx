@@ -42,7 +42,6 @@ export function NotFoundExplorer() {
           No source has asserted “{surface}” yet — but its position on the glome is
           determined. Here is what the substrate holds nearest to it.
         </Muted>
-        <code className={styles.idhex}>{data.word_id_hex}</code>
       </header>
 
       {data.suggestions.length > 0 ? (
@@ -107,7 +106,7 @@ export function NotFoundExplorer() {
                 key={`d-${d.ordinal}`}
                 to={`/explore/entity/${d.id_hex}`}
                 className={styles.glyph}
-                title={`tier ${d.tier} · ${d.id_hex}`}
+                title={`tier ${d.tier}`}
               >
                 {d.label === ' ' ? '␣' : d.label}
               </RouterLink>

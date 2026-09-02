@@ -97,9 +97,9 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
     SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
         SELECT COALESCE(NULLIF(labels.types[o.ord], ''),
                         consensus.relation_canonical(o.type_id),
-                        left(encode(o.type_id, 'hex'), 16)) AS type,
+                        'Unrealized relation') AS type,
                COALESCE(NULLIF(labels.l[o.ord], ''),
-                        left(encode(o.object_id, 'hex'), 16)) AS fact,
+                        'Unrealized entity') AS fact,
                consensus.eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
                o.sort_mu
         FROM ordered o, labels

@@ -1,19 +1,31 @@
 DROP FUNCTION IF EXISTS laplace.walk_text(text, int, int, float8, int, bigint);
-CREATE OR REPLACE FUNCTION generation.walk_text(
+CREATE OR REPLACE FUNCTION generation.forward_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
-        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
-        p_seed bigint DEFAULT NULL)
+        p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
+        p_seed bigint DEFAULT NULL, p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 8, p_prior_frontier bytea[] DEFAULT NULL)
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE AS $$
-    WITH ctx AS (
+    WITH ctx AS MATERIALIZED (
         SELECT array_agg(id ORDER BY ord) AS ids
         FROM converse.prompt_state(p_prompt) WHERE id IS NOT NULL
+    ), frontier AS MATERIALIZED (
+        SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
+        FROM (
+            SELECT f.entity, f.hop
+            FROM generation.forward_frontier(p_prompt, p_hops, p_fanout, 256) f
+            UNION
+            SELECT p.entity, 0::smallint
+            FROM unnest(COALESCE(p_prior_frontier, '{}'::bytea[])) p(entity)
+            WHERE p.entity IS NOT NULL
+        ) x
     ), walked AS MATERIALIZED (
         SELECT g.*
-        FROM ctx, generation.walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
+        FROM ctx CROSS JOIN frontier,
+             generation.forward_walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_top_k,
                               COALESCE(p_seed,
                                   laplace.hash128_lo(public.laplace_hash128_blake3(
-                                      convert_to(p_prompt, 'UTF8'))))) g
+                                      convert_to(p_prompt, 'UTF8')))), frontier.ids) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,
@@ -28,3 +40,16 @@ CREATE OR REPLACE FUNCTION generation.walk_text(
     FROM (SELECT w.*, row_number() OVER (ORDER BY step) AS rn FROM walked w) w
     CROSS JOIN txt t
 $$;
+
+-- Stable compatibility surface for protocol callers. Hop/fan-out defaults are
+-- owned by forward_text so this does not become another inference program.
+CREATE OR REPLACE FUNCTION generation.walk_text(
+        p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
+        p_seed bigint DEFAULT NULL)
+    RETURNS TABLE(step int, entity text, stride_used int)
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT * FROM generation.forward_text(
+        p_prompt, p_steps, p_max_stride, p_spread, p_top_k, p_seed, 2, 8, NULL);
+END;

@@ -89,9 +89,9 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
              ) AS p(id, txt)
     )
     SELECT h.white_id,
-           COALESCE(NULLIF(w.txt, ''), encode(h.white_id, 'hex')),
+           COALESCE(NULLIF(w.txt, ''), 'Unrealized player'),
            h.black_id,
-           COALESCE(NULLIF(bl.txt, ''), encode(h.black_id, 'hex')),
+           COALESCE(NULLIF(bl.txt, ''), 'Unrealized player'),
            r.txt, d.txt, ev.txt, ec.txt, tm.txt, tc.txt, tcc.txt
     FROM hdr h
     LEFT JOIN surface_text w   ON w.id   = h.white_id

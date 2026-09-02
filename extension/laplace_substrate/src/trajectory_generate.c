@@ -14,7 +14,8 @@
  *             any size.
  *
  * S7 STEER    generation.steer_candidates($cands, $frontier): re-rank by rated consensus
- *             mass reaching the LIVE frontier — the prompt's content PLUS the last
+ *             mass reaching the LIVE frontier — the prompt's routed token/sense
+ *             web PLUS the last
  *             max_order emitted constituents, so the frontier is where the walk has
  *             ARRIVED and not where it started (docs/specs/36 §3; GH #921 acceptance
  *             "each emitted unit updates the active frontier before the next election").
@@ -231,13 +232,13 @@ Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    ArrayType *ctx_arr;
+    ArrayType *ctx_arr, *front_arr;
     int32      steps, max_order, topk;
     float8     temp;
     uint64     rng;
-    Datum     *elems;
-    bool      *nulls;
-    int        n_in;
+    Datum     *elems, *front_elems;
+    bool      *nulls, *front_nulls;
+    int        n_in, n_front_in;
     Datum     *ctx;
     int        ctx_len = 0, ctx_cap;
     Datum     *frontier;
@@ -278,12 +279,25 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     deconstruct_array(ctx_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &elems, &nulls, &n_in);
 
+    /* The ordered proposal context and the semantic frontier are different
+     * operands. Appending routed neighbours to ctx would make them a fake
+     * trajectory suffix. A caller that omits p_frontier retains the historical
+     * prompt-only behaviour. */
+    if (PG_NARGS() > 6 && !PG_ARGISNULL(6))
+        front_arr = PG_GETARG_ARRAYTYPE_P(6);
+    else
+        front_arr = ctx_arr;
+    if (ARR_NDIM(front_arr) != 1 || ARR_ELEMTYPE(front_arr) != BYTEAOID)
+        ereport(ERROR, (errmsg("walk_continuations: frontier must be a 1-D bytea array")));
+    deconstruct_array(front_arr, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &front_elems, &front_nulls, &n_front_in);
+
     if ((uint64) n_in + (uint64) steps > (uint64) INT_MAX ||
         (uint64) n_in + (uint64) steps >
             (uint64) (MaxAllocSize / sizeof(Datum)))
         ereport(ERROR,
                 (errmsg("walk_continuations: requested walk exceeds PostgreSQL allocation capacity")));
-    if ((uint64) n_in + (uint64) max_order >
+    if ((uint64) n_front_in + (uint64) max_order >
             (uint64) (MaxAllocSize / sizeof(Datum)))
         ereport(ERROR,
                 (errmsg("walk_continuations: requested frontier exceeds PostgreSQL allocation capacity")));
@@ -293,7 +307,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     /* prompt content, held for the whole walk, plus a rolling window of the emitted
      * tail. The window is max_order — the SAME k the S6 context backoff already bounds
      * itself by — so the frontier introduces no constant of its own. */
-    frontier = (Datum *) palloc(sizeof(Datum) * (n_in + max_order > 0 ? n_in + max_order : 1));
+    frontier = (Datum *) palloc(sizeof(Datum) *
+                                (n_front_in + max_order > 0 ? n_front_in + max_order : 1));
     for (int i = 0; i < n_in; i++)
     {
         bytea *b;
@@ -304,7 +319,24 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         if (VARSIZE_ANY_EXHDR(b) != 16)
             ereport(ERROR, (errmsg("walk_continuations: context ids must be 16 bytes")));
         ctx[ctx_len++]           = copy_id_datum(elems[i]);
-        frontier[n_frontier++]   = ctx[ctx_len - 1];
+    }
+    for (int i = 0; i < n_front_in; i++)
+    {
+        bytea *b;
+
+        if (front_nulls[i])
+            continue;
+        b = DatumGetByteaPP(front_elems[i]);
+        if (VARSIZE_ANY_EXHDR(b) != 16)
+            ereport(ERROR, (errmsg("walk_continuations: frontier ids must be 16 bytes")));
+        frontier[n_frontier++] = copy_id_datum(front_elems[i]);
+    }
+    /* An explicitly empty route is an abstention, not permission to erase the
+     * request. Preserve the resolved prompt as the minimum live frontier. */
+    if (n_frontier == 0)
+    {
+        for (int i = 0; i < ctx_len; i++)
+            frontier[n_frontier++] = ctx[i];
     }
     n_prompt = n_frontier;
     MemoryContextSwitchTo(old);

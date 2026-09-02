@@ -208,7 +208,7 @@ export function EntityDetail() {
 
   function askSubstrate() {
     if (!preview) return;
-    setExploreSeedPrompt(`Tell me about "${preview.label}" (${preview.id_hex}) in the substrate consensus graph.`);
+    setExploreSeedPrompt(`Tell me about "${preview.label}" in the substrate consensus graph.`);
     nav('/chat');
   }
 
