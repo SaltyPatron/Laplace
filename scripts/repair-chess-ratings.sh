@@ -10,9 +10,11 @@ PGDATABASE="${PGDATABASE:-laplace}"
 PGHOST="${PGHOST:-/var/run/postgresql}"
 PGUSER="${PGUSER:-laplace_admin}"
 BATCH_SIZE="${LAPLACE_CHESS_RATING_REPAIR_BATCH:-256}"
+MAX_BATCHES="${LAPLACE_CHESS_RATING_REPAIR_MAX_BATCHES:-1}"
 
 [[ -x "$PSQL" ]] || { echo "::error::missing Laplace psql at $PSQL" >&2; exit 127; }
 [[ "$BATCH_SIZE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::invalid repair batch size: $BATCH_SIZE" >&2; exit 2; }
+[[ "$MAX_BATCHES" =~ ^[1-9][0-9]*$ ]] || { echo "::error::invalid repair max batches: $MAX_BATCHES" >&2; exit 2; }
 
 export PGHOST PGUSER PGDATABASE
 
@@ -25,10 +27,10 @@ psqlq() {
   "$PSQL" -X -w -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 "$@"
 }
 
-# workflow_run fires even when an upstream main run failed before installation.
-# In that case there is no repair contract to execute yet; the next successful
-# install will enqueue it. This is not a successful pending repair masquerading
-# as complete — it is an absent generation on the installed product.
+# A scheduled maintenance slice can run on a host whose latest main revision did
+# not install this generation (for example because that delivery failed earlier).
+# Absence means there is no installed repair contract yet; a successful extension
+# activation will create and enqueue it later.
 has_contract="$(psqlq -tAX -c \
   "SELECT to_regprocedure('chess.rating_repair_generation()') IS NOT NULL
       AND to_regprocedure('chess.repair_player_ratings_batch(bytea,bytea,bytea,bytea[])') IS NOT NULL")"
@@ -40,8 +42,8 @@ fi
 repair_id="$(psqlq -tAX -c "SELECT chess.rating_repair_generation()")"
 [[ -n "$repair_id" ]] || { echo "::error::empty chess rating repair generation" >&2; exit 1; }
 
-# A manually dispatched worker may arrive before deployment has invoked the cheap
-# enqueue procedure. Make the same generation visible without inventing another id.
+# A maintenance slice may arrive before the current deployment reached its cheap
+# enqueue call. Make the same declared generation visible without inventing another id.
 psqlq -v repair_id="$repair_id" -c \
   "INSERT INTO chess.rating_repair_journal(repair_id, status)
    VALUES (:'repair_id', 'pending')
@@ -64,9 +66,10 @@ psqlq -v repair_id="$repair_id" -c \
           error=NULL
     WHERE repair_id=:'repair_id'" >/dev/null
 
-echo "chess-rating-repair: generation=$repair_id batch_size=$BATCH_SIZE status=running"
+echo "chess-rating-repair: generation=$repair_id batch_size=$BATCH_SIZE max_batches=$MAX_BATCHES status=running"
 
-while :; do
+batches_done=0
+while (( batches_done < MAX_BATCHES )); do
   cursor="$(psqlq -v repair_id="$repair_id" -tAX -c \
     "SELECT COALESCE(encode(last_subject, 'hex'), '')
        FROM chess.rating_repair_journal
@@ -150,4 +153,10 @@ while :; do
             status='running'
       WHERE repair_id=:'repair_id'" >/dev/null
 
+  batches_done=$((batches_done + 1))
 done
+
+remaining="$(psqlq -v repair_id="$repair_id" -tAX -c \
+  "SELECT COALESCE(encode(last_subject, 'hex'), ''), subjects_done
+     FROM chess.rating_repair_journal WHERE repair_id=:'repair_id'")"
+echo "chess-rating-repair: slice complete batches=$batches_done cursor=$remaining; obligation remains running"
