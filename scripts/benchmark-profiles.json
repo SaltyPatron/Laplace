@@ -13,11 +13,20 @@
     {
       "id": "core-scale",
       "kind": "core-scale",
-      "description": "Measured whole-machine scaling over the same core composition operation with explicit CPU affinity and physical-core/SMT points.",
+      "description": "Unique-corpus makespan scaling: each source document is composed exactly once and remains an indivisible scheduling unit.",
       "execution_boundary": "built-source",
       "mutability": "none",
-      "resource_shape": "explicit worker/CPU affinity curve",
+      "resource_shape": "one finite corpus partitioned by whole documents across explicit CPU affinity points",
       "receipt_schema": "laplace.benchmark.core-scale/v1"
+    },
+    {
+      "id": "core-scale-streams",
+      "kind": "core-scale-streams",
+      "description": "Aggregate independent-stream scaling: every pinned worker executes one complete real-corpus stream so measured work grows with worker count.",
+      "execution_boundary": "built-source",
+      "mutability": "none",
+      "resource_shape": "replicated independent corpus streams over explicit physical-core/SMT affinity points",
+      "receipt_schema": "laplace.benchmark.core-scale-streams/v1"
     },
     {
       "id": "moby-roundtrip",
@@ -37,8 +46,8 @@
     },
     {
       "id": "throughput",
-      "description": "Core floor plus measured physical-core/SMT scaling curve.",
-      "profiles": ["core-single", "core-scale"]
+      "description": "Single-thread floor plus measured aggregate independent-stream physical-core/SMT scaling.",
+      "profiles": ["core-single", "core-scale-streams"]
     },
     {
       "id": "core",
@@ -47,7 +56,12 @@
     },
     {
       "id": "scale",
-      "description": "Whole-machine composition scaling only.",
+      "description": "Aggregate independent-stream whole-machine composition scaling only.",
+      "profiles": ["core-scale-streams"]
+    },
+    {
+      "id": "makespan",
+      "description": "Unique finite-corpus makespan scaling with indivisible document work units.",
       "profiles": ["core-scale"]
     },
     {
@@ -57,8 +71,8 @@
     },
     {
       "id": "all",
-      "description": "All currently implemented source/core benchmark profiles.",
-      "profiles": ["core-single", "core-scale", "moby-roundtrip"]
+      "description": "All currently implemented source/core benchmark profiles, including both scaling meanings.",
+      "profiles": ["core-single", "core-scale-streams", "core-scale", "moby-roundtrip"]
     }
   ]
 }
