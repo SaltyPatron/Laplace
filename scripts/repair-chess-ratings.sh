@@ -25,6 +25,18 @@ psqlq() {
   "$PSQL" -X -w -d "$PGDATABASE" -U "$PGUSER" -v ON_ERROR_STOP=1 "$@"
 }
 
+# workflow_run fires even when an upstream main run failed before installation.
+# In that case there is no repair contract to execute yet; the next successful
+# install will enqueue it. This is not a successful pending repair masquerading
+# as complete — it is an absent generation on the installed product.
+has_contract="$(psqlq -tAX -c \
+  "SELECT to_regprocedure('chess.rating_repair_generation()') IS NOT NULL
+      AND to_regprocedure('chess.repair_player_ratings_batch(bytea,bytea,bytea,bytea[])') IS NOT NULL")"
+if [[ "$has_contract" != "t" ]]; then
+  echo "chess-rating-repair: installed product has no current repair contract; nothing to execute"
+  exit 0
+fi
+
 repair_id="$(psqlq -tAX -c "SELECT chess.rating_repair_generation()")"
 [[ -n "$repair_id" ]] || { echo "::error::empty chess rating repair generation" >&2; exit 1; }
 
