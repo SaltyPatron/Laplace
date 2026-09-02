@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"
 HELPER=/usr/local/libexec/laplace-managed-deploy
 RECEIPT="$ROOT/build/.managed-publish-backup"
+BACKUP_ROOT=/opt/laplace/app-backups
 source "$ROOT/deploy/linux/payload-sync.sh"
 
 release_in_use() {
@@ -109,9 +110,14 @@ case "${1:-}" in
   begin)
     ensure_host
     [[ ! -f "$RECEIPT" ]] || { echo "unresolved publish receipt" >&2; exit 1; }
+    # A completed transaction has no rollback owner. Old managed.* backups are
+    # therefore dead rollback state, not archives. This host accumulated 8.6 GiB
+    # of 275-276 MiB completed backups on a 16 GiB LV and eventually could not
+    # stage a release. Reclaim them before allocating the next transaction.
+    laplace_prune_managed_backups "$BACKUP_ROOT"
     prune_unreferenced_releases
-    mkdir -p "$ROOT/build" /opt/laplace/app-backups
-    backup="$(mktemp -d /opt/laplace/app-backups/managed.XXXXXX)"
+    mkdir -p "$ROOT/build" "$BACKUP_ROOT"
+    backup="$(mktemp -d "$BACKUP_ROOT/managed.XXXXXX")"
     chmod 0700 "$backup"
     mkdir -m 0700 "$backup/app" "$backup/secrets"
     python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --snapshot "$backup/stockfish.json"
@@ -135,6 +141,9 @@ case "${1:-}" in
     if [[ -f "$RECEIPT" ]]; then
       mv "$RECEIPT" "$ROOT/build/.managed-publish-committed"
     fi
+    # Commit is the point at which rollback ownership ends. Keep the receipt,
+    # not another 275 MiB payload clone.
+    laplace_prune_managed_backups "$BACKUP_ROOT"
     ;;
   rollback)
     # The workflow's semantic/election eval runs AFTER publish, readiness, the
@@ -159,12 +168,13 @@ case "${1:-}" in
       if [[ -f "$RECEIPT" ]]; then
         mv "$RECEIPT" "$ROOT/build/.managed-publish-committed"
       fi
+      laplace_prune_managed_backups "$BACKUP_ROOT"
       exit 0
     fi
 
     if [[ -f "$RECEIPT" ]]; then
       backup="$(<"$RECEIPT")"
-      [[ "$backup" == /opt/laplace/app-backups/managed.* && -d "$backup" && ! -L "$backup" ]] || {
+      [[ "$backup" == "$BACKUP_ROOT"/managed.* && -d "$backup" && ! -L "$backup" ]] || {
         echo "invalid recovery receipt; no files changed" >&2; exit 1;
       }
       sudo -n systemctl stop laplace-api
@@ -182,7 +192,8 @@ case "${1:-}" in
       done
       sudo -n "$HELPER" rollback
       mv "$RECEIPT" "$ROOT/build/.managed-publish-rolled-back"
-      echo "restored previous API payload and managed units; backup retained at $backup"
+      echo "restored previous API payload and managed units"
+      laplace_prune_managed_backups "$BACKUP_ROOT"
     elif [[ -x "$HELPER" ]]; then
       sudo -n "$HELPER" rollback
     fi
