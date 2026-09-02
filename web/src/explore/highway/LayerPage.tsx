@@ -108,8 +108,14 @@ export function LayerPage() {
                     <th scope="col">Subject</th>
                     <th scope="col">Relation</th>
                     <th scope="col">Object</th>
-                    <th scope="col" className={styles.num}>μ</th>
-                    <th scope="col" className={styles.num}>Wit</th>
+                    <th
+                      scope="col"
+                      className={styles.num}
+                      title="Conservative standing (rating − 2×RD); not the underlying rating"
+                    >
+                      Conservative
+                    </th>
+                    <th scope="col" className={styles.num} title="Witnessed observations">Wit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -124,7 +130,7 @@ export function LayerPage() {
                         <Link className={styles.entLink} to={`/explore/entity/${r.object_id}`}>{r.object}</Link>
                       </td>
                       <td className={styles.num}>{Number(r.eff_mu).toFixed(1)}</td>
-                      <td className={styles.num}>{r.witnesses}</td>
+                      <td className={styles.num}>{r.witnesses.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
