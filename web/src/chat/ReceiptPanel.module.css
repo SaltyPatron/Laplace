@@ -1,11 +1,13 @@
 @layer components {
   .panel {
     position: relative;
-    border-left: 1px solid var(--color-border-default);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
     background: var(--color-bg-panel);
+    box-shadow: var(--shadow-instrument);
     flex-shrink: 0;
     display: flex;
-    min-width: 300px;
+    min-width: 320px;
     max-width: 60vw;
   }
 

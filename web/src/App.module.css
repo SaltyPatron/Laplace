@@ -23,12 +23,12 @@
   }
 
   .title {
-    color: inherit;
+    color: #f7fbfd !important;
     text-decoration: none;
     font-weight: inherit;
   }
 
   .title:hover {
-    color: var(--color-accent);
+    color: #ffffff !important;
   }
 }

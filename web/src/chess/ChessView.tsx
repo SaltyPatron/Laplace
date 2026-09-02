@@ -829,20 +829,6 @@ export function ChessView() {
 
         />
 
-        <EnginePanel
-
-          train={train}
-
-          knobs={knobs}
-
-          onKnobsChange={setKnobs}
-
-          onStart={startTrain}
-
-          onStop={stopTrain}
-
-        />
-
         <MoveList
 
           topMoves={topMoves}
@@ -873,6 +859,20 @@ export function ChessView() {
 
         <PstGrid />
 
+        <EnginePanel
+
+          train={train}
+
+          knobs={knobs}
+
+          onKnobsChange={setKnobs}
+
+          onStart={startTrain}
+
+          onStop={stopTrain}
+
+        />
+
       </Sidebar>
 
     </div>
@@ -880,4 +880,3 @@ export function ChessView() {
   );
 
 }
-

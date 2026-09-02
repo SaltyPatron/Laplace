@@ -81,6 +81,10 @@
     background: var(--color-bg-abyss);
     padding: 0.5rem 0.6rem;
     margin-bottom: 0.85rem;
+    color: #eef6f9;
+    --color-text-primary: #eef6f9;
+    --color-text-muted: #b9cad4;
+    --color-border-default: #36576b;
   }
 
   .commandHead {

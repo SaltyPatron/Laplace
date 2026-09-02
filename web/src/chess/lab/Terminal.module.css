@@ -101,6 +101,13 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     line-height: 1.45;
+    color: #eef6f9;
+    --color-text-primary: #eef6f9;
+    --color-text-muted: #b9cad4;
+    --color-accent: #69d9d1;
+    --color-signal: #69d9d1;
+    --color-steel: #8fc4e2;
+    --color-error: #ff8f9b;
   }
 
   .empty {

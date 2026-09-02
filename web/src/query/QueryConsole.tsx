@@ -125,9 +125,11 @@ export function QueryConsole() {
 
   if (catalogError) {
     return (
-      <Panel title="Query">
-        <ErrorText>{catalogError}</ErrorText>
-      </Panel>
+      <div className={styles.errorPage}>
+        <Panel title="Query">
+          <ErrorText>{catalogError}</ErrorText>
+        </Panel>
+      </div>
     );
   }
 

@@ -1,6 +1,21 @@
 @layer components {
+  .dbPage {
+    width: min(100%, 1380px);
+    margin: 0 auto;
+    padding: clamp(1rem, 3vw, 2rem);
+    overflow-y: auto;
+  }
+
   .hero h2 {
     margin: 0 0 var(--space-2);
+  }
+
+  .hero {
+    padding: 1.25rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-panel);
+    box-shadow: var(--shadow-instrument);
   }
 
   .heroTitleRow {

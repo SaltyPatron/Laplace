@@ -2,10 +2,14 @@
   .layout {
     display: grid;
     grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-    gap: var(--space-4);
+    gap: var(--space-5);
     align-items: start;
     height: 100%;
     min-height: 0;
+    width: min(100%, 1380px);
+    margin: 0 auto;
+    padding: clamp(1rem, 3vw, 2rem);
+    overflow-y: auto;
   }
 
   .controls {
@@ -28,7 +32,7 @@
 
   .results {
     min-width: 0;
-    height: 100%;
+    min-height: min(44rem, calc(100dvh - 8rem));
     display: flex;
     flex-direction: column;
   }
@@ -109,9 +113,18 @@
     overflow-wrap: anywhere;
   }
 
+  .errorPage {
+    width: min(100%, 1380px);
+    margin: 0 auto;
+    padding: clamp(1rem, 3vw, 2rem);
+  }
+
   @media (max-width: 900px) {
     .layout {
       grid-template-columns: minmax(0, 1fr);
+      height: auto;
     }
+
+    .results { min-height: 30rem; }
   }
 }

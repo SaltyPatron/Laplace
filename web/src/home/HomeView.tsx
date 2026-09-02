@@ -61,12 +61,11 @@ export function HomeView({ onGoto }: Props) {
           </p>
         </div>
         <div className={styles.heroInstrument} aria-hidden="true">
-          <span className={`${styles.orbit} ${styles.orbitOuter}`} />
-          <span className={`${styles.orbit} ${styles.orbitInner}`} />
-          <span className={styles.instrumentCore} />
-          <span className={styles.instrumentNeedle} />
-          <span className={styles.instrumentTrace} />
-          <span className={styles.instrumentLegend}>WITNESS · FOLD · TRAVERSE</span>
+          <img
+            className={styles.brandArt}
+            src="/assets/brand/laplace-mechanical.png"
+            alt=""
+          />
         </div>
       </section>
 

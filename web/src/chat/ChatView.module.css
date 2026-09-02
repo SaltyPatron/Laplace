@@ -3,7 +3,10 @@
     display: flex;
     height: 100%;
     min-height: 0;
-    width: 100%;
+    width: min(100%, 1500px);
+    margin: 0 auto;
+    padding: 1rem clamp(1rem, 2.5vw, 2rem) 1.5rem;
+    gap: var(--space-4);
   }
 
   .main {
@@ -12,14 +15,20 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-panel);
+    box-shadow: var(--shadow-instrument);
   }
 
   .toolbar {
     display: flex;
     gap: var(--space-3);
-    padding: 0.55rem 1rem;
+    padding: 0.75rem 1rem;
     align-items: center;
     border-bottom: 1px solid var(--color-border-default);
+    background: var(--color-bg-panel-2);
   }
 
   .transcript {
@@ -99,8 +108,9 @@
   .composer {
     display: flex;
     gap: var(--space-3);
-    padding: 0.8rem 1rem;
+    padding: 0.9rem 1rem;
     border-top: 1px solid var(--color-border-default);
+    background: var(--color-bg-panel-2);
   }
 
   .composer textarea {
@@ -109,6 +119,13 @@
 }
 
 @media (max-width: 900px) {
+  .layout {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .main { min-height: 70dvh; }
+
   .message {
     max-width: 92%;
   }

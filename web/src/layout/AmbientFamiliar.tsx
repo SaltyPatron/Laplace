@@ -263,8 +263,6 @@ export function AmbientFamiliar() {
       data-testid="ambient-familiar"
       style={customProperties}
     >
-      <div className={styles.abyss} />
-      <div className={styles.rail} />
       <div
         className={`${styles.actor} ${styles[pose.mode]}`}
         data-mode={pose.mode}

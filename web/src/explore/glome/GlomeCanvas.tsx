@@ -114,7 +114,10 @@ function GlomeScene({
       const n = nodes[i];
       const [x, y, z] = project(n, projection, xmAngle);
       const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
-      const radius = Math.max(0.02, (ordHit ? 0.045 : 0.028) + (n.runLength ?? 1) * 0.002);
+      // Run length is metadata, not literal volume. Keep dense trajectories
+      // legible while still giving repeated constituents a visible cue.
+      const runScale = Math.min(0.009, Math.log2(Math.max(1, n.runLength ?? 1)) * 0.0015);
+      const radius = ordHit ? 0.032 : 0.016 + runScale;
       transform.position.set(x, y, z);
       transform.scale.setScalar(radius);
       transform.updateMatrix();
@@ -152,7 +155,7 @@ function GlomeScene({
           onSelectOrdinal?.(n?.ordinal ?? null);
         }}
       >
-        <sphereGeometry args={[1, 12, 12]} />
+        <sphereGeometry args={[1, 9, 9]} />
         <meshStandardMaterial vertexColors emissiveIntensity={0.25} />
       </instancedMesh>
       {trajectory.length > 1 ? (
@@ -165,8 +168,8 @@ function GlomeScene({
         />
       ) : null}
       <mesh>
-        <sphereGeometry args={[1, 32, 32]} />
-        <meshBasicMaterial color="#243049" wireframe transparent opacity={0.15} />
+        <sphereGeometry args={[1, 28, 28]} />
+        <meshBasicMaterial color="#5f7890" wireframe transparent opacity={0.11} />
       </mesh>
       {hover ? (
         <Html position={project(hover, projection, xmAngle).map((v) => v + 0.08) as [number, number, number]}>
