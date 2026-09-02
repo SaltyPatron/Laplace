@@ -1,0 +1,69 @@
+name: Live chat forward-pass profile
+
+on:
+  push:
+    branches: [fix/live-chat-forward-pass]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+env:
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  PGDATABASE: laplace
+
+jobs:
+  profile:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact diagnostic revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Measure deployed dog forward-pass stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql="$LAPLACE_PG_PREFIX/bin/psql"
+          export PGHOST=/var/run/postgresql PGUSER=laplace_admin PGDATABASE=laplace
+          export PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=15000ms'
+
+          measure() {
+            local label="$1" sql="$2" start end rc=0
+            echo "===== CHAT_PROFILE $label ====="
+            start=$(date +%s%N)
+            "$psql" -X -w -v ON_ERROR_STOP=1 -tAX -c "$sql" || rc=$?
+            end=$(date +%s%N)
+            echo "CHAT_PROFILE_RESULT label=$label rc=$rc elapsed_ms=$(( (end-start)/1000000 ))"
+            return 0
+          }
+
+          measure prompt_state "SELECT count(*) FROM converse.prompt_state('dog')"
+          measure prompt_coherence "SELECT count(*) FROM converse.prompt_coherence('dog')"
+          measure orient_topic "SELECT count(*) FROM converse.orient_topic('dog', NULL)"
+          measure route "SELECT count(*) FROM generation.forward_route_trace('dog', 2, 8, NULL)"
+          measure frontier "SELECT count(*) FROM generation.forward_frontier('dog', 2, 8, NULL)"
+          measure proposal_word "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[laplace.word_id('dog')]::bytea[], NULL)"
+          measure forward_1 "SELECT count(*) FROM generation.forward_text('dog', 1, 5, 0.6, 10, 42, 2, 8, NULL)"
+          measure forward_2 "SELECT count(*) FROM generation.forward_text('dog', 2, 5, 0.6, 10, 42, 2, 8, NULL)"
+          measure forward_4 "SELECT count(*) FROM generation.forward_text('dog', 4, 5, 0.6, 10, 42, 2, 8, NULL)"
+          measure forward_8 "SELECT count(*) FROM generation.forward_text('dog', 8, 5, 0.6, 10, 42, 2, 8, NULL)"
+
+          echo '===== CHAT_PROFILE pg_stat_statements ====='
+          "$psql" -X -w -tAX -F'|' -c "
+            SELECT calls, round(total_exec_time::numeric,1), round(mean_exec_time::numeric,1),
+                   left(regexp_replace(query, E'[\\n\\r\\t ]+', ' ', 'g'), 220)
+              FROM pg_stat_statements
+             WHERE query ILIKE '%trajectory_continuations%'
+                OR query ILIKE '%steer_candidates%'
+                OR query ILIKE '%forward_route_trace%'
+                OR query ILIKE '%explore_web%'
+             ORDER BY total_exec_time DESC
+             LIMIT 30" || true
