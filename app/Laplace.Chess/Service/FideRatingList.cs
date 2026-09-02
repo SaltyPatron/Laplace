@@ -1,6 +1,8 @@
 using System.IO.Compression;
+using System.Net;
 using System.Net.Http.Headers;
-using System.Xml;
+using System.Text;
+using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Service;
 
@@ -8,6 +10,10 @@ namespace Laplace.Chess.Service;
 /// Reads FIDE's first-party combined rating artifact. Search and roster discovery
 /// belong to the published player estate; profile HTML is enrichment for a selected
 /// identity, not the authority for discovering whether the identity exists.
+///
+/// FIDE publishes XML, and XML is already a registered Laplace grammar. The native
+/// grammar decomposer therefore owns structural parsing; this class only projects
+/// FIDE's named fields from the resulting element AST.
 /// </summary>
 internal static class FideRatingList
 {
@@ -15,11 +21,11 @@ internal static class FideRatingList
     private const long MaxArchiveBytes = 128L * 1024 * 1024;
     private const long MaxXmlBytes = 1024L * 1024 * 1024;
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromHours(6);
-    private static readonly SemaphoreSlim ArchiveGate = new(1, 1);
+    private static readonly SemaphoreSlim EstateGate = new(1, 1);
     private static readonly HttpClient Http = CreateClient();
 
-    private static byte[]? _archive;
-    private static DateTimeOffset _archiveFetchedAt;
+    private static Player[]? _players;
+    private static DateTimeOffset _playersFetchedAt;
 
     internal sealed record Player(
         string FideId,
@@ -33,31 +39,98 @@ internal static class FideRatingList
         int BirthYear,
         string Flag);
 
+    private sealed class PlayerBuilder
+    {
+        public string FideId = "";
+        public string Name = "";
+        public string Federation = "";
+        public string Sex = "";
+        public string Title = "";
+        public int Standard;
+        public int Rapid;
+        public int Blitz;
+        public string Birthday = "";
+        public string Flag = "";
+    }
+
+    private readonly record struct ElementFrame(uint EndByte, string Name, PlayerBuilder? Player);
+
     public static async Task<IReadOnlyList<FidePlayerCandidate>> SearchAsync(
         string query, int limit, CancellationToken ct)
     {
-        byte[] archive = await GetArchiveAsync(ct).ConfigureAwait(false);
+        query = query.Trim();
+        if (query.Length < 2)
+            throw new ArgumentException("FIDE search needs at least two characters.", nameof(query));
+
+        string canonical = PlayerAlias.Canonical(query);
+        int cap = Math.Clamp(limit, 1, 100);
+        var players = await GetPlayersAsync(ct).ConfigureAwait(false);
         return await Task.Run(
-            () => SearchArchive(archive, query, limit, ct),
+            () => SearchPlayers(players, canonical, cap, ct),
             ct).ConfigureAwait(false);
     }
 
     public static async Task<IReadOnlyList<FidePlayerCandidate>> TopAsync(
         string cohort, int limit, CancellationToken ct)
     {
-        byte[] archive = await GetArchiveAsync(ct).ConfigureAwait(false);
+        cohort = cohort.Trim().ToLowerInvariant();
+        if (!ChessGameFetcher.FideCohorts.Contains(cohort))
+            throw new ArgumentException($"unknown FIDE cohort '{cohort}'", nameof(cohort));
+
+        var players = await GetPlayersAsync(ct).ConfigureAwait(false);
         return await Task.Run(
-            () => TopArchive(archive, cohort, limit, DateTime.UtcNow.Year, ct),
+            () => TopPlayers(players, cohort, limit, DateTime.UtcNow.Year, ct),
             ct).ConfigureAwait(false);
     }
 
     internal static IReadOnlyList<FidePlayerCandidate> SearchXml(
         Stream xml, string query, int limit, CancellationToken ct = default)
     {
-        string canonical = PlayerAlias.Canonical(query);
-        int cap = Math.Clamp(limit, 1, 100);
-        return ReadPlayers(xml, ct)
-            .Where(p => CandidateScore(canonical, p.Name) < 10)
+        byte[] bytes = ReadBounded(xml, MaxXmlBytes, "FIDE XML player list", ct);
+        var players = ParsePlayers(bytes, ct);
+        return SearchPlayers(
+            players,
+            PlayerAlias.Canonical(query.Trim()),
+            Math.Clamp(limit, 1, 100),
+            ct);
+    }
+
+    internal static IReadOnlyList<FidePlayerCandidate> TopXml(
+        Stream xml, string cohort, int limit, int currentYear, CancellationToken ct = default)
+    {
+        byte[] bytes = ReadBounded(xml, MaxXmlBytes, "FIDE XML player list", ct);
+        var players = ParsePlayers(bytes, ct);
+        return TopPlayers(players, cohort.Trim().ToLowerInvariant(), limit, currentYear, ct);
+    }
+
+    internal static IReadOnlyList<FidePlayerCandidate> SearchArchive(
+        byte[] archive, string query, int limit, CancellationToken ct = default)
+    {
+        var players = ParsePlayers(ExtractXml(archive, ct), ct);
+        return SearchPlayers(
+            players,
+            PlayerAlias.Canonical(query.Trim()),
+            Math.Clamp(limit, 1, 100),
+            ct);
+    }
+
+    internal static IReadOnlyList<FidePlayerCandidate> TopArchive(
+        byte[] archive, string cohort, int limit, int currentYear, CancellationToken ct = default)
+    {
+        var players = ParsePlayers(ExtractXml(archive, ct), ct);
+        return TopPlayers(players, cohort.Trim().ToLowerInvariant(), limit, currentYear, ct);
+    }
+
+    private static IReadOnlyList<FidePlayerCandidate> SearchPlayers(
+        IReadOnlyList<Player> players, string canonical, int cap, CancellationToken ct)
+    {
+        int seen = 0;
+        return players
+            .Where(p =>
+            {
+                if ((++seen & 4095) == 0) ct.ThrowIfCancellationRequested();
+                return CandidateScore(canonical, p.Name) < 10;
+            })
             .OrderBy(p => CandidateScore(canonical, p.Name))
             .ThenByDescending(p => p.Standard)
             .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
@@ -67,19 +140,24 @@ internal static class FideRatingList
             .ToArray();
     }
 
-    internal static IReadOnlyList<FidePlayerCandidate> TopXml(
-        Stream xml, string cohort, int limit, int currentYear, CancellationToken ct = default)
+    private static IReadOnlyList<FidePlayerCandidate> TopPlayers(
+        IReadOnlyList<Player> players, string cohort, int limit, int currentYear, CancellationToken ct)
     {
         int cap = Math.Clamp(limit, 1, 100);
-        var mode = Mode(cohort);
+        string mode = Mode(cohort);
         bool women = cohort.StartsWith("women", StringComparison.Ordinal)
             || cohort.StartsWith("girls", StringComparison.Ordinal);
         bool junior = cohort.StartsWith("juniors", StringComparison.Ordinal)
             || cohort.StartsWith("girls", StringComparison.Ordinal);
         int juniorBirthFloor = currentYear - 20;
+        int seen = 0;
 
-        var ranked = ReadPlayers(xml, ct)
-            .Where(p => !IsInactive(p.Flag))
+        return players
+            .Where(p =>
+            {
+                if ((++seen & 4095) == 0) ct.ThrowIfCancellationRequested();
+                return !IsInactive(p.Flag);
+            })
             .Where(p => !women || p.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
             .Where(p => !junior || p.BirthYear >= juniorBirthFloor)
             .Select(p => (Player: p, Rating: RatingFor(p, mode)))
@@ -90,149 +168,246 @@ internal static class FideRatingList
             .Take(cap)
             .Select((x, i) => ToCandidate(x.Player) with { Rank = i + 1 })
             .ToArray();
-        return ranked;
     }
 
-    internal static IReadOnlyList<FidePlayerCandidate> SearchArchive(
-        byte[] archive, string query, int limit, CancellationToken ct = default)
-    {
-        using var xml = OpenXml(archive);
-        return SearchXml(xml, query, limit, ct);
-    }
-
-    internal static IReadOnlyList<FidePlayerCandidate> TopArchive(
-        byte[] archive, string cohort, int limit, int currentYear, CancellationToken ct = default)
-    {
-        using var xml = OpenXml(archive);
-        return TopXml(xml, cohort, limit, currentYear, ct);
-    }
-
-    private static async Task<byte[]> GetArchiveAsync(CancellationToken ct)
+    private static async Task<Player[]> GetPlayersAsync(CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
-        var cached = _archive;
-        if (cached is not null && now - _archiveFetchedAt < RefreshAfter)
+        var cached = _players;
+        if (cached is not null && now - _playersFetchedAt < RefreshAfter)
             return cached;
 
-        await ArchiveGate.WaitAsync(ct).ConfigureAwait(false);
+        await EstateGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             now = DateTimeOffset.UtcNow;
-            cached = _archive;
-            if (cached is not null && now - _archiveFetchedAt < RefreshAfter)
+            cached = _players;
+            if (cached is not null && now - _playersFetchedAt < RefreshAfter)
                 return cached;
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, XmlArchiveUrl);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/zip"));
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream", 0.9));
-            using var response = await Http.SendAsync(
-                request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is long length && length > MaxArchiveBytes)
+            byte[] archive = await DownloadArchiveAsync(ct).ConfigureAwait(false);
+            byte[] xml = ExtractXml(archive, ct);
+            var players = await Task.Run(() => ParsePlayers(xml, ct), ct).ConfigureAwait(false);
+            if (players.Length == 0)
                 throw new InvalidDataException(
-                    $"FIDE rating archive is larger than the {MaxArchiveBytes} byte safety cap.");
+                    "FIDE published rating artifact parsed successfully but contained no valid player records.");
 
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            using var buffer = new MemoryStream();
-            var block = new byte[1024 * 1024];
-            int read;
-            long total = 0;
-            while ((read = await stream.ReadAsync(block.AsMemory(0, block.Length), ct).ConfigureAwait(false)) > 0)
-            {
-                total += read;
-                if (total > MaxArchiveBytes)
-                    throw new InvalidDataException(
-                        $"FIDE rating archive exceeded the {MaxArchiveBytes} byte safety cap while reading.");
-                buffer.Write(block, 0, read);
-            }
-            var bytes = buffer.ToArray();
-            using (OpenXml(bytes)) { }
-            _archive = bytes;
-            _archiveFetchedAt = now;
-            return bytes;
+            _players = players;
+            _playersFetchedAt = now;
+            return players;
         }
         finally
         {
-            ArchiveGate.Release();
+            EstateGate.Release();
         }
     }
 
-    private static Stream OpenXml(byte[] archive)
+    private static async Task<byte[]> DownloadArchiveAsync(CancellationToken ct)
     {
-        var backing = new MemoryStream(archive, writable: false);
-        ZipArchive? zip = null;
-        try
+        using var request = new HttpRequestMessage(HttpMethod.Get, XmlArchiveUrl);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/zip"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream", 0.9));
+        using var response = await Http.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is long length && length > MaxArchiveBytes)
+            throw new InvalidDataException(
+                $"FIDE rating archive is larger than the {MaxArchiveBytes} byte safety cap.");
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var block = new byte[1024 * 1024];
+        long total = 0;
+        int read;
+        while ((read = await stream.ReadAsync(block.AsMemory(0, block.Length), ct).ConfigureAwait(false)) > 0)
         {
-            zip = new ZipArchive(backing, ZipArchiveMode.Read, leaveOpen: false);
-            var xmlEntries = zip.Entries
-                .Where(e => e.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(e => e.Name.Contains("players", StringComparison.OrdinalIgnoreCase))
-                .ThenBy(e => e.FullName, StringComparer.Ordinal)
-                .ToArray();
-            if (xmlEntries.Length == 0)
-                throw new InvalidDataException("FIDE rating archive did not contain an XML player list.");
-            var entry = xmlEntries[0];
-            if (entry.Length <= 0 || entry.Length > MaxXmlBytes)
-                throw new InvalidDataException("FIDE XML player list has an invalid expanded size.");
-            return new ZipEntryStream(zip, backing, entry.Open());
+            total += read;
+            if (total > MaxArchiveBytes)
+                throw new InvalidDataException(
+                    $"FIDE rating archive exceeded the {MaxArchiveBytes} byte safety cap while reading.");
+            buffer.Write(block, 0, read);
         }
-        catch
-        {
-            zip?.Dispose();
-            backing.Dispose();
-            throw;
-        }
+        return buffer.ToArray();
     }
 
-    private static IEnumerable<Player> ReadPlayers(Stream xml, CancellationToken ct)
+    private static byte[] ExtractXml(byte[] archive, CancellationToken ct)
     {
-        var settings = new XmlReaderSettings
-        {
-            DtdProcessing = DtdProcessing.Prohibit,
-            XmlResolver = null,
-            IgnoreComments = true,
-            IgnoreWhitespace = true,
-            CloseInput = false,
-        };
-        using var reader = XmlReader.Create(xml, settings);
-        int seen = 0;
-        while (reader.Read())
-        {
-            if (reader.NodeType != XmlNodeType.Element
-                || !reader.LocalName.Equals("player", StringComparison.OrdinalIgnoreCase))
-                continue;
-            if ((++seen & 4095) == 0) ct.ThrowIfCancellationRequested();
+        using var backing = new MemoryStream(archive, writable: false);
+        using var zip = new ZipArchive(backing, ZipArchiveMode.Read, leaveOpen: false);
+        var xmlEntries = zip.Entries
+            .Where(e => e.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(e => e.Name.Contains("players", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(e => e.FullName, StringComparer.Ordinal)
+            .ToArray();
+        if (xmlEntries.Length == 0)
+            throw new InvalidDataException("FIDE rating archive did not contain an XML player list.");
 
-            string fideId = "", name = "", federation = "", sex = "", title = "", birthday = "", flag = "";
-            int standard = 0, rapid = 0, blitz = 0;
-            using var subtree = reader.ReadSubtree();
-            while (subtree.Read())
+        var entry = xmlEntries[0];
+        if (entry.Length <= 0 || entry.Length > MaxXmlBytes)
+            throw new InvalidDataException("FIDE XML player list has an invalid expanded size.");
+
+        using var input = entry.Open();
+        return ReadBounded(input, MaxXmlBytes, "FIDE XML player list", ct);
+    }
+
+    /// <summary>
+    /// Structural parsing belongs to the registered XML grammar. This projection only
+    /// interprets the direct child elements of each FIDE <player> element after that
+    /// structure has been produced by the native grammar decomposer.
+    /// </summary>
+    private static Player[] ParsePlayers(byte[] utf8, CancellationToken ct)
+    {
+        using var ast = GrammarDecomposer.Parse(utf8, "xml");
+        var players = new List<PlayerBuilder>();
+        var stack = new Stack<ElementFrame>();
+
+        for (int i = 0; i < ast.NodeCount; i++)
+        {
+            if ((i & 16383) == 0) ct.ThrowIfCancellationRequested();
+            var node = ast.GetNode(i);
+            if (!ast.NodeTypeIs(node.NodeTypeId, "element"u8)) continue;
+
+            while (stack.Count > 0 && node.StartByte >= stack.Peek().EndByte)
+                stack.Pop();
+
+            string name = ElementName(ast, utf8, i, node);
+            PlayerBuilder? player = null;
+            if (name.Equals("player", StringComparison.OrdinalIgnoreCase))
             {
-                if (subtree.NodeType != XmlNodeType.Element || subtree.IsEmptyElement) continue;
-                string field = subtree.LocalName;
-                if (field.Equals("player", StringComparison.OrdinalIgnoreCase)) continue;
-                string value = subtree.ReadString().Trim();
-                switch (field)
-                {
-                    case "fideid": fideId = value; break;
-                    case "name": name = value; break;
-                    case "country": federation = value; break;
-                    case "sex": sex = value; break;
-                    case "title": title = value; break;
-                    case "rating": standard = Int(value); break;
-                    case "rapid_rating": rapid = Int(value); break;
-                    case "blitz_rating": blitz = Int(value); break;
-                    case "birthday": birthday = value; break;
-                    case "flag": flag = value; break;
-                }
+                player = new PlayerBuilder();
+                players.Add(player);
+            }
+            else if (stack.Count > 0
+                     && stack.Peek().Name.Equals("player", StringComparison.OrdinalIgnoreCase)
+                     && stack.Peek().Player is { } owner)
+            {
+                ApplyField(owner, name, ElementText(ast, utf8, i, node));
             }
 
-            if (fideId.Length is < 4 or > 12 || !fideId.All(char.IsDigit) || string.IsNullOrWhiteSpace(name))
-                continue;
-            yield return new Player(
-                fideId, name.Trim(), federation.Trim().ToUpperInvariant(), sex.Trim().ToUpperInvariant(),
-                NormalizeTitle(title), standard, rapid, blitz, BirthYear(birthday), flag.Trim());
+            stack.Push(new ElementFrame(node.EndByte, name, player));
         }
+
+        return players
+            .Where(p => p.FideId.Length is >= 4 and <= 12
+                        && p.FideId.All(char.IsDigit)
+                        && !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new Player(
+                p.FideId,
+                p.Name.Trim(),
+                p.Federation.Trim().ToUpperInvariant(),
+                p.Sex.Trim().ToUpperInvariant(),
+                NormalizeTitle(p.Title),
+                p.Standard,
+                p.Rapid,
+                p.Blitz,
+                BirthYear(p.Birthday),
+                p.Flag.Trim()))
+            .ToArray();
+    }
+
+    private static string ElementName(
+        GrammarAst ast, byte[] utf8, int elementIndex, LaplaceAstNode element)
+    {
+        int startTagIndex = -1;
+        LaplaceAstNode startTag = default;
+        for (int i = elementIndex + 1; i < ast.NodeCount; i++)
+        {
+            var node = ast.GetNode(i);
+            if (node.StartByte >= element.EndByte) break;
+            if (node.Parent != (uint)elementIndex) continue;
+            if (!ast.NodeTypeIs(node.NodeTypeId, "STag"u8)
+                && !ast.NodeTypeIs(node.NodeTypeId, "EmptyElemTag"u8))
+                continue;
+            startTagIndex = i;
+            startTag = node;
+            break;
+        }
+        if (startTagIndex < 0) return "";
+
+        for (int i = startTagIndex + 1; i < ast.NodeCount; i++)
+        {
+            var node = ast.GetNode(i);
+            if (node.StartByte >= startTag.EndByte) break;
+            if (node.Parent == (uint)startTagIndex && ast.NodeTypeIs(node.NodeTypeId, "Name"u8))
+                return DecodeSpan(utf8, node.StartByte, node.EndByte);
+        }
+        return "";
+    }
+
+    private static string ElementText(
+        GrammarAst ast, byte[] utf8, int elementIndex, LaplaceAstNode element)
+    {
+        uint contentStart = element.StartByte;
+        uint contentEnd = element.EndByte;
+        bool sawStart = false;
+
+        for (int i = elementIndex + 1; i < ast.NodeCount; i++)
+        {
+            var node = ast.GetNode(i);
+            if (node.StartByte >= element.EndByte) break;
+            if (node.Parent != (uint)elementIndex) continue;
+
+            if (!sawStart && (ast.NodeTypeIs(node.NodeTypeId, "STag"u8)
+                              || ast.NodeTypeIs(node.NodeTypeId, "EmptyElemTag"u8)))
+            {
+                contentStart = node.EndByte;
+                sawStart = true;
+                if (ast.NodeTypeIs(node.NodeTypeId, "EmptyElemTag"u8))
+                    return "";
+            }
+            else if (ast.NodeTypeIs(node.NodeTypeId, "ETag"u8))
+            {
+                contentEnd = node.StartByte;
+                break;
+            }
+        }
+
+        if (!sawStart || contentEnd <= contentStart) return "";
+        return WebUtility.HtmlDecode(DecodeSpan(utf8, contentStart, contentEnd)).Trim();
+    }
+
+    private static string DecodeSpan(byte[] utf8, uint start, uint end)
+    {
+        if (end < start || end > (uint)utf8.Length) return "";
+        return Encoding.UTF8.GetString(
+            utf8,
+            checked((int)start),
+            checked((int)(end - start)));
+    }
+
+    private static void ApplyField(PlayerBuilder player, string field, string value)
+    {
+        switch (field.ToLowerInvariant())
+        {
+            case "fideid": player.FideId = value; break;
+            case "name": player.Name = value; break;
+            case "country": player.Federation = value; break;
+            case "sex": player.Sex = value; break;
+            case "title": player.Title = value; break;
+            case "rating": player.Standard = Int(value); break;
+            case "rapid_rating": player.Rapid = Int(value); break;
+            case "blitz_rating": player.Blitz = Int(value); break;
+            case "birthday": player.Birthday = value; break;
+            case "flag": player.Flag = value; break;
+        }
+    }
+
+    private static byte[] ReadBounded(Stream input, long maximum, string label, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        var block = new byte[1024 * 1024];
+        long total = 0;
+        int read;
+        while ((read = input.Read(block, 0, block.Length)) > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            total += read;
+            if (total > maximum)
+                throw new InvalidDataException(
+                    $"{label} exceeded the {maximum} byte safety cap while reading.");
+            buffer.Write(block, 0, read);
+        }
+        return buffer.ToArray();
     }
 
     private static FidePlayerCandidate ToCandidate(Player p)
@@ -291,32 +466,5 @@ internal static class FideRatingList
         var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Laplace-Chess-Ingest/1.0");
         return client;
-    }
-
-    private sealed class ZipEntryStream(ZipArchive zip, Stream backing, Stream inner) : Stream
-    {
-        public override bool CanRead => inner.CanRead;
-        public override bool CanSeek => false;
-        public override bool CanWrite => false;
-        public override long Length => throw new NotSupportedException();
-        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
-        public override void Flush() => inner.Flush();
-        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
-        public override int Read(Span<byte> buffer) => inner.Read(buffer);
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-            => inner.ReadAsync(buffer, cancellationToken);
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                inner.Dispose();
-                zip.Dispose();
-                backing.Dispose();
-            }
-            base.Dispose(disposing);
-        }
     }
 }
