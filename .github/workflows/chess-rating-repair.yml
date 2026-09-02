@@ -1,0 +1,42 @@
+name: Chess rating repair — durable replay
+
+on:
+  workflow_run:
+    workflows: ["Laplace — build, deploy, test"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# This worker uses the same persistent checkout/build host as the product pipeline.
+# Never let it race another workflow's checkout or installed-state mutation.
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+env:
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  PGDATABASE: laplace
+
+jobs:
+  repair:
+    name: Repair — chess ratings from durable evidence
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact installed-line revision
+        env:
+          TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Resume durable chess rating repair
+        run: |
+          chmod +x scripts/repair-chess-ratings.sh
+          bash scripts/repair-chess-ratings.sh
