@@ -2,6 +2,7 @@
 """Executable regression tests for Actions delivery and test-profile authority."""
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 import unittest
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 MAIN = WORKFLOWS / "laplace.yml"
 REGISTRY = ROOT / "scripts" / "test-profiles.json"
+BENCHMARK_REGISTRY = ROOT / "scripts" / "benchmark-profiles.json"
 
 
 def load(path: Path = MAIN):
@@ -27,6 +29,15 @@ def commands(job: dict) -> str:
 
 def suites():
     return {suite["id"]: suite for suite in json.loads(REGISTRY.read_text())["suites"]}
+
+
+def benchmark_module():
+    path = ROOT / "scripts" / "benchmark_suite.py"
+    spec = importlib.util.spec_from_file_location("benchmark_suite_contract", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class ActionsAuthorityTests(unittest.TestCase):
@@ -168,6 +179,27 @@ class ActionsAuthorityTests(unittest.TestCase):
                 names = {trigger} if isinstance(trigger, str) else set(trigger)
                 self.assertFalse(names & {"push", "pull_request"})
                 self.assertTrue(names & {"workflow_dispatch", "workflow_call"})
+
+    def test_benchmark_workflow_is_dispatch_only_registry_driven_and_exact_artifact_bound(self):
+        path = WORKFLOWS / "benchmark-evidence.yml"
+        workflow = load(path)
+        trigger = workflow["on"]
+        names = {trigger} if isinstance(trigger, str) else set(trigger)
+        self.assertEqual({"workflow_dispatch"}, names)
+        self.assertEqual("laplace-shared-workspace", workflow["concurrency"]["group"])
+        self.assertEqual("false", workflow["concurrency"]["cancel-in-progress"])
+        command = commands(workflow["jobs"]["benchmark"])
+        self.assertIn("python3 scripts/benchmark_suite.py validate", command)
+        self.assertIn("python3 scripts/benchmark_suite.py \"${args[@]}\"", command)
+        self.assertNotIn("python3 scripts/bench-compose.py", command)
+        self.assertNotIn("python3 scripts/bench-compose-scale.py", command)
+        self.assertIn("build/engine/core/liblaplace_core.so", command)
+        self.assertIn("build/engine/core/perfcache/laplace_t0_perfcache.bin", command)
+        module = benchmark_module()
+        registry = json.loads(BENCHMARK_REGISTRY.read_text(encoding="utf-8"))
+        module.validate_registry(registry)
+        suite_ids = {suite["id"] for suite in registry["suites"]}
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "all"}, suite_ids)
 
     def test_all_external_actions_are_commit_pinned(self):
         import re

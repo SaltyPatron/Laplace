@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "core-single",
+      "kind": "core-single",
+      "description": "Single-thread UTF-8 -> UAX29/Merkle/tier-tree/glome composition throughput over a fixed real corpus.",
+      "execution_boundary": "built-source",
+      "mutability": "none",
+      "resource_shape": "one logical CPU",
+      "receipt_schema": "laplace.benchmark.core-single/v1"
+    },
+    {
+      "id": "core-scale",
+      "kind": "core-scale",
+      "description": "Measured whole-machine scaling over the same core composition operation with explicit CPU affinity and physical-core/SMT points.",
+      "execution_boundary": "built-source",
+      "mutability": "none",
+      "resource_shape": "explicit worker/CPU affinity curve",
+      "receipt_schema": "laplace.benchmark.core-scale/v1"
+    },
+    {
+      "id": "moby-roundtrip",
+      "kind": "moby-roundtrip",
+      "description": "Bit-perfect Moby Dick engine roundtrip with independent cmp/SHA-256 proof.",
+      "execution_boundary": "built-source",
+      "mutability": "temporary-output-only",
+      "resource_shape": "single process",
+      "receipt_schema": "laplace.benchmark.moby-roundtrip/v1"
+    }
+  ],
+  "suites": [
+    {
+      "id": "quick",
+      "description": "Conservative reproducible floor: single-thread core plus bit-perfect Moby roundtrip.",
+      "profiles": ["core-single", "moby-roundtrip"]
+    },
+    {
+      "id": "throughput",
+      "description": "Core floor plus measured physical-core/SMT scaling curve.",
+      "profiles": ["core-single", "core-scale"]
+    },
+    {
+      "id": "core",
+      "description": "Single-thread core composition only.",
+      "profiles": ["core-single"]
+    },
+    {
+      "id": "scale",
+      "description": "Whole-machine composition scaling only.",
+      "profiles": ["core-scale"]
+    },
+    {
+      "id": "moby",
+      "description": "Bit-perfect Moby Dick roundtrip only.",
+      "profiles": ["moby-roundtrip"]
+    },
+    {
+      "id": "all",
+      "description": "All currently implemented source/core benchmark profiles.",
+      "profiles": ["core-single", "core-scale", "moby-roundtrip"]
+    }
+  ]
+}
