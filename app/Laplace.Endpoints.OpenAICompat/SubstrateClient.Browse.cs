@@ -26,8 +26,8 @@ internal sealed partial class SubstrateClient
         var root = TryParseIdHex(rootHex)
             ?? throw new ArgumentException("Browse root id must be a 128-bit entity id.", nameof(queryRootIdHex));
 
-        var normalizedMemberHex = directId
-            ? []
+        List<string> normalizedMemberHex = directId
+            ? new List<string>()
             : queryMemberIdsHex
                 .Where(static h => !string.IsNullOrWhiteSpace(h))
                 .Select(static h => h.ToLowerInvariant())
