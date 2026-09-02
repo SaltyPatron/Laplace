@@ -1,4 +1,5 @@
 using Laplace.Api.Contracts;
+using Laplace.SubstrateCRUD;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -7,6 +8,52 @@ internal static class ExploreEndpoints
     public static void MapExploreEndpoints(this WebApplication app)
     {
         MapMatchupEndpoints(app);
+
+        app.MapGet("/v1/explore/browse", async (
+            string? q,
+            int? offset,
+            int? limit,
+            int? capacity,
+            ExploreDecomposeService decompose,
+            ISubstrateClient substrate,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(q))
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'q' is required.");
+
+            var query = q.Trim();
+            DecomposeResponse decomposition;
+            try
+            {
+                decomposition = decompose.Decompose(query);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointJson.ServiceUnavailable("decompose_unavailable", ex.Message);
+            }
+
+            // NAME discovery consumes the same word-tier identities emitted by the
+            // native text spine. No UI tokenizer and no rendered substring scan.
+            var memberIds = decomposition.Nodes
+                .Where(static n => n.Tier == EntityTier.Word)
+                .Select(static n => n.IdHex)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var result = await substrate.ExploreBrowseAsync(
+                query,
+                decomposition.RootIdHex,
+                memberIds,
+                Math.Max(0, offset ?? 0),
+                Math.Clamp(limit ?? 50, 0, 200),
+                Math.Clamp(capacity ?? 2048, 0, 32768),
+                ct);
+            return Results.Json(result);
+        })
+        .WithTags("explore")
+        .Produces<ExploreBrowseResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/v1/explore/catalog", async (ISubstrateClient substrate, CancellationToken ct) =>
         {
