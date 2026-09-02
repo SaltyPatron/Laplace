@@ -36,13 +36,14 @@ class BenchmarkSuiteTests(unittest.TestCase):
         for suite in self.registry["suites"]:
             self.assertTrue(set(suite["profiles"]) <= profiles)
 
-    def test_throughput_and_makespan_are_different_suites(self):
+    def test_throughput_uses_stream_scaling_while_all_preserves_makespan(self):
         suites = {item["id"]: item for item in self.registry["suites"]}
         self.assertEqual(["core-single", "core-scale-streams"], suites["throughput"]["profiles"])
         self.assertEqual(["core-scale-streams"], suites["scale"]["profiles"])
-        self.assertEqual(["core-scale"], suites["makespan"]["profiles"])
+        self.assertNotIn("core-scale", suites["throughput"]["profiles"])
         self.assertIn("core-scale-streams", suites["all"]["profiles"])
         self.assertIn("core-scale", suites["all"]["profiles"])
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "all"}, set(suites))
 
     def test_scaling_points_include_physical_and_logical_boundaries(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))
