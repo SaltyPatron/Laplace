@@ -54,7 +54,7 @@ public sealed class FideRatingListTests
         var standard = FideRatingList.TopXml(standardXml, "open", 3, 2026);
         Assert.Equal("1503014", standard[0].FideId);
         Assert.DoesNotContain(standard, p => p.FideId == "7000003");
-        Assert.Equal(new[] { 1, 2, 3 }, standard.Select(p => p.Rank).ToArray());
+        Assert.Equal(new int?[] { 1, 2, 3 }, standard.Select(p => p.Rank).ToArray());
 
         using var rapidXml = Stream();
         var rapid = FideRatingList.TopXml(rapidXml, "men_rapid", 3, 2026);
