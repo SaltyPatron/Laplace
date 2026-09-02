@@ -18,7 +18,20 @@ internal static class FideLabRunners
             throw new ArgumentException("FIDE search needs at least two characters.", nameof(query));
 
         int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
-        var candidates = await FideRatingList.SearchAsync(query, limit, ct);
+        IReadOnlyList<FidePlayerCandidate> candidates;
+        if (query.Length is >= 4 and <= 12 && query.All(char.IsDigit))
+        {
+            // An exact provider id is already a selected FIDE identity, not fuzzy
+            // discovery. Preserve the historical exact-ID contract and enrich that
+            // exact provider coordinate directly.
+            var profile = await ChessGameFetcher.FetchFideProfileAsync(query, ct);
+            candidates = [Candidate(profile)];
+        }
+        else
+        {
+            candidates = await FideRatingList.SearchAsync(query, limit, ct);
+        }
+
         if (candidates.Count == 0)
             throw new InvalidDataException(
                 $"FIDE published rating list returned no valid candidates for '{query}'.");
@@ -27,7 +40,9 @@ internal static class FideLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("matches", candidates.Count));
         lab.UpdateSummary(slot, new ChessLabJobSummary(
             candidates.Count, candidates.Count,
-            $"{candidates.Count} official FIDE candidates from published rating list"));
+            query.All(char.IsDigit)
+                ? $"{candidates.Count} exact official FIDE identity"
+                : $"{candidates.Count} official FIDE candidates from published rating list"));
     }
 
     public static async Task RunRosterAsync(
@@ -89,6 +104,22 @@ internal static class FideLabRunners
         lab.UpdateSummary(slot, new ChessLabJobSummary(
             result.Profiles, candidates.Count,
             $"{result.Profiles} official FIDE profiles ingested from {cohort}"));
+    }
+
+    private static FidePlayerCandidate Candidate(ChessPlayerProfile profile)
+    {
+        int birthYear = profile.Facts.TryGetValue("birth_year", out var born)
+            && int.TryParse(born, out int year) ? year : 0;
+        return new FidePlayerCandidate(
+            profile.ProviderId,
+            profile.DisplayName,
+            profile.Title,
+            profile.Federation ?? "",
+            profile.Ratings.TryGetValue("standard", out int standard) ? standard : 0,
+            profile.Ratings.TryGetValue("rapid", out int rapid) ? rapid : 0,
+            profile.Ratings.TryGetValue("blitz", out int blitz) ? blitz : 0,
+            birthYear,
+            null);
     }
 
     private static ChessLabTableEvent FideTable(
