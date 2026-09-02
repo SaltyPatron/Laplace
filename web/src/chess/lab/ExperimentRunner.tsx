@@ -80,7 +80,7 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
   'player-profile': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'MagnusCarlsen' },
     { key: 'site', label: 'Site', type: 'select', options: ['lichess', 'chesscom'], optionLabels: { lichess: 'lichess.org', chesscom: 'chess.com' } },
-    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Leave blank to search official candidates from the provider real name.', placeholder: '1503014' },
+    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional explicit FIDE identity association. Leave blank for provider-only acquisition; use Find FIDE identity to discover candidates.', placeholder: '1503014' },
     { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Persist the profiles and selected identity association without downloading games.' },
   ],
   'fide-search': [
@@ -94,7 +94,7 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
       optionLabels: {
         open: 'Standard open', women: 'Standard women', juniors: 'Standard juniors', girls: 'Standard girls',
         men_rapid: 'Rapid open', women_rapid: 'Rapid women', juniors_rapid: 'Rapid juniors', girls_rapid: 'Rapid girls',
-        men_blitz: 'Blitz open', women_blitz: 'Blitz women', juniors_blitz: 'Blitz juniors', girls_blitz: 'Blitz girls',
+        men_blitz: 'Blitz open', women_blitz: 'Blitz women', juniors_blitz: 'Rapid juniors', girls_blitz: 'Blitz girls',
       },
     },
     { key: 'limit', label: 'Top players', type: 'number', min: 1, max: 100 },
@@ -179,7 +179,9 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
   const missingEngines = requiresFor(experiment).filter((name) => !engines[name]?.found);
   const blockedReason = missingEngines.length > 0
     ? `Install ${missingEngines.map((n) => ENGINE_LABELS[n] ?? n).join(', ')} on the server`
-    : null;
+    : kind === 'fide-search' && (params.query ?? '').trim().length < 2
+      ? 'Enter at least two characters for a FIDE search'
+      : null;
 
   // Only this surface's own runs: an experiments list that also showed gauntlet jobs is
   // precisely the mixing this split undoes.
