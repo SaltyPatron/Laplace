@@ -31,6 +31,17 @@ public sealed class PgBinaryCopyProtocolTests
     }
 
     [Fact]
+    public async Task EmptyManagedBodyWritesNoCopyDataPayload()
+    {
+        using var stream = new RecordingStream();
+
+        await PgBinaryCopy.WriteManagedBodyAsync(stream, ReadOnlyMemory<byte>.Empty, maxChunkBytes: 5);
+
+        Assert.Empty(stream.Writes);
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Fact]
     public async Task ManagedBodyRejectsWriteAbovePostgresProtocolCeiling()
     {
         using var stream = new MemoryStream();
