@@ -101,16 +101,28 @@ internal sealed partial class SubstrateClient
         if (!string.IsNullOrWhiteSpace(search))
         {
             var query = search.Trim();
+
+            // Exact content-addressed identity is terminal. Candidate/fuzzy expansion is
+            // a miss path, not an additional source of peers to mix into an exact lookup.
+            // Besides preventing identity contamination, this keeps an exact username/name
+            // lookup O(the exact indexed read) instead of paying the 2,000-candidate search.
+            var exact = await ChessFindPlayerAsync(query, ct);
+            if (exact is not null)
+            {
+                IReadOnlyList<ChessPlayerRow> exactPage = offset == 0 && limit > 0
+                    ? [exact with { Rank = 1 }]
+                    : [];
+                return new ChessPlayersResponse("chess.players", 1, offset, exactPage);
+            }
+
             var canonical = PlayerAlias.Canonical(query);
             var candidates = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
                 _dataSource,
                 [query, canonical, canonical.Replace(" ", "", StringComparison.Ordinal)],
                 2000, ct, TranslateReadError);
-            var exact = await ChessFindPlayerAsync(query, ct);
             var scored = candidates
                 .Select(static r => new ChessPlayerRow(
                     0, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu))
-                .Concat(exact is null ? [] : [exact])
                 .DistinctBy(static p => p.IdHex, StringComparer.OrdinalIgnoreCase)
                 .Select(p => (Player: p, Score: PlayerSearchScore(query, p.Name)))
                 .Where(static x => x.Score < int.MaxValue)
