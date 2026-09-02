@@ -144,6 +144,26 @@ for suffix in dll deps.json runtimeconfig.json; do
 done
 echo "OK apphost-only and incomplete UCI packages are rejected"
 
+# Completed transaction backups are not an archive. Preserve exactly the active
+# rollback receipt when one is supplied, then reclaim it after the transaction ends.
+BACKUP_ROOT="$TEST_ROOT/app-backups"
+mkdir "$BACKUP_ROOT"
+mkdir "$BACKUP_ROOT/managed.old-a" "$BACKUP_ROOT/managed.old-b" "$BACKUP_ROOT/managed.active" "$BACKUP_ROOT/not-managed"
+printf 'old\n' > "$BACKUP_ROOT/managed.old-a/payload"
+printf 'old\n' > "$BACKUP_ROOT/managed.old-b/payload"
+printf 'active\n' > "$BACKUP_ROOT/managed.active/payload"
+laplace_prune_managed_backups "$BACKUP_ROOT" "$BACKUP_ROOT/managed.active"
+[[ ! -e "$BACKUP_ROOT/managed.old-a" && ! -e "$BACKUP_ROOT/managed.old-b" ]]
+[[ -f "$BACKUP_ROOT/managed.active/payload" ]]
+[[ -d "$BACKUP_ROOT/not-managed" ]]
+laplace_prune_managed_backups "$BACKUP_ROOT"
+[[ ! -e "$BACKUP_ROOT/managed.active" && -d "$BACKUP_ROOT/not-managed" ]]
+if laplace_prune_managed_backups "$BACKUP_ROOT" "$TEST_ROOT/outside-managed"; then
+  echo "backup pruner accepted a protection path outside its root" >&2
+  exit 1
+fi
+echo "OK completed managed publish backups are bounded by transaction ownership"
+
 # This script already owns the deploy payload policy gate in CI. Keep the MCP
 # protocol regression under the same gate so a missing/stale probe cannot be
 # skipped merely because no workflow file changed.
