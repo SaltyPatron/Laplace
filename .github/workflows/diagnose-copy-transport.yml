@@ -1,0 +1,76 @@
+name: Diagnose COPY transport failure
+
+# One-shot incident receipt for GH #1409. This workflow runs only when the pushed
+# commit message starts with `diag(copy):`; keeping the guard here means the
+# diagnostic can land on main, inspect the self-hosted runner's retained journal,
+# and then sit inert until it is removed with the actual repair.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: startsWith(github.event.head_commit.message, 'diag(copy):')
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 10
+    env:
+      PGDATABASE: laplace
+    steps:
+      - name: PostgreSQL and kernel receipts for ConceptNet COPY reset
+        shell: bash
+        run: |
+          set +e
+          echo '=== incident ==='
+          echo 'seed_run=33579692400 source=conceptnet window=2026-09-02T01:25:00Z..2026-09-02T02:00:00Z'
+          date --iso-8601=seconds
+          uptime
+          free -h
+          echo
+
+          echo '=== postgres live ==='
+          pg_isready -h /var/run/postgresql -d "$PGDATABASE"
+          psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -X -v ON_ERROR_STOP=0 -P pager=off <<'SQL'
+          SELECT now() AS observed_at,
+                 pg_postmaster_start_time() AS postmaster_started_at,
+                 version();
+          SELECT name, setting, unit, source
+          FROM pg_settings
+          WHERE name IN ('max_connections','shared_buffers','work_mem','maintenance_work_mem',
+                         'io_method','io_max_concurrency','effective_io_concurrency',
+                         'log_destination','logging_collector','log_directory','log_filename')
+          ORDER BY name;
+          SELECT pid, backend_type, state, wait_event_type, wait_event,
+                 backend_start, xact_start, query_start, left(query, 160) AS query
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+          ORDER BY pid;
+          SQL
+          echo
+
+          echo '=== postgres service journal: incident window ==='
+          journalctl --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' \
+            -u 'postgresql*' -n 1000 2>&1 || true
+          echo
+
+          echo '=== kernel: OOM / kill / postgres / storage / io_uring ==='
+          journalctl -k --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' 2>&1 \
+            | grep -Ei 'out of memory|oom|killed process|postgres|segfault|general protection|nvme|i/o error|io_uring|blocked for more than|hung task' \
+            || true
+          echo
+
+          echo '=== coredumps ==='
+          coredumpctl --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' list 2>&1 \
+            | grep -Ei 'postgres|postmaster' || true
+          echo
+
+          echo '=== process/service state ==='
+          systemctl --no-pager --full status postgresql 2>&1 || true
+          systemctl --no-pager --full status 'postgresql*' 2>&1 || true
+          ps -eo pid,ppid,lstart,stat,rss,vsz,comm,args | grep -E '[p]ostgres|[p]ostmaster' || true
+
+          # Diagnostic step must itself stay green: its evidence is useful even when a
+          # particular journal/coredump surface is unavailable to the runner account.
+          exit 0
