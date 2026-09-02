@@ -68,29 +68,32 @@ public sealed class ConsensusMutationRoutingTests
     }
 
     [Fact]
-    public void ChessRatingRepairHealsEvidenceAheadOfConsensusWithoutZeroOpponentMarker()
+    public void ChessRatingRepairRebuildsCompletePlayerRatingSurfaceFromDurableEvidence()
     {
         var sql = Read("extension", "laplace_substrate", "sql", "functions",
             "chess", "repair_player_ratings.sql.in");
 
-        // The old procedure returned as soon as no opponent_rating=0 row existed.
-        // That cannot repair a fold which failed after evidence committed, because
-        // the evidence can already contain a correct real opponent rating.
+        // The old repair inferred debt only from a missing/stale witness count or
+        // timestamp. The runaway incident proved a corrupt rating can retain both,
+        // so deployment must reconstruct the whole chess player rating surface from
+        // authoritative testimony regardless of the current consensus values.
         Assert.DoesNotContain("IF NOT FOUND THEN\n        RETURN", sql,
             StringComparison.Ordinal);
-        Assert.Contains("current.id IS NULL", sql, StringComparison.Ordinal);
-        Assert.Contains("current.witness_count IS DISTINCT FROM", sql,
+        Assert.Contains("SELECT DISTINCT evidence.subject_id, evidence.type_id, evidence.object_id", sql,
             StringComparison.Ordinal);
-        Assert.Contains("SUM(GREATEST(evidence.observation_count, 1))", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("current.last_observed_at IS DISTINCT FROM", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("MAX(evidence.last_observed_at)", sql,
-            StringComparison.Ordinal);
+        Assert.Contains("evidence.type_id = p_played", sql, StringComparison.Ordinal);
+        Assert.Contains("evidence.type_id = p_outcome", sql, StringComparison.Ordinal);
         Assert.Contains("pairing.context_id IS NOT DISTINCT FROM evidence.context_id", sql,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("current.witness_count", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("current.last_observed_at", sql, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY evidence.last_observed_at, evidence.id", sql,
             StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", sql,
             StringComparison.Ordinal);
+        Assert.Contains("target.witness_count, target.last_observed_at", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("IS DISTINCT FROM", sql, StringComparison.Ordinal);
     }
 
     [Fact]
