@@ -82,7 +82,6 @@
       "extension/laplace_substrate/sql/functions/generation/recall_trajectories.sql.in::recall_trajectories": 1,
       "extension/laplace_substrate/sql/functions/generation/sentence_order.sql.in::sentence_order": 1,
       "extension/laplace_substrate/sql/functions/generation/sentence_order_word_bridge.sql.in::sentence_order_word_bridge": 1,
-      "extension/laplace_substrate/sql/functions/generation/walk_text.sql.in::walk_text": 1,
       "extension/laplace_substrate/sql/functions/generation/word_order.sql.in::word_order": 1,
       "extension/laplace_substrate/sql/functions/geometry/entity_container_degree.sql.in::entity_container_degree": 1,
       "extension/laplace_substrate/sql/functions/geometry/entity_physicality_coord.sql.in::entity_physicality_coord": 1,
