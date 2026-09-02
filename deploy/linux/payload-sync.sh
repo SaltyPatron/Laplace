@@ -28,6 +28,30 @@ laplace_sync_payload() {
     "$source_dir/" "$destination_dir/"
 }
 
+# Managed publish backups are rollback state only while a publish receipt owns them.
+# Completed/rolled-back transactions must not become an append-only archive on the
+# application LV. Delete only bootstrap-shaped managed.* directories under the exact
+# backup root, optionally preserving one active receipt path.
+laplace_prune_managed_backups() {
+  local root="$1" protected="${2:-}" candidate reclaimed=0
+  [[ -d "$root" && ! -L "$root" ]] || return 0
+
+  if [[ -n "$protected" ]]; then
+    case "$protected" in
+      "$root"/managed.*) ;;
+      *) echo "::error::refusing invalid managed-backup protection path: $protected" >&2; return 1 ;;
+    esac
+  fi
+
+  while IFS= read -r -d '' candidate; do
+    [[ -n "$protected" && "$candidate" == "$protected" ]] && continue
+    find "$candidate" -xdev -depth -delete || return 1
+    echo "reclaimed completed application backup: $candidate"
+    reclaimed=$((reclaimed + 1))
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -xdev -type d -name 'managed.*' -print0)
+  echo "application backup retention: reclaimed=$reclaimed"
+}
+
 # Resolve the immutable runtime directory currently selected by one stable app link.
 # The link points at the executable inside releases/runtime.*/<service>; dirname is
 # therefore the safe --link-dest root. Anything outside that exact release shape is
