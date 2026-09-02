@@ -1,9 +1,4 @@
 DROP FUNCTION IF EXISTS laplace.walk_text(text, int, int, float8, int, bigint);
--- Same upgrade rule as walk_continuations: the installed compatibility surface
--- used p_breadth, while the routed operator names that operand p_top_k. PostgreSQL
--- does not permit input-parameter renames through CREATE OR REPLACE, so retire the
--- old signature before recreating the compatibility wrapper.
-DROP FUNCTION IF EXISTS generation.walk_text(text, int, int, float8, int, bigint);
 CREATE OR REPLACE FUNCTION generation.forward_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
@@ -52,15 +47,16 @@ BEGIN ATOMIC
     CROSS JOIN txt t;
 END;
 
--- Compatibility surface for protocol callers. Hop/fan-out defaults are owned by
--- forward_text so this does not become another inference program.
+-- Compatibility surface: preserve the installed `p_breadth` name for named
+-- callers and extension upgrades. The canonical operator owns the semantic name
+-- `p_top_k`; this wrapper translates only the legacy API spelling.
 CREATE OR REPLACE FUNCTION generation.walk_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
-        p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
+        p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
         p_seed bigint DEFAULT NULL)
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
     SELECT * FROM generation.forward_text(
-        p_prompt, p_steps, p_max_stride, p_spread, p_top_k, p_seed, 2, 8, NULL);
+        p_prompt, p_steps, p_max_stride, p_spread, p_breadth, p_seed, 2, 8, NULL);
 END;
