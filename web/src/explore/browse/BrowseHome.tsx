@@ -21,6 +21,7 @@ const DEFAULT_CAPACITY = 2048;
 const MAX_CAPACITY = 32768;
 
 function positiveInt(value: string | null, fallback: number) {
+  if (value === null || value.trim() === '') return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
