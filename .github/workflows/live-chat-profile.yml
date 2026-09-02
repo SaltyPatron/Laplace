@@ -33,7 +33,7 @@ jobs:
           set -euo pipefail
           psql="$LAPLACE_PG_PREFIX/bin/psql"
           export PGHOST=/var/run/postgresql PGUSER=laplace_admin PGDATABASE=laplace
-          export PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=15000ms'
+          export PGOPTIONS='-c statement_timeout=15000ms'
 
           measure() {
             local label="$1" sql="$2" start end rc=0
@@ -52,8 +52,8 @@ jobs:
           measure frontier "SELECT count(*) FROM generation.forward_frontier('dog', 2, 8, NULL)"
           measure proposal_word "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[laplace.word_id('dog')]::bytea[], NULL)"
 
-          # Materialize the exact step-1 operands once so S7 can be timed without
-          # charging it for S4 route construction or S6 proposal generation.
+          # These are TEMP objects only: they materialize exact operands so the
+          # timed S7 query is not charged for S4/S6 construction.
           "$psql" -X -w -v ON_ERROR_STOP=1 <<'SQL'
           CREATE TEMP TABLE _chat_profile_input AS
           SELECT
@@ -66,9 +66,6 @@ jobs:
           measure steer_word "SELECT count(*) FROM _chat_profile_input i CROSS JOIN LATERAL generation.steer_candidates(i.candidates, i.frontier)"
           measure steer_input_sizes "SELECT cardinality(candidates), cardinality(frontier) FROM _chat_profile_input"
 
-          # Materialize the actual first elected constituent, then measure the next
-          # exact-context proposal and the unigram fallback independently. This shows
-          # whether S6 is paying several GIN probes per emitted constituent.
           "$psql" -X -w -v ON_ERROR_STOP=1 <<'SQL'
           CREATE TEMP TABLE _chat_profile_first AS
           WITH i AS (SELECT * FROM _chat_profile_input)
