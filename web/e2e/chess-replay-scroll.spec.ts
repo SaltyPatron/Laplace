@@ -65,23 +65,28 @@ test.describe('chess UI', () => {
     await page.goto(`/chess/games/${GAME_ID}`);
     await expect(page.getByText('Starting position')).toBeVisible();
 
-    const maxScroll = await page.evaluate(
-      () => document.documentElement.scrollHeight - window.innerHeight,
+    const scrollRoot = page.locator('[data-chess-scroll-root]');
+    await expect(scrollRoot).toBeVisible();
+    const maxScroll = await scrollRoot.evaluate((element) =>
+      element.scrollHeight - element.clientHeight,
     );
     expect(maxScroll).toBeGreaterThan(100);
 
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
-    const before = await page.evaluate(() => window.scrollY);
+    await scrollRoot.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect.poll(() => scrollRoot.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(100);
+    const before = await scrollRoot.evaluate((element) => element.scrollTop);
 
     // GameBoard owns ArrowRight even while its replay is off-screen. Advancing a
-    // ply may scroll the move-list viewport, but must not reclaim the document
-    // scroll position from a user who deliberately moved elsewhere on the page.
+    // ply may scroll the move-list viewport, but must not reclaim the application
+    // scroll container from a user who deliberately moved elsewhere on the page.
     await page.keyboard.press('ArrowRight');
     await expect(page.getByText('White played e4')).toBeAttached();
     await page.waitForTimeout(50);
 
-    const after = await page.evaluate(() => window.scrollY);
+    const after = await scrollRoot.evaluate((element) => element.scrollTop);
     expect(after).toBe(before);
   });
 });
