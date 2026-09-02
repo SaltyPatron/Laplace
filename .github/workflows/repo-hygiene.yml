@@ -23,7 +23,7 @@ jobs:
 
   # One-shot incident receipt for GH #1409. The failed ConceptNet seed preserved only
   # the client-side EPIPE; this guarded job reads the self-hosted runner's retained
-  # PostgreSQL/kernel journal when the diagnostic merge lands. It stays inert for every
+  # PostgreSQL/kernel evidence when a diagnostic merge lands. It stays inert for every
   # ordinary push and is removed with the repair once the server-side cause is proven.
   diagnose-copy-transport:
     name: Diagnose ConceptNet COPY transport reset
@@ -56,16 +56,33 @@ jobs:
                          'io_method','io_max_concurrency','effective_io_concurrency',
                          'log_destination','logging_collector','log_directory','log_filename')
           ORDER BY name;
-          SELECT pid, backend_type, state, wait_event_type, wait_event,
-                 backend_start, xact_start, query_start, left(query, 160) AS query
-          FROM pg_stat_activity
-          WHERE datname = current_database()
-          ORDER BY pid;
           SQL
+          echo
+
+          echo '=== PostgreSQL collector files ==='
+          ls -lah /var/log/postgresql 2>&1 || true
+          for f in /var/log/postgresql/*; do
+            [ -f "$f" ] || continue
+            echo "--- $f ---"
+            if [ -r "$f" ]; then
+              grep -E '2026-09-02 01:(2[5-9]|[3-5][0-9]):|2026-09-02 02:00:' "$f" 2>/dev/null \
+                | grep -Ei 'FATAL|PANIC|ERROR|WARNING|LOG:|server process|terminat|signal|memory|OOM|could not|I/O|io_uring|COPY|checkpoint|recovery|crash|segfault' \
+                | tail -n 1200 || true
+            elif sudo -n test -r "$f" 2>/dev/null; then
+              sudo -n grep -E '2026-09-02 01:(2[5-9]|[3-5][0-9]):|2026-09-02 02:00:' "$f" 2>/dev/null \
+                | grep -Ei 'FATAL|PANIC|ERROR|WARNING|LOG:|server process|terminat|signal|memory|OOM|could not|I/O|io_uring|COPY|checkpoint|recovery|crash|segfault' \
+                | tail -n 1200 || true
+            else
+              echo "unreadable by runner and sudo -n: $f"
+            fi
+          done
           echo
 
           echo '=== postgres service journal: incident window ==='
           journalctl --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' \
+            -u 'postgresql*' -n 1000 2>&1 || true
+          echo '--- sudo fallback ---'
+          sudo -n journalctl --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' \
             -u 'postgresql*' -n 1000 2>&1 || true
           echo
 
@@ -73,16 +90,21 @@ jobs:
           journalctl -k --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' 2>&1 \
             | grep -Ei 'out of memory|oom|killed process|postgres|segfault|general protection|nvme|i/o error|io_uring|blocked for more than|hung task' \
             || true
+          echo '--- sudo fallback ---'
+          sudo -n journalctl -k --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' 2>&1 \
+            | grep -Ei 'out of memory|oom|killed process|postgres|segfault|general protection|nvme|i/o error|io_uring|blocked for more than|hung task' \
+            || true
           echo
 
           echo '=== coredumps ==='
           coredumpctl --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' list 2>&1 \
             | grep -Ei 'postgres|postmaster' || true
+          sudo -n coredumpctl --no-pager --since '2026-09-02 01:25:00 UTC' --until '2026-09-02 02:00:00 UTC' list 2>&1 \
+            | grep -Ei 'postgres|postmaster' || true
           echo
 
           echo '=== process/service state ==='
           systemctl --no-pager --full status postgresql 2>&1 || true
-          systemctl --no-pager --full status 'postgresql*' 2>&1 || true
           ps -eo pid,ppid,lstart,stat,rss,vsz,comm,args | grep -E '[p]ostgres|[p]ostmaster' || true
 
           # Evidence should survive even if one diagnostic surface is not readable by the
