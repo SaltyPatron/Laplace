@@ -281,9 +281,13 @@ public static class ChessGameFetcher
     internal static ChessPlayerProfile ParseFideProfile(string html, string fideId, string url)
     {
         string text = WebText(html);
-        string name = HtmlMatch(html, @"<title[^>]*>\s*(.*?)\s+FIDE Profile\s*</title>")
-            ?? HtmlMatch(html, @"<h1[^>]*>\s*(.*?)\s*</h1>")
+        string name = HtmlMatch(html, @"<title[^>]*>\s*\uFEFF?\s*(.*?)\s+FIDE Profile\s*</title>")
+            ?? HtmlMatch(html, @"<h1[^>]*>\s*\uFEFF?\s*(.*?)\s*</h1>")
             ?? throw new InvalidDataException("FIDE profile did not contain a player name.");
+        string? pageFideId = Match(text, @"FIDE ID\s+(\d{4,12})\b");
+        if (pageFideId is not null && !pageFideId.Equals(fideId, StringComparison.Ordinal))
+            throw new InvalidDataException(
+                $"FIDE profile id mismatch: requested {fideId}, provider returned {pageFideId}.");
         var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         AddRating(text, ratings, "standard", @"(\d{3,4})\s+STANDARD\b");
         AddRating(text, ratings, "rapid", @"(\d{3,4})\s+RAPID\b");
@@ -312,6 +316,22 @@ public static class ChessGameFetcher
     {
         query = query.Trim();
         if (query.Length < 2) throw new ArgumentException("FIDE search needs at least two characters.", nameof(query));
+        if (query.Length is >= 4 and <= 12 && query.All(char.IsDigit))
+        {
+            var profile = await FetchFideProfileAsync(query, ct);
+            int birthYear = profile.Facts.TryGetValue("birth_year", out var born)
+                && int.TryParse(born, out int year) ? year : 0;
+            return [new FidePlayerCandidate(
+                profile.ProviderId,
+                profile.DisplayName,
+                profile.Title,
+                profile.Federation ?? "",
+                profile.Ratings.TryGetValue("standard", out int standard) ? standard : 0,
+                profile.Ratings.TryGetValue("rapid", out int rapid) ? rapid : 0,
+                profile.Ratings.TryGetValue("blitz", out int blitz) ? blitz : 0,
+                birthYear,
+                null)];
+        }
         var candidates = new Dictionary<string, FidePlayerCandidate>(StringComparer.Ordinal);
         foreach (string term in FideSearchTerms(query))
         {
@@ -353,7 +373,8 @@ public static class ChessGameFetcher
         foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
         {
             string body = row.Groups[1].Value;
-            var profile = Regex.Match(body, @"href\s*=\s*['""][^'""]*/profile/(\d+)[^'""]*['""][^>]*>(.*?)</a>",
+            var profile = Regex.Match(body,
+                @"href\s*=\s*['""][^'""]*profile/(\d{4,12})[^'""]*['""][^>]*>(.*?)</a>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
             if (!profile.Success) continue;
             var ratings = Regex.Matches(body, @"data-label\s*=\s*['""]Rtg['""][^>]*>(.*?)</td>",
@@ -376,13 +397,23 @@ public static class ChessGameFetcher
         foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
         {
             string body = row.Groups[1].Value;
-            var profile = Regex.Match(body, @"href\s*=\s*['""][^'""]*/profile/(\d+)[^'""]*['""][^>]*>(.*?)</a>",
+            var profile = Regex.Match(body,
+                @"href\s*=\s*['""][^'""]*profile/(\d{4,12})[^'""]*['""][^>]*>(.*?)</a>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
             if (!profile.Success) continue;
             int rating = IntText(Regex.Match(body, @"class\s*=\s*['""]?rating_column['""]?[^>]*>(.*?)</td>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
+            if (rating == 0)
+                rating = IntText(HtmlCell(body, "Rating") ?? HtmlCell(body, "Rtg") ?? "");
             int rank = IntText(Regex.Match(body, @"class\s*=\s*['""]rank_span['""][^>]*>(.*?)</span>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
+            if (rank == 0)
+                rank = IntText(Regex.Match(body, @"<td[^>]*>\s*(\d{1,3})\s*</td>",
+                    RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
+            int birthYear = IntText(Regex.Match(body, @"class\s*=\s*['""]?bday_column['""]?[^>]*>(.*?)</td>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
+            if (birthYear == 0)
+                birthYear = IntText(HtmlCell(body, "B-Year") ?? "");
             var mode = cohort.EndsWith("_rapid", StringComparison.Ordinal) ? "rapid"
                 : cohort.EndsWith("_blitz", StringComparison.Ordinal) ? "blitz" : "standard";
             result.Add(new FidePlayerCandidate(
@@ -391,8 +422,7 @@ public static class ChessGameFetcher
                 mode == "standard" ? rating : 0,
                 mode == "rapid" ? rating : 0,
                 mode == "blitz" ? rating : 0,
-                IntText(Regex.Match(body, @"class\s*=\s*['""]?bday_column['""]?[^>]*>(.*?)</td>",
-                    RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value), rank));
+                birthYear, rank));
         }
         return result;
     }
@@ -449,7 +479,9 @@ public static class ChessGameFetcher
         var text = Regex.Match(row,
             @"class\s*=\s*['""]?flag-wrapper['""]?[^>]*>.*?<img[^>]*>\s*([A-Z]{3})\b",
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        return text.Success ? text.Groups[1].Value.ToUpperInvariant() : "";
+        if (text.Success) return text.Groups[1].Value.ToUpperInvariant();
+        var generic = Regex.Match(CleanHtml(row), @"\b([A-Z]{3})\b");
+        return generic.Success ? generic.Groups[1].Value.ToUpperInvariant() : "";
     }
 
     private static IReadOnlyDictionary<string, string> Facts(JsonElement root, params string[] names)
