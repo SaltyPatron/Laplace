@@ -13,7 +13,7 @@ import {
   Th,
 } from '@ui';
 import { browseSubstrate } from './api';
-import type { BrowseResponse } from './types';
+import type { BrowseHit, BrowseResponse } from './types';
 import styles from './BrowseHome.module.css';
 
 const PAGE = 50;
@@ -29,6 +29,7 @@ function positiveInt(value: string | null, fallback: number) {
 export function BrowseHome() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q')?.trim() ?? '';
+  const view = params.get('view') === 'mesh' ? 'mesh' : 'entity';
   const offset = positiveInt(params.get('offset'), 0);
   const capacity = Math.min(MAX_CAPACITY, positiveInt(params.get('capacity'), DEFAULT_CAPACITY));
   const [draft, setDraft] = useState(query);
@@ -70,7 +71,9 @@ export function BrowseHome() {
 
   function clear() {
     setDraft('');
-    setParams(new URLSearchParams());
+    const next = new URLSearchParams();
+    if (view === 'mesh') next.set('view', 'mesh');
+    setParams(next);
   }
 
   function move(nextOffset: number) {
@@ -82,14 +85,21 @@ export function BrowseHome() {
     apply({ capacity: String(nextCapacity) });
   }
 
+  function resultDestination(hit: BrowseHit) {
+    return view === 'mesh'
+      ? `/explore/mesh/${hit.id_hex}`
+      : `/explore/entity/${hit.id_hex}`;
+  }
+
   return (
     <Stack gap={4}>
       <header className={styles.hero}>
         <p className={styles.eyebrow}>SUBSTRATE BROWSER</p>
         <h2>Browse Laplace like a reference site</h2>
         <Muted>
-          Start with a name or surface, open a canonical entity, then keep following relations,
-          compositions, evidence, 2D graph nodes, or the same neighborhood in 3D.
+          {view === 'mesh'
+            ? 'Choose the canonical entity you mean, then enter that same identity in the Mesh.'
+            : 'Start with a name or surface, open a canonical entity, then keep following relations, compositions, evidence, 2D graph nodes, or the same neighborhood in 3D.'}
         </Muted>
         <LookupRow
           value={draft}
@@ -148,7 +158,7 @@ export function BrowseHome() {
                   {data.hits.map((hit) => (
                     <tr key={hit.id_hex}>
                       <Td>
-                        <Link className={styles.entityLink} to={`/explore/entity/${hit.id_hex}`}>
+                        <Link className={styles.entityLink} to={resultDestination(hit)}>
                           {hit.label}
                         </Link>
                       </Td>
