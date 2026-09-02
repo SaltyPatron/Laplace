@@ -362,13 +362,11 @@ public static class ChessLabRunners
         int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
-        var outPath = Path.Combine(
-            LabDir, slot.Job.Id, $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn");
-        Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
-        int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
-            msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
-        lab.AddArtifact(slot, "games.pgn", outPath);
-        lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
+
+        // Identity/profile acquisition is the first observation. In particular, an explicitly
+        // supplied FIDE id must resolve and be admitted before an all-games archive download can
+        // begin. The former order downloaded thousands of games and only then discovered that
+        // the selected identity was invalid or the provider parser had drifted.
         var profiles = new List<ChessPlayerProfile>
         {
             await ChessGameFetcher.FetchProfileAsync(user, site, ct),
@@ -377,24 +375,47 @@ public static class ChessLabRunners
             profiles.Add(await ChessGameFetcher.FetchProfileAsync(fideId, "fide", ct));
         lab.Publish(slot, ProfileTable(profiles));
         await AddProfileArtifactsAsync(lab, slot, profiles, ct);
-        if (ingest)
+
+        ChessPgnIngestor? ingestor = null;
+        ChessPgnIngestor.ProfileResult profileResult = default;
+        try
         {
-            var liveHost = await lab.GetLiveHostAsync(ct);
-            await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-            var gameResult = await ingestor.IngestFileAsync(outPath,
+            if (ingest)
+            {
+                var liveHost = await lab.GetLiveHostAsync(ct);
+                ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
+                profileResult = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
+                lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", profileResult.Profiles));
+                lab.Publish(slot, new ChessLabMetricEvent("identity_links", profileResult.Links));
+            }
+
+            var outPath = Path.Combine(
+                LabDir, slot.Job.Id, $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn");
+            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
                 msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
-            var profileResult = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
-            lab.Publish(slot, new ChessLabMetricEvent("games_ingested", gameResult.Applied));
-            lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", profileResult.Profiles));
-            lab.Publish(slot, new ChessLabMetricEvent("identity_links", profileResult.Links));
-            lab.UpdateSummary(slot, new ChessLabJobSummary(
-                gameResult.Applied, games,
-                $"{games} fetched · {gameResult.Applied} new games · {profileResult.Profiles} profiles · {profileResult.Links} identity links"));
+            lab.AddArtifact(slot, "games.pgn", outPath);
+            lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
+
+            if (ingest)
+            {
+                var gameResult = await ingestor!.IngestFileAsync(outPath,
+                    msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
+                lab.Publish(slot, new ChessLabMetricEvent("games_ingested", gameResult.Applied));
+                lab.UpdateSummary(slot, new ChessLabJobSummary(
+                    gameResult.Applied, games,
+                    $"{profileResult.Profiles} profiles · {profileResult.Links} identity links · "
+                    + $"{games} fetched oldest-to-newest · {gameResult.Applied} new games"));
+            }
+            else
+            {
+                lab.UpdateSummary(slot, new ChessLabJobSummary(
+                    games, games, $"{profiles.Count} profiles acquired · {games} fetched oldest-to-newest · not ingested"));
+            }
         }
-        else
+        finally
         {
-            lab.UpdateSummary(slot, new ChessLabJobSummary(
-                games, games, $"{games} fetched · not ingested"));
+            if (ingestor is not null) await ingestor.DisposeAsync();
         }
         Finish(lab, slot, ChessLabJobState.Completed);
     }
