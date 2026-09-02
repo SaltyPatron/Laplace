@@ -31,8 +31,8 @@ CREATE OR REPLACE FUNCTION structural.browse_named_entities(
         type_id bytea,
         matched_name_id bytea,
         match_kind text,
-        rating bigint,
-        rd bigint,
+        rating numeric,
+        rd numeric,
         eff_mu numeric,
         witness_count bigint,
         candidate_name_count bigint,
@@ -56,8 +56,8 @@ BEGIN ATOMIC
     named_edges AS MATERIALIZED (
         SELECT c.subject_id AS entity_id,
                c.object_id AS matched_name_id,
-               c.rating,
-               c.rd,
+               round((c.rating / 1e9)::numeric, 3) AS rating,
+               round((c.rd / 1e9)::numeric, 3) AS rd,
                consensus.eff_mu_display(c.rating, c.rd) AS eff_mu,
                c.witness_count,
                row_number() OVER (
@@ -113,8 +113,8 @@ BEGIN ATOMIC
         SELECT e.id AS entity_id,
                e.id AS matched_name_id,
                'surface'::text AS match_kind,
-               NULL::bigint AS rating,
-               NULL::bigint AS rd,
+               NULL::numeric AS rating,
+               NULL::numeric AS rd,
                NULL::numeric AS eff_mu,
                0::bigint AS witness_count,
                1 AS priority
