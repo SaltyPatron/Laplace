@@ -94,7 +94,7 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
       optionLabels: {
         open: 'Standard open', women: 'Standard women', juniors: 'Standard juniors', girls: 'Standard girls',
         men_rapid: 'Rapid open', women_rapid: 'Rapid women', juniors_rapid: 'Rapid juniors', girls_rapid: 'Rapid girls',
-        men_blitz: 'Blitz open', women_blitz: 'Blitz women', juniors_blitz: 'Rapid juniors', girls_blitz: 'Blitz girls',
+        men_blitz: 'Blitz open', women_blitz: 'Blitz women', juniors_blitz: 'Blitz juniors', girls_blitz: 'Blitz girls',
       },
     },
     { key: 'limit', label: 'Top players', type: 'number', min: 1, max: 100 },
