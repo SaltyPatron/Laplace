@@ -387,11 +387,14 @@ internal static class CopyTupleParser
         await WritePackedAsync(stream, packed, ct).ConfigureAwait(false);
     }
 
-    /// <summary>Write a pre-packed PGCOPY body with header and trailer.</summary>
+    /// <summary>
+    /// Write a pre-packed PGCOPY body with one header/trailer while slicing only the
+    /// body into protocol-safe raw writes. The resulting byte stream is unchanged.
+    /// </summary>
     public static async Task WritePackedAsync(Stream stream, byte[] packed, CancellationToken ct = default)
     {
         await stream.WriteAsync(PgBinaryCopy.Header, ct).ConfigureAwait(false);
-        await stream.WriteAsync(packed, ct).ConfigureAwait(false);
+        await PgBinaryCopy.WriteManagedBodyAsync(stream, packed, ct).ConfigureAwait(false);
         await stream.WriteAsync(PgBinaryCopy.Trailer, ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
     }
