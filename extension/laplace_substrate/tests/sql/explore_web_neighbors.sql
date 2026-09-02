@@ -46,8 +46,10 @@ BEGIN
     ON CONFLICT DO NOTHING;
 
     -- s1 exercises outbound, inbound, dynamic/default-partition, and self-edge
-    -- paths. s2 is an exact-rank tie: same neighbour, two types, plus a reverse
-    -- copy of one type so direction is the final deterministic key.
+    -- paths. s2 has an exact-rank tie on n4 (two types plus a reverse copy) so
+    -- direction closes that deterministic order, plus one genuinely distinct
+    -- lower-ranked neighbor so a fanout=2 multi-seed test can require two entity
+    -- discoveries from s2 instead of counting three edges to n4 as three slots.
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd,
          volatility, witness_count, last_observed_at)
@@ -66,6 +68,8 @@ BEGIN
        neutral + 150000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
       (laplace.consensus_id(n4, rel_a, s2), n4, rel_a, s2,
        neutral + 150000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
+      (laplace.consensus_id(s2, rel_a, m1), s2, rel_a, m1,
+       neutral + 90000000000, sharp_rd, 60000000, 1, '2026-01-01 00:00:00+00'),
       (laplace.consensus_id(n1, rel_a, m1), n1, rel_a, m1,
        neutral + 140000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00'),
       (laplace.consensus_id(n1, rel_b, m2), n1, rel_b, m2,
@@ -213,7 +217,9 @@ BEGIN
 
     -- Multiple resolved prompt constituents enter one native crawl. Each seed
     -- receives its own per-parent quota; the array form is the canonical
-    -- implementation used by the scalar compatibility wrapper above it.
+    -- implementation used by the scalar compatibility wrapper above it. Both
+    -- roots have two distinct eligible neighbors, so this checks the quota
+    -- rather than accidentally counting relation/direction duplicates as slots.
     SELECT count(*) INTO multi_seed_rows
     FROM consensus.explore_web(ARRAY[s1, s2], 1, 2, 16) w
     WHERE w.hop = 1;

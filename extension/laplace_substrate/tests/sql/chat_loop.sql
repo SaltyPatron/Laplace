@@ -1,7 +1,8 @@
--- The closed-loop acceptance gate: a walk-driven answer, a refutation folded
--- through the same consensus_upsert lane the feedback frontends use, and the
--- ANSWER MEASURABLY CHANGES. This is the loop that makes the substrate a mind
--- and not a lookup -- pinned at the SQL layer on a self-contained fixture.
+-- The closed-loop acceptance gate: an explicit witnessed-description read, a
+-- refutation folded through the same consensus_upsert lane the feedback
+-- frontends use, and the ANSWER MEASURABLY CHANGES. The default no-shape chat
+-- path is tested separately because it is now the real dynamic forward pass,
+-- not the legacy description/template route.
 BEGIN;
 
 DO $$
@@ -112,8 +113,16 @@ SELECT converse.tiered(
 -- 2. The prose wrapper weaves the fact rows (web drill-down row excluded).
 SELECT converse.about(public.laplace_hash128_blake3('test/chat_loop/synset1')) AS about;
 
--- 3. A full chat turn lands on the walk-driven answer.
-SELECT converse.chat('what is a dog?') AS chat_reply;
+-- 3. The default no-shape route is the real dynamic forward pass. This tiny
+-- fixture does not manufacture sequence evidence merely to force generation;
+-- a valid dynamic answer OR an explicit no-forward abstention is acceptable,
+-- but empty/NULL output is never an honest product response.
+SELECT COALESCE(length(btrim(converse.chat('what is a dog?'))), 0) > 0
+       AS default_chat_nonempty;
+
+-- The closed-loop ranking assertion names the description shape it actually
+-- tests. A feedback-induced definition change must affect that same read.
+SELECT converse.chat('what is a dog?', NULL::bytea, NULL::bytea, 'describe') AS chat_reply;
 
 -- 4. converse.chat() is read-side: a session turn records session state but folds NOTHING
 --    into consensus (the OODA close lives at the frontends, through the writer
@@ -146,11 +155,12 @@ WHERE c1.id = laplace.consensus_id(public.laplace_hash128_blake3('test/chat_loop
   AND c2.id = laplace.consensus_id(public.laplace_hash128_blake3('test/chat_loop/synset1'),
                            laplace.relation_type_id('HAS_DEFINITION'), laplace.word_id('B'));
 
--- ...and the ANSWER CHANGES: the next walk reads the updated consensus.
+-- ...and the ANSWER CHANGES through the same explicit description read.
 SELECT sentence AS definition_after_refute
 FROM converse.facts(public.laplace_hash128_blake3('test/chat_loop/synset1'))
 WHERE fact_kind = 'definition';
 
-SELECT converse.chat('what is a dog?') AS chat_reply_after_refute;
+SELECT converse.chat('what is a dog?', NULL::bytea, NULL::bytea, 'describe')
+       AS chat_reply_after_refute;
 
 ROLLBACK;
