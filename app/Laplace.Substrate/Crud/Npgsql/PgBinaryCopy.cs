@@ -24,12 +24,26 @@ internal static class PgBinaryCopy
     public static readonly byte[] Trailer = { 0xFF, 0xFF };
 
 
+    // PostgreSQL frontend CopyData uses a 32-bit message length including the
+    // four-byte length word itself. The backend's PQ_LARGE_MESSAGE_LIMIT is
+    // MaxAllocSize - 1 (0x3ffffffe), so one CopyData payload may contain at most
+    // 0x3ffffffa bytes. NpgsqlRawCopyStream turns one sufficiently-large
+    // Stream.WriteAsync call into one CopyData message; every raw body write must
+    // therefore stay at or below this payload ceiling.
+    internal const int MaxCopyDataPayloadBytes = 0x3FFF_FFFA;
+
 
     // All concurrently active COPY connections together receive one flush envelope
     // of unmanaged-to-managed streaming windows. No independent 8 MiB window remains.
     public static readonly long StreamWindowBytes = Math.Max(1,
         IngestSizing.ResolveWorkingSetFlushEnvelopeBytes()
         / Math.Max(1, IngestTopology.Current.ApplyPartitions));
+
+    // Machine-derived throughput sizing remains authoritative, but the wire protocol
+    // is a hard upper bound regardless of how large a future machine envelope becomes.
+    internal static readonly int WriteWindowBytes = checked((int)Math.Max(1L,
+        Math.Min(Math.Min(StreamWindowBytes, (long)MaxCopyDataPayloadBytes),
+            (long)Array.MaxLength)));
 
 
 
@@ -57,7 +71,7 @@ internal static class PgBinaryCopy
         long maxLen = 0;
         foreach (var (_, len) in blobs) if (len > maxLen) maxLen = len;
         byte[]? window = maxLen > 0
-            ? new byte[(int)Math.Min(Math.Min(StreamWindowBytes, Array.MaxLength), maxLen)]
+            ? new byte[(int)Math.Min((long)WriteWindowBytes, maxLen)]
             : null;
         foreach (var (ptr, len) in blobs)
             await WriteBlobBodyAsync(stream, ptr, len, window, ct);
@@ -68,8 +82,10 @@ internal static class PgBinaryCopy
     private static async Task WriteBlobBodyAsync(
         Stream stream, IntPtr ptr, long len, byte[]? reuse, CancellationToken ct)
     {
-        int windowLength = (int)Math.Min(
-            Math.Min(StreamWindowBytes, Array.MaxLength), len);
+        if (len < 0) throw new ArgumentOutOfRangeException(nameof(len));
+        if (len == 0) return;
+
+        int windowLength = (int)Math.Min((long)WriteWindowBytes, len);
         if (len <= windowLength)
         {
             int n = (int)len;
@@ -90,6 +106,34 @@ internal static class PgBinaryCopy
                 new ReadOnlySpan<byte>((void*)(ptr + (nint)off), n).CopyTo(window);
             }
             await stream.WriteAsync(window.AsMemory(0, n), ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Write an already-managed PGCOPY body as a sequence of protocol-safe raw stream
+    /// writes. CopyData message boundaries have no COPY tuple semantics, so slicing the
+    /// body here preserves the byte stream while preventing Npgsql from constructing an
+    /// oversized single frontend message.
+    /// </summary>
+    internal static Task WriteManagedBodyAsync(
+        Stream stream, ReadOnlyMemory<byte> body, CancellationToken ct = default)
+        => WriteManagedBodyAsync(stream, body, WriteWindowBytes, ct);
+
+    /// <summary>Testable overload with an explicit raw-write ceiling.</summary>
+    internal static async Task WriteManagedBodyAsync(
+        Stream stream, ReadOnlyMemory<byte> body, int maxChunkBytes,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (maxChunkBytes is <= 0 or > MaxCopyDataPayloadBytes)
+            throw new ArgumentOutOfRangeException(nameof(maxChunkBytes), maxChunkBytes,
+                $"COPY raw-write ceiling must be in [1,{MaxCopyDataPayloadBytes}]");
+
+        for (int off = 0; off < body.Length;)
+        {
+            int n = Math.Min(maxChunkBytes, body.Length - off);
+            await stream.WriteAsync(body.Slice(off, n), ct).ConfigureAwait(false);
+            off += n;
         }
     }
 
