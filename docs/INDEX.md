@@ -8,8 +8,9 @@
 - [INVENTORY.md](INVENTORY.md) — source-generated counts and file listings.
 - [plan/EXECUTION_TO_FINISH.md](plan/EXECUTION_TO_FINISH.md) — current forward-only implementation order from source estate through native execution, reseed, product navigation, cognition, and domain acceptance.
 - [plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md) — product design for conversation, code, model consensus, and export.
-- [plan/DECOMPOSER_NORMALIZATION_STATUS.md](plan/DECOMPOSER_NORMALIZATION_STATUS.md) — merged decomposer implementation inventory and remaining product work.
-- [plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md](plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md) — authoritative decomposer outcome-to-issue map, source disposition, acceptance fixtures, and release sequence.
+- [plan/INGEST_BOUNDARY_AND_RECIPE_LAW.md](plan/INGEST_BOUNDARY_AND_RECIPE_LAW.md) — current P0 authority separating artifact, transport, parser/source-object, canonical semantic, and persistence boundaries; source providers recover structure while the common machine owns canonical admission and physical-plan invariance.
+- [plan/DECOMPOSER_NORMALIZATION_STATUS.md](plan/DECOMPOSER_NORMALIZATION_STATUS.md) — merged decomposer implementation inventory and remaining product work. Where older wording grants vendors generic “composition” ownership, the ingest boundary law above is the current correction.
+- [plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md](plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md) — decomposer outcome-to-issue map, source disposition, acceptance fixtures, and release sequence; interpret it under the current ingest boundary law.
 - [plan/SUBSTRATE_COHESION_STATUS.md](plan/SUBSTRATE_COHESION_STATUS.md) — SQL, identity, modality, media, perfcache, operation-surface, extension, and greenfield-reseed outcome inventory.
 - [plan/SUBSTRATE_COHESION_ISSUE_LEDGER.md](plan/SUBSTRATE_COHESION_ISSUE_LEDGER.md) — substrate campaign outcome-to-issue map, completion gates, preserved work, and release order.
 
