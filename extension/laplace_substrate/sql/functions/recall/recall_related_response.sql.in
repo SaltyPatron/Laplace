@@ -3,8 +3,13 @@ CREATE OR REPLACE FUNCTION converse.recall_related_response(p_topic bytea, p_typ
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
-    WITH topic AS MATERIALIZED (SELECT realize.label(p_topic) AS label)
-    SELECT replace(f.fact, '%s', t.label), f.eff_mu, f.witnesses
+    -- A witnessed relation does not disappear because either endpoint lacks an
+    -- eligible surface realization. Preserve the semantic row and render an
+    -- explicit abstention marker; never turn NULL realization into a blank reply
+    -- and never substitute the internal content hash as prose.
+    WITH topic AS MATERIALIZED (SELECT converse.label_or_hex(p_topic) AS label)
+    SELECT replace(COALESCE(NULLIF(f.fact, ''), 'unrealized entity'), '%s', t.label),
+           f.eff_mu, f.witnesses
     FROM consensus.related(p_topic, laplace.relation_type_id(p_type_name), converse.word_language(p_topic)) f
     CROSS JOIN topic t
 $$;
