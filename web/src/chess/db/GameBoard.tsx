@@ -25,6 +25,23 @@ function mmss(seconds: number | null | undefined): string {
 }
 
 /**
+ * Keep one move button visible inside the move-list viewport without asking the
+ * browser to reveal it through every scrollable ancestor. Element.scrollIntoView
+ * also scrolls the page, so autoplay/keyboard stepping could pull a user who had
+ * deliberately scrolled elsewhere back to the chess replay on every new ply.
+ */
+function keepMoveVisible(list: HTMLOListElement, active: HTMLElement) {
+  const listBox = list.getBoundingClientRect();
+  const activeBox = active.getBoundingClientRect();
+
+  if (activeBox.top < listBox.top) {
+    list.scrollTop -= listBox.top - activeBox.top;
+  } else if (activeBox.bottom > listBox.bottom) {
+    list.scrollTop += activeBox.bottom - listBox.bottom;
+  }
+}
+
+/**
  * How long to wait before the ply at `i` appears — the time its mover actually spent,
  * recovered by diffing that side's own consecutive clock readings. A player's clock only
  * runs on their own turn, so the previous reading for the SAME side is two plies back;
@@ -73,10 +90,12 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
     return () => clearTimeout(t);
   }, [playing, ply, atEnd, speed, plies]);
 
-  // Keep the moving ply in view without yanking the whole page.
+  // Keep autoplay/stepping readable, but mutate only the move list's scrollTop.
+  // The page belongs to the user; a changing chess ply must never reclaim it.
   useEffect(() => {
-    listRef.current?.querySelector('[data-active="true"]')
-      ?.scrollIntoView({ block: 'nearest' });
+    const list = listRef.current;
+    const active = list?.querySelector<HTMLElement>('[data-active="true"]');
+    if (list && active) keepMoveVisible(list, active);
   }, [ply]);
 
   const step = useCallback((delta: number) => {
