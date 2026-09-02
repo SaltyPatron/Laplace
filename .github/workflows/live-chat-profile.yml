@@ -31,30 +31,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          psql="$LAPLACE_PG_PREFIX/bin/psql"
           export PGHOST=/var/run/postgresql PGUSER=laplace_admin PGDATABASE=laplace
           export PGOPTIONS='-c statement_timeout=15000ms'
+          "$LAPLACE_PG_PREFIX/bin/psql" -X -w -v ON_ERROR_STOP=1 <<'SQL'
+          \timing on
+          \echo CHAT_PROFILE prompt_state
+          SELECT count(*) FROM converse.prompt_state('dog');
+          \echo CHAT_PROFILE prompt_coherence
+          SELECT count(*) FROM converse.prompt_coherence('dog');
+          \echo CHAT_PROFILE orient_topic
+          SELECT count(*) FROM converse.orient_topic('dog', NULL);
+          \echo CHAT_PROFILE route
+          SELECT count(*) FROM generation.forward_route_trace('dog', 2, 8, NULL);
+          \echo CHAT_PROFILE frontier
+          SELECT count(*) FROM generation.forward_frontier('dog', 2, 8, NULL);
+          \echo CHAT_PROFILE proposal_word
+          SELECT count(*) FROM generation.trajectory_continuations(
+              ARRAY[laplace.word_id('dog')]::bytea[], NULL);
 
-          measure() {
-            local label="$1" sql="$2" start end rc=0
-            echo "===== CHAT_PROFILE $label ====="
-            start=$(date +%s%N)
-            "$psql" -X -w -v ON_ERROR_STOP=1 -tAX -c "$sql" || rc=$?
-            end=$(date +%s%N)
-            echo "CHAT_PROFILE_RESULT label=$label rc=$rc elapsed_ms=$(( (end-start)/1000000 ))"
-            return 0
-          }
-
-          measure prompt_state "SELECT count(*) FROM converse.prompt_state('dog')"
-          measure prompt_coherence "SELECT count(*) FROM converse.prompt_coherence('dog')"
-          measure orient_topic "SELECT count(*) FROM converse.orient_topic('dog', NULL)"
-          measure route "SELECT count(*) FROM generation.forward_route_trace('dog', 2, 8, NULL)"
-          measure frontier "SELECT count(*) FROM generation.forward_frontier('dog', 2, 8, NULL)"
-          measure proposal_word "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[laplace.word_id('dog')]::bytea[], NULL)"
-
-          # These are TEMP objects only: they materialize exact operands so the
-          # timed S7 query is not charged for S4/S6 construction.
-          "$psql" -X -w -v ON_ERROR_STOP=1 <<'SQL'
+          \echo CHAT_PROFILE materialize_step1_operands
           CREATE TEMP TABLE _chat_profile_input AS
           SELECT
               ARRAY(SELECT t.object_id
@@ -62,22 +57,36 @@ jobs:
                                ARRAY[laplace.word_id('dog')]::bytea[], NULL) t) AS candidates,
               ARRAY(SELECT f.entity
                       FROM generation.forward_frontier('dog', 2, 8, NULL) f) AS frontier;
-          SQL
-          measure steer_word "SELECT count(*) FROM _chat_profile_input i CROSS JOIN LATERAL generation.steer_candidates(i.candidates, i.frontier)"
-          measure steer_input_sizes "SELECT cardinality(candidates), cardinality(frontier) FROM _chat_profile_input"
+          \echo CHAT_PROFILE steer_input_sizes
+          SELECT cardinality(candidates) AS candidates, cardinality(frontier) AS frontier
+          FROM _chat_profile_input;
+          \echo CHAT_PROFILE steer_word
+          SELECT count(*)
+          FROM _chat_profile_input i
+          CROSS JOIN LATERAL generation.steer_candidates(i.candidates, i.frontier);
 
-          "$psql" -X -w -v ON_ERROR_STOP=1 <<'SQL'
+          \echo CHAT_PROFILE materialize_first_election
           CREATE TEMP TABLE _chat_profile_first AS
           WITH i AS (SELECT * FROM _chat_profile_input)
           SELECT w.entity
           FROM i CROSS JOIN LATERAL generation.forward_walk_continuations(
               ARRAY[laplace.word_id('dog')]::bytea[], 1, 5, 0.6, 10, 42, i.frontier) w
           WHERE w.step = 1;
-          SQL
-          measure proposal_bigram "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[laplace.word_id('dog'), (SELECT entity FROM _chat_profile_first)]::bytea[], NULL)"
-          measure proposal_first_unigram "SELECT count(*) FROM generation.trajectory_continuations(ARRAY[(SELECT entity FROM _chat_profile_first)]::bytea[], NULL)"
+          \echo CHAT_PROFILE first_entity
+          SELECT encode(entity, 'hex') FROM _chat_profile_first;
+          \echo CHAT_PROFILE proposal_bigram
+          SELECT count(*) FROM generation.trajectory_continuations(
+              ARRAY[laplace.word_id('dog'), (SELECT entity FROM _chat_profile_first)]::bytea[], NULL);
+          \echo CHAT_PROFILE proposal_first_unigram
+          SELECT count(*) FROM generation.trajectory_continuations(
+              ARRAY[(SELECT entity FROM _chat_profile_first)]::bytea[], NULL);
 
-          measure forward_1 "SELECT count(*) FROM generation.forward_text('dog', 1, 5, 0.6, 10, 42, 2, 8, NULL)"
-          measure forward_2 "SELECT count(*) FROM generation.forward_text('dog', 2, 5, 0.6, 10, 42, 2, 8, NULL)"
-          measure forward_4 "SELECT count(*) FROM generation.forward_text('dog', 4, 5, 0.6, 10, 42, 2, 8, NULL)"
-          measure forward_8 "SELECT count(*) FROM generation.forward_text('dog', 8, 5, 0.6, 10, 42, 2, 8, NULL)"
+          \echo CHAT_PROFILE forward_1
+          SELECT count(*) FROM generation.forward_text('dog', 1, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE forward_2
+          SELECT count(*) FROM generation.forward_text('dog', 2, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE forward_4
+          SELECT count(*) FROM generation.forward_text('dog', 4, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE forward_8
+          SELECT count(*) FROM generation.forward_text('dog', 8, 5, 0.6, 10, 42, 2, 8, NULL);
+          SQL
