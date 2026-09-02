@@ -1,8 +1,8 @@
 name: Laplace — manual benchmark evidence
 
-# Deliberately dispatch-only. Benchmarks are evidence, not merge gates, and must not
-# run because somebody pushed code. The self-hosted runner is also the measured host,
-# so this shares the main workspace concurrency group and cannot overlap delivery.
+# Dispatch-only by design. Long benchmarks are evidence/calibration inputs, not
+# commit/push/PR gates. The measured self-hosted host is shared with delivery, so
+# this workflow uses the same workspace concurrency authority and cannot overlap it.
 on:
   workflow_dispatch:
     inputs:
@@ -12,16 +12,21 @@ on:
         required: false
         default: ""
       suite:
-        description: "benchmark suite"
+        description: "versioned benchmark suite"
         type: choice
         required: true
-        default: core+moby
-        options: [core, moby, core+moby]
+        default: quick
+        options: [quick, throughput, core, scale, moby, all]
       repeats:
-        description: "core benchmark repeats (best is reported by the harness)"
+        description: "repeats per core/scaling point; all runs retained, best reported"
         type: string
         required: true
-        default: "5"
+        default: "3"
+      scale_workers:
+        description: "optional comma-separated scale points; blank derives physical-core/SMT points"
+        type: string
+        required: false
+        default: ""
       corpus_dir:
         description: "core benchmark corpus root (blank = repository)"
         type: string
@@ -53,9 +58,9 @@ env:
 
 jobs:
   benchmark:
-    name: Measured host — source/core evidence only
+    name: Measured host — versioned benchmark suite
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Create immutable evidence directory first
         shell: bash
@@ -84,12 +89,14 @@ jobs:
 
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Validate benchmark inputs
+      - name: Validate benchmark registry and dispatch inputs
         shell: bash
         env:
           REPEATS: ${{ inputs.repeats }}
         run: |
           set -euo pipefail
+          python3 scripts/benchmark_suite.py validate
+          python3 scripts/benchmark_suite.py list | tee "$LAPLACE_BENCH_RECEIPT/suite-list.txt"
           [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]] || {
             echo "::error::repeats must be a positive integer"
             exit 2
@@ -99,17 +106,18 @@ jobs:
             exit 2
           }
 
-      - name: Record source, runner, and hardware provenance
+      - name: Record source, runner, hardware and accelerator inventory
         shell: bash
         run: |
           set -euo pipefail
           out="$LAPLACE_BENCH_RECEIPT"
           {
-            printf 'schema=laplace.legacy-benchmark-host/v1\n'
+            printf 'schema=laplace.benchmark-host/v2\n'
             printf 'repository=%s\n' "$GITHUB_REPOSITORY"
             printf 'commit=%s\n' "$LAPLACE_BENCH_SHA"
             printf 'run_id=%s\n' "$GITHUB_RUN_ID"
             printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'suite=%s\n' "${{ inputs.suite }}"
             printf 'observed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'runner_name=%s\n' "$RUNNER_NAME"
             printf 'runner_os=%s\n' "$RUNNER_OS"
@@ -127,6 +135,10 @@ jobs:
           else
             printf 'inxi unavailable\n' > "$out/inxi.txt"
           fi
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            [[ -r "$f" ]] || continue
+            printf '%s\t%s\n' "$f" "$(cat "$f")"
+          done > "$out/cpu-governors.tsv"
           if command -v nvidia-smi >/dev/null 2>&1; then
             nvidia-smi -q > "$out/nvidia-smi-before.txt" 2>&1 || true
             nvidia-smi --query-gpu=name,uuid,pstate,power.draw,power.limit,memory.used,utilization.gpu,utilization.memory \
@@ -134,12 +146,8 @@ jobs:
           else
             printf 'nvidia-smi unavailable\n' > "$out/nvidia-smi-before.txt"
           fi
-          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-            [[ -r "$f" ]] || continue
-            printf '%s\t%s\n' "$f" "$(cat "$f")"
-          done > "$out/cpu-governors.tsv"
 
-      - name: Build exact revision without installing it
+      - name: Build exact revision without installing or mutating substrate state
         shell: bash
         env:
           FORCE_REBUILD: ${{ inputs.force_rebuild }}
@@ -150,88 +158,57 @@ jobs:
           bash scripts/pipeline.sh "${args[@]}" build 2>&1 \
             | tee "$LAPLACE_BENCH_RECEIPT/build.log"
 
-      - name: Prepare Release CLI outside measured interval
-        if: inputs.suite == 'moby' || inputs.suite == 'core+moby'
+      - name: Bind the benchmark to exact built native artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          core="$GITHUB_WORKSPACE/build/engine/core/liblaplace_core.so"
+          t0="$GITHUB_WORKSPACE/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+          [[ -f "$core" ]] || { echo "::error::built core missing: $core"; exit 1; }
+          [[ -f "$t0" ]] || { echo "::error::built T0 perfcache missing: $t0"; exit 1; }
+          printf 'LAPLACE_CORE=%s\n' "$core" >> "$GITHUB_ENV"
+          printf 'LAPLACE_T0=%s\n' "$t0" >> "$GITHUB_ENV"
+          printf 'LAPLACE_PERFCACHE_BIN=%s\n' "$t0" >> "$GITHUB_ENV"
+          {
+            sha256sum "$core" "$t0"
+            printf '\n== core linkage ==\n'
+            ldd "$core" || true
+          } > "$LAPLACE_BENCH_RECEIPT/built-artifacts.txt"
+
+      - name: Prepare Release CLI outside the measured interval when required
+        if: inputs.suite == 'quick' || inputs.suite == 'moby' || inputs.suite == 'all'
         shell: bash
         run: |
           set -o pipefail
           dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
             | tee "$LAPLACE_BENCH_RECEIPT/cli-release-build.log"
 
-      - name: Record exact core library linkage
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$LAPLACE_BENCH_RECEIPT/core-linkage.txt"
-          : > "$out"
-          found=0
-          while IFS= read -r lib; do
-            found=1
-            printf '== %s ==\n' "$lib" >> "$out"
-            sha256sum "$lib" >> "$out"
-            ldd "$lib" >> "$out" 2>&1 || true
-            printf '\n' >> "$out"
-          done < <(find build -type f -name 'liblaplace_core.so' -print | sort)
-          [[ "$found" -eq 1 ]] || printf 'liblaplace_core.so not found under build/\n' >> "$out"
-
-      - name: Run single-thread core composition benchmark
-        if: inputs.suite == 'core' || inputs.suite == 'core+moby'
+      - name: Execute versioned benchmark suite
         shell: bash
         env:
+          SUITE: ${{ inputs.suite }}
           REPEATS: ${{ inputs.repeats }}
+          SCALE_WORKERS: ${{ inputs.scale_workers }}
           CORPUS_DIR: ${{ inputs.corpus_dir }}
-        run: |
-          set -euo pipefail
-          capture_rapl() {
-            local path="$1"
-            : > "$path"
-            for zone in /sys/class/powercap/intel-rapl:*; do
-              [[ -d "$zone" ]] || continue
-              name="$(cat "$zone/name" 2>/dev/null || basename "$zone")"
-              energy="$(cat "$zone/energy_uj" 2>/dev/null || true)"
-              max="$(cat "$zone/max_energy_range_uj" 2>/dev/null || true)"
-              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max" >> "$path"
-            done
-          }
-          corpus="${CORPUS_DIR:-$GITHUB_WORKSPACE}"
-          capture_rapl "$LAPLACE_BENCH_RECEIPT/core-rapl-before.tsv"
-          python3 scripts/bench-compose.py "$corpus" --repeats "$REPEATS" \
-            | tee "$LAPLACE_BENCH_RECEIPT/core-compose.log"
-          capture_rapl "$LAPLACE_BENCH_RECEIPT/core-rapl-after.tsv"
-
-      - name: Run Moby Dick bit-perfect engine roundtrip
-        if: inputs.suite == 'moby' || inputs.suite == 'core+moby'
-        shell: bash
-        env:
           MOBY_PATH: ${{ inputs.moby_path }}
         run: |
           set -euo pipefail
-          capture_rapl() {
-            local path="$1"
-            : > "$path"
-            for zone in /sys/class/powercap/intel-rapl:*; do
-              [[ -d "$zone" ]] || continue
-              name="$(cat "$zone/name" 2>/dev/null || basename "$zone")"
-              energy="$(cat "$zone/energy_uj" 2>/dev/null || true)"
-              max="$(cat "$zone/max_energy_range_uj" 2>/dev/null || true)"
-              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max" >> "$path"
-            done
-          }
-          [[ -f "$MOBY_PATH" ]] || {
-            echo "::error::Moby fixture does not exist: $MOBY_PATH"
-            exit 2
-          }
-          out="$LAPLACE_BENCH_RECEIPT/moby-roundtrip.out"
-          capture_rapl "$LAPLACE_BENCH_RECEIPT/moby-rapl-before.tsv"
-          dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-build -- \
-            roundtrip "$MOBY_PATH" "$out" \
-            | tee "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log"
-          capture_rapl "$LAPLACE_BENCH_RECEIPT/moby-rapl-after.tsv"
-          cmp -- "$MOBY_PATH" "$out"
-          sha256sum -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-sha256.txt"
-          wc -c -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-bytes.txt"
+          corpus="${CORPUS_DIR:-$GITHUB_WORKSPACE}"
+          args=(
+            run
+            --suite "$SUITE"
+            --receipt-dir "$LAPLACE_BENCH_RECEIPT"
+            --repeats "$REPEATS"
+            --corpus-dir "$corpus"
+            --moby-path "$MOBY_PATH"
+            --core "$LAPLACE_CORE"
+            --t0 "$LAPLACE_T0"
+          )
+          [[ -z "${SCALE_WORKERS:-}" ]] || args+=(--scale-workers "$SCALE_WORKERS")
+          python3 scripts/benchmark_suite.py "${args[@]}" 2>&1 \
+            | tee "$LAPLACE_BENCH_RECEIPT/suite.log"
 
-      - name: Record post-run accelerator state and seal manifest
+      - name: Record post-run accelerator state
         if: always()
         shell: bash
         run: |
@@ -242,8 +219,6 @@ jobs:
             nvidia-smi --query-gpu=name,uuid,pstate,power.draw,power.limit,memory.used,utilization.gpu,utilization.memory \
               --format=csv,noheader,nounits > "$out/gpu-after.csv" 2>&1 || true
           fi
-          find "$out" -maxdepth 1 -type f -printf '%f\n' | sort > "$out/manifest.txt"
-          sha256sum "$out"/* > "$out/artifact-sha256.txt" 2>/dev/null || true
 
       - name: Publish benchmark summary
         if: always()
@@ -251,27 +226,56 @@ jobs:
         run: |
           sha="${LAPLACE_BENCH_SHA:-unresolved}"
           {
-            echo '## Laplace manual benchmark evidence'
+            echo '## Laplace versioned benchmark suite'
             echo
             echo "- Commit: \`$sha\`"
             echo "- Runner: \`$RUNNER_NAME\`"
             echo "- Suite: \`${{ inputs.suite }}\`"
             echo "- Artifact: \`laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
-            if [[ -f "$LAPLACE_BENCH_RECEIPT/core-compose.log" ]]; then
+            if [[ -f "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" ]]; then
               echo
-              echo '### Core composition'
-              echo '```text'
-              tail -n 5 "$LAPLACE_BENCH_RECEIPT/core-compose.log"
-              echo '```'
-            fi
-            if [[ -f "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log" ]]; then
-              echo
-              echo '### Moby Dick roundtrip'
-              echo '```text'
-              tail -n 7 "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log"
-              echo '```'
+              python3 - "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" <<'PY'
+          import json, sys
+          receipt = json.load(open(sys.argv[1], encoding='utf-8'))
+          for item in receipt['results']:
+              profile = item['profile']
+              result = item['result']
+              print(f"### {profile}")
+              print()
+              if profile == 'core-single':
+                  print(f"- codepoints/s: {result['codepoints_per_second']:,.0f}")
+                  print(f"- 4-char BPE-equivalent/s: {result['bpe_equivalent_tokens_per_second_4chars']:,.0f}")
+                  print(f"- tier-tree nodes/s: {result['tier_tree_nodes_per_second']:,.0f}")
+              elif profile == 'core-scale':
+                  best = max(result['points'], key=lambda p: p['bpe_equivalent_tokens_per_second_4chars'])
+                  print(f"- best measured workers: {best['workers']}")
+                  print(f"- best 4-char BPE-equivalent/s: {best['bpe_equivalent_tokens_per_second_4chars']:,.0f}")
+                  print(f"- speedup vs 1 worker: {best['speedup_vs_1_worker']:.3f}x")
+                  print(f"- physical cores / allowed logical CPUs: {result['physical_cores']} / {result['allowed_logical_cpus']}")
+              elif profile == 'moby-roundtrip':
+                  print(f"- codepoints: {result['codepoints']:,}")
+                  print(f"- ingest: {result['ingest_milliseconds']:.1f} ms")
+                  print(f"- export: {result['export_milliseconds']:.1f} ms")
+                  print(f"- bit-perfect: {result['bit_perfect']}")
+              if item.get('rapl_energy'):
+                  energy = sum(x['energy_uj'] for x in item['rapl_energy']) / 1e6
+                  print(f"- summed RAPL-domain energy: {energy:.3f} J (not wall energy; domains may overlap)")
+              print()
+          PY
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Seal evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$LAPLACE_BENCH_RECEIPT"
+          find "$out" -type f -printf '%P\n' | sort > "$out/manifest.txt"
+          while IFS= read -r relative; do
+            [[ "$relative" != artifact-sha256.txt ]] || continue
+            sha256sum "$out/$relative"
+          done < "$out/manifest.txt" > "$out/artifact-sha256.txt"
 
       - name: Upload complete benchmark evidence
         if: always()
