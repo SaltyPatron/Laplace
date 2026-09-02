@@ -57,6 +57,26 @@ static int64_t sat_scale_i64(int64_t value, int64_t multiplier)
     return clamp_i128((__int128)value * (__int128)multiplier);
 }
 
+/* Illinois' secant correction is (B-A)*f(A)/(f(A)-f(B)).  All three
+ * operands are already Q1e9, so multiplying with laplace_fp_mul first throws
+ * away another 1e9 of precision before the division.  Near the root that made
+ * a non-zero correction round to zero and the solver bounce between two
+ * representable points until its iteration guard fired.  Divide the wide
+ * product directly and round only once. */
+static int64_t rounded_ratio_i128(__int128 numerator, int64_t denominator)
+{
+    if (denominator == 0)
+        return numerator >= 0 ? INT64_MAX : INT64_MIN;
+
+    __int128 den = (__int128)denominator;
+    const int negative = ((numerator < 0) ^ (den < 0));
+    if (numerator < 0) numerator = -numerator;
+    if (den < 0) den = -den;
+    __int128 q = (numerator + den / 2) / den;
+    if (negative) q = -q;
+    return clamp_i128(q);
+}
+
 static int glicko2_state_is_admissible(const glicko2_state_t *st)
 {
     return st != NULL && st->rd > 0 && st->rd <= LAPLACE_FP_RD_MAX &&
@@ -325,11 +345,22 @@ static int glicko2_finish_period(glicko2_state_t* st,
         if (sat_abs_i64(diff) <= LAPLACE_GLICKO2_ILLINOIS_EPS) break;
         int64_t f_span = sat_sub_i64(fA, fB);
         if (f_span == 0) return -1;
-        int64_t correction = laplace_fp_div(laplace_fp_mul(diff, fA), f_span);
+
+        /* Keep the secant numerator wide until the division.  The previous
+         * laplace_fp_mul(diff, fA) rounded a Q1e18 numerator back to Q1e9
+         * before dividing by f_span; close to the root that became zero and
+         * manufactured a non-convergence failure for valid periods. */
+        int64_t correction = rounded_ratio_i128(
+            (__int128)diff * (__int128)fA, f_span);
         int64_t C = sat_add_i64(A, correction);
         int64_t fC = illinois_f(C, delta_sq, phi_sq, v, a, tau_sq);
 
-        if (laplace_fp_mul(fC, fB) <= 0) {
+        /* A fixed-point product is not a sign test.  Small same-sign values
+         * can multiply to less than half a Q1e9 unit and round to zero, which
+         * used to be misread as a bracket crossing. */
+        const int crosses_zero =
+            fC == 0 || fB == 0 || ((fC < 0) != (fB < 0));
+        if (crosses_zero) {
             A = B;
             fA = fB;
         } else {

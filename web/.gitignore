@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.local
 web/test-results/
+openapi/openapi.json

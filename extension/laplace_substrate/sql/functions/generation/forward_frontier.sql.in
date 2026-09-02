@@ -1,56 +1,12 @@
--- generation.forward_frontier — the routed semantic operand for the dynamic
--- trajectory forward pass.
---
--- Every resolved prompt constituent remains in the frontier. prompt_coherence
--- contributes that constituent's jointly elected witnessed sense; no rank-1
--- topic collapse is performed. consensus.explore_web owns the native,
--- both-direction hop loop and per-parent fan-out. The returned hop is an
--- execution coordinate, not a model layer or a confidence score.
-CREATE OR REPLACE FUNCTION generation.forward_frontier(
-        p_prompt text,
-        p_hops int DEFAULT 2,
-        p_fanout int DEFAULT 8,
-        p_max_nodes int DEFAULT 256)
-    RETURNS TABLE(entity bytea, hop smallint)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
-WITH resolved AS MATERIALIZED (
-    SELECT p.ord, p.id AS entity
-    FROM converse.prompt_state(p_prompt) p
-    WHERE p.id IS NOT NULL
-    UNION ALL
-    SELECT c.ord, c.synset_id
-    FROM converse.prompt_coherence(p_prompt) c
-    WHERE c.synset_id IS NOT NULL
-), seeds AS MATERIALIZED (
-    SELECT r.entity, min(r.ord) AS ord
-    FROM resolved r
-    GROUP BY r.entity
-), routed AS MATERIALIZED (
-    SELECT w.*
-    FROM consensus.explore_web(
-        ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity),
-        p_hops, p_fanout, p_max_nodes) w
-), nodes AS (
-    SELECT s.entity, 0::smallint AS hop FROM seeds s
-    UNION ALL
-    SELECT r.source_id, r.hop FROM routed r
-    UNION ALL
-    SELECT r.object_id, r.hop FROM routed r
-)
-SELECT n.entity, min(n.hop)::smallint AS hop
-FROM nodes n
-GROUP BY n.entity
-ORDER BY min(n.hop), n.entity;
-END;
-
 -- The bounded receipt for ROUTE/SCAN. It exposes the exact typed consensus
--- edges admitted by the same crawl used to build forward_frontier.
+-- edges admitted by the same crawl used to build forward_frontier. Defining the
+-- receipt first lets the executable frontier depend on it, so the receipt cannot
+-- drift into dead diagnostic scaffolding beside a second traversal.
 CREATE OR REPLACE FUNCTION generation.forward_route_trace(
         p_prompt text,
         p_hops int DEFAULT 2,
         p_fanout int DEFAULT 8,
-        p_max_nodes int DEFAULT 256)
+        p_max_nodes int DEFAULT NULL)
     RETURNS TABLE(source_id bytea, type_id bytea, object_id bytea,
                   hop smallint, rating bigint, rd bigint,
                   witness_count bigint)
@@ -75,4 +31,52 @@ FROM consensus.explore_web(
     ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity),
     p_hops, p_fanout, p_max_nodes) w
 ORDER BY w.hop, w.source_id, w.type_id, w.object_id;
+END;
+
+-- generation.forward_frontier — the routed semantic operand for the dynamic
+-- trajectory forward pass.
+--
+-- Every resolved prompt constituent remains in the frontier. prompt_coherence
+-- contributes that constituent's jointly elected witnessed sense; no rank-1
+-- topic collapse is performed. forward_route_trace owns the typed native crawl,
+-- so execution and the auditable ROUTE/SCAN receipt are the same edge set. The
+-- returned hop is an execution coordinate, not a model layer or confidence score.
+-- A NULL node budget delegates capacity to consensus.explore_web, which derives
+-- the exact fanout tree from the seed count/hops/fanout and rejects only actual
+-- PostgreSQL allocation overflow. The forward pass does not invent a second cap.
+CREATE OR REPLACE FUNCTION generation.forward_frontier(
+        p_prompt text,
+        p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 8,
+        p_max_nodes int DEFAULT NULL)
+    RETURNS TABLE(entity bytea, hop smallint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+WITH resolved AS MATERIALIZED (
+    SELECT p.ord, p.id AS entity
+    FROM converse.prompt_state(p_prompt) p
+    WHERE p.id IS NOT NULL
+    UNION ALL
+    SELECT c.ord, c.synset_id
+    FROM converse.prompt_coherence(p_prompt) c
+    WHERE c.synset_id IS NOT NULL
+), seeds AS MATERIALIZED (
+    SELECT r.entity, min(r.ord) AS ord
+    FROM resolved r
+    GROUP BY r.entity
+), routed AS MATERIALIZED (
+    SELECT w.*
+    FROM generation.forward_route_trace(
+        p_prompt, p_hops, p_fanout, p_max_nodes) w
+), nodes AS (
+    SELECT s.entity, 0::smallint AS hop FROM seeds s
+    UNION ALL
+    SELECT r.source_id, r.hop FROM routed r
+    UNION ALL
+    SELECT r.object_id, r.hop FROM routed r
+)
+SELECT n.entity, min(n.hop)::smallint AS hop
+FROM nodes n
+GROUP BY n.entity
+ORDER BY min(n.hop), n.entity;
 END;

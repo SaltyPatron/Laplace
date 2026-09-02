@@ -18,7 +18,9 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///   - the canonical body carries the key order,
 ///   - the delegates carry NO election of their own (a copy reappearing is a failure),
 ///   - the language-filtered electors, which rank a genuinely different candidate set,
-///     still key-match the canonical order.
+///     still key-match the canonical order,
+///   - explicitly declared per-constituent consumers may read every coherence row, but
+///     may not collapse those rows through converse.elect or regrow the election order.
 /// </summary>
 public sealed class ElectorArchitectureGateTests
 {
@@ -38,6 +40,18 @@ public sealed class ElectorArchitectureGateTests
     [
         "extension/laplace_substrate/sql/functions/converse/infer.sql.in",
         "extension/laplace_substrate/sql/functions/converse/orient_topic.sql.in",
+    ];
+
+    /// <summary>
+    /// These consume the PER-CONSTITUENT result of prompt_coherence rather than electing
+    /// one prompt topic. prompt_coherence already returns the best witnessed sense for
+    /// each prompt token; preserving all of those rows is a different operation from
+    /// converse.elect's OP6/OP7 prompt collapse. The forward pass is intentionally here:
+    /// replacing it with converse.elect would discard prompt constituents before ROUTE.
+    /// </summary>
+    private static readonly string[] PerConstituentCoherenceConsumers =
+    [
+        "extension/laplace_substrate/sql/functions/generation/forward_frontier.sql.in",
     ];
 
     /// <summary>
@@ -148,6 +162,30 @@ public sealed class ElectorArchitectureGateTests
         }
     }
 
+    /// <summary>
+    /// A per-constituent consumer is not an elector exemption. It is a separately pinned
+    /// operation shape: it must consume prompt_coherence directly, preserve that row set,
+    /// and carry neither the single-topic elect call nor a local copy of its key order.
+    /// </summary>
+    [Fact]
+    public void PerConstituentConsumers_DoNotCollapseToOnePromptTopic()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+
+        foreach (var relativePath in PerConstituentCoherenceConsumers)
+        {
+            var path = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(File.Exists(path), $"Declared per-constituent consumer does not exist: {relativePath}");
+
+            var sql = StripComments(File.ReadAllText(path));
+            Assert.True(PromptCoherenceCall.IsMatch(sql),
+                $"{relativePath} no longer consumes per-constituent prompt_coherence rows.");
+            Assert.False(ElectCall.IsMatch(sql),
+                $"{relativePath} must preserve the per-constituent frontier, not collapse through converse.elect*.");
+            Assert.Empty(ExtractElectorOrders(sql));
+        }
+    }
+
     [Fact]
     public void PromptElectorDeclarations_MatchAllSqlCallers()
     {
@@ -166,17 +204,20 @@ public sealed class ElectorArchitectureGateTests
             })
             .Select(path => Path.GetRelativePath(repoRoot, path).Replace('\\', '/'))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var declared = KeyPinnedElectors.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var declared = KeyPinnedElectors
+            .Concat(PerConstituentCoherenceConsumers)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var unknown = callers.Except(declared).Order(StringComparer.OrdinalIgnoreCase).ToList();
         var stale = declared.Except(callers).Order(StringComparer.OrdinalIgnoreCase).ToList();
 
         Assert.True(unknown.Count == 0,
-            "New prompt_coherence callers must delegate to converse.elect, or be declared "
-            + "and key-pinned if they rank a different candidate set:\n  "
+            "New prompt_coherence callers must delegate to converse.elect when they elect one topic, "
+            + "be declared/key-pinned when they rank a different candidate set, or be declared as a "
+            + "non-electing per-constituent consumer:\n  "
             + string.Join("\n  ", unknown));
         Assert.True(stale.Count == 0,
-            "Declared electors no longer call prompt_coherence; remove or rewire them:\n  "
+            "Declared prompt_coherence consumers no longer call it; remove or rewire them:\n  "
             + string.Join("\n  ", stale));
     }
 
