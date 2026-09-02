@@ -1,42 +1,42 @@
 name: Chess rating repair — durable replay
 
 on:
-  workflow_run:
-    workflows: ["Laplace — build, deploy, test"]
-    types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# This worker uses the same persistent checkout/build host as the product pipeline.
-# Never let it race another workflow's checkout or installed-state mutation.
+# Repair is maintenance over durable evidence, not a second delivery pipeline.
+# Each run owns one small committed subject batch and exits, so it cannot monopolize
+# the only product runner for a multi-hour historical replay. The journal cursor is
+# the durable continuation point; a later slice resumes exactly where this one ended.
 concurrency:
-  group: laplace-shared-workspace
+  group: laplace-chess-rating-repair
   cancel-in-progress: false
 
 env:
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
   LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
   PGDATABASE: laplace
+  LAPLACE_CHESS_RATING_REPAIR_BATCH: 64
+  LAPLACE_CHESS_RATING_REPAIR_MAX_BATCHES: 1
 
 jobs:
   repair:
-    name: Repair — chess ratings from durable evidence
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.head_branch == 'main'
+    name: Repair — one chess-rating evidence slice
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 180
+    timeout-minutes: 10
     steps:
-      - name: Checkout exact installed-line revision
+      - name: Checkout current default-branch repair worker
         env:
-          TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
-      - name: Resume durable chess rating repair
+      - name: Resume one durable chess-rating repair slice
         run: |
           chmod +x scripts/repair-chess-ratings.sh
           bash scripts/repair-chess-ratings.sh
