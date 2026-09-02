@@ -1,16 +1,42 @@
--- Repair chess opponent ratings lost at the managed/native staging boundary AND
--- rebuild every chess player rating cell from durable evidence after Glicko math
--- changes. Evidence is durable authority; consensus is rebuildable.
+-- Chess rating repair is a durable maintenance obligation, not part of extension
+-- activation latency. The public three-argument procedure is intentionally cheap:
+-- deployment calls it after ALTER EXTENSION to enqueue the current repair generation.
+-- A separate worker replays bounded subject batches from durable attestations and
+-- advances rating_repair_journal after every committed batch.
 --
--- The first repair reconstructs a missing opponent rating from PLAYED_BY plus
--- HAS_RATING testimony under the same playing context. The second repair does
--- NOT try to infer corruption from witness_count/timestamp alone: the runaway
--- incident proved a consensus row can have the correct cardinality and timestamp
--- while its rating/RD/volatility are mathematically corrupt. Therefore deployment
--- canonically refolds the complete chess player OUTCOME + PLAYED_BY surface.
+-- This fixes the failure mode observed on 2026-09-02: ALTER EXTENSION committed,
+-- then a full monolithic replay ran inside sync-extension until the 20-minute DB
+-- lifecycle job was cancelled. On retry the extension version was already current,
+-- so the one-shot CALL was skipped and the repair obligation disappeared.
 --
--- This is called by deployment after ALTER EXTENSION so its indexed temporary
--- work tables are not captured as extension members.
+-- Durable evidence remains authority; consensus remains rebuildable. Replaying a
+-- completed batch is idempotent because every selected cell is reconstructed from
+-- all of its durable evidence and UPSERTed to the canonical consensus identity.
+
+CREATE TABLE IF NOT EXISTS chess.rating_repair_journal (
+    repair_id       text PRIMARY KEY,
+    status          text NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'running', 'ok', 'failed')),
+    last_subject    bytea CHECK (last_subject IS NULL OR octet_length(last_subject) = 16),
+    subjects_done   bigint NOT NULL DEFAULT 0 CHECK (subjects_done >= 0),
+    attempts        integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    requested_at    timestamptz NOT NULL DEFAULT now(),
+    started_at      timestamptz,
+    heartbeat_at    timestamptz,
+    ended_at        timestamptz,
+    error           text
+);
+
+-- Bump this literal only when a new historical replay is actually required.
+-- Ordinary extension revisions must not force a full chess-rating rebuild.
+CREATE OR REPLACE FUNCTION chess.rating_repair_generation()
+RETURNS text
+LANGUAGE sql IMMUTABLE PARALLEL SAFE
+AS $$ SELECT 'glicko2-opponent-carrier-20260902-v1'::text $$;
+
+-- Deployment-facing contract: record/refresh the obligation and return quickly.
+-- An already completed generation stays completed. A previously interrupted or
+-- failed generation becomes pending again so the worker will resume it.
 CREATE OR REPLACE PROCEDURE chess.repair_player_ratings(
     p_outcome bytea,
     p_played bytea,
@@ -18,10 +44,53 @@ CREATE OR REPLACE PROCEDURE chess.repair_player_ratings(
 LANGUAGE plpgsql
 AS $$
 DECLARE
+    v_generation text := chess.rating_repair_generation();
+BEGIN
+    IF p_outcome IS NULL OR p_played IS NULL OR p_rating IS NULL THEN
+        RAISE EXCEPTION 'repair_player_ratings: required relation id is NULL';
+    END IF;
+
+    INSERT INTO chess.rating_repair_journal AS j
+        (repair_id, status, requested_at)
+    VALUES
+        (v_generation, 'pending', now())
+    ON CONFLICT (repair_id) DO UPDATE
+    SET requested_at = EXCLUDED.requested_at,
+        status = CASE WHEN j.status = 'ok' THEN 'ok' ELSE 'pending' END,
+        error = CASE WHEN j.status = 'ok' THEN j.error ELSE NULL END;
+
+    RAISE LOG 'repair_player_ratings: generation % is durably queued', v_generation;
+END;
+$$;
+
+-- Worker primitive. Every call owns only the supplied canonical subjects, so the
+-- outer worker can commit progress after each batch. Cancellation rolls back only
+-- the in-flight batch; all prior batches and the journal cursor remain durable.
+CREATE OR REPLACE PROCEDURE chess.repair_player_ratings_batch(
+    p_outcome bytea,
+    p_played bytea,
+    p_rating bytea,
+    p_subjects bytea[])
+LANGUAGE plpgsql
+AS $$
+DECLARE
     v_repaired bigint := 0;
     v_scope bigint := 0;
     v_refolded bigint := 0;
 BEGIN
+    IF p_outcome IS NULL OR p_played IS NULL OR p_rating IS NULL THEN
+        RAISE EXCEPTION 'repair_player_ratings_batch: required relation id is NULL';
+    END IF;
+    IF p_subjects IS NULL OR cardinality(p_subjects) = 0 THEN
+        RAISE EXCEPTION 'repair_player_ratings_batch: empty subject batch';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM unnest(p_subjects) s(id)
+        WHERE id IS NULL OR octet_length(id) <> 16
+    ) THEN
+        RAISE EXCEPTION 'repair_player_ratings_batch: subject ids must be canonical 16-byte ids';
+    END IF;
+
     CREATE TEMP TABLE _chess_rating_values (
         rating_id bytea PRIMARY KEY,
         rating bigint NOT NULL
@@ -35,7 +104,8 @@ BEGIN
 
     -- Historical GH #1321 repair: managed staging once persisted a literal zero
     -- instead of the opponent's rating. Recover it from the opponent identity and
-    -- that opponent's HAS_RATING testimony in the same playing context.
+    -- that opponent's HAS_RATING testimony in the same playing context, bounded to
+    -- this worker batch.
     INSERT INTO _chess_rating_values(rating_id, rating)
     WITH ids AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT r.object_id ORDER BY r.object_id),
@@ -49,7 +119,8 @@ BEGIN
           ON r.subject_id = pairing.object_id
          AND r.context_id = target.context_id
          AND r.type_id = p_rating
-        WHERE target.type_id = ANY(ARRAY[p_outcome, p_played])
+        WHERE target.subject_id = ANY(p_subjects)
+          AND target.type_id = ANY(ARRAY[p_outcome, p_played])
           AND target.opponent_rating_fp1e9 = 0
           AND r.object_id IS NOT NULL
     ), rendered AS MATERIALIZED (
@@ -78,7 +149,8 @@ BEGIN
          AND r.context_id = target.context_id
          AND r.type_id = p_rating
         LEFT JOIN _chess_rating_values rv ON rv.rating_id = r.object_id
-        WHERE target.type_id = ANY(ARRAY[p_outcome, p_played])
+        WHERE target.subject_id = ANY(p_subjects)
+          AND target.type_id = ANY(ARRAY[p_outcome, p_played])
           AND target.opponent_rating_fp1e9 = 0
         GROUP BY target.id, target.type_id, target.subject_id
     )
@@ -90,39 +162,32 @@ BEGIN
       AND target.subject_id = resolved.subject_id;
     GET DIAGNOSTICS v_repaired = ROW_COUNT;
 
-    -- COMPLETE replay scope, intentionally independent of the current consensus
-    -- values. A corrupt fold can preserve witness_count and last_observed_at, so
-    -- those fields are not a corruption oracle. PLAYED_BY is chess-specific; an
-    -- OUTCOME row qualifies only when the same player/context has PLAYED_BY
-    -- testimony, which excludes unrelated OUTCOME uses in the universal substrate.
     INSERT INTO _chess_rating_cells(subject_id, type_id, object_id)
     SELECT DISTINCT evidence.subject_id, evidence.type_id, evidence.object_id
     FROM laplace.attestations evidence
-    WHERE evidence.type_id = p_played
-       OR (
-           evidence.type_id = p_outcome
-           AND EXISTS (
-               SELECT 1
-               FROM laplace.attestations pairing
-               WHERE pairing.subject_id = evidence.subject_id
-                 AND pairing.context_id IS NOT DISTINCT FROM evidence.context_id
-                 AND pairing.type_id = p_played
-           )
-       )
+    WHERE evidence.subject_id = ANY(p_subjects)
+      AND (
+          evidence.type_id = p_played
+          OR (
+              evidence.type_id = p_outcome
+              AND EXISTS (
+                  SELECT 1
+                  FROM laplace.attestations pairing
+                  WHERE pairing.subject_id = evidence.subject_id
+                    AND pairing.context_id IS NOT DISTINCT FROM evidence.context_id
+                    AND pairing.type_id = p_played
+              )
+          )
+      )
     ON CONFLICT DO NOTHING;
     GET DIAGNOSTICS v_scope = ROW_COUNT;
 
     IF v_scope = 0 THEN
-        RAISE LOG 'repair_player_ratings: no chess player rating evidence to refold; repaired % legacy opponent-rating row(s)',
-            v_repaired;
+        RAISE LOG 'repair_player_ratings_batch: no chess rating evidence in % subject(s); repaired % legacy opponent row(s)',
+            cardinality(p_subjects), v_repaired;
         RETURN;
     END IF;
 
-    -- Total reconstruction from durable evidence in canonical event order. This
-    -- is idempotent and heals all three failure shapes:
-    --   * missing consensus after evidence-first fold failure,
-    --   * stale consensus with incomplete witness cardinality,
-    --   * count-complete but mathematically corrupt rating/RD/volatility.
     INSERT INTO laplace.consensus AS target
         (id, subject_id, type_id, object_id, rating, rd, volatility,
          witness_count, last_observed_at)
@@ -162,7 +227,7 @@ BEGIN
               EXCLUDED.witness_count, EXCLUDED.last_observed_at);
     GET DIAGNOSTICS v_refolded = ROW_COUNT;
 
-    RAISE LOG 'repair_player_ratings: repaired % legacy opponent-rating evidence row(s), replayed % chess rating cell(s), corrected/materialized % consensus row(s)',
-        v_repaired, v_scope, v_refolded;
+    RAISE LOG 'repair_player_ratings_batch: % subject(s), repaired % legacy opponent row(s), replayed % cells, corrected/materialized % consensus row(s)',
+        cardinality(p_subjects), v_repaired, v_scope, v_refolded;
 END;
 $$;
