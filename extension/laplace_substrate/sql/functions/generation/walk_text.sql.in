@@ -14,7 +14,7 @@ BEGIN ATOMIC
         SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
         FROM (
             SELECT f.entity, f.hop
-            FROM generation.forward_frontier(p_prompt, p_hops, p_fanout, 256) f
+            FROM generation.forward_frontier(p_prompt, p_hops, p_fanout, NULL) f
             UNION
             SELECT p.entity, 0::smallint
             FROM unnest(COALESCE(p_prior_frontier, '{}'::bytea[])) p(entity)
