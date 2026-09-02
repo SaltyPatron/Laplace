@@ -1,4 +1,9 @@
 DROP FUNCTION IF EXISTS laplace.walk_text(text, int, int, float8, int, bigint);
+-- Same upgrade rule as walk_continuations: the installed compatibility surface
+-- used p_breadth, while the routed operator names that operand p_top_k. PostgreSQL
+-- does not permit input-parameter renames through CREATE OR REPLACE, so retire the
+-- old signature before recreating the compatibility wrapper.
+DROP FUNCTION IF EXISTS generation.walk_text(text, int, int, float8, int, bigint);
 CREATE OR REPLACE FUNCTION generation.forward_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
