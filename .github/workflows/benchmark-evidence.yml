@@ -1,0 +1,283 @@
+name: Laplace — manual benchmark evidence
+
+# Deliberately dispatch-only. Benchmarks are evidence, not merge gates, and must not
+# run because somebody pushed code. The self-hosted runner is also the measured host,
+# so this shares the main workspace concurrency group and cannot overlap delivery.
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: "repository ref/SHA to benchmark (blank = dispatched revision)"
+        type: string
+        required: false
+        default: ""
+      suite:
+        description: "benchmark suite"
+        type: choice
+        required: true
+        default: core+moby
+        options: [core, moby, core+moby]
+      repeats:
+        description: "core benchmark repeats (best is reported by the harness)"
+        type: string
+        required: true
+        default: "5"
+      corpus_dir:
+        description: "core benchmark corpus root (blank = repository)"
+        type: string
+        required: false
+        default: ""
+      moby_path:
+        description: "Moby Dick fixture path on the measured host"
+        type: string
+        required: true
+        default: "/vault/Data/test-data/text/moby_dick.txt"
+      force_rebuild:
+        description: "force a clean exact-revision rebuild before measurement"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+env:
+  LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  PGDATABASE: laplace
+  LAPLACE_DATA_ROOT: /vault/Data
+
+jobs:
+  benchmark:
+    name: Measured host — source/core evidence only
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 120
+    steps:
+      - name: Create immutable evidence directory first
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/laplace-benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$receipt"
+          mkdir -p "$receipt"
+          printf 'LAPLACE_BENCH_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
+
+      - name: Resolve and checkout exact revision
+        shell: bash
+        env:
+          DISPATCH_SHA: ${{ github.sha }}
+          REQUESTED_REF: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+          target="${REQUESTED_REF:-}"
+          [[ -n "$target" ]] || target="$DISPATCH_SHA"
+          printf 'requested_ref=%s\n' "$target" > "$LAPLACE_BENCH_RECEIPT/request.env"
+          git fetch --no-tags --prune origin "$target"
+          resolved="$(git rev-parse FETCH_HEAD)"
+          git checkout --force "$resolved"
+          printf 'LAPLACE_BENCH_SHA=%s\n' "$resolved" >> "$GITHUB_ENV"
+          printf 'resolved_sha=%s\n' "$resolved" >> "$LAPLACE_BENCH_RECEIPT/request.env"
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Validate benchmark inputs
+        shell: bash
+        env:
+          REPEATS: ${{ inputs.repeats }}
+        run: |
+          set -euo pipefail
+          [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::repeats must be a positive integer"
+            exit 2
+          }
+          (( REPEATS <= 100 )) || {
+            echo "::error::repeats must be <= 100"
+            exit 2
+          }
+
+      - name: Record source, runner, and hardware provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$LAPLACE_BENCH_RECEIPT"
+          {
+            printf 'schema=laplace.legacy-benchmark-host/v1\n'
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'commit=%s\n' "$LAPLACE_BENCH_SHA"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'observed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'runner_name=%s\n' "$RUNNER_NAME"
+            printf 'runner_os=%s\n' "$RUNNER_OS"
+            printf 'runner_arch=%s\n' "$RUNNER_ARCH"
+          } > "$out/identity.env"
+          git status --short > "$out/git-status.txt"
+          git show -s --format=fuller "$LAPLACE_BENCH_SHA" > "$out/commit.txt"
+          uname -a > "$out/uname.txt"
+          lscpu > "$out/lscpu.txt"
+          free -b > "$out/memory.txt"
+          lsblk -b -o NAME,TYPE,SIZE,ROTA,FSTYPE,MOUNTPOINTS,MODEL > "$out/storage.txt"
+          df -B1 > "$out/filesystems.txt"
+          if command -v inxi >/dev/null 2>&1; then
+            inxi -Fxz > "$out/inxi.txt" 2>&1 || true
+          else
+            printf 'inxi unavailable\n' > "$out/inxi.txt"
+          fi
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            nvidia-smi -q > "$out/nvidia-smi-before.txt" 2>&1 || true
+            nvidia-smi --query-gpu=name,uuid,pstate,power.draw,power.limit,memory.used,utilization.gpu,utilization.memory \
+              --format=csv,noheader,nounits > "$out/gpu-before.csv" 2>&1 || true
+          else
+            printf 'nvidia-smi unavailable\n' > "$out/nvidia-smi-before.txt"
+          fi
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            [[ -r "$f" ]] || continue
+            printf '%s\t%s\n' "$f" "$(cat "$f")"
+          done > "$out/cpu-governors.tsv"
+
+      - name: Build exact revision without installing it
+        shell: bash
+        env:
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+        run: |
+          set -o pipefail
+          args=()
+          [[ "$FORCE_REBUILD" != true ]] || args+=(--force-rebuild)
+          bash scripts/pipeline.sh "${args[@]}" build 2>&1 \
+            | tee "$LAPLACE_BENCH_RECEIPT/build.log"
+
+      - name: Prepare Release CLI outside measured interval
+        if: inputs.suite == 'moby' || inputs.suite == 'core+moby'
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
+            | tee "$LAPLACE_BENCH_RECEIPT/cli-release-build.log"
+
+      - name: Record exact core library linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$LAPLACE_BENCH_RECEIPT/core-linkage.txt"
+          : > "$out"
+          found=0
+          while IFS= read -r lib; do
+            found=1
+            printf '== %s ==\n' "$lib" >> "$out"
+            sha256sum "$lib" >> "$out"
+            ldd "$lib" >> "$out" 2>&1 || true
+            printf '\n' >> "$out"
+          done < <(find build -type f -name 'liblaplace_core.so' -print | sort)
+          [[ "$found" -eq 1 ]] || printf 'liblaplace_core.so not found under build/\n' >> "$out"
+
+      - name: Run single-thread core composition benchmark
+        if: inputs.suite == 'core' || inputs.suite == 'core+moby'
+        shell: bash
+        env:
+          REPEATS: ${{ inputs.repeats }}
+          CORPUS_DIR: ${{ inputs.corpus_dir }}
+        run: |
+          set -euo pipefail
+          capture_rapl() {
+            local path="$1"
+            : > "$path"
+            for zone in /sys/class/powercap/intel-rapl:*; do
+              [[ -d "$zone" ]] || continue
+              name="$(cat "$zone/name" 2>/dev/null || basename "$zone")"
+              energy="$(cat "$zone/energy_uj" 2>/dev/null || true)"
+              max="$(cat "$zone/max_energy_range_uj" 2>/dev/null || true)"
+              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max" >> "$path"
+            done
+          }
+          corpus="${CORPUS_DIR:-$GITHUB_WORKSPACE}"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/core-rapl-before.tsv"
+          python3 scripts/bench-compose.py "$corpus" --repeats "$REPEATS" \
+            | tee "$LAPLACE_BENCH_RECEIPT/core-compose.log"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/core-rapl-after.tsv"
+
+      - name: Run Moby Dick bit-perfect engine roundtrip
+        if: inputs.suite == 'moby' || inputs.suite == 'core+moby'
+        shell: bash
+        env:
+          MOBY_PATH: ${{ inputs.moby_path }}
+        run: |
+          set -euo pipefail
+          capture_rapl() {
+            local path="$1"
+            : > "$path"
+            for zone in /sys/class/powercap/intel-rapl:*; do
+              [[ -d "$zone" ]] || continue
+              name="$(cat "$zone/name" 2>/dev/null || basename "$zone")"
+              energy="$(cat "$zone/energy_uj" 2>/dev/null || true)"
+              max="$(cat "$zone/max_energy_range_uj" 2>/dev/null || true)"
+              printf '%s\t%s\t%s\t%s\n' "$zone" "$name" "$energy" "$max" >> "$path"
+            done
+          }
+          [[ -f "$MOBY_PATH" ]] || {
+            echo "::error::Moby fixture does not exist: $MOBY_PATH"
+            exit 2
+          }
+          out="$LAPLACE_BENCH_RECEIPT/moby-roundtrip.out"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/moby-rapl-before.tsv"
+          dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-build -- \
+            roundtrip "$MOBY_PATH" "$out" \
+            | tee "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log"
+          capture_rapl "$LAPLACE_BENCH_RECEIPT/moby-rapl-after.tsv"
+          cmp -- "$MOBY_PATH" "$out"
+          sha256sum -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-sha256.txt"
+          wc -c -- "$MOBY_PATH" "$out" > "$LAPLACE_BENCH_RECEIPT/moby-bytes.txt"
+
+      - name: Record post-run accelerator state and seal manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$LAPLACE_BENCH_RECEIPT"
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            nvidia-smi -q > "$out/nvidia-smi-after.txt" 2>&1 || true
+            nvidia-smi --query-gpu=name,uuid,pstate,power.draw,power.limit,memory.used,utilization.gpu,utilization.memory \
+              --format=csv,noheader,nounits > "$out/gpu-after.csv" 2>&1 || true
+          fi
+          find "$out" -maxdepth 1 -type f -printf '%f\n' | sort > "$out/manifest.txt"
+          sha256sum "$out"/* > "$out/artifact-sha256.txt" 2>/dev/null || true
+
+      - name: Publish benchmark summary
+        if: always()
+        shell: bash
+        run: |
+          sha="${LAPLACE_BENCH_SHA:-unresolved}"
+          {
+            echo '## Laplace manual benchmark evidence'
+            echo
+            echo "- Commit: \`$sha\`"
+            echo "- Runner: \`$RUNNER_NAME\`"
+            echo "- Suite: \`${{ inputs.suite }}\`"
+            echo "- Artifact: \`laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
+            if [[ -f "$LAPLACE_BENCH_RECEIPT/core-compose.log" ]]; then
+              echo
+              echo '### Core composition'
+              echo '```text'
+              tail -n 5 "$LAPLACE_BENCH_RECEIPT/core-compose.log"
+              echo '```'
+            fi
+            if [[ -f "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log" ]]; then
+              echo
+              echo '### Moby Dick roundtrip'
+              echo '```text'
+              tail -n 7 "$LAPLACE_BENCH_RECEIPT/moby-roundtrip.log"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload complete benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: laplace-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/laplace-benchmark-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
