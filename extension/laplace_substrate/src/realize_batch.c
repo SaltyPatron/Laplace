@@ -18,10 +18,10 @@
  *   - arms 1/2/4 filter candidates to non-empty renders BEFORE their LIMIT 1,
  *     so the batch walks each id's rank-ordered candidates and takes the first
  *     whose render is non-empty;
- *   - arms 5/6 have NO non-empty filter in the scalar: arm 5 returns the
- *     regexp-stripped canonical name as-is, arm 6 returns the render of the
- *     single top-mu definition as-is (possibly NULL → overall NULL, possibly
- *     '' → '' is the final answer);
+ *   - arms 5/6 have NO non-empty filter in the scalar: arm 5 returns the exact
+ *     technical registry name as-is, arm 6 returns the render of the single
+ *     top-mu definition as-is (possibly NULL → overall NULL, possibly '' → ''
+ *     is the final answer);
  *   - arm 2 joins plain consensus for the HAS_SENSE hop (only the IS_SENSE_OF
  *     edge goes through the unrefuted view), exactly as _realize_synset_lemma;
  *   - a NULL lang makes every lp flag false (LEFT JOIN on object_id = NULL
@@ -98,10 +98,12 @@ static const char *Q_TRANSLATION =
     "   AND m.type_id = laplace.relation_type_id('IS_TRANSLATION_OF')"
     " ORDER BY m.subject_id, lp DESC, mu DESC, m.object_id";
 
+/* Canonical registry strings are opaque technical identity metadata.  Return the
+ * exact stored value; do not parse a source/path spelling to manufacture a label. */
 static const char *Q_CANONICAL =
-    "SELECT n.id, regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\\1')"
+    "SELECT n.id, n.name"
     " FROM laplace.canonical_names n"
-    " WHERE n.id = ANY($1) AND n.name LIKE 'substrate/%'"
+    " WHERE n.id = ANY($1)"
     " ORDER BY n.id";
 
 static const char *Q_DEFINES =
@@ -185,7 +187,7 @@ typedef struct RenderEntry
  * same entity). The rows were equally valid; the choice was simply not reproducible.
  * Closing each ORDER BY on an id makes the winner a property of the data. */
 
-/* Canonical-name arm: id -> stripped name text (first row per id). */
+/* Canonical-name arm: id -> exact technical registry text (first row per id). */
 typedef struct CanonEntry
 {
     IdKey key;
@@ -701,7 +703,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         SPI_freetuptable(SPI_tuptable);
     }
 
-    /* ---- canonical-name arm (text result, no rendering) ---- */
+    /* ---- canonical-name arm (exact technical text, no rendering) ---- */
     canon = make_id_htab("canonical", sizeof(CanonEntry), 256);
     if (arm_input != NULL)
     {
