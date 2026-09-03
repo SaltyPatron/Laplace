@@ -37,7 +37,7 @@ public static class NpgsqlBrowseReads
         NpgsqlRead.ReadRowsAsync(conn, """
             WITH page AS MATERIALIZED (
                 SELECT row_number() OVER ()::int AS ord, b.*
-                FROM structural.browse_named_entities(
+                FROM consensus.browse_named_entities(
                     @members, @exact, @offset, @limit, @capacity) b
             ), ids AS MATERIALIZED (
                 SELECT COALESCE(array_agg(p.entity_id ORDER BY p.ord), '{}'::bytea[]) AS entities,
