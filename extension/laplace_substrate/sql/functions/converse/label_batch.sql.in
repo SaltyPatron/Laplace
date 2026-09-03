@@ -31,11 +31,11 @@ CREATE OR REPLACE FUNCTION realize.display_batch(
         technical_name text,
         type_name text,
         realization text)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH inp AS MATERIALIZED (
         SELECT u.id, u.ord
-        FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
+        FROM unnest(COALESCE(p_ids, '{}'::bytea[])) WITH ORDINALITY AS u(id, ord)
     ), facets AS MATERIALIZED (
         -- The same id can legitimately be observed through more than one structural
         -- interpretation.  Only project a scalar facet when the stored evidence is
@@ -49,8 +49,8 @@ BEGIN ATOMIC
         LEFT JOIN laplace.entities e ON e.id = i.id
         GROUP BY i.id, i.ord
     ), batches AS MATERIALIZED (
-        SELECT realize.render_text_batch(p_ids) AS content,
-               realize.resolve_name_batch(p_ids, p_lang) AS names
+        SELECT realize.render_text_batch(COALESCE(p_ids, '{}'::bytea[])) AS content,
+               realize.resolve_name_batch(COALESCE(p_ids, '{}'::bytea[]), p_lang) AS names
     )
     SELECT f.ord,
            f.id,
@@ -81,11 +81,11 @@ BEGIN ATOMIC
     ORDER BY f.ord;
 END;
 
--- Language-aware label projection.  This is intentionally a projection of the
--- structured contract above, not a second naming policy.
+-- Language-aware label projection.  NULL language is a valid request meaning no
+-- language preference; do not mark this overload STRICT.
 CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[], p_lang bytea)
     RETURNS text[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT COALESCE(array_agg(d.label ORDER BY d.ord), '{}'::text[])
     FROM realize.display_batch(p_ids, p_lang) d;
