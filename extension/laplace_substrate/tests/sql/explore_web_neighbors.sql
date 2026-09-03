@@ -186,6 +186,35 @@ BEGIN
         RAISE EXCEPTION 'FAIL: scalar zero limit returned % rows', zero_rows;
     END IF;
 
+    -- PostgreSQL's canonical empty typed array has zero dimensions. It is the
+    -- exact no-seed operand produced by ARRAY(SELECT ...) when prompt routing
+    -- resolves nothing, so the native crawl must abstain with zero rows rather
+    -- than reject a valid empty set. NULL and actual multidimensional arrays
+    -- remain malformed operands.
+    SELECT count(*) INTO zero_rows
+    FROM consensus.explore_web('{}'::bytea[], 2, 8);
+    IF zero_rows <> 0 THEN
+        RAISE EXCEPTION 'FAIL: empty seed set returned % crawl rows', zero_rows;
+    END IF;
+
+    BEGIN
+        PERFORM * FROM consensus.explore_web(NULL::bytea[], 1, 1, 8);
+        RAISE EXCEPTION 'FAIL: NULL seed array was accepted';
+    EXCEPTION WHEN others THEN
+        IF SQLERRM NOT LIKE 'explore_web: seeds must not be NULL%' THEN
+            RAISE;
+        END IF;
+    END;
+
+    BEGIN
+        PERFORM * FROM consensus.explore_web(ARRAY[[s1], [s2]]::bytea[], 1, 1, 8);
+        RAISE EXCEPTION 'FAIL: multidimensional seed array was accepted';
+    EXCEPTION WHEN others THEN
+        IF SQLERRM NOT LIKE 'explore_web: seeds must be an empty or 1-D bytea array%' THEN
+            RAISE;
+        END IF;
+    END;
+
     SELECT count(*) INTO revisit_rows
     FROM consensus.explore_web(s1, 3, 32, 128) w
     WHERE w.hop > 1 AND (w.source_id = s1 OR w.object_id = s1);
