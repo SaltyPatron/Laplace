@@ -17,12 +17,14 @@ def strip_sql_comments(text: str) -> str:
 
 
 def function_slice(text: str, name: str, next_name: str | None) -> str:
-    start_marker = f"CREATE OR REPLACE FUNCTION {name}"
+    # Include the opening parenthesis so prefix-related function names such as
+    # forward_route_trace and forward_route_trace_ids cannot alias each other.
+    start_marker = f"CREATE OR REPLACE FUNCTION {name}("
     start = text.find(start_marker)
     assert start >= 0, f"missing function {name}"
     if next_name is None:
         return text[start:]
-    end_marker = f"CREATE OR REPLACE FUNCTION {next_name}"
+    end_marker = f"CREATE OR REPLACE FUNCTION {next_name}("
     end = text.find(end_marker, start + len(start_marker))
     assert end >= 0, f"missing function following {name}: {next_name}"
     return text[start:end]
