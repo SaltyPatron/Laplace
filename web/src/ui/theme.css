@@ -52,6 +52,16 @@
     --color-draw: var(--primitive-yellow-500);
     --color-uncertain: var(--primitive-yellow-500);
 
+    /* WebGL/Three canvases are dark instruments inside the light product UI.
+       Their palette is a UI token contract too — do not duplicate legacy
+       purple/yellow/blue literals in renderer code. */
+    --viz-bg: #0a2638;
+    --viz-text: #eef6f9;
+    --viz-muted: #b9cad4;
+    --viz-signal: #69d9d1;
+    --viz-steel: #8fc4e2;
+    --viz-error: #ff8f9b;
+
     --material-enamel: var(--color-bg-panel);
     --material-raised:
       linear-gradient(180deg,
