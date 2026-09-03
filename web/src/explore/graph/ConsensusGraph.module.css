@@ -37,7 +37,7 @@
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     overflow: hidden;
-    background: #0b1220;
+    background: var(--color-viz-bg);
     outline: none;
   }
 
