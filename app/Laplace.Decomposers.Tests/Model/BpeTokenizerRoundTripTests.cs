@@ -103,4 +103,75 @@ public class BpeTokenizerRoundTripTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void VocabEmission_PlacesEveryContentIdentity_AndKeepsSpecialsGoverned()
+    {
+        string dir = Directory.CreateTempSubdirectory("lap-tok-admission-").FullName;
+        try
+        {
+            string path = WriteTokenizer(dir, "BPE", withMerges: true);
+            var records = LlamaTokenizerParser.Parse(path);
+            var source = Laplace.Engine.Core.Hash128.OfCanonical("test/model/tokenizer-admission");
+            var builder = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(
+                source, "tokenizer/vocab/test", entityCapacity: 64, physicalityCapacity: 64);
+
+            foreach (var record in records)
+                LlamaTokenizerParser.StageVocabToken(builder, record, source);
+
+            var change = builder.Build();
+            var placed = change.Physicalities.Select(p => p.EntityId).ToHashSet();
+            foreach (var entity in change.Entities)
+            {
+                if (entity.TypeId == Laplace.Decomposers.Abstractions.EntityTypeRegistry.Word)
+                    Assert.Contains(entity.Id, placed);
+            }
+            Assert.All(
+                change.Entities.Where(e => records.Any(r =>
+                    r.Role.HasFlag(TokenRole.Special) && r.EntityId == e.Id)),
+                e => Assert.Equal(
+                    Laplace.Decomposers.Abstractions.EntityTypeRegistry.SourceReference,
+                    e.TypeId));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void InvalidUtf8ByteToken_IsOneMerkleTrajectory_NotAnUnplacedWord()
+    {
+        string dir = Directory.CreateTempSubdirectory("lap-tok-bytes-").FullName;
+        try
+        {
+            string path = Path.Combine(dir, "tokenizer.json");
+            File.WriteAllText(path, JsonSerializer.Serialize(new
+            {
+                model = new { type = "BPE", vocab = new Dictionary<string, int> { ["Ã("] = 0 } }
+            }));
+            var record = Assert.Single(LlamaTokenizerParser.Parse(path));
+            Assert.Equal(new byte[] { 0xC3, 0x28 }, record.CanonicalBytes);
+
+            var source = Laplace.Engine.Core.Hash128.OfCanonical("test/model/opaque-byte-token");
+            var builder = new Laplace.SubstrateCRUD.SubstrateChangeBuilder(source, "tokenizer/vocab/0");
+            LlamaTokenizerParser.StageVocabToken(builder, record, source);
+            var change = builder.Build();
+
+            var physicality = Assert.Single(change.Physicalities.Where(p => p.EntityId == record.EntityId));
+            Assert.Equal(2, physicality.NConstituents);
+            Assert.NotNull(physicality.TrajectoryXyzm);
+            Assert.Equal(
+                new[]
+                {
+                    Laplace.Engine.Core.ByteAtoms.Id(0xC3),
+                    Laplace.Engine.Core.ByteAtoms.Id(0x28),
+                },
+                Laplace.Engine.Core.Trajectory.Constituents(physicality.TrajectoryXyzm));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
