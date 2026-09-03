@@ -51,7 +51,7 @@ public sealed class ElectorArchitectureGateTests
     /// </summary>
     private static readonly string[] PerConstituentCoherenceConsumers =
     [
-        "extension/laplace_substrate/sql/functions/generation/forward_frontier.sql.in",
+        "extension/laplace_substrate/sql/functions/generation/walk_text.sql.in",
     ];
 
     /// <summary>
@@ -278,42 +278,36 @@ public sealed class ElectorArchitectureGateTests
 
         foreach (Match orderBy in OrderBy.Matches(text))
         {
-            var keys = ReadOrderKeys(text, orderBy.Index + orderBy.Length);
-            if (keys.Any(key => key.StartsWith("SPECIFICITY", StringComparison.Ordinal)))
-                orders.Add(keys);
+            var parsed = TryParseElectorKeySequence(text, orderBy.Index + orderBy.Length);
+            if (parsed is not null)
+                orders.Add(parsed);
         }
 
         return orders;
     }
 
-    private static IReadOnlyList<string> ReadOrderKeys(string text, int position)
+    private static IReadOnlyList<string>? TryParseElectorKeySequence(string text, int index)
     {
         var keys = new List<string>();
-        while (position < text.Length)
+        var cursor = index;
+
+        while (true)
         {
-            var key = ElectorKey.Match(text, position);
-            if (!key.Success || key.Index != position)
-            {
-                if (keys.Count > 0)
-                    keys.Add("<UNPARSED>");
-                break;
-            }
+            var key = ElectorKey.Match(text, cursor);
+            if (!key.Success)
+                return keys.Count == 0 ? null : keys;
 
-            var normalized = key.Groups["name"].Value.ToUpperInvariant();
-            if (key.Groups["direction"].Success)
-                normalized += " DESC";
-            if (key.Groups["nulls"].Success)
-                normalized += " NULLS LAST";
-            keys.Add(normalized);
-            position = key.Index + key.Length;
+            var name = key.Groups["name"].Value.ToUpperInvariant();
+            var direction = key.Groups["direction"].Success ? " DESC" : string.Empty;
+            var nulls = key.Groups["nulls"].Success ? " NULLS LAST" : string.Empty;
+            keys.Add(name + direction + nulls);
+            cursor = key.Index + key.Length;
 
-            var comma = Comma.Match(text, position);
-            if (!comma.Success || comma.Index != position)
-                break;
-            position = comma.Index + comma.Length;
+            var comma = Comma.Match(text, cursor);
+            if (!comma.Success)
+                return keys;
+            cursor = comma.Index + comma.Length;
         }
-
-        return keys;
     }
 
     private static string StripComments(string sql)
