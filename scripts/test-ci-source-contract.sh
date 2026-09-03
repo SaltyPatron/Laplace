@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Mechanical CI source-presence contract. Executable policy tests are separate registry suites.
+# Mechanical CI source-presence contract plus source-only operator contracts that
+# must run before build/deployment. Delegated tests here may use temporary roots,
+# but may not touch the database, installed runtime, services, or /vault/Data.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -29,6 +31,11 @@ for f in \
   scripts/setup-host.sh \
   scripts/bootstrap-laplace-runner.sh \
   scripts/ingest-source.sh \
+  scripts/dataset-estate-refresh.sh \
+  scripts/dataset-estate-refresh.sources.psv \
+  scripts/test-dataset-estate-refresh.py \
+  scripts/test-dataset-estate-refresh.sh \
+  docs/plan/DATASET_ESTATE_REFRESH_OPERATOR.md \
   scripts/ci-policy.sh \
   scripts/ci-policy-suite.sh \
   scripts/ci-deps.sh \
@@ -58,3 +65,8 @@ for f in \
   [[ -f "$f" ]] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
 done
 [[ "$fail" -eq 0 ]]
+
+# The dataset operator is allowed to manipulate only caller-supplied temporary
+# staging roots in policy. Its regression test asserts fail-closed job receipts,
+# aggregate verification, bad-artifact preservation, and active-root non-mutation.
+bash scripts/test-dataset-estate-refresh.sh
