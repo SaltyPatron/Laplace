@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Reject extension manifests that bind a view after a literal SQL consumer.
+"""Reject extension manifests that bind a source view after a literal SQL consumer.
 
 Fresh CREATE EXTENSION starts with no pre-existing views, while upgrade/dev databases
-can retain old views and accidentally hide a broken manifest order.  This check keeps
+can retain old views and accidentally hide a broken manifest order. This check keeps
 that distinction visible without mutating a database in pull-request validation.
+
+Entries under sql/generated are build products and may not exist in a clean source
+checkout; their existence/determinism remains owned by the normal codegen/build gates.
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SQL_ROOT = ROOT / "extension" / "laplace_substrate" / "sql"
 MANIFESTS = (SQL_ROOT / "manifest.install", SQL_ROOT / "manifest.upgrade")
+GENERATED_PREFIX = "generated/"
 
 CREATE_VIEW_RE = re.compile(
     r"\bCREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+laplace\.(v_[a-z0-9_]+)\b",
@@ -33,11 +37,18 @@ def manifest_modules(path: Path) -> list[str]:
         if line in seen:
             raise ValueError(f"{path.name}: duplicate module: {line}")
         module_path = SQL_ROOT / line
-        if not module_path.is_file():
-            raise ValueError(f"{path.name}: missing module: {line}")
+        if not module_path.is_file() and not line.startswith(GENERATED_PREFIX):
+            raise ValueError(f"{path.name}: missing source module: {line}")
         seen.add(line)
         modules.append(line)
     return modules
+
+
+def available_module_text(module: str) -> str | None:
+    module_path = SQL_ROOT / module
+    if not module_path.is_file():
+        return None
+    return module_path.read_text(encoding="utf-8")
 
 
 def sql_without_line_comments(text: str) -> list[str]:
@@ -53,7 +64,9 @@ def sql_without_line_comments(text: str) -> list[str]:
 def declared_views(modules: list[str], manifest: Path) -> dict[str, str]:
     owners: dict[str, str] = {}
     for module in modules:
-        text = (SQL_ROOT / module).read_text(encoding="utf-8")
+        text = available_module_text(module)
+        if text is None:
+            continue
         for match in CREATE_VIEW_RE.finditer(text):
             view = match.group(1).lower()
             previous = owners.get(view)
@@ -74,7 +87,9 @@ def validate_manifest(path: Path) -> list[str]:
 
     for module in modules:
         module_index = positions[module]
-        text = (SQL_ROOT / module).read_text(encoding="utf-8")
+        text = available_module_text(module)
+        if text is None:
+            continue
         declared_here = {
             match.group(1).lower() for match in CREATE_VIEW_RE.finditer(text)
         }
