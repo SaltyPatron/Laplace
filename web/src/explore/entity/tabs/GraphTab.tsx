@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, ErrorText, LoadingText, Muted, Panel } from '@ui';
+import { Button, ErrorText, Field, Input, LoadingText, Muted, Panel } from '@ui';
 import { PaymentRequiredError } from '../../../api/client';
 import { exploreConsensusGraph } from '../../api';
 import { GatePrompt } from '../../components/GatePrompt';
@@ -12,6 +12,10 @@ import styles from './GraphTab.module.css';
 const HOPS_MAX = 8;
 const FANOUT_MAX = 256;
 const NODES_MAX = 2048;
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n));
+}
 
 export function GraphTab({
   centerId,
@@ -120,19 +124,51 @@ export function GraphTab({
         walkPath={walkPath}
         onNodeClick={onNodeClick}
         fill
-        hops={hops}
-        fanout={fanout}
-        hopsMax={HOPS_MAX}
-        fanoutMax={FANOUT_MAX}
-        maxNodes={nodeCapacity}
-        maxNodesMax={NODES_MAX}
-        onHopsChange={setHops}
-        onFanoutChange={setFanout}
-        onMaxNodesChange={setNodeCapacity}
         dim={dim}
         onDimChange={setDim}
         toolbar={
           <div className={styles.actions}>
+            <details className={styles.settings}>
+              <summary className={styles.settingsSummary}>
+                Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes
+              </summary>
+              <div className={styles.settingsBody}>
+                <Field label="hops" layout="row" htmlFor="web-hops">
+                  <Input
+                    id="web-hops"
+                    type="number"
+                    min={1}
+                    max={HOPS_MAX}
+                    value={hops}
+                    onChange={(e) => setHops(clamp(Number(e.target.value) || 1, 1, HOPS_MAX))}
+                    aria-label="Hop depth"
+                  />
+                </Field>
+                <Field label="fanout" layout="row" htmlFor="web-fanout">
+                  <Input
+                    id="web-fanout"
+                    type="number"
+                    min={2}
+                    max={FANOUT_MAX}
+                    value={fanout}
+                    onChange={(e) => setFanout(clamp(Number(e.target.value) || 8, 2, FANOUT_MAX))}
+                    aria-label="Fanout per parent"
+                  />
+                </Field>
+                <Field label="capacity" layout="row" htmlFor="web-max-nodes">
+                  <Input
+                    id="web-max-nodes"
+                    type="number"
+                    min={32}
+                    max={NODES_MAX}
+                    step={32}
+                    value={nodeCapacity}
+                    onChange={(e) => setNodeCapacity(clamp(Number(e.target.value) || 32, 32, NODES_MAX))}
+                    aria-label="Maximum graph nodes"
+                  />
+                </Field>
+              </div>
+            </details>
             <Button type="button" size="sm" onClick={() => void expand()} disabled={busy}>
               {busy ? 'Crawling…' : web ? 'Recrawl web' : 'Expand web'}
             </Button>
