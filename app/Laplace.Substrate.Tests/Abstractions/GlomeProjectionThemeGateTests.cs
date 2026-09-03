@@ -73,8 +73,13 @@ public sealed class GlomeProjectionThemeGateTests
 
         Assert.Contains("<details className={styles.navDisclosure} open>", explore, StringComparison.Ordinal);
         Assert.Contains("<summary className={styles.navSummary}>Explore tools</summary>", explore, StringComparison.Ordinal);
+        Assert.Contains("<div className={styles.graphBody}>", graphTab, StringComparison.Ordinal);
         Assert.Contains("<details className={styles.settings}>", graphTab, StringComparison.Ordinal);
         Assert.Contains("Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes", graphTab, StringComparison.Ordinal);
+        Assert.Contains(".graphBody", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains("flex: 1 1 auto;", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains(".note", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains("flex: 0 0 auto;", graphTabCss, StringComparison.Ordinal);
         Assert.Contains("position: absolute;", graphTabCss, StringComparison.Ordinal);
         Assert.Contains(".settings[open] .settingsSummary::before", graphTabCss, StringComparison.Ordinal);
 
