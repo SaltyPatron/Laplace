@@ -1,8 +1,7 @@
 -- The bounded receipt for ROUTE/SCAN. It exposes the exact typed consensus
--- edges admitted by the same crawl used to build forward_frontier. The id-facing
--- form is the execution owner: callers that already paid prompt decomposition /
--- coherence pass those exact seeds instead of asking a nested helper to analyze
--- the same text again.
+-- edges admitted by the same crawl used to build the forward frontier. Resolved
+-- prompt ids are the operand: text decomposition/coherence belongs to the caller
+-- that owns the forward pass, not to a nested routing helper.
 CREATE OR REPLACE FUNCTION generation.forward_route_trace_ids(
         p_seeds bytea[],
         p_hops int DEFAULT 2,
@@ -21,47 +20,11 @@ FROM consensus.explore_web(
 ORDER BY w.hop, w.source_id, w.type_id, w.object_id;
 END;
 
--- Text-facing receipt compatibility. Analyze the prompt exactly once here, then
--- delegate the actual crawl to forward_route_trace_ids. ARRAY(subquery) is used
--- deliberately: no resolved seed becomes PostgreSQL's canonical empty bytea[];
--- consensus.explore_web owns that no-frontier/no-crawl case.
-CREATE OR REPLACE FUNCTION generation.forward_route_trace(
-        p_prompt text,
-        p_hops int DEFAULT 2,
-        p_fanout int DEFAULT 8,
-        p_max_nodes int DEFAULT NULL)
-    RETURNS TABLE(source_id bytea, type_id bytea, object_id bytea,
-                  hop smallint, rating bigint, rd bigint,
-                  witness_count bigint)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
-WITH resolved AS MATERIALIZED (
-    SELECT p.ord, p.id AS entity
-    FROM converse.prompt_state(p_prompt) p
-    WHERE p.id IS NOT NULL
-    UNION ALL
-    SELECT c.ord, c.synset_id
-    FROM converse.prompt_coherence(p_prompt) c
-    WHERE c.synset_id IS NOT NULL
-), seeds AS MATERIALIZED (
-    SELECT r.entity, min(r.ord) AS ord
-    FROM resolved r
-    GROUP BY r.entity
-), seed_array AS MATERIALIZED (
-    SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
-)
-SELECT w.source_id, w.type_id, w.object_id, w.hop,
-       w.rating, w.rd, w.witness_count
-FROM seed_array s
-CROSS JOIN LATERAL generation.forward_route_trace_ids(
-    s.ids, p_hops, p_fanout, p_max_nodes) w
-ORDER BY w.hop, w.source_id, w.type_id, w.object_id;
-END;
-
 -- ID-facing semantic frontier. The prompt's resolved constituents/senses are
 -- already an operand here, so ROUTE/SCAN is one consensus.explore_web traversal.
--- This function and forward_route_trace_ids share that exact crawl; no second
--- prompt parse/coherence election can drift the execution from its receipt.
+-- The seeds themselves stay at hop zero; every routed endpoint carries the hop
+-- reported by the same trace receipt above. A NULL node budget delegates exact
+-- capacity to consensus.explore_web rather than inventing a second cap.
 CREATE OR REPLACE FUNCTION generation.forward_frontier_ids(
         p_seeds bytea[],
         p_hops int DEFAULT 2,
@@ -89,43 +52,4 @@ SELECT n.entity, min(n.hop)::smallint AS hop
 FROM nodes n
 GROUP BY n.entity
 ORDER BY min(n.hop), n.entity;
-END;
-
--- generation.forward_frontier — text-facing routed semantic operand for the
--- dynamic trajectory forward pass.
---
--- Every resolved prompt constituent remains in the frontier. prompt_coherence
--- contributes that constituent's jointly elected witnessed sense; no rank-1
--- topic collapse is performed. This wrapper performs that analysis once and
--- hands the resulting ids to forward_frontier_ids. A NULL node budget delegates
--- capacity to consensus.explore_web, which derives the exact fanout tree from the
--- seed count/hops/fanout and rejects only actual PostgreSQL allocation overflow.
-CREATE OR REPLACE FUNCTION generation.forward_frontier(
-        p_prompt text,
-        p_hops int DEFAULT 2,
-        p_fanout int DEFAULT 8,
-        p_max_nodes int DEFAULT NULL)
-    RETURNS TABLE(entity bytea, hop smallint)
-    LANGUAGE sql STABLE
-BEGIN ATOMIC
-WITH resolved AS MATERIALIZED (
-    SELECT p.ord, p.id AS entity
-    FROM converse.prompt_state(p_prompt) p
-    WHERE p.id IS NOT NULL
-    UNION ALL
-    SELECT c.ord, c.synset_id
-    FROM converse.prompt_coherence(p_prompt) c
-    WHERE c.synset_id IS NOT NULL
-), seeds AS MATERIALIZED (
-    SELECT r.entity, min(r.ord) AS ord
-    FROM resolved r
-    GROUP BY r.entity
-), seed_array AS MATERIALIZED (
-    SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
-)
-SELECT f.entity, f.hop
-FROM seed_array s
-CROSS JOIN LATERAL generation.forward_frontier_ids(
-    s.ids, p_hops, p_fanout, p_max_nodes) f
-ORDER BY f.hop, f.entity;
 END;
