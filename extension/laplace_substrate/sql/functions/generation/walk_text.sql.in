@@ -1,21 +1,19 @@
 DROP FUNCTION IF EXISTS laplace.walk_text(text, int, int, float8, int, bigint);
+
+-- Canonical conversational forward program with an explicit realization language.
+-- The second argument is required and typed bytea, so this overload cannot make the
+-- installed `(text, integer, ...)` compatibility/default surface ambiguous.
 CREATE OR REPLACE FUNCTION generation.forward_text(
-        p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
+        p_prompt text, p_lang bytea,
+        p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
         p_seed bigint DEFAULT NULL, p_hops int DEFAULT 2,
         p_fanout int DEFAULT 8, p_prior_frontier bytea[] DEFAULT NULL)
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    -- One prompt analysis per forward pass. The old shape called prompt_state
-    -- here, then forward_frontier(text), which called prompt_state +
-    -- prompt_coherence and then forward_route_trace(text), which called both
-    -- again. On the seeded estate that means paying the same decomposition /
-    -- sense election repeatedly before S6 emits one constituent.
-    --
-    -- Keep the operands distinct: ctx is the ordered request trajectory S6
-    -- proposes from; seeds are the deduped prompt ids + witnessed senses used to
-    -- route S7's semantic frontier. No routed neighbor is appended to ctx.
+    -- One prompt analysis per forward pass.  WHAT to say stays in ids through S8;
+    -- HOW to say it is the final realize.batch under p_lang (spec 36 §3.1).
     WITH prompt_state AS MATERIALIZED (
         SELECT p.ord, p.id
         FROM converse.prompt_state(p_prompt) p
@@ -37,43 +35,84 @@ BEGIN ATOMIC
         GROUP BY r.entity
     ), seed_array AS MATERIALIZED (
         SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
+    ), frontier_raw AS MATERIALIZED (
+        SELECT f.entity, f.hop
+        FROM seed_array s
+        CROSS JOIN LATERAL generation.forward_frontier_ids(
+            s.ids, p_hops, p_fanout, NULL) f
+        UNION ALL
+        SELECT p.entity, 0::smallint
+        FROM unnest(COALESCE(p_prior_frontier, '{}'::bytea[])) p(entity)
+        WHERE p.entity IS NOT NULL
+    ), frontier_rows AS MATERIALIZED (
+        -- The same node may be both remembered context and a routed endpoint.  Its
+        -- minimum hop is the honest coordinate; hop zero is context, not a newly
+        -- proposed semantic continuation.
+        SELECT f.entity, min(f.hop)::smallint AS hop
+        FROM frontier_raw f
+        GROUP BY f.entity
     ), frontier AS MATERIALIZED (
-        SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
-        FROM (
-            SELECT f.entity, f.hop
-            FROM seed_array s
-            CROSS JOIN LATERAL generation.forward_frontier_ids(
-                s.ids, p_hops, p_fanout, NULL) f
-            UNION
-            SELECT p.entity, 0::smallint
-            FROM unnest(COALESCE(p_prior_frontier, '{}'::bytea[])) p(entity)
-            WHERE p.entity IS NOT NULL
-        ) x
+        SELECT array_agg(f.entity ORDER BY f.hop, f.entity) AS ids
+        FROM frontier_rows f
+    ), semantic_candidates AS MATERIALIZED (
+        -- S6's graph-evidence proposal channel: routed S4 concepts only.  No tier,
+        -- spelling, script, or rendered-surface predicate is involved.  The walker
+        -- unions these ids with ordered trajectory successors before S7.
+        SELECT array_agg(f.entity ORDER BY f.hop, f.entity) AS ids
+        FROM frontier_rows f
+        WHERE f.hop > 0
     ), walked AS MATERIALIZED (
         SELECT g.*
-        FROM ctx CROSS JOIN frontier,
+        FROM ctx
+        CROSS JOIN frontier
+        CROSS JOIN semantic_candidates,
              generation.forward_walk_continuations(
                  ctx.ids, p_steps, p_max_stride, p_spread, p_top_k,
                  COALESCE(
                      p_seed,
                      laplace.hash128_lo(public.laplace_hash128_blake3(
                          convert_to(p_prompt, 'UTF8')))),
-                 frontier.ids) g
+                 frontier.ids,
+                 semantic_candidates.ids) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,
                array_agg(sep_entity ORDER BY step) AS separators
         FROM walked
     ), txt AS MATERIALIZED (
-        SELECT realize.render_text_batch(entities) AS entities,
-               realize.render_text_batch(separators) AS separators
+        -- S9 REALIZE.  Picked ids may be concepts, words, sentences, or another
+        -- evidence-bearing tier.  render_text_batch is only correct for literal
+        -- content; realize.batch owns concept->surface selection under language.
+        SELECT realize.batch(COALESCE(entities, '{}'::bytea[]), p_lang) AS entities,
+               realize.render_text_batch(COALESCE(separators, '{}'::bytea[])) AS separators
         FROM ids
     )
     SELECT w.step,
            t.entities[rn] || COALESCE(t.separators[rn], ''),
            w.stride_used
     FROM (SELECT w.*, row_number() OVER (ORDER BY step) AS rn FROM walked w) w
-    CROSS JOIN txt t;
+    CROSS JOIN txt t
+    WHERE t.entities[rn] IS NOT NULL;
+END;
+
+-- Installed compatibility signature.  Preserve its OID/defaults for SQL, API and
+-- live-test callers, but delegate to the one program above.  In the absence of an
+-- explicit operator language, prompt evidence supplies the realization coordinate;
+-- no hardcoded language is selected here.
+CREATE OR REPLACE FUNCTION generation.forward_text(
+        p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
+        p_seed bigint DEFAULT NULL, p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 8, p_prior_frontier bytea[] DEFAULT NULL)
+    RETURNS TABLE(step int, entity text, stride_used int)
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT *
+    FROM generation.forward_text(
+        p_prompt,
+        converse.prompt_language_top(p_prompt),
+        p_steps, p_max_stride, p_spread, p_top_k,
+        p_seed, p_hops, p_fanout, p_prior_frontier);
 END;
 
 -- Compatibility surface: preserve the installed `p_breadth` name for named
@@ -91,8 +130,8 @@ BEGIN ATOMIC
 END;
 
 -- Upgrade retirement. These text routing surfaces had no callers outside the
--- recursive chain removed above. They must be dropped only AFTER forward_text is
--- rebound to forward_frontier_ids: BEGIN ATOMIC records pg_depend, so dropping
+-- recursive chain removed above. They must be dropped only AFTER the installed
+-- forward_text signature is rebound: BEGIN ATOMIC records pg_depend, so dropping
 -- them earlier would make an in-place extension upgrade fail under RESTRICT.
 DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);
 DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);
