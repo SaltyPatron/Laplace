@@ -1,4 +1,13 @@
 @layer components {
+  .graphBody {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    gap: 0.35rem;
+  }
+
   .actions {
     display: flex;
     flex-wrap: wrap;
@@ -6,8 +15,80 @@
     align-items: center;
   }
 
+  .settings {
+    position: relative;
+  }
+
+  .settingsSummary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2rem;
+    padding: 0.28rem 0.58rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-panel-2);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    list-style: none;
+    user-select: none;
+  }
+
+  .settingsSummary::-webkit-details-marker {
+    display: none;
+  }
+
+  .settingsSummary::before {
+    content: '▸';
+    color: var(--color-accent);
+    transition: transform var(--duration-fast) var(--ease-standard);
+  }
+
+  .settings[open] .settingsSummary::before {
+    transform: rotate(90deg);
+  }
+
+  .settingsSummary:hover {
+    color: var(--color-text-primary);
+    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border-default));
+  }
+
+  .settingsBody {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 0.4rem);
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(8rem, 1fr));
+    gap: 0.65rem 1rem;
+    min-width: min(32rem, 80vw);
+    padding: 0.8rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-panel);
+    box-shadow: var(--shadow-instrument);
+  }
+
   .note {
     flex: 0 0 auto;
     margin-top: 0.25rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .settings {
+    width: 100%;
+  }
+
+  .settingsSummary {
+    width: 100%;
+  }
+
+  .settingsBody {
+    position: static;
+    grid-template-columns: 1fr;
+    min-width: 0;
+    margin-top: 0.4rem;
   }
 }

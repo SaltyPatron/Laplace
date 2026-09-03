@@ -57,18 +57,21 @@ export function ExploreView() {
   return (
     <div className={styles.layout}>
       <aside className={styles.sidebar}>
-        <nav className={styles.nav}>
-          {navItems.map(([label, to]) => (
-            <NavLink
-              key={to}
-              className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
-              to={to}
-              end={to === '/explore' || to === '/explore/warehouse'}
-            >
-              {label}
-            </NavLink>
-          ))}
-        </nav>
+        <details className={styles.navDisclosure} open>
+          <summary className={styles.navSummary}>Explore tools</summary>
+          <nav className={styles.nav} aria-label="Explore tools">
+            {navItems.map(([label, to]) => (
+              <NavLink
+                key={to}
+                className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
+                to={to}
+                end={to === '/explore' || to === '/explore/warehouse'}
+              >
+                {label}
+              </NavLink>
+            ))}
+          </nav>
+        </details>
       </aside>
       <div className={styles.content}>
         <ExploreBreadcrumb />

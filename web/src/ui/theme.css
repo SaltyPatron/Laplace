@@ -38,6 +38,8 @@
     --color-bg-abyss: var(--primitive-neutral-950);
     --color-bg-top: #f8fafb;
     --color-viz-bg: #e4edf2;
+    --color-viz-label: #16384c;
+    --color-viz-label-bg: rgb(244 248 250 / 82%);
     --color-navy: #0a2638;
     --color-navy-raised: #10344a;
     --color-navy-muted: #a9bdc9;
@@ -142,6 +144,8 @@
 
       --color-bg-top: #123247;
       --color-viz-bg: #173b50;
+      --color-viz-label: #e4f0f5;
+      --color-viz-label-bg: rgb(10 38 56 / 78%);
       --color-navy: #102d40;
       --color-navy-raised: #1a4258;
       --color-navy-muted: #b3cad5;

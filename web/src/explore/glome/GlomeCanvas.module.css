@@ -9,13 +9,14 @@
 
   .rootFill {
     flex: 1 1 auto;
-    height: 100%;
+    height: auto;
+    min-height: 0;
   }
 
   .canvas {
     width: 100%;
-    min-height: min(50vh, 28rem);
-    height: min(70vh, 40rem);
+    min-height: 28rem;
+    height: 72dvh;
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     overflow: hidden;
@@ -24,8 +25,8 @@
 
   .canvasFill {
     flex: 1 1 auto;
-    min-height: 12rem;
-    height: auto;
+    min-height: max(28rem, 62dvh);
+    height: 100%;
   }
 
   .empty,
@@ -74,5 +75,18 @@
   .rotationControl output {
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (max-width: 700px) {
+  .canvas,
+  .canvasFill {
+    min-height: 22rem;
+    height: 60dvh;
+  }
+
+  .rotationControl {
+    grid-template-columns: 5.5rem minmax(6rem, 1fr) 3.25rem;
+    gap: 0.45rem;
   }
 }

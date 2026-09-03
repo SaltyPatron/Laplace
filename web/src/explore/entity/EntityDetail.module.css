@@ -23,8 +23,15 @@
   .header {
     display: flex;
     justify-content: space-between;
+    align-items: flex-start;
     gap: var(--space-5);
     flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .titleBlock {
+    flex: 1 1 28rem;
+    min-width: 0;
   }
 
   .titleBlock h2 {
@@ -41,7 +48,9 @@
     display: flex;
     gap: var(--space-3);
     align-items: center;
+    justify-content: flex-end;
     flex-wrap: wrap;
+    margin-left: auto;
   }
 
   .previewFacts {
@@ -69,5 +78,17 @@
 
   .sectionTitle:first-child {
     margin-top: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .titleBlock,
+  .actions {
+    flex-basis: 100%;
+  }
+
+  .actions {
+    justify-content: flex-start;
+    margin-left: 0;
   }
 }

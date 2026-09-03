@@ -38,15 +38,20 @@ public sealed class GlomeProjectionThemeGateTests
         var theme = Read("web", "src", "ui", "theme.css");
         var canvasCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
         var tabCss = Read("web", "src", "explore", "entity", "tabs", "GlomeTab.module.css");
+        var graphCss = Read("web", "src", "explore", "graph", "ConsensusGraph.module.css");
 
         Assert.Contains("@media (prefers-color-scheme: dark)", theme, StringComparison.Ordinal);
         Assert.Contains("--color-viz-bg: #e4edf2", theme, StringComparison.Ordinal);
         Assert.Contains("--color-viz-bg: #173b50", theme, StringComparison.Ordinal);
+        Assert.Contains("--color-viz-label: #16384c", theme, StringComparison.Ordinal);
+        Assert.Contains("--color-viz-label: #e4f0f5", theme, StringComparison.Ordinal);
         Assert.Contains("linear-gradient(180deg, var(--color-bg-top)", theme, StringComparison.Ordinal);
         Assert.Contains("background: var(--color-viz-bg)", canvasCss, StringComparison.Ordinal);
         Assert.Contains("background: var(--color-viz-bg)", tabCss, StringComparison.Ordinal);
+        Assert.Contains("background: var(--color-viz-bg)", graphCss, StringComparison.Ordinal);
         Assert.DoesNotContain("#05070c", canvasCss, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("#05070c", tabCss, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("background: #0b1220", graphCss, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -58,5 +63,45 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.DoesNotContain("placementBallPos", tab, StringComparison.Ordinal);
         Assert.DoesNotContain("placementTrajectory", tab, StringComparison.Ordinal);
         Assert.DoesNotContain("trajectoryPoints={placementTrajectory", tab, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExploreWorkbench_UsesViewportSpace_Disclosures_AndDistinctButtonStates()
+    {
+        var explore = Read("web", "src", "explore", "ExploreView.tsx");
+        var exploreCss = Read("web", "src", "explore", "ExploreView.module.css");
+        var graphTab = Read("web", "src", "explore", "entity", "tabs", "GraphTab.tsx");
+        var graphTabCss = Read("web", "src", "explore", "entity", "tabs", "GraphTab.module.css");
+        var graphCss = Read("web", "src", "explore", "graph", "ConsensusGraph.module.css");
+        var glomeCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
+        var buttons = Read("web", "src", "ui", "primitives", "Button", "Button.module.css");
+
+        Assert.Contains("<details className={styles.navDisclosure} open>", explore, StringComparison.Ordinal);
+        Assert.Contains("<summary className={styles.navSummary}>Explore tools</summary>", explore, StringComparison.Ordinal);
+        Assert.Contains("<div className={styles.graphBody}>", graphTab, StringComparison.Ordinal);
+        Assert.Contains("<details className={styles.settings}>", graphTab, StringComparison.Ordinal);
+        Assert.Contains("Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes", graphTab, StringComparison.Ordinal);
+        Assert.Contains(".graphBody", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains("flex: 1 1 auto;", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains(".note", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains("flex: 0 0 auto;", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains("position: absolute;", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains(".settings[open] .settingsSummary::before", graphTabCss, StringComparison.Ordinal);
+
+        Assert.Contains("width: 100%;", exploreCss, StringComparison.Ordinal);
+        Assert.Contains("max-width: none;", exploreCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("width: min(100%, 1600px)", exploreCss, StringComparison.Ordinal);
+
+        Assert.Contains("height: 72dvh;", graphCss, StringComparison.Ordinal);
+        Assert.Contains("min-height: max(28rem, 62dvh);", graphCss, StringComparison.Ordinal);
+        Assert.Contains("height: 72dvh;", glomeCss, StringComparison.Ordinal);
+        Assert.Contains("min-height: max(28rem, 62dvh);", glomeCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("height: min(70vh, 40rem)", graphCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("height: min(70vh, 40rem)", glomeCss, StringComparison.Ordinal);
+
+        Assert.Contains(".button:link", buttons, StringComparison.Ordinal);
+        Assert.Contains(".button:visited", buttons, StringComparison.Ordinal);
+        Assert.Contains("opacity: 1;", buttons, StringComparison.Ordinal);
+        Assert.Contains("background: var(--color-bg-panel-2);", buttons, StringComparison.Ordinal);
     }
 }
