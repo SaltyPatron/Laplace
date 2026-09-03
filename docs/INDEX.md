@@ -2,8 +2,9 @@
 
 ## Invention and implementation
 
-- [INVENTION.md](INVENTION.md) — derivation of the intended invention.
-- [INVENTIONS.md](INVENTIONS.md) — mechanism catalog.
+- [INVENTION.md](INVENTION.md) — derivation of the intended invention; read with the 2026-09-02 preservation correction below where older compressed wording conflicts with later-established trajectory/model/state-separation law.
+- [INVENTION_PRESERVATION_2026-09-02.md](INVENTION_PRESERVATION_2026-09-02.md) — current reconciliation of exact reusable subtrajectories, identity-versus-realization, model circuit/role preservation, deterministic execution trajectories, information-shaped materialization, scoped target construction, and state separation; explicitly corrects stale reductions in `INVENTION.md` without claiming implementation completeness.
+- [INVENTIONS.md](INVENTIONS.md) — mechanism catalog, including the cross-domain preservation laws.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — description of the current source tree, with code citations.
 - [INVENTORY.md](INVENTORY.md) — source-generated counts and file listings.
 - [plan/EXECUTION_TO_FINISH.md](plan/EXECUTION_TO_FINISH.md) — current forward-only implementation order from source estate through native execution, reseed, product navigation, cognition, and domain acceptance.

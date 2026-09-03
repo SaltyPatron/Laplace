@@ -140,6 +140,60 @@ belongs in GitHub; full annotated history is preserved in
 56. **MCP citizenship.** Agents read, witness, give feedback, ingest under governance,
     inspect traces, and invoke the same canonical product program.
 
+## Cross-domain preservation laws
+
+57. **Exact reusable subtrajectory identity.** Repeated ordered subpaths are canonical
+    reusable content under their trajectory recipe, not merely matching endpoints. A
+    chess segment, AST subtree, media/time-series subpath, circuit factor walk, or
+    cognition subprogram may be folded into larger trajectories and expanded losslessly
+    while each containing occurrence/path remains independently attributable.
+58. **Identity-versus-realization separation.** SAN/PGN/FEN, human labels, aliases,
+    languages, codec fields, source paths, and model tensor names are contextual
+    realizations/references. They never own canonical content identity; typed structure
+    plus context may realize a human representation at the read edge.
+59. **Composition/trajectory/occurrence symmetry.** Text, chess, models, code, and other
+    modalities instantiate the same recursive pattern: atom → composition → higher
+    composition → trajectory/reusable structure → witnessed occurrence. Domain grammar
+    changes the typed ladder, not the underlying machine law.
+60. **Consumer-role model anatomy.** Q/K/V/O, embeddings, FFN Gate/Up/Down, MoE/MLA
+    roles, norms, heads, experts and similar checkpoint structures are witnessed
+    conventional-architecture roles and optional target roles; they are not the native
+    ontology of Laplace cognition.
+61. **Deterministic execution trajectory.** A conventional model forward pass, chess
+    calculation, tablebase probe, code execution, or other deterministic provider run is
+    an exact/declared transformation trajectory under its complete input, generation,
+    numeric/precision, implementation and recipe boundary. A result-changing omitted
+    coordinate belongs in that boundary.
+62. **Information-shaped materialization.** Store irreducible admitted information once,
+    reuse canonical compositions, derive deterministic views, and materialize only
+    measured rebuildable accelerations or required consumer artifacts. Occurrence volume
+    and pair-query combinatorics do not justify duplicate canonical content or eager V² /
+    world-all-pairs persistence.
+63. **Navigable entity world.** Canonical content, occurrences, provenance, calculations,
+    testimony and realizations are addressable so product actions can navigate among
+    them through common semantic operations. Opening a historical chess playing at a
+    matched exact segment is one instance of the same law used to recenter a document,
+    person, model circuit, code artifact or prior receipt; UI state does not own the
+    semantics.
+64. **Whole-prompt-root cognition and source/participant separation.** A prompt is first
+    one exact canonical observation/trunk. UAX/grammar structure supports descent and
+    rise but does not privilege a noun, topic, token, punctuation class or English regex
+    as the interpretation root. All `UserPrompt` observations share one seeded
+    source-type prior while individual users/witnesses retain separately earned typed
+    standing, history, preferences and habits. Constituents do not inherit source trust.
+65. **Structural geometry/semantic-web orthogonality.** S³ coordinates, trajectory
+    geometry, Hilbert locality, angular/curve calculations and related indexes describe
+    or nominate structural state. Typed semantic relations, testimony, deterministic
+    calculations, dependence and standing remain distinct; geometry cannot become
+    meaning merely because it is measurable or indexable.
+66. **Falsifiable operator-generation law.** Sparse intersections/dot products,
+    incidence/transport, Laplacian/spectral methods, Lanczos, QR/Gram-Schmidt, SVD,
+    Procrustes, geometric metrics, Glicko-2, A*/best-first and other named mathematics
+    apply only through explicit typed contracts naming their input state, assumptions,
+    scope/evidence roots, direction/roles, algebra/numeric boundary, resources, output,
+    loss/approximation, provenance/receipt and deliberate counterexamples. Target-neutral
+    operators are derived first; consumer Q/K/V/O/FFN/etc. materialization comes second.
+
 ## Product identity
 
 Laplace replaces opaque probabilistic runtime authority with content-addressed identity,
