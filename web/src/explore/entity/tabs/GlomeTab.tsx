@@ -5,7 +5,6 @@ import {
   GlomeCanvas,
   ordinalColor,
   packedDisplayPos,
-  placementBallPos,
   physicalitiesToNodes,
   type GlomeNode,
 } from '../../glome/GlomeCanvas';
@@ -124,14 +123,6 @@ export function GlomeTab({
     return [...placementPrimary, ...placementConstituents, ...extras];
   }, [placementPrimary, placementConstituents, glomeExtraNodes, neighborMode, neighborsUnlocked]);
 
-  const placementTrajectory = useMemo(
-    () => placementConstituents
-      .slice()
-      .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-      .map((n) => placementBallPos(n)),
-    [placementConstituents],
-  );
-
   const selectedChip = useMemo(() => {
     if (selectedOrdinal == null) return null;
     const r = realized.find((v) => v.ordinal === selectedOrdinal);
@@ -195,7 +186,6 @@ export function GlomeTab({
             ) : (
               <GlomeCanvas
                 nodes={placementNodes}
-                trajectoryPoints={placementTrajectory.length > 1 ? placementTrajectory : undefined}
                 projection="placement"
                 highlightIds={walkHighlight}
                 highlightOrdinal={selectedOrdinal}
