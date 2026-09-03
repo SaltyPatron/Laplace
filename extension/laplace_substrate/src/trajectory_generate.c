@@ -2,57 +2,62 @@
  * trajectory_generate.c — walk_continuations: the S6→S7→S8 emission loop
  * (docs/specs/36 §3), corpus-free.
  *
- * S6 PROPOSE  generation.trajectory_continuations($tail, NULL): the complete k-context successor
- *             read straight off physicalities.trajectory (GIN containment +
- *             ordinal window), with trigram→…→unigram backoff over max_stride.
- *             The trajectory IS the ordered sequence (§9); the per-backend
- *             GenCorpus rebuild of it — 97,111,658 rows streamed into a RAM
- *             suffix array on FIRST CALL of every connection, measured 46
- *             minutes before generate('The king', 40) could emit a token — is
- *             deleted, not optimized. §7 requires cost bounded by the path,
- *             not the corpus, and a whole-corpus build cannot satisfy that at
- *             any size.
+ * S6 PROPOSE  TWO evidence channels, both still in id space:
  *
- * S7 STEER    generation.steer_candidates($cands, $frontier): re-rank by rated consensus
- *             mass reaching the LIVE frontier — the prompt's routed token/sense
- *             web PLUS the last
- *             max_order emitted constituents, so the frontier is where the walk has
- *             ARRIVED and not where it started (docs/specs/36 §3; GH #921 acceptance
- *             "each emitted unit updates the active frontier before the next election").
+ *             (a) generation.trajectory_continuations($tail, NULL): the complete
+ *             k-context successor read straight off physicalities.trajectory (GIN
+ *             containment + ordinal window), with trigram→…→unigram backoff over
+ *             max_stride. The trajectory IS ordered sequence evidence (§9).
+ *
+ *             (b) the caller's routed S4 semantic concepts (p_semantic_candidates).
+ *             A concept does not need to have occurred as the next surface in a
+ *             corpus trajectory to be eligible for the forward pass. A semantic-only
+ *             candidate enters with neutral sequence weight 1; S7's witnessed graph
+ *             mass decides whether it survives. This is the "next CONCEPT candidates
+ *             at whatever tier carries the evidence" contract from spec 36 §3.
+ *
+ *             The per-backend GenCorpus rebuild of trajectory evidence — 97,111,658
+ *             rows streamed into a RAM suffix array on FIRST CALL of every connection,
+ *             measured 46 minutes before generate('The king', 40) could emit a token —
+ *             is deleted, not optimized. §7 requires cost bounded by the path, not
+ *             the corpus, and a whole-corpus build cannot satisfy that at any size.
+ *
+ * S7 STEER    generation.steer_candidates($cands, $frontier): re-rank the UNION of
+ *             S6 proposal channels by rated consensus mass reaching the LIVE frontier
+ *             — the prompt's routed token/sense web PLUS the last max_order emitted
+ *             constituents. The frontier is therefore where the walk has ARRIVED,
+ *             not where it started (docs/specs/36 §3; GH #921 acceptance "each
+ *             emitted unit updates the active frontier before the next election").
  *             steer_candidates.c's own header rejects "a weight fixed BEFORE the walk
- *             begins" as a prior rather than steering; holding the frontier at the
- *             prompt made that true of its only caller
- *             ids, re-scored per emitted token. Scored by walk_score.h, the
- *             same kernel walk_branches retrieves with, so proposing and
- *             steering cannot disagree about what an edge is worth.
+ *             begins" as a prior rather than steering. Scored by walk_score.h, the
+ *             same kernel walk_branches retrieves with, so proposing and steering
+ *             cannot disagree about what an edge is worth.
  *
- *             The combination is signed and multiplicative, matching the
- *             walk's existing semantics (rank × edge_weight precedent, and
- *             walk_branches' "non-positive score must dead-end, not walk"):
- *               edges > 0, steer > 0  → sequence weight × steer
- *               edges = 0             → sequence weight × 1 only when S7 has
+ *             The combination is signed and multiplicative, matching the walk's
+ *             existing semantics (rank × edge_weight precedent, and walk_branches'
+ *             "non-positive score must dead-end, not walk"):
+ *               edges > 0, steer > 0  → proposal weight × steer
+ *               edges = 0             → proposal weight × 1 only when S7 has
  *                                       no positively witnessed proposal;
  *                                       UNATTESTED is fallback, not refutation
  *               edges > 0, steer ≤ 0 → excluded (adjudicated against the
  *                                       frontier: refuted edges dead-end)
  *
  *             This ordering matters once the trajectory estate is large. If a
- *             witnessed-positive candidate exists, allowing an unattested but
- *             very frequent unigram continuation to compete at ×1 makes S6
- *             frequency erase S7 meaning. If no positive S7 signal exists, the
- *             unattested sequence pool remains available exactly as before.
+ *             witnessed-positive candidate exists, allowing an unattested but very
+ *             frequent unigram continuation to compete at ×1 makes S6 frequency
+ *             erase S7 meaning. If no positive S7 signal exists, the unattested
+ *             sequence pool remains available exactly as before.
  *
  * S8 SAMPLE   After steering the complete proposal set, a Gumbel draw over the
- *             top-k surviving candidates at the caller's
- *             spread. (Spec S8 names RD-as-temperature; RD already shapes the
- *             steer term through exp(−κ·rd) inside walk_edge_weight, so the
- *             caller's spread composes with it rather than replacing it.
- *             Making RD the SOLE temperature is a candidate follow-up, not
- *             smuggled in here.)
+ *             top-k surviving candidates at the caller's spread. (Spec S8 names
+ *             RD-as-temperature; RD already shapes the steer term through
+ *             exp(−κ·rd) inside walk_edge_weight, so the caller's spread composes
+ *             with it rather than replacing it. Making RD the SOLE temperature is
+ *             a candidate follow-up, not smuggled in here.)
  *
- * FLOOR       walk_completes_floor (consensus COMPLETES_TO) when the sequence
- *             well is dry — unchanged from the corpus era; it was always a
- *             substrate read.
+ * FLOOR       walk_completes_floor (consensus COMPLETES_TO) only when BOTH S6
+ *             channels are dry — unchanged as the final substrate fallback.
  *
  * All ids stay bytea end to end. The vocab intern table died with the corpus:
  * interning existed to map ids into the suffix array's int32 space, and there
@@ -82,12 +87,12 @@ PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 
 typedef struct Cand
 {
-    Datum  obj;        /* bytea(16), caller-context copy */
-    Datum  sep;        /* bytea(16) or (Datum) 0         */
-    int64  weight;     /* S6 sequence count              */
-    double steer;      /* S7 signed consensus mass       */
-    int64  edges;      /* S7 edge count; 0 = unattested  */
-    double eff;        /* combined sampling weight       */
+    Datum  obj;        /* bytea(16), caller-context copy                   */
+    Datum  sep;        /* bytea(16) or (Datum) 0                          */
+    int64  weight;     /* sequence count; 1 = neutral semantic-only prior */
+    double steer;      /* S7 signed consensus mass                        */
+    int64  edges;      /* S7 edge count; 0 = unattested                   */
+    double eff;        /* combined sampling weight                        */
 } Cand;
 
 typedef struct CandIndex
@@ -171,7 +176,7 @@ rng_uniform(uint64 *state)
     return ((double) (splitmix64(state) >> 11) + 0.5) * (1.0 / 9007199254740992.0);
 }
 
-/* Copy a 16-byte bytea datum out of SPI_tuptable into the caller's context. */
+/* Copy a 16-byte bytea datum out of SPI_tuptable/input arrays into the walk context. */
 static Datum
 copy_id_datum(Datum d)
 {
@@ -238,13 +243,13 @@ Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    ArrayType *ctx_arr, *front_arr;
+    ArrayType *ctx_arr, *front_arr, *semantic_arr = NULL;
     int32      steps, max_order, topk;
     float8     temp;
     uint64     rng;
-    Datum     *elems, *front_elems;
-    bool      *nulls, *front_nulls;
-    int        n_in, n_front_in;
+    Datum     *elems, *front_elems, *semantic_elems = NULL;
+    bool      *nulls, *front_nulls, *semantic_nulls = NULL;
+    int        n_in, n_front_in, n_semantic_in = 0;
     Datum     *ctx;
     int        ctx_len = 0, ctx_cap;
     Datum     *frontier;
@@ -288,7 +293,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     /* The ordered proposal context and the semantic frontier are different
      * operands. Appending routed neighbours to ctx would make them a fake
      * trajectory suffix. A caller that omits p_frontier retains the historical
-     * prompt-only behaviour. */
+     * prompt-only steering behaviour. */
     if (PG_NARGS() > 6 && !PG_ARGISNULL(6))
         front_arr = PG_GETARG_ARRAYTYPE_P(6);
     else
@@ -297,6 +302,25 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("walk_continuations: frontier must be a 1-D bytea array")));
     deconstruct_array(front_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &front_elems, &front_nulls, &n_front_in);
+
+    /* Optional eighth operand: routed S4 concepts admitted by S6 independently
+     * of sequence occurrence. NULL/empty means the legacy sequence-only proposal
+     * channel. It is deliberately an id array: no rendered-text classifier exists
+     * in this loop. */
+    if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
+    {
+        semantic_arr = PG_GETARG_ARRAYTYPE_P(7);
+        if (ARR_NDIM(semantic_arr) == 0)
+            n_semantic_in = 0;
+        else
+        {
+            if (ARR_NDIM(semantic_arr) != 1 || ARR_ELEMTYPE(semantic_arr) != BYTEAOID)
+                ereport(ERROR,
+                        (errmsg("walk_continuations: semantic candidates must be a 1-D bytea array")));
+            deconstruct_array(semantic_arr, BYTEAOID, -1, false, TYPALIGN_INT,
+                              &semantic_elems, &semantic_nulls, &n_semantic_in);
+        }
+    }
 
     if ((uint64) n_in + (uint64) steps > (uint64) INT_MAX ||
         (uint64) n_in + (uint64) steps >
@@ -324,7 +348,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         b = DatumGetByteaPP(elems[i]);
         if (VARSIZE_ANY_EXHDR(b) != 16)
             ereport(ERROR, (errmsg("walk_continuations: context ids must be 16 bytes")));
-        ctx[ctx_len++]           = copy_id_datum(elems[i]);
+        ctx[ctx_len++] = copy_id_datum(elems[i]);
     }
     for (int i = 0; i < n_front_in; i++)
     {
@@ -360,7 +384,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
         CHECK_FOR_INTERRUPTS();
 
-        /* ---- S6 PROPOSE: k-context backoff over the trajectories ---- */
+        /* ---- S6 PROPOSE A: k-context backoff over ordered trajectories ---- */
         for (int k = (ctx_len < max_order ? ctx_len : max_order); k >= 1; k--)
         {
             ArrayType *tail;
@@ -416,7 +440,72 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             }
         }
 
-        /* ---- FLOOR: consensus COMPLETES_TO when sequence is dry ---- */
+        /* ---- S6 PROPOSE B: routed semantic concepts from S4 ----
+         *
+         * These candidates are not required to have been observed as the next
+         * literal surface in a trajectory. They enter with neutral sequence prior
+         * 1 and must earn their place through S7. Dedupe is by canonical id against
+         * the trajectory proposal set; if both channels propose the same id, the
+         * measured sequence count is preserved. */
+        if (n_semantic_in > 0)
+        {
+            HASHCTL ctl;
+            HTAB   *seen;
+
+            memset(&ctl, 0, sizeof(ctl));
+            ctl.keysize = 16;
+            ctl.entrysize = sizeof(CandIndex);
+            ctl.hcxt = walk_cxt;
+            seen = hash_create("walk S6 proposal union",
+                               Max(32, n_cand + n_semantic_in),
+                               &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+            for (int i = 0; i < n_cand; i++)
+            {
+                CandIndex *entry;
+                bool       found;
+                bytea     *object = DatumGetByteaPP(cand[i].obj);
+
+                entry = (CandIndex *) hash_search(seen, VARDATA_ANY(object),
+                                                   HASH_ENTER, &found);
+                if (!found)
+                    entry->index = i;
+            }
+
+            for (int i = 0; i < n_semantic_in; i++)
+            {
+                bytea     *object;
+                CandIndex *entry;
+                bool       found;
+
+                if (semantic_nulls[i])
+                    continue;
+                object = DatumGetByteaPP(semantic_elems[i]);
+                if (VARSIZE_ANY_EXHDR(object) != 16)
+                    ereport(ERROR,
+                            (errmsg("walk_continuations: semantic candidate ids must be 16 bytes")));
+
+                entry = (CandIndex *) hash_search(seen, VARDATA_ANY(object),
+                                                   HASH_ENTER, &found);
+                if (found)
+                    continue;
+
+                ensure_candidate_capacity(
+                    &cand, &cand_capacity, (uint64) n_cand + 1, walk_cxt);
+                old = MemoryContextSwitchTo(walk_cxt);
+                cand[n_cand].obj = copy_id_datum(semantic_elems[i]);
+                MemoryContextSwitchTo(old);
+                cand[n_cand].sep = (Datum) 0;
+                cand[n_cand].weight = 1;
+                cand[n_cand].steer = 0.0;
+                cand[n_cand].edges = 0;
+                entry->index = n_cand;
+                n_cand++;
+            }
+            hash_destroy(seen);
+        }
+
+        /* ---- FLOOR: COMPLETES_TO only when both S6 proposal channels are dry ---- */
         if (n_cand == 0)
         {
             Datum args[2];
@@ -440,12 +529,12 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 if (obj_null || w_null)
                     continue;
                 old = MemoryContextSwitchTo(walk_cxt);
-                cand[n_cand].obj    = copy_id_datum(od);
+                cand[n_cand].obj = copy_id_datum(od);
                 MemoryContextSwitchTo(old);
-                cand[n_cand].sep    = (Datum) 0;
+                cand[n_cand].sep = (Datum) 0;
                 cand[n_cand].weight = DatumGetInt64(wd);
-                cand[n_cand].steer  = 0.0;
-                cand[n_cand].edges  = 0;
+                cand[n_cand].steer = 0.0;
+                cand[n_cand].edges = 0;
                 n_cand++;
             }
             if (SPI_tuptable != NULL)
@@ -455,7 +544,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         if (n_cand == 0)
             break;
 
-        /* ---- S7 STEER: re-rank by the live frontier ---- */
+        /* ---- S7 STEER: re-rank the complete S6 union by the live frontier ---- */
         {
             Datum     *objs;
             ArrayType *cand_a, *front_a;
@@ -530,12 +619,14 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         /*
          * Combine, signed, in two semantic pools. Refuted-toward-frontier
          * candidates are always excluded. If S7 positively witnesses at least
-         * one proposal, unattested sequence-only proposals wait behind that
-         * witnessed pool instead of competing with raw ×1 frequency. If S7 has
-         * no positive signal at all, unattested proposals remain the fallback.
+         * one proposal, unattested proposals wait behind that witnessed pool
+         * instead of competing with raw ×1 frequency. If S7 has no positive
+         * signal at all, unattested sequence proposals remain the fallback.
          *
-         * This keeps "no opinion" distinct from refutation without letting a
-         * high-frequency unigram erase meaning when meaning is actually present.
+         * A routed semantic proposal starts with weight 1, so it cannot win by
+         * invented frequency; it wins only by positive S7 evidence. This keeps
+         * "no opinion" distinct from refutation without making sequence the only
+         * admission gate for meaning.
          */
         {
             int  m = 0;
