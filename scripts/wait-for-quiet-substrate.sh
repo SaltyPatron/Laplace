@@ -28,6 +28,14 @@
 # grace covers the instant between the journal INSERT and the lock acquisition), is
 # closed here as 'cancelled' and deploys stop being hostage to ghosts.
 #
+# BOOTSTRAP BOUNDARY. A reachable database can legitimately exist before the Laplace
+# schema has been created (fresh-db nuke -> empty database -> install -> migrate). In
+# that state laplace.ingest_run_journal does not exist, and a journal query failing
+# with 42P01 is not evidence of a busy substrate. Probe the exact journal relation with
+# to_regclass first. A successful NULL result proves PostgreSQL answered and that the
+# ingest registration surface is absent, so no registered ingest can be in flight.
+# Other probe failures still fail closed.
+#
 # It is also the only lock that works with more than one runner: GitHub concurrency
 # groups cannot express "many ingests, one bouncer", and serialising ingest against
 # ingest to fake it would freeze a single box's capacity into the pipeline.
@@ -57,17 +65,40 @@ HELD="EXISTS (SELECT 1 FROM pg_locks l
          AND l.objid::bigint = (hashtext(j.run_id::text)::bigint & 4294967295))"
 
 while :; do
+  # Prove the exact registration surface exists before querying it. This is distinct
+  # from accepting a generic "relation does not exist" error: only a SUCCESSFUL
+  # to_regclass(NULL) result on this exact relation means the server is reachable and
+  # the database is still pre-schema. That is a legitimate quiet bootstrap state.
+  journal_rc=0
+  journal_state=$("${PSQL[@]}" -tAc \
+      "SELECT CASE WHEN to_regclass('laplace.ingest_run_journal') IS NULL THEN 'missing' ELSE 'present' END;" \
+      2>&1) || journal_rc=$?
+
+  if [ "$journal_rc" -eq 0 ] && [ "$journal_state" = "missing" ]; then
+    echo "substrate quiet — reachable database has no laplace.ingest_run_journal yet (pre-schema bootstrap), so no registered ingest can be in flight"
+    exit 0
+  fi
+
   # FAIL CLOSED. The previous form was `n=$(psql ... 2>/dev/null || echo 0)`, which
   # collapsed "the database says zero" and "the probe did not run" into the same
   # answer -- so an unreachable host, a bad PGUSER, a missing laplace schema or an
   # exhausted connection cap all reported QUIET and let the caller bounce PostgreSQL
   # over a live ingest. That is the one failure this script exists to prevent, and it
-  # was the only one it could not see. Quiet must now be PROVEN: rc 0 and two numeric
-  # counts. Anything else is busy, and the wait budget still bounds the loop.
-  rc=0
-  n=$("${PSQL[@]}" -tAc \
-      "SELECT count(*) FILTER (WHERE ${HELD}) || ' ' || count(*) FILTER (WHERE NOT ${HELD})
-       FROM laplace.ingest_run_journal j WHERE j.status = 'running';" 2>&1) || rc=$?
+  # was the only one it could not see. Quiet must now be PROVEN: the exact journal
+  # relation exists, rc 0, and two numeric counts. Anything else is busy, and the wait
+  # budget still bounds the loop.
+  if [ "$journal_rc" -ne 0 ]; then
+    rc=$journal_rc
+    n=$journal_state
+  elif [ "$journal_state" != "present" ]; then
+    rc=1
+    n="unexpected ingest-journal probe response: $journal_state"
+  else
+    rc=0
+    n=$("${PSQL[@]}" -tAc \
+        "SELECT count(*) FILTER (WHERE ${HELD}) || ' ' || count(*) FILTER (WHERE NOT ${HELD})
+         FROM laplace.ingest_run_journal j WHERE j.status = 'running';" 2>&1) || rc=$?
+  fi
 
   if [ "$rc" -eq 0 ] && [[ "$n" =~ ^[0-9]+\ [0-9]+$ ]]; then
     live="${n% *}"
