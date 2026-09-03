@@ -4,7 +4,7 @@ import { Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ExplorePhysicalityRow } from '../types';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
-import { lerpColor, visualizationPalette } from '../visualizationPalette';
+import { lerpColor, visualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './GlomeCanvas.module.css';
 
 export type GlomeProjection = 'packed' | 'placement';
@@ -211,9 +211,12 @@ export function physicalitiesToNodes(
 }
 
 /** Ordinal → the shared steel→signal visualization ramp for Packed paint. */
-export function ordinalColor(ordinal: number, maxOrdinal: number): string {
+export function ordinalColor(
+  ordinal: number,
+  maxOrdinal: number,
+  palette: VisualizationPalette = visualizationPalette(),
+): string {
   const t = maxOrdinal <= 1 ? 0 : (ordinal - 1) / (maxOrdinal - 1);
-  const palette = visualizationPalette();
   return lerpColor(palette.steel, palette.signal, t);
 }
 
