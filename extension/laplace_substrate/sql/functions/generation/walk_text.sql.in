@@ -7,14 +7,43 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    WITH ctx AS MATERIALIZED (
-        SELECT array_agg(id ORDER BY ord) AS ids
-        FROM converse.prompt_state(p_prompt) WHERE id IS NOT NULL
+    -- One prompt analysis per forward pass. The old shape called prompt_state
+    -- here, then forward_frontier(text), which called prompt_state +
+    -- prompt_coherence and then forward_route_trace(text), which called both
+    -- again. On the seeded estate that means paying the same decomposition /
+    -- sense election repeatedly before S6 emits one constituent.
+    --
+    -- Keep the operands distinct: ctx is the ordered request trajectory S6
+    -- proposes from; seeds are the deduped prompt ids + witnessed senses used to
+    -- route S7's semantic frontier. No routed neighbor is appended to ctx.
+    WITH prompt_state AS MATERIALIZED (
+        SELECT p.ord, p.id
+        FROM converse.prompt_state(p_prompt) p
+        WHERE p.id IS NOT NULL
+    ), prompt_coherence AS MATERIALIZED (
+        SELECT c.ord, c.synset_id
+        FROM converse.prompt_coherence(p_prompt) c
+        WHERE c.synset_id IS NOT NULL
+    ), ctx AS MATERIALIZED (
+        SELECT array_agg(p.id ORDER BY p.ord) AS ids
+        FROM prompt_state p
+    ), resolved AS MATERIALIZED (
+        SELECT p.ord, p.id AS entity FROM prompt_state p
+        UNION ALL
+        SELECT c.ord, c.synset_id FROM prompt_coherence c
+    ), seeds AS MATERIALIZED (
+        SELECT r.entity, min(r.ord) AS ord
+        FROM resolved r
+        GROUP BY r.entity
+    ), seed_array AS MATERIALIZED (
+        SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
     ), frontier AS MATERIALIZED (
         SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
         FROM (
             SELECT f.entity, f.hop
-            FROM generation.forward_frontier(p_prompt, p_hops, p_fanout, NULL) f
+            FROM seed_array s
+            CROSS JOIN LATERAL generation.forward_frontier_ids(
+                s.ids, p_hops, p_fanout, NULL) f
             UNION
             SELECT p.entity, 0::smallint
             FROM unnest(COALESCE(p_prior_frontier, '{}'::bytea[])) p(entity)
@@ -60,3 +89,10 @@ BEGIN ATOMIC
     SELECT * FROM generation.forward_text(
         p_prompt, p_steps, p_max_stride, p_spread, p_breadth, p_seed, 2, 8, NULL);
 END;
+
+-- Upgrade retirement. These text routing surfaces had no callers outside the
+-- recursive chain removed above. They must be dropped only AFTER forward_text is
+-- rebound to forward_frontier_ids: BEGIN ATOMIC records pg_depend, so dropping
+-- them earlier would make an in-place extension upgrade fail under RESTRICT.
+DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);
+DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);

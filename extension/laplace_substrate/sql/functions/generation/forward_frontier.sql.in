@@ -1,9 +1,9 @@
 -- The bounded receipt for ROUTE/SCAN. It exposes the exact typed consensus
--- edges admitted by the same crawl used to build forward_frontier. Defining the
--- receipt first lets the executable frontier depend on it, so the receipt cannot
--- drift into dead diagnostic scaffolding beside a second traversal.
-CREATE OR REPLACE FUNCTION generation.forward_route_trace(
-        p_prompt text,
+-- edges admitted by the same crawl used to build the forward frontier. Resolved
+-- prompt ids are the operand: text decomposition/coherence belongs to the caller
+-- that owns the forward pass, not to a nested routing helper.
+CREATE OR REPLACE FUNCTION generation.forward_route_trace_ids(
+        p_seeds bytea[],
         p_hops int DEFAULT 2,
         p_fanout int DEFAULT 8,
         p_max_nodes int DEFAULT NULL)
@@ -12,62 +12,35 @@ CREATE OR REPLACE FUNCTION generation.forward_route_trace(
                   witness_count bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-WITH resolved AS MATERIALIZED (
-    SELECT p.ord, p.id AS entity
-    FROM converse.prompt_state(p_prompt) p
-    WHERE p.id IS NOT NULL
-    UNION ALL
-    SELECT c.ord, c.synset_id
-    FROM converse.prompt_coherence(p_prompt) c
-    WHERE c.synset_id IS NOT NULL
-), seeds AS MATERIALIZED (
-    SELECT r.entity, min(r.ord) AS ord
-    FROM resolved r
-    GROUP BY r.entity
-)
 SELECT w.source_id, w.type_id, w.object_id, w.hop,
        w.rating, w.rd, w.witness_count
 FROM consensus.explore_web(
-    ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity),
+    COALESCE(p_seeds, '{}'::bytea[]),
     p_hops, p_fanout, p_max_nodes) w
 ORDER BY w.hop, w.source_id, w.type_id, w.object_id;
 END;
 
--- generation.forward_frontier — the routed semantic operand for the dynamic
--- trajectory forward pass.
---
--- Every resolved prompt constituent remains in the frontier. prompt_coherence
--- contributes that constituent's jointly elected witnessed sense; no rank-1
--- topic collapse is performed. forward_route_trace owns the typed native crawl,
--- so execution and the auditable ROUTE/SCAN receipt are the same edge set. The
--- returned hop is an execution coordinate, not a model layer or confidence score.
--- A NULL node budget delegates capacity to consensus.explore_web, which derives
--- the exact fanout tree from the seed count/hops/fanout and rejects only actual
--- PostgreSQL allocation overflow. The forward pass does not invent a second cap.
-CREATE OR REPLACE FUNCTION generation.forward_frontier(
-        p_prompt text,
+-- ID-facing semantic frontier. The prompt's resolved constituents/senses are
+-- already an operand here, so ROUTE/SCAN is one consensus.explore_web traversal.
+-- The seeds themselves stay at hop zero; every routed endpoint carries the hop
+-- reported by the same trace receipt above. A NULL node budget delegates exact
+-- capacity to consensus.explore_web rather than inventing a second cap.
+CREATE OR REPLACE FUNCTION generation.forward_frontier_ids(
+        p_seeds bytea[],
         p_hops int DEFAULT 2,
         p_fanout int DEFAULT 8,
         p_max_nodes int DEFAULT NULL)
     RETURNS TABLE(entity bytea, hop smallint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-WITH resolved AS MATERIALIZED (
-    SELECT p.ord, p.id AS entity
-    FROM converse.prompt_state(p_prompt) p
-    WHERE p.id IS NOT NULL
-    UNION ALL
-    SELECT c.ord, c.synset_id
-    FROM converse.prompt_coherence(p_prompt) c
-    WHERE c.synset_id IS NOT NULL
-), seeds AS MATERIALIZED (
-    SELECT r.entity, min(r.ord) AS ord
-    FROM resolved r
-    GROUP BY r.entity
+WITH seeds AS MATERIALIZED (
+    SELECT DISTINCT u.entity
+    FROM unnest(COALESCE(p_seeds, '{}'::bytea[])) u(entity)
+    WHERE u.entity IS NOT NULL
 ), routed AS MATERIALIZED (
     SELECT w.*
-    FROM generation.forward_route_trace(
-        p_prompt, p_hops, p_fanout, p_max_nodes) w
+    FROM generation.forward_route_trace_ids(
+        COALESCE(p_seeds, '{}'::bytea[]), p_hops, p_fanout, p_max_nodes) w
 ), nodes AS (
     SELECT s.entity, 0::smallint AS hop FROM seeds s
     UNION ALL
