@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { WarehouseHome } from './catalog/WarehouseHome';
 import { AuditPanel } from './catalog/AuditPanel';
+import { BrowseHome } from './browse/BrowseHome';
 import { StageBrowse } from './browse/StageBrowse';
 import { SourceBrowse } from './browse/SourceBrowse';
 import { EntityDetail, ResolveRedirect } from './entity/EntityDetail';
@@ -18,17 +19,19 @@ import styles from './ExploreView.module.css';
 function ExploreBreadcrumb() {
   const { pathname } = useLocation();
   const crumb = useExploreStore((s) => s.breadcrumb);
-  const segments: { label: string; to?: string }[] = [{ label: 'Warehouse', to: '/explore' }];
+  const segments: { label: string; to?: string }[] = [{ label: 'Browse', to: '/explore' }];
 
   const stageMatch = pathname.match(/\/explore\/stage\/([^/]+)/);
   if (stageMatch) {
     const stage = decodeURIComponent(stageMatch[1]);
+    segments.push({ label: 'Warehouse', to: '/explore/warehouse' });
     segments.push({ label: stage, to: `/explore/stage/${stageMatch[1]}` });
   }
   const sourceMatch = pathname.match(/\/explore\/source\/([^/]+)/);
   if (sourceMatch) {
     const source = decodeURIComponent(sourceMatch[1]);
-    if (crumb.stage) segments.splice(1, 0, { label: crumb.stage, to: `/explore/stage/${encodeURIComponent(crumb.stage)}` });
+    segments.push({ label: 'Warehouse', to: '/explore/warehouse' });
+    if (crumb.stage) segments.push({ label: crumb.stage, to: `/explore/stage/${encodeURIComponent(crumb.stage)}` });
     segments.push({ label: source, to: `/explore/source/${sourceMatch[1]}` });
   }
   const entityMatch = pathname.match(/\/explore\/entity\/([0-9a-f]{32})/i);
@@ -41,9 +44,10 @@ function ExploreBreadcrumb() {
 
 export function ExploreView() {
   const navItems = [
+    ['Browse', '/explore'],
     ['Highway', '/explore/highway'],
     ['Mesh', '/explore/mesh'],
-    ['Warehouse', '/explore'],
+    ['Warehouse', '/explore/warehouse'],
     ['Matchup', '/explore/matchup'],
     ['Constellation', '/explore/constellation'],
     ['Walk', '/explore/walk'],
@@ -59,7 +63,7 @@ export function ExploreView() {
               key={to}
               className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
               to={to}
-              end={to === '/explore'}
+              end={to === '/explore' || to === '/explore/warehouse'}
             >
               {label}
             </NavLink>
@@ -69,7 +73,8 @@ export function ExploreView() {
       <div className={styles.content}>
         <ExploreBreadcrumb />
         <Routes>
-          <Route index element={<WarehouseHome />} />
+          <Route index element={<BrowseHome />} />
+          <Route path="warehouse" element={<WarehouseHome />} />
           <Route path="constellation" element={<ConstellationView />} />
           <Route path="stage/:stageId" element={<StageBrowse />} />
           <Route path="source/:sourceKey" element={<SourceBrowse />} />

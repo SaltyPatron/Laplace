@@ -1,42 +1,128 @@
 import { test, expect } from '@playwright/test';
 
-test('Explore tab loads warehouse', async ({ page }) => {
+const WHALE_ID = '11111111111111111111111111111111';
+
+function browseResponse(query: string, hits: unknown[]) {
+  return {
+    object: 'laplace.explore.browse',
+    query,
+    hits,
+    receipt: {
+      query_root_id_hex: WHALE_ID,
+      query_member_ids_hex: [WHALE_ID],
+      candidate_names: hits.length,
+      candidate_capacity: 2048,
+      candidate_truncated: false,
+      matched_entities: hits.length,
+      returned: hits.length,
+      offset: 0,
+      limit: 50,
+      elapsed_us: 731,
+    },
+  };
+}
+
+test('Explore tab opens the substrate browser and keeps Warehouse addressable', async ({ page }) => {
   await page.goto('/explore');
+  await expect(page.getByRole('heading', { name: 'Browse Laplace like a reference site' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Find a starting point in the substrate' })).toBeVisible();
+  const exploreNav = page.locator('aside');
+  await expect(exploreNav.getByRole('link', { name: 'Browse', exact: true })).toBeVisible();
+  await expect(exploreNav.getByRole('link', { name: 'Warehouse', exact: true })).toBeVisible();
+
+  await exploreNav.getByRole('link', { name: 'Warehouse', exact: true }).click();
+  await expect(page).toHaveURL('/explore/warehouse');
   await expect(page.getByRole('heading', { name: 'Substrate warehouse' })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Find anything in the substrate' })).toBeVisible();
 });
 
-test('Explore resolve navigates to entity preview', async ({ page }) => {
+test('Browse returns a canonical result set instead of silently choosing one entity', async ({ page }) => {
+  await page.route('**/v1/explore/browse?**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(browseResponse('Hikaru', [
+        {
+          id_hex: WHALE_ID,
+          label: 'Nakamura, Hikaru',
+          tier: 2,
+          type: 'Chess_Player',
+          matched_name_id_hex: '22222222222222222222222222222222',
+          match_kind: 'name',
+          rating: 1500,
+          rd: 120,
+          eff_mu: 1260,
+          witnesses: 42,
+        },
+        {
+          id_hex: '33333333333333333333333333333333',
+          label: 'Hikaru',
+          tier: 2,
+          type: 'Word',
+          matched_name_id_hex: '33333333333333333333333333333333',
+          match_kind: 'surface',
+          rating: null,
+          rd: null,
+          eff_mu: null,
+          witnesses: 0,
+        },
+      ])),
+    });
+  });
+
   await page.goto('/explore');
-  await page.getByRole('textbox', { name: 'Find anything in the substrate' }).fill('whale');
-  await page.getByRole('button', { name: 'Open' }).click();
-  await expect(page).toHaveURL(/\/explore\/entity\/[0-9a-f]{32}/i, { timeout: 15_000 });
-  await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('textbox', { name: 'Find a starting point in the substrate' }).fill('Hikaru');
+  await page.getByRole('button', { name: 'Browse' }).click();
+
+  await expect(page.getByRole('link', { name: 'Nakamura, Hikaru' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Hikaru', exact: true })).toBeVisible();
+  await expect(page.getByText('2 canonical results')).toBeVisible();
+  await expect(page.getByText('731 μs')).toBeVisible();
+
+  await page.getByRole('link', { name: 'Nakamura, Hikaru' }).click();
+  await expect(page).toHaveURL(`/explore/entity/${WHALE_ID}`);
 });
 
-test('Explore routes an unwitnessed result to the geometric neighborhood', async ({ page }) => {
-  await page.route('**/v1/explore/catalog', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ counts: [], consensus: null, top_relations: [], sources: [], stages: [], featured_refs: [] }),
-    });
+test('Browse exposes capacity truncation as an execution bound the user can expand', async ({ page }) => {
+  let seenCapacity = '';
+  await page.route('**/v1/explore/browse?**', async (route) => {
+    const url = new URL(route.request().url());
+    seenCapacity = url.searchParams.get('capacity') ?? '';
+    const result = browseResponse('Hikaru', [{
+      id_hex: WHALE_ID,
+      label: 'Nakamura, Hikaru',
+      tier: 2,
+      type: 'Chess_Player',
+      matched_name_id_hex: '22222222222222222222222222222222',
+      match_kind: 'name',
+      rating: 1500,
+      rd: 120,
+      eff_mu: 1260,
+      witnesses: 42,
+    }]);
+    result.receipt.candidate_names = Number(seenCapacity || 2048);
+    result.receipt.candidate_capacity = Number(seenCapacity || 2048);
+    result.receipt.candidate_truncated = true;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(result) });
   });
-  await page.route('**/v1/explore/resolve?**', async (route) => {
+
+  await page.goto('/explore?q=Hikaru');
+  await expect(page.getByRole('button', { name: 'Expand frontier to 4,096' })).toBeVisible();
+  await page.getByRole('button', { name: 'Expand frontier to 4,096' }).click();
+  await expect(page).toHaveURL(/capacity=4096/);
+  await expect.poll(() => seenCapacity).toBe('4096');
+});
+
+test('Browse routes an unwitnessed surface to its geometric neighborhood', async ({ page }) => {
+  await page.route('**/v1/explore/browse?**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({
-        id_hex: '00000000000000000000000000000000',
-        label: 'unheld',
-        ref_kind: 'word',
-        exists: false,
-        preview_facts: [],
-      }),
+      body: JSON.stringify(browseResponse('unheld', [])),
     });
   });
 
   await page.goto('/explore');
-  await page.getByRole('textbox', { name: 'Find anything in the substrate' }).fill('unheld');
-  await page.getByRole('button', { name: 'Open' }).click();
+  await page.getByRole('textbox', { name: 'Find a starting point in the substrate' }).fill('unheld');
+  await page.getByRole('button', { name: 'Browse' }).click();
+  await page.getByRole('link', { name: 'Open its structural neighborhood ›' }).click();
   await expect(page).toHaveURL('/explore/notfound/unheld');
 });
 

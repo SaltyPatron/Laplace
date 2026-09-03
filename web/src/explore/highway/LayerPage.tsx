@@ -141,9 +141,9 @@ export function LayerPage() {
 
       <Panel title="Enter the division">
         <SearchBar
-          placeholder="a word, sense, frame, or id hex…"
-          label={`Open a witnessed entity in ${layer.name}`}
-          hint="Unwitnessed terms open the nearest geometric neighborhood."
+          placeholder="a word, sense, frame, player, or id hex…"
+          label={`Browse a witnessed entity in ${layer.name}`}
+          hint="Discovery uses the same canonical Browse result set; select the entity you mean, then inspect this division from that identity."
           shortcut={false}
         />
       </Panel>
