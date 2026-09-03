@@ -251,7 +251,7 @@ internal static class Program
             .JournalToPostgresqlTable("public", "schemaversions")
             .WithVariablesDisabled()
             .WithExecutionTimeout(TimeSpan.FromHours(4))
-            .LogToConsole()
+            .LogTo(new LiteralSafeUpgradeLog())
             .Build();
     }
 
