@@ -1,73 +1,12 @@
--- Chess rating repair is a durable maintenance obligation, not part of extension
--- activation latency. The public three-argument procedure is intentionally cheap:
--- deployment calls it after ALTER EXTENSION to enqueue the current repair generation.
--- A separate worker replays bounded subject batches from durable attestations and
--- advances rating_repair_journal after every committed batch.
+-- Exceptional chess standing reconstruction for migrations/forensics after a
+-- correctness defect. This is deliberately NOT a steady-state maintenance loop:
+-- durable game/evidence observations are authority and normal reads/folds must
+-- derive standing from the declared event-time recipe. Deployment does not queue
+-- this procedure and no scheduled worker calls it.
 --
--- This fixes the failure mode observed on 2026-09-02: ALTER EXTENSION committed,
--- then a full monolithic replay ran inside sync-extension until the 20-minute DB
--- lifecycle job was cancelled. On retry the extension version was already current,
--- so the one-shot CALL was skipped and the repair obligation disappeared.
---
--- Durable evidence remains authority; consensus remains rebuildable. Replaying a
--- completed batch is idempotent because every selected cell is reconstructed from
--- all of its durable evidence and UPSERTed to the canonical consensus identity.
-
-CREATE TABLE IF NOT EXISTS chess.rating_repair_journal (
-    repair_id       text PRIMARY KEY,
-    status          text NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'running', 'ok', 'failed')),
-    last_subject    bytea CHECK (last_subject IS NULL OR octet_length(last_subject) = 16),
-    subjects_done   bigint NOT NULL DEFAULT 0 CHECK (subjects_done >= 0),
-    attempts        integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
-    requested_at    timestamptz NOT NULL DEFAULT now(),
-    started_at      timestamptz,
-    heartbeat_at    timestamptz,
-    ended_at        timestamptz,
-    error           text
-);
-
--- Bump this literal only when a new historical replay is actually required.
--- Ordinary extension revisions must not force a full chess-rating rebuild.
-CREATE OR REPLACE FUNCTION chess.rating_repair_generation()
-RETURNS text
-LANGUAGE sql IMMUTABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT 'glicko2-opponent-carrier-20260902-v1'::text;
-END;
-
--- Deployment-facing contract: record/refresh the obligation and return quickly.
--- An already completed generation stays completed. A previously interrupted or
--- failed generation becomes pending again so the worker will resume it.
-CREATE OR REPLACE PROCEDURE chess.repair_player_ratings(
-    p_outcome bytea,
-    p_played bytea,
-    p_rating bytea)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_generation text := chess.rating_repair_generation();
-BEGIN
-    IF p_outcome IS NULL OR p_played IS NULL OR p_rating IS NULL THEN
-        RAISE EXCEPTION 'repair_player_ratings: required relation id is NULL';
-    END IF;
-
-    INSERT INTO chess.rating_repair_journal AS j
-        (repair_id, status, requested_at)
-    VALUES
-        (v_generation, 'pending', now())
-    ON CONFLICT (repair_id) DO UPDATE
-    SET requested_at = EXCLUDED.requested_at,
-        status = CASE WHEN j.status = 'ok' THEN 'ok' ELSE 'pending' END,
-        error = CASE WHEN j.status = 'ok' THEN j.error ELSE NULL END;
-
-    RAISE LOG 'repair_player_ratings: generation % is durably queued', v_generation;
-END;
-$$;
-
--- Worker primitive. Every call owns only the supplied canonical subjects, so the
--- outer worker can commit progress after each batch. Cancellation rolls back only
--- the in-flight batch; all prior batches and the journal cursor remain durable.
+-- The procedure is bounded to an explicit caller-supplied set of canonical player
+-- subjects. Replaying the same subjects is idempotent because every selected cell
+-- is reconstructed from all durable evidence and UPSERTed to canonical consensus.
 CREATE OR REPLACE PROCEDURE chess.repair_player_ratings_batch(
     p_outcome bytea,
     p_played bytea,
@@ -107,7 +46,7 @@ BEGIN
     -- Historical GH #1321 repair: managed staging once persisted a literal zero
     -- instead of the opponent's rating. Recover it from the opponent identity and
     -- that opponent's HAS_RATING testimony in the same playing context, bounded to
-    -- this worker batch.
+    -- this explicitly selected repair set.
     INSERT INTO _chess_rating_values(rating_id, rating)
     WITH ids AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT r.object_id ORDER BY r.object_id),
