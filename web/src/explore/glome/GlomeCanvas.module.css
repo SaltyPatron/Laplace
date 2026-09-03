@@ -19,7 +19,7 @@
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     overflow: hidden;
-    background: #05070c;
+    background: var(--viz-bg);
   }
 
   .canvasFill {
