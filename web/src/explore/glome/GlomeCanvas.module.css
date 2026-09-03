@@ -19,7 +19,7 @@
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     overflow: hidden;
-    background: #05070c;
+    background: var(--color-viz-bg);
   }
 
   .canvasFill {
@@ -38,11 +38,13 @@
 
   .tooltip {
     background: var(--color-bg-panel);
+    color: var(--color-text-primary);
     border: 1px solid var(--color-border-default);
     padding: 0.35rem 0.5rem;
     border-radius: 4px;
     font-size: 0.75rem;
     white-space: nowrap;
+    box-shadow: var(--shadow-instrument);
   }
 
   .cap {
@@ -50,12 +52,17 @@
     flex: 0 0 auto;
   }
 
+  .rotationControls {
+    display: grid;
+    gap: 0.2rem;
+    margin: 0 0 0.45rem;
+  }
+
   .rotationControl {
     display: grid;
-    grid-template-columns: auto minmax(8rem, 1fr) 3.5rem;
+    grid-template-columns: 6.5rem minmax(8rem, 1fr) 3.5rem;
     align-items: center;
     gap: 0.65rem;
-    margin: 0 0 0.45rem;
     color: var(--color-text-muted);
     font-size: 0.78rem;
   }
