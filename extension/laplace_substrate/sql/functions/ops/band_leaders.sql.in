@@ -1,28 +1,108 @@
--- Per-band leaderboards: the strongest consensus edges in each salience band,
--- fully labeled — consensus.band_edges(native top-k by mu) with the labels
--- applied only to the survivors. BEGIN ATOMIC: GH #764.
+-- Per-band leaderboards: rank in id space, then realize only the surviving edge
+-- endpoints.  The richer overload carries the realization receipt and every Glicko
+-- display coordinate the product needs; the installed two-argument function remains
+-- as a compatibility projection over this one implementation.
+CREATE OR REPLACE FUNCTION ops.band_leaders(
+        p_bands int[],
+        p_per int,
+        p_lang bytea)
+    RETURNS TABLE(
+        band int,
+        subject_id bytea,
+        subject text,
+        subject_realization text,
+        subject_technical_name text,
+        subject_type_id bytea,
+        subject_type_name text,
+        relation_id bytea,
+        relation text,
+        relation_realization text,
+        relation_technical_name text,
+        object_id bytea,
+        object text,
+        object_realization text,
+        object_technical_name text,
+        object_type_id bytea,
+        object_type_name text,
+        rating numeric,
+        rd numeric,
+        eff_mu numeric,
+        witnesses bigint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH raw AS MATERIALIZED (
+      SELECT b.band, e.subject_id, e.type_id, e.object_id,
+             e.rating, e.rd, e.witness_count
+      FROM unnest(COALESCE(p_bands, '{}'::int[])) AS b(band)
+      CROSS JOIN LATERAL consensus.band_edges(b.band, NULL, p_per) e
+    ), ids AS MATERIALIZED (
+      SELECT array_agg(DISTINCT id ORDER BY id) AS a
+      FROM (
+        SELECT subject_id AS id FROM raw
+        UNION
+        SELECT type_id FROM raw
+        UNION
+        SELECT object_id FROM raw
+      ) x
+      WHERE id IS NOT NULL
+    ), display AS MATERIALIZED (
+      SELECT d.*
+      FROM ids
+      CROSS JOIN LATERAL realize.display_batch(ids.a, p_lang) d
+    )
+    SELECT e.band,
+           e.subject_id,
+           sd.label,
+           sd.realization,
+           sd.technical_name,
+           sd.type_id,
+           sd.type_name,
+           e.type_id,
+           CASE WHEN rdsp.realization IN ('content', 'name')
+                THEN rdsp.label
+                ELSE COALESCE(NULLIF(consensus.relation_canonical(e.type_id), ''),
+                              rdsp.technical_name,
+                              rdsp.label)
+           END AS relation,
+           rdsp.realization,
+           COALESCE(NULLIF(consensus.relation_canonical(e.type_id), ''),
+                    rdsp.technical_name) AS relation_technical_name,
+           e.object_id,
+           od.label,
+           od.realization,
+           od.technical_name,
+           od.type_id,
+           od.type_name,
+           consensus.rating_display(e.rating),
+           consensus.rd_display(e.rd),
+           consensus.eff_mu_display(e.rating, e.rd),
+           e.witness_count
+    FROM raw e
+    JOIN display sd ON sd.id = e.subject_id
+    JOIN display rdsp ON rdsp.id = e.type_id
+    JOIN display od ON od.id = e.object_id;
+END;
+
+-- Installed compatibility signature.  Preserve its OID and old row shape while
+-- delegating ranking and realization to the richer contract above.  Technical names
+-- are shown only when the old shape has nowhere to carry realization metadata.
 DROP FUNCTION IF EXISTS laplace.band_leaders(int[], int);
-CREATE OR REPLACE FUNCTION ops.band_leaders(p_bands int[] DEFAULT ARRAY[1,2,4,5], p_per int DEFAULT 5)
+CREATE OR REPLACE FUNCTION ops.band_leaders(
+        p_bands int[] DEFAULT ARRAY[1,2,4,5],
+        p_per int DEFAULT 5)
     RETURNS TABLE(band int, subject_id bytea, subject text, relation text,
                   object_id bytea, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    WITH raw AS MATERIALIZED (
-      SELECT b.band, e.subject_id, e.type_id, e.object_id, e.rating, e.rd, e.witness_count
-      FROM unnest(p_bands) AS b(band)
-      CROSS JOIN LATERAL consensus.band_edges(b.band, NULL, p_per) e
-    ), ids AS MATERIALIZED (
-      SELECT array_agg(DISTINCT id ORDER BY id) AS a
-      FROM (SELECT subject_id AS id FROM raw UNION SELECT object_id FROM raw) x
-    ), labels AS MATERIALIZED (
-      SELECT i.id, i.txt FROM ids,
-        LATERAL ROWS FROM (
-          unnest(ids.a), unnest(realize.label_batch(ids.a))
-        ) i(id, txt)
-    )
-    SELECT e.band, e.subject_id, s.txt,
-           consensus.relation_canonical(e.type_id),
-           e.object_id, o.txt,
-           consensus.eff_mu_display(e.rating, e.rd), e.witness_count
-    FROM raw e JOIN labels s ON s.id=e.subject_id JOIN labels o ON o.id=e.object_id;
+    SELECT l.band,
+           l.subject_id,
+           CASE WHEN l.subject_realization IN ('content', 'name') THEN l.subject
+                ELSE COALESCE(l.subject_technical_name, l.subject) END,
+           l.relation,
+           l.object_id,
+           CASE WHEN l.object_realization IN ('content', 'name') THEN l.object
+                ELSE COALESCE(l.object_technical_name, l.object) END,
+           l.eff_mu,
+           l.witnesses
+    FROM ops.band_leaders(p_bands, p_per, NULL::bytea) l;
 END;
