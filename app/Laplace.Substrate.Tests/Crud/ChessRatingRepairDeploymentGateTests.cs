@@ -4,7 +4,8 @@ namespace Laplace.Substrate.Tests.Crud;
 
 public class ChessRatingRepairDeploymentGateTests
 {
-    private static string Root => Abstractions.TypeIdLawTests.FindRepoRootPublic();
+    private static string Root =>
+        Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic();
 
     [Fact]
     public void LegacyDeploymentEntrypointCannotPerformOrScheduleRepair()
