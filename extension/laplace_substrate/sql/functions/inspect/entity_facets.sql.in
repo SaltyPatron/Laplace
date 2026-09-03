@@ -6,3 +6,15 @@ CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     AS $$
     SELECT e.tier, e.type_id FROM laplace.entities e WHERE e.id = p_id
 $$;
+
+-- Batch form for serving/browse paths.  One set read over surviving ids; callers
+-- must not LATERAL-loop the scalar facet reader or hand-read laplace.entities.
+DROP FUNCTION IF EXISTS ops.entity_facets_batch(bytea[]);
+CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
+    RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT e.id, e.tier, e.type_id
+    FROM laplace.entities e
+    WHERE e.id = ANY(COALESCE(p_ids, '{}'::bytea[]));
+END;
