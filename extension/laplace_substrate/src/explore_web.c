@@ -201,8 +201,13 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(0))
 		ereport(ERROR, (errmsg("explore_web: seeds must not be NULL")));
 	seeds_a = PG_GETARG_ARRAYTYPE_P(0);
-	if (ARR_NDIM(seeds_a) != 1 || ARR_ELEMTYPE(seeds_a) != BYTEAOID)
-		ereport(ERROR, (errmsg("explore_web: seeds must be a 1-D bytea array")));
+	/* PostgreSQL represents a canonical empty typed array with ARR_NDIM == 0.
+	 * That is a valid empty seed set, not a malformed multidimensional operand.
+	 * Keep NULL and dimensions >1 rejected, but let the existing zero-seed
+	 * abstention below return an empty crawl instead of throwing XX000. */
+	if (ARR_ELEMTYPE(seeds_a) != BYTEAOID ||
+		(ARR_NDIM(seeds_a) != 0 && ARR_NDIM(seeds_a) != 1))
+		ereport(ERROR, (errmsg("explore_web: seeds must be an empty or 1-D bytea array")));
 	deconstruct_array(seeds_a, BYTEAOID, -1, false, TYPALIGN_INT,
 					  &seed_datums, &seed_nulls, &n_seed_datums);
 
