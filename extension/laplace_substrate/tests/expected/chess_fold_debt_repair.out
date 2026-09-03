@@ -42,25 +42,8 @@ SELECT laplace.consensus_id(player_id, outcome_t, result_id),
        10398275800000000, 350000000000, 60000000,
        2, '2026-01-02 03:04:05+00'::timestamptz
 FROM _repair_ids;
--- Deployment must only record the durable obligation; it must not perform an
--- unbounded replay inside extension activation.
-CALL chess.repair_player_ratings(
-    laplace.relation_type_id('OUTCOME'),
-    laplace.relation_type_id('PLAYED_BY'),
-    laplace.relation_type_id('HAS_RATING'));
-DO $$
-DECLARE
-    queued_status text;
-BEGIN
-    SELECT status INTO STRICT queued_status
-    FROM chess.rating_repair_journal
-    WHERE repair_id = chess.rating_repair_generation();
-    IF queued_status <> 'pending' THEN
-        RAISE EXCEPTION 'FAIL: deployment repair obligation status %', queued_status;
-    END IF;
-    RAISE NOTICE 'chess rating repair obligation queued durably';
-END $$;
-NOTICE:  chess rating repair obligation queued durably
+-- Historical repair is explicit and bounded. Deployment/steady-state operation
+-- must not invoke or schedule it.
 CALL chess.repair_player_ratings_batch(
     laplace.relation_type_id('OUTCOME'),
     laplace.relation_type_id('PLAYED_BY'),
