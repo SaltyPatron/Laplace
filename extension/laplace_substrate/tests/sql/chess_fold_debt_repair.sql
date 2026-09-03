@@ -44,13 +44,31 @@ SELECT laplace.consensus_id(player_id, outcome_t, result_id),
        2, '2026-01-02 03:04:05+00'::timestamptz
 FROM _repair_ids;
 
--- Historical repair is explicit and bounded. Deployment/steady-state operation
--- must not invoke or schedule it.
+-- Deployment must only record the durable obligation; it must not perform an
+-- unbounded replay inside extension activation.
+CALL chess.repair_player_ratings(
+    laplace.relation_type_id('OUTCOME'),
+    laplace.relation_type_id('PLAYED_BY'),
+    laplace.relation_type_id('HAS_RATING'));
+
+DO $$
+DECLARE
+    queued_status text;
+BEGIN
+    SELECT status INTO STRICT queued_status
+    FROM chess.rating_repair_journal
+    WHERE repair_id = chess.rating_repair_generation();
+    IF queued_status <> 'pending' THEN
+        RAISE EXCEPTION 'FAIL: deployment repair obligation status %', queued_status;
+    END IF;
+    RAISE NOTICE 'chess rating repair obligation queued durably';
+END $$;
+
 CALL chess.repair_player_ratings_batch(
     laplace.relation_type_id('OUTCOME'),
     laplace.relation_type_id('PLAYED_BY'),
     laplace.relation_type_id('HAS_RATING'),
-    ARRAY[(SELECT player_id FROM _repair_ids)]::bytea[]);
+    ARRAY[public.laplace_hash128_blake3('test/chess-fold-debt/player')]::bytea[]);
 
 DO $$
 DECLARE
@@ -115,7 +133,7 @@ CALL chess.repair_player_ratings_batch(
     laplace.relation_type_id('OUTCOME'),
     laplace.relation_type_id('PLAYED_BY'),
     laplace.relation_type_id('HAS_RATING'),
-    ARRAY[(SELECT player_id FROM _repair_ids)]::bytea[]);
+    ARRAY[public.laplace_hash128_blake3('test/chess-fold-debt/player')]::bytea[]);
 
 DO $$
 BEGIN

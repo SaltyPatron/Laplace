@@ -1,0 +1,97 @@
+.hero {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.hero h2 {
+  margin: 0;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  opacity: 0.65;
+}
+
+.directoryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.directoryCard {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 92px;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  background: rgba(127, 127, 127, 0.035);
+}
+
+.directoryCard:hover {
+  background: rgba(127, 127, 127, 0.075);
+}
+
+.directoryCard span {
+  font-size: 0.86rem;
+  line-height: 1.35;
+  opacity: 0.72;
+}
+
+.toolbar,
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.pager {
+  margin-top: 0.75rem;
+}
+
+.entityLink {
+  font-weight: 700;
+}
+
+.empty {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem 0;
+}
+
+.receipt {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.85rem;
+  margin: 0;
+}
+
+.receipt div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.receipt dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+}
+
+.receipt dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}

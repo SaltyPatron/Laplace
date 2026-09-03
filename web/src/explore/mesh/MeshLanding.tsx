@@ -10,7 +10,7 @@ import styles from './MeshView.module.css';
  * The mesh front page. The divisions are a fixed structural vocabulary — the hub
  * types the factorization is built from — not a data-derived list (there are
  * 100k+ synsets; you don't page a team list that long, you enter the graph at a
- * node and drill). So this explains the ladder and drops you in via search.
+ * node and drill). So this explains the ladder and drops you in via Browse.
  */
 const DIVISIONS: { name: string; tag: string; blurb: string }[] = [
   { name: 'Word surface', tag: 'surface', blurb: 'The lemma you type. Every entry point into the mesh; it plays for its senses.' },
@@ -38,9 +38,9 @@ export function MeshLanding() {
         </p>
         <div className={styles.landingSearch}>
           <SearchBar
-            placeholder="a word, sense, frame, or id hex…"
-            label="Enter the mesh at any witnessed node"
-            hint="Names, words, semantic IDs, and close spellings work."
+            placeholder="a word, sense, frame, player, or id hex…"
+            label="Choose an entity, then enter its mesh"
+            hint="Discovery uses the same canonical Browse result set; Mesh only changes the selected entity's presentation."
             destination="mesh"
           />
         </div>
@@ -61,7 +61,7 @@ export function MeshLanding() {
         <div className={styles.exampleChips}>
           {['whale', 'run', 'gravity', 'justice', 'cell'].map((w) => (
             <Link key={w} className={styles.exampleChip}
-              to={`/explore/resolve/${encodeURIComponent(w)}`}>
+              to={`/explore?q=${encodeURIComponent(w)}&view=mesh`}>
               {w}
             </Link>
           ))}

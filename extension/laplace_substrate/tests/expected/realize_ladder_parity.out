@@ -29,7 +29,6 @@
 -- assertion is guarded by a cardinality check so an empty input FAILS instead of
 -- vacuously succeeding.
 BEGIN;
-
 -- A fixed, deterministic id set spanning the ladder's arms: ordinary words that
 -- a seeded substrate resolves, and content that nothing has ever witnessed
 -- (the abstain arm). Both must behave identically scalar and batched, whether or
@@ -38,8 +37,6 @@ CREATE TEMP TABLE probe AS
 SELECT ord, laplace.word_id(w) AS id
 FROM unnest(ARRAY['a','dog','nine','letter','the','king','King',
                   'test/realize/never-witnessed-xyzzy']) WITH ORDINALITY AS t(w, ord);
-SELECT 8
-
 SELECT count(*) = 8 AS probe_is_fixed_size FROM probe;
  probe_is_fixed_size 
 ---------------------
@@ -171,5 +168,4 @@ SELECT realize.batch(
          ARRAY[[laplace.word_id('a')],[laplace.word_id('dog')]],NULL::bytea);
 ERROR:  realize_batch: ids must be 1-dimensional
 ROLLBACK TO SAVEPOINT multidim_realize;
-
 ROLLBACK;

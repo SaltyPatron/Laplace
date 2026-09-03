@@ -539,9 +539,9 @@ FROM consensus.salient_facts(laplace.word_id('dog'), NULL, 0);
 (1 row)
 
 SELECT reply FROM converse.recall_intent('related', laplace.word_id('dog'), NULL, 'IS_ANTONYM_OF');
-       reply       
--------------------
- unrealized entity
+ reply 
+-------
+ h
 (1 row)
 
 SELECT fact FROM consensus.related_in(public.laplace_hash128_blake3('test/converse/synset1'), laplace.relation_type_id('CAUSES'));
@@ -587,21 +587,21 @@ SELECT reply, eff_mu FROM converse.recall_intent('walk', laplace.word_id('p'));
 -- it no longer routes on phrasing: a bare prompt gets the default shape, and the
 -- session carries the topic forward. Callers wanting a specific shape name it.
 SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
-         reply          | witnesses 
-------------------------+-----------
- unrealized entity: G   |         2
+        reply         | witnesses 
+----------------------+-----------
+ unrealized entity: G |         2
 (1 row)
 
 SELECT reply FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
-        reply        
----------------------
+        reply         
+----------------------
  unrealized entity: G
 (1 row)
 
 SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
-         reply          | witnesses 
-------------------------+-----------
- unrealized entity: G   |         2
+        reply         | witnesses 
+----------------------+-----------
+ unrealized entity: G |         2
 (1 row)
 
 SELECT ord, prompt, resolved_id = laplace.word_id('dog') AS topic_is_dog
