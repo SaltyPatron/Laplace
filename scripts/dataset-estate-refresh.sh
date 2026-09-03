@@ -72,26 +72,33 @@ safe_stage_path() {
     esac
 }
 
-ensure_receipt_header() {
-    if [[ ! -e "$RECEIPT" ]]; then
-        printf 'observed_at_utc\tid\tstate\tbytes\tsha256\tmd5\tpath\tsource\n' > "$RECEIPT"
-    fi
-}
-
 record_receipt() {
     local id="$1" state="$2" path="$3" source="$4"
-    local bytes sha md5 row
+    local bytes sha md5 observed_at relative_path
     bytes="$(stat -c '%s' "$path" 2>/dev/null || printf '0')"
     sha="$(sha256sum "$path" 2>/dev/null | awk '{print $1}' || true)"
     md5="$(md5sum "$path" 2>/dev/null | awk '{print $1}' || true)"
-    row="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$(date -u +%FT%TZ)" "$id" "$state" "$bytes" "$sha" "$md5" \
-        "${path#"$DATA_ROOT"/}" "$source")"
-    ensure_receipt_header
+    observed_at="$(date -u +%FT%TZ)"
+    relative_path="${path#"$DATA_ROOT"/}"
     if command -v flock >/dev/null 2>&1; then
-        { flock 9; printf '%s' "$row" >&9; } 9>>"$RECEIPT"
+        {
+            flock 9
+            if [[ ! -s "$RECEIPT" ]]; then
+                printf 'observed_at_utc\tid\tstate\tbytes\tsha256\tmd5\tpath\tsource\n' >&9
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$observed_at" "$id" "$state" "$bytes" "$sha" "$md5" \
+                "$relative_path" "$source" >&9
+        } 9>>"$RECEIPT"
     else
-        printf '%s' "$row" >> "$RECEIPT"
+        # The normal operator environment supplies flock. Keep a valid serial
+        # fallback for constrained test/inspection hosts.
+        if [[ ! -s "$RECEIPT" ]]; then
+            printf 'observed_at_utc\tid\tstate\tbytes\tsha256\tmd5\tpath\tsource\n' > "$RECEIPT"
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$observed_at" "$id" "$state" "$bytes" "$sha" "$md5" \
+            "$relative_path" "$source" >> "$RECEIPT"
     fi
 }
 
@@ -130,13 +137,15 @@ verify_file() {
 }
 
 write_sha_sidecar() {
-    local path="$1" sidecar="$path.sha256" digest
+    local path="$1" sidecar digest
+    sidecar="$path.sha256"
     digest="$(sha256sum "$path" | awk '{print $1}')"
     printf '%s  %s\n' "$digest" "$(basename "$path")" > "$sidecar"
 }
 
 verify_sha_sidecar() {
-    local path="$1" sidecar="$path.sha256"
+    local path="$1" sidecar
+    sidecar="$path.sha256"
     [[ -f "$path" && -f "$sidecar" ]] || return 1
     (cd "$(dirname "$path")" && sha256sum -c "$(basename "$sidecar")" >/dev/null)
 }
@@ -220,6 +229,19 @@ _git_snapshot() {
             record_receipt "$id" "verified-existing" "$dest" "$repo@$sha"
             return 0
         fi
+        # A previous operator revision finalized the archive before attempting to
+        # write its sidecar, then failed under set -u. Recover only that exact,
+        # independently checkable state; every other incomplete state remains
+        # preserved and fails closed.
+        if [[ ! -e "$dest.sha256" && -f "$dest.commit.tsv" ]] \
+            && [[ "$(awk -F '\t' 'NR == 1 { print $1 }' "$dest.commit.tsv")" == "$sha" ]] \
+            && [[ "$(awk -F '\t' 'NR == 1 { print $2 }' "$dest.commit.tsv")" == "$repo" ]] \
+            && container_check "$dest" "$dest"; then
+            write_sha_sidecar "$dest"
+            note "$id recovered verified Git snapshot sidecar: $sha"
+            record_receipt "$id" "recovered-verified" "$dest" "$repo@$sha"
+            return 0
+        fi
         die "$id existing Git snapshot or SHA-256 sidecar is invalid; preserving: $dest"
     fi
 
@@ -290,49 +312,19 @@ _git_lfs_snapshot() {
     note "$id LFS snapshot staged at commit $sha"
 }
 
-_ud218() {
-    local id="$1" rel="$2" landing="$3" expected_bytes="$4" expected_md5="$5"
-    local html asset
-    html="$(mktemp)"
-    trap 'rm -f -- "$html"' RETURN
-    need curl
-    need python3
-    curl -fsSL --retry 4 "$landing" > "$html"
-    asset="$(python3 - "$landing" "$html" <<'PY'
-import html.parser, pathlib, sys, urllib.parse
-base, path = sys.argv[1], pathlib.Path(sys.argv[2])
-class P(html.parser.HTMLParser):
-    def __init__(self): super().__init__(); self.hrefs=[]
-    def handle_starttag(self, tag, attrs):
-        if tag.lower() == 'a':
-            d=dict(attrs); h=d.get('href')
-            if h: self.hrefs.append(h)
-p=P(); p.feed(path.read_text(errors='replace'))
-for href in p.hrefs:
-    if 'ud-treebanks-v2.18.tgz' in href:
-        print(urllib.parse.urljoin(base, href)); break
-else:
-    raise SystemExit('official UD 2.18 archive link not found on landing page')
-PY
-)"
-    rm -f -- "$html"
-    trap - RETURN
-    _download "$id" "$rel" "$asset" "$expected_bytes" "" "$expected_md5"
-}
-
 row_worker() {
     local lane="$1" id="$2" kind="$3" rel="$4" source="$5" ref="$6" bytes="$7" sha="$8" md5="$9"
     case "$kind" in
         url) _download "$id" "$rel" "$source" "$bytes" "$sha" "$md5" ;;
         git) _git_snapshot "$id" "$rel" "$source" "$ref" ;;
         git-lfs) _git_lfs_snapshot "$id" "$rel" "$source" "$ref" ;;
-        ud218) _ud218 "$id" "$rel" "$source" "$bytes" "$md5" ;;
         *) die "unknown acquisition kind '$kind' for $id ($lane)" ;;
     esac
 }
 
 job_alive() {
-    local id="$1" pid_file="$JOB_ROOT/$id.pid" pid
+    local id="$1" pid_file pid
+    pid_file="$JOB_ROOT/$id.pid"
     [[ -f "$pid_file" ]] || return 1
     pid="$(cat "$pid_file" 2>/dev/null || true)"
     [[ "$pid" =~ ^[0-9]+$ ]] || return 1
@@ -399,7 +391,7 @@ verify_row() {
     local lane="$1" id="$2" kind="$3" rel="$4" source="$5" ref="$6" bytes="$7" sha="$8" md5="$9"
     local target status="BAD/MISSING"
     case "$kind" in
-        url|ud218)
+        url)
             target="$STAGE_ROOT/$rel"
             if verify_file "$target" "$bytes" "$sha" "$md5" "$target" 2>/dev/null; then status="OK"; fi
             ;;
@@ -541,7 +533,9 @@ syzygy6_worker() {
     # artifact roster and verification. The roster source itself is commit-pinned.
     local wdl_base="${LAPLACE_SYZYGY6_WDL_BASE:-https://tablebase.lichess.ovh/tables/standard/6-wdl/}"
     local dtz_base="${LAPLACE_SYZYGY6_DTZ_BASE:-https://tablebase.lichess.ovh/tables/standard/6-dtz/}"
-    local root="$STAGE_ROOT/Syzygy-6-men" checks="$STAGE_ROOT/Syzygy-6-men/checksums"
+    local root checks
+    root="$STAGE_ROOT/Syzygy-6-men"
+    checks="$root/checksums"
     local roster_commit="0bb8aeee525f364bb750f96df312a1a7c9b54398"
     local free_bytes min_free=$((180 * 1024 * 1024 * 1024))
     mkdir -p "$root/WDL" "$root/DTZ" "$checks"

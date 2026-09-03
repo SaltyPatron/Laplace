@@ -20,7 +20,7 @@ semantic|verbnet-current|git|VerbNet|https://github.com/cu-clear/verbnet.git|HEA
 semantic|propbank-current|git|PropBank|https://github.com/propbank/propbank-frames.git|HEAD|||
 semantic|verbatlas-1.1|url|VerbAtlas-1.1/VerbAtlas-1.1.0.zip|https://verbatlas.org/downloads/VerbAtlas-1.1.0.zip||||
 
-mutable|ud-2.18|ud218|UD-Treebanks/ud-treebanks-v2.18.tgz|https://lindat.mff.cuni.cz/repository/handle/11234/1-6149||684056893||e9bfd544a48eac63ea3bb41e80c78813
+mutable|ud-2.18|url|UD-Treebanks/ud-treebanks-v2.18.tgz|https://lindat.mff.cuni.cz/repository/server/api/core/bitstreams/handle/11234/1-6149/ud-treebanks-v2.18.tgz?sequence=5&isAllowed=y||684056893||e9bfd544a48eac63ea3bb41e80c78813
 mutable|tatoeba-sentences|url|Tatoeba/sentences.tar.bz2|https://downloads.tatoeba.org/exports/sentences.tar.bz2||218181927||
 mutable|tatoeba-links|url|Tatoeba/links.tar.bz2|https://downloads.tatoeba.org/exports/links.tar.bz2||149438756||
 mutable|tatoeba-audio-map|url|Tatoeba/sentences_with_audio.tar.bz2|https://downloads.tatoeba.org/exports/sentences_with_audio.tar.bz2||6375974||
@@ -36,16 +36,16 @@ mutable|tatoeba-tag-metadata|url|Tatoeba/tag_metadata.csv|https://downloads.tato
 mutable|wiktionary-raw-2026-08-28|url|Wiktionary/raw-wiktextract-data-2026-08-28.jsonl.gz|https://kaikki.org/dictionary/raw-wiktextract-data.jsonl.gz||2826623319||
 mutable|atomic10x|url|Atomic/ATOMIC10X.jsonl|https://storage.googleapis.com/ai2-mosaic-public/projects/symbolic-knowledge-decoding/ATOMIC10X.jsonl||1535887049||027c1c063750bbe8ef65000ccccf0960
 mutable|lichess-openings|git|LichessOpenings|https://github.com/lichess-org/chess-openings.git|4b8622759e7ae6f93f011cc6c83a3823401ab45e|||
-mutable|twic-1651|url|TWIC/twic1651g.zip|https://theweekinchess.com/assets/files/pgn/twic1651g.zip||||
-mutable|twic-1652|url|TWIC/twic1652g.zip|https://theweekinchess.com/assets/files/pgn/twic1652g.zip||||
-mutable|twic-1653|url|TWIC/twic1653g.zip|https://theweekinchess.com/assets/files/pgn/twic1653g.zip||||
-mutable|twic-1654|url|TWIC/twic1654g.zip|https://theweekinchess.com/assets/files/pgn/twic1654g.zip||||
-mutable|twic-1655|url|TWIC/twic1655g.zip|https://theweekinchess.com/assets/files/pgn/twic1655g.zip||||
-mutable|twic-1656|url|TWIC/twic1656g.zip|https://theweekinchess.com/assets/files/pgn/twic1656g.zip||||
-mutable|twic-1657|url|TWIC/twic1657g.zip|https://theweekinchess.com/assets/files/pgn/twic1657g.zip||||
-mutable|twic-1658|url|TWIC/twic1658g.zip|https://theweekinchess.com/assets/files/pgn/twic1658g.zip||||
-mutable|twic-1659|url|TWIC/twic1659g.zip|https://theweekinchess.com/assets/files/pgn/twic1659g.zip||||
-mutable|twic-1660|url|TWIC/twic1660g.zip|https://theweekinchess.com/assets/files/pgn/twic1660g.zip||||
+mutable|twic-1651|url|TWIC/twic1651g.zip|https://theweekinchess.com/zips/twic1651g.zip||||
+mutable|twic-1652|url|TWIC/twic1652g.zip|https://theweekinchess.com/zips/twic1652g.zip||||
+mutable|twic-1653|url|TWIC/twic1653g.zip|https://theweekinchess.com/zips/twic1653g.zip||||
+mutable|twic-1654|url|TWIC/twic1654g.zip|https://theweekinchess.com/zips/twic1654g.zip||||
+mutable|twic-1655|url|TWIC/twic1655g.zip|https://theweekinchess.com/zips/twic1655g.zip||||
+mutable|twic-1656|url|TWIC/twic1656g.zip|https://theweekinchess.com/zips/twic1656g.zip||||
+mutable|twic-1657|url|TWIC/twic1657g.zip|https://theweekinchess.com/zips/twic1657g.zip||||
+mutable|twic-1658|url|TWIC/twic1658g.zip|https://theweekinchess.com/zips/twic1658g.zip||||
+mutable|twic-1659|url|TWIC/twic1659g.zip|https://theweekinchess.com/zips/twic1659g.zip||||
+mutable|twic-1660|url|TWIC/twic1660g.zip|https://theweekinchess.com/zips/twic1660g.zip||||
 
 geo|geonames-allcountries|url|GeoNames/allCountries.zip|https://download.geonames.org/export/dump/allCountries.zip||||
 geo|geonames-altnames-v2|url|GeoNames/alternateNamesV2.zip|https://download.geonames.org/export/dump/alternateNamesV2.zip||||

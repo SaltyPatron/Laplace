@@ -39,7 +39,7 @@ def main() -> int:
         assert len(parts) == 9, f"bad source manifest width ({len(parts)}): {line}"
         lane, ident, kind, rel, source, ref, expected_bytes, sha256, md5 = parts
         assert lane in {"semantic", "mutable", "geo", "safety"}
-        assert kind in {"url", "git", "git-lfs", "ud218"}
+        assert kind in {"url", "git", "git-lfs"}
         assert ident and ident not in ids, f"duplicate id: {ident}"
         ids.add(ident)
         assert rel and not rel.startswith("/") and ".." not in Path(rel).parts

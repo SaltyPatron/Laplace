@@ -21,7 +21,7 @@ Atomic2020	/vault/Data/Atomic2020	2020 human-authored release	Atomic2020	current
 ATOMIC10x	.refresh-20260903/Atomic/ATOMIC10X.jsonl	not active	v1 data release	staged	admit separately; 1535887049 bytes; MD5 027c1c063750bbe8ef65000ccccf0960	https://storage.googleapis.com/ai2-mosaic-public/projects/symbolic-knowledge-decoding/ATOMIC10X.jsonl	#1472
 Dense-ATOMIC	absent	research extension	stable licensed artifact unresolved	absent	investigate; do not admit opaque Drive blob without license/hash	https://github.com/allenai/dense-atomic	#1472
 UD	/vault/Data/UD-Treebanks/ud-treebanks-v2.17	2.17	2.18	superseded	delete after v2.18 tree/archive reconciliation	https://universaldependencies.org/	#1472
-UD	.refresh-20260903/UD-Treebanks/ud-treebanks-v2.18.tgz	not active	2.18	staged	admit; 684056893 bytes; MD5 e9bfd544a48eac63ea3bb41e80c78813	https://lindat.mff.cuni.cz/repository/xmlui/handle/11234/1-6039	#1472
+UD	.refresh-20260903/UD-Treebanks/ud-treebanks-v2.18.tgz	not active	2.18	staged	admit; 684056893 bytes; MD5 e9bfd544a48eac63ea3bb41e80c78813	https://lindat.mff.cuni.cz/repository/handle/11234/1-6149	#1472
 Tatoeba	/vault/Data/Tatoeba/sentences.tar.bz2	2026-01-31	2026-08-29	superseded	replace after current archive/extract reconciliation	https://downloads.tatoeba.org/exports/	#1472
 Tatoeba	/vault/Data/Tatoeba/links.tar.bz2	2026-01-31	2026-08-29	superseded	replace after current archive/extract reconciliation	https://downloads.tatoeba.org/exports/	#1472
 Tatoeba	/vault/Data/Tatoeba/audio/tatoeba_audio_eng.zip	upstream stable 2017-11-29	same artifact	current-verify	retain if hash matches official 4116471982-byte artifact	https://downloads.tatoeba.org/audio/tatoeba_audio_eng.zip	#1472
