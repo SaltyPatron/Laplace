@@ -1,4 +1,7 @@
 using Xunit;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model.Tests;
 
@@ -10,7 +13,9 @@ namespace Laplace.Decomposers.Model.Tests;
 public class RealModelManifestTests
 {
     private static string HubRoot =>
-        TestInstall.ResolveModelHubOrFallback();
+        Environment.GetEnvironmentVariable("LAPLACE_MODEL_ROOT") is { Length: > 0 } root
+            ? root
+            : TestInstall.ResolveModelHubOrFallback();
 
     public sealed record Expect(
         string HubDir, string ModelType, int Vocab, int Hidden, int Layers, int Heads, int KvHeads,
@@ -45,6 +50,40 @@ public class RealModelManifestTests
         var cfg = ModelConfigReader.Read(Path.Combine(dir, "config.json"));
         var headers = SafetensorsContainerParser.ParseModel(dir);
         return TensorRoleClassifier.Build(headers, cfg, name);
+    }
+
+    [SkippableFact]
+    public void TinyLlamaTokenizer_EveryContentIdentityHasPhysicality()
+    {
+        const string hubDir = "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0";
+        string? dir = ResolveSnapshot(hubDir);
+        if (dir is null) throw new SkipException($"model snapshot not present: {hubDir}");
+        if (!CodepointPerfcache.IsLoaded)
+            CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+
+        var records = LlamaTokenizerParser.Parse(Path.Combine(dir, "tokenizer.json"));
+        Assert.Equal(32_000, records.Count);
+
+        Hash128 source = Hash128.OfCanonical("test/model/tinyllama-tokenizer-admission");
+        var builder = new SubstrateChangeBuilder(
+            source, "tokenizer/vocab/tinyllama", entityCapacity: 200_000,
+            physicalityCapacity: 200_000);
+        foreach (var record in records)
+            LlamaTokenizerParser.StageVocabToken(builder, record, source);
+
+        var change = builder.Build();
+        var placed = change.Physicalities.Select(p => p.EntityId).ToHashSet();
+        var pending = change.Entities
+            .Where(e => EntityIdentityPolicy.RequiresPhysicality(e.TypeId))
+            .Where(e => !placed.Contains(e.Id))
+            .Select(e => e.Id)
+            .Distinct()
+            .ToArray();
+
+        Assert.True(
+            pending.Length == 0,
+            $"TinyLlama tokenizer emitted {pending.Length} content entities without physicality; " +
+            $"first={string.Join(',', pending.Take(10))}");
     }
 
     [SkippableTheory]

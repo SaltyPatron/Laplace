@@ -17,12 +17,7 @@ public sealed class TextEntityBuilderEmissionTests
     [InlineData("foo.\r\n\r\n")]
     [InlineData(" to hear about new eBooks.\r\n\r\n")]
     public void TrailingDoubleNewline_RoundtripsFromPhysicalities(string text)
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(text);
-        Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
-        byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
-        Assert.Equal(Nfc(bytes), rebuilt);
-    }
+        => AssertRoundtrip(Encoding.UTF8.GetBytes(text));
 
     private static string GalileoPath()
     {
@@ -36,16 +31,41 @@ public sealed class TextEntityBuilderEmissionTests
     }
 
     [Fact]
+    public void GeneratedLargeDocument_InMemory_RoundtripsFromPhysicalities()
+    {
+        // Keep the large-document DAG/reconstruction path in every DEV/BAT run.
+        // The physical Galileo corpus is useful additional evidence when mounted,
+        // but a developer/CI machine must not lose this law merely because that
+        // external corpus is absent. Diverse separators, Unicode, paragraph
+        // boundaries, repeated phrases and unique ordinals exercise the same
+        // document/sentence/word/grapheme composition and trajectory reconstruction.
+        var text = new StringBuilder(180_000);
+        for (int i = 0; i < 768; i++)
+        {
+            text.Append("Observation ").Append(i)
+                .Append(": Galileo measured motion — café, κόσμος, 狼, and stars. ")
+                .Append("Repeated evidence remains content-addressed; order remains trajectory geometry.\r\n")
+                .Append("Second sentence ").Append(i).Append(" keeps punctuation (A/B), numbers ")
+                .Append(i * 17).Append(", and tabs\tinside the same paragraph.\r\n\r\n");
+        }
+
+        AssertRoundtrip(Encoding.UTF8.GetBytes(text.ToString()));
+    }
+
+    [SkippableFact]
     public void FullGalileo_InMemory_RoundtripsFromPhysicalities()
     {
-        byte[] bytes = File.ReadAllBytes(GalileoPath());
+        string path = GalileoPath();
+        Skip.IfNot(File.Exists(path), $"external document corpus not present: {path}");
+        AssertRoundtrip(File.ReadAllBytes(path));
+    }
+
+    private static void AssertRoundtrip(byte[] bytes)
+    {
         Assert.True(TextEntityBuilder.TryBuildRows(bytes, Src, out _, out var phys, out var rootId, out _));
         byte[] rebuilt = ReconstructFromPhysicalities(phys, rootId);
         Assert.Equal(Nfc(bytes), rebuilt);
     }
-
-
-
 
     private static unsafe byte[] Nfc(byte[] utf8)
     {

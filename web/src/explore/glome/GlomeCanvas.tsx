@@ -26,7 +26,60 @@ export interface GlomeNode {
   color?: string;
 }
 
+interface GlomePalette {
+  background: string;
+  primary: string;
+  walk: string;
+  neighbor: string;
+  constituent: string;
+  highlight: string;
+  packedLine: string;
+  placementLine: string;
+  wireframe: string;
+}
+
+const LIGHT_PALETTE: GlomePalette = {
+  background: '#e4edf2',
+  primary: '#1f6f9f',
+  walk: '#007b68',
+  neighbor: '#a65e08',
+  constituent: '#7448c8',
+  highlight: '#00836e',
+  packedLine: '#7d4bc3',
+  placementLine: '#287da9',
+  wireframe: '#66889b',
+};
+
+const DARK_PALETTE: GlomePalette = {
+  background: '#173b50',
+  primary: '#69bced',
+  walk: '#5bd8b0',
+  neighbor: '#f0bd68',
+  constituent: '#b9a0ff',
+  highlight: '#69e4bd',
+  packedLine: '#c39cff',
+  placementLine: '#71c1ed',
+  wireframe: '#91b8ca',
+};
+
 const SHELL = 0.85;
+
+function useSystemDarkMode(): boolean {
+  const [dark, setDark] = useState(() =>
+    typeof window !== 'undefined'
+      && window.matchMedia('(prefers-color-scheme: dark)').matches,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (event: MediaQueryListEvent) => setDark(event.matches);
+    setDark(media.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+
+  return dark;
+}
 
 /** Packed: hash-XYZ on a display shell. M is paint, not an axis. */
 export function packedDisplayPos(n: GlomeNode): [number, number, number] {
@@ -35,25 +88,55 @@ export function packedDisplayPos(n: GlomeNode): [number, number, number] {
 }
 
 /**
- * Placement: an orthographic projection of the actual 4D point after an X-M
- * plane rotation. It retains the projected XYZ magnitude instead of normalizing
- * every point onto a shell, and makes M observable. The former projection discarded M, normalized XYZ, then restored
- * radius_origin; every point on the same XYZ ray therefore collapsed onto one
- * display ray even when its fourth coordinate differed.
+ * Placement is a 3-D view of the real PointZM ball, not a flat XYZ slice.
+ *
+ * First rotate the actual 4-D point through X-M and Z-M planes so M remains
+ * observable in both screen width and camera depth. Then use the rotated XYZ
+ * direction with radius_origin as radial depth. This preserves the useful part
+ * of the Aug-9 M-aware projection without discarding the coherence/interior
+ * radius that the earlier glome-ball view exposed.
  */
-export function placementBallPos(n: GlomeNode, xmAngle = 0): [number, number, number] {
-  const c = Math.cos(xmAngle);
-  const s = Math.sin(xmAngle);
+export function placementBallPos(
+  n: GlomeNode,
+  xmAngle = 0,
+  zmAngle = 0,
+): [number, number, number] {
   const x = Number.isFinite(n.x) ? n.x : 0;
   const y = Number.isFinite(n.y) ? n.y : 0;
   const z = Number.isFinite(n.z) ? n.z : 0;
   const m = n.m != null && Number.isFinite(n.m) ? n.m : 0;
-  const rotatedX = x * c - m * s;
-  return [rotatedX * SHELL, y * SHELL, z * SHELL];
+
+  const cx = Math.cos(xmAngle);
+  const sx = Math.sin(xmAngle);
+  const xmX = x * cx - m * sx;
+  const xmM = x * sx + m * cx;
+
+  const cz = Math.cos(zmAngle);
+  const sz = Math.sin(zmAngle);
+  const zmZ = z * cz - xmM * sz;
+  const zmM = z * sz + xmM * cz;
+
+  const dirLen = Math.hypot(xmX, y, zmZ);
+  if (dirLen <= Number.EPSILON) return [0, 0, 0];
+
+  const fallbackRadius = Math.min(1, Math.hypot(xmX, y, zmZ, zmM) || 1);
+  const radius4 = Number.isFinite(n.radius) && n.radius >= 0
+    ? Math.min(1, n.radius)
+    : fallbackRadius;
+  const displayRadius = SHELL * Math.max(0.02, radius4);
+  const scale = displayRadius / dirLen;
+  return [xmX * scale, y * scale, zmZ * scale];
 }
 
-function project(n: GlomeNode, mode: GlomeProjection, xmAngle: number): [number, number, number] {
-  return mode === 'packed' ? packedDisplayPos(n) : placementBallPos(n, xmAngle);
+function project(
+  n: GlomeNode,
+  mode: GlomeProjection,
+  xmAngle: number,
+  zmAngle: number,
+): [number, number, number] {
+  return mode === 'packed'
+    ? packedDisplayPos(n)
+    : placementBallPos(n, xmAngle, zmAngle);
 }
 
 /** Demand-mode: redraw when node set changes; OrbitControls still invalidates on input. */
@@ -92,6 +175,8 @@ function GlomeScene({
   highlightOrdinal,
   projection,
   xmAngle,
+  zmAngle,
+  palette,
   revision,
   onSelectOrdinal,
 }: {
@@ -101,6 +186,8 @@ function GlomeScene({
   highlightOrdinal: number | null;
   projection: GlomeProjection;
   xmAngle: number;
+  zmAngle: number;
+  palette: GlomePalette;
   revision: string;
   onSelectOrdinal?: (ordinal: number | null) => void;
 }) {
@@ -112,9 +199,10 @@ function GlomeScene({
   useEffect(() => {
     const mesh = instances.current;
     if (!mesh) return;
+    const hadInstanceColor = mesh.instanceColor != null;
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
-      const [x, y, z] = project(n, projection, xmAngle);
+      const [x, y, z] = project(n, projection, xmAngle, zmAngle);
       const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
       // Run length is metadata, not literal volume. Keep dense trajectories
       // legible while still giving repeated constituents a visible cue.
@@ -126,23 +214,29 @@ function GlomeScene({
       mesh.setMatrixAt(i, transform.matrix);
       mesh.setColorAt(i, new THREE.Color(
         n.color
-          ?? (n.kind === 'walk' ? palette.signal
-            : n.kind === 'neighbor' ? palette.error
-              : n.kind === 'constituent' ? palette.steel
-                : ordHit || highlightIds.has(n.id) ? palette.signal : palette.primary),
+          ?? (n.kind === 'walk' ? palette.walk
+            : n.kind === 'neighbor' ? palette.neighbor
+              : n.kind === 'constituent' ? palette.constituent
+                : ordHit || highlightIds.has(n.id) ? palette.highlight : palette.primary),
       ));
     }
     mesh.count = nodes.length;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [nodes, projection, xmAngle, highlightIds, highlightOrdinal, transform, palette]);
+    // setColorAt allocates instanceColor lazily. The material may already have
+    // compiled once without USE_INSTANCING_COLOR, so force one recompile when
+    // that attribute first appears instead of rendering black/unpainted spheres.
+    if (!hadInstanceColor && mesh.instanceColor) {
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) material.needsUpdate = true;
+    }
+  }, [nodes, projection, xmAngle, zmAngle, highlightIds, highlightOrdinal, palette, transform]);
 
   return (
     <>
+      <color attach="background" args={[palette.background]} />
       <ContextLossGuard />
       <InvalidateOnData revision={revision} />
-      <ambientLight intensity={0.55} />
-      <pointLight position={[4, 4, 4]} intensity={1.2} />
       <instancedMesh
         ref={instances}
         args={[undefined, undefined, nodes.length]}
@@ -158,23 +252,29 @@ function GlomeScene({
         }}
       >
         <sphereGeometry args={[1, 9, 9]} />
-        <meshStandardMaterial vertexColors emissiveIntensity={0.25} />
+        <meshBasicMaterial vertexColors toneMapped={false} />
       </instancedMesh>
       {trajectory.length > 1 ? (
         <Line
           points={trajectory}
-          color={projection === 'packed' ? palette.signal : palette.steel}
+          color={projection === 'packed' ? palette.packedLine : palette.placementLine}
           lineWidth={1.25}
           transparent
-          opacity={0.75}
+          opacity={0.82}
         />
       ) : null}
       <mesh>
         <sphereGeometry args={[1, 28, 28]} />
-        <meshBasicMaterial color={palette.muted} wireframe transparent opacity={0.11} />
+        <meshBasicMaterial
+          color={palette.wireframe}
+          wireframe
+          transparent
+          opacity={0.22}
+          toneMapped={false}
+        />
       </mesh>
       {hover ? (
-        <Html position={project(hover, projection, xmAngle).map((v) => v + 0.08) as [number, number, number]}>
+        <Html position={project(hover, projection, xmAngle, zmAngle).map((v) => v + 0.08) as [number, number, number]}>
           <div className={styles.tooltip}>
             <strong>{hover.label}</strong>
             {hover.ordinal != null ? <span> · ord {hover.ordinal}</span> : null}
@@ -247,7 +347,12 @@ export function GlomeCanvas({
   const baseReady = useDeferredWebGlMount(nodes.length > 0);
   const [staggerReady, setStaggerReady] = useState(staggerMs <= 0);
   const [xmDegrees, setXmDegrees] = useState(35);
+  const [zmDegrees, setZmDegrees] = useState(25);
   const xmAngle = xmDegrees * Math.PI / 180;
+  const zmAngle = zmDegrees * Math.PI / 180;
+  const dark = useSystemDarkMode();
+  const palette = dark ? DARK_PALETTE : LIGHT_PALETTE;
+
   useEffect(() => {
     if (!baseReady || staggerMs <= 0) {
       setStaggerReady(staggerMs <= 0 ? baseReady : false);
@@ -265,13 +370,13 @@ export function GlomeCanvas({
       .filter((n) => n.kind === 'constituent')
       .slice()
       .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-      .map((n) => project(n, projection, xmAngle));
-  }, [nodes, trajectoryPoints, projection, xmAngle]);
+      .map((n) => project(n, projection, xmAngle, zmAngle));
+  }, [nodes, trajectoryPoints, projection, xmAngle, zmAngle]);
 
   const highlights = useMemo(() => new Set(highlightIds), [highlightIds]);
   const revision = useMemo(
-    () => `${projection}:${xmDegrees}:${nodes.length}:${highlightOrdinal}:${nodes.map((n) => n.id).join(',')}`,
-    [nodes, projection, xmDegrees, highlightOrdinal],
+    () => `${projection}:${xmDegrees}:${zmDegrees}:${dark}:${nodes.length}:${highlightOrdinal}:${nodes.map((n) => n.id).join(',')}`,
+    [nodes, projection, xmDegrees, zmDegrees, dark, highlightOrdinal],
   );
 
   if (nodes.length === 0) {
@@ -281,18 +386,32 @@ export function GlomeCanvas({
   return (
     <div className={fill ? `${styles.root} ${styles.rootFill}` : styles.root}>
       {projection === 'placement' ? (
-        <label className={styles.rotationControl}>
-          <span>X–M rotation</span>
-          <input
-            type="range"
-            min="-180"
-            max="180"
-            step="1"
-            value={xmDegrees}
-            onChange={(event) => setXmDegrees(Number(event.target.value))}
-          />
-          <output>{xmDegrees}°</output>
-        </label>
+        <div className={styles.rotationControls}>
+          <label className={styles.rotationControl}>
+            <span>X–M rotation</span>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              value={xmDegrees}
+              onChange={(event) => setXmDegrees(Number(event.target.value))}
+            />
+            <output>{xmDegrees}°</output>
+          </label>
+          <label className={styles.rotationControl}>
+            <span>Z–M depth</span>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              value={zmDegrees}
+              onChange={(event) => setZmDegrees(Number(event.target.value))}
+            />
+            <output>{zmDegrees}°</output>
+          </label>
+        </div>
       ) : null}
       <div className={fill ? `${styles.canvas} ${styles.canvasFill}` : styles.canvas}>
         {webGlReady ? (
@@ -315,6 +434,8 @@ export function GlomeCanvas({
                 highlightOrdinal={highlightOrdinal}
                 projection={projection}
                 xmAngle={xmAngle}
+                zmAngle={zmAngle}
+                palette={palette}
                 revision={revision}
                 onSelectOrdinal={onSelectOrdinal}
               />

@@ -41,7 +41,7 @@
   .paneCaption {
     margin: 0.15rem 0 0;
     font-size: 0.78rem;
-    color: var(--muted, #8b97a8);
+    color: var(--color-text-muted);
     line-height: 1.35;
   }
 
@@ -52,12 +52,12 @@
     align-items: center;
     justify-content: center;
     padding: 1rem;
-    border: 1px dashed var(--color-border-default, #2a3344);
-    border-radius: var(--radius-md, 6px);
-    color: var(--viz-muted);
+    border: 1px dashed var(--color-border-default);
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
     font-size: 0.85rem;
     text-align: center;
-    background: var(--viz-bg);
+    background: var(--color-viz-bg);
   }
 
   .scrub {
@@ -70,7 +70,7 @@
 
   .scrubLabel {
     font-size: 0.8rem;
-    color: var(--muted, #8b97a8);
+    color: var(--color-text-muted);
   }
 
   .scrubRange {
@@ -80,7 +80,7 @@
   .chip {
     font-size: 0.8rem;
     padding: 0.25rem 0.5rem;
-    border: 1px solid var(--color-border-default, #2a3344);
+    border: 1px solid var(--color-border-default);
     border-radius: 4px;
     white-space: nowrap;
     overflow: hidden;
@@ -88,7 +88,7 @@
   }
 
   .chipMuted {
-    color: var(--muted, #8b97a8);
+    color: var(--color-text-muted);
   }
 
   .overlayRow {
@@ -101,7 +101,7 @@
   .hint {
     margin: 0;
     font-size: 0.85rem;
-    color: var(--muted, #8b97a8);
+    color: var(--color-text-muted);
     line-height: 1.4;
   }
 }

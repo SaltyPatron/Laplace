@@ -1,5 +1,7 @@
 @layer tokens {
   :root {
+    color-scheme: light;
+
     /* Tier A — Primitives */
     --primitive-neutral-950: #0a2638;
     --primitive-neutral-900: #f3f7f9;
@@ -34,6 +36,10 @@
     --color-bg-panel-2: var(--primitive-neutral-700);
     --color-bg-elevated: color-mix(in srgb, var(--primitive-neutral-700) 72%, var(--primitive-neutral-800));
     --color-bg-abyss: var(--primitive-neutral-950);
+    --color-bg-top: #f8fafb;
+    --color-viz-bg: #e4edf2;
+    --color-viz-label: #16384c;
+    --color-viz-label-bg: rgb(244 248 250 / 82%);
     --color-navy: #0a2638;
     --color-navy-raised: #10344a;
     --color-navy-muted: #a9bdc9;
@@ -120,6 +126,44 @@
 
     font-size: 16px;
   }
+
+  /* Follow the host OS/browser preference without returning to the almost-black
+     pre-reskin UI. The dark surface stays in the same blue instrument family as
+     the header, so switching between system modes changes luminance without a
+     white ↔ black flash. */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+
+      --primitive-neutral-950: #122f42;
+      --primitive-neutral-900: #17384c;
+      --primitive-neutral-800: #1e4055;
+      --primitive-neutral-700: #274b61;
+      --primitive-neutral-600: #4b6d7f;
+      --primitive-blue-500: #69add2;
+      --primitive-blue-600: #327da8;
+      --primitive-teal-400: #63cfc2;
+      --primitive-teal-600: #23756f;
+      --primitive-copper-400: #d99a72;
+      --primitive-copper-600: #b77b58;
+      --primitive-red-500: #ef7f89;
+      --primitive-green-500: #61cb91;
+      --primitive-yellow-500: #e4b762;
+      --primitive-text-100: #eef7fa;
+      --primitive-text-400: #b9ccd5;
+
+      --color-bg-top: #123247;
+      --color-viz-bg: #173b50;
+      --color-viz-label: #e4f0f5;
+      --color-viz-label-bg: rgb(10 38 56 / 78%);
+      --color-navy: #102d40;
+      --color-navy-raised: #1a4258;
+      --color-navy-muted: #b3cad5;
+      --shadow-instrument:
+        0 1px 2px rgb(3 18 28 / 24%),
+        0 10px 30px rgb(3 18 28 / 20%);
+    }
+  }
 }
 
 @layer base {
@@ -147,7 +191,7 @@
     background-color: var(--color-bg-surface);
     background-image:
       radial-gradient(circle at 72% -10%, color-mix(in srgb, var(--color-steel) 9%, transparent), transparent 34rem),
-      linear-gradient(180deg, #f8fafb, var(--color-bg-surface) 22rem);
+      linear-gradient(180deg, var(--color-bg-top), var(--color-bg-surface) 22rem);
     background-size: auto;
     background-attachment: fixed;
     color: var(--color-text-primary);

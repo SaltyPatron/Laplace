@@ -1,10 +1,28 @@
 # Decomposer normalization campaign status
 
-Status date: 2026-08-20
+Implementation status date: 2026-08-20
+
+Dataset-authority addendum: 2026-09-03
 
 This is the integration inventory for the decomposer campaign. It records what is
 on `main` and what still requires product work. A pull request is not counted as
 delivered until it is merged.
+
+## Dataset prerequisite
+
+This implementation inventory does not certify the data currently installed under
+`/vault/Data`. Before any decomposer is re-evaluated or reseeded, execute
+[DATASET_ESTATE_MODERNIZATION.md](DATASET_ESTATE_MODERNIZATION.md) and reconcile every
+selected artifact through [`docs/source-estate.tsv`](../source-estate.tsv). GitHub
+[#1403](https://github.com/SaltyPatron/Laplace/issues/1403) owns the complete physical
+artifact graph; [#1471](https://github.com/SaltyPatron/Laplace/issues/1471),
+[#1472](https://github.com/SaltyPatron/Laplace/issues/1472), and
+[#1473](https://github.com/SaltyPatron/Laplace/issues/1473) own the release-specific
+replacement and acquisition work.
+
+The handoff into this campaign is a list of admitted immutable artifact hashes, not a
+legacy directory name. Decomposer fidelity and coverage receipts are measured only after
+the dataset estate's global completion gate passes.
 
 ## Tracking authority
 
