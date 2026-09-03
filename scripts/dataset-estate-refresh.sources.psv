@@ -1,0 +1,71 @@
+# Executable acquisition manifest for scripts/dataset-estate-refresh.sh
+#
+# pipe-separated columns:
+# lane|id|kind|relative_path|url_or_repo|ref|expected_bytes|sha256|md5
+#
+# This file contains only artifacts that are safe to automate without click-through
+# terms. `git` rows are archived into deterministic gzip snapshots; mutable active
+# worktrees are never used as the admitted artifact. `url` rows download atomically
+# into /vault/Data/.refresh-20260903 (or LAPLACE_DATA_REFRESH_ROOT).
+#
+# Large Wikipedia/Wikidata/Syzygy acquisition is intentionally implemented as named
+# workers in the shell script rather than pretending a recursive estate is one URL row.
+
+semantic|omw-2.0|url|OMW-2.0/omw-2.0.tar.xz|https://github.com/omwn/omw-data/releases/download/v2.0/omw-2.0.tar.xz||55846636|c369a2ad773a31e182ac4cc753132fa7c31ad423586d6783bacce08090cb8d7d|
+semantic|omw-index|url|OMW-2.0/index.toml|https://github.com/omwn/omw-data/releases/download/v2.0/index.toml||9298|63fc6828e577647a14b21f429d589f240057fc0c668f684a40af7bdcc4c8c186|
+semantic|oewn-2025-plus|url|OpenEnglishWordNet-2025-plus/english-wordnet-2025-plus.xml.gz|https://github.com/globalwordnet/english-wordnet/releases/download/2025-edition/english-wordnet-2025-plus.xml.gz||12925887|31f4af16c54b532fd5484d4cc33aee588a31bb5b70683ae8197842fde5b586bc|
+semantic|cili-current|git|CILI|https://github.com/globalwordnet/cili.git|a895d7ecb18019dda3443f98901e59d81ce8722b|||
+semantic|semlink-current|git|SemLink|https://github.com/cu-clear/semlink.git|HEAD|||
+semantic|verbnet-current|git|VerbNet|https://github.com/cu-clear/verbnet.git|HEAD|||
+semantic|propbank-current|git|PropBank|https://github.com/propbank/propbank-frames.git|HEAD|||
+semantic|verbatlas-1.1|url|VerbAtlas-1.1/VerbAtlas-1.1.0.zip|https://verbatlas.org/downloads/VerbAtlas-1.1.0.zip||||
+
+mutable|ud-2.18|ud218|UD-Treebanks/ud-treebanks-v2.18.tgz|https://lindat.mff.cuni.cz/repository/handle/11234/1-6149||684056893|||e9bfd544a48eac63ea3bb41e80c78813
+mutable|tatoeba-sentences|url|Tatoeba/sentences.tar.bz2|https://downloads.tatoeba.org/exports/sentences.tar.bz2||218181927||
+mutable|tatoeba-links|url|Tatoeba/links.tar.bz2|https://downloads.tatoeba.org/exports/links.tar.bz2||149438756||
+mutable|tatoeba-audio-map|url|Tatoeba/sentences_with_audio.tar.bz2|https://downloads.tatoeba.org/exports/sentences_with_audio.tar.bz2||6375974||
+mutable|tatoeba-detailed|url|Tatoeba/sentences_detailed.tar.bz2|https://downloads.tatoeba.org/exports/sentences_detailed.tar.bz2||302362514||
+mutable|tatoeba-cc0|url|Tatoeba/sentences_CC0.tar.bz2|https://downloads.tatoeba.org/exports/sentences_CC0.tar.bz2||7956499||
+mutable|tatoeba-lists|url|Tatoeba/sentences_in_lists.tar.bz2|https://downloads.tatoeba.org/exports/sentences_in_lists.tar.bz2||41348209||
+mutable|tatoeba-tags|url|Tatoeba/tags.tar.bz2|https://downloads.tatoeba.org/exports/tags.tar.bz2||4871427||
+mutable|tatoeba-tags-detailed|url|Tatoeba/tags_detailed.tar.bz2|https://downloads.tatoeba.org/exports/tags_detailed.tar.bz2||9024661||
+mutable|tatoeba-transcriptions|url|Tatoeba/transcriptions.tar.bz2|https://downloads.tatoeba.org/exports/transcriptions.tar.bz2||8710182||
+mutable|tatoeba-user-languages|url|Tatoeba/user_languages.tar.bz2|https://downloads.tatoeba.org/exports/user_languages.tar.bz2||825897||
+mutable|tatoeba-users-sentences|url|Tatoeba/users_sentences.csv|https://downloads.tatoeba.org/exports/users_sentences.csv||98584943||
+mutable|tatoeba-tag-metadata|url|Tatoeba/tag_metadata.csv|https://downloads.tatoeba.org/exports/tag_metadata.csv||604308||
+mutable|wiktionary-raw-2026-08-28|url|Wiktionary/raw-wiktextract-data-2026-08-28.jsonl.gz|https://kaikki.org/dictionary/raw-wiktextract-data.jsonl.gz||2826623319||
+mutable|atomic10x|url|Atomic/ATOMIC10X.jsonl|https://storage.googleapis.com/ai2-mosaic-public/projects/symbolic-knowledge-decoding/ATOMIC10X.jsonl||1535887049|||027c1c063750bbe8ef65000ccccf0960
+mutable|lichess-openings|git|LichessOpenings|https://github.com/lichess-org/chess-openings.git|4b8622759e7ae6f93f011cc6c83a3823401ab45e|||
+mutable|twic-1651|url|TWIC/twic1651g.zip|https://theweekinchess.com/assets/files/pgn/twic1651g.zip||||
+mutable|twic-1652|url|TWIC/twic1652g.zip|https://theweekinchess.com/assets/files/pgn/twic1652g.zip||||
+mutable|twic-1653|url|TWIC/twic1653g.zip|https://theweekinchess.com/assets/files/pgn/twic1653g.zip||||
+mutable|twic-1654|url|TWIC/twic1654g.zip|https://theweekinchess.com/assets/files/pgn/twic1654g.zip||||
+mutable|twic-1655|url|TWIC/twic1655g.zip|https://theweekinchess.com/assets/files/pgn/twic1655g.zip||||
+mutable|twic-1656|url|TWIC/twic1656g.zip|https://theweekinchess.com/assets/files/pgn/twic1656g.zip||||
+mutable|twic-1657|url|TWIC/twic1657g.zip|https://theweekinchess.com/assets/files/pgn/twic1657g.zip||||
+mutable|twic-1658|url|TWIC/twic1658g.zip|https://theweekinchess.com/assets/files/pgn/twic1658g.zip||||
+mutable|twic-1659|url|TWIC/twic1659g.zip|https://theweekinchess.com/assets/files/pgn/twic1659g.zip||||
+mutable|twic-1660|url|TWIC/twic1660g.zip|https://theweekinchess.com/assets/files/pgn/twic1660g.zip||||
+
+geo|geonames-allcountries|url|GeoNames/allCountries.zip|https://download.geonames.org/export/dump/allCountries.zip||||
+geo|geonames-altnames-v2|url|GeoNames/alternateNamesV2.zip|https://download.geonames.org/export/dump/alternateNamesV2.zip||||
+geo|geonames-hierarchy|url|GeoNames/hierarchy.zip|https://download.geonames.org/export/dump/hierarchy.zip||||
+geo|geonames-country-info|url|GeoNames/countryInfo.txt|https://download.geonames.org/export/dump/countryInfo.txt||||
+geo|geonames-admin1|url|GeoNames/admin1CodesASCII.txt|https://download.geonames.org/export/dump/admin1CodesASCII.txt||||
+geo|geonames-admin2|url|GeoNames/admin2Codes.txt|https://download.geonames.org/export/dump/admin2Codes.txt||||
+geo|geonames-feature-codes|url|GeoNames/featureCodes_en.txt|https://download.geonames.org/export/dump/featureCodes_en.txt||||
+geo|geonames-language-codes|url|GeoNames/iso-languagecodes.txt|https://download.geonames.org/export/dump/iso-languagecodes.txt||||
+geo|geonames-timezones|url|GeoNames/timeZones.txt|https://download.geonames.org/export/dump/timeZones.txt||||
+geo|naturalearth-admin0-5.1.1|url|NaturalEarth/ne_110m_admin_0_countries-5.1.1.zip|https://naturalearth.s3.amazonaws.com/5.1.1/110m_cultural/ne_110m_admin_0_countries.zip||||
+geo|naturalearth-populated-5.1.2|url|NaturalEarth/ne_110m_populated_places-5.1.2.zip|https://naturalearth.s3.amazonaws.com/5.1.2/110m_cultural/ne_110m_populated_places.zip||||
+
+safety|hatecheck|git|Safety/HateCheck|https://github.com/paul-rottger/hatecheck-data.git|HEAD|||
+safety|sghatecheck|git|Safety/SGHateCheck|https://github.com/Social-AI-Studio/SGHateCheck.git|HEAD|||
+safety|xstest|git|Safety/XSTest|https://github.com/paul-rottger/xstest.git|HEAD|||
+safety|social-bias-frames-v2|url|Safety/SocialBiasFrames/SBIC.v2.tgz|https://homes.cs.washington.edu/~msap/social-bias-frames/SBIC.v2.tgz||||
+safety|social-chemistry-101|url|Safety/SocialChemistry101/social-chem-101.zip|https://storage.googleapis.com/ai2-mosaic-public/projects/social-chemistry/data/social-chem-101.zip||||
+safety|civil-comments|git-lfs|Safety/CivilComments|https://huggingface.co/datasets/google/civil_comments|HEAD|||
+safety|toxigen|git-lfs|Safety/ToxiGen|https://huggingface.co/datasets/toxigen/toxigen-data|HEAD|||
+safety|measuring-hate-speech|git-lfs|Safety/MeasuringHateSpeech|https://huggingface.co/datasets/ucberkeley-dlab/measuring-hate-speech|HEAD|||
+safety|prosocial-dialog|git-lfs|Safety/ProsocialDialog|https://huggingface.co/datasets/allenai/prosocial-dialog|HEAD|||
+safety|real-toxicity-prompts|git-lfs|Safety/RealToxicityPrompts|https://huggingface.co/datasets/allenai/real-toxicity-prompts|HEAD|||
