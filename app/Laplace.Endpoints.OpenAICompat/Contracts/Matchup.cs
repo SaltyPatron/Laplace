@@ -2,7 +2,12 @@ using System.Text.Json.Serialization;
 
 namespace Laplace.Api.Contracts;
 
-/// <summary>One row of a per-band leaderboard: a consensus edge at full label.</summary>
+/// <summary>
+/// One row of a per-band leaderboard.  The original compact fields remain the
+/// compatibility surface; realization metadata keeps identity, human/content
+/// presentation, and technical registry names distinct, while rating/RD/eff_mu
+/// remain separate measurements.
+/// </summary>
 public sealed record LeaderRow(
     [property: JsonPropertyName("subject_id")] string SubjectId,
     [property: JsonPropertyName("subject")] string Subject,
@@ -10,7 +15,47 @@ public sealed record LeaderRow(
     [property: JsonPropertyName("object_id")] string ObjectId,
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("eff_mu")] decimal EffMu,
-    [property: JsonPropertyName("witnesses")] long Witnesses);
+    [property: JsonPropertyName("witnesses")] long Witnesses)
+{
+    [JsonPropertyName("subject_realization")]
+    public string? SubjectRealization { get; init; }
+
+    [JsonPropertyName("subject_technical_name")]
+    public string? SubjectTechnicalName { get; init; }
+
+    [JsonPropertyName("subject_type_id")]
+    public string? SubjectTypeId { get; init; }
+
+    [JsonPropertyName("subject_type_name")]
+    public string? SubjectTypeName { get; init; }
+
+    [JsonPropertyName("relation_id")]
+    public string? RelationId { get; init; }
+
+    [JsonPropertyName("relation_realization")]
+    public string? RelationRealization { get; init; }
+
+    [JsonPropertyName("relation_technical_name")]
+    public string? RelationTechnicalName { get; init; }
+
+    [JsonPropertyName("object_realization")]
+    public string? ObjectRealization { get; init; }
+
+    [JsonPropertyName("object_technical_name")]
+    public string? ObjectTechnicalName { get; init; }
+
+    [JsonPropertyName("object_type_id")]
+    public string? ObjectTypeId { get; init; }
+
+    [JsonPropertyName("object_type_name")]
+    public string? ObjectTypeName { get; init; }
+
+    [JsonPropertyName("rating")]
+    public decimal? Rating { get; init; }
+
+    [JsonPropertyName("rd")]
+    public decimal? Rd { get; init; }
+}
 
 public sealed record BandLeaders(
     [property: JsonPropertyName("band")] int Band,
