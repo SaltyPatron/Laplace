@@ -78,7 +78,7 @@ public sealed class LlamaTokenizerParser
             if (role.HasFlag(TokenRole.Special))
             {
                 entityId = Hash128.OfCanonical($"substrate/token/special/{raw}/v1");
-                tier = 0;
+                tier = EntityTier.Word;
             }
             else if (TryDecomposeRoot(canonical, out entityId, out tier, out cx, out cy, out cz, out cm))
             {
@@ -86,14 +86,8 @@ public sealed class LlamaTokenizerParser
             }
             else
             {
-                entityId = Hash128.Blake3(canonical);
-                tier = EntityTier.Word;
-                if (canonical.Length == 1 && canonical[0] >= ByteAtoms.First)
-                {
-                    var bc = ByteAtoms.Coord(canonical[0]);
-                    cx = bc[0]; cy = bc[1]; cz = bc[2]; cm = bc[3];
-                    hasContent = true;
-                }
+                (entityId, tier, cx, cy, cz, cm) = OpaqueByteRoot(canonical);
+                hasContent = canonical.Length > 0;
             }
 
             records.Add(new TokenRecord
@@ -222,9 +216,12 @@ public sealed class LlamaTokenizerParser
             if (!UnicodeToByte.TryGetValue(raw[i], out byte b)) return false;
             buf[i] = b;
         }
-        int start = 0;
-        if (buf.Length > 1 && buf[0] == (byte)' ') { leadingSpace = true; start = 1; }
-        bytes = start == 0 ? buf : buf[start..];
+        // GPT-2 byte-level `Ġ` is byte 0x20.  The space is CONTENT, not a
+        // disposable tokenizer hint: stripping it aliases `Ġword` with `word`
+        // and makes exact tokenizer reconstruction impossible.  Keep the decoded
+        // bytes and retain the role as realization metadata for consumers.
+        leadingSpace = buf[0] == (byte)' ';
+        bytes = buf;
         return true;
     }
 
@@ -257,7 +254,10 @@ public sealed class LlamaTokenizerParser
         if (surface.Length > 0 && (surface[0] == '▁' || surface[0] == 'Ġ'))
         {
             role |= TokenRole.LeadingSpace;
-            surface = surface.Substring(1);
+            // SentencePiece metaspace and GPT-2's byte-level space marker both
+            // realize a LEADING U+0020.  Preserve it in canonical content so its
+            // physicality trajectory is [space, token], never [token, space].
+            surface = " " + surface.Substring(1);
         }
         else if (surface.Length > 2 && surface.StartsWith("##", StringComparison.Ordinal))
         {
@@ -307,22 +307,91 @@ public sealed class LlamaTokenizerParser
         }
         else
         {
-            b.AddEntity(rec.EntityId, EntityTier.Word, TextEntityBuilder.WordTypeId,
-                firstObservedBy: sourceId);
+            // A special/control token is a governed tokenizer reference, not
+            // ordinary textual content.  All other fallbacks are literal byte
+            // sequences and therefore owe one exact Merkle physicality.
+            Hash128 typeId = rec.Role.HasFlag(TokenRole.Special)
+                ? EntityTypeRegistry.SourceReference
+                : TextEntityBuilder.WordTypeId;
+            b.AddEntity(rec.EntityId, rec.Tier, typeId, firstObservedBy: sourceId);
             if (rec.HasContentCoord)
             {
-                coord[0] = rec.ContentX; coord[1] = rec.ContentY;
-                coord[2] = rec.ContentZ; coord[3] = rec.ContentM;
-                Hash128 physId = PhysicalityId.Compute(rec.EntityId, PhysicalityType.Content);
-                b.AddPhysicality(new PhysicalityRow(
-                    Id: physId, EntityId: rec.EntityId, SourceId: sourceId,
-                    Type: PhysicalityType.Content,
-                    CoordX: rec.ContentX, CoordY: rec.ContentY, CoordZ: rec.ContentZ, CoordM: rec.ContentM,
-                    HilbertIndex: Hilbert128.Encode(coord),
-                    TrajectoryXyzm: null, NConstituents: 0,
-                    AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+                if (rec.CanonicalBytes.Length > 1)
+                {
+                    var children = ByteConstituents(rec.CanonicalBytes);
+                    var composed = NgramTrajectory.Compose(
+                        children, rec.Tier, TextEntityBuilder.WordTypeId, sourceId,
+                        IngestClock.NowUnixUs());
+                    if (composed.Id != rec.EntityId)
+                        throw new InvalidOperationException(
+                            $"opaque tokenizer byte identity mismatch: parsed={rec.EntityId} composed={composed.Id}");
+                    b.AddPhysicality(composed.Physicality);
+                }
+                else
+                {
+                    coord[0] = rec.ContentX; coord[1] = rec.ContentY;
+                    coord[2] = rec.ContentZ; coord[3] = rec.ContentM;
+                    Hash128 physId = PhysicalityId.Compute(rec.EntityId, PhysicalityType.Content);
+                    b.AddPhysicality(new PhysicalityRow(
+                        Id: physId, EntityId: rec.EntityId, SourceId: sourceId,
+                        Type: PhysicalityType.Content,
+                        CoordX: rec.ContentX, CoordY: rec.ContentY, CoordZ: rec.ContentZ, CoordM: rec.ContentM,
+                        HilbertIndex: Hilbert128.Encode(coord),
+                        TrajectoryXyzm: null, NConstituents: 0,
+                        AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+                }
             }
         }
+    }
+
+    private static (Hash128 Id, byte Tier, double X, double Y, double Z, double M)
+        OpaqueByteRoot(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length == 0)
+            return (Hash128.Blake3(bytes), EntityTier.Word,
+                double.NaN, double.NaN, double.NaN, double.NaN);
+
+        var children = ByteConstituents(bytes);
+        if (children.Length == 1)
+        {
+            var c = children[0];
+            return (c.Id, 0, c.X, c.Y, c.Z, c.M);
+        }
+
+        var ids = new Hash128[children.Length];
+        var coords = new double[children.Length * 4];
+        for (int i = 0; i < children.Length; i++)
+        {
+            var c = children[i];
+            ids[i] = c.Id;
+            coords[i * 4] = c.X; coords[i * 4 + 1] = c.Y;
+            coords[i * 4 + 2] = c.Z; coords[i * 4 + 3] = c.M;
+        }
+        double[] center = Math4d.KarcherMean(coords);
+        return (Hash128.Merkle(EntityTier.Word, ids), EntityTier.Word,
+            center[0], center[1], center[2], center[3]);
+    }
+
+    private static NgramTrajectory.Constituent[] ByteConstituents(ReadOnlySpan<byte> bytes)
+    {
+        var children = new NgramTrajectory.Constituent[bytes.Length];
+        var codepoints = CodepointPerfcache.Records;
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            byte value = bytes[i];
+            Hash128 id = ByteAtoms.Id(value);
+            if (value < ByteAtoms.First)
+            {
+                ref readonly var cp = ref codepoints[value];
+                children[i] = new(id, cp.CoordX, cp.CoordY, cp.CoordZ, cp.CoordM);
+            }
+            else
+            {
+                ReadOnlySpan<double> c = ByteAtoms.Coord(value);
+                children[i] = new(id, c[0], c[1], c[2], c[3]);
+            }
+        }
+        return children;
     }
 
     public static async IAsyncEnumerable<TokenRecord> EnumerateVocabRecordsAsync(

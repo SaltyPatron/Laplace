@@ -7,8 +7,8 @@ namespace Laplace.Decomposers.Model.Tests;
 public class TokenRoleTests
 {
     [Theory]
-    [InlineData("▁the", TokenRole.LeadingSpace, "the")]
-    [InlineData("Ġthe", TokenRole.LeadingSpace, "the")]
+    [InlineData("▁the", TokenRole.LeadingSpace, " the")]
+    [InlineData("Ġthe", TokenRole.LeadingSpace, " the")]
     [InlineData("the", TokenRole.None, "the")]
     [InlineData("cat", TokenRole.None, "cat")]
     public void Canonicalize_RecordsLeadingSpaceRole(string raw, TokenRole expectedRole, string expectedText)
@@ -19,11 +19,13 @@ public class TokenRoleTests
     }
 
     [Fact]
-    public void WordInitialAndSubword_ShareCanonicalText_ButDifferByRole()
+    public void WordInitialAndBareToken_HaveDistinctExactContent()
     {
         var (cInit, rInit) = LlamaTokenizerParser.Canonicalize("▁the");
         var (cSub, rSub) = LlamaTokenizerParser.Canonicalize("the");
-        Assert.Equal(cInit, cSub);
+        Assert.NotEqual(cInit, cSub);
+        Assert.Equal(" the"u8.ToArray(), cInit);
+        Assert.Equal("the"u8.ToArray(), cSub);
         Assert.True(rInit.HasFlag(TokenRole.LeadingSpace));
         Assert.False(rSub.HasFlag(TokenRole.LeadingSpace));
     }
