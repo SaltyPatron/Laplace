@@ -81,13 +81,16 @@ BEGIN ATOMIC
     ORDER BY f.ord;
 END;
 
--- Language-aware label projection.  NULL language is a valid request meaning no
--- language preference; do not mark this overload STRICT.
+-- Language-aware semantic label projection.  A label is content or an eligible
+-- witnessed name.  Technical registry names and id handles remain metadata; callers
+-- that need a total display use realize.display_batch / converse.label_or_hex_batch.
 CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[], p_lang bytea)
     RETURNS text[]
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT COALESCE(array_agg(d.label ORDER BY d.ord), '{}'::text[])
+    SELECT COALESCE(array_agg(
+               CASE WHEN d.realization IN ('content', 'name') THEN d.label END
+               ORDER BY d.ord), '{}'::text[])
     FROM realize.display_batch(p_ids, p_lang) d;
 END;
 
@@ -100,12 +103,13 @@ BEGIN ATOMIC
     SELECT realize.label_batch(p_ids, NULL::bytea);
 END;
 
--- Legacy function name retained for installed callers.  The fallback is now the
--- explicit identity handle allowed by GH #1404, never the fabricated prose string
--- "unrealized entity" and never a regex-derived pseudo-language label.
+-- Legacy function name retained for installed callers.  This is the total-display
+-- projection: unresolved entities become an explicit id handle, never fabricated
+-- prose and never a regex-derived pseudo-language label.
 CREATE OR REPLACE FUNCTION converse.label_or_hex_batch(p_ids bytea[])
     RETURNS text[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT realize.label_batch(p_ids, NULL::bytea);
+    SELECT COALESCE(array_agg(d.label ORDER BY d.ord), '{}'::text[])
+    FROM realize.display_batch(p_ids, NULL::bytea) d;
 END;
