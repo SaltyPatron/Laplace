@@ -122,6 +122,27 @@ public class MeasurementLaneGateTests
     }
 
     /// <summary>
+    /// Fresh-db deliberately leaves a reachable empty database between nuke and migration.
+    /// The quiet gate must distinguish that bootstrap state from a broken observer: only a
+    /// successful exact to_regclass probe may classify the missing ingest journal as quiet,
+    /// and that proof has to occur before any query dereferences the journal itself.
+    /// </summary>
+    [Fact]
+    public void QuietGate_PreSchemaBootstrapIsProvenWithoutFailingOpen()
+    {
+        var gate = QuietGate();
+        var probe = gate.IndexOf("to_regclass('laplace.ingest_run_journal')", StringComparison.Ordinal);
+        var provenMissing = gate.IndexOf("[ \"$journal_rc\" -eq 0 ] && [ \"$journal_state\" = \"missing\" ]", StringComparison.Ordinal);
+        var journalRead = gate.IndexOf("FROM laplace.ingest_run_journal j WHERE j.status = 'running'", StringComparison.Ordinal);
+
+        Assert.True(probe >= 0, "quiet gate no longer proves whether the exact ingest journal exists");
+        Assert.True(provenMissing > probe, "missing journal may be accepted without a successful PostgreSQL probe");
+        Assert.True(journalRead > provenMissing, "quiet gate dereferences the ingest journal before handling pre-schema bootstrap");
+        Assert.Contains("unreachable or misconfigured database is not proof of quiet", gate);
+        Assert.DoesNotContain("*relation*does not exist*", gate);
+    }
+
+    /// <summary>
     /// The modes are the whole mechanism. Ingest SHARED lets any number of ingests run
     /// together — exclusive there would serialise ingest against ingest, the exact thing
     /// wait-for-quiet-substrate.sh's header refuses to do. Measurement EXCLUSIVE is what
