@@ -66,6 +66,31 @@ LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
   already.txt https://example.invalid/already '' '' '' '' >/dev/null 2>&1
 [[ "$(cat "$REFRESH/.jobs/valid-existing.rc")" == '0' ]] || { echo "successful worker did not write rc=0" >&2; exit 1; }
 
+# Git snapshot creation and replay exercise the set -u-sensitive sidecar path.
+# The source is local so this remains deterministic and network-free.
+git_source="$tmp/git-source"
+mkdir -p "$git_source"
+git -C "$git_source" init -q
+git -C "$git_source" config user.name 'Dataset refresh test'
+git -C "$git_source" config user.email 'dataset-refresh@example.invalid'
+printf 'snapshot payload\n' > "$git_source/payload.txt"
+git -C "$git_source" add payload.txt
+git -C "$git_source" commit -qm 'fixture'
+git_sha="$(git -C "$git_source" rev-parse HEAD)"
+LAPLACE_DATA_ROOT="$DATA" \
+LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
+  "$SCRIPT" _job git-snapshot row_worker semantic git-snapshot git \
+  snapshots "$git_source" "$git_sha" '' '' '' >/dev/null 2>&1
+snapshot="$REFRESH/snapshots/git-snapshot-$git_sha.tar.gz"
+[[ -f "$snapshot" && -f "$snapshot.sha256" ]] || { echo "Git snapshot sidecar was not created" >&2; exit 1; }
+rm -f -- "$snapshot.sha256"
+LAPLACE_DATA_ROOT="$DATA" \
+LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
+  "$SCRIPT" _job git-snapshot-replay row_worker semantic git-snapshot git \
+  snapshots "$git_source" "$git_sha" '' '' '' >/dev/null 2>&1
+[[ "$(cat "$REFRESH/.jobs/git-snapshot-replay.rc")" == '0' ]] || { echo "Git snapshot replay failed" >&2; exit 1; }
+[[ -f "$snapshot.sha256" ]] || { echo "interrupted Git snapshot sidecar was not recovered" >&2; exit 1; }
+
 # wait must fail closed for a job that is no longer alive but has no exit receipt.
 printf '999999999\n' > "$REFRESH/.jobs/orphan.pid"
 rm -f "$REFRESH/.jobs/orphan.rc"
