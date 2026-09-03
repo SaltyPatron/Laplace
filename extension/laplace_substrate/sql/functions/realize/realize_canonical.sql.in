@@ -1,10 +1,18 @@
--- realize._canonical — GH #862 / #860. No SET (blocks plan caching and inlining;
--- this runs per row inside realize's COALESCE), real schema names.
+-- realize._canonical — exact technical identity-name lookup.
+--
+-- Canonical identity names are registry/reference metadata, not a language and not
+-- content.  Do not parse their spelling to manufacture a human surface: names such
+-- as substrate/.../v1, language:..., repo:..., a Unicode string, or a future
+-- modality-specific notation are all opaque here.  The presentation layer decides
+-- whether a canonical technical name is eligible after content/name realization.
+--
+-- This is deliberately an exact id -> name lookup.  No regex, case fold, delimiter
+-- stripping, ASCII/Latin assumption, or source-path grammar belongs in REALIZE.
 DROP FUNCTION IF EXISTS laplace._realize_canonical(bytea);
 CREATE OR REPLACE FUNCTION realize._canonical(p_id bytea)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
-    SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
+    SELECT n.name
     FROM laplace.canonical_names n
-    WHERE n.id = p_id AND n.name LIKE 'substrate/%'
+    WHERE n.id = p_id
 $$;
