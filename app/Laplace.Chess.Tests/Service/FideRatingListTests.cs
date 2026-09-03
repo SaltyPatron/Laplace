@@ -80,6 +80,31 @@ public sealed class FideRatingListTests
         Assert.Equal("7000001", girl.FideId);
     }
 
+    [Fact]
+    public void Search_PreservesRecordsAcrossBoundedGrammarBatches()
+    {
+        const int count = 4105; // deliberately crosses the 4096-record grammar batch boundary
+        var source = new StringBuilder("<?xml version=\"1.0\"?><playerslist>");
+        for (int i = 0; i < count; i++)
+        {
+            string id = (8000000 + i).ToString();
+            string name = i == count - 1 ? "Needle, Player" : $"Fixture, Player {i}";
+            source.Append("<player><fideid>").Append(id)
+                .Append("</fideid><name>").Append(name)
+                .Append("</name><country>USA</country><sex>M</sex><title>M</title>")
+                .Append("<rating>2000</rating><rapid_rating>1900</rapid_rating>")
+                .Append("<blitz_rating>1800</blitz_rating><birthday>20000101</birthday><flag />")
+                .Append("</player>");
+        }
+        source.Append("</playerslist>");
+
+        using var xml = new MemoryStream(Encoding.UTF8.GetBytes(source.ToString()));
+        var player = Assert.Single(FideRatingList.SearchXml(xml, "Needle", 5));
+        Assert.Equal((8000000 + count - 1).ToString(), player.FideId);
+        Assert.Equal("Needle, Player", player.Name);
+        Assert.Equal("IM", player.Title);
+    }
+
     private static MemoryStream Stream()
         => new(Encoding.UTF8.GetBytes(Xml));
 }
