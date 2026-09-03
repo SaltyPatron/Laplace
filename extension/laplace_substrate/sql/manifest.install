@@ -64,10 +64,14 @@ indexes/consensus_object_type_btree.sql.in
 schema/tables/consensus_id.sql.in
 schema/tables/highway_mask_dirty.sql.in
 schema/apply_write_epoch.sql.in
+views/v_word_points.sql.in
 functions/mu/effective_mu.sql.in
 functions/mu/eff_mu.sql.in
 functions/mu/eff_mu_display.sql.in
 functions/mu/refuted.sql.in
+views/v_consensus_resolved.sql.in
+views/v_consensus_edges.sql.in
+views/v_consensus_unrefuted.sql.in
 functions/relation/relation_type_resolve.sql.in
 functions/relation/relation_type_in_family.sql.in
 functions/relation/relation_in_family.sql.in
@@ -171,6 +175,7 @@ functions/converse/word_segment.sql.in
 functions/converse/word_segment_resolved.sql.in
 functions/converse/label.sql.in
 functions/converse/label_or_hex.sql.in
+views/v_attestation_readable.sql.in
 functions/converse/label_is_content.sql.in
 functions/inspect/consensus_partition_pressure.sql.in
 functions/converse/prompt_words.sql.in
@@ -414,13 +419,8 @@ functions/ops/backend_signal.sql.in
 functions/ops/repair.sql.in
 functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
-views/v_consensus_resolved.sql.in
-views/v_consensus_edges.sql.in
 views/v_entities_highway.sql.in
-views/v_consensus_unrefuted.sql.in
-views/v_word_points.sql.in
 views/v_word_senses.sql.in
-views/v_attestation_readable.sql.in
 functions/structural/word_anchor.sql.in
 functions/geometry/structural_cluster_batch.sql.in
 functions/geometry/structural_cluster.sql.in
