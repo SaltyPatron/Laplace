@@ -48,3 +48,34 @@ BEGIN ATOMIC
       AND public.laplace_trajectory_constituent_ids(p.trajectory) @> p_members
     ORDER BY p.entity_id, p.id;
 END;
+
+-- Browser/name discovery needs the same indexed containment law, but only over
+-- word-like composition points.  Keep the raw trajectory predicate in this one
+-- sanctioned structural boundary; callers receive an explicit capacity receipt
+-- instead of reimplementing the GIN probe or pretending a bounded frontier is
+-- the complete universe.
+DROP FUNCTION IF EXISTS structural.word_containers_containing_all(bytea[], int);
+CREATE OR REPLACE FUNCTION structural.word_containers_containing_all(
+    p_members bytea[],
+    p_capacity int DEFAULT 2048)
+    RETURNS TABLE(entity_id bytea, candidate_count bigint, truncated boolean)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH bounded AS MATERIALIZED (
+        SELECT w.id
+        FROM laplace.v_word_points w
+        WHERE cardinality(p_members) > 0
+          AND w.trajectory IS NOT NULL
+          AND public.laplace_trajectory_constituent_ids(w.trajectory) @> p_members
+        ORDER BY w.id
+        LIMIT GREATEST(COALESCE(p_capacity, 0), 0) + 1
+    ), stats AS MATERIALIZED (
+        SELECT LEAST(count(*), GREATEST(COALESCE(p_capacity, 0), 0))::bigint AS n,
+               count(*) > GREATEST(COALESCE(p_capacity, 0), 0) AS clipped
+        FROM bounded
+    )
+    SELECT b.id, s.n, s.clipped
+    FROM bounded b CROSS JOIN stats s
+    ORDER BY b.id
+    LIMIT GREATEST(COALESCE(p_capacity, 0), 0);
+END;
