@@ -172,3 +172,22 @@ BEGIN
         cardinality(p_subjects), v_repaired, v_scope, v_refolded;
 END;
 $$;
+
+-- Transition compatibility for the one legacy deployment caller left behind when
+-- PR #1453 retired the queue/journal/worker. This entrypoint MUST stay inert: it
+-- validates only the declared relation ids, performs no table reads or writes, and
+-- never calls repair_player_ratings_batch. Historical reconstruction requires an
+-- explicit caller-selected subject set through the bounded batch procedure above.
+DROP PROCEDURE IF EXISTS chess.repair_player_ratings(bytea, bytea, bytea);
+CREATE PROCEDURE chess.repair_player_ratings(
+    p_outcome bytea,
+    p_played bytea,
+    p_rating bytea)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF p_outcome IS NULL OR p_played IS NULL OR p_rating IS NULL THEN
+        RAISE EXCEPTION 'repair_player_ratings: required relation id is NULL';
+    END IF;
+END;
+$$;
