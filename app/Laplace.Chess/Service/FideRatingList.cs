@@ -12,17 +12,25 @@ namespace Laplace.Chess.Service;
 /// identity, not the authority for discovering whether the identity exists.
 ///
 /// FIDE publishes XML, and XML is already a registered Laplace grammar. The native
-/// grammar decomposer therefore owns structural parsing; this class only projects
-/// FIDE's named fields from the resulting element AST.
+/// grammar decomposer therefore owns structural parsing; this class only frames the
+/// provider's repeated player records into bounded grammar batches and projects FIDE's
+/// named fields from each resulting element AST.
 /// </summary>
 internal static class FideRatingList
 {
     internal const string XmlArchiveUrl = "https://ratings.fide.com/download/players_list_xml.zip";
     private const long MaxArchiveBytes = 128L * 1024 * 1024;
     private const long MaxXmlBytes = 1024L * 1024 * 1024;
+    private const int MaxPlayersPerGrammarBatch = 4096;
+    private const int MaxGrammarBatchBytes = 16 * 1024 * 1024;
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromHours(6);
     private static readonly SemaphoreSlim EstateGate = new(1, 1);
     private static readonly HttpClient Http = CreateClient();
+
+    private static ReadOnlySpan<byte> PlayerOpenTag => "<player>"u8;
+    private static ReadOnlySpan<byte> PlayerCloseTag => "</player>"u8;
+    private static ReadOnlySpan<byte> BatchRootOpen => "<playerslist>"u8;
+    private static ReadOnlySpan<byte> BatchRootClose => "</playerslist>"u8;
 
     private static Player[]? _players;
     private static DateTimeOffset _playersFetchedAt;
@@ -251,43 +259,60 @@ internal static class FideRatingList
     }
 
     /// <summary>
-    /// Structural parsing belongs to the registered XML grammar. This projection only
-    /// interprets the direct child elements of each FIDE <player> element after that
-    /// structure has been produced by the native grammar decomposer.
+    /// The source framer recognizes only the provider's repeated record boundary.
+    /// It does not read or interpret a field. Each bounded group is wrapped in the
+    /// provider root and handed to the registered native XML grammar, which remains
+    /// the sole owner of element structure and field extraction.
+    ///
+    /// One whole-estate Tree-sitter AST previously made first search cancellation
+    /// ineffective for several minutes. Bounded grammar batches keep both parse work
+    /// and cancellation latency proportional to a small slice of the estate.
     /// </summary>
     private static Player[] ParsePlayers(byte[] utf8, CancellationToken ct)
     {
-        using var ast = GrammarDecomposer.Parse(utf8, "xml");
-        var players = new List<PlayerBuilder>();
-        var stack = new Stack<ElementFrame>();
+        var builders = new List<PlayerBuilder>();
+        int scan = 0;
+        int batchStart = -1;
+        int batchEnd = -1;
+        int batchCount = 0;
 
-        for (int i = 0; i < ast.NodeCount; i++)
+        while (scan < utf8.Length)
         {
-            if ((i & 16383) == 0) ct.ThrowIfCancellationRequested();
-            var node = ast.GetNode(i);
-            if (!ast.NodeTypeIs(node.NodeTypeId, "element"u8)) continue;
+            ct.ThrowIfCancellationRequested();
+            int relativeStart = utf8.AsSpan(scan).IndexOf(PlayerOpenTag);
+            if (relativeStart < 0) break;
+            int recordStart = scan + relativeStart;
+            int relativeClose = utf8.AsSpan(recordStart).IndexOf(PlayerCloseTag);
+            if (relativeClose < 0)
+                throw new InvalidDataException("FIDE XML player record is missing its closing tag.");
+            int recordEnd = checked(recordStart + relativeClose + PlayerCloseTag.Length);
 
-            while (stack.Count > 0 && node.StartByte >= stack.Peek().EndByte)
-                stack.Pop();
-
-            string name = ElementName(ast, utf8, i, node);
-            PlayerBuilder? player = null;
-            if (name.Equals("player", StringComparison.OrdinalIgnoreCase))
+            if (batchStart < 0) batchStart = recordStart;
+            bool batchFull = batchCount > 0
+                && (batchCount >= MaxPlayersPerGrammarBatch
+                    || recordEnd - batchStart > MaxGrammarBatchBytes);
+            if (batchFull)
             {
-                player = new PlayerBuilder();
-                players.Add(player);
-            }
-            else if (stack.Count > 0
-                     && stack.Peek().Name.Equals("player", StringComparison.OrdinalIgnoreCase)
-                     && stack.Peek().Player is { } owner)
-            {
-                ApplyField(owner, name, ElementText(ast, utf8, i, node));
+                ParsePlayerGrammarBatch(
+                    utf8.AsSpan(batchStart, batchEnd - batchStart), builders, ct);
+                batchStart = recordStart;
+                batchCount = 0;
             }
 
-            stack.Push(new ElementFrame(node.EndByte, name, player));
+            batchEnd = recordEnd;
+            batchCount++;
+            scan = recordEnd;
         }
 
-        return players
+        if (batchCount > 0)
+            ParsePlayerGrammarBatch(
+                utf8.AsSpan(batchStart, batchEnd - batchStart), builders, ct);
+
+        if (builders.Count == 0)
+            throw new InvalidDataException(
+                "FIDE XML player list did not contain canonical <player> records.");
+
+        return builders
             .Where(p => p.FideId.Length is >= 4 and <= 12
                         && p.FideId.All(char.IsDigit)
                         && !string.IsNullOrWhiteSpace(p.Name))
@@ -303,6 +328,46 @@ internal static class FideRatingList
                 BirthYear(p.Birthday),
                 p.Flag.Trim()))
             .ToArray();
+    }
+
+    private static void ParsePlayerGrammarBatch(
+        ReadOnlySpan<byte> records, List<PlayerBuilder> players, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        int length = checked(BatchRootOpen.Length + records.Length + BatchRootClose.Length);
+        var document = new byte[length];
+        BatchRootOpen.CopyTo(document);
+        records.CopyTo(document.AsSpan(BatchRootOpen.Length));
+        BatchRootClose.CopyTo(document.AsSpan(BatchRootOpen.Length + records.Length));
+
+        using var ast = GrammarDecomposer.Parse(document, "xml");
+        var stack = new Stack<ElementFrame>();
+
+        for (int i = 0; i < ast.NodeCount; i++)
+        {
+            if ((i & 4095) == 0) ct.ThrowIfCancellationRequested();
+            var node = ast.GetNode(i);
+            if (!ast.NodeTypeIs(node.NodeTypeId, "element"u8)) continue;
+
+            while (stack.Count > 0 && node.StartByte >= stack.Peek().EndByte)
+                stack.Pop();
+
+            string name = ElementName(ast, document, i, node);
+            PlayerBuilder? player = null;
+            if (name.Equals("player", StringComparison.OrdinalIgnoreCase))
+            {
+                player = new PlayerBuilder();
+                players.Add(player);
+            }
+            else if (stack.Count > 0
+                     && stack.Peek().Name.Equals("player", StringComparison.OrdinalIgnoreCase)
+                     && stack.Peek().Player is { } owner)
+            {
+                ApplyField(owner, name, ElementText(ast, document, i, node));
+            }
+
+            stack.Push(new ElementFrame(node.EndByte, name, player));
+        }
     }
 
     private static string ElementName(
