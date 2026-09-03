@@ -59,4 +59,32 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.DoesNotContain("placementTrajectory", tab, StringComparison.Ordinal);
         Assert.DoesNotContain("trajectoryPoints={placementTrajectory", tab, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ExploreWorkbench_UsesViewportSpace_DisclosureNavigation_AndDistinctButtonStates()
+    {
+        var explore = Read("web", "src", "explore", "ExploreView.tsx");
+        var exploreCss = Read("web", "src", "explore", "ExploreView.module.css");
+        var graphCss = Read("web", "src", "explore", "graph", "ConsensusGraph.module.css");
+        var glomeCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
+        var buttons = Read("web", "src", "ui", "primitives", "Button", "Button.module.css");
+
+        Assert.Contains("<details className={styles.navDisclosure} open>", explore, StringComparison.Ordinal);
+        Assert.Contains("<summary className={styles.navSummary}>Explore tools</summary>", explore, StringComparison.Ordinal);
+        Assert.Contains("width: 100%;", exploreCss, StringComparison.Ordinal);
+        Assert.Contains("max-width: none;", exploreCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("width: min(100%, 1600px)", exploreCss, StringComparison.Ordinal);
+
+        Assert.Contains("height: 72dvh;", graphCss, StringComparison.Ordinal);
+        Assert.Contains("min-height: max(28rem, 62dvh);", graphCss, StringComparison.Ordinal);
+        Assert.Contains("height: 72dvh;", glomeCss, StringComparison.Ordinal);
+        Assert.Contains("min-height: max(28rem, 62dvh);", glomeCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("height: min(70vh, 40rem)", graphCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("height: min(70vh, 40rem)", glomeCss, StringComparison.Ordinal);
+
+        Assert.Contains(".button:link", buttons, StringComparison.Ordinal);
+        Assert.Contains(".button:visited", buttons, StringComparison.Ordinal);
+        Assert.Contains("opacity: 1;", buttons, StringComparison.Ordinal);
+        Assert.Contains("background: var(--color-bg-panel-2);", buttons, StringComparison.Ordinal);
+    }
 }
