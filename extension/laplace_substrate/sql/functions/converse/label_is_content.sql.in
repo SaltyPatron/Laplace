@@ -1,18 +1,14 @@
--- True when a rendered label is real content, not substrate scaffolding. The
--- associative band (7) carries mesh/structural edges alongside content concepts,
--- so the listing responders keep only labels that are NOT a bare ILI id
--- ("09411430-n"), a WordNet lexfile name ("noun.object", "adjs.pert"), or a
--- multi-word phrase (a space). This was the same regex triplet copy-pasted into
--- converse.chat() and converse.facts() -- and it had already drifted (chat dropped the
--- "adjs" lexfile case), the exact one-definition-per-fact hazard. One predicate,
--- both callers. IMMUTABLE (pure function of the input, no schema objects) so it
--- inlines into the WHERE and needs no search_path.
+-- Legacy compatibility predicate.  Semantic/content classification cannot be
+-- recovered from a rendered string: WordNet-looking ids, spaces, punctuation,
+-- scripts, casing and delimiters are all valid content in some modality/language.
+--
+-- The former regex stoplist duplicated structural exclusions that now happen in id
+-- space through relation families before realization.  Keep this installed signature
+-- only for callers not yet retired; the only honest property of a text projection is
+-- whether a non-empty realization exists.
 DROP FUNCTION IF EXISTS laplace.label_is_content(text);
 CREATE OR REPLACE FUNCTION converse.label_is_content(p_label text)
     RETURNS boolean
     LANGUAGE sql IMMUTABLE AS $$
-    SELECT p_label IS NOT NULL
-       AND p_label !~ '^[0-9]{6,}-[nvasr]$'
-       AND p_label !~ '^(noun|verb|adj|adv|adjs)\.'
-       AND p_label !~ ' '
+    SELECT NULLIF(p_label, '') IS NOT NULL
 $$;
