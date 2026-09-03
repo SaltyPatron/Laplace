@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS chess.rating_repair_journal (
 CREATE OR REPLACE FUNCTION chess.rating_repair_generation()
 RETURNS text
 LANGUAGE sql IMMUTABLE PARALLEL SAFE
-AS $$ SELECT 'glicko2-opponent-carrier-20260902-v1'::text $$;
+BEGIN ATOMIC
+    SELECT 'glicko2-opponent-carrier-20260902-v1'::text;
+END;
 
 -- Deployment-facing contract: record/refresh the obligation and return quickly.
 -- An already completed generation stays completed. A previously interrupted or
