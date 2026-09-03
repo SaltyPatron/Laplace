@@ -16,6 +16,8 @@ CACHE_ROOT="$STAGE_ROOT/.git-cache"
 RECEIPT="$STAGE_ROOT/REFRESH_RECEIPT.tsv"
 LOCAL_HASHES="$STAGE_ROOT/DOWNLOADS.local.sha256"
 LOCAL_INVENTORY="$STAGE_ROOT/STAGING_LOCAL.tsv"
+CURRENT_JOB_ID=""
+VERIFY_FAILURES=0
 
 mkdir -p "$STAGE_ROOT" "$JOB_ROOT" "$CACHE_ROOT"
 
@@ -29,8 +31,8 @@ Safe staging commands:
   start all                   Start semantic + mutable + geo + safety (large estates excluded).
   start syzygy6               Opt-in complete 6-man WDL+DTZ staging, sequential and resumable.
   status                      Show background job state and log paths.
-  wait                        Wait for all started jobs; fail if any job failed.
-  verify [lane|all]           Re-verify staged manifest artifacts already present.
+  wait                        Wait for all started jobs; fail if any job failed or lost its exit receipt.
+  verify [lane|all]           Re-verify every staged manifest artifact in the selected lane(s).
   adopt-existing              Hash/inventory the existing refresh tree without changing it.
   disk                        Show active/staging sizes and free vault capacity.
 
@@ -127,6 +129,18 @@ verify_file() {
     container_check "$path" "$logical"
 }
 
+write_sha_sidecar() {
+    local path="$1" sidecar="$path.sha256" digest
+    digest="$(sha256sum "$path" | awk '{print $1}')"
+    printf '%s  %s\n' "$digest" "$(basename "$path")" > "$sidecar"
+}
+
+verify_sha_sidecar() {
+    local path="$1" sidecar="$path.sha256"
+    [[ -f "$path" && -f "$sidecar" ]] || return 1
+    (cd "$(dirname "$path")" && sha256sum -c "$(basename "$sidecar")" >/dev/null)
+}
+
 _download() {
     local id="$1" rel="$2" url="$3" expected_bytes="${4:-}" expected_sha="${5:-}" expected_md5="${6:-}"
     local target part rc
@@ -136,10 +150,13 @@ _download() {
     safe_stage_path "$target"
     mkdir -p "$(dirname "$target")"
 
-    if verify_file "$target" "$expected_bytes" "$expected_sha" "$expected_md5" "$target" 2>/dev/null; then
-        note "$id already staged and verified: $target"
-        record_receipt "$id" "verified-existing" "$target" "$url"
-        return 0
+    if [[ -e "$target" ]]; then
+        if verify_file "$target" "$expected_bytes" "$expected_sha" "$expected_md5" "$target" 2>/dev/null; then
+            note "$id already staged and verified: $target"
+            record_receipt "$id" "verified-existing" "$target" "$url"
+            return 0
+        fi
+        die "$id existing staged artifact failed verification; preserving it for inspection: $target"
     fi
 
     need curl
@@ -150,9 +167,9 @@ _download() {
     rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
-        # Some servers do not honor byte ranges. One clean restart is safer than
-        # declaring a partial file complete or looping forever on HTTP 416.
-        note "$id resume failed rc=$rc; retrying once from byte zero"
+        # Some servers do not honor byte ranges. One clean restart of the partial
+        # file is safe; an already-finalized artifact above is never overwritten.
+        note "$id resume failed rc=$rc; retrying partial once from byte zero"
         rm -f -- "$part"
         curl -fL --retry 6 --retry-delay 5 --retry-all-errors --connect-timeout 30 \
             --output "$part" "$url"
@@ -160,7 +177,7 @@ _download() {
 
     verify_file "$part" "$expected_bytes" "$expected_sha" "$expected_md5" "$target" \
         || die "$id failed size/hash/container verification"
-    mv -f -- "$part" "$target"
+    mv -- "$part" "$target"
     record_receipt "$id" "staged-verified" "$target" "$url"
     note "$id staged and verified"
 }
@@ -197,10 +214,13 @@ _git_snapshot() {
     safe_stage_path "$dest"
     mkdir -p "$(dirname "$dest")"
 
-    if [[ -f "$dest" ]] && container_check "$dest" "$dest"; then
-        note "$id Git snapshot already present: $sha"
-        record_receipt "$id" "verified-existing" "$dest" "$repo@$sha"
-        return 0
+    if [[ -e "$dest" ]]; then
+        if verify_sha_sidecar "$dest" && container_check "$dest" "$dest"; then
+            note "$id Git snapshot already present: $sha"
+            record_receipt "$id" "verified-existing" "$dest" "$repo@$sha"
+            return 0
+        fi
+        die "$id existing Git snapshot or SHA-256 sidecar is invalid; preserving: $dest"
     fi
 
     need git
@@ -215,9 +235,9 @@ _git_snapshot() {
     git -C "$cache" cat-file -e "$sha^{commit}"
     git -C "$cache" archive --format=tar --prefix="${id}-${sha}/" "$sha" | gzip -n > "$part"
     container_check "$part" "$dest"
-    mv -f -- "$part" "$dest"
+    mv -- "$part" "$dest"
     printf '%s\t%s\t%s\n' "$sha" "$repo" "$(date -u +%FT%TZ)" > "$dest.commit.tsv"
-    sha256sum "$dest" > "$dest.sha256"
+    write_sha_sidecar "$dest"
     record_receipt "$id" "staged-verified" "$dest" "$repo@$sha"
     note "$id Git snapshot staged at commit $sha"
 }
@@ -238,11 +258,14 @@ _git_lfs_snapshot() {
     safe_stage_path "$tmp"
     mkdir -p "$(dirname "$dest")"
 
-    if [[ -d "$dest" && -f "$files_manifest" ]]; then
-        (cd "$dest" && sha256sum -c "$files_manifest" >/dev/null) && {
+    if [[ -e "$dest" || -e "$files_manifest" ]]; then
+        if [[ -d "$dest" && -f "$files_manifest" ]] \
+            && (cd "$dest" && sha256sum -c "$files_manifest" >/dev/null); then
             note "$id LFS snapshot already present: $sha"
+            record_receipt "$id" "verified-existing" "$files_manifest" "$repo@$sha"
             return 0
-        }
+        fi
+        die "$id existing LFS snapshot/manifest is incomplete or invalid; preserving: $dest"
     fi
 
     rm -rf -- "$work" "$tmp"
@@ -263,6 +286,7 @@ _git_lfs_snapshot() {
     (cd "$dest" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) > "$files_manifest"
     printf '%s\t%s\t%s\n' "$sha" "$repo" "$(date -u +%FT%TZ)" > "$dest.commit.tsv"
     rm -rf -- "$work"
+    record_receipt "$id" "staged-verified" "$files_manifest" "$repo@$sha"
     note "$id LFS snapshot staged at commit $sha"
 }
 
@@ -328,16 +352,22 @@ start_job() {
     note "started $id pid=$! log=$JOB_ROOT/$id.log"
 }
 
-_job() {
-    local id="$1"; shift
-    local rc
-    set +e
-    "$@"
-    rc=$?
-    set -e
-    printf '%s\n' "$rc" > "$JOB_ROOT/$id.rc.tmp.$$"
-    mv -f -- "$JOB_ROOT/$id.rc.tmp.$$" "$JOB_ROOT/$id.rc"
+write_job_result_on_exit() {
+    local rc=$?
+    trap - EXIT
+    if [[ -n "$CURRENT_JOB_ID" ]]; then
+        printf '%s\n' "$rc" > "$JOB_ROOT/$CURRENT_JOB_ID.rc.tmp.$$"
+        mv -f -- "$JOB_ROOT/$CURRENT_JOB_ID.rc.tmp.$$" "$JOB_ROOT/$CURRENT_JOB_ID.rc"
+    fi
     exit "$rc"
+}
+
+_job() {
+    CURRENT_JOB_ID="$1"
+    shift
+    [[ "$CURRENT_JOB_ID" =~ ^[A-Za-z0-9._-]+$ ]] || die "unsafe job id: $CURRENT_JOB_ID"
+    trap write_job_result_on_exit EXIT
+    "$@"
 }
 
 for_rows() {
@@ -367,24 +397,27 @@ start_row() {
 
 verify_row() {
     local lane="$1" id="$2" kind="$3" rel="$4" source="$5" ref="$6" bytes="$7" sha="$8" md5="$9"
-    local target status="MISSING"
+    local target status="BAD/MISSING"
     case "$kind" in
         url|ud218)
             target="$STAGE_ROOT/$rel"
-            if verify_file "$target" "$bytes" "$sha" "$md5" "$target" 2>/dev/null; then status="OK"; else status="BAD/MISSING"; fi
+            if verify_file "$target" "$bytes" "$sha" "$md5" "$target" 2>/dev/null; then status="OK"; fi
             ;;
         git)
             target="$(find "$STAGE_ROOT/$rel" -maxdepth 1 -type f -name "${id}-*.tar.gz" 2>/dev/null | LC_ALL=C sort | tail -1 || true)"
-            if [[ -n "$target" ]] && container_check "$target" "$target"; then status="OK"; else status="BAD/MISSING"; fi
+            if [[ -n "$target" ]] && verify_sha_sidecar "$target" && container_check "$target" "$target"; then status="OK"; fi
             ;;
         git-lfs)
             target="$(find "$STAGE_ROOT/$rel" -maxdepth 1 -type d -name "${id}-*" 2>/dev/null | LC_ALL=C sort | tail -1 || true)"
             if [[ -n "$target" && -f "$target.files.sha256" ]] \
-                && (cd "$target" && sha256sum -c "$target.files.sha256" >/dev/null 2>&1); then status="OK"; else status="BAD/MISSING"; fi
+                && (cd "$target" && sha256sum -c "$target.files.sha256" >/dev/null 2>&1); then status="OK"; fi
             ;;
     esac
     printf '%-9s %-28s %s\n' "$lane" "$id" "$status"
-    [[ "$status" == "OK" ]]
+    if [[ "$status" != "OK" ]]; then
+        VERIFY_FAILURES=1
+    fi
+    return 0
 }
 
 status_jobs() {
@@ -402,7 +435,7 @@ status_jobs() {
         else
             state="ENDED(no receipt)"
         fi
-        printf '%-30s %-16s pid=%-8s log=%s\n' "$id" "$state" "${pid:-?}" "$JOB_ROOT/$id.log"
+        printf '%-30s %-18s pid=%-8s log=%s\n' "$id" "$state" "${pid:-?}" "$JOB_ROOT/$id.log"
     done
     shopt -u nullglob
     [[ "$any" -eq 1 ]] || note "no refresh jobs have been started"
@@ -422,10 +455,15 @@ wait_jobs() {
         [[ "$running" -eq 0 ]] || sleep 5
     done
 
-    local rc_file rc
+    local pid_file id rc
     shopt -s nullglob
-    for rc_file in "$JOB_ROOT"/*.rc; do
-        rc="$(cat "$rc_file")"
+    for pid_file in "$JOB_ROOT"/*.pid; do
+        id="$(basename "$pid_file" .pid)"
+        if [[ ! -f "$JOB_ROOT/$id.rc" ]]; then
+            failed=1
+            continue
+        fi
+        rc="$(cat "$JOB_ROOT/$id.rc")"
         [[ "$rc" == "0" ]] || failed=1
     done
     shopt -u nullglob
@@ -445,7 +483,7 @@ adopt_existing() {
     while IFS= read -r -d '' path; do
         rel="${path#"$STAGE_ROOT"/}"
         case "$rel" in
-            .jobs/*|.git-cache/*|*.part|DOWNLOADS.local.sha256|STAGING_LOCAL.tsv|REFRESH_RECEIPT.tsv) continue ;;
+            .jobs/*|.git-cache/*|*.part|*.part.*|DOWNLOADS.local.sha256|STAGING_LOCAL.tsv|REFRESH_RECEIPT.tsv) continue ;;
         esac
         bytes="$(stat -c '%s' "$path")"
         sha="$(sha256sum "$path" | awk '{print $1}')"
@@ -485,7 +523,8 @@ refresh_clean_repos() {
         fi
         target="$(resolve_git_ref "$repo" "$ref")"
         before="$(git -C "$path" rev-parse HEAD)"
-        git -C "$path" fetch -q origin "$target"
+        git -C "$path" fetch -q "$repo" "$target"
+        git -C "$path" cat-file -e "$target^{commit}"
         if ! git -C "$path" merge-base --is-ancestor "$before" "$target"; then
             printf '%-18s SKIP current HEAD is not ancestor of target %s\n' "$id" "$target"
             continue
@@ -499,19 +538,20 @@ refresh_clean_repos() {
 syzygy6_worker() {
     # Full six-men is intentionally opt-in. Download one file at a time so this
     # does not hammer a public mirror. Official filename->MD5 lists drive both the
-    # artifact roster and verification.
+    # artifact roster and verification. The roster source itself is commit-pinned.
     local wdl_base="${LAPLACE_SYZYGY6_WDL_BASE:-https://tablebase.lichess.ovh/tables/standard/6-wdl/}"
     local dtz_base="${LAPLACE_SYZYGY6_DTZ_BASE:-https://tablebase.lichess.ovh/tables/standard/6-dtz/}"
     local root="$STAGE_ROOT/Syzygy-6-men" checks="$STAGE_ROOT/Syzygy-6-men/checksums"
+    local roster_commit="0bb8aeee525f364bb750f96df312a1a7c9b54398"
     local free_bytes min_free=$((180 * 1024 * 1024 * 1024))
     mkdir -p "$root/WDL" "$root/DTZ" "$checks"
     free_bytes="$(df -PB1 "$STAGE_ROOT" | awk 'NR==2 {print $4}')"
     (( free_bytes >= min_free )) || die "Syzygy 6-man staging requires at least 180 GiB free; have $free_bytes bytes"
 
     _download "syzygy6-wdl-checksums" "Syzygy-6-men/checksums/wdl6.txt" \
-        "https://raw.githubusercontent.com/syzygy1/tb/master/checksums/wdl6.txt" "" "" ""
+        "https://raw.githubusercontent.com/syzygy1/tb/$roster_commit/checksums/wdl6.txt" "" "" ""
     _download "syzygy6-dtz-checksums" "Syzygy-6-men/checksums/dtz6.txt" \
-        "https://raw.githubusercontent.com/syzygy1/tb/master/checksums/dtz6.txt" "" "" ""
+        "https://raw.githubusercontent.com/syzygy1/tb/$roster_commit/checksums/dtz6.txt" "" "" ""
 
     local list kind base file expected target part actual count=0
     for kind in WDL DTZ; do
@@ -522,9 +562,12 @@ syzygy6_worker() {
             [[ -n "$file" && "$expected" =~ ^[0-9a-fA-F]{32}$ ]] || continue
             target="$root/$kind/$file"
             part="$target.part"
-            if [[ -f "$target" ]] && [[ "$(md5sum "$target" | awk '{print $1}')" == "${expected,,}" ]]; then
-                ((count+=1))
-                continue
+            if [[ -e "$target" ]]; then
+                if [[ -f "$target" ]] && [[ "$(md5sum "$target" | awk '{print $1}')" == "${expected,,}" ]]; then
+                    ((count+=1))
+                    continue
+                fi
+                die "existing Syzygy artifact failed MD5; preserving it for inspection: $target"
             fi
             note "Syzygy6 $kind $file"
             set +e
@@ -536,7 +579,7 @@ syzygy6_worker() {
                 curl -fL --retry 8 --retry-delay 8 --retry-all-errors -o "$part" "$base$file"
             fi
             [[ "$(md5sum "$part" | awk '{print $1}')" == "${expected,,}" ]] || die "Syzygy checksum mismatch: $file"
-            mv -f -- "$part" "$target"
+            mv -- "$part" "$target"
             ((count+=1))
         done < "$list"
     done
@@ -576,16 +619,13 @@ case "$cmd" in
         esac
         ;;
     status) status_jobs ;;
-    wait) wait_jobs ;;
+    wait) wait_jobs || die "one or more refresh jobs failed or ended without an exit receipt" ;;
     verify)
         lane="${1:-all}"
         [[ "$lane" =~ ^(semantic|mutable|geo|safety|all)$ ]] || die "unknown verify lane: $lane"
-        failed=0
-        set +e
+        VERIFY_FAILURES=0
         for_rows "$lane" verify_row
-        failed=$?
-        set -e
-        [[ "$failed" -eq 0 ]] || die "one or more staged artifacts failed verification"
+        [[ "$VERIFY_FAILURES" -eq 0 ]] || die "one or more staged artifacts failed verification"
         ;;
     adopt-existing) adopt_existing ;;
     refresh-clean-repos) refresh_clean_repos ;;
