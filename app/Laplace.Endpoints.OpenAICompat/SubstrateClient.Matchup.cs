@@ -10,22 +10,48 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// Split into fast reads (leaders, record, tape) and the slow path/verdict read,
 /// which the UI fetches lazily; path search competes with active seeds for the
 /// box, so it must never block the parts that return in a second. The SQL
-/// itself lives in <see cref="NpgsqlSubstrateReads"/> (doc 41) — salient_facts
-/// in particular is shared with the CLI's neighbors command and the MCP facts tool.
+/// itself lives in the sanctioned Npgsql read layer; consumers do not maintain
+/// private SQL or realization policy.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
-    /// <summary>Top consensus edges per salience band, fully labeled.</summary>
+    /// <summary>
+    /// Top consensus edges per salience band with the universal realization receipt
+    /// and all three Glicko display coordinates kept distinct.
+    /// </summary>
     public async Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
     {
-        var rows = await NpgsqlSubstrateReads.BandLeadersAsync(_dataSource, bands, perBand, ct, TranslateSubstrateError);
+        var rows = await NpgsqlLeaderboardReads.BandLeadersAsync(
+            _dataSource, bands, perBand, languageId: null, ct, TranslateSubstrateError);
 
         var catalog = await RelationBandsAsync(ct);
         var names = catalog.ToDictionary(b => b.Band, b => b.Name);
         return rows.GroupBy(r => r.Band)
             .OrderBy(g => g.Key)
             .Select(g => new BandLeaders(g.Key, names.GetValueOrDefault(g.Key, $"band {g.Key}"),
-                [.. g.Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))]))
+                [.. g.Select(r => new LeaderRow(
+                    r.SubjectIdHex,
+                    r.Subject,
+                    r.Relation,
+                    r.ObjectIdHex,
+                    r.Object,
+                    r.EffMu,
+                    r.Witnesses)
+                {
+                    SubjectRealization = r.SubjectRealization,
+                    SubjectTechnicalName = r.SubjectTechnicalName,
+                    SubjectTypeId = r.SubjectTypeIdHex,
+                    SubjectTypeName = r.SubjectTypeName,
+                    RelationId = r.RelationIdHex,
+                    RelationRealization = r.RelationRealization,
+                    RelationTechnicalName = r.RelationTechnicalName,
+                    ObjectRealization = r.ObjectRealization,
+                    ObjectTechnicalName = r.ObjectTechnicalName,
+                    ObjectTypeId = r.ObjectTypeIdHex,
+                    ObjectTypeName = r.ObjectTypeName,
+                    Rating = r.Rating,
+                    Rd = r.Rd,
+                })]))
             .ToList();
     }
 
