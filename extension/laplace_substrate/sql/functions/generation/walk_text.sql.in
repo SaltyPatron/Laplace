@@ -89,3 +89,10 @@ BEGIN ATOMIC
     SELECT * FROM generation.forward_text(
         p_prompt, p_steps, p_max_stride, p_spread, p_breadth, p_seed, 2, 8, NULL);
 END;
+
+-- Upgrade retirement. These text routing surfaces had no callers outside the
+-- recursive chain removed above. They must be dropped only AFTER forward_text is
+-- rebound to forward_frontier_ids: BEGIN ATOMIC records pg_depend, so dropping
+-- them earlier would make an in-place extension upgrade fail under RESTRICT.
+DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);
+DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);
