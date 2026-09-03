@@ -42,7 +42,7 @@
   }
 
   .shell:focus-visible {
-    border-color: var(--color-accent, #4f8cff);
+    border-color: var(--viz-signal);
   }
 
   .shellFill {

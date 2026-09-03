@@ -4,6 +4,7 @@ import { Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ExplorePhysicalityRow } from '../types';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
+import { lerpColor, visualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './GlomeCanvas.module.css';
 
 export type GlomeProjection = 'packed' | 'placement';
@@ -193,6 +194,7 @@ function GlomeScene({
   const [hover, setHover] = useState<GlomeNode | null>(null);
   const instances = useRef<THREE.InstancedMesh>(null);
   const transform = useMemo(() => new THREE.Object3D(), []);
+  const palette = useMemo(() => visualizationPalette(), []);
 
   useEffect(() => {
     const mesh = instances.current;
@@ -308,11 +310,14 @@ export function physicalitiesToNodes(
     }));
 }
 
-/** Ordinal → hue for Packed paint (M/ordinal channel). */
-export function ordinalColor(ordinal: number, maxOrdinal: number): string {
+/** Ordinal → the shared steel→signal visualization ramp for Packed paint. */
+export function ordinalColor(
+  ordinal: number,
+  maxOrdinal: number,
+  palette: VisualizationPalette = visualizationPalette(),
+): string {
   const t = maxOrdinal <= 1 ? 0 : (ordinal - 1) / (maxOrdinal - 1);
-  const h = Math.round(260 - t * 140);
-  return `hsl(${h} 70% 62%)`;
+  return lerpColor(palette.steel, palette.signal, t);
 }
 
 export function GlomeCanvas({

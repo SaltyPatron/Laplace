@@ -91,14 +91,6 @@ export function GlomeTab({
     }));
   }, [packed, maxOrd, constituentLabels]);
 
-  const packedTrajectory = useMemo(
-    () => packedNodes
-      .slice()
-      .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-      .map((n) => packedDisplayPos(n)),
-    [packedNodes],
-  );
-
   const placementPrimary = useMemo(
     () => physicalitiesToNodes(entity.physicalities, entity.label, entity.id_hex),
     [entity.physicalities, entity.label, entity.id_hex],
@@ -166,7 +158,6 @@ export function GlomeTab({
             ) : (
               <GlomeCanvas
                 nodes={packedNodes}
-                trajectoryPoints={packedTrajectory}
                 projection="packed"
                 highlightOrdinal={packedHighlightOrdinal}
                 onSelectOrdinal={setSelectedOrdinal}
