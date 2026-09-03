@@ -1,11 +1,35 @@
 # Decomposer normalization issue and acceptance ledger
 
-Status date: 2026-08-20
+Implementation status date: 2026-08-20
+
+Dataset-authority addendum: 2026-09-03
 
 This is the durable work graph for the decomposer normalization campaign. The
 campaign-level GitHub tracker is
 [#1177](https://github.com/SaltyPatron/Laplace/issues/1177). The implementation
 inventory is [DECOMPOSER_NORMALIZATION_STATUS.md](DECOMPOSER_NORMALIZATION_STATUS.md).
+
+## Dataset authority prerequisite
+
+Do not use the installed `/vault/Data` directory names or the legacy decomposer inputs as
+release authority. The complete source replacement, retention, and cleanup work is owned
+by [DATASET_ESTATE_MODERNIZATION.md](DATASET_ESTATE_MODERNIZATION.md), its
+[machine-readable estate inventory](../source-estate.tsv), and these execution issues:
+
+| Scope | Owner |
+|---|---|
+| Complete physical artifact graph and shared completion gate | [#1403](https://github.com/SaltyPatron/Laplace/issues/1403) |
+| OMW/OEWN/CILI and legacy semantic-mapping replacement | [#1471](https://github.com/SaltyPatron/Laplace/issues/1471) |
+| Mutable corpora, ATOMIC, Gutenberg, TWIC, and Lichess openings | [#1472](https://github.com/SaltyPatron/Laplace/issues/1472) |
+| Harm, toxicity, bias-contrast, and prosocial datasets | [#1473](https://github.com/SaltyPatron/Laplace/issues/1473) |
+| Unicode authority and abandoned-tree removal | [#1043](https://github.com/SaltyPatron/Laplace/issues/1043) |
+| Encyclopedic and geographic offline evidence | [#372](https://github.com/SaltyPatron/Laplace/issues/372) |
+| Syzygy tablebase coverage | [#605](https://github.com/SaltyPatron/Laplace/issues/605) |
+
+The dataset issues establish immutable release identity, selected artifacts, licenses,
+hashes, equivalent packaging, supersession, and removal receipts. Only their admitted
+artifact hashes become decomposer inputs. A parser accepting an old, duplicate, damaged,
+or unidentified source does not satisfy any normalization row below.
 
 This ledger deliberately treats comments, old issue bodies, and design prose as
 evidence to verify, not as implementation truth. Status is based on merged code,

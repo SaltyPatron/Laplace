@@ -14,6 +14,12 @@ analyses are under `docs/archive/plans/workstreams-v1/`.
 
 ## Ingest / decomposer authority
 
+[DATASET_ESTATE_MODERNIZATION.md](DATASET_ESTATE_MODERNIZATION.md) is the release,
+artifact, provenance, supersession, and cleanup runbook for `/vault/Data`. Its
+machine-readable companion is
+[`docs/source-estate.tsv`](../source-estate.tsv). Dataset authority is
+established before decomposer fidelity is judged.
+
 [INGEST_BOUNDARY_AND_RECIPE_LAW.md](INGEST_BOUNDARY_AND_RECIPE_LAW.md) is the current
 P0 correction for world admission. It separates artifact, transport, parser/source-object,
 canonical semantic, and persistence boundaries; source providers recover structure while
