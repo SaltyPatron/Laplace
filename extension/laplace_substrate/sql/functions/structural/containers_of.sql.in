@@ -24,17 +24,6 @@ CREATE OR REPLACE FUNCTION structural.containers_of(
 -- contains every identity.  This preserves the composition hop: `Captain` and
 -- `Ahab` remain constituents of the returned sentence; this function does not
 -- fabricate a direct semantic edge between them.
---
--- The predicate is the exact expression served by
--- physicalities_constituents_gin.  It is intentionally one bound @> probe, not
--- N calls to containers_of followed by an intersection.  On the live Moby Dick
--- data the two-id Captain/Ahab probe returns 112 containers in ~3 ms; separately
--- expanding both words and intersecting their result sets ran for minutes.
---
--- No row cap belongs in this primitive.  The caller owns policy and may rank or
--- stop after it has a typed candidate set.  An empty member set returns no rows
--- rather than allowing array containment's empty-set truth to scan every
--- physicality.
 DROP FUNCTION IF EXISTS laplace.containers_containing_all(bytea[]);
 CREATE OR REPLACE FUNCTION structural.containers_containing_all(p_members bytea[])
     RETURNS TABLE(entity_id bytea)
@@ -49,11 +38,10 @@ BEGIN ATOMIC
     ORDER BY p.entity_id, p.id;
 END;
 
--- Browser/name discovery needs the same indexed containment law, but only over
--- word-like composition points.  Keep the raw trajectory predicate in this one
--- sanctioned structural boundary; callers receive an explicit capacity receipt
--- instead of reimplementing the GIN probe or pretending a bounded frontier is
--- the complete universe.
+-- Browser/name discovery reuses the exact same indexed trajectory law over the
+-- word-point surface, but accepts the decomposer's word identities as input.
+-- They are lowered here to the tier-0 constituent floor using the canonical
+-- closure/facet operators; no UI tokenizer and no English-only character logic.
 DROP FUNCTION IF EXISTS structural.word_containers_containing_all(bytea[], int);
 CREATE OR REPLACE FUNCTION structural.word_containers_containing_all(
     p_members bytea[],
@@ -61,12 +49,26 @@ CREATE OR REPLACE FUNCTION structural.word_containers_containing_all(
     RETURNS TABLE(entity_id bytea, candidate_count bigint, truncated boolean)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH bounded AS MATERIALIZED (
+    WITH closure AS MATERIALIZED (
+        SELECT DISTINCT c.child_id AS id
+        FROM realize.constituents_closure(COALESCE(p_members, '{}'::bytea[]), 0) c
+        UNION
+        SELECT DISTINCT x.id
+        FROM unnest(COALESCE(p_members, '{}'::bytea[])) AS x(id)
+    ), closure_ids AS MATERIALIZED (
+        SELECT COALESCE(array_agg(c.id ORDER BY c.id), '{}'::bytea[]) AS ids
+        FROM closure c
+    ), floor_ids AS MATERIALIZED (
+        SELECT COALESCE(array_agg(f.entity_id ORDER BY f.entity_id), '{}'::bytea[]) AS ids
+        FROM closure_ids x, ops.entity_facets_batch(x.ids) f
+        WHERE f.tier = 0
+    ), bounded AS MATERIALIZED (
         SELECT w.id
-        FROM laplace.v_word_points w
-        WHERE cardinality(p_members) > 0
-          AND w.trajectory IS NOT NULL
-          AND public.laplace_trajectory_constituent_ids(w.trajectory) @> p_members
+        FROM floor_ids f
+        JOIN laplace.v_word_points w
+          ON cardinality(f.ids) > 0
+         AND w.trajectory IS NOT NULL
+         AND public.laplace_trajectory_constituent_ids(w.trajectory) @> f.ids
         ORDER BY w.id
         LIMIT GREATEST(COALESCE(p_capacity, 0), 0) + 1
     ), stats AS MATERIALIZED (
