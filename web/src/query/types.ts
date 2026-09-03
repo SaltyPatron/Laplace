@@ -68,12 +68,27 @@ export const SHAPE_DIALS: Record<string, (keyof QueryDials)[]> = {
   complete: ['depth', 'breadth'],
 };
 
+export type RealizationKind = 'content' | 'name' | 'canonical' | 'id' | string;
+
 export interface LeaderRow {
   subject_id: string;
   subject: string;
+  subject_realization?: RealizationKind | null;
+  subject_technical_name?: string | null;
+  subject_type_id?: string | null;
+  subject_type_name?: string | null;
+  relation_id?: string | null;
   relation: string;
+  relation_realization?: RealizationKind | null;
+  relation_technical_name?: string | null;
   object_id: string;
   object: string;
+  object_realization?: RealizationKind | null;
+  object_technical_name?: string | null;
+  object_type_id?: string | null;
+  object_type_name?: string | null;
+  rating?: number | null;
+  rd?: number | null;
   eff_mu: number;
   witnesses: number;
 }
