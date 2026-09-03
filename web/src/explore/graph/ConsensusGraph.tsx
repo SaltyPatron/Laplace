@@ -6,6 +6,7 @@ import ForceGraph3D from 'react-force-graph-3d';
 import { CanvasTexture, LinearFilter, MOUSE, Object3D, Sprite, SpriteMaterial, type Camera, type Vector3 } from 'three';
 import type { ExploreConsensusRow } from '../types';
 import type { WalkPathNode } from '../store';
+import { rgba, visualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './ConsensusGraph.module.css';
 import { useGraphFlyControls } from './useGraphFlyControls';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
@@ -39,6 +40,7 @@ export interface WebGraph {
 }
 
 type Dim = '2d' | '3d';
+type GraphData = { nodes: WebNode[]; links: WebEdge[] };
 
 /** World units — stay small vs link length so zoom-in is readable. */
 const NODE_REL_SIZE = 0.9;
@@ -46,15 +48,73 @@ const SHELL_RADIUS = 78;
 const LINK_BASE = 52;
 const CHARGE = -420;
 
-const HOP_COLOR = ['#4f8cff', '#3ecf8e', '#e8b339', '#9b7bff', '#f07178'];
-
-function hopColor(hop: number, walk?: boolean): string {
-  if (walk) return '#3ecf8e';
-  return HOP_COLOR[Math.min(Math.max(hop, 0), HOP_COLOR.length - 1)];
+function hopColor(hop: number, walk: boolean | undefined, palette: VisualizationPalette): string {
+  if (walk) return palette.signal;
+  const colors = [palette.signal, palette.steel, palette.primary, palette.muted, palette.error];
+  return colors[Math.min(Math.max(hop, 0), colors.length - 1)];
 }
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
+}
+
+function hash32(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Deterministic point on a 3-D shell. ForceGraph mutates graphData coordinates,
+ * so this seed is intentionally regenerated from identity whenever the 3-D
+ * renderer gets its own copy. A prior 2-D simulation can therefore never hand
+ * 3-D a set of z=0 nodes and trap the force system in a planar symmetry.
+ */
+function volumetricSeed(id: string, hop: number): [number, number, number] {
+  const u = (hash32(`${id}\0u`) + 0.5) / 0x100000000;
+  const v = (hash32(`${id}\0v`) + 0.5) / 0x100000000;
+  const z = 1 - 2 * u;
+  const phi = 2 * Math.PI * v;
+  const xy = Math.sqrt(Math.max(0, 1 - z * z));
+  const radius = Math.max(1, hop) * SHELL_RADIUS;
+  return [
+    Math.cos(phi) * xy * radius,
+    Math.sin(phi) * xy * radius,
+    z * radius,
+  ];
+}
+
+/**
+ * react-force-graph mutates both node coordinates and link endpoints in place.
+ * Never give the 2-D and 3-D engines the same objects: toggling dimensions used
+ * to leave the 3-D engine starting from the 2-D sheet it had just inherited.
+ */
+export function graphForDimension(base: GraphData, dim: Dim, centerId: string): GraphData {
+  const nodes = base.nodes.map((node) => {
+    const clean: WebNode = {
+      id: node.id,
+      label: node.label,
+      hop: node.hop,
+      walk: node.walk,
+    };
+    if (node.id === centerId) {
+      return dim === '3d'
+        ? { ...clean, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0 }
+        : { ...clean, x: 0, y: 0, fx: 0, fy: 0 };
+    }
+    if (dim === '3d') {
+      const [x, y, z] = volumetricSeed(node.id, node.hop);
+      return { ...clean, x, y, z };
+    }
+    return clean;
+  });
+  return {
+    nodes,
+    links: base.links.map((link) => ({ ...link })),
+  };
 }
 
 /**
@@ -68,8 +128,8 @@ function clamp(n: number, lo: number, hi: number) {
 const LABEL_FONT_PX = 44;
 const labelCache = new Map<string, Sprite>();
 
-function labelSprite(text: string, color: string): Sprite | null {
-  const key = `${text}\0${color}`;
+function labelSprite(text: string, color: string, background: string): Sprite | null {
+  const key = `${text}\0${color}\0${background}`;
   const hit = labelCache.get(key);
   if (hit) return hit.clone() as Sprite;
 
@@ -85,7 +145,7 @@ function labelSprite(text: string, color: string): Sprite | null {
   // Re-set after the resize — sizing a canvas resets its 2-D state.
   ctx.font = font;
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(11,18,32,0.72)';
+  ctx.fillStyle = rgba(background, 0.78);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = color;
   ctx.fillText(text, 8, canvas.height / 2);
@@ -178,6 +238,7 @@ export function ConsensusGraph({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const fittedKey = useRef<string>('');
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const palette = useMemo(() => visualizationPalette(), []);
 
   useGraphFlyControls(shellRef, ref3d, dim === '3d' && size.width > 0);
   const webGlReady = useDeferredWebGlMount(dim === '3d' && size.width > 0 && size.height > 0);
@@ -197,9 +258,13 @@ export function ConsensusGraph({
     };
   }, []);
 
-  const data = useMemo(
+  const baseData = useMemo(
     () => (web ? fromWeb(web, walkPath) : fromStar(centerId, centerLabel, edges, walkPath)),
     [web, centerId, centerLabel, edges, walkPath],
+  );
+  const data = useMemo(
+    () => graphForDimension(baseData, dim, centerId),
+    [baseData, dim, centerId],
   );
 
   const maxMu = useMemo(
@@ -414,7 +479,7 @@ export function ConsensusGraph({
             width={size.width}
             height={size.height}
             graphData={data}
-            backgroundColor="#0b1220"
+            backgroundColor={palette.background}
             showNavInfo
             controlType="orbit"
             enableNavigationControls
@@ -431,17 +496,21 @@ export function ConsensusGraph({
             }}
             linkWidth={(l: WebEdge) => 0.06 + tension(l.mu, maxMu) * 0.55}
             linkColor={(l: WebEdge) => {
-              if (l.walk) return '#3ecf8e';
+              if (l.walk) return palette.signal;
               const t = tension(l.mu, maxMu);
-              return `rgba(79, 140, 255, ${0.2 + 0.65 * t})`;
+              return rgba(palette.steel, 0.2 + 0.65 * t);
             }}
             nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
             linkLabel={(l: WebEdge) => `${l.type} μ=${l.mu.toFixed(1)} · ${l.witnesses} wit`}
-            nodeColor={(n: WebNode) => hopColor(n.hop, n.walk || n.id === centerId)}
+            nodeColor={(n: WebNode) => hopColor(n.hop, n.walk || n.id === centerId, palette)}
             nodeThreeObjectExtend
             nodeThreeObject={(n: WebNode) => {
               const label = n.label.length > 22 ? `${n.label.slice(0, 21)}…` : n.label;
-              const sprite = labelSprite(label, n.id === centerId ? '#ffffff' : 'rgba(215,224,240,0.92)');
+              const sprite = labelSprite(
+                label,
+                n.id === centerId ? palette.primary : palette.muted,
+                palette.background,
+              );
               // `nodeThreeObjectExtend` still needs an Object3D when a label
               // cannot be rasterised (no 2-D context); an empty group adds
               // nothing and leaves the default sphere alone.
@@ -467,12 +536,13 @@ export function ConsensusGraph({
             width={size.width}
             height={size.height}
             graphData={data}
+            backgroundColor={palette.background}
             enablePanInteraction
             enableZoomInteraction
             nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
             linkLabel={(l: WebEdge) => `${l.type} μ=${l.mu.toFixed(1)}`}
             linkWidth={(l: WebEdge) => 0.35 + tension(l.mu, maxMu) * 1.4}
-            linkColor={(l: WebEdge) => (l.walk ? '#3ecf8e' : hopColor(l.hop))}
+            linkColor={(l: WebEdge) => (l.walk ? palette.signal : hopColor(l.hop, false, palette))}
             onNodeClick={(n: WebNode) => {
               if (!onNodeClick || n.id === centerId || n.id.length !== 32) return;
               if (clickTimer.current) {
@@ -492,13 +562,13 @@ export function ConsensusGraph({
               const y = (node as WebNode & { x: number; y: number }).y;
               ctx.beginPath();
               ctx.arc(x, y, r, 0, 2 * Math.PI);
-              ctx.fillStyle = hopColor(node.hop, node.walk || node.id === centerId);
+              ctx.fillStyle = hopColor(node.hop, node.walk || node.id === centerId, palette);
               ctx.fill();
               if (globalScale >= 1.15) {
                 const label = node.label.length > 18 ? `${node.label.slice(0, 17)}…` : node.label;
                 const fontSize = 10 / globalScale;
                 ctx.font = `${fontSize}px sans-serif`;
-                ctx.fillStyle = 'rgba(215,224,240,0.9)';
+                ctx.fillStyle = palette.muted;
                 ctx.fillText(label, x + r + 1.2, y + fontSize * 0.35);
               }
             }}
@@ -521,15 +591,15 @@ export function ConsensusGraph({
   );
 }
 
-function fromWeb(web: WebGraph, walkPath: WalkPathNode[]) {
+function fromWeb(web: WebGraph, walkPath: WalkPathNode[]): GraphData {
   const unique = new Map<string, WebNode>();
   for (const n of web.nodes) {
     if (unique.has(n.id)) continue;
     unique.set(n.id, {
-      ...n,
+      id: n.id,
+      label: n.label,
+      hop: n.hop,
       walk: walkIdsHas(walkPath, n.id),
-      // Anchor seed at origin so hop shells stay true radii.
-      ...(n.hop === 0 ? { fx: 0, fy: 0, fz: 0, x: 0, y: 0, z: 0 } : {}),
     });
   }
   const nodes = [...unique.values()];
@@ -563,19 +633,13 @@ function fromStar(
   centerLabel: string,
   edges: ExploreConsensusRow[],
   walkPath: WalkPathNode[],
-) {
+): GraphData {
   const nodes = new Map<string, WebNode>();
   nodes.set(centerId, {
     id: centerId,
     label: centerLabel,
     hop: 0,
     walk: walkIdsHas(walkPath, centerId),
-    fx: 0,
-    fy: 0,
-    fz: 0,
-    x: 0,
-    y: 0,
-    z: 0,
   });
   const links: WebEdge[] = [];
   for (const e of edges) {
