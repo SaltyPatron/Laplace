@@ -10,6 +10,7 @@ cd "$ROOT"
 # Test selection belongs to the executable profile registry. Policy and DEV/BAT
 # therefore use the same authority as main; UCI/browser coverage is part of DEV/BAT
 # and must not be repeated here with independent commands.
+python3 scripts/check-sql-manifest-dependencies.py
 bash scripts/test-parallel.sh --policy
 
 bash scripts/pipeline.sh build
