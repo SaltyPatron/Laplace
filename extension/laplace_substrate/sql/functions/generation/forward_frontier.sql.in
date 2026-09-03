@@ -1,7 +1,30 @@
 -- The bounded receipt for ROUTE/SCAN. It exposes the exact typed consensus
--- edges admitted by the same crawl used to build forward_frontier. Defining the
--- receipt first lets the executable frontier depend on it, so the receipt cannot
--- drift into dead diagnostic scaffolding beside a second traversal.
+-- edges admitted by the same crawl used to build forward_frontier. The id-facing
+-- form is the execution owner: callers that already paid prompt decomposition /
+-- coherence pass those exact seeds instead of asking a nested helper to analyze
+-- the same text again.
+CREATE OR REPLACE FUNCTION generation.forward_route_trace_ids(
+        p_seeds bytea[],
+        p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 8,
+        p_max_nodes int DEFAULT NULL)
+    RETURNS TABLE(source_id bytea, type_id bytea, object_id bytea,
+                  hop smallint, rating bigint, rd bigint,
+                  witness_count bigint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+SELECT w.source_id, w.type_id, w.object_id, w.hop,
+       w.rating, w.rd, w.witness_count
+FROM consensus.explore_web(
+    COALESCE(p_seeds, '{}'::bytea[]),
+    p_hops, p_fanout, p_max_nodes) w
+ORDER BY w.hop, w.source_id, w.type_id, w.object_id;
+END;
+
+-- Text-facing receipt compatibility. Analyze the prompt exactly once here, then
+-- delegate the actual crawl to forward_route_trace_ids. ARRAY(subquery) is used
+-- deliberately: no resolved seed becomes PostgreSQL's canonical empty bytea[];
+-- consensus.explore_web owns that no-frontier/no-crawl case.
 CREATE OR REPLACE FUNCTION generation.forward_route_trace(
         p_prompt text,
         p_hops int DEFAULT 2,
@@ -24,26 +47,59 @@ WITH resolved AS MATERIALIZED (
     SELECT r.entity, min(r.ord) AS ord
     FROM resolved r
     GROUP BY r.entity
+), seed_array AS MATERIALIZED (
+    SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
 )
 SELECT w.source_id, w.type_id, w.object_id, w.hop,
        w.rating, w.rd, w.witness_count
-FROM consensus.explore_web(
-    ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity),
-    p_hops, p_fanout, p_max_nodes) w
+FROM seed_array s
+CROSS JOIN LATERAL generation.forward_route_trace_ids(
+    s.ids, p_hops, p_fanout, p_max_nodes) w
 ORDER BY w.hop, w.source_id, w.type_id, w.object_id;
 END;
 
--- generation.forward_frontier — the routed semantic operand for the dynamic
--- trajectory forward pass.
+-- ID-facing semantic frontier. The prompt's resolved constituents/senses are
+-- already an operand here, so ROUTE/SCAN is one consensus.explore_web traversal.
+-- This function and forward_route_trace_ids share that exact crawl; no second
+-- prompt parse/coherence election can drift the execution from its receipt.
+CREATE OR REPLACE FUNCTION generation.forward_frontier_ids(
+        p_seeds bytea[],
+        p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 8,
+        p_max_nodes int DEFAULT NULL)
+    RETURNS TABLE(entity bytea, hop smallint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+WITH seeds AS MATERIALIZED (
+    SELECT DISTINCT u.entity
+    FROM unnest(COALESCE(p_seeds, '{}'::bytea[])) u(entity)
+    WHERE u.entity IS NOT NULL
+), routed AS MATERIALIZED (
+    SELECT w.*
+    FROM generation.forward_route_trace_ids(
+        COALESCE(p_seeds, '{}'::bytea[]), p_hops, p_fanout, p_max_nodes) w
+), nodes AS (
+    SELECT s.entity, 0::smallint AS hop FROM seeds s
+    UNION ALL
+    SELECT r.source_id, r.hop FROM routed r
+    UNION ALL
+    SELECT r.object_id, r.hop FROM routed r
+)
+SELECT n.entity, min(n.hop)::smallint AS hop
+FROM nodes n
+GROUP BY n.entity
+ORDER BY min(n.hop), n.entity;
+END;
+
+-- generation.forward_frontier — text-facing routed semantic operand for the
+-- dynamic trajectory forward pass.
 --
 -- Every resolved prompt constituent remains in the frontier. prompt_coherence
 -- contributes that constituent's jointly elected witnessed sense; no rank-1
--- topic collapse is performed. forward_route_trace owns the typed native crawl,
--- so execution and the auditable ROUTE/SCAN receipt are the same edge set. The
--- returned hop is an execution coordinate, not a model layer or confidence score.
--- A NULL node budget delegates capacity to consensus.explore_web, which derives
--- the exact fanout tree from the seed count/hops/fanout and rejects only actual
--- PostgreSQL allocation overflow. The forward pass does not invent a second cap.
+-- topic collapse is performed. This wrapper performs that analysis once and
+-- hands the resulting ids to forward_frontier_ids. A NULL node budget delegates
+-- capacity to consensus.explore_web, which derives the exact fanout tree from the
+-- seed count/hops/fanout and rejects only actual PostgreSQL allocation overflow.
 CREATE OR REPLACE FUNCTION generation.forward_frontier(
         p_prompt text,
         p_hops int DEFAULT 2,
@@ -64,19 +120,12 @@ WITH resolved AS MATERIALIZED (
     SELECT r.entity, min(r.ord) AS ord
     FROM resolved r
     GROUP BY r.entity
-), routed AS MATERIALIZED (
-    SELECT w.*
-    FROM generation.forward_route_trace(
-        p_prompt, p_hops, p_fanout, p_max_nodes) w
-), nodes AS (
-    SELECT s.entity, 0::smallint AS hop FROM seeds s
-    UNION ALL
-    SELECT r.source_id, r.hop FROM routed r
-    UNION ALL
-    SELECT r.object_id, r.hop FROM routed r
+), seed_array AS MATERIALIZED (
+    SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
 )
-SELECT n.entity, min(n.hop)::smallint AS hop
-FROM nodes n
-GROUP BY n.entity
-ORDER BY min(n.hop), n.entity;
+SELECT f.entity, f.hop
+FROM seed_array s
+CROSS JOIN LATERAL generation.forward_frontier_ids(
+    s.ids, p_hops, p_fanout, p_max_nodes) f
+ORDER BY f.hop, f.entity;
 END;
