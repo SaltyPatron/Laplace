@@ -1,8 +1,29 @@
 DROP FUNCTION IF EXISTS laplace.walk_continuations(bytea[], int, int, float8, int, bigint);
+
+-- Compatibility/native surface used by existing callers.  With seven arguments the
+-- C loop receives only the sequence proposal stream and the live S7 frontier.
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
         p_seed bigint DEFAULT NULL, p_frontier bytea[] DEFAULT NULL)
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
+    LANGUAGE C VOLATILE;
+
+-- Canonical S6→S7→S8 surface.  S6 has two independent proposal sources:
+--
+--   * ordered trajectory successors (surface/sequence evidence), and
+--   * routed semantic concepts from S4 (graph evidence).
+--
+-- They are unioned in ID space before the existing S7 scorer.  A semantic-only
+-- proposal carries neutral sequence weight 1 — the same "unattested is not refuted"
+-- identity the combine law already uses — so its rank comes from witnessed S7 mass,
+-- not from an invented corpus frequency.  The extra argument has no defaults so it
+-- cannot make the installed seven-argument/defaulted API ambiguous on upgrade.
+CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
+        p_ctx bytea[], p_steps int, p_max_stride int,
+        p_spread float8, p_top_k int,
+        p_seed bigint, p_frontier bytea[], p_semantic_candidates bytea[])
     RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
     LANGUAGE C VOLATILE;
