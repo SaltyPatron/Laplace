@@ -4,9 +4,7 @@ CREATE EXTENSION IF NOT EXISTS laplace_geom;
 NOTICE:  extension "laplace_geom" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 NOTICE:  extension "laplace_substrate" already exists, skipping
-
 BEGIN;
-
 DO $$
 DECLARE
     type_t       bytea := public.laplace_hash128_blake3(convert_to('Type', 'UTF8'));
@@ -110,5 +108,4 @@ BEGIN
     RAISE NOTICE '✓ steering precedence: positive witnessed meaning outranks unattested frequency; unattested remains fallback';
 END $$;
 NOTICE:  ✓ steering precedence: positive witnessed meaning outranks unattested frequency; unattested remains fallback
-
 ROLLBACK;
