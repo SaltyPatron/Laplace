@@ -30,11 +30,17 @@
  *             walk's existing semantics (rank × edge_weight precedent, and
  *             walk_branches' "non-positive score must dead-end, not walk"):
  *               edges > 0, steer > 0  → sequence weight × steer
- *               edges = 0             → sequence weight × 1  (UNATTESTED is
- *                                       not refuted — the bool_or/NULL
- *                                       distinction, kept on purpose)
+ *               edges = 0             → sequence weight × 1 only when S7 has
+ *                                       no positively witnessed proposal;
+ *                                       UNATTESTED is fallback, not refutation
  *               edges > 0, steer ≤ 0 → excluded (adjudicated against the
  *                                       frontier: refuted edges dead-end)
+ *
+ *             This ordering matters once the trajectory estate is large. If a
+ *             witnessed-positive candidate exists, allowing an unattested but
+ *             very frequent unigram continuation to compete at ×1 makes S6
+ *             frequency erase S7 meaning. If no positive S7 signal exists, the
+ *             unattested sequence pool remains available exactly as before.
  *
  * S8 SAMPLE   After steering the complete proposal set, a Gumbel draw over the
  *             top-k surviving candidates at the caller's
@@ -522,17 +528,34 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         }
 
         /*
-         * Combine, signed. Refuted-toward-frontier candidates are EXCLUDED —
-         * the walk must dead-end rather than walk into an adjudicated-negative
-         * claim (walk_branches' rule). Unattested candidates keep their
-         * sequence weight: no opinion is not a refutation.
+         * Combine, signed, in two semantic pools. Refuted-toward-frontier
+         * candidates are always excluded. If S7 positively witnesses at least
+         * one proposal, unattested sequence-only proposals wait behind that
+         * witnessed pool instead of competing with raw ×1 frequency. If S7 has
+         * no positive signal at all, unattested proposals remain the fallback.
+         *
+         * This keeps "no opinion" distinct from refutation without letting a
+         * high-frequency unigram erase meaning when meaning is actually present.
          */
         {
-            int m = 0;
+            int  m = 0;
+            bool has_positive_steer = false;
 
             for (int i = 0; i < n_cand; i++)
             {
-                if (cand[i].edges > 0 && cand[i].steer <= 0.0)
+                if (cand[i].weight > 0 && cand[i].edges > 0
+                    && cand[i].steer > 0.0 && isfinite(cand[i].steer))
+                {
+                    has_positive_steer = true;
+                    break;
+                }
+            }
+
+            for (int i = 0; i < n_cand; i++)
+            {
+                if ((cand[i].edges > 0
+                     && (cand[i].steer <= 0.0 || !isfinite(cand[i].steer)))
+                    || (has_positive_steer && cand[i].edges == 0))
                 {
                     pfree(DatumGetPointer(cand[i].obj));
                     if (cand[i].sep != (Datum) 0)
