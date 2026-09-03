@@ -35,6 +35,7 @@ for f in \
   scripts/dataset-estate-refresh.sources.psv \
   scripts/test-dataset-estate-refresh.py \
   scripts/test-dataset-estate-refresh.sh \
+  scripts/test-forward-prompt-analysis.py \
   docs/plan/DATASET_ESTATE_REFRESH_OPERATOR.md \
   scripts/ci-policy.sh \
   scripts/ci-policy-suite.sh \
@@ -70,3 +71,7 @@ done
 # staging roots in policy. Its regression test asserts fail-closed job receipts,
 # aggregate verification, bad-artifact preservation, and active-root non-mutation.
 bash scripts/test-dataset-estate-refresh.sh
+
+# The dynamic forward pass may optimize duplicate orchestration work, but it may
+# not shorten the requested walk or introduce a second route/crawl definition.
+python3 scripts/test-forward-prompt-analysis.py
