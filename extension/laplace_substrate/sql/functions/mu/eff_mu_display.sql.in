@@ -1,3 +1,16 @@
+-- Display conversion for the fixed-point Glicko coordinates.  Rating, RD, and
+-- conservative standing are different measurements and must stay different all
+-- the way to the product edge (GH #1404); none is a label for another.
+CREATE OR REPLACE FUNCTION consensus.rating_display(p_rating bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
+    SELECT round((p_rating / 1e9)::numeric, 3)
+$$;
+
+CREATE OR REPLACE FUNCTION consensus.rd_display(p_rd bigint)
+    RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
+    SELECT round((p_rd / 1e9)::numeric, 3)
+$$;
+
 CREATE OR REPLACE FUNCTION consensus.eff_mu_display(p_rating bigint, p_rd bigint)
     RETURNS numeric LANGUAGE sql LAPLACE_IMMUTABLE AS $$
     SELECT round((consensus.eff_mu(p_rating, p_rd) / 1e9)::numeric, 3)
