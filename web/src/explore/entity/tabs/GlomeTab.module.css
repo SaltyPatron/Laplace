@@ -54,10 +54,10 @@
     padding: 1rem;
     border: 1px dashed var(--color-border-default, #2a3344);
     border-radius: var(--radius-md, 6px);
-    color: var(--muted, #8b97a8);
+    color: var(--viz-muted);
     font-size: 0.85rem;
     text-align: center;
-    background: #05070c;
+    background: var(--viz-bg);
   }
 
   .scrub {
