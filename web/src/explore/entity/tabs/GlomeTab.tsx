@@ -4,8 +4,6 @@ import { GatePrompt } from '../../components/GatePrompt';
 import {
   GlomeCanvas,
   ordinalColor,
-  packedDisplayPos,
-  placementBallPos,
   physicalitiesToNodes,
   type GlomeNode,
 } from '../../glome/GlomeCanvas';
@@ -92,14 +90,6 @@ export function GlomeTab({
     }));
   }, [packed, maxOrd, constituentLabels]);
 
-  const packedTrajectory = useMemo(
-    () => packedNodes
-      .slice()
-      .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-      .map((n) => packedDisplayPos(n)),
-    [packedNodes],
-  );
-
   const placementPrimary = useMemo(
     () => physicalitiesToNodes(entity.physicalities, entity.label, entity.id_hex),
     [entity.physicalities, entity.label, entity.id_hex],
@@ -123,14 +113,6 @@ export function GlomeTab({
     const extras = neighborMode === 'structural' && neighborsUnlocked ? glomeExtraNodes : [];
     return [...placementPrimary, ...placementConstituents, ...extras];
   }, [placementPrimary, placementConstituents, glomeExtraNodes, neighborMode, neighborsUnlocked]);
-
-  const placementTrajectory = useMemo(
-    () => placementConstituents
-      .slice()
-      .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-      .map((n) => placementBallPos(n)),
-    [placementConstituents],
-  );
 
   const selectedChip = useMemo(() => {
     if (selectedOrdinal == null) return null;
@@ -175,7 +157,6 @@ export function GlomeTab({
             ) : (
               <GlomeCanvas
                 nodes={packedNodes}
-                trajectoryPoints={packedTrajectory}
                 projection="packed"
                 highlightOrdinal={packedHighlightOrdinal}
                 onSelectOrdinal={setSelectedOrdinal}
@@ -195,7 +176,6 @@ export function GlomeTab({
             ) : (
               <GlomeCanvas
                 nodes={placementNodes}
-                trajectoryPoints={placementTrajectory.length > 1 ? placementTrajectory : undefined}
                 projection="placement"
                 highlightIds={walkHighlight}
                 highlightOrdinal={selectedOrdinal}
