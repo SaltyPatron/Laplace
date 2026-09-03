@@ -36,6 +36,7 @@ for f in \
   scripts/test-dataset-estate-refresh.py \
   scripts/test-dataset-estate-refresh.sh \
   scripts/test-forward-prompt-analysis.py \
+  scripts/test-upgrade-drop-order.py \
   docs/plan/DATASET_ESTATE_REFRESH_OPERATOR.md \
   scripts/ci-policy.sh \
   scripts/ci-policy-suite.sh \
@@ -75,3 +76,8 @@ bash scripts/test-dataset-estate-refresh.sh
 # The dynamic forward pass may optimize duplicate orchestration work, but it may
 # not shorten the requested walk or introduce a second route/crawl definition.
 python3 scripts/test-forward-prompt-analysis.py
+
+# BEGIN ATOMIC pg_depend release is part of live extension-upgrade safety. Prove
+# both legal release forms (drop/rebind) and the unsafe rebind/ordering cases with
+# a synthetic manifest before the live-catalog checker uses that model.
+python3 scripts/test-upgrade-drop-order.py
