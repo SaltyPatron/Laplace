@@ -24,6 +24,7 @@ public sealed class UniversalRealizationContractTests
         var scalar = Read("extension", "laplace_substrate", "sql", "functions", "converse", "label.sql.in");
         var batch = Read("extension", "laplace_substrate", "sql", "functions", "converse", "label_batch.sql.in");
         var canonical = Read("extension", "laplace_substrate", "sql", "functions", "realize", "realize_canonical.sql.in");
+        var classifier = Read("extension", "laplace_substrate", "sql", "functions", "converse", "label_is_content.sql.in");
         var native = Read("extension", "laplace_substrate", "src", "realize_batch.c");
 
         foreach (var text in new[] { scalar, batch, canonical })
@@ -33,6 +34,15 @@ public sealed class UniversalRealizationContractTests
             Assert.DoesNotContain("tiny-codes/concept", text, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("source/file/", text, StringComparison.OrdinalIgnoreCase);
         }
+
+        // A text projection cannot determine semantic kind. The legacy predicate is
+        // allowed to answer only whether a non-empty realization exists; structural
+        // exclusions happen in id/type/relation space before rendering.
+        Assert.DoesNotContain("!~", classifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("~ '", classifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("noun|verb|adj", classifier, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("[0-9]{6,}", classifier, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("NULLIF(p_label, '') IS NOT NULL", classifier, StringComparison.Ordinal);
 
         Assert.Contains("WHERE n.id = p_id", canonical, StringComparison.Ordinal);
         Assert.DoesNotContain("name LIKE 'substrate/%'", canonical, StringComparison.OrdinalIgnoreCase);
