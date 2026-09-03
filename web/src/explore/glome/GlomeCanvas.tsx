@@ -4,6 +4,7 @@ import { Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ExplorePhysicalityRow } from '../types';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
+import { lerpColor, visualizationPalette } from '../visualizationPalette';
 import styles from './GlomeCanvas.module.css';
 
 export type GlomeProjection = 'packed' | 'placement';
@@ -106,6 +107,7 @@ function GlomeScene({
   const [hover, setHover] = useState<GlomeNode | null>(null);
   const instances = useRef<THREE.InstancedMesh>(null);
   const transform = useMemo(() => new THREE.Object3D(), []);
+  const palette = useMemo(() => visualizationPalette(), []);
 
   useEffect(() => {
     const mesh = instances.current;
@@ -124,16 +126,16 @@ function GlomeScene({
       mesh.setMatrixAt(i, transform.matrix);
       mesh.setColorAt(i, new THREE.Color(
         n.color
-          ?? (n.kind === 'walk' ? '#3ecf8e'
-            : n.kind === 'neighbor' ? '#e8b339'
-              : n.kind === 'constituent' ? '#9b7bff'
-                : ordHit || highlightIds.has(n.id) ? '#3ecf8e' : '#4f8cff'),
+          ?? (n.kind === 'walk' ? palette.signal
+            : n.kind === 'neighbor' ? palette.error
+              : n.kind === 'constituent' ? palette.steel
+                : ordHit || highlightIds.has(n.id) ? palette.signal : palette.primary),
       ));
     }
     mesh.count = nodes.length;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [nodes, projection, xmAngle, highlightIds, highlightOrdinal, transform]);
+  }, [nodes, projection, xmAngle, highlightIds, highlightOrdinal, transform, palette]);
 
   return (
     <>
@@ -161,7 +163,7 @@ function GlomeScene({
       {trajectory.length > 1 ? (
         <Line
           points={trajectory}
-          color={projection === 'packed' ? '#c084fc' : '#4f8cff'}
+          color={projection === 'packed' ? palette.signal : palette.steel}
           lineWidth={1.25}
           transparent
           opacity={0.75}
@@ -169,7 +171,7 @@ function GlomeScene({
       ) : null}
       <mesh>
         <sphereGeometry args={[1, 28, 28]} />
-        <meshBasicMaterial color="#5f7890" wireframe transparent opacity={0.11} />
+        <meshBasicMaterial color={palette.muted} wireframe transparent opacity={0.11} />
       </mesh>
       {hover ? (
         <Html position={project(hover, projection, xmAngle).map((v) => v + 0.08) as [number, number, number]}>
@@ -208,11 +210,11 @@ export function physicalitiesToNodes(
     }));
 }
 
-/** Ordinal → hue for Packed paint (M/ordinal channel). */
+/** Ordinal → the shared steel→signal visualization ramp for Packed paint. */
 export function ordinalColor(ordinal: number, maxOrdinal: number): string {
   const t = maxOrdinal <= 1 ? 0 : (ordinal - 1) / (maxOrdinal - 1);
-  const h = Math.round(260 - t * 140);
-  return `hsl(${h} 70% 62%)`;
+  const palette = visualizationPalette();
+  return lerpColor(palette.steel, palette.signal, t);
 }
 
 export function GlomeCanvas({
