@@ -1,47 +1,111 @@
--- Exact realize.label() cleanup/fallback over an aligned id array. Name and
--- render ladders execute once for the whole input; regex cleanup is text-only.
-CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[])
-    RETURNS text[]
+-- One product-facing realization contract over an aligned id array.
+--
+-- Identity is not presentation (INVENTIONS #58 / GH #1404).  This function never
+-- parses a rendered string to guess what kind of entity it is, never assumes a
+-- language from spelling, and never treats compositional tier as semantic kind.
+-- It carries the independent coordinates the substrate actually knows:
+--
+--   id               canonical content/reference identity
+--   tier/type_id     stored structural facets when they are unambiguous
+--   language_id      the caller's requested realization language
+--   label            content or witnessed name; otherwise an explicit id handle
+--   technical_name   registry/reference name, kept separate from human content
+--   type_name        technical name of the unambiguous stored type, when present
+--   realization      content | name | canonical | id
+--
+-- A canonical technical name is metadata, not silently promoted to a human-language
+-- label.  When it is the only readable metadata, label remains an explicit id handle
+-- and technical_name carries the registry string.  Domain notation can be added as a
+-- declared realizer without changing identity or teaching this core about English,
+-- Latin delimiters, chess, UD, repository paths, or any other source serialization.
+CREATE OR REPLACE FUNCTION realize.display_batch(
+        p_ids bytea[],
+        p_lang bytea DEFAULT NULL)
+    RETURNS TABLE(
+        ord bigint,
+        id bytea,
+        tier smallint,
+        type_id bytea,
+        language_id bytea,
+        label text,
+        technical_name text,
+        type_name text,
+        realization text)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
     WITH inp AS MATERIALIZED (
         SELECT u.id, u.ord
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
+    ), facets AS MATERIALIZED (
+        -- The same id can legitimately be observed through more than one structural
+        -- interpretation.  Only project a scalar facet when the stored evidence is
+        -- unambiguous; NULL is more correct than choosing one arbitrarily.
+        SELECT i.id, i.ord,
+               CASE WHEN count(DISTINCT e.tier) = 1
+                    THEN min(e.tier) END AS tier,
+               CASE WHEN count(DISTINCT e.type_id) = 1
+                    THEN (array_agg(DISTINCT e.type_id ORDER BY e.type_id))[1] END AS type_id
+        FROM inp i
+        LEFT JOIN laplace.entities e ON e.id = i.id
+        GROUP BY i.id, i.ord
     ), batches AS MATERIALIZED (
-        SELECT realize.resolve_name_batch(p_ids) AS names,
-               realize.render_batch(p_ids) AS rendered
-    ), cleaned AS (
-        SELECT i.id, i.ord, b.names[i.ord] AS name,
-               regexp_replace(
-               regexp_replace(
-                   regexp_replace(
-                       regexp_replace(
-                           regexp_replace(
-                               regexp_replace(
-                                   regexp_replace(
-                                       regexp_replace(b.rendered[i.ord],
-                                           '^substrate/(?:type|relation|trust_class|source|entity)/(.*)/v1$', '\1'),
-                                       '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
-                                   '^source/file/(.+)/v1$', '\1'),
-                               '^repo:(.+)/v1$', '\1'),
-                           '^language:([a-z]{3})$', '\1'),
-                       '^ud/feature/(.+)$', '\1'),
-                   '^tiny-codes/concept/(.+)/v1$', '\1'),
-               '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$', '') AS rendered
-        FROM inp i CROSS JOIN batches b
+        SELECT realize.render_text_batch(p_ids) AS content,
+               realize.resolve_name_batch(p_ids, p_lang) AS names
     )
-    SELECT COALESCE(array_agg(
-               COALESCE(c.name, NULLIF(c.rendered, ''))
-               ORDER BY c.ord), '{}'::text[])
-    FROM cleaned c;
+    SELECT f.ord,
+           f.id,
+           f.tier,
+           f.type_id,
+           p_lang AS language_id,
+           CASE
+             WHEN NULLIF(b.content[f.ord], '') IS NOT NULL
+               THEN b.content[f.ord]
+             WHEN NULLIF(b.names[f.ord], '') IS NOT NULL
+                  AND b.names[f.ord] IS DISTINCT FROM cn.name
+               THEN b.names[f.ord]
+             ELSE 'id:' || left(encode(f.id, 'hex'), 12)
+           END AS label,
+           cn.name AS technical_name,
+           tcn.name AS type_name,
+           CASE
+             WHEN NULLIF(b.content[f.ord], '') IS NOT NULL THEN 'content'
+             WHEN NULLIF(b.names[f.ord], '') IS NOT NULL
+                  AND b.names[f.ord] IS DISTINCT FROM cn.name THEN 'name'
+             WHEN cn.name IS NOT NULL THEN 'canonical'
+             ELSE 'id'
+           END AS realization
+    FROM facets f
+    CROSS JOIN batches b
+    LEFT JOIN laplace.canonical_names cn ON cn.id = f.id
+    LEFT JOIN laplace.canonical_names tcn ON tcn.id = f.type_id
+    ORDER BY f.ord;
 END;
 
+-- Language-aware label projection.  This is intentionally a projection of the
+-- structured contract above, not a second naming policy.
+CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[], p_lang bytea)
+    RETURNS text[]
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT COALESCE(array_agg(d.label ORDER BY d.ord), '{}'::text[])
+    FROM realize.display_batch(p_ids, p_lang) d;
+END;
+
+-- Installed one-argument compatibility surface.  Keep its OID and delegate to the
+-- same implementation so existing BEGIN-ATOMIC callers retain pg_depend stability.
+CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[])
+    RETURNS text[]
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT realize.label_batch(p_ids, NULL::bytea);
+END;
+
+-- Legacy function name retained for installed callers.  The fallback is now the
+-- explicit identity handle allowed by GH #1404, never the fabricated prose string
+-- "unrealized entity" and never a regex-derived pseudo-language label.
 CREATE OR REPLACE FUNCTION converse.label_or_hex_batch(p_ids bytea[])
     RETURNS text[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT COALESCE(array_agg(
-               COALESCE(l.label, 'unrealized entity') ORDER BY l.ord),
-               '{}'::text[])
-    FROM unnest(realize.label_batch(p_ids)) WITH ORDINALITY AS l(label, ord);
+    SELECT realize.label_batch(p_ids, NULL::bytea);
 END;
