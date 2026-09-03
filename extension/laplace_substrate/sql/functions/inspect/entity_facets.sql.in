@@ -7,6 +7,22 @@ CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     SELECT e.tier, e.type_id FROM laplace.entities e WHERE e.id = p_id
 $$;
 
+-- LIVE-UPGRADE DROP ORDER. These BEGIN-ATOMIC functions pin the exact OIDs of
+-- bases that are recompiled later in manifest.upgrade:
+--
+--   consensus.browse_named_entities
+--       -> structural.word_containers_containing_all
+--       -> ops.entity_facets_batch
+--       -> consensus.relation_family_ids
+--
+-- ops.entity_facets_batch is the first base encountered by the upgrade. Drop
+-- the installed dependents here, in dependent-first order, so every later base
+-- can be replaced with RESTRICT semantics intact. Their normal modules recreate
+-- them later after all bases exist. Do not use CASCADE: an unlisted dependent is
+-- a contract change that scripts/check-upgrade-drop-order.py must expose.
+DROP FUNCTION IF EXISTS consensus.browse_named_entities(bytea[], bytea, int, int, int);
+DROP FUNCTION IF EXISTS structural.word_containers_containing_all(bytea[], int);
+
 -- Batch form for serving/browse paths.  One set read over surviving ids; callers
 -- must not LATERAL-loop the scalar facet reader or hand-read laplace.entities.
 DROP FUNCTION IF EXISTS ops.entity_facets_batch(bytea[]);
