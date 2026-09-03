@@ -22,7 +22,12 @@ internal sealed partial class SubstrateClient
     public async Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
     {
         var rows = await NpgsqlLeaderboardReads.BandLeadersAsync(
-            _dataSource, bands, perBand, languageId: null, ct, TranslateSubstrateError);
+            _dataSource,
+            bands,
+            perBand,
+            languageId: null,
+            ct: ct,
+            onError: TranslateSubstrateError);
 
         var catalog = await RelationBandsAsync(ct);
         var names = catalog.ToDictionary(b => b.Band, b => b.Name);
