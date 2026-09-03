@@ -116,81 +116,83 @@ export function GraphTab({
           onReady={() => void expand()}
         />
       ) : null}
-      <ConsensusGraph
-        centerId={centerId}
-        centerLabel={centerLabel}
-        edges={starEdges}
-        web={web}
-        walkPath={walkPath}
-        onNodeClick={onNodeClick}
-        fill
-        dim={dim}
-        onDimChange={setDim}
-        toolbar={
-          <div className={styles.actions}>
-            <details className={styles.settings}>
-              <summary className={styles.settingsSummary}>
-                Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes
-              </summary>
-              <div className={styles.settingsBody}>
-                <Field label="hops" layout="row" htmlFor="web-hops">
-                  <Input
-                    id="web-hops"
-                    type="number"
-                    min={1}
-                    max={HOPS_MAX}
-                    value={hops}
-                    onChange={(e) => setHops(clamp(Number(e.target.value) || 1, 1, HOPS_MAX))}
-                    aria-label="Hop depth"
-                  />
-                </Field>
-                <Field label="fanout" layout="row" htmlFor="web-fanout">
-                  <Input
-                    id="web-fanout"
-                    type="number"
-                    min={2}
-                    max={FANOUT_MAX}
-                    value={fanout}
-                    onChange={(e) => setFanout(clamp(Number(e.target.value) || 8, 2, FANOUT_MAX))}
-                    aria-label="Fanout per parent"
-                  />
-                </Field>
-                <Field label="capacity" layout="row" htmlFor="web-max-nodes">
-                  <Input
-                    id="web-max-nodes"
-                    type="number"
-                    min={32}
-                    max={NODES_MAX}
-                    step={32}
-                    value={nodeCapacity}
-                    onChange={(e) => setNodeCapacity(clamp(Number(e.target.value) || 32, 32, NODES_MAX))}
-                    aria-label="Maximum graph nodes"
-                  />
-                </Field>
-              </div>
-            </details>
-            <Button type="button" size="sm" onClick={() => void expand()} disabled={busy}>
-              {busy ? 'Crawling…' : web ? 'Recrawl web' : 'Expand web'}
-            </Button>
-            {web ? (
-              <Button type="button" size="sm" variant="ghost" onClick={() => { setWeb(null); setTruncated(false); }} disabled={busy}>
-                Reset to 1-hop
+      <div className={styles.graphBody}>
+        <ConsensusGraph
+          centerId={centerId}
+          centerLabel={centerLabel}
+          edges={starEdges}
+          web={web}
+          walkPath={walkPath}
+          onNodeClick={onNodeClick}
+          fill
+          dim={dim}
+          onDimChange={setDim}
+          toolbar={
+            <div className={styles.actions}>
+              <details className={styles.settings}>
+                <summary className={styles.settingsSummary}>
+                  Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes
+                </summary>
+                <div className={styles.settingsBody}>
+                  <Field label="hops" layout="row" htmlFor="web-hops">
+                    <Input
+                      id="web-hops"
+                      type="number"
+                      min={1}
+                      max={HOPS_MAX}
+                      value={hops}
+                      onChange={(e) => setHops(clamp(Number(e.target.value) || 1, 1, HOPS_MAX))}
+                      aria-label="Hop depth"
+                    />
+                  </Field>
+                  <Field label="fanout" layout="row" htmlFor="web-fanout">
+                    <Input
+                      id="web-fanout"
+                      type="number"
+                      min={2}
+                      max={FANOUT_MAX}
+                      value={fanout}
+                      onChange={(e) => setFanout(clamp(Number(e.target.value) || 8, 2, FANOUT_MAX))}
+                      aria-label="Fanout per parent"
+                    />
+                  </Field>
+                  <Field label="capacity" layout="row" htmlFor="web-max-nodes">
+                    <Input
+                      id="web-max-nodes"
+                      type="number"
+                      min={32}
+                      max={NODES_MAX}
+                      step={32}
+                      value={nodeCapacity}
+                      onChange={(e) => setNodeCapacity(clamp(Number(e.target.value) || 32, 32, NODES_MAX))}
+                      aria-label="Maximum graph nodes"
+                    />
+                  </Field>
+                </div>
+              </details>
+              <Button type="button" size="sm" onClick={() => void expand()} disabled={busy}>
+                {busy ? 'Crawling…' : web ? 'Recrawl web' : 'Expand web'}
               </Button>
-            ) : null}
-          </div>
-        }
-      />
-      {truncated ? (
-        <Muted className={styles.note}>
-          Capacity reached at {maxNodes || nodeCapacity} nodes (≤{fanout} strongest unseen nodes per parent).
-        </Muted>
-      ) : (
-        <Muted className={styles.note}>
-          Multi-hop web: ≤{fanout} strongest unseen nodes per parent · capacity {nodeCapacity} · revisits suppressed.
-        </Muted>
-      )}
-      {busy && !web ? <LoadingText>Crawling consensus neighborhood…</LoadingText> : null}
-      {err ? <ErrorText>{err}</ErrorText> : null}
+              {web ? (
+                <Button type="button" size="sm" variant="ghost" onClick={() => { setWeb(null); setTruncated(false); }} disabled={busy}>
+                  Reset to 1-hop
+                </Button>
+              ) : null}
+            </div>
+          }
+        />
+        {truncated ? (
+          <Muted className={styles.note}>
+            Capacity reached at {maxNodes || nodeCapacity} nodes (≤{fanout} strongest unseen nodes per parent).
+          </Muted>
+        ) : (
+          <Muted className={styles.note}>
+            Multi-hop web: ≤{fanout} strongest unseen nodes per parent · capacity {nodeCapacity} · revisits suppressed.
+          </Muted>
+        )}
+        {busy && !web ? <LoadingText>Crawling consensus neighborhood…</LoadingText> : null}
+        {err ? <ErrorText>{err}</ErrorText> : null}
+      </div>
     </Panel>
   );
 }
