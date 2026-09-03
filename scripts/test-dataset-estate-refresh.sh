@@ -91,6 +91,13 @@ LAPLACE_DATA_REFRESH_ROOT="$REFRESH" \
 [[ "$(cat "$REFRESH/.jobs/git-snapshot-replay.rc")" == '0' ]] || { echo "Git snapshot replay failed" >&2; exit 1; }
 [[ -f "$snapshot.sha256" ]] || { echo "interrupted Git snapshot sidecar was not recovered" >&2; exit 1; }
 
+# Receipt rows are newline-delimited and the header is created once inside the
+# append lock; command substitution must not strip the record separator.
+[[ "$(head -1 "$REFRESH/REFRESH_RECEIPT.tsv")" == $'observed_at_utc\tid\tstate\tbytes\tsha256\tmd5\tpath\tsource' ]]
+[[ "$(grep -c '^observed_at_utc' "$REFRESH/REFRESH_RECEIPT.tsv")" == '1' ]]
+[[ "$(wc -l < "$REFRESH/REFRESH_RECEIPT.tsv")" -ge 4 ]]
+awk -F '\t' 'NF != 8 { exit 1 }' "$REFRESH/REFRESH_RECEIPT.tsv"
+
 # wait must fail closed for a job that is no longer alive but has no exit receipt.
 printf '999999999\n' > "$REFRESH/.jobs/orphan.pid"
 rm -f "$REFRESH/.jobs/orphan.rc"

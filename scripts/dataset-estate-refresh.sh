@@ -72,26 +72,33 @@ safe_stage_path() {
     esac
 }
 
-ensure_receipt_header() {
-    if [[ ! -e "$RECEIPT" ]]; then
-        printf 'observed_at_utc\tid\tstate\tbytes\tsha256\tmd5\tpath\tsource\n' > "$RECEIPT"
-    fi
-}
-
 record_receipt() {
     local id="$1" state="$2" path="$3" source="$4"
-    local bytes sha md5 row
+    local bytes sha md5 observed_at relative_path
     bytes="$(stat -c '%s' "$path" 2>/dev/null || printf '0')"
     sha="$(sha256sum "$path" 2>/dev/null | awk '{print $1}' || true)"
     md5="$(md5sum "$path" 2>/dev/null | awk '{print $1}' || true)"
-    row="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$(date -u +%FT%TZ)" "$id" "$state" "$bytes" "$sha" "$md5" \
-        "${path#"$DATA_ROOT"/}" "$source")"
-    ensure_receipt_header
+    observed_at="$(date -u +%FT%TZ)"
+    relative_path="${path#"$DATA_ROOT"/}"
     if command -v flock >/dev/null 2>&1; then
-        { flock 9; printf '%s' "$row" >&9; } 9>>"$RECEIPT"
+        {
+            flock 9
+            if [[ ! -s "$RECEIPT" ]]; then
+                printf 'observed_at_utc\tid\tstate\tbytes\tsha256\tmd5\tpath\tsource\n' >&9
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$observed_at" "$id" "$state" "$bytes" "$sha" "$md5" \
+                "$relative_path" "$source" >&9
+        } 9>>"$RECEIPT"
     else
-        printf '%s' "$row" >> "$RECEIPT"
+        # The normal operator environment supplies flock. Keep a valid serial
+        # fallback for constrained test/inspection hosts.
+        if [[ ! -s "$RECEIPT" ]]; then
+            printf 'observed_at_utc\tid\tstate\tbytes\tsha256\tmd5\tpath\tsource\n' > "$RECEIPT"
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$observed_at" "$id" "$state" "$bytes" "$sha" "$md5" \
+            "$relative_path" "$source" >> "$RECEIPT"
     fi
 }
 
