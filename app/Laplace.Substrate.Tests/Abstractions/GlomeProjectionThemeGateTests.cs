@@ -38,15 +38,20 @@ public sealed class GlomeProjectionThemeGateTests
         var theme = Read("web", "src", "ui", "theme.css");
         var canvasCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
         var tabCss = Read("web", "src", "explore", "entity", "tabs", "GlomeTab.module.css");
+        var graphCss = Read("web", "src", "explore", "graph", "ConsensusGraph.module.css");
 
         Assert.Contains("@media (prefers-color-scheme: dark)", theme, StringComparison.Ordinal);
         Assert.Contains("--color-viz-bg: #e4edf2", theme, StringComparison.Ordinal);
         Assert.Contains("--color-viz-bg: #173b50", theme, StringComparison.Ordinal);
+        Assert.Contains("--color-viz-label: #16384c", theme, StringComparison.Ordinal);
+        Assert.Contains("--color-viz-label: #e4f0f5", theme, StringComparison.Ordinal);
         Assert.Contains("linear-gradient(180deg, var(--color-bg-top)", theme, StringComparison.Ordinal);
         Assert.Contains("background: var(--color-viz-bg)", canvasCss, StringComparison.Ordinal);
         Assert.Contains("background: var(--color-viz-bg)", tabCss, StringComparison.Ordinal);
+        Assert.Contains("background: var(--color-viz-bg)", graphCss, StringComparison.Ordinal);
         Assert.DoesNotContain("#05070c", canvasCss, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("#05070c", tabCss, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("background: #0b1220", graphCss, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
