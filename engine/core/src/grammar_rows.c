@@ -7,6 +7,9 @@
 
 #include "tree_sitter/api.h"
 
+extern const TSLanguage* tree_sitter_csv(void);
+extern const TSLanguage* tree_sitter_tsv(void);
+
 typedef struct { uint32_t s; uint32_t e; } laplace_row_rng_t;
 
 struct laplace_grammar_row_iter {
@@ -19,6 +22,7 @@ struct laplace_grammar_row_iter {
     TSSymbol          row_symbol;
     int               row_structured;
     int               force_line_framed;
+    uint8_t           delimited_separator;
 };
 
 int laplace_grammar_row_iter_new(const TSLanguage* recipe,
@@ -37,6 +41,8 @@ int laplace_grammar_row_iter_new(const TSLanguage* recipe,
     }
     it->row_symbol = ts_language_symbol_for_name(recipe, "row", 3, true);
     it->row_structured = it->row_symbol != 0;
+    if (recipe == tree_sitter_csv()) it->delimited_separator = ',';
+    else if (recipe == tree_sitter_tsv()) it->delimited_separator = '\t';
     *out = it;
     return 0;
 }
@@ -47,6 +53,10 @@ void laplace_grammar_row_iter_set_line_framed(laplace_grammar_row_iter_t* it, in
 
 static int use_grammar_row_framing(const laplace_grammar_row_iter_t* it) {
     return it->row_structured && !it->force_line_framed;
+}
+
+static int use_delimited_row_framing(const laplace_grammar_row_iter_t* it) {
+    return it->delimited_separator != 0 && !it->force_line_framed;
 }
 
 static int append_carry(laplace_grammar_row_iter_t* it,
@@ -72,6 +82,30 @@ static int append_carry(laplace_grammar_row_iter_t* it,
     }
     memcpy(it->carry + it->carry_len, chunk, len);
     it->carry_len += len;
+    return 0;
+}
+
+static int append_raw_row_copy(laplace_grammar_row_iter_t* it,
+                               laplace_raw_row_t** rows,
+                               size_t* row_cap,
+                               size_t* row_n,
+                               const uint8_t* src,
+                               size_t len) {
+    if (len == 0) return 0;
+    if (*row_n >= *row_cap) {
+        size_t ncap = *row_cap ? *row_cap * 2 : 64;
+        laplace_raw_row_t* n = (laplace_raw_row_t*)realloc(
+            *rows, ncap * sizeof(*n));
+        if (!n) { it->oom = 1; return -3; }
+        *rows = n;
+        *row_cap = ncap;
+    }
+    uint8_t* copy = (uint8_t*)malloc(len);
+    if (!copy) { it->oom = 1; return -3; }
+    memcpy(copy, src, len);
+    (*rows)[*row_n].row_utf8 = copy;
+    (*rows)[*row_n].row_len = len;
+    (*row_n)++;
     return 0;
 }
 
@@ -131,6 +165,114 @@ static int split_carry_lines(laplace_grammar_row_iter_t* it, int finalize,
         it->carry_len = rem;
     } else if (start >= it->carry_len) {
         it->carry_len = 0;
+    }
+
+    *out_rows = rows;
+    *out_count = row_n;
+    return 0;
+
+fail:
+    for (size_t j = 0; j < row_n; ++j)
+        free(rows[j].row_utf8);
+    free(rows);
+    return -3;
+}
+
+/* CSV/TSV need a codec-level framing pass before Tree-sitter parses each recovered
+ * record. Parsing an incomplete prefix is not a safe boundary oracle: before the
+ * closing quote arrives, the vendor grammar can legally tokenize the opening quote
+ * as unquoted text and expose an embedded newline as a temporary row boundary.
+ * Emitting that speculative CST row makes ReadAsync/feed chunk size semantic.
+ *
+ * This scanner only owns source-record framing. It does not interpret field values;
+ * the grammar still parses each emitted byte-exact record. One complete record is
+ * deliberately retained on non-final feeds, preserving the iterator's existing
+ * lookahead contract while making that lookahead depend on real delimiters rather
+ * than a speculative partial parse. */
+static int split_carry_delimited_records(laplace_grammar_row_iter_t* it, int finalize,
+                                         laplace_raw_row_t** out_rows, size_t* out_count) {
+    *out_rows = NULL;
+    *out_count = 0;
+    if (it->carry_len == 0) return 0;
+
+    size_t row_cap = 0, row_n = 0;
+    laplace_raw_row_t* rows = NULL;
+    size_t start = 0;
+    size_t pending_start = 0, pending_len = 0;
+    int have_pending = 0;
+    bool in_quotes = false;
+    bool field_start = true;
+
+    for (size_t i = 0; i < it->carry_len; ++i) {
+        uint8_t ch = it->carry[i];
+
+        if (in_quotes) {
+            if (ch == '"') {
+                if (i + 1 < it->carry_len && it->carry[i + 1] == '"') {
+                    ++i;
+                    continue;
+                }
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        if (ch == '"' && field_start) {
+            in_quotes = true;
+            field_start = false;
+            continue;
+        }
+
+        if (ch == it->delimited_separator) {
+            field_start = true;
+            continue;
+        }
+
+        if (ch != '\r' && ch != '\n') {
+            field_start = false;
+            continue;
+        }
+
+        size_t row_len = i - start;
+        size_t after = i + 1;
+        if (ch == '\r' && after < it->carry_len && it->carry[after] == '\n')
+            ++after;
+
+        if (row_len > 0) {
+            if (have_pending) {
+                if (append_raw_row_copy(it, &rows, &row_cap, &row_n,
+                                        it->carry + pending_start, pending_len) != 0)
+                    goto fail;
+            }
+            pending_start = start;
+            pending_len = row_len;
+            have_pending = 1;
+        }
+
+        start = after;
+        field_start = true;
+        i = after - 1;
+    }
+
+    if (finalize) {
+        if (have_pending) {
+            if (append_raw_row_copy(it, &rows, &row_cap, &row_n,
+                                    it->carry + pending_start, pending_len) != 0)
+                goto fail;
+        }
+        if (start < it->carry_len) {
+            if (append_raw_row_copy(it, &rows, &row_cap, &row_n,
+                                    it->carry + start, it->carry_len - start) != 0)
+                goto fail;
+        }
+        it->carry_len = 0;
+    } else {
+        size_t keep_start = have_pending ? pending_start : start;
+        if (keep_start > 0) {
+            size_t rem = it->carry_len - keep_start;
+            if (rem > 0) memmove(it->carry, it->carry + keep_start, rem);
+            it->carry_len = rem;
+        }
     }
 
     *out_rows = rows;
@@ -230,6 +372,8 @@ int laplace_grammar_row_iter_feed_lines(laplace_grammar_row_iter_t* it,
     if (chunk && len > 0) {
         if (append_carry(it, chunk, len) != 0) return -3;
     }
+    if (use_delimited_row_framing(it))
+        return split_carry_delimited_records(it, finalize, out_rows, out_count);
     if (use_grammar_row_framing(it))
         return split_carry_records(it, finalize, out_rows, out_count);
     return split_carry_lines(it, finalize, out_rows, out_count);
@@ -257,9 +401,11 @@ int laplace_grammar_row_iter_feed_parsed(laplace_grammar_row_iter_t* it,
 
     laplace_raw_row_t* raw = NULL;
     size_t raw_n = 0;
-    int rc = use_grammar_row_framing(it)
-        ? split_carry_records(it, finalize, &raw, &raw_n)
-        : split_carry_lines(it, finalize, &raw, &raw_n);
+    int rc = use_delimited_row_framing(it)
+        ? split_carry_delimited_records(it, finalize, &raw, &raw_n)
+        : use_grammar_row_framing(it)
+            ? split_carry_records(it, finalize, &raw, &raw_n)
+            : split_carry_lines(it, finalize, &raw, &raw_n);
     if (rc != 0) return rc;
     if (raw_n == 0) return 0;
 
