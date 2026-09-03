@@ -122,7 +122,10 @@ SELECT i, public.laplace_hash128_blake3(convert_to('memo/s/' || i, 'UTF8')) s,
        CASE WHEN i % 4 = 0 THEN NULL::bytea
             ELSE public.laplace_hash128_blake3(convert_to('memo/o/' || i, 'UTF8')) END o,
        1500000000000::bigint + CASE WHEN i % 8 = 1 THEN 200000000000 ELSE 0 END r,
-       350000000000::bigint + CASE WHEN i % 8 = 2 THEN 20000000000 ELSE 0 END rd,
+       -- RD=350 is the declared Glicko ceiling. Vary the memo-key input downward,
+       -- not above the admissible state domain: the fail-closed kernel must reject
+       -- an impossible 370 RD rather than making a parity fixture green by accepting it.
+       350000000000::bigint - CASE WHEN i % 8 = 2 THEN 20000000000 ELSE 0 END rd,
        60000000::bigint + CASE WHEN i % 8 = 3 THEN 10000000 ELSE 0 END vol,
        1500000000000::bigint + CASE WHEN i % 8 = 4 THEN 300000000000 ELSE 0 END opp,
        30000000000::bigint + CASE WHEN i % 8 = 5 THEN 10000000000 ELSE 0 END phi,

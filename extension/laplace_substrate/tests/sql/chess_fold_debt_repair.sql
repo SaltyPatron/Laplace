@@ -68,7 +68,7 @@ CALL chess.repair_player_ratings_batch(
     laplace.relation_type_id('OUTCOME'),
     laplace.relation_type_id('PLAYED_BY'),
     laplace.relation_type_id('HAS_RATING'),
-    ARRAY[(SELECT player_id FROM _repair_ids)]::bytea[]);
+    ARRAY[public.laplace_hash128_blake3('test/chess-fold-debt/player')]::bytea[]);
 
 DO $$
 DECLARE
@@ -133,7 +133,7 @@ CALL chess.repair_player_ratings_batch(
     laplace.relation_type_id('OUTCOME'),
     laplace.relation_type_id('PLAYED_BY'),
     laplace.relation_type_id('HAS_RATING'),
-    ARRAY[(SELECT player_id FROM _repair_ids)]::bytea[]);
+    ARRAY[public.laplace_hash128_blake3('test/chess-fold-debt/player')]::bytea[]);
 
 DO $$
 BEGIN
