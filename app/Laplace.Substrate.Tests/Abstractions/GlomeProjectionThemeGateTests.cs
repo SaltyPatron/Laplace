@@ -61,16 +61,23 @@ public sealed class GlomeProjectionThemeGateTests
     }
 
     [Fact]
-    public void ExploreWorkbench_UsesViewportSpace_DisclosureNavigation_AndDistinctButtonStates()
+    public void ExploreWorkbench_UsesViewportSpace_Disclosures_AndDistinctButtonStates()
     {
         var explore = Read("web", "src", "explore", "ExploreView.tsx");
         var exploreCss = Read("web", "src", "explore", "ExploreView.module.css");
+        var graphTab = Read("web", "src", "explore", "entity", "tabs", "GraphTab.tsx");
+        var graphTabCss = Read("web", "src", "explore", "entity", "tabs", "GraphTab.module.css");
         var graphCss = Read("web", "src", "explore", "graph", "ConsensusGraph.module.css");
         var glomeCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
         var buttons = Read("web", "src", "ui", "primitives", "Button", "Button.module.css");
 
         Assert.Contains("<details className={styles.navDisclosure} open>", explore, StringComparison.Ordinal);
         Assert.Contains("<summary className={styles.navSummary}>Explore tools</summary>", explore, StringComparison.Ordinal);
+        Assert.Contains("<details className={styles.settings}>", graphTab, StringComparison.Ordinal);
+        Assert.Contains("Graph settings · {hops}h · {fanout} fanout · {nodeCapacity} nodes", graphTab, StringComparison.Ordinal);
+        Assert.Contains("position: absolute;", graphTabCss, StringComparison.Ordinal);
+        Assert.Contains(".settings[open] .settingsSummary::before", graphTabCss, StringComparison.Ordinal);
+
         Assert.Contains("width: 100%;", exploreCss, StringComparison.Ordinal);
         Assert.Contains("max-width: none;", exploreCss, StringComparison.Ordinal);
         Assert.DoesNotContain("width: min(100%, 1600px)", exploreCss, StringComparison.Ordinal);
