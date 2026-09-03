@@ -6,7 +6,6 @@
 --
 --   consensus_subject_edges        raw table, outbound only, unlabeled
 --   consensus_neighbors_directed   unrefuted view, outbound, types[] required
---   consensus_neighbors_undirected unrefuted view, both, types[] required
 --   consensus_walk_edges           unrefuted, outbound, exclude[], RelationType antijoin
 --   consensus_step_edge            unrefuted, both, but ONE edge between two ids
 --   explore_web_neighbors          RAW consensus (consensus.refuted included), both
@@ -44,9 +43,6 @@ CREATE OR REPLACE FUNCTION consensus.edges(
 -- one consensus scan. Every reference is @extschema@-qualified instead. GH #860.
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH ranked AS MATERIALIZED (
-        -- The scan is consensus.edges_raw() — the one consensus scan. This function is its
-        -- LABELING layer and nothing else: rank/limit happen in the core, labels
-        -- resolve here, once, over exactly the surviving ids.
         SELECT e.direction AS dir,e.type_id,e.neighbour_id AS nid,
                e.rating,e.rd,e.witness_count,e.ord
         FROM consensus.edges_raw(p_subject,p_direction,p_types,p_limit,p_refuted,'edge_rank')
@@ -62,8 +58,6 @@ CREATE OR REPLACE FUNCTION consensus.edges(
             unnest(ids.a), unnest(realize.label_batch(ids.a))
           ) i(id,txt)
     ), rel AS MATERIALIZED (
-        -- Relation names come from the manifest, once per DISTINCT type — a
-        -- governed vocabulary of ~189, so a subject spans a handful.
         SELECT t.type_id,
                COALESCE(NULLIF(consensus.relation_canonical(t.type_id), ''),
                         l.txt) AS relation
@@ -85,9 +79,6 @@ CREATE OR REPLACE FUNCTION consensus.edges(
     ORDER BY k.ord
 $$;
 
--- Text front door. Every hand-written probe this replaced started by resolving a
--- word, and getting that wrong (laplace.word_id vs resolve vs resolve_ref) is its own
--- class of silent miss.
 DROP FUNCTION IF EXISTS laplace.edges(text, text, int, boolean);
 CREATE OR REPLACE FUNCTION consensus.edges(
         p_word      text,
@@ -102,3 +93,111 @@ CREATE OR REPLACE FUNCTION consensus.edges(
                            p_limit, p_refuted,
                            converse.word_language(laplace.word_id(p_word))) e
 $$;
+
+-- Generic Browse NAME lane. Structural candidate generation stays behind the
+-- sanctioned trajectory-containment boundary; all relation-family/Glicko access
+-- stays here in the consensus boundary. The result is still canonical ids and
+-- typed standing state; rendering happens after page selection.
+DROP FUNCTION IF EXISTS consensus.browse_named_entities(bytea[], bytea, int, int, int);
+CREATE OR REPLACE FUNCTION consensus.browse_named_entities(
+    p_members bytea[],
+    p_exact bytea DEFAULT NULL,
+    p_offset int DEFAULT 0,
+    p_limit int DEFAULT 40,
+    p_capacity int DEFAULT 2048)
+    RETURNS TABLE(
+        entity_id bytea,
+        tier smallint,
+        type_id bytea,
+        matched_name_id bytea,
+        match_kind text,
+        rating numeric,
+        rd numeric,
+        eff_mu numeric,
+        witness_count bigint,
+        candidate_name_count bigint,
+        candidate_truncated boolean,
+        matched_entity_count bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH names AS MATERIALIZED (
+        SELECT c.entity_id AS name_id, c.candidate_count, c.truncated
+        FROM structural.word_containers_containing_all(p_members, p_capacity) c
+    ), name_stats AS MATERIALIZED (
+        SELECT COALESCE(max(candidate_count), 0)::bigint AS candidate_count,
+               COALESCE(bool_or(truncated), false) AS truncated
+        FROM names
+    ), named AS MATERIALIZED (
+        SELECT c.subject_id AS entity_id,
+               c.object_id AS matched_name_id,
+               'name'::text AS match_kind,
+               round((c.rating / 1e9)::numeric, 3) AS rating,
+               round((c.rd / 1e9)::numeric, 3) AS rd,
+               consensus.eff_mu_display(c.rating, c.rd) AS eff_mu,
+               c.witness_count,
+               row_number() OVER (
+                   PARTITION BY c.subject_id
+                   ORDER BY consensus.eff_mu(c.rating, c.rd) DESC,
+                            c.witness_count DESC,
+                            c.object_id) AS name_rank
+        FROM names n
+        JOIN laplace.consensus c ON c.object_id = n.name_id
+        WHERE c.type_id = ANY (
+                consensus.relation_family_ids('HAS_NAME')
+                || consensus.relation_family_ids('HAS_NAME_ALIAS'))
+          AND NOT consensus.refuted(c.rating, c.rd)
+    ), direct AS MATERIALIZED (
+        SELECT p_exact AS entity_id,
+               p_exact AS matched_name_id,
+               'surface'::text AS match_kind,
+               NULL::numeric AS rating,
+               NULL::numeric AS rd,
+               NULL::numeric AS eff_mu,
+               0::bigint AS witness_count,
+               1::bigint AS name_rank
+        WHERE p_exact IS NOT NULL AND consensus.entity_exists(p_exact)
+    ), combined AS MATERIALIZED (
+        SELECT entity_id, matched_name_id, match_kind, rating, rd, eff_mu, witness_count, 0 AS priority
+        FROM named WHERE name_rank = 1
+        UNION ALL
+        SELECT entity_id, matched_name_id, match_kind, rating, rd, eff_mu, witness_count, 1 AS priority
+        FROM direct
+    ), dedup AS MATERIALIZED (
+        SELECT x.entity_id, x.matched_name_id, x.match_kind, x.rating, x.rd, x.eff_mu,
+               x.witness_count, x.priority
+        FROM (
+            SELECT c.*,
+                   row_number() OVER (
+                       PARTITION BY c.entity_id
+                       ORDER BY c.priority, c.eff_mu DESC NULLS LAST,
+                                c.witness_count DESC, c.matched_name_id) AS rn
+            FROM combined c
+        ) x
+        WHERE x.rn = 1
+    ), ranked AS MATERIALIZED (
+        SELECT d.*,
+               count(*) OVER ()::bigint AS matched_entity_count,
+               row_number() OVER (
+                   ORDER BY d.priority, d.eff_mu DESC NULLS LAST,
+                            d.witness_count DESC, d.entity_id) AS ord
+        FROM dedup d
+    ), page AS MATERIALIZED (
+        SELECT r.*
+        FROM ranked r
+        WHERE r.ord > GREATEST(COALESCE(p_offset, 0), 0)
+          AND r.ord <= GREATEST(COALESCE(p_offset, 0), 0) + GREATEST(COALESCE(p_limit, 0), 0)
+    ), ids AS MATERIALIZED (
+        SELECT COALESCE(array_agg(p.entity_id ORDER BY p.ord), '{}'::bytea[]) AS ids
+        FROM page p
+    ), facets AS MATERIALIZED (
+        SELECT f.entity_id, f.tier, f.type_id
+        FROM ids i, ops.entity_facets_batch(i.ids) f
+    )
+    SELECT p.entity_id, f.tier, f.type_id, p.matched_name_id, p.match_kind,
+           p.rating, p.rd, p.eff_mu, p.witness_count,
+           s.candidate_count, s.truncated, p.matched_entity_count
+    FROM page p
+    JOIN facets f ON f.entity_id = p.entity_id
+    CROSS JOIN name_stats s
+    ORDER BY p.ord;
+END;
