@@ -10,7 +10,8 @@
 
   .rootFill {
     flex: 1 1 auto;
-    height: 100%;
+    height: auto;
+    min-height: 0;
   }
 
   .toolbar {
@@ -31,8 +32,8 @@
 
   .shell {
     width: 100%;
-    min-height: min(50vh, 28rem);
-    height: min(70vh, 40rem);
+    min-height: 28rem;
+    height: 72dvh;
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     overflow: hidden;
@@ -46,7 +47,15 @@
 
   .shellFill {
     flex: 1 1 auto;
-    min-height: 12rem;
-    height: auto;
+    min-height: max(28rem, 62dvh);
+    height: 100%;
+  }
+}
+
+@media (max-width: 700px) {
+  .shell,
+  .shellFill {
+    min-height: 22rem;
+    height: 60dvh;
   }
 }
