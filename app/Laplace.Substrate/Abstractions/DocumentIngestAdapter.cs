@@ -35,45 +35,66 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
 
 public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
-    private readonly ContentIngestHandler _inner = new(UserPromptContent.Source);
+    private readonly ContentIngestHandler _inner = new(DocumentSource.SourceId);
 
     public DocumentIngestHandler(int layerOrder) => LayerOrder = layerOrder;
 
-    /// <summary>Layer the per-file completion marker is minted/checked at — the
-    /// decomposer's layer, threaded in so the gate and the marker can never disagree.</summary>
     public int LayerOrder { get; }
 
-    /// <summary>--force (ReObservePresent): bypass the per-file completion-marker skip in
-    /// the existence gate and re-observe already-completed files.</summary>
     public bool IgnoreCompletedFiles { get; init; }
 
     public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
         _inner.CreateDeferredUnit(record);
 
-    public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
+    public void WalkWitness(
+        ContentIngestRecord record,
+        Hash128 root,
+        SubstrateChangeBuilder builder,
+        IIngestDeferredUnit unit)
     {
-        // Pillar 3a: a document emits its content DAG (entities + physicalities/trajectory) via
-        // the deferred unit ONLY. No per-node distributional attestations: sequence is the
-        // trajectory geometry, containment is containers_of + the point-match. The file's
-        // WITNESS is trunk-grain — the per-file completion marker plus the metadata DAG,
-        // deposited once per file, novel path only (the present path already skipped a
-        // marker-complete file in IngestExistenceGate; recomposes that reach here without a
-        // marker still deposit it, which is the "content known from another source" case).
-        if (unit is PresentRootDeferredUnit) return;
-
-        // DrainInto legitimately returns default when the existence bitmap covered every
-        // node (content fully present, only the marker/metadata are novel) — the file root
-        // is the record's own per-file source id, not the drain result.
-        Hash128 fileRoot = record.SourceId != default
-            ? record.SourceId
+        Hash128 contentRoot = record.ContentRootId != default
+            ? record.ContentRootId
             : root != default
                 ? root
                 : ContentTierSpine.ResolveRoot(record.CanonicalUtf8) ?? default;
-        if (fileRoot == default) return;
+        if (contentRoot == default) return;
 
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, fileRoot, LayerOrder);
-        if (record.Metadata is { } metadata)
-            FileEntity.EmitMetadata(builder, fileRoot, metadata);
+        if (record.Metadata is not { } metadata
+            || record.FileId == default
+            || record.DocumentId == default)
+        {
+            // Compatibility path for synthetic/unit-test records that do not represent a
+            // filesystem occurrence. They remain ordinary content and do not pretend to be
+            // a fully formed file/document provenance chain.
+            return;
+        }
+
+        FileIdentity file = FileEntity.Emit(
+            builder,
+            DocumentSource.SourceId,
+            record.CanonicalUtf8,
+            metadata);
+        if (file.ContentRootId != contentRoot || file.FileId != record.FileId)
+            throw new InvalidOperationException(
+                "DocumentIngestHandler: extracted file identity changed between open and compose");
+
+        Hash128 documentId = DocumentEntity.Emit(
+            builder,
+            file.FileId,
+            contentRoot,
+            record.CanonicalUtf8);
+        if (documentId != record.DocumentId)
+            throw new InvalidOperationException(
+                "DocumentIngestHandler: extracted document identity changed between open and compose");
+
+        // Completion belongs to the file composition, not to the shared content root.
+        // Same text in another path therefore remains independently ingestible, while an
+        // exact re-ingest of the same file occurrence true-skips at this id.
+        Laplace.Ingestion.LayerCompletion.EmitFileMarker(
+            builder,
+            file.FileId,
+            DocumentSource.SourceId,
+            LayerOrder);
     }
 }
 
@@ -86,11 +107,11 @@ public static class DocumentIngestSupport
         var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options);
         return new()
         {
-            SourceId = UserPromptContent.Source,
+            SourceId = DocumentSource.SourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = ws.Batch,
             ProbeChunkSize = ws.ProbeChunk,
-            WitnessWeight = UserPromptContent.WitnessWeight,
+            WitnessWeight = SourceTrust.StructuredCorpus,
             ContainmentReader = reader,
             WorkingSet = WorkingSetMode.Enabled,
             WorkingSetProbeInterval = ws.ProbeInterval,
