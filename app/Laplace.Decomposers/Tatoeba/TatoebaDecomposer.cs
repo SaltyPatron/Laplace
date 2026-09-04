@@ -49,8 +49,10 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
             ? new ConcurrentDictionary<long, byte>()
             : null;
 
+        string sentencesPath = Path.Combine(context.EcosystemPath, "sentences.csv");
         await foreach (var c in RunPhaseAsync(
-                           new TatoebaSentencePhase(_ids, _allowedSentenceIds), context, options, ct))
+                           new TatoebaSentencePhase(_ids, _allowedSentenceIds), context, options,
+                           "tatoeba/sentences", sentencesPath, ct))
             yield return c;
 
         // Phase 2 only ever runs after phase 1 has been fully composed, so the map is
@@ -61,8 +63,10 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
                 "Tatoeba link phase reached with an empty id map: sentences.csv was missing or "
                 + "yielded no resolvable rows. Every IS_TRANSLATION_OF would be dropped.");
 
+        string linksPath = Path.Combine(context.EcosystemPath, "links.csv");
         await foreach (var c in RunPhaseAsync(
-                           new TatoebaLinkPhase(_ids, _allowedSentenceIds), context, options, ct))
+                   new TatoebaLinkPhase(_ids, _allowedSentenceIds), context, options,
+                   "tatoeba/links", linksPath, ct))
             yield return c;
     }
 

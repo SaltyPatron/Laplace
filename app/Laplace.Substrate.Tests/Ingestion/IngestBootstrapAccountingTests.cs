@@ -65,6 +65,36 @@ public sealed class IngestBootstrapAccountingTests
         Assert.Contains("layer-complete/0", writer.AppliedUnits);
     }
 
+    [Fact]
+    public async Task RequiredArtifactManifest_FailsBeforeSourceInitialization()
+    {
+        string sourceRoot = Directory.CreateDirectory(
+            Path.Combine(Path.GetTempPath(), $"laplace-estate-{Guid.NewGuid():N}"))
+            .FullName;
+        try
+        {
+            var writer = new InsertAllWriter();
+            var runner = new IngestRunner(
+                writer, new EmptyReader(), NullLoggerFactory.Instance);
+
+            var error = await Assert.ThrowsAsync<FileNotFoundException>(() =>
+                runner.RunAsync(
+                    new BootstrapThenContentDecomposer(),
+                    IngestRunOptions.Default with
+                    {
+                        EcosystemPath = sourceRoot,
+                        RequireArtifactManifest = true,
+                    }));
+
+            Assert.Equal(Path.Combine(sourceRoot, "MANIFEST.tsv"), error.FileName);
+            Assert.Empty(writer.AppliedUnits);
+        }
+        finally
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+        }
+    }
+
     private sealed class BootstrapThenContentDecomposer : IDecomposer
     {
         private static readonly Hash128 Source = Hash128.OfCanonical("test/bootstrap-accounting/source");

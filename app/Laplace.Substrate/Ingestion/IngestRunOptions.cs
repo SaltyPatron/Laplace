@@ -12,7 +12,8 @@ public sealed record IngestRunOptions(
     string? EcosystemPath = null,
     int BatchSize = 1,
     int CommitRows = 0,
-    bool BypassSourceCompletionGuard = false)
+    bool BypassSourceCompletionGuard = false,
+    bool RequireArtifactManifest = false)
 {
     public static IngestRunOptions Default { get; } = new(
         DecomposerOptions: DecomposerOptions.Default,

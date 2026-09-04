@@ -194,7 +194,6 @@ function GlomeScene({
   const [hover, setHover] = useState<GlomeNode | null>(null);
   const instances = useRef<THREE.InstancedMesh>(null);
   const transform = useMemo(() => new THREE.Object3D(), []);
-  const palette = useMemo(() => visualizationPalette(), []);
 
   useEffect(() => {
     const mesh = instances.current;

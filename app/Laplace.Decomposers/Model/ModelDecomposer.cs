@@ -182,9 +182,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-        // Analyzer modes (LAPLACE_MODEL_PLANES != "structure") deposit CALCULATED
-        // planes only. The witnessed phases (recipe/tokenizer/vocab/merges/maps-to)
-        // belong to the recorder and must not re-fold their witnesses on re-runs.
+        // Model ingest is one recorder pass: checkpoint, tokenizer and recipe
+        // anatomy plus bounded calculated circuit testimony.
         bool recorderRun = ModelTokenEdgeETL.ResolvePlanesMode() == "structure";
 
         if (recorderRun)
@@ -393,10 +392,9 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
         }
 
-        // Matches ModelTokenEdgeETL's emission for the active mode. Structure mode
-        // scales with CIRCUITS, not vocabulary: the circuit's whole salience
-        // assertion is one physicality trajectory and the attestations are a
-        // bounded testimony prefix (ModelTokenEdgeETL.TestimonyWidthPerCircuit).
+        // Matches ModelTokenEdgeETL's emission. It scales with CIRCUITS, not
+        // vocabulary: checkpoint content remains the lossless record and each
+        // circuit emits a bounded testimony prefix.
         // This used to read `circuits * distinctVocab` and matched the emission
         // that made TinyLlama a 45.8M-row deposit; leaving it would over-estimate
         // the unit count ~125x and make every progress line meaningless.

@@ -26,6 +26,61 @@ public sealed class DecomposerMultiPhaseBudgetTests
         Assert.Equal(1, second.ReceivedCap);
     }
 
+    [Fact]
+    public async Task FileBackedPhase_RejectsUndeclaredArtifact()
+    {
+        var selected = Artifact("selected", "/source/selected.dat");
+        var decomposer = new FileBackedMultiPhase("/source/undeclared.dat");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DrainAsync(decomposer.DecomposeAsync(
+                new Context([selected]), DecomposerOptions.Default)));
+
+        Assert.Contains("attempted undeclared artifact", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UncappedRun_RejectsSelectedArtifactThatWasNotConsumed()
+    {
+        IngestArtifact[] selected =
+        [
+            Artifact("consumed", "/source/consumed.dat"),
+            Artifact("omitted", "/source/omitted.dat"),
+        ];
+        var decomposer = new FileBackedMultiPhase(selected[0].Path);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DrainAsync(decomposer.DecomposeAsync(
+                new Context(selected), DecomposerOptions.Default)));
+
+        Assert.Contains(selected[1].Path, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SelectedArtifact_CannotBeConsumedTwice()
+    {
+        var selected = Artifact("selected", "/source/selected.dat");
+        var decomposer = new FileBackedMultiPhase(selected.Path, repeat: true);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => DrainAsync(decomposer.DecomposeAsync(
+                new Context([selected]), DecomposerOptions.Default)));
+
+        Assert.Contains("more than once", error.Message, StringComparison.Ordinal);
+    }
+
+    private static async Task DrainAsync(IAsyncEnumerable<SubstrateChange> changes)
+    {
+        await foreach (var _ in changes)
+        {
+        }
+    }
+
+    private static IngestArtifact Artifact(string artifact, string path) => new(
+        "test", "r1", artifact, Path.GetFileName(path), path,
+        IngestArtifactDisposition.Admitted, "", "", null, "", "", "", "", "", "",
+        "", "", "");
+
     private sealed class SyntheticMultiPhase(params SyntheticPhase[] phases) : DecomposerMultiPhase
     {
         public override Hash128 SourceId { get; } = Hash128.OfCanonical("test/multiphase");
@@ -89,9 +144,40 @@ public sealed class DecomposerMultiPhaseBudgetTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class Context : IDecomposerContext
+    private sealed class FileBackedMultiPhase(string path, bool repeat = false) : DecomposerMultiPhase
+    {
+        public override Hash128 SourceId { get; } = Hash128.OfCanonical("test/file-backed-multiphase");
+        public override string SourceName => "test-file-backed-multiphase";
+        public override int LayerOrder => 1;
+        public override Hash128 TrustClassId => default;
+
+        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public override Task<long?> EstimateUnitCountAsync(
+            IDecomposerContext context, CancellationToken ct = default) =>
+            Task.FromResult<long?>(1);
+
+        protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
+            IDecomposerContext context,
+            DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var change in RunPhaseAsync(
+                               new SyntheticPhase(0), context, options, "legacy-label", path, ct))
+                yield return change;
+                 if (repeat)
+                await foreach (var change in RunPhaseAsync(
+                            new SyntheticPhase(0), context, options, "second-label", path, ct))
+                    yield return change;
+        }
+    }
+
+    private sealed class Context(IReadOnlyList<IngestArtifact>? selectedArtifacts = null) : IDecomposerContext
     {
         public string EcosystemPath => string.Empty;
+        public IReadOnlyList<IngestArtifact> SelectedArtifacts { get; } =
+            selectedArtifacts ?? Array.Empty<IngestArtifact>();
         public ISubstrateWriter Writer { get; } = new WriterStub();
         public ISubstrateReader Reader { get; } = new ReaderStub();
         public ILogger Logger => NullLogger.Instance;

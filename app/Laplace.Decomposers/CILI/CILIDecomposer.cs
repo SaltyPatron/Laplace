@@ -33,18 +33,20 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
         string ttl = Path.Combine(root, "ili.ttl");
         if (File.Exists(ttl))
         {
-            await foreach (var change in RunPhaseAsync(new ConceptsPhase(), context, options, ct))
+            await foreach (var change in RunPhaseAsync(
+                               new ConceptsPhase(), context, options, "cili/concepts", ttl, ct))
                 yield return change;
         }
 
         // The release's own change log. SelectMapInputs globs ili-map-* only, so this was
         // never read: 76 deprecated ILIs whose withdrawal the corpus states outright.
         foreach (string changes in Directory
-                     .EnumerateFiles(root, "changes-in-*.csv", SearchOption.AllDirectories)
-                     .OrderBy(p => p, StringComparer.Ordinal))
+                 .EnumerateFiles(root, "changes-in-*.csv", SearchOption.AllDirectories)
+                 .OrderBy(p => p, StringComparer.Ordinal))
         {
             await foreach (var change in RunPhaseAsync(
-                               new IliStatusPhase(changes, VersionLabel(changes)), context, options, ct))
+                               new IliStatusPhase(changes, VersionLabel(changes)), context, options,
+                               $"cili/status/{Path.GetFileName(changes)}", changes, ct))
                 yield return change;
         }
 
@@ -54,7 +56,9 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
             IDecomposer phase = map.IsTab
                 ? new MapTabPhase(map.Path, map.Version)
                 : new MapTtlPhase(map.Path, map.Version);
-            await foreach (var change in RunPhaseAsync(phase, context, options, ct))
+            await foreach (var change in RunPhaseAsync(
+                               phase, context, options,
+                               $"cili/map/{Path.GetFileName(map.Path)}", map.Path, ct))
                 yield return change;
         }
     }

@@ -65,11 +65,10 @@ public sealed class ModelTokenEdgeETL
     // (32 × 32, V=51,200) 2,080 × 51,200 = 106.5M. Both model seeds failed. That is
     // a representation defect, not a throughput one.
     //
-    // The assertion is NOT truncated: it is carried losslessly by geometry, exactly
-    // as text carries sequence. One circuit = one entity = ONE physicality whose
-    // trajectory is the whole (token, score) walk in salience order, exactly
-    // invertible through laplace_testimony_unpack_vertex. The attestations that
-    // remain are TESTIMONY — the top-k salient tokens — not storage.
+    // The checkpoint byte ranges and recipe are the lossless record. Circuit
+    // projections are calculated from that content and are not another content
+    // body. The persisted attestations are bounded TESTIMONY: the top-k salient
+    // tokens participating in consensus.
     //
     // The coordinate stays shared content across models; the model is only the
     // source, so consensus (token, <plane relation>, coord) still rates cross-model
@@ -77,9 +76,7 @@ public sealed class ModelTokenEdgeETL
     // checkpoints' matching circuits next to each other under physicalities_coord_gist.
 
     // Semantic materialization width, not an execution batch/cap. This must remain
-    // topology-independent because it decides which consensus cells exist. The full,
-    // lossless circuit assertion is the factor trajectory; removing this compatibility
-    // projection requires its readers to move to trajectory containment first.
+    // topology-independent because it decides which consensus cells exist.
     private const int TopTokensPerCircuit = 64;
 
     /// <summary>Per-circuit testimony width — the bound the row-count regression pins.</summary>
@@ -89,12 +86,12 @@ public sealed class ModelTokenEdgeETL
     {
         var m = Environment.GetEnvironmentVariable("LAPLACE_MODEL_PLANES");
         string mode = string.IsNullOrWhiteSpace(m) ? "structure" : m.Trim().ToLowerInvariant();
-        return mode is "structure" or "factors"
-            ? mode
-            : throw new InvalidOperationException(
-                $"LAPLACE_MODEL_PLANES='{mode}' — valid modes: 'structure' (recorder anatomy) and "
-                + "'factors' (per-head factor trajectories; pair evidence derives at read). "
-                + "Eager pair-fold modes were deleted (doc 26: rejected V² materialization).");
+        if (mode == "structure") return mode;
+
+        throw new InvalidOperationException(
+            $"LAPLACE_MODEL_PLANES='{mode}' is not a valid model-ingest mode. "
+            + "Raw factor trajectories are retired: checkpoint floats must be streamed into "
+            + "bounded testimony and discarded, never persisted as vocabulary-by-dimension geometry.");
     }
 
     // Rows per change/chunk: the machine's commit-row budget from the one sizing
@@ -102,21 +99,9 @@ public sealed class ModelTokenEdgeETL
     // hand-set constant (Rule #12).
     private readonly int _rowsPerChange = IngestSizing.ResolveForSource(IngestSourceProfile.Default).CommitRows;
 
-    // "structure" (default) is the recorder's anatomy pass: vocab, merges,
-    // TOKEN_MAPS_TO, CONTAINS/PRECEDES structure. It does NOT deposit APPEARS_IN
-    // — the only emitter is EmitFactorTrajectories, gated on RunFactors below.
-    // This matters because generation.model_forward resolves its emb/lm/mlp slices
-    // exclusively through APPEARS_IN: a checkpoint ingested with the default mode
-    // alone is queryable as anatomy but cannot be forwarded through, and needs a
-    // second `LAPLACE_MODEL_PLANES=factors` pass over the already-recorded model.
-    private readonly string _mode = ResolvePlanesMode();
-    private bool StructureMode => _mode == "structure";
-    private bool RunLayers => _mode == "structure";
-    // "factors" (campaign doc 26 item A): deposit the WITNESS — per-head factor
-    // trajectories (entity -> firefly), native-dim, FACTOR vertices. No pair
-    // tiles, no pair attestations: pair evidence is virtual (derivable from the
-    // trajectories under the versioned derivation law; receipts at walk grain).
-    private bool RunFactors => _mode == "factors";
+    // The single ingest pass records checkpoint/tokenizer anatomy and derives the
+    // bounded Q/K, OV and MLP testimony used by substrate consensus.
+    private const bool StructureMode = true;
 
 
 
@@ -146,6 +131,7 @@ public sealed class ModelTokenEdgeETL
                 [token.ContentX, token.ContentY, token.ContentZ, token.ContentM]);
         }
         _tokenPlacements = placements;
+
     }
 
     private static double WeightFor(string relation) =>
@@ -214,22 +200,12 @@ public sealed class ModelTokenEdgeETL
 
 
 
-        if (RunFactors)
-        {
-            await foreach (var change in EmitFactorTrajectories(Af, ents, rowOfToken, n, d, commitEpoch, refMap, reader, options, ct))
-                yield return change;
-            yield break;
-        }
-
         if (!_manifest.TextPlanesRunnable)
         {
             _log.LogInformation("phase=edges: coverage={Cov} modality={Mod}; embedding-plane only",
                 _manifest.Coverage, _manifest.Modality);
             yield break;
         }
-
-        if (!RunLayers) yield break;
-
 
         var Ad = new double[(long)n * d];
         unsafe { fixed (float* pf = Af) fixed (double* pd = Ad)
@@ -1087,66 +1063,14 @@ public sealed class ModelTokenEdgeETL
         double weight = WeightFor(descriptor.RelationName);
         bool metaStaged = false;
 
-        // THE CIRCUIT IS THE GAME (chess trajectory parity): one testimony-packed
-        // linestring on the coordinate entity carrying the circuit's ENTIRE
-        // assertion — every token, its score, in salience order — exactly as a
-        // game's trajectory carries its whole move sequence, and exactly invertible
-        // through laplace_testimony_unpack_vertex. This is the lossless record the
-        // deleted per-token attestations were a second, unread copy of. Calculated
-        // payload (Projection class, doc 08: versioned, evictable); anatomy queries
-        // read 1 row per circuit.
-        var trajTokens = new Hash128[ranked.Length];
-        var trajScores = new long[ranked.Length];
-        for (int i = 0; i < ranked.Length; i++)
-        {
-            trajTokens[i] = ranked[i].Token;
-            trajScores[i] = ranked[i].ScoreFp;
-        }
-        byte[] packed = TestimonyWalk.Pack(trajTokens, trajScores);
-        double[] trajXyzm = System.Runtime.InteropServices.MemoryMarshal
-            .Cast<byte, double>(packed).ToArray();
-
-        // Bounded testimony: the top-k salient tokens, capped by the collector the
-        // file already owns rather than a second cap written here. Offered in
-        // salience order, so the drained set is the ranked prefix and stays
-        // deterministic even where scores tie at the boundary.
+        // The checkpoint byte ranges are the lossless source record. Derived
+        // vocabulary-by-circuit floats are calculated evidence, not a second
+        // physical content body. Persist only the bounded, ranked testimony that
+        // participates in consensus; the full matrices remain reproducible from
+        // the content-addressed checkpoint and recipe.
         var collector = new TopPairCollector(Math.Min(TopTokensPerCircuit, ranked.Length));
         foreach (var (token, scoreFp) in ranked) collector.Offer(token, coord, scoreFp);
         var top = collector.Drain();
-
-        // The circuit's point in 4-space: the centroid of the substrate's OWN
-        // real placements of its salient tokens. Content-derived and model-free,
-        // so two checkpoints whose
-        // L5.H7 head is salient for the same tokens land on neighbouring points and
-        // find each other through physicalities_coord_gist / the Hilbert order.
-        // Taken over the SALIENT PREFIX, never the whole vocabulary: averaged over
-        // every token, every circuit converges on the same vocabulary centroid and
-        // discriminates nothing. Packed identity/score vertices remain in
-        // trajectory only; treating them as child positions produces a valid
-        // double and a meaningless point.
-        PhysicalityRow? circuitPhys = null;
-        var salientPlacedTokens = ranked
-            .Select(static pair => pair.Token)
-            .Where(_tokenPlacements.ContainsKey)
-            .Take(Math.Min(TopTokensPerCircuit, ranked.Length));
-        if (TryCentroidOfPlacedTokens(salientPlacedTokens, out var centroid))
-        {
-            circuitPhys = new PhysicalityRow(
-                Id: PhysicalityId.Compute(coord, PhysicalityType.Projection),
-                EntityId: coord, SourceId: _source,
-                Type: PhysicalityType.Projection,
-                CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
-                HilbertIndex: Hilbert128.Encode(centroid),
-                TrajectoryXyzm: trajXyzm, NConstituents: ranked.Length,
-                AlignmentResidual: null, SourceDim: null,
-                ObservedAtUnixUs: IngestClock.NowUnixUs());
-        }
-        else
-        {
-            _log.LogWarning(
-                "Cannot place circuit {Plane} L{Layer} H{Head}: no ranked token has a real content coordinate; retaining testimony without a projection physicality",
-                descriptor.Plane, descriptor.Layer, descriptor.Head);
-        }
 
         // Same batch door as the pair planes: fill machine-sized cell chunks,
         // ONE AggregatedBatch P/Invoke per chunk — never one per token.
@@ -1177,8 +1101,6 @@ public sealed class ModelTokenEdgeETL
                                if (!metaStaged)
                                {
                                    ModelCoordinates.StageCoordinate(b, descriptor, _source);
-                                   if (circuitPhys is { } placed)
-                                       b.AddPhysicality(placed);
                                    metaStaged = true;
                                }
                                StageEdgeChunk(b, chunk);
@@ -1186,30 +1108,6 @@ public sealed class ModelTokenEdgeETL
                            _source, EdgeBatchLabel(descriptor) + "/occ",
                            reader, options, ct, commitEpoch, _rowsPerChange))
             yield return batch;
-    }
-
-    private bool TryCentroidOfPlacedTokens(
-        IEnumerable<Hash128> tokenIds, out double[] centroid)
-    {
-        var coords = new List<double>();
-        foreach (var tokenId in tokenIds)
-        {
-            if (!_tokenPlacements.TryGetValue(tokenId, out var coord)) continue;
-            coords.Add(coord[0]);
-            coords.Add(coord[1]);
-            coords.Add(coord[2]);
-            coords.Add(coord[3]);
-        }
-        if (coords.Count == 0)
-        {
-            centroid = [];
-            return false;
-        }
-        // Karcher, not Centroid. This feeds PhysicalityType.Projection's coord and
-        // its Hilbert index, so it is placement and belongs on S3 at norm 1 like
-        // every other coord. Requires a reseed.
-        centroid = Math4d.KarcherMean(coords.ToArray());
-        return true;
     }
 
     private Hash128[] SelectMostSalientPlacedTokens(
@@ -1239,6 +1137,27 @@ public sealed class ModelTokenEdgeETL
         for (int i = 0; i < selected.Length; i++)
             selected[i] = queue.Dequeue();
         return selected;
+    }
+
+    private bool TryCentroidOfPlacedTokens(
+        IEnumerable<Hash128> tokenIds, out double[] centroid)
+    {
+        var coords = new List<double>();
+        foreach (var tokenId in tokenIds)
+        {
+            if (!_tokenPlacements.TryGetValue(tokenId, out var coord)) continue;
+            coords.Add(coord[0]);
+            coords.Add(coord[1]);
+            coords.Add(coord[2]);
+            coords.Add(coord[3]);
+        }
+        if (coords.Count == 0)
+        {
+            centroid = [];
+            return false;
+        }
+        centroid = Math4d.KarcherMean(coords.ToArray());
+        return true;
     }
 
     private readonly record struct SaliencePriority(double Salience, Hash128 Token);
