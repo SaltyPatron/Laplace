@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Threading;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -28,8 +30,20 @@ public static class ChessStockfishEval
     public static Hash128 MarkerId(Hash128 lineId, int version)
         => Hash128.OfCanonical($"chess/stockfish-eval/{lineId}/{version}");
 
-    private const double EvalWeight = 0.95;    // stronger witness than the in-repo search's 0.9
+    private const double EvalWeight = 0.95;
     private const double QualityWeight = 0.9;
+
+    /// <summary>
+    /// Expensive, builder-independent half of one eval line. Chess composition and Stockfish
+    /// searches are pure with respect to the substrate writer, so they can run on different
+    /// compose workers. The prepared value is drained into the one non-thread-safe builder
+    /// later by <see cref="DepositPrepared"/>.
+    /// </summary>
+    internal sealed record PreparedLine(
+        ChessWitnessedGame Game,
+        ChessComposed?[] Positions,
+        int?[] Evals,
+        KeyValuePair<Hash128, int?>[] FreshEvaluations);
 
     // Centipawns lost (mover POV) → canonical MoveQuality token; null = no class fires.
     // Silence is the non-event: a fine move deposits no quality row.
@@ -41,79 +55,150 @@ public static class ChessStockfishEval
         _ => null,
     };
 
+    /// <summary>
+    /// Compatibility entrypoint used by direct callers/tests. The production decomposer uses
+    /// PrepareGame on the compose pool and DepositPrepared on the serial builder drain.
+    /// </summary>
     public static void DeriveGame(
         SubstrateChangeBuilder b, ChessWitnessedGame game, IPositionEvaluator eval,
-        System.Collections.Concurrent.ConcurrentDictionary<Hash128, int?>? evalMemo = null)
+        ConcurrentDictionary<Hash128, int?>? evalMemo = null)
+    {
+        var prepared = PrepareGame(game, eval, evalMemo, evalInflight: null);
+        if (prepared is not null)
+            DepositPrepared(b, prepared);
+    }
+
+    /// <summary>
+    /// Replay and evaluate one witnessed line without mutating a SubstrateChangeBuilder.
+    /// A run-scoped in-flight map makes a shared position one engine search even when many
+    /// line workers reach the same opening position concurrently.
+    /// </summary>
+    internal static PreparedLine? PrepareGame(
+        ChessWitnessedGame game,
+        IPositionEvaluator eval,
+        ConcurrentDictionary<Hash128, int?>? evalMemo,
+        ConcurrentDictionary<Hash128, Lazy<int?>>? evalInflight)
     {
         var m = new ChessModality();
-        // Unreadable start: evaluate nothing rather than evaluate a board the game never had.
-        if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return;
-        var state = start.Initial;
+        if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return null;
 
-        // evals[i] = side-to-move cp of the position before ply i (plus the final position
-        // at index N). Each position is evaluated exactly once; move i's loss reads i and i+1.
         int n = game.Moves.Count;
         var evals = new int?[n + 1];
         var composed = new ChessComposed?[n + 1];
+        var fresh = new List<KeyValuePair<Hash128, int?>>();
 
-        var cur = state;
+        var cur = start.Initial;
         ChessComposed? carried = null;
         for (int ply = 0; ply <= n; ply++)
         {
-            var node = carried ?? ChessGraph.EmitComposed(b, cur.Board, SourceId);
+            // Compose is pure here. Staging waits for DepositPrepared so worker threads never
+            // share a SubstrateChangeBuilder.
+            var node = carried ?? ChessCompose.Position(cur.Board);
             composed[ply] = node;
-            bool terminal = m.Terminal(cur) is not null;
-            // Positions are content-addressed and shared across games (the start position
-            // recurs in every standard game) — a stockfish value is a pure function of the
-            // position, so the run-level memo searches each unique position ONCE and every
-            // repeat reads the cached cp. Deposits stay per-game (provenance unchanged).
-            if (terminal)
-                evals[ply] = null;
-            else if (evalMemo is not null && evalMemo.TryGetValue(node.Position.Id, out var cached))
-                evals[ply] = cached;
-            else
+
+            if (m.Terminal(cur) is null)
             {
-                evals[ply] = eval.EvaluateCp(cur.Board.ToFen());
-                // Cap defends the bounded-cache law; middlegame positions rarely recur, so
-                // the high-value opening entries are long since resident when the cap hits.
-                if (evalMemo is not null && evalMemo.Count < 3_000_000)
-                    evalMemo[node.Position.Id] = evals[ply];
+                evals[ply] = EvaluatePosition(
+                    node.Position.Id,
+                    cur.Board.ToFen(),
+                    eval,
+                    evalMemo,
+                    evalInflight,
+                    out bool newlyCached);
+                if (newlyCached)
+                    fresh.Add(new KeyValuePair<Hash128, int?>(node.Position.Id, evals[ply]));
             }
+
+            if (ply == n) break;
+            var mv = San.Resolve(cur.Board, m.LegalActions(cur), game.Moves[ply]);
+            if (mv is null) break;
+            cur = m.Apply(cur, mv.Value);
+            carried = ChessCompose.Position(cur.Board);
+        }
+
+        return new PreparedLine(game, composed, evals, fresh.ToArray());
+    }
+
+    /// <summary>
+    /// Cheap serial half of the lane: stage already-composed positions and deposit the
+    /// calculated testimony. No Stockfish process is touched here.
+    /// </summary>
+    internal static void DepositPrepared(SubstrateChangeBuilder b, PreparedLine prepared)
+    {
+        var game = prepared.Game;
+        var composed = prepared.Positions;
+        var evals = prepared.Evals;
+
+        for (int ply = 0; ply < composed.Length; ply++)
+        {
+            if (composed[ply] is not { } node) continue;
+            ChessGraph.EmitComposed(b, node, SourceId);
 
             // ctx = the LINE: the verdict is line-grain testimony (pure function of the
             // position reached along it), never per-playing provenance.
             if (evals[ply] is { } cp)
                 ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, game.LineId);
-
-            if (ply == n) break;
-            var mv = San.Resolve(cur.Board, m.LegalActions(cur), game.Moves[ply]);
-            if (mv is null) break; // unreplayable movetext — stop, no marker withheld: partial evals stand
-            cur = m.Apply(cur, mv.Value);
-            carried = ChessGraph.EmitComposed(b, cur.Board, SourceId);
         }
 
-        for (int ply = 0; ply < n; ply++)
+        int moveCount = Math.Min(game.Moves.Count, Math.Max(0, evals.Length - 1));
+        for (int ply = 0; ply < moveCount; ply++)
         {
-            // Mover's eval after their move is the negation of the next position's
-            // side-to-move eval; loss = before − (−after) = before + after.
             if (evals[ply] is not { } before || evals[ply + 1] is not { } after) continue;
+            if (composed[ply] is not { } from) continue;
             if (ClassifyLoss(before + after) is not { } token) continue;
             ChessGraph.AppendMoveQuality(
-                b, composed[ply]!.Position.Id, token, games: 1, QualityWeight,
+                b, from.Position.Id, token, games: 1, QualityWeight,
                 SourceId, game.LineId);
         }
 
         b.AddEntity(MarkerId(game.LineId, Version), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, SourceId);
-        // Metadata on the trunk, not rated testimony -- see ChessVocabulary
-        // .AnalysisVersionMetaTypeId. A substrate meta-type is not in relation_types.toml
-        // and therefore never folds, so this stops minting one unrateable consensus cell
-        // per analysed game.
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
             b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
                     BootstrapIntentBuilder.RelationTypeMetaTypeId, SourceId)
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     game.LineId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
                     SourceId, contextId: null, ChessVocabulary.Trust));
+    }
+
+    private static int? EvaluatePosition(
+        Hash128 positionId,
+        string fen,
+        IPositionEvaluator eval,
+        ConcurrentDictionary<Hash128, int?>? evalMemo,
+        ConcurrentDictionary<Hash128, Lazy<int?>>? evalInflight,
+        out bool newlyCached)
+    {
+        newlyCached = false;
+        if (evalMemo is not null && evalMemo.TryGetValue(positionId, out var cached))
+            return cached;
+
+        if (evalMemo is null || evalInflight is null)
+        {
+            int? value = eval.EvaluateCp(fen);
+            if (evalMemo is not null && evalMemo.TryAdd(positionId, value))
+                newlyCached = true;
+            return value;
+        }
+
+        // One Lazy owns one position search. Losing workers wait for that result and then
+        // continue with their own engine on the next novel position instead of duplicating
+        // the opening search across every process.
+        var candidate = new Lazy<int?>(
+            () => eval.EvaluateCp(fen),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        var shared = evalInflight.GetOrAdd(positionId, candidate);
+        try
+        {
+            int? value = shared.Value;
+            if (evalMemo.TryAdd(positionId, value))
+                newlyCached = true;
+            return value;
+        }
+        finally
+        {
+            if (ReferenceEquals(shared, candidate))
+                evalInflight.TryRemove(positionId, out _);
+        }
     }
 }
