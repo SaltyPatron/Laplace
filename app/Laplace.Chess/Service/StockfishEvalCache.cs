@@ -6,16 +6,13 @@ namespace Laplace.Chess.Service;
 /// <summary>
 /// Persistent form of the census eval memo — the spec-33 two-tier pattern applied to
 /// engine time: Postgres holds the system-of-record testimony; this file is a DERIVED,
-/// one-way, versioned cache of pure function values (position id → side-to-move cp at a
-/// fixed budget). It lives outside the database on purpose: a db-reset destroys the
-/// testimony, the reseed re-derives it, and this cache makes that re-derivation pay
-/// zero engine time for every position already searched. Header pins census version and
-/// exact search budget — different budget = different testimony = cold cache.
+/// one-way, versioned cache of successful pure-function values (position id → side-to-move
+/// cp at a fixed budget). A timeout/dead engine produces no cache record: absence is not an
+/// engine verdict and a replacement engine must be allowed to try again.
 ///
-/// The compact snapshot is accompanied by a fixed-record append journal. A completed
+/// The compact snapshot is accompanied by a fixed-record append journal. A successful
 /// Stockfish search is appended as soon as its line finishes, so canceling a long census
-/// cannot throw away tens of minutes of paid engine work merely because the next full
-/// snapshot threshold was not reached. Normal completion compacts the journal into the
+/// cannot throw away paid engine work. Normal completion compacts the journal into the
 /// snapshot; a torn journal tail is ignored record-by-record.
 /// </summary>
 public static class StockfishEvalCache
@@ -50,16 +47,14 @@ public static class StockfishEvalCache
         return memo;
     }
 
-    /// <summary>
-    /// Append only evaluations newly admitted to the run memo. Each record has fixed width,
-    /// so a process killed during the final write leaves every preceding record readable and
-    /// the incomplete tail is ignored on restart.
-    /// </summary>
     public static void Append(
         string path, int censusVersion, int depth, long nodes,
         IReadOnlyCollection<KeyValuePair<Hash128, int?>> entries)
     {
         if (entries.Count == 0) return;
+        var successful = entries.Where(static entry => entry.Value.HasValue).ToArray();
+        if (successful.Length == 0) return;
+
         try
         {
             lock (Gate(path))
@@ -80,14 +75,14 @@ public static class StockfishEvalCache
                 }
 
                 stream.Position = stream.Length;
-                foreach (var (id, cp) in entries)
+                foreach (var (id, cp) in successful)
                 {
                     rw.Write(id.ToBytes());
-                    rw.Write(cp.HasValue);
-                    rw.Write(cp ?? 0);
+                    rw.Write(true); // retained for v1 format compatibility
+                    rw.Write(cp!.Value);
                 }
                 rw.Flush();
-                stream.Flush(); // process-cancel durability; full fsync waits for compaction
+                stream.Flush();
             }
         }
         catch (Exception)
@@ -116,19 +111,19 @@ public static class StockfishEvalCache
                 using (var w = new BinaryWriter(stream))
                 {
                     WriteHeader(w, Magic, censusVersion, depth, nodes);
-                    var snapshot = memo.ToArray();
+                    var snapshot = memo.Where(static entry => entry.Value.HasValue).ToArray();
                     w.Write(snapshot.Length);
                     foreach (var (id, cp) in snapshot)
                     {
                         w.Write(id.ToBytes());
-                        w.Write(cp.HasValue);
-                        w.Write(cp ?? 0);
+                        w.Write(true);
+                        w.Write(cp!.Value);
                     }
                     w.Flush();
                     stream.Flush(flushToDisk: true);
                 }
 
-                File.Move(tmp, full, overwrite: true); // atomic on the same volume
+                File.Move(tmp, full, overwrite: true);
                 tmp = null;
                 TryDelete(JournalPath(full));
             }
@@ -162,7 +157,9 @@ public static class StockfishEvalCache
                 var id = Hash128.FromBytes(r.ReadBytes(16));
                 bool has = r.ReadBoolean();
                 int cp = r.ReadInt32();
-                memo[id] = has ? cp : null;
+                // Legacy v1 snapshots may contain has=false rows from transient engine
+                // failures. Drop them on read so they cannot suppress a lawful retry.
+                if (has) memo[id] = cp;
             }
         }
         catch (Exception)
@@ -187,7 +184,7 @@ public static class StockfishEvalCache
                 var id = Hash128.FromBytes(r.ReadBytes(16));
                 bool has = r.ReadBoolean();
                 int cp = r.ReadInt32();
-                memo[id] = has ? cp : null;
+                if (has) memo[id] = cp;
             }
         }
         catch (Exception)
