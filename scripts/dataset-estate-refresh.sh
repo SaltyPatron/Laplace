@@ -9,6 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SELF="$ROOT/scripts/dataset-estate-refresh.sh"
 SOURCES="${LAPLACE_DATA_REFRESH_SOURCES:-$ROOT/scripts/dataset-estate-refresh.sources.psv}"
+SOURCE_ESTATE="${LAPLACE_SOURCE_ESTATE:-$ROOT/docs/source-estate.tsv}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 STAGE_ROOT="${LAPLACE_DATA_REFRESH_ROOT:-$DATA_ROOT/.refresh-20260903}"
 JOB_ROOT="$STAGE_ROOT/.jobs"
@@ -33,6 +34,7 @@ Safe staging commands:
   status                      Show background job state and log paths.
   wait                        Wait for all started jobs; fail if any job failed or lost its exit receipt.
   verify [lane|all]           Re-verify every staged manifest artifact in the selected lane(s).
+  gate                        Fail unless every source-estate row has a final disposition.
   adopt-existing              Hash/inventory the existing refresh tree without changing it.
   disk                        Show active/staging sizes and free vault capacity.
 
@@ -44,6 +46,7 @@ Environment:
   LAPLACE_DATA_ROOT            active data root (default /vault/Data)
   LAPLACE_DATA_REFRESH_ROOT    staging root (default /vault/Data/.refresh-20260903)
   LAPLACE_DATA_REFRESH_SOURCES executable acquisition manifest override
+  LAPLACE_SOURCE_ESTATE        authoritative source-estate TSV override
   LAPLACE_SYZYGY6_WDL_BASE     mirror base for 6-man .rtbw files
   LAPLACE_SYZYGY6_DTZ_BASE     mirror base for 6-man .rtbz files
 
@@ -588,6 +591,34 @@ show_disk() {
     df -h "$DATA_ROOT"
 }
 
+source_estate_gate() {
+    [[ -f "$SOURCE_ESTATE" ]] || die "source-estate ledger not found: $SOURCE_ESTATE"
+    local header line=1 failures=0
+    IFS= read -r header < "$SOURCE_ESTATE"
+    [[ "$header" == $'family\tartifact_or_path\tinstalled_identity\ttarget_identity\tstate\tdisposition_or_next_action\tauthority\tissue' ]] \
+        || die "unexpected source-estate header: $SOURCE_ESTATE"
+
+    local family artifact installed target state action authority issue extra
+    while IFS=$'\t' read -r family artifact installed target state action authority issue extra; do
+        ((line+=1))
+        [[ -n "$family$artifact$state" ]] || continue
+        [[ -z "${extra:-}" ]] || die "$SOURCE_ESTATE:$line has more than 8 fields"
+        case "$state" in
+            admitted|equivalent-packaging|superseded|excluded-with-reason|unsupported-with-why-not|absent|historical)
+                ;;
+            *)
+                printf '%s:%d\t%s\t%s\t%s\t%s\n' \
+                    "$SOURCE_ESTATE" "$line" "$state" "$family" "$artifact" "$action" >&2
+                ((failures+=1))
+                ;;
+        esac
+    done < <(tail -n +2 "$SOURCE_ESTATE")
+
+    [[ "$failures" -eq 0 ]] \
+        || die "$failures source-estate rows still require a final disposition"
+    note "source-estate gate passed: every row has a final disposition"
+}
+
 cmd="${1:-help}"
 shift || true
 case "$cmd" in
@@ -621,6 +652,7 @@ case "$cmd" in
         for_rows "$lane" verify_row
         [[ "$VERIFY_FAILURES" -eq 0 ]] || die "one or more staged artifacts failed verification"
         ;;
+    gate) source_estate_gate ;;
     adopt-existing) adopt_existing ;;
     refresh-clean-repos) refresh_clean_repos ;;
     disk) show_disk ;;

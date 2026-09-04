@@ -7,6 +7,8 @@ public interface IDecomposerContext
 {
     string EcosystemPath { get; }
 
+    IReadOnlyList<IngestArtifact> SelectedArtifacts => Array.Empty<IngestArtifact>();
+
     ISubstrateWriter Writer { get; }
 
     ISubstrateReader Reader { get; }

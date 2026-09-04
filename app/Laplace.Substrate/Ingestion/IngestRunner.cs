@@ -147,8 +147,12 @@ public sealed class IngestRunner
             SourceName = decomposer.SourceName,
             LayerOrder = decomposer.LayerOrder,
         };
+        string ecosystemPath = ResolveEcosystemPath(decomposer, options);
+        IngestArtifactGraph? artifactGraph = LoadArtifactGraph(
+            ecosystemPath, options.RequireArtifactManifest);
         var ctx = new InternalContext(
-            EcosystemPath: ResolveEcosystemPath(decomposer, options),
+            EcosystemPath: ecosystemPath,
+            SelectedArtifacts: artifactGraph?.Selected ?? Array.Empty<IngestArtifact>(),
             // Initialization is part of the decomposer's write surface. Route it
             // through the same run counters so manifest/bootstrap rows cannot vanish
             // from source amplification and identity-admission reporting.
@@ -173,7 +177,7 @@ public sealed class IngestRunner
             decomposer.SourceName, ctx.EcosystemPath, pathIsDir || pathIsFile,
             pathIsDir ? "dir" : pathIsFile ? "file" : "missing");
 
-        var inventory = await ResolveInventoryAsync(decomposer, ctx, options, ct);
+        var inventory = await ResolveInventoryAsync(decomposer, ctx, artifactGraph, options, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
         // The file boundary is inside the static IngestBatchPipeline, which is called
         // directly by every decomposer and is handed no observability. The run brackets
@@ -1070,6 +1074,7 @@ public sealed class IngestRunner
     private static async Task<IngestInventory?> ResolveInventoryAsync(
         IDecomposer decomposer,
         IDecomposerContext ctx,
+        IngestArtifactGraph? artifactGraph,
         IngestRunOptions options,
         CancellationToken ct)
     {
@@ -1077,12 +1082,39 @@ public sealed class IngestRunner
         if (decomposer is IIngestInventoryProvider provider)
         {
             var inv = await provider.DescribeInputAsync(ctx, options.DecomposerOptions, ct);
-            if (inv is not null) return ApplyInputCap(inv, cap);
+            if (inv is not null)
+            {
+                if (artifactGraph is not null)
+                    artifactGraph.ValidateInventory(inv);
+                return ApplyInputCap(inv, cap);
+            }
         }
+        if (artifactGraph is not null)
+            return artifactGraph.ToFileInventory("records");
         if (cap > 0)
             return IngestInventory.Single(cap, "records");
         long? est = await decomposer.EstimateUnitCountAsync(ctx, ct);
         return est is long n ? IngestInventory.Single(n) : null;
+    }
+
+    private static IngestArtifactGraph? LoadArtifactGraph(
+        string ecosystemPath, bool required)
+    {
+        if (!Directory.Exists(ecosystemPath))
+        {
+            if (required)
+                throw new DirectoryNotFoundException(
+                    $"Required source estate directory does not exist: '{ecosystemPath}'.");
+            return null;
+        }
+        string manifestPath = Path.Combine(ecosystemPath, "MANIFEST.tsv");
+        if (File.Exists(manifestPath))
+            return IngestArtifactGraph.Load(ecosystemPath);
+        if (required)
+            throw new FileNotFoundException(
+                "Production source ingest requires a complete MANIFEST.tsv artifact graph.",
+                manifestPath);
+        return null;
     }
 
     private static int ValidateEntityAdmission(
@@ -1300,6 +1332,7 @@ public sealed class IngestRunner
 
     private sealed record InternalContext(
         string EcosystemPath,
+        IReadOnlyList<IngestArtifact> SelectedArtifacts,
         ISubstrateWriter Writer,
         ISubstrateReader Reader,
         ILogger Logger,

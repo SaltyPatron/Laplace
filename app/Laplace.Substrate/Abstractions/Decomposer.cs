@@ -251,7 +251,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
     /// A non-null stream selects the multi-file scheduling branch of the same driver.
     /// </summary>
     protected virtual IMultiFileRecordStream<TRecord>? CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options) => null;
+        IDecomposerContext context, DecomposerOptions options) => null;
 
     protected virtual IIngestRecordHandler<TRecord> CreateHandlerForFile(
         string fileLabel, DecomposerOptions options) => CreateHandler(options);
@@ -283,7 +283,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
         ContainmentReader = context.Reader;
         if (options.DryRun) yield break;
 
-        var multiFileStream = CreateMultiFileStream(context.EcosystemPath, options);
+        var multiFileStream = CreateMultiFileStream(context, options);
         if (multiFileStream is not null)
         {
             IngestBatchPipeline.PerFileResumePlan? resume =
@@ -382,9 +382,11 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
     /// each file opened via <see cref="ExtractFileAsync"/>.
     /// </summary>
     protected override IMultiFileRecordStream<TRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options)
+        IDecomposerContext context, DecomposerOptions options)
     {
-        var files = ListFiles(ecosystemPath, options);
+        IReadOnlyList<(string Path, string Label)> files = IngestInput.ResolveScheduledFiles(
+            context.SelectedArtifacts,
+            context.SelectedArtifacts.Count > 0 ? [] : ListFiles(context.EcosystemPath, options));
         var labels = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (_, label) in files)
         {
@@ -636,6 +638,8 @@ public abstract class DecomposerMultiPhase : IDecomposer
 {
     private long _runUnitsConsumed;
     private long _runMaxInputUnits;
+    private HashSet<string>? _runSelectedArtifactPaths;
+    private HashSet<string>? _runVisitedArtifactPaths;
 
     public abstract Hash128 SourceId { get; }
     public abstract string SourceName { get; }
@@ -666,12 +670,27 @@ public abstract class DecomposerMultiPhase : IDecomposer
         if (options.DryRun) yield break;
         _runUnitsConsumed = 0;
         _runMaxInputUnits = options.MaxInputUnits;
+        _runSelectedArtifactPaths = context.SelectedArtifacts
+            .Select(static artifact => Path.GetFullPath(artifact.Path))
+            .ToHashSet(StringComparer.Ordinal);
+        _runVisitedArtifactPaths = new HashSet<string>(StringComparer.Ordinal);
         await foreach (var change in RunIngestAsync(context, options, ct))
         {
             yield return change;
             _runUnitsConsumed += change.Metadata.InputUnitsConsumed;
             if (_runMaxInputUnits > 0 && _runUnitsConsumed >= _runMaxInputUnits)
                 yield break;
+        }
+        if (_runMaxInputUnits == 0 && _runSelectedArtifactPaths.Count > 0)
+        {
+            string[] omitted = _runSelectedArtifactPaths
+                .Except(_runVisitedArtifactPaths)
+                .OrderBy(static path => path, StringComparer.Ordinal)
+                .ToArray();
+            if (omitted.Length > 0)
+                throw new InvalidOperationException(
+                    $"{SourceName} completed without consuming selected manifest artifacts: "
+                    + string.Join(", ", omitted));
         }
     }
 
@@ -706,6 +725,7 @@ public abstract class DecomposerMultiPhase : IDecomposer
         string path,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        fileLabel = ClaimArtifact(context, path, fileLabel);
         var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
         long bytes = File.Exists(path) ? new FileInfo(path).Length : 0;
         observability.OnFileStarted(phase.SourceName, fileLabel, bytes);
@@ -722,6 +742,25 @@ public abstract class DecomposerMultiPhase : IDecomposer
             phase.SourceName, fileLabel, null,
             records, entities, physicalities, attestations);
         yield return IngestBatchPipeline.BuildPeriodBoundary(phase.SourceId, fileLabel);
+    }
+
+    protected string ClaimArtifact(
+        IDecomposerContext context, string path, string fallbackLabel)
+    {
+        if (_runSelectedArtifactPaths is not { Count: > 0 })
+            return fallbackLabel;
+
+        string fullPath = Path.GetFullPath(path);
+        if (!_runSelectedArtifactPaths.Contains(fullPath))
+            throw new InvalidOperationException(
+                $"{SourceName} attempted undeclared artifact '{fullPath}'.");
+        if (!_runVisitedArtifactPaths!.Add(fullPath))
+            throw new InvalidOperationException(
+                $"{SourceName} attempted to consume selected artifact more than once: '{fullPath}'.");
+        return context.SelectedArtifacts
+            .Single(artifact => string.Equals(
+                Path.GetFullPath(artifact.Path), fullPath, StringComparison.Ordinal))
+            .Id;
     }
 }
 

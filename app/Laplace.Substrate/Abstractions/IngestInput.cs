@@ -79,6 +79,15 @@ public sealed record IngestSourceLayout
 /// </summary>
 public static class IngestInput
 {
+    public static IReadOnlyList<(string Path, string Label)> ResolveScheduledFiles(
+        IReadOnlyList<IngestArtifact> selectedArtifacts,
+        IReadOnlyList<(string Path, string Label)> discoveredFiles) =>
+        selectedArtifacts.Count > 0
+            ? selectedArtifacts
+                .Select(static artifact => (artifact.Path, artifact.Id))
+                .ToArray()
+            : discoveredFiles;
+
     /// <param name="root">CLI path or default ecosystem path.</param>
     /// <param name="pattern">Glob for matching files, e.g. "*.conllu".</param>
     /// <param name="ecosystemSubdir">If <paramref name="root"/> is the ecosystem root,
