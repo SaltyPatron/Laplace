@@ -9,12 +9,10 @@ namespace Laplace.Chess.Service.Tests;
 [Trait("Tier", "fast")]
 public sealed class ChessStockfishEvalTests
 {
-    // Scholar's mate: 7 plies, ends in checkmate (terminal final position → no eval there).
     private const string Game =
         "[Event \"T\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Date \"2024.01.01\"]\n[Result \"1-0\"]\n\n"
         + "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0\n";
 
-    /// <summary>Returns scripted side-to-move cps in call order; records every FEN asked.</summary>
     private sealed class ScriptedEvaluator(params int?[] scores) : IPositionEvaluator
     {
         private int _i;
@@ -31,7 +29,7 @@ public sealed class ChessStockfishEvalTests
         public int? EvaluateCp(string fen)
         {
             calls.AddOrUpdate(fen, 1, static (_, count) => count + 1);
-            Thread.Sleep(10); // make same-position overlap deterministic enough to exercise single-flight
+            Thread.Sleep(10);
             return 10;
         }
     }
@@ -150,6 +148,23 @@ public sealed class ChessStockfishEvalTests
     }
 
     [Fact]
+    public void FailedEvaluations_AreAbsenceAndDoNotPoisonMemo()
+    {
+        var witnessed = ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(Game)!);
+        var memo = new ConcurrentDictionary<Hash128, int?>();
+        var first = new ScriptedEvaluator(new int?[] { null, null, null, null, null, null, null });
+        var b = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/null-memo");
+        ChessStockfishEval.DeriveGame(b, witnessed, first, memo);
+        Assert.Empty(memo);
+
+        var retry = new ScriptedEvaluator(Enumerable.Repeat((int?)17, 7).ToArray());
+        var b2 = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/null-retry");
+        ChessStockfishEval.DeriveGame(b2, witnessed, retry, memo);
+        Assert.Equal(7, retry.Fens.Count);
+        Assert.Equal(7, memo.Count);
+    }
+
+    [Fact]
     public async Task PrepareGame_ParallelWorkersSingleFlightSharedPositions()
     {
         var witnessed = ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(Game)!);
@@ -163,7 +178,7 @@ public sealed class ChessStockfishEvalTests
             witnessed, new CountingEvaluator(calls), memo, inflight));
 
         var prepared = await Task.WhenAll(first, second);
-        Assert.All(prepared, Assert.NotNull);
+        Assert.All(prepared, item => Assert.NotNull(item));
         Assert.Equal(7, calls.Count);
         Assert.All(calls.Values, count => Assert.Equal(1, count));
         Assert.Equal(7, memo.Count);
@@ -191,19 +206,22 @@ public sealed class ChessStockfishEvalTests
     public void EvalCache_RoundTrips_AndRejectsBudgetMismatch()
     {
         var path = Path.Combine(Path.GetTempPath(), $"lpsf-test-{Guid.NewGuid():N}.bin");
+        var p1 = Hash128.OfCanonical("p1");
+        var p2 = Hash128.OfCanonical("p2");
+        var failed = Hash128.OfCanonical("failed");
         try
         {
             var memo = new ConcurrentDictionary<Hash128, int?>();
-            memo[Hash128.OfCanonical("p1")] = 42;
-            memo[Hash128.OfCanonical("p2")] = -310;
-            memo[Hash128.OfCanonical("p3")] = null;
+            memo[p1] = 42;
+            memo[p2] = -310;
+            memo[failed] = null; // legacy/transient absence is compacted away
             StockfishEvalCache.Save(path, censusVersion: 1, depth: 10, nodes: 0, memo);
 
             var back = StockfishEvalCache.Load(path, 1, 10, 0);
-            Assert.Equal(3, back.Count);
-            Assert.Equal(42, back[Hash128.OfCanonical("p1")]);
-            Assert.Equal(-310, back[Hash128.OfCanonical("p2")]);
-            Assert.Null(back[Hash128.OfCanonical("p3")]);
+            Assert.Equal(2, back.Count);
+            Assert.Equal(42, back[p1]);
+            Assert.Equal(-310, back[p2]);
+            Assert.False(back.ContainsKey(failed));
 
             Assert.Empty(StockfishEvalCache.Load(path, 1, 12, 0));
             Assert.Empty(StockfishEvalCache.Load(path, 1, 10, 80_000));
@@ -223,12 +241,14 @@ public sealed class ChessStockfishEvalTests
         string journal = path + ".journal";
         var p1 = Hash128.OfCanonical("journal/p1");
         var p2 = Hash128.OfCanonical("journal/p2");
+        var failed = Hash128.OfCanonical("journal/failed");
         try
         {
             StockfishEvalCache.Append(path, 1, 10, 0,
             [
                 new KeyValuePair<Hash128, int?>(p1, 88),
-                new KeyValuePair<Hash128, int?>(p2, null),
+                new KeyValuePair<Hash128, int?>(p2, -7),
+                new KeyValuePair<Hash128, int?>(failed, null),
             ]);
 
             Assert.False(File.Exists(path));
@@ -236,11 +256,10 @@ public sealed class ChessStockfishEvalTests
             var recovered = StockfishEvalCache.Load(path, 1, 10, 0);
             Assert.Equal(2, recovered.Count);
             Assert.Equal(88, recovered[p1]);
-            Assert.Null(recovered[p2]);
+            Assert.Equal(-7, recovered[p2]);
+            Assert.False(recovered.ContainsKey(failed));
             Assert.Empty(StockfishEvalCache.Load(path, 1, 11, 0));
 
-            // Simulate a kill in the middle of the next fixed-width record. Complete records
-            // already flushed before the torn tail remain valid.
             using (var append = new FileStream(journal, FileMode.Append, FileAccess.Write, FileShare.Read))
                 append.Write([1, 2, 3, 4, 5]);
             var afterTornTail = StockfishEvalCache.Load(path, 1, 10, 0);
