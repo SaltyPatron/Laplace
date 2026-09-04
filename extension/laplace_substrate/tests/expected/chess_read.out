@@ -583,6 +583,20 @@ BEGIN
             n, ra, rdv, mu;
     END IF;
 
+    SELECT count(*) INTO n
+      FROM chess.players_by_initial(ARRAY['T'], 10, 0, 'strength', 'desc') p
+     WHERE p.player_id = profile_only;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL: profile-only player was hidden from initial browse';
+    END IF;
+
+    SELECT p.games, p.rating, p.rd, p.eff_mu INTO n, ra, rdv, mu
+      FROM chess.ranked(10) p WHERE p.player_id = profile_only;
+    IF n <> 0 OR ra <> 1500.0 OR rdv <> 350.0 OR mu <> 800.0 THEN
+        RAISE EXCEPTION 'FAIL: profile-only player was hidden from master list or assigned invented standing: %/%/%/%',
+            n, ra, rdv, mu;
+    END IF;
+
     IF to_regprocedure('chess.game_plies(bytea)') IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: retired per-ply SQL board projection is still installed';
     END IF;
