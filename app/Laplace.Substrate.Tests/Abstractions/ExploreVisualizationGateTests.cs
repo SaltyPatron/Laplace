@@ -61,7 +61,7 @@ public class ExploreVisualizationGateTests
         Assert.DoesNotContain("placementBallPos", tab);
         Assert.DoesNotContain("packedDisplayPos", tab);
         Assert.DoesNotContain("trajectoryPoints={placementTrajectory", tab);
-        Assert.Contains(".map((n) => project(n, projection, xmAngle))", canvas);
+        Assert.Contains(".map((n) => project(n, projection, xmAngle, zmAngle))", canvas);
         Assert.Contains("`${projection}:${xmDegrees}", canvas);
     }
 }

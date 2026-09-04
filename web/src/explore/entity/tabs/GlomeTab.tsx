@@ -4,7 +4,6 @@ import { GatePrompt } from '../../components/GatePrompt';
 import {
   GlomeCanvas,
   ordinalColor,
-  packedDisplayPos,
   physicalitiesToNodes,
   type GlomeNode,
 } from '../../glome/GlomeCanvas';
