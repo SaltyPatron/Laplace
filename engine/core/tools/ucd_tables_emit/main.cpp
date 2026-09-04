@@ -17,7 +17,6 @@
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/super_fibonacci.h"
 #include "laplace/core/perfcache_format.h"
-#include "laplace/core/ucd_property_values.h"
 #include "laplace/core/unicode_seed.h"
 
 namespace fs = std::filesystem;
@@ -82,59 +81,17 @@ static Cli parse_cli(int argc, char** argv) {
     return c;
 }
 
-static uint8_t map_gb(const char* s) {
-    static const std::unordered_map<std::string, uint8_t> m = {
-        {"XX",LAPLACE_GB_OTHER},{"CR",LAPLACE_GB_CR},{"LF",LAPLACE_GB_LF},
-        {"CN",LAPLACE_GB_CONTROL},{"EX",LAPLACE_GB_EXTEND},{"ZWJ",LAPLACE_GB_ZWJ},
-        {"RI",LAPLACE_GB_REGIONAL_INDICATOR},{"PP",LAPLACE_GB_PREPEND},
-        {"SM",LAPLACE_GB_SPACINGMARK},{"L",LAPLACE_GB_L},{"V",LAPLACE_GB_V},
-        {"T",LAPLACE_GB_T},{"LV",LAPLACE_GB_LV},{"LVT",LAPLACE_GB_LVT},
-    };
-    auto it = m.find(s); return it == m.end() ? (uint8_t)LAPLACE_GB_OTHER : it->second;
-}
-static uint8_t map_wb(const char* s) {
-    static const std::unordered_map<std::string, uint8_t> m = {
-        {"XX",LAPLACE_WB_OTHER},{"CR",LAPLACE_WB_CR},{"LF",LAPLACE_WB_LF},
-        {"NL",LAPLACE_WB_NEWLINE},{"Extend",LAPLACE_WB_EXTEND},{"ZWJ",LAPLACE_WB_ZWJ},
-        {"RI",LAPLACE_WB_REGIONAL_INDICATOR},{"FO",LAPLACE_WB_FORMAT},
-        {"KA",LAPLACE_WB_KATAKANA},{"HL",LAPLACE_WB_HEBREW_LETTER},{"LE",LAPLACE_WB_ALETTER},
-        {"SQ",LAPLACE_WB_SINGLE_QUOTE},{"DQ",LAPLACE_WB_DOUBLE_QUOTE},
-        {"MB",LAPLACE_WB_MIDNUMLET},{"ML",LAPLACE_WB_MIDLETTER},{"MN",LAPLACE_WB_MIDNUM},
-        {"NU",LAPLACE_WB_NUMERIC},{"EX",LAPLACE_WB_EXTENDNUMLET},{"WSegSpace",LAPLACE_WB_WSEGSPACE},
-    };
-    auto it = m.find(s); return it == m.end() ? (uint8_t)LAPLACE_WB_OTHER : it->second;
-}
-static uint8_t map_sb(const char* s) {
-    static const std::unordered_map<std::string, uint8_t> m = {
-        {"XX",LAPLACE_SB_OTHER},{"CR",LAPLACE_SB_CR},{"LF",LAPLACE_SB_LF},
-        {"EX",LAPLACE_SB_EXTEND},{"SE",LAPLACE_SB_SEP},{"FO",LAPLACE_SB_FORMAT},
-        {"SP",LAPLACE_SB_SP},{"LO",LAPLACE_SB_LOWER},{"UP",LAPLACE_SB_UPPER},
-        {"LE",LAPLACE_SB_OLETTER},{"NU",LAPLACE_SB_NUMERIC},{"AT",LAPLACE_SB_ATERM},
-        {"SC",LAPLACE_SB_SCONTINUE},{"ST",LAPLACE_SB_STERM},{"CL",LAPLACE_SB_CLOSE},
-    };
-    auto it = m.find(s); return it == m.end() ? (uint8_t)LAPLACE_SB_OTHER : it->second;
-}
-static uint8_t map_incb(const char* s) {
-    if (std::strcmp(s, "Consonant") == 0) return LAPLACE_INCB_CONSONANT;
-    if (std::strcmp(s, "Linker") == 0)    return LAPLACE_INCB_LINKER;
-    if (std::strcmp(s, "Extend") == 0)    return LAPLACE_INCB_EXTEND;
-    return LAPLACE_INCB_NONE;
-}
-
-struct UcdData {
-    std::vector<uint8_t> gb, wb, sb, incb, ccc;
-    std::vector<uint8_t> ext_pict;
+/*
+ * unicode_seed.cpp is the single authority for all UCD property -> packed T0
+ * mappings. This emitter performs a second UCDXML pass only for the canonical
+ * decomposition/composition tables that are not part of the fixed-size record.
+ * Keeping GCB/WB/SB/InCB/CCC mappings here as well was an independent copy of
+ * foundational semantics and allowed the two generated views to drift.
+ */
+struct UcdCompositionData {
     std::unordered_map<uint32_t, std::vector<uint32_t>> decomp;
     std::vector<uint8_t> comp_ex;
-    UcdData() {
-        gb.assign(CP_FULL, LAPLACE_GB_OTHER);
-        wb.assign(CP_FULL, LAPLACE_WB_OTHER);
-        sb.assign(CP_FULL, LAPLACE_SB_OTHER);
-        incb.assign(CP_FULL, LAPLACE_INCB_NONE);
-        ccc.assign(CP_FULL, 0);
-        ext_pict.assign(CP_FULL, 0);
-        comp_ex.assign(CP_FULL, 0);
-    }
+    UcdCompositionData() { comp_ex.assign(CP_FULL, 0); }
 };
 
 static const char* attr(const char** a, const char* n) {
@@ -143,57 +100,50 @@ static const char* attr(const char** a, const char* n) {
     return nullptr;
 }
 
-struct SaxCtx { UcdData* d; bool in_rep = false; };
+struct SaxCtx { UcdCompositionData* d; bool in_rep = false; };
 
 extern "C" void on_start(void* u, const char* name, const char** a) {
     auto* ctx = (SaxCtx*)u;
-    if (std::strcmp((const char*)name, "repertoire") == 0) { ctx->in_rep = true; return; }
+    if (std::strcmp(name, "repertoire") == 0) { ctx->in_rep = true; return; }
     if (!ctx->in_rep) return;
-    const char* nm = (const char*)name;
-    if (std::strcmp(nm,"char") && std::strcmp(nm,"reserved")
-     && std::strcmp(nm,"noncharacter") && std::strcmp(nm,"surrogate")) return;
+    if (std::strcmp(name,"char") && std::strcmp(name,"reserved")
+     && std::strcmp(name,"noncharacter") && std::strcmp(name,"surrogate")) return;
 
     uint32_t first, last;
     auto cp = attr(a, "cp");
-    if (cp) { first = last = (uint32_t)std::stoul((const char*)cp, nullptr, 16); }
+    if (cp) { first = last = (uint32_t)std::stoul(cp, nullptr, 16); }
     else {
         auto f = attr(a, "first-cp"); auto l = attr(a, "last-cp");
         if (!f || !l) return;
-        first = (uint32_t)std::stoul((const char*)f, nullptr, 16);
-        last  = (uint32_t)std::stoul((const char*)l, nullptr, 16);
+        first = (uint32_t)std::stoul(f, nullptr, 16);
+        last  = (uint32_t)std::stoul(l, nullptr, 16);
     }
     if (last >= CP_FULL) return;
 
-    UcdData* d = ctx->d;
-    auto gcb = attr(a,"GCB"); auto wbv = attr(a,"WB"); auto sbv = attr(a,"SB");
-    auto inc = attr(a,"InCB"); auto cccv = attr(a,"ccc");
-    auto ep = attr(a,"ExtPict"); auto dt = attr(a,"dt"); auto dm = attr(a,"dm");
+    auto dt = attr(a,"dt");
+    auto dm = attr(a,"dm");
     auto cex = attr(a,"Comp_Ex");
+    const uint8_t cxv = (cex && std::strcmp(cex,"Y") == 0) ? 1u : 0u;
+    for (uint32_t c = first; c <= last; ++c) ctx->d->comp_ex[c] = cxv;
 
-    uint8_t gbid = gcb ? map_gb((const char*)gcb) : LAPLACE_GB_OTHER;
-    if (ep && std::strcmp((const char*)ep,"Y")==0) gbid = LAPLACE_GB_EXTENDED_PICTOGRAPHIC;
-    uint8_t wbid = wbv ? map_wb((const char*)wbv) : LAPLACE_WB_OTHER;
-    uint8_t sbid = sbv ? map_sb((const char*)sbv) : LAPLACE_SB_OTHER;
-    uint8_t inid = inc ? map_incb((const char*)inc) : LAPLACE_INCB_NONE;
-    uint8_t ccv  = cccv ? (uint8_t)std::stoul((const char*)cccv, nullptr, 10) : 0;
-    uint8_t epv  = (ep && std::strcmp((const char*)ep,"Y")==0) ? 1 : 0;
-    uint8_t cxv  = (cex && std::strcmp((const char*)cex,"Y")==0) ? 1 : 0;
-
-    for (uint32_t c = first; c <= last; ++c) {
-        d->gb[c]=gbid; d->wb[c]=wbid; d->sb[c]=sbid; d->incb[c]=inid;
-        d->ccc[c]=ccv; d->ext_pict[c]=epv; d->comp_ex[c]=cxv;
-    }
-    if (first == last && dt && dm && std::strcmp((const char*)dt,"can")==0
-        && std::strcmp((const char*)dm,"#")!=0) {
+    if (first == last && dt && dm && std::strcmp(dt,"can") == 0
+        && std::strcmp(dm,"#") != 0) {
         std::vector<uint32_t> seq;
-        const char* p = (const char*)dm; char* e;
-        while (*p) { uint32_t v=(uint32_t)std::strtoul(p,&e,16); if(e==p)break; seq.push_back(v); p=e; while(*p==' ')++p; }
-        if (!seq.empty()) d->decomp[first] = seq;
+        const char* p = dm; char* e;
+        while (*p) {
+            uint32_t v = (uint32_t)std::strtoul(p, &e, 16);
+            if (e == p) break;
+            seq.push_back(v);
+            p = e;
+            while (*p == ' ') ++p;
+        }
+        if (!seq.empty()) ctx->d->decomp[first] = std::move(seq);
     }
 }
+
 extern "C" void on_end(void* u, const char* name) {
     auto* ctx = (SaxCtx*)u;
-    if (std::strcmp((const char*)name,"repertoire")==0) ctx->in_rep = false;
+    if (std::strcmp(name,"repertoire") == 0) ctx->in_rep = false;
 }
 
 static void put_u32(std::vector<uint8_t>& b, uint32_t v) { for(int i=0;i<4;++i) b.push_back((uint8_t)(v>>(i*8))); }
@@ -201,7 +151,6 @@ static void put_u64(std::vector<uint8_t>& b, uint64_t v) { for(int i=0;i<8;++i) 
 static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
     const uint8_t* p = (const uint8_t*)&h; for (int i=0;i<16;++i) b.push_back(p[i]);
 }
-
 
 // Generator identity for the source-hash gate. This USED to be a hand-edited
 // string with a comment asking the author to "bump when the emit LOGIC changes",
@@ -260,10 +209,6 @@ static void compute_source_hash(const std::vector<uint8_t>& xml,
 int main(int argc, char** argv) {
     Cli cli = parse_cli(argc, argv);
 
-    // --- source-hash gate: read raw source bytes, hash, and no-op if the existing
-    // output already carries a matching source hash in its header. Reading 66 MiB to
-    // hash is ~sub-second; the crawl it guards is minutes. On a miss the compute below
-    // re-reads the XML — negligible next to the crawl it is about to do. ---
     std::vector<uint8_t> xml_bytes, ducet_bytes;
     if (!read_file_bytes(cli.ucdxml, xml_bytes)) {
         std::fprintf(stderr, "cannot open %s\n", cli.ucdxml.string().c_str());
@@ -293,7 +238,8 @@ int main(int argc, char** argv) {
     }
 
     // Full-universe compute so shared codepoints keep identical ids/coords across scopes;
-    // the blob stores only the dense prefix [0, scope_count).
+    // the blob stores only the dense prefix [0, scope_count). unicode_seed is also the
+    // sole property mapper for every packed T0 property bit.
     std::vector<laplace_perfcache_record_t> rec_array(CP_FULL);
     int rc = laplace_unicode_seed_compute(cli.ucdxml.string().c_str(),
                                           cli.ducet.string().c_str(),
@@ -306,11 +252,11 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> records;
     records.resize(sizeof(laplace_perfcache_record_t) * scope_count);
     std::memcpy(records.data(), rec_array.data(), records.size());
-    std::vector<laplace_perfcache_record_t>().swap(rec_array);
 
-    UcdData d;
+    UcdCompositionData d;
     SaxCtx ctx{&d, false};
-    // Reuse the bytes already read for the source-hash gate instead of a third read.
+    // The second parse recovers only canonical decomposition/composition metadata.
+    // It deliberately does not interpret UAX#29/CCC/White_Space properties.
     std::vector<uint8_t> doc = std::move(xml_bytes);
     int xml_rc = laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx);
     if (xml_rc != 0) {
@@ -345,7 +291,11 @@ int main(int argc, char** argv) {
         for (uint32_t c : dd.second) { put_u32(decomp_data, c); ++data_idx; }
     }
 
-    auto ccc_of = [&](uint32_t cp){ return cp < CP_FULL ? d.ccc[cp] : 0; };
+    // CCC comes from the already-authoritative packed records generated by
+    // unicode_seed, so composition selection cannot drift from the runtime table.
+    auto ccc_of = [&](uint32_t cp) -> uint8_t {
+        return cp < CP_FULL ? laplace_pc_ccc(rec_array[cp].flags) : 0u;
+    };
     std::vector<std::array<uint32_t,3>> comps;
     for (auto& kv : d.decomp) {
         uint32_t cp = kv.first; const auto& seq = kv.second;
@@ -361,7 +311,12 @@ int main(int argc, char** argv) {
         return a[0]!=b[0] ? a[0]<b[0] : a[1]<b[1];
     });
     std::vector<uint8_t> compose_recs;
-    for (auto& c : comps) { put_u32(compose_recs, c[0]); put_u32(compose_recs, c[1]); put_u32(compose_recs, c[2]); }
+    for (auto& c : comps) {
+        put_u32(compose_recs, c[0]);
+        put_u32(compose_recs, c[1]);
+        put_u32(compose_recs, c[2]);
+    }
+    std::vector<laplace_perfcache_record_t>().swap(rec_array);
 
     const uint64_t HDR = 128;
     uint64_t off_records   = HDR;
@@ -384,7 +339,7 @@ int main(int argc, char** argv) {
     put_u64(blob, off_decomp_d);
     put_u64(blob, comps.size());
     put_u64(blob, off_compose_r);
-    put_h128(blob, source_hash);   // header.ucd_hash = source-hash gate key
+    put_h128(blob, source_hash);
     for (int i=0;i<16;++i) blob.push_back(0);
     blob.insert(blob.end(), records.begin(), records.end());
     blob.insert(blob.end(), decomp_recs.begin(), decomp_recs.end());
@@ -393,11 +348,6 @@ int main(int argc, char** argv) {
     hash128_t crc; hash128_blake3(blob.data(), blob.size(), &crc);
     put_h128(blob, crc);
 
-    /* Write-if-changed: the runtime mmaps this blob and Windows refuses to
-     * truncate a user-mapped file, so a regeneration that produced identical
-     * bytes (the normal, deterministic case) must not fail the build under a
-     * live ingest. A CHANGED blob still writes — and correctly fails while
-     * anything has the old one mapped. */
     {
         std::ifstream prev(cli.output, std::ios::binary);
         if (prev) {
