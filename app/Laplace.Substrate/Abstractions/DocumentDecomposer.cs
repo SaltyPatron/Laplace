@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Abstractions;
 
@@ -14,7 +15,7 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     public override string SourceName => DocumentSource.SourceName;
     public override int LayerOrder => 2;
     public override Hash128 TrustClassId => DocumentSource.TrustClass;
-    protected override double SourceTrust => SourceTrust.StructuredCorpus;
+    protected override double SourceTrust => TC.StructuredCorpus;
 
     public override bool PerFileCompletion => true;
 
