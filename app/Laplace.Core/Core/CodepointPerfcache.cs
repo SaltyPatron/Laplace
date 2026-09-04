@@ -21,6 +21,7 @@ public static unsafe class CodepointPerfcache
                     -2 => "bad magic / unsupported format version",
                     -3 => "record count / size mismatch",
                     -4 => "body CRC mismatch (corrupt blob)",
+                    -5 => "UCD version mismatch (stale or wrong Unicode authority)",
                     _ => "unknown error",
                 };
                 throw new InvalidOperationException(

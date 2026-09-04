@@ -8,6 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Keep the runtime load boundary pinned to the same Unicode release that owns
+ * the shipped T0 artifact. The generator already writes this exact release into
+ * laplace_perfcache_header_t::ucd_version; accepting a different header would
+ * silently change segmentation and therefore content identity.
+ *
+ * This constant deliberately mirrors engine/CMakeLists.txt's current stable
+ * LAPLACE_UNICODE_VERSION. A follow-up can generate this definition from CMake;
+ * the important runtime invariant is fail-closed version checking now.
+ */
+#define LAPLACE_EXPECTED_UCD_VERSION "17.0.0"
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -103,6 +115,13 @@ int codepoint_table_is_loaded(void) {
     return g_pc.records != NULL;
 }
 
+static int pc_version_matches(const char actual[8], const char* expected) {
+    const size_t expected_len = strlen(expected);
+    if (expected_len >= 8) return 0;
+    return memcmp(actual, expected, expected_len) == 0
+        && actual[expected_len] == '\0';
+}
+
 int codepoint_table_load_perfcache(const char* path) {
     if (path == NULL) return -1;
 
@@ -114,6 +133,9 @@ int codepoint_table_load_perfcache(const char* path) {
 
     if (h->magic != LAPLACE_PERFCACHE_MAGIC || h->format_version != LAPLACE_PERFCACHE_VERSION) {
         pc_unmap(base, len); return -2;
+    }
+    if (!pc_version_matches(h->ucd_version, LAPLACE_EXPECTED_UCD_VERSION)) {
+        pc_unmap(base, len); return -5;
     }
     /* Scoped blobs are dense prefixes: ascii=0x80, bmp=0x10000, full=0x110000.
      * Lookup already returns NULL for cp >= record_count (out-of-scope). */
@@ -268,11 +290,6 @@ int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp) {
     return -1;
 }
 
-
-
-
-
-
 int laplace_codepoint_is_whitespace(uint32_t cp) {
     switch (codepoint_table_wb(cp)) {
         case LAPLACE_WB_CR:
@@ -285,7 +302,6 @@ int laplace_codepoint_is_whitespace(uint32_t cp) {
     }
     return cp == 0x0009u || cp == 0x00A0u || cp == 0x2007u || cp == 0x202Fu;
 }
-
 
 int laplace_text_is_all_whitespace(const uint8_t* utf8, size_t len) {
     if (utf8 == NULL || len == 0) return 0;
