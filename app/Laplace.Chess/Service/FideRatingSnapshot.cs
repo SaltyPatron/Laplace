@@ -23,6 +23,7 @@ internal static class FideRatingSnapshot
         string SourceUrl,
         DateTimeOffset FetchedAt,
         string ArchiveSha256,
+        string PlayersSha256,
         FideRatingList.Player[] Players);
 
     internal sealed record Loaded(
@@ -61,24 +62,7 @@ internal static class FideRatingSnapshot
         string path,
         CancellationToken ct)
     {
-        string checksumPath = ChecksumPath(path);
-        if (!File.Exists(path) || !File.Exists(checksumPath))
-            return null;
-
-        string expected = (await File.ReadAllTextAsync(checksumPath, ct).ConfigureAwait(false)).Trim();
-        if (expected.Length != 64 || !expected.All(Uri.IsHexDigit))
-            return null;
-
-        string actual;
-        await using (var raw = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
-        {
-            actual = Convert.ToHexString(
-                await SHA256.HashDataAsync(raw, ct).ConfigureAwait(false));
-        }
-
-        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+        if (!File.Exists(path))
             return null;
 
         Envelope? envelope;
@@ -103,13 +87,17 @@ internal static class FideRatingSnapshot
         if (envelope is null
             || envelope.Version != SnapshotVersion
             || !envelope.SourceUrl.Equals(FideRatingList.XmlArchiveUrl, StringComparison.Ordinal)
-            || envelope.ArchiveSha256.Length != 64
-            || !envelope.ArchiveSha256.All(Uri.IsHexDigit)
+            || !ValidSha256(envelope.ArchiveSha256)
+            || !ValidSha256(envelope.PlayersSha256)
             || envelope.Players.Length == 0
             || envelope.Players.Any(static p =>
                 p.FideId.Length is < 4 or > 12
                 || !p.FideId.All(char.IsDigit)
                 || string.IsNullOrWhiteSpace(p.Name)))
+            return null;
+
+        string actualPlayersSha = PlayerPayloadSha256(envelope.Players);
+        if (!actualPlayersSha.Equals(envelope.PlayersSha256, StringComparison.OrdinalIgnoreCase))
             return null;
 
         return new Loaded(envelope.Players, envelope.FetchedAt, envelope.ArchiveSha256);
@@ -124,7 +112,7 @@ internal static class FideRatingSnapshot
     {
         if (players.Length == 0)
             throw new ArgumentException("FIDE snapshot cannot contain zero players.", nameof(players));
-        if (archiveSha256.Length != 64 || !archiveSha256.All(Uri.IsHexDigit))
+        if (!ValidSha256(archiveSha256))
             throw new ArgumentException("FIDE archive SHA-256 must be 64 hex characters.", nameof(archiveSha256));
 
         string fullPath = Path.GetFullPath(path);
@@ -132,11 +120,7 @@ internal static class FideRatingSnapshot
             ?? throw new InvalidOperationException("FIDE snapshot path has no parent directory.");
         Directory.CreateDirectory(directory);
 
-        string suffix = $".{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
-        string tempPath = fullPath + suffix;
-        string checksumPath = ChecksumPath(fullPath);
-        string checksumTempPath = checksumPath + suffix;
-
+        string tempPath = fullPath + $".{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
         try
         {
             var envelope = new Envelope(
@@ -144,6 +128,7 @@ internal static class FideRatingSnapshot
                 FideRatingList.XmlArchiveUrl,
                 fetchedAt,
                 archiveSha256.ToUpperInvariant(),
+                PlayerPayloadSha256(players),
                 players);
 
             await using (var file = new FileStream(
@@ -162,32 +147,22 @@ internal static class FideRatingSnapshot
                 file.Flush(flushToDisk: true);
             }
 
-            string checksum;
-            await using (var raw = new FileStream(
-                tempPath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
-            {
-                checksum = Convert.ToHexString(
-                    await SHA256.HashDataAsync(raw, ct).ConfigureAwait(false));
-            }
-
-            await File.WriteAllTextAsync(checksumTempPath, checksum + Environment.NewLine, ct)
-                .ConfigureAwait(false);
-
-            // Both files are complete before either active name changes. If the process is
-            // killed between the two renames, checksum mismatch fails closed and the next
-            // refresh rebuilds; no partial gzip is ever activated.
+            // A single atomic replacement owns activation. The active file contains both
+            // provenance and its projected-player payload digest, so there is no two-file
+            // rename window that can destroy the last known-good generation.
             File.Move(tempPath, fullPath, overwrite: true);
-            File.Move(checksumTempPath, checksumPath, overwrite: true);
         }
         finally
         {
             TryDelete(tempPath);
-            TryDelete(checksumTempPath);
         }
     }
 
-    private static string ChecksumPath(string path) => path + ".sha256";
+    private static string PlayerPayloadSha256(FideRatingList.Player[] players)
+        => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(players)));
+
+    private static bool ValidSha256(string value)
+        => value.Length == 64 && value.All(Uri.IsHexDigit);
 
     private static void TryDelete(string path)
     {
