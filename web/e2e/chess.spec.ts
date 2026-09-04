@@ -37,9 +37,10 @@ test.describe('chess UI', () => {
 
     await page.goto('/lab/gauntlet');
     const startButton = page.getByRole('button', { name: 'Start gauntlet', exact: true });
-    await expect(startButton).toBeDisabled();
-    await page.getByLabel('Operator token', { exact: true }).fill('ui-test-token');
+    // Local/header-mode Lab does not require a hidden operator secret. Supplying one is
+    // still supported for a locked/key-mode deployment and is forwarded when present.
     await expect(startButton).toBeEnabled();
+    await page.getByLabel('Operator token', { exact: true }).fill('ui-test-token');
 
     const elo = page.getByRole('spinbutton', { name: 'Stockfish Elo cap' });
     await expect(elo).toHaveValue('2000');
