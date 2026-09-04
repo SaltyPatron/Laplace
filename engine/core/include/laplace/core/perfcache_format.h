@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define LAPLACE_PERFCACHE_MAGIC 0x4652504Cu
-#define LAPLACE_PERFCACHE_VERSION 2u
+#define LAPLACE_PERFCACHE_VERSION 3u
 #define LAPLACE_PERFCACHE_RECORD_COUNT 1114112u
 
 typedef struct {
@@ -24,30 +24,37 @@ typedef struct {
     uint32_t     _pad;
 } laplace_perfcache_record_t;
 
-#define LAPLACE_PC_GB_SHIFT   0u
-#define LAPLACE_PC_GB_MASK    0x0000000Fu
-#define LAPLACE_PC_WB_SHIFT   4u
-#define LAPLACE_PC_WB_MASK    0x000001F0u
-#define LAPLACE_PC_SB_SHIFT   9u
-#define LAPLACE_PC_SB_MASK    0x00001E00u
-#define LAPLACE_PC_INCB_SHIFT 13u
-#define LAPLACE_PC_INCB_MASK  0x00006000u
-#define LAPLACE_PC_CCC_SHIFT  15u
-#define LAPLACE_PC_CCC_MASK   0x007F8000u
+#define LAPLACE_PC_GB_SHIFT       0u
+#define LAPLACE_PC_GB_MASK        0x0000000Fu
+#define LAPLACE_PC_WB_SHIFT       4u
+#define LAPLACE_PC_WB_MASK        0x000001F0u
+#define LAPLACE_PC_SB_SHIFT       9u
+#define LAPLACE_PC_SB_MASK        0x00001E00u
+#define LAPLACE_PC_INCB_SHIFT     13u
+#define LAPLACE_PC_INCB_MASK      0x00006000u
+#define LAPLACE_PC_CCC_SHIFT      15u
+#define LAPLACE_PC_CCC_MASK       0x007F8000u
+#define LAPLACE_PC_WHITESPACE_SHIFT 23u
+#define LAPLACE_PC_WHITESPACE_MASK  0x00800000u
 
 static inline uint32_t laplace_pc_pack_flags(uint8_t gb, uint8_t wb, uint8_t sb,
-                                             uint8_t incb, uint8_t ccc) {
-    return ((uint32_t)gb   << LAPLACE_PC_GB_SHIFT)
-         | ((uint32_t)wb   << LAPLACE_PC_WB_SHIFT)
-         | ((uint32_t)sb   << LAPLACE_PC_SB_SHIFT)
-         | ((uint32_t)incb << LAPLACE_PC_INCB_SHIFT)
-         | ((uint32_t)ccc  << LAPLACE_PC_CCC_SHIFT);
+                                             uint8_t incb, uint8_t ccc,
+                                             uint8_t white_space) {
+    return ((uint32_t)gb          << LAPLACE_PC_GB_SHIFT)
+         | ((uint32_t)wb          << LAPLACE_PC_WB_SHIFT)
+         | ((uint32_t)sb          << LAPLACE_PC_SB_SHIFT)
+         | ((uint32_t)incb        << LAPLACE_PC_INCB_SHIFT)
+         | ((uint32_t)ccc         << LAPLACE_PC_CCC_SHIFT)
+         | ((uint32_t)(white_space != 0u) << LAPLACE_PC_WHITESPACE_SHIFT);
 }
 static inline uint8_t laplace_pc_gb(uint32_t f)   { return (uint8_t)((f & LAPLACE_PC_GB_MASK)   >> LAPLACE_PC_GB_SHIFT); }
 static inline uint8_t laplace_pc_wb(uint32_t f)   { return (uint8_t)((f & LAPLACE_PC_WB_MASK)   >> LAPLACE_PC_WB_SHIFT); }
 static inline uint8_t laplace_pc_sb(uint32_t f)   { return (uint8_t)((f & LAPLACE_PC_SB_MASK)   >> LAPLACE_PC_SB_SHIFT); }
 static inline uint8_t laplace_pc_incb(uint32_t f) { return (uint8_t)((f & LAPLACE_PC_INCB_MASK) >> LAPLACE_PC_INCB_SHIFT); }
 static inline uint8_t laplace_pc_ccc(uint32_t f)  { return (uint8_t)((f & LAPLACE_PC_CCC_MASK)  >> LAPLACE_PC_CCC_SHIFT); }
+static inline uint8_t laplace_pc_white_space(uint32_t f) {
+    return (uint8_t)((f & LAPLACE_PC_WHITESPACE_MASK) >> LAPLACE_PC_WHITESPACE_SHIFT);
+}
 
 typedef struct {
     uint32_t cp;
