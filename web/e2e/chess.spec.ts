@@ -9,6 +9,7 @@ test.describe('chess UI', () => {
   test('gauntlet accepts non-default Elo and sends explicit full strength', async ({ page }) => {
     const previews: URL[] = [];
     const starts: { config: Record<string, string> }[] = [];
+    const startTokens: (string | undefined)[] = [];
     // All chess requests are mocked: this UI contract must not start an engine or write a game.
     await page.route('**/chess/lab/**', async (route) => {
       const url = new URL(route.request().url());
@@ -24,6 +25,7 @@ test.describe('chess UI', () => {
         previews.push(url);
         body = { commandLine: 'cutechess-cli -debug all', ready: true, games: 10, missing: [] };
       } else if (url.pathname.endsWith('/start')) {
+        startTokens.push(route.request().headers()['x-laplace-operator-token']);
         starts.push(route.request().postDataJSON());
         body = { jobId: 'ui-only-test' };
       } else if (url.pathname.includes('/events')) {
@@ -34,21 +36,28 @@ test.describe('chess UI', () => {
     });
 
     await page.goto('/lab/gauntlet');
+    const startButton = page.getByRole('button', { name: 'Start gauntlet', exact: true });
+    await expect(startButton).toBeDisabled();
+    await page.getByLabel('Operator token', { exact: true }).fill('ui-test-token');
+    await expect(startButton).toBeEnabled();
+
     const elo = page.getByRole('spinbutton', { name: 'Stockfish Elo cap' });
     await expect(elo).toHaveValue('2000');
     await elo.fill('2300');
     await expect(elo).toHaveValue('2300');
     await expect.poll(() => previews.at(-1)?.searchParams.get('elo')).toBe('2300');
-    await page.getByRole('button', { name: 'Start gauntlet', exact: true }).click();
+    await startButton.click();
     await expect.poll(() => starts.length).toBe(1);
     expect(starts[0].config).toMatchObject({ elo: '2300', limitStrength: 'true' });
+    expect(startTokens[0]).toBe('ui-test-token');
 
     await page.getByLabel('Limit Stockfish strength', { exact: true }).click();
     await expect(elo).toBeDisabled();
     await expect.poll(() => previews.at(-1)?.searchParams.get('limitStrength')).toBe('false');
-    await page.getByRole('button', { name: 'Start gauntlet', exact: true }).click();
+    await startButton.click();
     await expect.poll(() => starts.length).toBe(2);
     expect(starts[1].config).toMatchObject({ elo: '2300', limitStrength: 'false' });
+    expect(startTokens[1]).toBe('ui-test-token');
 
     await page.getByLabel('Limit Stockfish strength', { exact: true }).click();
     await expect(elo).toBeEnabled();
