@@ -4,57 +4,90 @@
     display: flex;
     align-items: center;
     gap: var(--space-6);
-    min-height: 4.25rem;
-    padding: 0.7rem clamp(1rem, 3vw, 2.5rem);
-    background: var(--color-navy);
-    border-bottom: 1px solid color-mix(in srgb, white 14%, transparent);
-    box-shadow: 0 3px 14px color-mix(in srgb, var(--color-navy) 22%, transparent);
-    color: #f7fbfd;
-    --color-text-primary: #f7fbfd;
+    min-height: 4.4rem;
+    padding: 0.72rem clamp(1rem, 3vw, 2.5rem);
+    background: var(--material-blue-enamel);
+    border-bottom: 2px solid var(--color-copper);
+    box-shadow:
+      inset 0 -1px 0 color-mix(in srgb, var(--color-brass) 40%, transparent),
+      0 4px 16px rgb(40 32 25 / 18%);
+    color: #f8f0e3;
+    --color-text-primary: #f8f0e3;
     --color-text-muted: var(--color-navy-muted);
     --color-bg-panel: var(--color-navy);
     --color-bg-panel-2: var(--color-navy-raised);
     --color-bg-elevated: var(--color-navy-raised);
-    --color-border-default: color-mix(in srgb, white 20%, var(--color-navy));
+    --color-border-default: color-mix(in srgb, var(--color-brass) 42%, var(--color-navy));
     flex-wrap: nowrap;
     flex-shrink: 0;
+    isolation: isolate;
   }
 
+  /* A slim energized rail: magical circuitry, not a generic accent stripe. */
   .header::before {
     content: '';
     position: absolute;
+    z-index: 2;
     inset: 0 0 auto;
     height: 3px;
-    background: linear-gradient(90deg, var(--color-signal), var(--color-steel) 52%, var(--color-copper));
+    background:
+      linear-gradient(90deg,
+        transparent 0 2%,
+        var(--color-copper) 2% 8%,
+        var(--color-signal-hot) 8% 19%,
+        var(--color-steel) 38%,
+        var(--color-neon-gold) 58%,
+        var(--color-signal-hot) 78%,
+        var(--color-copper) 92% 98%,
+        transparent 98%);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--color-signal) 34%, transparent);
+  }
+
+  .header::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.26;
+    background-image:
+      linear-gradient(90deg, transparent 0 33px, color-mix(in srgb, var(--color-copper) 24%, transparent) 34px, transparent 35px),
+      radial-gradient(circle at 20% 50%, color-mix(in srgb, var(--color-signal) 14%, transparent), transparent 18rem);
+    background-size: 68px 100%, auto;
   }
 
   .title {
     display: flex;
     align-items: center;
     font-family: var(--font-display);
-    font-size: 1.22rem;
+    font-size: 1.35rem;
+    font-weight: 700;
     margin: 0;
-    letter-spacing: -0.015em;
+    letter-spacing: 0.01em;
     min-width: 0;
   }
 
   .title a {
-    color: #f7fbfd;
+    color: #f8f0e3;
+    text-decoration: none;
   }
 
   .title a:hover {
     color: #ffffff;
+    text-shadow: 0 0 12px color-mix(in srgb, var(--color-signal-hot) 32%, transparent);
   }
 
   .title::before {
     content: '';
-    width: 11px;
-    height: 11px;
+    width: 12px;
+    height: 12px;
     margin-right: var(--space-3);
-    border: 2px solid #f7fbfd;
-    background: var(--color-signal);
+    border: 2px solid var(--color-brass);
+    background: var(--color-signal-hot);
     box-shadow:
-      0 0 0 4px color-mix(in srgb, var(--color-signal) 18%, transparent);
+      inset 0 0 0 2px color-mix(in srgb, white 42%, transparent),
+      0 0 0 4px color-mix(in srgb, var(--color-copper) 34%, transparent),
+      0 0 13px color-mix(in srgb, var(--color-signal-hot) 55%, transparent);
     transform: rotate(45deg);
   }
 
@@ -62,9 +95,9 @@
     font-size: 0.66rem;
     color: var(--color-text-muted);
     margin-left: var(--space-3);
-    font-weight: 400;
+    font-weight: 500;
     font-family: var(--font-sans);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.055em;
     text-transform: uppercase;
   }
 
@@ -74,9 +107,10 @@
     flex-wrap: wrap;
     min-width: 0;
     padding: 3px;
-    border: 1px solid color-mix(in srgb, white 11%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-brass) 30%, var(--color-navy));
     border-radius: var(--radius-lg);
-    background: color-mix(in srgb, black 12%, transparent);
+    background: rgb(5 28 40 / 30%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
   }
 
   .tenantSlot {
@@ -94,13 +128,13 @@
     display: none;
   }
 
-    .nav {
+  .nav {
     order: 3;
     width: 100%;
     overflow-x: auto;
     overscroll-behavior-inline: contain;
     scrollbar-width: thin;
-    }
+  }
 
   .tenantSlot {
     margin-left: 0;
