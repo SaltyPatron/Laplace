@@ -35,6 +35,23 @@ public class ModelTokenEdgeETLTests
         public void Dispose() => Environment.SetEnvironmentVariable("LAPLACE_MODEL_PLANES", _old);
     }
 
+    [Fact]
+    public void ResolvePlanesMode_DefaultsToStructure()
+    {
+        using var _ = PlanesMode("");
+
+        Assert.Equal("structure", ModelTokenEdgeETL.ResolvePlanesMode());
+    }
+
+    [Fact]
+    public void ResolvePlanesMode_RejectsRawFactorPersistence()
+    {
+        using var _ = PlanesMode("factors");
+
+        var error = Assert.Throws<InvalidOperationException>(ModelTokenEdgeETL.ResolvePlanesMode);
+        Assert.Contains("Raw factor trajectories are retired", error.Message);
+    }
+
 
     [Fact]
     public async Task Fold_NormGain_ShiftsAttendSalienceOrdering()
@@ -56,7 +73,7 @@ public class ModelTokenEdgeETLTests
     }
 
     [Fact]
-    public async Task StructureMode_UnplaceableTokens_SkipsProjectionWithoutDroppingTestimony()
+    public async Task StructureMode_UnplaceableTokens_StillEmitBoundedTestimony()
     {
         var testimony = await RunAttend(
             new float[] { 1, 1, 2, 0, 0, 2, 3, 3 },
@@ -297,43 +314,9 @@ public class ModelTokenEdgeETLTests
             // factors lane's slice anatomy link (model_circuit_slices reads it).
             Assert.DoesNotContain(atts, a => a.TypeId == appearsIn);
 
-            // Pillar 3a: the circuit's WHOLE assertion is the physicality trajectory
-            // — one row per circuit, every token, exactly invertible — and the
-            // testimony above is a bounded prefix of it, not a second copy.
-            var phys = Assert.Single(physicalities, p => p.EntityId == coord);
-            Assert.Equal(PhysicalityType.Projection, phys.Type);
-            Assert.Equal(n, phys.NConstituents);
-            Assert.Equal(n * 4, phys.TrajectoryXyzm!.Length);
-            Assert.Equal(
-                ent.OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray(),
-                Trajectory.Constituents(phys.TrajectoryXyzm).OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray());
-
-            // PointZM is the KARCHER (intrinsic) mean of the selected entities'
-            // real content placements. The packed trajectory is identity/testimony
-            // payload and must never be averaged or copied into the point columns.
-            //
-            // Was Math4d.Centroid. The Euclidean mean of unit vectors lands INSIDE
-            // the 4-ball, not on S3: measured 2026-08-12 over 14,481,064 composed
-            // placements, min ||coord|| = 0.003148 and 241,015 rows under 0.1,
-            // where the normalised direction is dominated by accumulated float
-            // error. Karcher lands at norm 1 by construction. Both means are now
-            // canonically ordered so either is permutation-invariant, but only one
-            // of them puts a composed entity where the placement law says entities
-            // live. This is placement-changing and rides the reseed.
-            var actualPlacements = tokens
-                .SelectMany(t => new[] { t.ContentX, t.ContentY, t.ContentZ, t.ContentM })
-                .ToArray();
-            var expectedPlacement = Math4d.KarcherMean(actualPlacements);
-            Assert.Equal(expectedPlacement[0], phys.CoordX, 12);
-            Assert.Equal(expectedPlacement[1], phys.CoordY, 12);
-            Assert.Equal(expectedPlacement[2], phys.CoordZ, 12);
-            Assert.Equal(expectedPlacement[3], phys.CoordM, 12);
-            Assert.Equal(Hilbert128.Encode(expectedPlacement), phys.HilbertIndex);
-
-            // Testimony is ranked: the emitted rows are the trajectory's leading
-            // salience prefix, in order.
-            var walk = Trajectory.Constituents(phys.TrajectoryXyzm);
-            Assert.Equal(walk.Take(occ.Count).ToArray(), occ.Select(a => a.SubjectId).ToArray());
+            // The checkpoint is the lossless source body. Derived circuit floats
+            // must not be duplicated into physicality trajectories.
+            Assert.Empty(physicalities);
 
             // Coordinate entity + constituents, typed correctly.
             Assert.Contains(entities, e => e.Id == coord && e.TypeId == ModelCoordinates.CoordinateTypeId);
@@ -362,15 +345,15 @@ public class ModelTokenEdgeETLTests
     // The row-count regression. Structure mode used to emit one attestation per
     // VOCABULARY TOKEN per circuit, so the deposit scaled V × circuits: TinyLlama
     // 1,430 × 32,000 = 45.8M rows, Phi-2 2,080 × 51,200 = 106.5M. Both model seeds
-    // failed on it. The circuit's whole assertion now lives in ONE physicality
-    // trajectory and the attestations are a bounded testimony prefix, so the deposit
-    // scales with CIRCUITS alone.
+    // failed on it. The content-addressed checkpoint remains the lossless source;
+    // the substrate stores only a bounded testimony prefix per circuit, so the
+    // deposit scales with CIRCUITS alone.
     //
     // Measured, not asserted from a formula: two real emissions differing only in
     // vocabulary size must produce byte-identical row counts. A Phi-2-scale run
     // needs a 5 GB checkpoint and hours of GEMM, so the Phi-2 line is a PROJECTION
-    // — the measured per-circuit row cost (scale-invariant: three entities, one
-    // physicality, the CONTAINS/PRECEDES structure and k testimony rows, none of
+    // — the measured per-circuit row cost (scale-invariant: three entities,
+    // the CONTAINS/PRECEDES structure and k testimony rows, none of
     // which depend on layer/head/vocab magnitude) times Phi-2's circuit count. That
     // is stated plainly rather than dressed up as a measurement.
     [Fact]
@@ -389,15 +372,14 @@ public class ModelTokenEdgeETLTests
 
         // Per layer: attention head circuits + OV head circuits + one dense MLP.
         int circuits = layers * (2 * heads + 1);
-        Assert.Equal(circuits, small.Physicalities);
+        Assert.Equal(0, small.Physicalities);
+        Assert.Equal(0, large.Physicalities);
 
         // Testimony is capped at k per circuit, whatever the vocabulary holds.
         Assert.Equal(circuits * k, small.Testimony);
 
-        // The trajectory keeps the WHOLE assertion — nothing was truncated, it moved
-        // into the geometry (Pillar 3a).
-        Assert.Equal(k + 44, small.MaxTrajectoryConstituents);
-        Assert.Equal(2 * (k + 44), large.MaxTrajectoryConstituents);
+        Assert.Equal(0, small.MaxTrajectoryConstituents);
+        Assert.Equal(0, large.MaxTrajectoryConstituents);
 
         double perCircuit = (double)small.Total / circuits;
         // Phi-2: 32 layers x 32 heads x (attention + OV) + 32 dense MLP circuits.
@@ -543,110 +525,6 @@ public class ModelTokenEdgeETLTests
         Assert.Equal(RelationTypeRegistry.Symmetry.Symmetric, RelationTypeRegistry.Resolve("SIMILAR_TO").Symmetry);
         Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, RelationTypeRegistry.Resolve("ATTENDS").Symmetry);
         Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, RelationTypeRegistry.Resolve("OV_RELATES").Symmetry);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task LmFactorPlane_DepositedOnlyWhenUntied(bool untied)
-    {
-        const int n = 6, d = 4;
-
-        var embed = new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1 };
-        var lmhead = new float[] { 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1 };
-
-        string dir = Path.Combine(Path.GetTempPath(), "laplace-cont-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        try
-        {
-            var tensors = new List<TensorSpec> { Tensor("model.embed_tokens.weight", new[] { n, d }, embed) };
-            if (untied) tensors.Add(Tensor("lm_head.weight", new[] { n, d }, lmhead));
-            WriteSafetensors(Path.Combine(dir, "model.safetensors"), tensors);
-
-            var ent = new Hash128[n];
-            var tokens = new LlamaTokenizerParser.TokenRecord[n];
-            for (int i = 0; i < n; i++)
-            {
-                ent[i] = Hash128.OfCanonical($"substrate/test/cont/tok/{i}");
-                tokens[i] = new LlamaTokenizerParser.TokenRecord
-                {
-                    TokenId = i,
-                    RawToken = $"t{i}",
-                    CanonicalBytes = Encoding.UTF8.GetBytes($"t{i}"),
-                    EntityId = ent[i],
-                    Tier = 2,
-                    IsByteLevel = false,
-                    Role = TokenRole.None,
-                    ContentX = Math.Cos(i),
-                    ContentY = Math.Sin(i),
-                    ContentZ = 0,
-                    ContentM = 0,
-                    HasContentCoord = true,
-                };
-            }
-
-            var cfg = new ModelConfig
-            {
-                ModelType = "llama",
-                Architecture = "LlamaForCausalLM",
-                VocabSize = n,
-                HiddenSize = d,
-                NumLayers = 1,
-                NumHeads = 1,
-                NumKvHeads = 1,
-                HeadDim = d,
-                IntermediateSize = d,
-                NumExperts = 0,
-                TieWordEmbeddings = !untied,
-                QkNorm = false,
-                RopeTheta = 10000,
-                NormEps = 1e-5,
-                HiddenAct = "silu",
-                MlaQLoraRank = 0,
-                MlaKvLoraRank = 0,
-                QkRopeHeadDim = 0,
-                QkNopeHeadDim = 0,
-                VHeadDim = 0,
-                RecipeEntityId = SubstrateCanonicalIds.Of("test", "cont", "recipe"),
-                CanonicalJson = Encoding.UTF8.GetBytes("{}"),
-            };
-            var roles = new List<TensorRole>
-            {
-                new("model.embed_tokens.weight", new[] { n, d }, "F32", TensorRoleKind.Embedding, -1, -1),
-            };
-            if (untied) roles.Add(new("lm_head.weight", new[] { n, d }, "F32", TensorRoleKind.LmHead, -1, -1));
-            var manifest = new ModelManifest
-            {
-                Config = cfg,
-                Roles = roles,
-                Modality = Modality.Text,
-                Coverage = Coverage.Full,
-                ModelName = "cont-model",
-            };
-
-            using var _ = PlanesMode("factors");
-            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
-            var appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
-            var lmAnchor = ModelCoordinates.PlaneAnchor("lm");
-            var embAnchor = ModelCoordinates.PlaneAnchor("emb");
-            int lmSlices = 0, embSlices = 0;
-            await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default))
-                foreach (var a in c.Attestations)
-                {
-                    if (a.TypeId != appearsIn || a.ObjectId is not { } o) continue;
-                    if (o == lmAnchor) lmSlices++;
-                    if (o == embAnchor) embSlices++;
-                }
-
-            Assert.True(embSlices > 0, "factors mode must always deposit the emb-plane factor slice");
-            if (untied) Assert.True(lmSlices > 0,
-                "untied model must deposit the lm/completion factor plane (unembed rows)");
-            else Assert.Equal(0, lmSlices);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
     }
 
     private static ModelManifest ToyManifest(string dir, int vocab, int hidden)
