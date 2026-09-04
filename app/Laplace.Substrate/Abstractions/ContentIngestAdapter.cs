@@ -7,11 +7,12 @@ namespace Laplace.Decomposers.Abstractions;
 /// One canonical content payload plus optional structural provenance.
 ///
 /// <para><see cref="ContentRootId"/> is the globally shared content identity used for
-/// existence/dedup. <see cref="SourceId"/> is who directly contains/witnesses that content
-/// (for a document lane, the document entity). They are deliberately different concepts.</para>
+/// existence/dedup. <see cref="DocumentId"/> and <see cref="FileId"/> are explicit higher
+/// trunks for standard document/file content.</para>
 ///
-/// <para><see cref="DocumentId"/> and <see cref="FileId"/> are the higher trunks when the
-/// producer is a standard file/document lane. Other content lanes leave them zero.</para>
+/// <para><see cref="SourceId"/> is retained as the historical source/root slot so older
+/// record producers stay binary/source compatible. New document records fill the explicit
+/// ids and the deferred content emitter uses <see cref="DocumentId"/> as the nearest trunk.</para>
 /// </summary>
 public readonly record struct ContentIngestRecord(
     byte[] CanonicalUtf8,
@@ -28,9 +29,15 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
 
     public ContentIngestHandler(Hash128 sourceId) => _sourceId = sourceId;
 
-    public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
-        new ContentDeferredUnit(record.CanonicalUtf8,
-            record.SourceId.Equals(default(Hash128)) ? _sourceId : record.SourceId);
+    public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record)
+    {
+        Hash128 directSource = record.DocumentId != default
+            ? record.DocumentId
+            : record.SourceId != default
+                ? record.SourceId
+                : _sourceId;
+        return new ContentDeferredUnit(record.CanonicalUtf8, directSource);
+    }
 
     public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
     {
