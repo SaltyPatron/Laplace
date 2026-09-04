@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using Laplace.Engine.Core;
 
@@ -13,26 +14,32 @@ namespace Laplace.Chess.Service;
 ///
 /// Native code owns the deterministic projection from the provider's repeated XML
 /// records. This class streams the compressed estate, bounds batches, and maps those
-/// projected byte spans into the chess domain.
+/// projected byte spans into the chess domain. The successful projection is persisted
+/// as derived provider state so interactive reads never have to rebuild the publication
+/// merely because the API process restarted.
 /// </summary>
 internal static class FideRatingList
 {
     internal const string XmlArchiveUrl = "https://ratings.fide.com/download/players_list_xml.zip";
     private const long MaxArchiveBytes = 128L * 1024 * 1024;
     private const long MaxXmlBytes = 1024L * 1024 * 1024;
-    // The published estate currently contains well over a million compact records.
+    // The published estate currently contains well over a hundred thousand compact records.
     // Keep both dimensions bounded while amortizing native projection calls.
     private const int MaxPlayersPerGrammarBatch = 32 * 1024;
     private const int MaxGrammarBatchBytes = 32 * 1024 * 1024;
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromHours(6);
     private static readonly SemaphoreSlim EstateGate = new(1, 1);
+    private static readonly object RefreshSync = new();
     private static readonly HttpClient Http = CreateClient();
 
     private static ReadOnlySpan<byte> PlayerOpenTag => "<player>"u8;
     private static ReadOnlySpan<byte> PlayerCloseTag => "</player>"u8;
 
     private static Player[]? _players;
+    private static IReadOnlyDictionary<string, Player>? _playersById;
     private static DateTimeOffset _playersFetchedAt;
+    private static Task? _refreshTask;
+    private static string? _lastRefreshError;
 
     internal sealed record Player(
         string FideId,
@@ -94,8 +101,12 @@ internal static class FideRatingList
         fideId = fideId.Trim();
         if (fideId.Length is < 4 or > 12 || !fideId.All(char.IsDigit))
             throw new ArgumentException("FIDE identifier must contain 4 to 12 digits.", nameof(fideId));
+
         var players = await GetPlayersAsync(ct).ConfigureAwait(false);
-        var player = players.FirstOrDefault(p => p.FideId.Equals(fideId, StringComparison.Ordinal));
+        var byId = _playersById;
+        Player? player = byId is not null && byId.TryGetValue(fideId, out var indexed)
+            ? indexed
+            : players.FirstOrDefault(p => p.FideId.Equals(fideId, StringComparison.Ordinal));
         return player is null
             ? throw new KeyNotFoundException($"FIDE id {fideId} is absent from the official rating list.")
             : ToCandidate(player);
@@ -136,6 +147,9 @@ internal static class FideRatingList
         var players = ParseArchive(archive, ct);
         return TopPlayers(players, cohort.Trim().ToLowerInvariant(), limit, currentYear, ct);
     }
+
+    internal static string? LastRefreshError => _lastRefreshError;
+    internal static DateTimeOffset CachedFetchedAt => _playersFetchedAt;
 
     private static IReadOnlyList<FidePlayerCandidate> SearchPlayers(
         IReadOnlyList<Player> players, string canonical, int cap, CancellationToken ct)
@@ -189,32 +203,131 @@ internal static class FideRatingList
     private static async Task<Player[]> GetPlayersAsync(CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
-        var cached = _players;
-        if (cached is not null && now - _playersFetchedAt < RefreshAfter)
+        var cached = Volatile.Read(ref _players);
+        if (cached is not null)
+        {
+            if (now - _playersFetchedAt >= RefreshAfter)
+                EnsureBackgroundRefresh();
             return cached;
+        }
 
         await EstateGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             now = DateTimeOffset.UtcNow;
-            cached = _players;
-            if (cached is not null && now - _playersFetchedAt < RefreshAfter)
+            cached = Volatile.Read(ref _players);
+            if (cached is not null)
+            {
+                if (now - _playersFetchedAt >= RefreshAfter)
+                    EnsureBackgroundRefresh();
                 return cached;
+            }
 
-            byte[] archive = await DownloadArchiveAsync(ct).ConfigureAwait(false);
-            var players = await Task.Run(() => ParseArchive(archive, ct), ct).ConfigureAwait(false);
-            if (players.Length == 0)
-                throw new InvalidDataException(
-                    "FIDE published rating artifact parsed successfully but contained no valid player records.");
+            FideRatingSnapshot.Loaded? snapshot = null;
+            try
+            {
+                snapshot = await FideRatingSnapshot.TryLoadAsync(
+                    FideRatingSnapshot.DefaultPath, ct).ConfigureAwait(false);
+            }
+            catch (IOException ex)
+            {
+                _lastRefreshError = $"FIDE snapshot read failed: {ex.Message}";
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _lastRefreshError = $"FIDE snapshot read failed: {ex.Message}";
+            }
 
-            _players = players;
-            _playersFetchedAt = now;
-            return players;
+            if (snapshot is not null)
+            {
+                PublishPlayers(snapshot.Players, snapshot.FetchedAt);
+                if (now - snapshot.FetchedAt >= RefreshAfter)
+                    EnsureBackgroundRefresh();
+                return snapshot.Players;
+            }
+
+            return await RefreshUnderGateAsync(ct).ConfigureAwait(false);
         }
         finally
         {
             EstateGate.Release();
         }
+    }
+
+    private static void EnsureBackgroundRefresh()
+    {
+        lock (RefreshSync)
+        {
+            if (_refreshTask is { IsCompleted: false })
+                return;
+
+            _refreshTask = Task.Run(async () =>
+            {
+                await EstateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await RefreshUnderGateAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is HttpRequestException
+                    or IOException
+                    or UnauthorizedAccessException
+                    or InvalidDataException
+                    or TaskCanceledException)
+                {
+                    // Stale-while-refresh: the last valid publication remains live. The
+                    // error is retained for diagnostics rather than poisoning readers.
+                    _lastRefreshError = $"FIDE background refresh failed: {ex.Message}";
+                }
+                finally
+                {
+                    EstateGate.Release();
+                }
+            });
+        }
+    }
+
+    private static async Task<Player[]> RefreshUnderGateAsync(CancellationToken ct)
+    {
+        DateTimeOffset fetchedAt = DateTimeOffset.UtcNow;
+        byte[] archive = await DownloadArchiveAsync(ct).ConfigureAwait(false);
+        string archiveSha256 = Convert.ToHexString(SHA256.HashData(archive));
+        var players = await Task.Run(() => ParseArchive(archive, ct), ct).ConfigureAwait(false);
+        if (players.Length == 0)
+            throw new InvalidDataException(
+                "FIDE published rating artifact parsed successfully but contained no valid player records.");
+
+        string? persistenceError = null;
+        try
+        {
+            await FideRatingSnapshot.SaveAsync(
+                FideRatingSnapshot.DefaultPath,
+                players,
+                fetchedAt,
+                archiveSha256,
+                ct).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            persistenceError = $"FIDE snapshot persist failed: {ex.Message}";
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            persistenceError = $"FIDE snapshot persist failed: {ex.Message}";
+        }
+
+        PublishPlayers(players, fetchedAt);
+        _lastRefreshError = persistenceError;
+        return players;
+    }
+
+    private static void PublishPlayers(Player[] players, DateTimeOffset fetchedAt)
+    {
+        // Provider ids are supposed to be unique. Failing here is preferable to letting
+        // an ambiguous publication make exact-id reads depend on array order.
+        var byId = players.ToDictionary(static p => p.FideId, StringComparer.Ordinal);
+        _playersById = byId;
+        _playersFetchedAt = fetchedAt;
+        Volatile.Write(ref _players, players);
     }
 
     private static async Task<byte[]> DownloadArchiveAsync(CancellationToken ct)
