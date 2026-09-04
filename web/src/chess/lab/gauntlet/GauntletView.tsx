@@ -285,7 +285,7 @@ export function GauntletView() {
       )}
 
       <Panel title="Operator access">
-        <Field label="Operator token" help="Required to run or stop engine evaluations.">
+        <Field label="Operator token" help="Optional on local-dev/header-mode hosts; required only when this server is configured to require the operator credential.">
           <Input type="password" autoComplete="off" value={operatorToken}
                  aria-label="Operator token"
                  onChange={(e) => {
@@ -406,7 +406,7 @@ export function GauntletView() {
           </div>
 
           <div className={styles.actions}>
-            <Button onClick={() => void start()} disabled={busy || running || missing.length > 0 || operatorToken.length === 0} loading={busy}>
+            <Button onClick={() => void start()} disabled={busy || running || missing.length > 0} loading={busy}>
               {running ? 'Running…' : 'Start gauntlet'}
             </Button>
             <Button variant="ghost" onClick={() => void stop()} disabled={!running}>Stop</Button>
