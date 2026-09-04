@@ -137,7 +137,10 @@ export interface ExperimentRunnerProps {
  */
 export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerProps) {
   const importSurface = categories.length === 1 && categories[0] === 'import';
-  const [operatorToken, setOperatorToken] = useState(() => sessionStorage.getItem('laplace.operatorToken') ?? '');
+  // The lab is not an operator-credential form. Header/local mode is intentionally usable
+  // without a second secret; key-mode deployments can still supply a token from the operator
+  // surface through sessionStorage, but it never blocks browsing or local execution here.
+  const operatorToken = sessionStorage.getItem('laplace.operatorToken') ?? '';
   const [catalog, setCatalog] = useState<LabCatalog | null>(null);
   const [jobs, setJobs] = useState<LabJob[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -204,8 +207,6 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
   const missingEngines = requiresFor(experiment).filter((name) => !engines[name]?.found);
   const blockedReason = missingEngines.length > 0
     ? `Install ${missingEngines.map((n) => ENGINE_LABELS[n] ?? n).join(', ')} on the server`
-    : operatorToken.length === 0
-      ? 'Enter the operator token to run imports or evaluations'
     : kind === 'fide-search' && (params.query ?? '').trim().length < 2
       ? 'Enter at least two characters for a FIDE search'
       : null;
@@ -336,17 +337,6 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
           </Muted>
         </Panel>
       )}
-
-      <Panel title="Operator access">
-        <Field label="Operator token" help="Required to import profiles/games or run evaluations. Read, browse, and play remain public.">
-          <Input type="password" autoComplete="off" value={operatorToken}
-                 aria-label="Operator token"
-                 onChange={(e) => {
-                   setOperatorToken(e.target.value);
-                   sessionStorage.setItem('laplace.operatorToken', e.target.value);
-                 }} />
-        </Field>
-      </Panel>
 
       <Panel title="Choose an experiment">
         {LAB_CATEGORIES.filter((cat) => categories.includes(cat.id)).map((cat) => (
