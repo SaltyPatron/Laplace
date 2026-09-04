@@ -200,9 +200,16 @@ internal static class OperatorAuth
 {
     public const string TokenHeader = "X-Laplace-Operator-Token";
 
-    /// <summary>Constant-time check of the operator token; false when unconfigured.</summary>
+    /// <summary>
+    /// Constant-time check of the operator token. Chess Lab is an interactive local-dev
+    /// work surface, so header-mode hosts do not require a second secret that the product
+    /// has no discovery/provisioning path for. Key-mode/production hosts remain fail-closed.
+    /// Service-control and billing operator endpoints retain the token requirement in all modes.
+    /// </summary>
     public static bool IsAuthorized(HttpRequest request, LaplaceAuthOptions options)
     {
+        if (!options.KeyMode && request.Path.StartsWithSegments("/chess/lab"))
+            return true;
         if (string.IsNullOrWhiteSpace(options.OperatorToken))
             return false;
         var presented = request.Headers[TokenHeader].ToString();
