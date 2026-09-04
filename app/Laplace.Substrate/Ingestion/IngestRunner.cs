@@ -16,11 +16,6 @@ public sealed class IngestRunner
     private readonly ISubstrateReader _reader;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IIngestObservability _obs;
-    /// <summary>
-    /// ContentLadderLedger is process-static; wipe it when the source changes so one
-    /// source's deposited roots cannot suppress another source's first witness.
-    /// Same-source warm re-ingest keeps membership across End/Begin.
-    /// </summary>
     private Hash128 _ladderSource;
 
     public IngestRunner(
@@ -43,27 +38,6 @@ public sealed class IngestRunner
         ArgumentNullException.ThrowIfNull(decomposer);
         ArgumentNullException.ThrowIfNull(options);
 
-        // SIGTERM MUST REACH THE CATCH BELOW. The cancellation arm already journals a
-        // terminal row -- but only if the token is cancelled. A raw SIGTERM terminates
-        // the process outright, so RunCoreAsync never unwinds, OnRunFinished never runs,
-        // and the row sits at 'running' with no process behind it.
-        //
-        // That is not hypothetical and it is not rare: GitHub Actions cancels a job by
-        // SIGTERMing the job's processes ("Terminate orphan process: pid (N) (dotnet)"),
-        // and laplace.yml states that rebuilds preempt seeds BY DESIGN on the strength of
-        // "a preempted seed loses nothing and re-runs cleanly". It does not. MEASURED
-        // 2026-08-10: five PR merges inside 25 minutes preempted a ChessPgn seed at
-        // 19:02; 6,649,061 entities and 17,337,962 attestations went in with no terminal
-        // record, the row stranded at 'running', and wait-for-quiet-substrate.sh then
-        // blocked the very deploy that had caused the preemption -- for its full budget,
-        // waiting on an ingest that was already dead.
-        //
-        // Console.CancelKeyPress does NOT cover this. It surfaces SIGINT only; SIGTERM
-        // never reaches it, which is exactly why the chess lane's handler did not help.
-        //
-        // ctx.Cancel = true suppresses the default terminate so the token cancellation
-        // can unwind normally. Actions escalates to SIGKILL after its grace period, so
-        // the terminal write must be cheap -- it is one UPDATE on one row by primary key.
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx =>
         {
@@ -76,9 +50,6 @@ public sealed class IngestRunner
             linked.Cancel();
         });
 
-        // Abnormal exits still journal a terminal status: a run cut off by cancellation or
-        // a fatal error must be distinguishable from one that never ran (the run-journal
-        // row would otherwise sit at 'running' forever with no explanation attached).
         try
         {
             return await RunCoreAsync(decomposer, options, linked.Token);
@@ -100,7 +71,6 @@ public sealed class IngestRunner
         IngestRunOptions options,
         CancellationToken ct)
     {
-
         var log = _loggerFactory.CreateLogger($"Ingest:{decomposer.SourceName}");
         var sw = Stopwatch.StartNew();
         var foldMetrics = _writer as IConsensusFoldMetrics;
@@ -111,16 +81,6 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
-
-
-
-
-
-
-
-        // Per-file-completion sources skip the SOURCE-level guard: their idempotency is
-        // per-file (marker-complete files true-skip in the existence gate before compose),
-        // so a re-run is cheap AND new files in a completed directory still ingest.
         if (!options.SkipSourceCompletion
             && !options.BypassSourceCompletionGuard
             && !decomposer.PerFileCompletion
@@ -149,13 +109,12 @@ public sealed class IngestRunner
         };
         string ecosystemPath = ResolveEcosystemPath(decomposer, options);
         IngestArtifactGraph? artifactGraph = LoadArtifactGraph(
-            ecosystemPath, options.RequireArtifactManifest);
+            ecosystemPath,
+            options.RequireArtifactManifest,
+            allowAmbientManifest: decomposer is not IIgnoresAmbientArtifactManifest);
         var ctx = new InternalContext(
             EcosystemPath: ecosystemPath,
             SelectedArtifacts: artifactGraph?.Selected ?? Array.Empty<IngestArtifact>(),
-            // Initialization is part of the decomposer's write surface. Route it
-            // through the same run counters so manifest/bootstrap rows cannot vanish
-            // from source amplification and identity-admission reporting.
             Writer: new InitializationAccountingWriter(_writer, counters),
             Reader: _reader,
             Logger: _loggerFactory.CreateLogger($"Decomposer:{decomposer.SourceName}"),
@@ -166,10 +125,6 @@ public sealed class IngestRunner
         NativeRuntimeEnv.ApplyFromTopologyIfUnset();
         IngestTopology.EnsureReady();
 
-        // Directory.Exists ALONE was reported as "exists", so every single-file ingest logged
-        // exists=False on a file that was then read successfully — the line immediately after
-        // it announced input_units for that same path. A run that opens with a false negative
-        // about its own input teaches the reader to ignore the log.
         bool pathIsDir = Directory.Exists(ctx.EcosystemPath);
         bool pathIsFile = File.Exists(ctx.EcosystemPath);
         log.LogInformation(
@@ -179,10 +134,6 @@ public sealed class IngestRunner
 
         var inventory = await ResolveInventoryAsync(decomposer, ctx, artifactGraph, options, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
-        // The file boundary is inside the static IngestBatchPipeline, which is called
-        // directly by every decomposer and is handed no observability. The run brackets
-        // the ambient so those two sites can write per-file ledger rows without changing
-        // 33 call sites. Disposed with the run below.
         using var obsScope = IngestObservabilityScope.Begin(_obs, decomposer.SourceName);
         log.LogInformation(
             "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",
@@ -204,6 +155,7 @@ public sealed class IngestRunner
         int maxIntentsPerCommit = commitRows > 0
             ? sizing.MaxIntentsPerCommit
             : batchSize;
+
         static int RowsOf(SubstrateChange c)
         {
             int rows = c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
@@ -212,11 +164,9 @@ public sealed class IngestRunner
                     rows += s.EntityCount + s.PhysicalityCount + s.AttestationCount;
             return rows;
         }
+
         static long BytesOf(SubstrateChange c)
         {
-            // Trajectory payloads dwarf the fixed tuple estimate (a factor
-            // deposit is tens-to-hundreds of MB in one row); count them or the
-            // byte gates never fire and the working set buffers the whole run.
             long traj = 0;
             foreach (var p in c.Physicalities)
                 if (p.TrajectoryXyzm is { Length: > 0 } t) traj += (long)t.Length * 8;
@@ -231,9 +181,6 @@ public sealed class IngestRunner
                     stageAtt += s.AttestationCount;
                 }
             }
-            // Attestation merge surcharge lives in IngestSizing so the
-            // MemoryTopology flush envelope closes on apply work (MEASURED
-            // ChessPgn: 2.43M present merges / ~103s under a 152 B/att bill).
             return IngestSizing.EstimateApplyGateBytes(
                 c.Entities.Length,
                 c.Physicalities.Length,
@@ -243,10 +190,6 @@ public sealed class IngestRunner
                 stageAtt);
         }
 
-        // Rule #8: the working set is the unit of write. Yielded changes
-        // accumulate until the memory budget closes the set with ONE
-        // journaled apply; batch/commit-row caps only govern the retired
-        // per-batch lane (LAPLACE_WORKING_SET=0).
         bool workingSet = Laplace.Decomposers.Abstractions.WorkingSetMode.Enabled;
         long wsBytes = 0;
         bool ShouldFlush(int intents, int rows) =>
@@ -254,51 +197,9 @@ public sealed class IngestRunner
                 ? (rows >= commitRows || intents >= batchSize)
                 : intents >= batchSize;
 
-        // COMMIT GRANULARITY (2026-07-21). The apply gate used to be the 4 GiB
-        // COPY-buffer CEILING alone, so a source whose whole output is smaller
-        // than that composed the ENTIRE run into RAM and wrote once, at the end:
-        // OMW showed composed=1.6M / committed=0 / files=0/1226 / round_trips=0
-        // for its whole run, then one terminal COPY with compose stalled behind
-        // it. The ceiling is a memory SAFETY bound, not a batching policy —
-        // using it as the batch size is what globbed every source.
-        //
-        // Commit at the same granularity compose already closes at (the flush
-        // envelope, RAM/64 <= 512 MiB), and at every file boundary. Same total
-        // COPY volume, same O(partitions) round-trips per apply, ~8x more
-        // applies of 1/8 the size: the loader stays busy, files=n/N advances
-        // live, and a cancelled run keeps every committed file instead of
-        // losing the whole source.
         long applyEnvelope = Math.Min(
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
-
-        // Compose closes are memory-safety fragments, not database transaction units.
-        // Multi-file sources divide the compose envelope across the active file pool;
-        // a high-fan source can therefore yield very small changes (UD: about eight
-        // sentences per worker close). Flushing after three such changes turned the
-        // generic ten-file pool into 526 indexed applies for 13,672 sentences: 26.5
-        // sentences/apply, with the database NVMe saturated by random presence/fold IO.
-        //
-        // Coalesce finalized fragments here. Their deferred trees have already been
-        // drained and disposed, so the compose-memory reason for closing them no longer
-        // applies. The byte envelope remains the apply safety boundary; the file-
-        // boundary floor below remains the durability/UI-progress boundary.
-
-        // A file boundary is a commit OPPORTUNITY, not a commit requirement
-        // (2026-07-21). Flushing on EVERY boundary shreds a many-small-files
-        // source: OMW's 1226 files each yielded one working-set change plus one
-        // boundary, so every apply was "intents=2 rows=~1,200" paying 10-12 round
-        // trips and running at 1.5-9k rows/s, against 23,498 rows/s for the one
-        // apply in that run that actually reached the envelope
-        // (intents=3 rows=90,426, 29 round trips). It also produced
-        // "intents=1 rows=0" applies — a full apply cycle for a lone boundary
-        // carrying nothing.
-        //
-        // So a boundary commits only once the batch is worth a COPY. Below the
-        // floor it rides along and commits with the next group, which still
-        // advances files=n/N live (in steps of several files) and still bounds
-        // what a cancelled run loses. Per-FILE visibility does not depend on
-        // this: INGEST_FILE_COMPOSED/COMMITTED name every file individually.
         long boundaryCommitFloor = applyEnvelope
             / Math.Max(1, topo.ApplyPartitions);
 
@@ -308,18 +209,11 @@ public sealed class IngestRunner
 
         bool ShouldFlushWithCap(int intents, int rows) =>
             workingSet
-                ? ShouldFlushWorkingSet(
-                    wsBytes, applyEnvelope)
+                ? ShouldFlushWorkingSet(wsBytes, applyEnvelope)
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
-
-
-
-
 
         bool syncIngest = false;
 
-        // The writer's run bracket owns exact presence caches, fold lanes,
-        // recovery checks, and the terminal completion barrier. Indexes stay online.
         if (_ladderSource != decomposer.SourceId)
         {
             ContentLadderLedger.Reset();
@@ -336,9 +230,6 @@ public sealed class IngestRunner
             if (syncIngest)
             {
                 CpuTopology.RequirePerformanceCorePin();
-
-
-
 
                 var sbatch = new List<SubstrateChange>(batchSize);
                 int sbatchRows = 0;
@@ -357,9 +248,6 @@ public sealed class IngestRunner
                         continue;
                     }
                     long sib = BytesOf(intent);
-                    // A decomposer may orchestrate independent witness vendors. Preserve
-                    // their stream order, but never coalesce them into one replay/eviction
-                    // transaction: working-set ownership is exactly one SourceId.
                     if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                             sbatchSource, intent.Metadata.SourceId))
                     {
@@ -370,10 +258,6 @@ public sealed class IngestRunner
                         wsBytes = 0;
                         sbatchSource = null;
                     }
-                    // Flush BEFORE adding an intent that would push the accumulated COPY
-                    // bytes past the budget, so a single apply never exceeds it. Adding then
-                    // checking (below) let the crossing intent land first, so one apply could
-                    // reach ~2× budget and build a single-table buffer near the 2 GiB wall.
                     if (workingSet && sbatch.Count > 0
                         && wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
                     {
@@ -405,13 +289,9 @@ public sealed class IngestRunner
             }
             else
             {
-
                 int channelCap = sizing.DecomposeChannelCapacity;
                 long rowBudget = sizing.RowBudget;
                 long bufferedRows = 0;
-                // Compose-ahead is bounded by BYTES as well as rows: with huge
-                // trajectory rows the 58-intent channel alone can hold tens of
-                // GB, so the row budget never constrains anything.
                 long byteBudget = Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes;
                 long bufferedBytes = 0;
                 var drained = new SemaphoreSlim(0, channelCap);
@@ -455,14 +335,6 @@ public sealed class IngestRunner
                     }
                 }, "ingest-decompose-pcore", runCt);
 
-                // One ordered set coordinator consumes the composed stream while the
-                // producer continues composing ahead. This is not a one-thread writer:
-                // each apply fans probes, COPY, merge, fold, and masks across the
-                // machine-derived ApplyPartitions inside NpgsqlWorkingSetApply. A second
-                // outer worker would duplicate that full connection fan and race the
-                // cross-process ownership/journal boundary; the old fixed-width option
-                // never changed the production width and is removed rather than exposed
-                // as a fake performance knob.
                 async Task FlushBatchAsync(List<SubstrateChange> b)
                 {
                     if (b.Count == 0) return;
@@ -490,9 +362,6 @@ public sealed class IngestRunner
                             continue;
                         }
                         long ib = BytesOf(intent);
-                        // Flush the ordered prefix when an orchestrator crosses into a
-                        // different witness vendor. Grouping by SourceId would reorder
-                        // testimony; carrying both forward would corrupt run ownership.
                         if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                                 batchSource, intent.Metadata.SourceId))
                         {
@@ -501,9 +370,6 @@ public sealed class IngestRunner
                             wsBytes = 0;
                             batchSource = null;
                         }
-                        // Flush BEFORE adding an intent that would push accumulated COPY bytes
-                        // past the budget, so a single working-set apply never exceeds it and
-                        // no single-table buffer approaches the 2 GiB int wall.
                         if (workingSet && batch.Count > 0
                             && wsBytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
                         {
@@ -534,9 +400,6 @@ public sealed class IngestRunner
         }
         finally
         {
-            // CompleteBulkRun owns the one fold drain and releases run-scoped writer
-            // state. Production indexes stay online throughout ingest; BeginBulkRun only
-            // repairs journal entries left by the retired drop/rebuild loader.
             try
             {
                 if (bulkRunStarted)
@@ -595,8 +458,7 @@ public sealed class IngestRunner
         bool enforceEntityAdmission = options.DecomposerOptions.MaxInputUnits <= 0
             && counters.UnitsFailed == 0
             && failures.Count == 0;
-        int governedWithoutPhysicality = ValidateEntityAdmission(
-            counters, log, enforceEntityAdmission);
+        int governedWithoutPhysicality = ValidateEntityAdmission(counters, log, enforceEntityAdmission);
 
         long filesTotalForMarker = inventory?.FileCount ?? 0;
         bool filesComplete = filesTotalForMarker <= 0
@@ -606,11 +468,6 @@ public sealed class IngestRunner
             && failures.Count == 0
             && filesComplete;
 
-        // Inventory totals are estimates until extraction proves otherwise. Reconcile
-        // both upward and downward after a complete run so newline estimates, filtered
-        // records and refined multi-file inventories cannot leave LapSight above/below
-        // 100%. Internal decomposer phases must report zero input units when they merely
-        // project an already-counted source record.
         if (fullSuccessfulExtraction
             && inventory is not null
             && counters.InputUnitsDone > 0)
@@ -648,18 +505,10 @@ public sealed class IngestRunner
             ConsensusCellDeposits: Math.Max(
                 0, (foldMetrics?.CellsFolded ?? foldCellsAtStart) - foldCellsAtStart));
 
-
-
-
-
         long declaredInput = inventory?.EffectiveTotalInputUnits ?? 0;
         long declaredFiles = inventory?.FileCount ?? 0;
         bool emptySourceNoOp = result.UnitsApplied == 0 && (declaredInput > 0 || declaredFiles > 0);
 
-        // An empty run the decomposer can ACCOUNT FOR is not the failure this guard is
-        // for. See IIngestNoOpExplainer: idempotent re-ingest, a caught-up marker-gated
-        // backfill, and an unset optional dependency all applied zero and all failed the
-        // run. A decomposer that cannot explain itself still fails.
         (string Status, string Detail)? explained = null;
         if (emptySourceNoOp && decomposer is IIngestNoOpExplainer explainer)
         {
@@ -672,13 +521,7 @@ public sealed class IngestRunner
                     decomposer.SourceName, e.Status, e.Detail);
             }
         }
-        // 'capped' = a MaxInputUnits smoke run: it succeeded but deliberately did not
-        // ingest the whole source, which is also why it never mints a completion marker —
-        // the run journal must not let it masquerade as a full 'ok'.
-        // File-tracking lanes (TracksFileCompletion): files_done must equal files_total.
-        // Failed files emit file-failed/ instead of period-boundary/, so they do not
-        // inflate files_done; a cut-off or partial run cannot report status=ok
-        // (CONSOLIDATION Q5 / FrameNet 33/14900).
+
         string status = explained is { } exp
             ? exp.Status
             : DeriveRunStatus(
@@ -720,21 +563,12 @@ public sealed class IngestRunner
             ? DescribeRunFailure(result.UnitsFailed, counters.FilesDone, declaredFiles)
             : null;
         _obs.OnRunFinished(decomposer.SourceName, result, status, failureReason);
-        // A run that wrote status=failed to the ledger MUST NOT return normally. It used to:
-        // the journal recorded failed, this method returned the result, the CLI saw no
-        // exception and exited 0. MEASURED 2026-08-10 — `INGEST_TIMING source=document
-        // elapsed_s=594 rc=0` over a row reading `failed, files 199/207`. Eight files'
-        // content was absent from the substrate and every downstream step read green.
-        // The empty-noop branch below already throws for exactly this reason; a partial
-        // run is the same class of lie and gets the same treatment.
+
         if (status == "failed")
             throw new InvalidOperationException(
                 $"{decomposer.SourceName}: ingest run recorded status=failed — "
                 + (failureReason ?? "no reason derived")
                 + ". Failing the process so the exit code matches the ledger.");
-        // Zero-novel re-ingest did not add traffic — the default-partition scan is a
-        // multi-second catalog read on a populated box and must not sit on the process
-        // completion envelope after a no-op fold.
         if (result.EntitiesInserted + result.PhysicalitiesInserted + result.AttestationsInserted > 0)
             await ReportPartitionPressureAsync(log, ct);
         if (emptySourceNoOp)
@@ -745,11 +579,6 @@ public sealed class IngestRunner
         return result;
     }
 
-    /// <summary>
-    /// Journal / INGEST_COMPLETE status. File-tracking sources cannot report <c>ok</c>
-    /// when <paramref name="filesDone"/> is short of <paramref name="filesTotal"/> —
-    /// that was the CONSOLIDATION Q5 lie (<c>FrameNet 33/14900 ok</c>).
-    /// </summary>
     internal static string DeriveRunStatus(
         long unitsFailed,
         bool emptySourceNoOp,
@@ -760,36 +589,17 @@ public sealed class IngestRunner
         if (unitsFailed > 0) return "failed";
         if (emptySourceNoOp) return "empty-noop";
         if (capped) return "capped";
-        // Exact match: undercount was Q5; overcount (segment markers counted as files) is the same lie.
         if (filesTotal > 0 && filesDone != filesTotal) return "failed";
         return "ok";
     }
 
-    /// <summary>
-    /// Apply batching is governed by the finalized COPY payload, never by how many
-    /// compose-memory fragments produced it. File workers deliberately close small
-    /// fragments under high fan-out; using their count here reintroduces per-file-ish
-    /// transactions and indexed probes into the shared generic apply lane.
-    /// </summary>
-    internal static bool ShouldFlushWorkingSet(
-        long bufferedBytes, long byteCap) =>
+    internal static bool ShouldFlushWorkingSet(long bufferedBytes, long byteCap) =>
         bufferedBytes >= byteCap;
 
-    /// <summary>
-    /// A working-set apply is owned by one witness vendor. Composite decomposers may
-    /// emit several vendors, but the runner must close the ordered prefix before the
-    /// source changes so replay and source eviction retain an unambiguous owner.
-    /// </summary>
     internal static bool ShouldFlushWorkingSetSourceBoundary(
         Hash128? bufferedSource, Hash128 nextSource) =>
         bufferedSource is { } source && source != nextSource;
 
-    /// <summary>
-    /// The operator-facing reason a run derived <c>failed</c>, written into
-    /// <c>ingest_run_journal.error</c>. Without it the ledger says a run failed and nothing
-    /// about why: the document lane recorded <c>failed, files_done=199/207, units_failed=0,
-    /// error=NULL</c> twice on 2026-08-10, and the row was the only surviving artifact.
-    /// </summary>
     internal static string? DescribeRunFailure(long unitsFailed, int filesDone, long filesTotal)
     {
         if (unitsFailed > 0)
@@ -803,21 +613,6 @@ public sealed class IngestRunner
         return null;
     }
 
-    /// <summary>
-    /// Names any relation crowding the consensus DEFAULT partition, at the end of every run.
-    ///
-    /// WHY THIS IS A RUN-TIME REPORT AND NOT A CI GATE: the hot roster is a judgement about
-    /// TRAFFIC, and traffic only exists on a populated database. CI can and does recreate
-    /// laplace empty, so a fixture-backed gate would pass while the real box degrades. The
-    /// ingest that generates the traffic is the only thing that reliably knows — so it is the
-    /// thing that reports. MEASURED cost of not doing this: Tatoeba's HAS_EXTERNAL_ID and
-    /// IS_TRANSLATION_OF reached 69% of consensus_rdefault (5.2 GB, one heap, one btree)
-    /// before anyone noticed, and the only symptom was an ingest getting slower.
-    ///
-    /// It warns, it does not throw: a layout problem must not fail an otherwise-clean
-    /// multi-hour ingest whose rows are all correctly recorded. Promotion is a manifest
-    /// edit plus a codegen run — the partition seed adopts it in place, no reseed.
-    /// </summary>
     private async Task ReportPartitionPressureAsync(ILogger log, CancellationToken ct)
     {
         IReadOnlyList<PartitionPressure> pressure;
@@ -827,7 +622,7 @@ public sealed class IngestRunner
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return;  // a diagnostic must never be the reason a finished run reports failure
+            return;
         }
 
         foreach (var p in pressure)
@@ -934,9 +729,6 @@ public sealed class IngestRunner
         CancellationToken ct)
     {
         if (batch.Count == 0) return;
-
-
-
 
         int unitCount = 0;
         foreach (var c in batch) if (c.CountsAsUnit) unitCount++;
@@ -1098,7 +890,9 @@ public sealed class IngestRunner
     }
 
     private static IngestArtifactGraph? LoadArtifactGraph(
-        string ecosystemPath, bool required)
+        string ecosystemPath,
+        bool required,
+        bool allowAmbientManifest)
     {
         if (!Directory.Exists(ecosystemPath))
         {
@@ -1108,7 +902,7 @@ public sealed class IngestRunner
             return null;
         }
         string manifestPath = Path.Combine(ecosystemPath, "MANIFEST.tsv");
-        if (File.Exists(manifestPath))
+        if (File.Exists(manifestPath) && (required || allowAmbientManifest))
             return IngestArtifactGraph.Load(ecosystemPath);
         if (required)
             throw new FileNotFoundException(
@@ -1159,10 +953,6 @@ public sealed class IngestRunner
     {
         string unit = intent.Metadata.SourceContentUnitName;
 
-        // Per-file failure marker (file-failure isolation): the file's read/parse/compose
-        // threw but the rest of the run continued. Count it as a failed unit WITH its
-        // reason — it blocks the completion marker and drives run status to 'failed';
-        // the file itself has no per-file marker, so a re-run retries exactly it.
         const string fileFailed = IngestBatchPipeline.FileFailedUnitPrefix;
         if (unit.StartsWith(fileFailed, StringComparison.Ordinal))
         {
@@ -1215,8 +1005,6 @@ public sealed class IngestRunner
         }
         if (unit.StartsWith("layer-complete/", StringComparison.Ordinal)) return;
 
-        // Operational boundary/marker entities above are runner scaffolding, not source
-        // admission. Only the decomposer's semantic payload feeds the identity metric.
         c.EntityAdmission.Observe(intent);
         long consumed = intent.Metadata.InputUnitsConsumed;
         if (consumed > 0 && intent.CountsAsUnit)
@@ -1289,13 +1077,6 @@ public sealed class IngestRunner
         public long BootstrapAttestationsInserted => Interlocked.Read(ref _bootstrapAttestationsInserted);
     }
 
-    /// <summary>
-    /// Decomposer initialization historically wrote through the raw writer before run
-    /// counters existed. That made source totals exclude vocabulary/bootstrap rows and
-    /// let their entity admission bypass the terminal gate. This wrapper is deliberately
-    /// scoped to <see cref="IDecomposer.InitializeAsync"/>; streamed changes continue
-    /// through the runner's normal batching and accounting path.
-    /// </summary>
     private sealed class InitializationAccountingWriter(
         ISubstrateWriter inner,
         RunCounters counters) : ISubstrateWriter

@@ -1,40 +1,26 @@
 name: Seed — documents
 
-# Document ingestion as its own first-class phase (previously shoehorned into the
-# generic ingest dropdown). Text rides the codepoint ladder via IngestDocumentAsync.
-# The <path> is single-file capable (IngestInput.ResolveFiles) — point it at one
-# file to validate in seconds, or a directory / corpus root for a full run.
-# Blank <path> falls back to the DATA_ROOT/test-data/text default. Delegates to
-# _ingest.yml; document carries a decomposer-gates.json entry (skip_layer_complete,
-# no consensus gates) so the gate is a lenient presence check.
+# Direct/plain document ingestion. The operator-selected path is the content inventory;
+# dataset-estate MANIFEST.tsv files in a parent or shared folder must not replace that
+# inventory. Project Gutenberg moved out of test-data on 2026-09-03, so the workflow's
+# named corpus choices follow the current physical estate rather than the retired layout.
 
 on:
   workflow_dispatch:
     inputs:
       corpus:
-        # A dropdown of what is actually on the runner, because the corpus is
-        # static (same names on re-download). GitHub requires choice options to
-        # be literal YAML — they cannot be enumerated from disk at dispatch
-        # time — so this list is maintained against /vault/Data and `path`
-        # below stays as the escape hatch for anything not listed.
-        # A book is a book. Britannica, Sherlock Holmes, a chess manual and a
-        # radio handbook are the same kind of content differing only in topic,
-        # so the default is ALL of them in one path — DocumentDecomposer
-        # recurses with a *.txt filter, so one root covers every subject
-        # folder. The subsets below exist for topic-targeted work, not because
-        # the lane treats them differently.
-        description: "which corpus to ingest"
+        description: "which document collection to ingest"
         type: choice
         required: true
-        default: all-books
+        default: project-gutenberg
         options:
-          - all-books         # DATA_ROOT/test-data — every .txt, all subjects (209 files, ~212 MB)
-          - literature-etc    # test-data/text only — Britannica, literature, science, chess books (201)
-          - electronics       # test-data/electronics only — ham radio, morse, wireless (8)
-          - smoke-alice       # one book. Validates the lane in seconds.
-          - path-override     # use the `path` input below
+          - project-gutenberg # ProjectGutenberg/text — 195-file curated mini-collection
+          - fixtures          # test-data/text — non-Gutenberg text fixtures only
+          - electronics       # test-data/electronics — ham radio, morse, wireless
+          - smoke-alice       # one Gutenberg book; validates the lane in seconds
+          - path-override     # use the explicit `path` input
       path:
-        description: "explicit <path>, used only when corpus = path-override (single file, dir, or corpus root)"
+        description: "explicit path; when non-empty it wins over the corpus choice (single file, dir, or corpus root)"
         type: string
         default: ""
       database:
@@ -51,11 +37,6 @@ permissions:
   contents: read
 
 jobs:
-  # Resolve the dropdown to a path. A reusable workflow's `with:` cannot hold a
-  # multi-line expression, so the mapping lives in a job whose output feeds it.
-  # DATA_ROOT is the runner's LAPLACE_DATA_ROOT (default /vault/Data), matching
-  # scripts/ingest-source.sh:8 — kept in one place here rather than repeated per
-  # option.
   resolve:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 2
@@ -65,26 +46,8 @@ jobs:
       - id: pick
         run: |
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
-
-          # An explicit path WINS over the corpus dropdown, and says so.
-          #
-          # This block used to read `path` only under corpus=path-override, so
-          # setting a path while leaving corpus at its default `all-books`
-          # SILENTLY ingested $root/test-data instead. MEASURED 2026-08-10: a run
-          # aimed at /vault/Data/ProjectGutenberg/Pierre-Simon-Laplace/
-          # gutenberg.org/58881 ingested `path='/vault/Data/test-data'` -- 209
-          # unrelated files -- with no notice, no warning and no error. The
-          # operator only found out by reading the corpus that came back.
-          #
-          # seed-code.yml already had the correct precedence (its resolve step:
-          # non-empty path wins, existence-checked, `::notice::` emitted). Two
-          # sibling workflows with the same two inputs disagreed on which one
-          # wins, and the one that discarded input was the silent one.
-          #
-          # Least surprise: if you typed a path, you meant it. An unusable path
-          # is an error, never a fallback to a default corpus -- silently
-          # ingesting the wrong 209 files is worse than failing.
           user_path="${{ inputs.path }}"
+
           if [ -n "$user_path" ]; then
             if [ ! -e "$user_path" ]; then
               echo "::error::path '$user_path' does not exist on this runner"; exit 1
@@ -98,11 +61,11 @@ jobs:
           fi
 
           case "${{ inputs.corpus }}" in
-            all-books)      p="$root/test-data" ;;
-            literature-etc) p="$root/test-data/text" ;;
-            electronics)    p="$root/test-data/electronics" ;;
-            smoke-alice)    p="$root/test-data/text/alice.txt" ;;
-            path-override)  p="${{ inputs.path }}" ;;
+            project-gutenberg) p="$root/ProjectGutenberg/text" ;;
+            fixtures)          p="$root/test-data/text" ;;
+            electronics)       p="$root/test-data/electronics" ;;
+            smoke-alice)       p="$root/ProjectGutenberg/text/alice.txt" ;;
+            path-override)     p="" ;;
             *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
           esac
           if [ -z "$p" ]; then
