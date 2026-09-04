@@ -33,225 +33,553 @@
       "layer": 0,
       "prerequisites": [],
       "consensus_gates": [
-        { "relation": "HAS_SCRIPT", "min": 1 },
-        { "relation": "DECODES_TO", "min": 1 },
-        { "relation": "CONFUSABLE_WITH", "min": 1 }
+        {
+          "relation": "HAS_SCRIPT",
+          "min": 1
+        },
+        {
+          "relation": "DECODES_TO",
+          "min": 1
+        },
+        {
+          "relation": "CONFUSABLE_WITH",
+          "min": 1
+        }
       ]
     },
     "iso639": {
       "decomposer": "ISO639Decomposer",
       "layer": 1,
-      "prerequisites": ["unicode"],
+      "prerequisites": [
+        "unicode"
+      ],
       "consensus_gates": [
         {
           "relation": "HAS_ISO639_2_CODE",
           "min": 1,
           "fallback": "source_evidence",
-          "fallback_relations": ["HAS_ISO639_1_CODE", "HAS_ISO639_2_CODE", "HAS_ISO639_3_CODE"],
+          "fallback_relations": [
+            "HAS_ISO639_1_CODE",
+            "HAS_ISO639_2_CODE",
+            "HAS_ISO639_3_CODE"
+          ],
           "fallback_min": 1
         },
-        { "relation": "USES_SCRIPT", "min": 1 }
+        {
+          "relation": "USES_SCRIPT",
+          "min": 1
+        }
       ]
     },
     "cili": {
       "decomposer": "CILIDecomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
+      "prerequisites": [
+        "iso639"
+      ],
       "consensus_gates": [
-        { "relation": "HAS_DEFINITION", "min": 1 },
-        { "relation": "IS_TYPED_AS", "min": 1 }
+        {
+          "relation": "HAS_DEFINITION",
+          "min": 1
+        },
+        {
+          "relation": "IS_TYPED_AS",
+          "min": 1
+        }
       ]
     },
     "document": {
       "decomposer": "DocumentDecomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
+      "prerequisites": [
+        "iso639"
+      ],
       "consensus_gates": [
-        { "relation": "CONTAINS", "min": 1, "constant_rating_ok": "structural file-to-document containment" }
+        {
+          "relation": "CONTAINS",
+          "min": 1,
+          "constant_rating_ok": "structural file-to-document containment -- the edge is membership, not a ranked claim"
+        }
       ]
     },
     "wordnet": {
       "decomposer": "WordNetDecomposer",
       "layer": 2,
-      "prerequisites": ["cili"],
+      "prerequisites": [
+        "cili"
+      ],
       "consensus_gates": [
-        { "relation": "IS_A", "min": 50000 },
-        { "relation": "HAS_DOMAIN_TOPIC", "min": 1 },
-        { "relation": "HAS_VERB_FRAME", "min": 1 }
+        {
+          "relation": "IS_A",
+          "min": 50000
+        },
+        {
+          "relation": "HAS_DOMAIN_TOPIC",
+          "min": 1
+        },
+        {
+          "relation": "HAS_VERB_FRAME",
+          "min": 1
+        }
       ]
     },
     "omw": {
       "decomposer": "OMWDecomposer",
       "layer": 3,
-      "prerequisites": ["wordnet"],
-      "consensus_gates": [ { "relation": "HAS_LANGUAGE", "min": 1 } ]
+      "prerequisites": [
+        "wordnet"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "HAS_LANGUAGE",
+          "min": 1
+        }
+      ]
     },
     "verbnet": {
       "decomposer": "VerbNetDecomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
+      "prerequisites": [
+        "iso639"
+      ],
       "consensus_gates": [
-        { "relation": "HAS_THEMATIC_ROLE", "min": 500 },
-        { "relation": "HAS_VERB_FRAME", "min": 1000 }
+        {
+          "relation": "HAS_THEMATIC_ROLE",
+          "min": 500
+        },
+        {
+          "relation": "HAS_VERB_FRAME",
+          "min": 1000
+        }
       ]
     },
     "propbank": {
       "decomposer": "PropBankDecomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
+      "prerequisites": [
+        "iso639"
+      ],
       "consensus_gates": [
-        { "relation": "HAS_SEMANTIC_ROLE", "min": 10000 },
-        { "relation": "HAS_SENSE", "min": 5000 }
+        {
+          "relation": "HAS_SEMANTIC_ROLE",
+          "min": 10000
+        },
+        {
+          "relation": "HAS_SENSE",
+          "min": 5000
+        }
       ]
     },
     "framenet": {
       "decomposer": "FrameNetDecomposer",
       "layer": 3,
-      "prerequisites": ["wordnet"],
+      "prerequisites": [
+        "wordnet"
+      ],
       "consensus_gates": [
-        { "relation": "EVOKES_FRAME", "min": 5000 },
-        { "relation": "HAS_FRAME_ELEMENT", "min": 5000 }
+        {
+          "relation": "EVOKES_FRAME",
+          "min": 5000
+        },
+        {
+          "relation": "HAS_FRAME_ELEMENT",
+          "min": 5000
+        }
       ]
     },
     "mapnet": {
       "decomposer": "MapNetDecomposer",
-      "layer": 4,
-      "prerequisites": ["framenet"],
-      "consensus_gates": [ { "relation": "CORRESPONDS_TO", "min": 1000 } ]
+      "layer": 3,
+      "prerequisites": [
+        "wordnet",
+        "framenet"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "CORRESPONDS_TO",
+          "min": 1000
+        }
+      ]
     },
     "wordframenet": {
       "decomposer": "WordFrameNetDecomposer",
-      "layer": 4,
-      "prerequisites": ["framenet"],
-      "consensus_gates": [ { "relation": "EVOKES_FRAME", "min": 1000 } ]
+      "layer": 3,
+      "prerequisites": [
+        "wordnet",
+        "framenet"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "CORRESPONDS_TO",
+          "min": 1000
+        }
+      ]
     },
     "semlink": {
       "decomposer": "SemLinkDecomposer",
-      "layer": 4,
-      "prerequisites": ["verbnet", "propbank", "framenet"],
-      "consensus_gates": [ { "relation": "CORRESPONDS_TO", "min": 1000 } ]
+      "layer": 3,
+      "prerequisites": [
+        "wordnet",
+        "verbnet",
+        "propbank",
+        "framenet"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "CORRESPONDS_TO",
+          "min": 10000
+        }
+      ]
     },
     "conceptnet": {
       "decomposer": "ConceptNetDecomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
+      "prerequisites": [
+        "iso639"
+      ],
       "consensus_gates": [
-        { "relation": "IS_A", "min": 1000 },
-        { "relation": "IS_RELATED_TO", "min": 1000 }
+        {
+          "relation": "CAPABLE_OF",
+          "min": 1
+        },
+        {
+          "relation": "RELATED_TO",
+          "min": 1
+        }
       ]
     },
     "atomic2020": {
       "decomposer": "Atomic2020Decomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
-      "consensus_gates": [ { "relation": "CAUSES", "min": 1000 } ]
+      "prerequisites": [
+        "iso639"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "X_INTENT",
+          "min": 1
+        },
+        {
+          "relation": "OBSTRUCTED_BY",
+          "min": 1
+        }
+      ]
     },
     "ud": {
       "decomposer": "UDDecomposer",
       "layer": 2,
-      "prerequisites": ["iso639"],
+      "prerequisites": [
+        "iso639"
+      ],
       "consensus_gates": [
-        { "relation": "DEPENDS_ON", "min": 1000, "family": true },
-        { "relation": "HAS_FEATURE", "min": 1000, "family": true }
+        {
+          "relation": "HAS_PARSE",
+          "min": 100000,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "HAS_LANGUAGE",
+          "min": 100000,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "DEPENDS_ON",
+          "max": 0,
+          "family": true
+        }
       ]
     },
     "wiktionary": {
       "decomposer": "WiktionaryDecomposer",
-      "layer": 3,
-      "prerequisites": ["iso639"],
+      "layer": 2,
+      "prerequisites": [
+        "iso639"
+      ],
       "consensus_gates": [
-        { "relation": "HAS_DEFINITION", "min": 1000 },
-        { "relation": "HAS_LANGUAGE", "min": 1000 }
+        {
+          "relation": "HAS_DEFINITION",
+          "min": 100000
+        },
+        {
+          "relation": "IS_COORDINATE_TERM_WITH",
+          "min": 1
+        },
+        {
+          "relation": "HAS_USAGE_REGISTER",
+          "min": 1
+        }
       ]
     },
     "tatoeba": {
       "decomposer": "TatoebaDecomposer",
-      "layer": 3,
-      "prerequisites": ["iso639"],
-      "consensus_gates": [ { "relation": "IS_TRANSLATION_OF", "min": 1000 } ]
+      "layer": 2,
+      "prerequisites": [
+        "iso639"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "IS_TRANSLATION_OF",
+          "min": 100000
+        }
+      ]
     },
     "opensubtitles": {
       "decomposer": "OpenSubtitlesDecomposer",
-      "layer": 3,
-      "prerequisites": ["iso639"],
-      "consensus_gates": [ { "relation": "IS_TRANSLATION_OF", "min": 1000 } ]
+      "layer": 2,
+      "prerequisites": [
+        "iso639"
+      ],
+      "consensus_gates": [
+        {
+          "relation": "IS_TRANSLATION_OF",
+          "min": 1000000
+        }
+      ]
     },
     "chess": {
       "decomposer": "ChessPgn",
-      "layer": 5,
+      "layer": 20,
       "prerequisites": [],
       "skip_layer_complete": true,
-      "consensus_gates": []
+      "consensus_gates": [
+        {
+          "relation": "PLAYS_LINE",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "HAS_WHITE",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "HAS_BLACK",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "HAS_RESULT",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "OUTCOME",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "MOVE",
+          "max": 0,
+          "scope": "source_evidence"
+        }
+      ]
     },
     "chess-analyze": {
       "decomposer": "ChessAnalysis",
-      "layer": 6,
-      "prerequisites": ["chess"],
-      "skip_layer_complete": true,
-      "consensus_gates": []
-    },
-    "chess-trajectory": {
-      "decomposer": "ChessTrajectory",
-      "layer": 6,
-      "prerequisites": ["chess"],
-      "marker_entities": "ChessTrajectoryMarker",
-      "consensus_gates": []
-    },
-    "chess-transitions": {
-      "decomposer": "ChessTransitions",
-      "layer": 6,
-      "prerequisites": ["chess"],
-      "skip_layer_complete": true,
-      "consensus_gates": []
-    },
-    "chess-move-outcomes": {
-      "decomposer": "ChessMoveOutcomes",
-      "layer": 6,
-      "prerequisites": ["chess"],
-      "skip_layer_complete": true,
-      "consensus_gates": []
-    },
-    "chess-position-outcomes": {
-      "decomposer": "ChessPositionOutcomes",
-      "layer": 6,
-      "prerequisites": ["chess"],
-      "skip_layer_complete": true,
-      "consensus_gates": []
-    },
-    "chess-eval": {
-      "decomposer": "ChessStockfish",
-      "layer": 6,
-      "prerequisites": ["chess"],
-      "skip_layer_complete": true,
-      "consensus_gates": []
-    },
-    "chess-syzygy": {
-      "decomposer": "ChessSyzygy",
-      "layer": 6,
-      "prerequisites": [],
-      "skip_layer_complete": true,
-      "consensus_gates": []
-    },
-    "chess-opening-match": {
-      "decomposer": "ChessOpeningMatch",
-      "layer": 6,
-      "prerequisites": ["chess", "openings"],
-      "skip_layer_complete": true,
-      "consensus_gates": []
+      "layer": 21,
+      "prerequisites": [
+        "chess"
+      ],
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "ANALYZED_AT",
+          "min": 1,
+          "scope": "source_evidence",
+          "constant_rating_ok": "provenance timestamp, not a claim about the world -- nothing to rank"
+        },
+        {
+          "relation": "MOVE",
+          "max": 0,
+          "scope": "source_evidence"
+        }
+      ]
     },
     "openings": {
       "decomposer": "ChessOpenings",
-      "layer": 5,
+      "layer": 20,
       "prerequisites": [],
       "skip_layer_complete": true,
-      "consensus_gates": []
+      "consensus_gates": [
+        {
+          "relation": "OPENING_NAME",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "HAS_ECO",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "MOVE",
+          "max": 0,
+          "scope": "source_evidence"
+        }
+      ]
     },
     "chess-books": {
       "decomposer": "ChessBook",
-      "layer": 6,
+      "layer": 20,
       "prerequisites": [],
       "skip_layer_complete": true,
-      "consensus_gates": []
+      "consensus_gates": [
+        {
+          "relation": "EXPLAINS",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "MOVE",
+          "max": 0,
+          "scope": "source_evidence"
+        }
+      ]
+    },
+    "chess-eval": {
+      "decomposer": "ChessStockfish",
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": [
+        {
+          "relation": "MOVE_QUALITY",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "ANALYZED_AT",
+          "min": 1,
+          "scope": "source_evidence",
+          "constant_rating_ok": "provenance timestamp, not a claim about the world -- nothing to rank"
+        }
+      ]
+    },
+    "chess-move-outcomes": {
+      "decomposer": "ChessMoveOutcomes",
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "OUTCOME",
+          "min": 1,
+          "scope": "source_evidence"
+        }
+      ]
+    },
+    "chess-transitions": {
+      "decomposer": "ChessTransitions",
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "MOVE",
+          "min": 1,
+          "scope": "source_evidence"
+        }
+      ]
+    },
+    "code": {
+      "decomposer": "CodeDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "repo": {
+      "decomposer": "RepoDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "stack": {
+      "decomposer": "StackDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "tiny-codes": {
+      "decomposer": "TinyCodesDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "tabular": {
+      "decomposer": "TabularDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "chess-syzygy": {
+      "decomposer": "ChessSyzygy",
+      "layer": 23,
+      "prerequisites": [],
+      "skip_layer_complete": true,
+      "consensus_gates": [
+        {
+          "relation": "HAS_WDL",
+          "min": 1,
+          "scope": "source_evidence",
+          "constant_rating_ok": "exact tablebase result -- the object IS the value (win/draw/loss); a syzygy probe ships no confidence to rate"
+        },
+        {
+          "relation": "HAS_DTZ",
+          "min": 1,
+          "scope": "source_evidence",
+          "constant_rating_ok": "exact tablebase distance -- the object IS the value; a syzygy probe ships no confidence to rate"
+        }
+      ]
+    },
+    "chess-trajectory": {
+      "decomposer": "ChessTrajectory",
+      "layer": 21,
+      "prerequisites": [
+        "chess"
+      ],
+      "consensus_gates": [],
+      "marker_entities": "Chess_AnalysisMarker"
+    },
+    "chess-opening-match": {
+      "decomposer": "ChessOpeningMatch",
+      "layer": 21,
+      "prerequisites": [
+        "openings",
+        "chess"
+      ],
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "GAME_HAS_OPENING",
+          "min": 1,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "GAME_HAS_ECO",
+          "min": 1,
+          "scope": "source_evidence"
+        }
+      ]
+    },
+    "agents": {
+      "decomposer": "AgentTraceDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
     }
   }
 }
