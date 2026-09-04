@@ -24,42 +24,47 @@ BEGIN ATOMIC
     WITH frontier AS MATERIALIZED (
         SELECT s.subject_id, s.frontier_ord
         FROM unnest(p_subjects) WITH ORDINALITY AS s(subject_id, frontier_ord)
+   WHERE GREATEST(p_limit, 0) > 0
+    ), edges AS MATERIALIZED (
+   SELECT f.frontier_ord, f.subject_id AS frontier_id,
+     x.object_id AS nbr, x.type_id,
+     x.rating, x.rd, x.witness_count, true AS outbound
+   FROM laplace.consensus x
+   JOIN frontier f ON f.subject_id = x.subject_id
+   WHERE x.subject_id = ANY (p_subjects)
+     AND x.object_id IS NOT NULL
+     AND x.object_id <> x.subject_id
+
+   UNION ALL
+
+   SELECT f.frontier_ord, f.subject_id,
+     x.subject_id, x.type_id,
+     x.rating, x.rd, x.witness_count, false
+   FROM laplace.consensus x
+   JOIN frontier f ON f.subject_id = x.object_id
+   WHERE x.object_id = ANY (p_subjects)
+     AND x.subject_id <> x.object_id
+    ), deduped AS MATERIALIZED (
+   SELECT DISTINCT ON (e.frontier_ord, e.nbr)
+     e.frontier_ord, e.frontier_id, e.nbr, e.type_id,
+     e.rating, e.rd, e.witness_count, e.outbound
+   FROM edges e
+   ORDER BY e.frontier_ord, e.nbr,
+       consensus.eff_mu(e.rating, e.rd) DESC,
+       e.type_id, e.outbound DESC
+    ), ranked AS (
+   SELECT d.*,
+     row_number() OVER (
+         PARTITION BY d.frontier_ord
+         ORDER BY consensus.eff_mu(d.rating, d.rd) DESC,
+        d.nbr, d.type_id, d.outbound DESC) AS rn
+   FROM deduped d
     )
-    SELECT f.subject_id AS frontier_id,
-           e.nbr, e.type_id, e.rating, e.rd, e.witness_count, e.outbound
-    FROM frontier f
-    CROSS JOIN LATERAL (
-        SELECT d.nbr, d.type_id, d.rating, d.rd, d.witness_count, d.outbound
-        FROM (
-          SELECT DISTINCT ON (c.nbr)
-                 c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
-          FROM (
-            SELECT x.object_id AS nbr, x.type_id,
-                   x.rating, x.rd, x.witness_count, true AS outbound
-            FROM laplace.consensus x
-            WHERE x.subject_id = f.subject_id
-              AND x.object_id IS NOT NULL
-              AND x.object_id <> f.subject_id
-
-            UNION ALL
-
-            SELECT x.subject_id, x.type_id,
-                   x.rating, x.rd, x.witness_count, false
-            FROM laplace.consensus x
-            WHERE x.object_id = f.subject_id
-              -- The outbound arm already emits a self-edge.  Suppressing its
-              -- inbound mirror preserves edges_raw(..., 'both') semantics.
-              AND x.subject_id <> f.subject_id
-          ) c
-          ORDER BY c.nbr, consensus.eff_mu(c.rating, c.rd) DESC,
-                   c.type_id, c.outbound DESC
-        ) d
-        ORDER BY consensus.eff_mu(d.rating, d.rd) DESC, d.nbr, d.type_id,
-                 d.outbound DESC
-        LIMIT GREATEST(p_limit, 0)
-    ) e
-    ORDER BY f.frontier_ord, consensus.eff_mu(e.rating, e.rd) DESC,
-             e.nbr, e.type_id, e.outbound DESC;
+    SELECT r.frontier_id, r.nbr, r.type_id, r.rating, r.rd,
+      r.witness_count, r.outbound
+    FROM ranked r
+    WHERE r.rn <= GREATEST(p_limit, 0)
+    ORDER BY r.frontier_ord, r.rn;
 END;
 
 -- Masked frontier probe.  p_types is the governed relation set obtained from

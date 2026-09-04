@@ -34,7 +34,15 @@ public sealed record ChessLabBoardEvent(
 public sealed record ChessLabTableEvent(
     string Title,
     IReadOnlyList<string> Columns,
-    IReadOnlyList<IReadOnlyList<string>> Rows) : ChessLabEvent;
+    IReadOnlyList<IReadOnlyList<string>> Rows,
+    ChessLabTableAction? Action = null) : ChessLabEvent;
+
+/// <summary>A deterministic action derived from one table cell, rendered as a button.</summary>
+public sealed record ChessLabTableAction(
+    string Label,
+    string Kind,
+    string ConfigKey,
+    int ValueColumn);
 
 public sealed record ChessLabDoneEvent(ChessLabJobState FinalState, string? Message = null) : ChessLabEvent;
 

@@ -6,13 +6,14 @@ export interface SegmentedControlProps {
   value: string;
   onValueChange: (value: string) => void;
   options: readonly string[];
+  optionLabels?: Readonly<Record<string, string>>;
   label: string;
   disabled?: boolean;
   className?: string;
 }
 
 export const SegmentedControl = forwardRef<HTMLDivElement, SegmentedControlProps>(
-  function SegmentedControl({ value, onValueChange, options, label, disabled, className }, ref) {
+  function SegmentedControl({ value, onValueChange, options, optionLabels, label, disabled, className }, ref) {
     return (
       <div
         ref={ref}
@@ -23,7 +24,7 @@ export const SegmentedControl = forwardRef<HTMLDivElement, SegmentedControlProps
         {options.map((option) => (
           <SegmentedOption
             key={option}
-            option={option}
+            display={optionLabels?.[option] ?? option}
             selected={value === option}
             disabled={disabled}
             onSelect={() => onValueChange(option)}
@@ -35,12 +36,12 @@ export const SegmentedControl = forwardRef<HTMLDivElement, SegmentedControlProps
 );
 
 function SegmentedOption({
-  option,
+  display,
   selected,
   disabled,
   onSelect,
 }: {
-  option: string;
+  display: string;
   selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -54,7 +55,7 @@ function SegmentedOption({
       className={cn(styles.option, selected && styles.selected)}
       onClick={onSelect}
     >
-      {option}
+      {display}
     </button>
   );
 }

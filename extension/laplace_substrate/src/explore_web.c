@@ -131,7 +131,7 @@ frontier_relation_types(SPIPlanPtr mask_plan, ArrayType *frontier_array,
 		HeapTuple	tup = SPI_tuptable->vals[r];
 		TupleDesc	td = SPI_tuptable->tupdesc;
 		bool		isnull;
-		Datum		d = SPI_getbinval(tup, td, 1, &isnull);
+		Datum		d = SPI_getbinval(tup, td, 2, &isnull);
 		bytea	   *mask;
 		laplace_mask256_t one;
 
@@ -190,8 +190,10 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	hash128_t  *next_frontier;
 	int			n_front = 0;
 	int			n_seen = 0;
-	SPIPlanPtr	full_plan;
 	SPIPlanPtr	masked_plan;
+	const char *full_query =
+		"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
+		"FROM consensus.explore_web_neighbors($1, $2)";
 	SPIPlanPtr	mask_plan;
 	EdgeCand   *cands;
 	Datum	   *frontier_datums;
@@ -249,16 +251,6 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		elog(ERROR, "explore_web: SPI_connect failed");
 
 	{
-		Oid			pargs[2] = {BYTEAARRAYOID, INT4OID};
-
-		full_plan = SPI_prepare_cursor(
-			"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
-			"FROM consensus.explore_web_neighbors($1, $2)",
-			2, pargs, CURSOR_OPT_PARALLEL_OK);
-		if (full_plan == NULL)
-			elog(ERROR, "explore_web: full neighbor SPI_prepare failed");
-	}
-	{
 		Oid			pargs[3] = {BYTEAARRAYOID, BYTEAARRAYOID, INT4OID};
 
 		masked_plan = SPI_prepare_cursor(
@@ -272,7 +264,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		Oid			pargs[1] = {BYTEAARRAYOID};
 
 		mask_plan = SPI_prepare_cursor(
-			"SELECT e.highway_mask FROM laplace.entities e "
+			"SELECT DISTINCT e.id, e.highway_mask FROM laplace.entities e "
 			"WHERE e.id = ANY($1) AND e.highway_mask IS NOT NULL",
 			1, pargs, CURSOR_OPT_PARALLEL_OK);
 		if (mask_plan == NULL)
@@ -360,8 +352,11 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		}
 		else
 		{
+			Oid argtypes[2] = {BYTEAARRAYOID, INT4OID};
+
 			args[1] = Int32GetDatum(probe_limit);
-			rc = SPI_execute_plan(full_plan, args, NULL, true, 0);
+			rc = SPI_execute_with_args(full_query, 2, argtypes, args,
+									   NULL, true, 0);
 		}
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "explore_web: frontier probe failed: %s",
@@ -502,7 +497,6 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 
 	SPI_freeplan(mask_plan);
 	SPI_freeplan(masked_plan);
-	SPI_freeplan(full_plan);
 	laplace_spi_finish(spi_top);
 	return (Datum) 0;
 }

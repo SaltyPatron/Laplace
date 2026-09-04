@@ -11,26 +11,25 @@ namespace Laplace.Chess.Service;
 /// belong to the published player estate; profile HTML is enrichment for a selected
 /// identity, not the authority for discovering whether the identity exists.
 ///
-/// FIDE publishes XML, and XML is already a registered Laplace grammar. The native
-/// grammar decomposer therefore owns structural parsing; this class only frames the
-/// provider's repeated player records into bounded grammar batches and projects FIDE's
-/// named fields from each resulting element AST.
+/// Native code owns the deterministic projection from the provider's repeated XML
+/// records. This class streams the compressed estate, bounds batches, and maps those
+/// projected byte spans into the chess domain.
 /// </summary>
 internal static class FideRatingList
 {
     internal const string XmlArchiveUrl = "https://ratings.fide.com/download/players_list_xml.zip";
     private const long MaxArchiveBytes = 128L * 1024 * 1024;
     private const long MaxXmlBytes = 1024L * 1024 * 1024;
-    private const int MaxPlayersPerGrammarBatch = 4096;
-    private const int MaxGrammarBatchBytes = 16 * 1024 * 1024;
+    // The published estate currently contains well over a million compact records.
+    // Keep both dimensions bounded while amortizing native projection calls.
+    private const int MaxPlayersPerGrammarBatch = 32 * 1024;
+    private const int MaxGrammarBatchBytes = 32 * 1024 * 1024;
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromHours(6);
     private static readonly SemaphoreSlim EstateGate = new(1, 1);
     private static readonly HttpClient Http = CreateClient();
 
     private static ReadOnlySpan<byte> PlayerOpenTag => "<player>"u8;
     private static ReadOnlySpan<byte> PlayerCloseTag => "</player>"u8;
-    private static ReadOnlySpan<byte> BatchRootOpen => "<playerslist>"u8;
-    private static ReadOnlySpan<byte> BatchRootClose => "</playerslist>"u8;
 
     private static Player[]? _players;
     private static DateTimeOffset _playersFetchedAt;
@@ -61,8 +60,6 @@ internal static class FideRatingList
         public string Flag = "";
     }
 
-    private readonly record struct ElementFrame(uint EndByte, string Name, PlayerBuilder? Player);
-
     public static async Task<IReadOnlyList<FidePlayerCandidate>> SearchAsync(
         string query, int limit, CancellationToken ct)
     {
@@ -91,11 +88,23 @@ internal static class FideRatingList
             ct).ConfigureAwait(false);
     }
 
+    public static async Task<FidePlayerCandidate> FindByIdAsync(
+        string fideId, CancellationToken ct)
+    {
+        fideId = fideId.Trim();
+        if (fideId.Length is < 4 or > 12 || !fideId.All(char.IsDigit))
+            throw new ArgumentException("FIDE identifier must contain 4 to 12 digits.", nameof(fideId));
+        var players = await GetPlayersAsync(ct).ConfigureAwait(false);
+        var player = players.FirstOrDefault(p => p.FideId.Equals(fideId, StringComparison.Ordinal));
+        return player is null
+            ? throw new KeyNotFoundException($"FIDE id {fideId} is absent from the official rating list.")
+            : ToCandidate(player);
+    }
+
     internal static IReadOnlyList<FidePlayerCandidate> SearchXml(
         Stream xml, string query, int limit, CancellationToken ct = default)
     {
-        byte[] bytes = ReadBounded(xml, MaxXmlBytes, "FIDE XML player list", ct);
-        var players = ParsePlayers(bytes, ct);
+        var players = ParsePlayers(xml, MaxXmlBytes, ct);
         return SearchPlayers(
             players,
             PlayerAlias.Canonical(query.Trim()),
@@ -106,15 +115,14 @@ internal static class FideRatingList
     internal static IReadOnlyList<FidePlayerCandidate> TopXml(
         Stream xml, string cohort, int limit, int currentYear, CancellationToken ct = default)
     {
-        byte[] bytes = ReadBounded(xml, MaxXmlBytes, "FIDE XML player list", ct);
-        var players = ParsePlayers(bytes, ct);
+        var players = ParsePlayers(xml, MaxXmlBytes, ct);
         return TopPlayers(players, cohort.Trim().ToLowerInvariant(), limit, currentYear, ct);
     }
 
     internal static IReadOnlyList<FidePlayerCandidate> SearchArchive(
         byte[] archive, string query, int limit, CancellationToken ct = default)
     {
-        var players = ParsePlayers(ExtractXml(archive, ct), ct);
+        var players = ParseArchive(archive, ct);
         return SearchPlayers(
             players,
             PlayerAlias.Canonical(query.Trim()),
@@ -125,7 +133,7 @@ internal static class FideRatingList
     internal static IReadOnlyList<FidePlayerCandidate> TopArchive(
         byte[] archive, string cohort, int limit, int currentYear, CancellationToken ct = default)
     {
-        var players = ParsePlayers(ExtractXml(archive, ct), ct);
+        var players = ParseArchive(archive, ct);
         return TopPlayers(players, cohort.Trim().ToLowerInvariant(), limit, currentYear, ct);
     }
 
@@ -194,8 +202,7 @@ internal static class FideRatingList
                 return cached;
 
             byte[] archive = await DownloadArchiveAsync(ct).ConfigureAwait(false);
-            byte[] xml = ExtractXml(archive, ct);
-            var players = await Task.Run(() => ParsePlayers(xml, ct), ct).ConfigureAwait(false);
+            var players = await Task.Run(() => ParseArchive(archive, ct), ct).ConfigureAwait(false);
             if (players.Length == 0)
                 throw new InvalidDataException(
                     "FIDE published rating artifact parsed successfully but contained no valid player records.");
@@ -238,7 +245,7 @@ internal static class FideRatingList
         return buffer.ToArray();
     }
 
-    private static byte[] ExtractXml(byte[] archive, CancellationToken ct)
+    private static Player[] ParseArchive(byte[] archive, CancellationToken ct)
     {
         using var backing = new MemoryStream(archive, writable: false);
         using var zip = new ZipArchive(backing, ZipArchiveMode.Read, leaveOpen: false);
@@ -255,58 +262,84 @@ internal static class FideRatingList
             throw new InvalidDataException("FIDE XML player list has an invalid expanded size.");
 
         using var input = entry.Open();
-        return ReadBounded(input, MaxXmlBytes, "FIDE XML player list", ct);
+        return ParsePlayers(input, entry.Length, ct);
     }
 
     /// <summary>
-    /// The source framer recognizes only the provider's repeated record boundary.
-    /// It does not read or interpret a field. Each bounded group is wrapped in the
-    /// provider root and handed to the registered native XML grammar, which remains
-    /// the sole owner of element structure and field extraction.
-    ///
-    /// One whole-estate Tree-sitter AST previously made first search cancellation
-    /// ineffective for several minutes. Bounded grammar batches keep both parse work
-    /// and cancellation latency proportional to a small slice of the estate.
+    /// The source framer recognizes only the provider's repeated record boundary;
+    /// native projection owns the fields. Bounded batches keep memory and cancellation
+    /// latency independent of the size of the monthly publication.
     /// </summary>
-    private static Player[] ParsePlayers(byte[] utf8, CancellationToken ct)
+    private static Player[] ParsePlayers(Stream xml, long maximumBytes, CancellationToken ct)
     {
         var builders = new List<PlayerBuilder>();
-        int scan = 0;
-        int batchStart = -1;
-        int batchEnd = -1;
+        using var batch = new MemoryStream(MaxGrammarBatchBytes);
+        var block = new byte[1024 * 1024];
+        byte[] carry = [];
+        long total = 0;
         int batchCount = 0;
 
-        while (scan < utf8.Length)
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
-            int relativeStart = utf8.AsSpan(scan).IndexOf(PlayerOpenTag);
-            if (relativeStart < 0) break;
-            int recordStart = scan + relativeStart;
-            int relativeClose = utf8.AsSpan(recordStart).IndexOf(PlayerCloseTag);
-            if (relativeClose < 0)
-                throw new InvalidDataException("FIDE XML player record is missing its closing tag.");
-            int recordEnd = checked(recordStart + relativeClose + PlayerCloseTag.Length);
+            int read = xml.Read(block, 0, block.Length);
+            if (read == 0) break;
+            total += read;
+            if (total > maximumBytes)
+                throw new InvalidDataException(
+                    $"FIDE XML player list exceeded the {maximumBytes} byte safety cap while reading.");
 
-            if (batchStart < 0) batchStart = recordStart;
-            bool batchFull = batchCount > 0
-                && (batchCount >= MaxPlayersPerGrammarBatch
-                    || recordEnd - batchStart > MaxGrammarBatchBytes);
-            if (batchFull)
+            var window = new byte[checked(carry.Length + read)];
+            carry.CopyTo(window, 0);
+            block.AsSpan(0, read).CopyTo(window.AsSpan(carry.Length));
+
+            int scan = 0;
+            int keepFrom = Math.Max(0, window.Length - PlayerOpenTag.Length + 1);
+            while (scan < window.Length)
             {
-                ParsePlayerGrammarBatch(
-                    utf8.AsSpan(batchStart, batchEnd - batchStart), builders, ct);
-                batchStart = recordStart;
-                batchCount = 0;
+                int relativeStart = window.AsSpan(scan).IndexOf(PlayerOpenTag);
+                if (relativeStart < 0) break;
+                int recordStart = scan + relativeStart;
+                int closeSearchStart = checked(recordStart + PlayerOpenTag.Length);
+                int relativeClose = window.AsSpan(closeSearchStart).IndexOf(PlayerCloseTag);
+                if (relativeClose < 0)
+                {
+                    keepFrom = recordStart;
+                    break;
+                }
+
+                int recordEnd = checked(closeSearchStart + relativeClose + PlayerCloseTag.Length);
+                int recordLength = recordEnd - recordStart;
+                if (recordLength > MaxGrammarBatchBytes)
+                    throw new InvalidDataException("FIDE XML player record exceeds the grammar batch cap.");
+
+                if (batchCount > 0
+                    && (batchCount >= MaxPlayersPerGrammarBatch
+                        || batch.Length + recordLength > MaxGrammarBatchBytes))
+                {
+                    ParsePlayerProjectionBatch(
+                        batch.GetBuffer().AsSpan(0, checked((int)batch.Length)), builders, ct);
+                    batch.SetLength(0);
+                    batchCount = 0;
+                }
+
+                batch.Write(window, recordStart, recordLength);
+                batchCount++;
+                scan = recordEnd;
+                keepFrom = Math.Max(scan, window.Length - PlayerOpenTag.Length + 1);
             }
 
-            batchEnd = recordEnd;
-            batchCount++;
-            scan = recordEnd;
+            int carryLength = window.Length - keepFrom;
+            if (carryLength > MaxGrammarBatchBytes)
+                throw new InvalidDataException("FIDE XML player record is missing its closing tag.");
+            carry = carryLength == 0 ? [] : window.AsSpan(keepFrom).ToArray();
         }
 
+        if (carry.AsSpan().IndexOf(PlayerOpenTag) >= 0)
+            throw new InvalidDataException("FIDE XML player record is missing its closing tag.");
         if (batchCount > 0)
-            ParsePlayerGrammarBatch(
-                utf8.AsSpan(batchStart, batchEnd - batchStart), builders, ct);
+            ParsePlayerProjectionBatch(
+                batch.GetBuffer().AsSpan(0, checked((int)batch.Length)), builders, ct);
 
         if (builders.Count == 0)
             throw new InvalidDataException(
@@ -330,149 +363,39 @@ internal static class FideRatingList
             .ToArray();
     }
 
-    private static void ParsePlayerGrammarBatch(
+    private static void ParsePlayerProjectionBatch(
         ReadOnlySpan<byte> records, List<PlayerBuilder> players, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        int length = checked(BatchRootOpen.Length + records.Length + BatchRootClose.Length);
-        var document = new byte[length];
-        BatchRootOpen.CopyTo(document);
-        records.CopyTo(document.AsSpan(BatchRootOpen.Length));
-        BatchRootClose.CopyTo(document.AsSpan(BatchRootOpen.Length + records.Length));
-
-        using var ast = GrammarDecomposer.Parse(document, "xml");
-        var stack = new Stack<ElementFrame>();
-
-        for (int i = 0; i < ast.NodeCount; i++)
+        var projected = new FidePlayerProjection[MaxPlayersPerGrammarBatch];
+        int count = FideXmlProjection.Project(records, projected);
+        for (int i = 0; i < count; i++)
         {
             if ((i & 4095) == 0) ct.ThrowIfCancellationRequested();
-            var node = ast.GetNode(i);
-            if (!ast.NodeTypeIs(node.NodeTypeId, "element"u8)) continue;
-
-            while (stack.Count > 0 && node.StartByte >= stack.Peek().EndByte)
-                stack.Pop();
-
-            string name = ElementName(ast, document, i, node);
-            PlayerBuilder? player = null;
-            if (name.Equals("player", StringComparison.OrdinalIgnoreCase))
+            ref readonly FidePlayerProjection p = ref projected[i];
+            players.Add(new PlayerBuilder
             {
-                player = new PlayerBuilder();
-                players.Add(player);
-            }
-            else if (stack.Count > 0
-                     && stack.Peek().Name.Equals("player", StringComparison.OrdinalIgnoreCase)
-                     && stack.Peek().Player is { } owner)
-            {
-                ApplyField(owner, name, ElementText(ast, document, i, node));
-            }
-
-            stack.Push(new ElementFrame(node.EndByte, name, player));
+                FideId = Text(records, p.FideId),
+                Name = Text(records, p.Name),
+                Federation = Text(records, p.Country),
+                Sex = Text(records, p.Sex),
+                Title = Text(records, p.Title),
+                Standard = Int(Text(records, p.StandardRating)),
+                Rapid = Int(Text(records, p.RapidRating)),
+                Blitz = Int(Text(records, p.BlitzRating)),
+                Birthday = Text(records, p.Birthday),
+                Flag = Text(records, p.Flag),
+            });
         }
     }
 
-    private static string ElementName(
-        GrammarAst ast, byte[] utf8, int elementIndex, LaplaceAstNode element)
+    private static string Text(ReadOnlySpan<byte> utf8, NativeTextSpan span)
     {
-        int startTagIndex = -1;
-        LaplaceAstNode startTag = default;
-        for (int i = elementIndex + 1; i < ast.NodeCount; i++)
-        {
-            var node = ast.GetNode(i);
-            if (node.StartByte >= element.EndByte) break;
-            if (node.Parent != (uint)elementIndex) continue;
-            if (!ast.NodeTypeIs(node.NodeTypeId, "STag"u8)
-                && !ast.NodeTypeIs(node.NodeTypeId, "EmptyElemTag"u8))
-                continue;
-            startTagIndex = i;
-            startTag = node;
-            break;
-        }
-        if (startTagIndex < 0) return "";
-
-        for (int i = startTagIndex + 1; i < ast.NodeCount; i++)
-        {
-            var node = ast.GetNode(i);
-            if (node.StartByte >= startTag.EndByte) break;
-            if (node.Parent == (uint)startTagIndex && ast.NodeTypeIs(node.NodeTypeId, "Name"u8))
-                return DecodeSpan(utf8, node.StartByte, node.EndByte);
-        }
-        return "";
-    }
-
-    private static string ElementText(
-        GrammarAst ast, byte[] utf8, int elementIndex, LaplaceAstNode element)
-    {
-        uint contentStart = element.StartByte;
-        uint contentEnd = element.EndByte;
-        bool sawStart = false;
-
-        for (int i = elementIndex + 1; i < ast.NodeCount; i++)
-        {
-            var node = ast.GetNode(i);
-            if (node.StartByte >= element.EndByte) break;
-            if (node.Parent != (uint)elementIndex) continue;
-
-            if (!sawStart && (ast.NodeTypeIs(node.NodeTypeId, "STag"u8)
-                              || ast.NodeTypeIs(node.NodeTypeId, "EmptyElemTag"u8)))
-            {
-                contentStart = node.EndByte;
-                sawStart = true;
-                if (ast.NodeTypeIs(node.NodeTypeId, "EmptyElemTag"u8))
-                    return "";
-            }
-            else if (ast.NodeTypeIs(node.NodeTypeId, "ETag"u8))
-            {
-                contentEnd = node.StartByte;
-                break;
-            }
-        }
-
-        if (!sawStart || contentEnd <= contentStart) return "";
-        return WebUtility.HtmlDecode(DecodeSpan(utf8, contentStart, contentEnd)).Trim();
-    }
-
-    private static string DecodeSpan(byte[] utf8, uint start, uint end)
-    {
-        if (end < start || end > (uint)utf8.Length) return "";
-        return Encoding.UTF8.GetString(
-            utf8,
-            checked((int)start),
-            checked((int)(end - start)));
-    }
-
-    private static void ApplyField(PlayerBuilder player, string field, string value)
-    {
-        switch (field.ToLowerInvariant())
-        {
-            case "fideid": player.FideId = value; break;
-            case "name": player.Name = value; break;
-            case "country": player.Federation = value; break;
-            case "sex": player.Sex = value; break;
-            case "title": player.Title = value; break;
-            case "rating": player.Standard = Int(value); break;
-            case "rapid_rating": player.Rapid = Int(value); break;
-            case "blitz_rating": player.Blitz = Int(value); break;
-            case "birthday": player.Birthday = value; break;
-            case "flag": player.Flag = value; break;
-        }
-    }
-
-    private static byte[] ReadBounded(Stream input, long maximum, string label, CancellationToken ct)
-    {
-        using var buffer = new MemoryStream();
-        var block = new byte[1024 * 1024];
-        long total = 0;
-        int read;
-        while ((read = input.Read(block, 0, block.Length)) > 0)
-        {
-            ct.ThrowIfCancellationRequested();
-            total += read;
-            if (total > maximum)
-                throw new InvalidDataException(
-                    $"{label} exceeded the {maximum} byte safety cap while reading.");
-            buffer.Write(block, 0, read);
-        }
-        return buffer.ToArray();
+        int offset = checked((int)span.Offset);
+        int length = checked((int)span.Length);
+        if (offset < 0 || length < 0 || offset > utf8.Length - length)
+            throw new InvalidDataException("native FIDE XML projection returned an invalid byte span");
+        return WebUtility.HtmlDecode(Encoding.UTF8.GetString(utf8.Slice(offset, length))).Trim();
     }
 
     private static FidePlayerCandidate ToCandidate(Player p)

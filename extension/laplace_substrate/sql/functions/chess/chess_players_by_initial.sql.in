@@ -34,17 +34,19 @@ BEGIN ATOMIC
     ),
     rated AS MATERIALIZED (
         SELECT p.player,
-               o.witness_count AS games,
-               o.rating,
-               o.rd,
+               COALESCE(o.witness_count, 0) AS games,
+               COALESCE(o.rating, consensus.glicko2_neutral_mu()) AS rating,
+               COALESCE(o.rd, consensus.glicko2_initial_rd()) AS rd,
                CASE COALESCE(p_sort, 'strength')
-                   WHEN 'games'  THEN o.witness_count::double precision
-                   WHEN 'rating' THEN o.rating::double precision
-                   WHEN 'rd'     THEN o.rd::double precision
-                   ELSE consensus.eff_mu(o.rating, o.rd)::double precision
+                   WHEN 'games'  THEN COALESCE(o.witness_count, 0)::double precision
+                   WHEN 'rating' THEN COALESCE(o.rating, consensus.glicko2_neutral_mu())::double precision
+                   WHEN 'rd'     THEN COALESCE(o.rd, consensus.glicko2_initial_rd())::double precision
+                   ELSE consensus.eff_mu(
+                       COALESCE(o.rating, consensus.glicko2_neutral_mu()),
+                       COALESCE(o.rd, consensus.glicko2_initial_rd()))::double precision
                END AS sort_value
         FROM players p
-        JOIN laplace.consensus o
+        LEFT JOIN laplace.consensus o
           ON o.subject_id = p.player
          AND o.type_id = laplace.relation_type_id('OUTCOME')
     ),

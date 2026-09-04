@@ -111,4 +111,3 @@ public sealed unsafe class GrammarAst : IDisposable
 
     ~GrammarAst() => Dispose();
 }
-

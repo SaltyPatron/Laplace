@@ -73,47 +73,18 @@ typedef struct PairEntry
     double score;
 } PairEntry;
 
-static SPIPlanPtr steer_plan = NULL;
-
-/*
- * Prepared once per backend and kept (same idiom as generate_walk.c's edge_plan):
- * the un-prepared path re-planned this on every emitted token of every walk.
- */
-static void
-ensure_steer_plan(void)
-{
-    if (steer_plan == NULL)
-    {
-        Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-        /*
-         * The FRONTIER-side id comes back too (e.front). Summing edge scores without it
-         * cannot tell "reaches one frontier member very strongly" from "sits where several
-         * frontier members overlap" — and the second is what a composed prefix means. For
-         * "the capital of france is", `Lyon` carries one strong edge to `france` while
-         * `Paris` carries moderate edges to `france` AND `capital`; a bare sum lets Lyon win.
-         */
-        SPIPlanPtr plan = SPI_prepare_cursor(
-            "SELECT e.cand, e.front, e.type_id, e.rating, e.rd FROM ("
-            "  SELECT c.subject_id AS cand, c.object_id AS front,"
-            "         c.type_id, c.rating, c.rd"
-            "    FROM laplace.consensus c"
-            "   WHERE c.subject_id = ANY($1) AND c.object_id = ANY($2)"
-            "  UNION ALL"
-            "  SELECT c.object_id, c.subject_id,"
-            "         c.type_id, c.rating, c.rd"
-            "    FROM laplace.consensus c"
-            "   WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2)"
-            ") e",
-            2, argtypes, CURSOR_OPT_PARALLEL_OK);
-
-        if (plan == NULL)
-            elog(ERROR, "steer_candidates: SPI_prepare failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "steer_candidates: SPI_keepplan failed");
-        steer_plan = plan;
-    }
-}
+static const char *steer_query =
+    "SELECT e.cand, e.front, e.type_id, e.rating, e.rd FROM ("
+    "  SELECT c.subject_id AS cand, c.object_id AS front,"
+    "         c.type_id, c.rating, c.rd"
+    "    FROM laplace.consensus c"
+    "   WHERE c.subject_id = ANY($1) AND c.object_id = ANY($2)"
+    "  UNION ALL"
+    "  SELECT c.object_id, c.subject_id,"
+    "         c.type_id, c.rating, c.rd"
+    "    FROM laplace.consensus c"
+    "   WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2)"
+    ") e";
 
 Datum
 pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
@@ -183,10 +154,14 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
         }
     }
 
-    ensure_steer_plan();
     args[0] = PointerGetDatum(cand_arr);
     args[1] = PointerGetDatum(front_arr);
-    rc = SPI_execute_plan(steer_plan, args, NULL, true, 0);
+    {
+        Oid argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
+
+        rc = SPI_execute_with_args(steer_query, 2, argtypes, args,
+                                   NULL, true, 0);
+    }
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "steer_candidates: edge read failed: %s", SPI_result_code_string(rc));
 

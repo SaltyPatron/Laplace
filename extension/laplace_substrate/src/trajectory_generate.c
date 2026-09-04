@@ -97,8 +97,10 @@ typedef struct CandIndex
 } CandIndex;
 
 static SPIPlanPtr propose_plan = NULL;
-static SPIPlanPtr steer_plan   = NULL;
 static SPIPlanPtr floor_plan   = NULL;
+static const char *steer_query =
+    "SELECT candidate, steer, edges "
+    "FROM generation.steer_candidates($1, $2)";
 
 /*
  * Prepared once per backend and kept: the un-prepared path re-plans on every
@@ -123,21 +125,6 @@ ensure_plans(void)
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "walk_continuations: SPI_keepplan(propose) failed");
         propose_plan = plan;
-    }
-    if (steer_plan == NULL)
-    {
-        Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(
-            "SELECT candidate, steer, edges "
-            "FROM generation.steer_candidates($1, $2)",
-            2, argtypes, CURSOR_OPT_PARALLEL_OK);
-
-        if (plan == NULL)
-            elog(ERROR, "walk_continuations: SPI_prepare(steer) failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "walk_continuations: SPI_keepplan(steer) failed");
-        steer_plan = plan;
     }
     if (floor_plan == NULL)
     {
@@ -472,7 +459,12 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
             args[0] = PointerGetDatum(cand_a);
             args[1] = PointerGetDatum(front_a);
-            rc = SPI_execute_plan(steer_plan, args, NULL, true, 0);
+            {
+                Oid argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
+
+                rc = SPI_execute_with_args(steer_query, 2, argtypes, args,
+                                           NULL, true, 0);
+            }
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "walk_continuations: steer failed: %s",
                      SPI_result_code_string(rc));

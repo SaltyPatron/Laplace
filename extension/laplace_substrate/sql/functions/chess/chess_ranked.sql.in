@@ -11,18 +11,20 @@ CREATE FUNCTION chess.ranked(
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH rated AS MATERIALIZED (
-        SELECT c.subject_id AS player,
-               c.witness_count AS games,
-               c.rating,
-               c.rd,
+        SELECT e.id AS player,
+               COALESCE(c.witness_count, 0) AS games,
+               COALESCE(c.rating, consensus.glicko2_neutral_mu()) AS rating,
+               COALESCE(c.rd, consensus.glicko2_initial_rd()) AS rd,
                CASE COALESCE(p_sort, 'strength')
-                   WHEN 'games'  THEN c.witness_count::double precision
-                   WHEN 'rating' THEN c.rating::double precision
-                   WHEN 'rd'     THEN c.rd::double precision
-                   ELSE consensus.eff_mu(c.rating, c.rd)::double precision
+                   WHEN 'games'  THEN COALESCE(c.witness_count, 0)::double precision
+                   WHEN 'rating' THEN COALESCE(c.rating, consensus.glicko2_neutral_mu())::double precision
+                   WHEN 'rd'     THEN COALESCE(c.rd, consensus.glicko2_initial_rd())::double precision
+                   ELSE consensus.eff_mu(
+                       COALESCE(c.rating, consensus.glicko2_neutral_mu()),
+                       COALESCE(c.rd, consensus.glicko2_initial_rd()))::double precision
                END AS sort_value
         FROM laplace.entities e
-        JOIN laplace.consensus c
+        LEFT JOIN laplace.consensus c
           ON c.subject_id = e.id
          AND c.type_id = laplace.relation_type_id('OUTCOME')
         WHERE e.type_id = laplace.entity_type_id('Chess_Player')

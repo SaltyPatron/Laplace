@@ -110,12 +110,21 @@ resolved AS (
     FROM family_out fo
     WHERE fo.via_relation = 'IS_SENSE_OF'
 ),
+-- An explicitly empty context lets an owning caller perform language election
+-- after receiving the complete candidate field. NULL retains automatic language
+-- scoping for scalar and ordinary batch callers; a nonempty context still applies
+-- both language and domain constraints.
+language_filter AS MATERIALIZED (
+    SELECT p_domain_context IS NULL OR cardinality(p_domain_context) > 0 AS requested
+),
 -- Per-term fact, set-based pass. Language is a CONSTRAINT on which surface the
 -- input denotes, never a score -- a boolean
 -- "has an edge to the query language" does not discriminate.
 term_lang AS MATERIALIZED (
     SELECT al.id AS term, al.lang AS id
     FROM converse.attested_language_batch(ARRAY(SELECT term FROM terms)) al
+    CROSS JOIN language_filter lf
+    WHERE lf.requested
 ),
 -- ONE probe for EVERY candidate synset of EVERY term, through the canonical body
 -- (§15: this argmax used to be inlined here AND written again as the scalar
@@ -177,20 +186,26 @@ term_lang AS MATERIALIZED (
 cand_lang_hit AS MATERIALIZED (
     SELECT DISTINCT a.subject_id AS id, a.context_id AS lang
     FROM laplace.attestations a
+        CROSS JOIN language_filter lf
     WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
       AND a.context_id = ANY (ARRAY(SELECT tl.id FROM term_lang tl WHERE tl.id IS NOT NULL))
+            AND lf.requested
 ),
 cand_lang_any AS MATERIALIZED (
     SELECT DISTINCT a.subject_id AS id
     FROM laplace.attestations a
     JOIN laplace.entities e ON e.id = a.context_id
                            AND e.type_id = realize.canonical_id('Language')
+        CROSS JOIN language_filter lf
     WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
+            AND lf.requested
 ),
 scoped AS (
     SELECT r.* FROM resolved r
     LEFT JOIN term_lang tl ON tl.term = r.term
-    WHERE tl.id IS NULL
+        CROSS JOIN language_filter lf
+        WHERE NOT lf.requested
+             OR tl.id IS NULL
        OR NOT EXISTS (SELECT 1 FROM cand_lang_any ca WHERE ca.id = r.synset_id)
        OR EXISTS (SELECT 1 FROM cand_lang_hit ch
                    WHERE ch.id = r.synset_id AND ch.lang = tl.id)

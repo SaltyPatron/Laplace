@@ -71,21 +71,25 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
   'learned-pst': [],
   'lichess-fetch': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'DrNykterstein' },
-    { key: 'site', label: 'Site', type: 'select', options: ['lichess', 'chesscom'], optionLabels: { lichess: 'lichess.org', chesscom: 'chess.com' } },
+    { key: 'site', label: 'Source', type: 'select', options: ['chesscom', 'lichess'], optionLabels: { chesscom: 'Chess.com', lichess: 'Lichess' } },
     { key: 'all', label: 'Ingest all games', type: 'bool', help: 'Omit the provider cap and stream the complete available archive.' },
     { key: 'max', label: 'Game limit', type: 'number', min: 1, step: 100, help: 'Used only when “Ingest all games” is off.', placeholder: '1000' },
+    { key: 'concurrency', label: 'Parallel archive downloads', type: 'number', min: 0, help: '0 = use the host I/O worker budget. Applies to Chess.com monthly archives.', placeholder: '0' },
     { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional official FIDE profile to connect to this online identity.', placeholder: '1503014' },
     { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Record, analyze, deduplicate, and attribute the downloaded games immediately.' },
   ],
   'player-profile': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'MagnusCarlsen' },
-    { key: 'site', label: 'Site', type: 'select', options: ['lichess', 'chesscom'], optionLabels: { lichess: 'lichess.org', chesscom: 'chess.com' } },
+    { key: 'site', label: 'Source', type: 'select', options: ['chesscom', 'lichess'], optionLabels: { chesscom: 'Chess.com', lichess: 'Lichess' } },
     { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional explicit FIDE identity association. Leave blank for provider-only acquisition; use Find FIDE identity to discover candidates.', placeholder: '1503014' },
     { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Persist the profiles and selected identity association without downloading games.' },
   ],
   'fide-search': [
     { key: 'query', label: 'Player name', type: 'text', help: 'Search the official FIDE ratings database by real name.', placeholder: 'Carlsen, Magnus' },
     { key: 'limit', label: 'Candidate limit', type: 'number', min: 1, max: 100 },
+  ],
+  'fide-profile': [
+    { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Import one official profile without downloading games.', placeholder: '1503014' },
   ],
   'fide-roster': [
     {
@@ -132,6 +136,8 @@ export interface ExperimentRunnerProps {
  * which is why it has its own view instead of a seventh card in this grid.
  */
 export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerProps) {
+  const importSurface = categories.length === 1 && categories[0] === 'import';
+  const [operatorToken, setOperatorToken] = useState(() => sessionStorage.getItem('laplace.operatorToken') ?? '');
   const [catalog, setCatalog] = useState<LabCatalog | null>(null);
   const [jobs, setJobs] = useState<LabJob[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -139,6 +145,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
   const [boards, setBoards] = useState<Record<number, LabBoardState>>({});
   const [lastGame, setLastGame] = useState<number | null>(null);
   const [kind, setKind] = useState(initialKind);
+  const [preferredProvider, setPreferredProvider] = useState<'chesscom' | 'lichess'>('chesscom');
   const [params, setParams] = useState<Record<string, string>>(() => paramsFor(initialKind, undefined));
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -165,9 +172,27 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
   const seededRef = useRef<string | null>(null);
   useEffect(() => {
     if (seededRef.current === kind) return;
-    setParams(paramsFor(kind, activeSpec));
+    const next = paramsFor(kind, activeSpec);
+    if (kind === 'player-profile' || kind === 'lichess-fetch') next.site = preferredProvider;
+    setParams(next);
     if (catalog) seededRef.current = kind;
-  }, [kind, catalog, activeSpec]);
+  }, [kind, catalog, activeSpec, preferredProvider]);
+
+  const importSource = kind.startsWith('fide-') ? 'fide' : (params.site === 'lichess' ? 'lichess' : 'chesscom');
+  const chooseImportSource = (source: string) => {
+    if (source === 'fide') {
+      setKind('fide-search');
+      return;
+    }
+    const provider = source === 'lichess' ? 'lichess' : 'chesscom';
+    setPreferredProvider(provider);
+    const nextKind = kind === 'lichess-fetch' || kind === 'player-profile' ? kind : 'player-profile';
+    setKind(nextKind);
+    setParams((current) => ({
+      ...(nextKind === kind ? current : paramsFor(nextKind, jobSpecs.find((job) => job.kind === nextKind))),
+      site: provider,
+    }));
+  };
 
   const engines = catalog?.engines ?? {};
   const relevantEngines = useMemo(() => {
@@ -179,6 +204,8 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
   const missingEngines = requiresFor(experiment).filter((name) => !engines[name]?.found);
   const blockedReason = missingEngines.length > 0
     ? `Install ${missingEngines.map((n) => ENGINE_LABELS[n] ?? n).join(', ')} on the server`
+    : operatorToken.length === 0
+      ? 'Enter the operator token to run imports or evaluations'
     : kind === 'fide-search' && (params.query ?? '').trim().length < 2
       ? 'Enter at least two characters for a FIDE search'
       : null;
@@ -237,8 +264,24 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
     setStarting(true);
     setErr(null);
     try {
-      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind, config: params });
+      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind, config: params }, { operatorToken });
       openJob({ id: r.jobId, kind, state: 'Pending', summary: { done: 0, total: 0 }, artifacts: {} });
+      void refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const startTableAction = async (actionKind: string, config: Record<string, string>) => {
+    if (starting || activeRunning) return;
+    setStarting(true);
+    setErr(null);
+    try {
+      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind: actionKind, config }, { operatorToken });
+      setKind(actionKind);
+      openJob({ id: r.jobId, kind: actionKind, state: 'Pending', summary: { done: 0, total: 0 }, artifacts: {} });
       void refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -249,7 +292,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
 
   const stopJob = async () => {
     if (!active) return;
-    try { await apiPost(`/chess/lab/stop/${active.id}`, {}); void refresh(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    try { await apiPost(`/chess/lab/stop/${active.id}`, {}, { operatorToken }); void refresh(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
 
   return (
@@ -278,6 +321,32 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
       )}
 
       {err && <Alert>{err}</Alert>}
+
+      {importSurface && (
+        <Panel title="Choose a source">
+          <SegmentedControl
+            value={importSource}
+            onValueChange={chooseImportSource}
+            options={['fide', 'chesscom', 'lichess']}
+            optionLabels={{ fide: 'FIDE', chesscom: 'CHESS.COM', lichess: 'LICHESS' }}
+            label="Profile source"
+          />
+          <Muted className={styles.sourceHelp}>
+            Importing the same unchanged profile or game again is idempotent; only new provider facts or games are witnessed.
+          </Muted>
+        </Panel>
+      )}
+
+      <Panel title="Operator access">
+        <Field label="Operator token" help="Required to import profiles/games or run evaluations. Read, browse, and play remain public.">
+          <Input type="password" autoComplete="off" value={operatorToken}
+                 aria-label="Operator token"
+                 onChange={(e) => {
+                   setOperatorToken(e.target.value);
+                   sessionStorage.setItem('laplace.operatorToken', e.target.value);
+                 }} />
+        </Field>
+      </Panel>
 
       <Panel title="Choose an experiment">
         {LAB_CATEGORIES.filter((cat) => categories.includes(cat.id)).map((cat) => (
@@ -350,14 +419,14 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button onClick={() => void startJob()} visuallyDisabled>
-                  {starting ? 'Starting…' : activeRunning ? 'Running…' : 'Start experiment'}
+                  {starting ? 'Starting…' : activeRunning ? 'Running…' : importSurface ? 'Import' : 'Start experiment'}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{blockedReason}</TooltipContent>
             </Tooltip>
           ) : (
             <Button onClick={() => void startJob()} disabled={starting || activeRunning} loading={starting}>
-              {starting ? 'Starting…' : activeRunning ? 'Running…' : 'Start experiment'}
+              {starting ? 'Starting…' : activeRunning ? 'Running…' : importSurface ? 'Import' : 'Start experiment'}
             </Button>
           )}
           <Button variant="ghost" onClick={() => void stopJob()} disabled={!activeRunning}>Stop</Button>
@@ -401,7 +470,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
               ) : active.kind.toLowerCase().replaceAll('-', '') === 'lichessfetch' && active.summary.message?.includes('new games') ? (
                 <Muted>Games and player profiles were ingested during this run. PGN is retained as the source artifact.</Muted>
               ) : (
-                <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest PGN to substrate</Button>
+                <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {}, { operatorToken })}>Ingest PGN to substrate</Button>
               )}
             </div>
           )}
@@ -422,7 +491,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
         {/* tabIndex only — a role here would override the list semantics and
             orphan the <li> children (axe: listitem). */}
         <ul className={styles.events} tabIndex={0} aria-label="Live feed">
-          {events.map((e, i) => <LabRow key={i} e={e} />)}
+          {events.map((e, i) => <LabRow key={i} e={e} onAction={startTableAction} />)}
           {events.length === 0 && <li><Muted>Select a job or start an experiment to see live output.</Muted></li>}
         </ul>
       </Panel>
@@ -499,6 +568,7 @@ function LabField({ field, value, onChange }: { field: FieldDef; value: string; 
           value={value}
           onValueChange={onChange}
           options={labeled.map((o) => (typeof o === 'string' ? o : o.value))}
+          optionLabels={field.optionLabels}
           label={field.label}
         />
         {field.optionLabels && (
@@ -545,7 +615,10 @@ function stateStyle(state: string): string | undefined {
   return key ? styles[key as keyof typeof styles] : styles.state;
 }
 
-function LabRow({ e }: { e: LabEvent }) {
+function LabRow({ e, onAction }: {
+  e: LabEvent;
+  onAction: (kind: string, config: Record<string, string>) => Promise<void>;
+}) {
   if (e.title && e.rows) {
     return (
       <li className={styles.tableRow}>
@@ -553,11 +626,20 @@ function LabRow({ e }: { e: LabEvent }) {
         <div className={styles.tableScroll}>
           <table className={styles.labTable}>
             {e.columns && (
-              <thead><tr>{e.columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
+              <thead><tr>{e.columns.map((c, i) => <th key={i}>{c}</th>)}{e.action && <th>Action</th>}</tr></thead>
             )}
             <tbody>
               {e.rows.map((row, ri) => (
-                <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{cell}</td>)}</tr>
+                <tr key={ri}>
+                  {row.map((cell, ci) => <td key={ci}>{cell}</td>)}
+                  {e.action && (
+                    <td>
+                      <Button onClick={() => void onAction(e.action!.kind, {
+                        [e.action!.configKey]: row[e.action!.valueColumn] ?? '',
+                      })}>{e.action.label}</Button>
+                    </td>
+                  )}
+                </tr>
               ))}
             </tbody>
           </table>

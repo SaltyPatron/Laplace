@@ -596,8 +596,6 @@ internal static class FoundryExport
         {
             await using var conn = await ds.OpenConnectionAsync();
             await NpgsqlFoundryReads.WarmRelationTypeIdAsync(conn, "IS_A");
-            if (corpusMax > 0)
-                await NpgsqlFoundryReads.SetCorpusMaxRowsAsync(conn, corpusMax);
 
             var rows = await NpgsqlFoundryReads.WordOrderAsync(
                 ds, vocab, trajCap, maxGap, timeoutSeconds: 600);

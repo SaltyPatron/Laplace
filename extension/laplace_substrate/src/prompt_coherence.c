@@ -439,7 +439,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
              * `cands` and indexes it by token, so no row wins by arriving first. */
             "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
             "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
-            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), NULL, NULL)) "
+            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), ARRAY[]::bytea[], NULL)) "
             "SELECT p.ord, p.id, b.synset_id, b.base_eff_mu::float8, "
             "       b.witnesses::bigint, p.language, "
             "       converse.word_language(b.sense_id) "

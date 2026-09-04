@@ -194,6 +194,12 @@
     font-size: 0.78rem;
   }
 
+  .sourceHelp {
+    display: block;
+    margin-top: 0.55rem;
+    font-size: var(--text-sm);
+  }
+
   .actions {
     display: flex;
     align-items: center;
@@ -378,7 +384,7 @@
   .labTable {
     border-collapse: collapse;
     width: 100%;
-    font-family: ui-monospace, monospace;
+    font-family: inherit;
     font-size: 0.78rem;
   }
 

@@ -5,6 +5,58 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessGameFetcherTests
 {
     [Fact]
+    public void PlayerIdentity_ConvergesAcrossEquivalentUnicodeSpellings()
+    {
+        const string composed = "Jos\u00e9 Ra\u00fal Capablanca";
+        const string decomposed = "Jose\u0301 Rau\u0301l Capablanca";
+
+        Assert.Equal(PlayerAlias.Canonical(composed), PlayerAlias.Canonical(decomposed));
+        Assert.Equal(ChessVocabulary.PlayerId(composed), ChessVocabulary.PlayerId(decomposed));
+    }
+
+    [Fact]
+    public void PgnReader_PreservesUnicodeAndNormalizesTagsToNfc()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path,
+                "[Event \"Unicode\"]\n"
+                + "[White \"Jose\u0301 Rau\u0301l Capablanca\"]\n"
+                + "[Black \"Mikhail Tal\"]\n"
+                + "[Result \"1-0\"]\n\n"
+                + "1. e4 e5 1-0\n",
+                new System.Text.UTF8Encoding(false));
+
+            string game = Assert.Single(PgnGames.StreamGames(path));
+            Assert.Equal("Jos\u00e9 Ra\u00fal Capablanca", PgnGames.TagStr(game, "White"));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void PgnReader_RejectsMalformedUtf8InsteadOfCorruptingIdentity()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path,
+            [
+                (byte)'[', (byte)'E', (byte)'v', (byte)'e', (byte)'n', (byte)'t', (byte)' ', (byte)'"',
+                0xc3, 0x28, (byte)'"', (byte)']', (byte)'\n',
+            ]);
+            Assert.Throws<System.Text.DecoderFallbackException>(() => PgnGames.StreamGames(path).ToArray());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void FideProfile_UsesTheProfileTitle_NotNavigationText()
     {
         const string html = """

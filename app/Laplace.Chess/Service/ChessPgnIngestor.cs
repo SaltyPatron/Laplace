@@ -102,6 +102,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
 
     public async Task<Result> IngestFileAsync(
         string pgnPath, Action<string>? log = null, CancellationToken ct = default)
+        => await IngestGamesAsync(PgnGames.StreamGames(pgnPath), Path.GetFileName(pgnPath), log, ct);
+
+    public async Task<Result> IngestGamesAsync(
+        IEnumerable<string> games, string sourceLabel, Action<string>? log = null,
+        CancellationToken ct = default)
     {
         await Gate.WaitAsync(ct);
         try
@@ -109,7 +114,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             int parsed = 0, novel = 0, applied = 0, repaired = 0;
             var chunk = new List<ChessGameRecord>(ChunkSize);
 
-            foreach (var gameText in PgnGames.StreamGames(pgnPath))
+            foreach (var gameText in games)
             {
                 ct.ThrowIfCancellationRequested();
                 if (ChessPgnDecomposer.TryParseGame(gameText) is not { } game) continue;
@@ -126,7 +131,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 novel += n; applied += a; repaired += r;
             }
 
-            log?.Invoke($"ingested {applied}/{parsed} new games from {Path.GetFileName(pgnPath)}"
+            log?.Invoke($"ingested {applied}/{parsed} new games from {sourceLabel}"
                         + (parsed > novel ? $" ({parsed - novel} already present)" : "")
                         + (repaired > 0
                             ? $"; repaired current playing testimony for {repaired} already-present games"
@@ -235,8 +240,21 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 }
             }
 
-            var changes = new List<SubstrateChange>(planned.Count);
-            foreach (var item in planned) changes.Add(await item.Builder.BuildAsync(ct));
+            var built = new List<SubstrateChange>(planned.Count);
+            foreach (var item in planned) built.Add(await item.Builder.BuildAsync(ct));
+
+            // Profile refresh is a deterministic observation, not another vote. The
+            // accumulating writer quite correctly treats every submitted attestation as a
+            // witness, so suppress exact evidence IDs already present before they reach it.
+            // A changed provider fact/rating has a different content object and therefore a
+            // different attestation ID; it is admitted while an identical button press is not.
+            var candidateAttestations = built.SelectMany(static change => change.Attestations).ToArray();
+            var present = await ReadPresentAttestationIdsAsync(candidateAttestations, ct);
+            var changes = built.Select(change => change with
+            {
+                Attestations = change.Attestations.Where(row => !present.Contains(row.Id)).ToImmutableArray(),
+                CountsAsUnit = false,
+            }).ToArray();
             await _writer.ApplyManyAsync(changes, ct);
             return new ProfileResult(profiles.Count, players, identityLinks.Count);
         }

@@ -15,6 +15,7 @@ public enum ChessLabJobKind
     LichessFetch,
     PlayerProfile,
     FideSearch,
+    FideProfile,
     FideRoster,
 }
 

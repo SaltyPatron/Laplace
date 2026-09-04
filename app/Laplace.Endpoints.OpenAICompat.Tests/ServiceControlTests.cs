@@ -129,6 +129,7 @@ public sealed class ServiceControlTests
     {
         await using var factory = new Factory();
         using var client = factory.Client();
+        client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, "operator-test-only");
         using var reply = await client.PostAsJsonAsync("/chess/lab/start", new { kind = "lichess-bot" });
         Assert.Equal(HttpStatusCode.Conflict, reply.StatusCode);
         Assert.Empty(factory.Control.Calls);

@@ -20,11 +20,15 @@ public static class ChessGameFetcher
         => Path.Combine(LaplaceInstall.ResolveChessGamesDir(), $"{Sanitize(user)}_{site}.pgn");
 
     public static Task<int> FetchAsync(
-        string user, string site, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)
+        string user, string site, int? max, int minTcSeconds, string outPath, Action<string>? log,
+        CancellationToken ct,
+        Func<IReadOnlyList<string>, CancellationToken, Task>? onBatchReady = null,
+        int? concurrency = null)
         => NormalizeSite(site) switch
         {
             "lichess" => FetchLichessAsync(user, max, outPath, log, ct),
-            "chesscom" or "chess.com" or "chess" => FetchChessComAsync(user, max, minTcSeconds, outPath, log, ct),
+            "chesscom" or "chess.com" or "chess" => FetchChessComAsync(
+                user, max, minTcSeconds, outPath, log, ct, onBatchReady, concurrency),
             _ => throw new ArgumentException($"unknown site '{site}' (chesscom|lichess)", nameof(site)),
         };
 
@@ -39,7 +43,10 @@ public static class ChessGameFetcher
         };
 
     public static async Task<int> FetchChessComAsync(
-        string user, int? max, int minTcSeconds, string outPath, Action<string>? log, CancellationToken ct)
+        string user, int? max, int minTcSeconds, string outPath, Action<string>? log,
+        CancellationToken ct,
+        Func<IReadOnlyList<string>, CancellationToken, Task>? onBatchReady = null,
+        int? concurrency = null)
     {
         ValidateLimit(max);
         var archUrl = $"https://api.chess.com/pub/player/{Uri.EscapeDataString(user)}/games/archives";
@@ -49,26 +56,51 @@ public static class ChessGameFetcher
         var archives = ChronologicalArchiveUrls(
             doc.RootElement.GetProperty("archives").EnumerateArray()
                 .Select(e => e.GetString()!));
-        log?.Invoke($"  {archives.Count} monthly archives (oldest first)"
+        int workers = Math.Clamp(
+            concurrency ?? IngestTopology.Current.IoWorkersAvailable, 1, Math.Max(1, archives.Count));
+        log?.Invoke($"  {archives.Count} monthly archives ({workers} parallel downloads; oldest-first apply)"
             + (minTcSeconds > 0 ? $", min base TC {minTcSeconds}s" : ""));
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         int kept = 0;
         await using (var w = new StreamWriter(outPath, append: false, new UTF8Encoding(false)))
         {
-            foreach (var a in archives)
+            // Downloads are independent physical artifacts, so keep one topology-sized window
+            // in flight. Consumption remains oldest-first: deterministic record chronology is
+            // preserved while network latency overlaps parsing, apply, and inline fold work.
+            var pending = new Queue<(string Url, Task<string> Download)>();
+            int nextArchive = 0;
+            while (nextArchive < archives.Count && pending.Count < workers)
+            {
+                string url = archives[nextArchive++];
+                pending.Enqueue((url, GetStringWithRetryAsync($"{url}/pgn", ct)));
+            }
+
+            while (pending.Count > 0)
             {
                 ct.ThrowIfCancellationRequested();
-                var pgn = await GetStringWithRetryAsync($"{a}/pgn", ct);
+                var (archiveUrl, download) = pending.Dequeue();
+                var pgn = await download;
+                if (nextArchive < archives.Count)
+                {
+                    string url = archives[nextArchive++];
+                    pending.Enqueue((url, GetStringWithRetryAsync($"{url}/pgn", ct)));
+                }
                 if (string.IsNullOrWhiteSpace(pgn)) continue;
+
+                var ready = new List<string>();
                 foreach (var game in ChronologicalGames(SplitGames(pgn)))
                 {
                     if (minTcSeconds > 0 && BaseTcSeconds(game) < minTcSeconds) continue;
                     await w.WriteAsync(game);
                     await w.WriteAsync("\n\n");
+                    ready.Add(game);
                     if (++kept >= (max ?? int.MaxValue)) break;
                 }
-                log?.Invoke($"  {a[^7..]}: {kept} kept");
+                await w.FlushAsync(ct);
+                if (ready.Count > 0 && onBatchReady is not null)
+                    await onBatchReady(ready, ct);
+                log?.Invoke($"  {archiveUrl[^7..]}: {ready.Count} processed · {kept} total");
                 if (max is { } m && kept >= m) break;
             }
         }

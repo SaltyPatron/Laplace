@@ -140,6 +140,10 @@ public sealed class ChessLabService
                     await FideLabRunners.RunSearchAsync(this, slot, ct);
                     Finish(slot, ChessLabJobState.Completed, null);
                     return;
+                case ChessLabJobKind.FideProfile:
+                    await FideLabRunners.RunProfileAsync(this, slot, ct);
+                    Finish(slot, ChessLabJobState.Completed, null);
+                    return;
                 case ChessLabJobKind.FideRoster:
                     await FideLabRunners.RunRosterAsync(this, slot, ct);
                     Finish(slot, ChessLabJobState.Completed, null);

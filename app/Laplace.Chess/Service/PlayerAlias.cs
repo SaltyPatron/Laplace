@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Laplace.Chess.Service;
@@ -13,7 +14,10 @@ public static partial class PlayerAlias
     public static string Canonical(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
-        var s = raw.Trim();
+        // Provider JSON and PGN are UTF-8, but the same visible name can arrive in
+        // composed or decomposed Unicode form. Identity must not depend on that byte-level
+        // spelling difference (for example, "Jos\u00e9" vs "Jose\u0301").
+        var s = raw.Trim().Normalize(NormalizationForm.FormC);
         int comma = s.IndexOf(',');
         if (comma >= 0)
         {

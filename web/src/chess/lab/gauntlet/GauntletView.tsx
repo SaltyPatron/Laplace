@@ -71,6 +71,7 @@ interface GameRow {
 const RUNNING = new Set(['Running', 'Pending']);
 
 export function GauntletView() {
+  const [operatorToken, setOperatorToken] = useState(() => sessionStorage.getItem('laplace.operatorToken') ?? '');
   const [engines, setEngines] = useState<LabCatalog['engines']>({});
   const [setup, setSetup] = useState<Setup>(DEFAULT_SETUP);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -209,7 +210,7 @@ export function GauntletView() {
         depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
         st: setup.clock === 'seconds' ? setup.st || '1' : '0',
       };
-      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind: 'cutechess', config });
+      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind: 'cutechess', config }, { operatorToken });
       openJob(r.jobId);
       await refresh();
     } catch (e) {
@@ -222,7 +223,7 @@ export function GauntletView() {
   const stop = async () => {
     if (!active) return;
     try {
-      await apiPost(`/chess/lab/stop/${active.id}`, {});
+      await apiPost(`/chess/lab/stop/${active.id}`, {}, { operatorToken });
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -282,6 +283,17 @@ export function GauntletView() {
           scripts/bootstrap-chess-lab.sh, or point chess-lab.env at existing ones.
         </Alert>
       )}
+
+      <Panel title="Operator access">
+        <Field label="Operator token" help="Required to run or stop engine evaluations.">
+          <Input type="password" autoComplete="off" value={operatorToken}
+                 aria-label="Operator token"
+                 onChange={(e) => {
+                   setOperatorToken(e.target.value);
+                   sessionStorage.setItem('laplace.operatorToken', e.target.value);
+                 }} />
+        </Field>
+      </Panel>
       {err && <Alert>{err}</Alert>}
 
       <div className={styles.columns}>
@@ -394,7 +406,7 @@ export function GauntletView() {
           </div>
 
           <div className={styles.actions}>
-            <Button onClick={() => void start()} disabled={busy || running || missing.length > 0} loading={busy}>
+            <Button onClick={() => void start()} disabled={busy || running || missing.length > 0 || operatorToken.length === 0} loading={busy}>
               {running ? 'Running…' : 'Start gauntlet'}
             </Button>
             <Button variant="ghost" onClick={() => void stop()} disabled={!running}>Stop</Button>

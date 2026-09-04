@@ -343,6 +343,11 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_ast_get_node")]
     internal static partial int AstGetNode(IntPtr ast, nuint idx, LaplaceAstNode* outNode);
 
+    [LibraryImport(Library, EntryPoint = "laplace_fide_xml_project")]
+    internal static partial int FideXmlProject(
+        byte* utf8, nuint length, FidePlayerProjection* outPlayers,
+        nuint capacity, nuint* outCount);
+
     [LibraryImport(Library, EntryPoint = "laplace_ast_type_name")]
     internal static partial IntPtr AstTypeName(IntPtr ast, uint nodeTypeId);
 

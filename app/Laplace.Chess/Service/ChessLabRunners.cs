@@ -360,6 +360,7 @@ public static class ChessLabRunners
         bool all = bool.TryParse(Config(slot.Job.Config, "all", "true"), out bool allValue) && allValue;
         bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
         int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
+        int concurrency = ResolveConcurrency(slot.Job.Config);
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
 
@@ -392,15 +393,30 @@ public static class ChessLabRunners
             var outPath = Path.Combine(
                 LabDir, slot.Job.Id, $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn");
             Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            int appliedWhileFetching = 0;
             int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
-                msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
+                msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
+                ingest && site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase)
+                    ? async (batch, token) =>
+                    {
+                        var part = await ingestor!.IngestGamesAsync(
+                            batch, "Chess.com monthly archive",
+                            msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), token);
+                        appliedWhileFetching += part.Applied;
+                        lab.UpdateSummary(slot, new ChessLabJobSummary(
+                            appliedWhileFetching, 0, $"{appliedWhileFetching} new games recorded while downloading"));
+                    }
+                    : null,
+                concurrency);
             lab.AddArtifact(slot, "games.pgn", outPath);
             lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
 
             if (ingest)
             {
-                var gameResult = await ingestor!.IngestFileAsync(outPath,
-                    msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
+                var gameResult = appliedWhileFetching > 0 || site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase)
+                    ? new ChessPgnIngestor.Result(games, appliedWhileFetching, appliedWhileFetching)
+                    : await ingestor!.IngestFileAsync(outPath,
+                        msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
                 lab.Publish(slot, new ChessLabMetricEvent("games_ingested", gameResult.Applied));
                 lab.UpdateSummary(slot, new ChessLabJobSummary(
                     gameResult.Applied, games,
@@ -454,75 +470,6 @@ public static class ChessLabRunners
             $"{result.Profiles} profiles · {result.Links} identity links"));
         Finish(lab, slot, ChessLabJobState.Completed);
     }
-
-    public static async Task RunFideSearchAsync(
-        ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
-    {
-        string query = Config(slot.Job.Config, "query", "").Trim();
-        int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
-        var candidates = await ChessGameFetcher.SearchFideAsync(query, limit, ct);
-        lab.Publish(slot, FideTable($"FIDE matches for {query}", candidates));
-        lab.Publish(slot, new ChessLabMetricEvent("matches", candidates.Count));
-        lab.UpdateSummary(slot, new ChessLabJobSummary(candidates.Count, candidates.Count,
-            $"{candidates.Count} official FIDE candidates"));
-        Finish(lab, slot, ChessLabJobState.Completed);
-    }
-
-    public static async Task RunFideRosterAsync(
-        ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
-    {
-        string cohort = Config(slot.Job.Config, "cohort", "open");
-        int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
-        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
-        var candidates = await ChessGameFetcher.FetchFideTopAsync(cohort, limit, ct);
-        lab.Publish(slot, FideTable($"FIDE {cohort} top {candidates.Count}", candidates));
-        if (!ingest)
-        {
-            lab.UpdateSummary(slot, new ChessLabJobSummary(candidates.Count, candidates.Count,
-                $"{candidates.Count} official FIDE profiles · not ingested"));
-            Finish(lab, slot, ChessLabJobState.Completed);
-            return;
-        }
-
-        var fetched = new ConcurrentDictionary<string, ChessPlayerProfile>(StringComparer.Ordinal);
-        int done = 0;
-        await Parallel.ForEachAsync(candidates,
-            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
-            async (candidate, token) =>
-            {
-                var profile = await ChessGameFetcher.FetchFideProfileAsync(candidate.FideId, token);
-                var facts = profile.Facts.ToDictionary(
-                    static x => x.Key, static x => x.Value, StringComparer.OrdinalIgnoreCase);
-                facts["cohort"] = cohort;
-                facts["rank"] = candidate.Rank?.ToString() ?? "";
-                fetched[candidate.FideId] = profile with { Facts = facts };
-                int current = Interlocked.Increment(ref done);
-                lab.UpdateSummary(slot, new ChessLabJobSummary(current, candidates.Count,
-                    $"profiles {current}/{candidates.Count}"));
-                lab.Publish(slot, new ChessLabProgressEvent(current, candidates.Count, candidate.Name));
-            });
-
-        var profiles = candidates.Select(c => fetched[c.FideId]).ToArray();
-        var liveHost = await lab.GetLiveHostAsync(ct);
-        await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-        var result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
-        lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
-        lab.UpdateSummary(slot, new ChessLabJobSummary(result.Profiles, candidates.Count,
-            $"{result.Profiles} official FIDE profiles ingested from {cohort}"));
-        Finish(lab, slot, ChessLabJobState.Completed);
-    }
-
-    private static ChessLabTableEvent FideTable(
-        string title, IReadOnlyList<FidePlayerCandidate> candidates)
-        => new(title,
-            ["Rank", "FIDE ID", "Name", "Title", "Fed", "Standard", "Rapid", "Blitz", "Born"],
-            candidates.Select(static c => (IReadOnlyList<string>)[
-                c.Rank?.ToString() ?? "", c.FideId, c.Name, c.Title ?? "", c.Federation,
-                c.Standard == 0 ? "" : c.Standard.ToString(),
-                c.Rapid == 0 ? "" : c.Rapid.ToString(),
-                c.Blitz == 0 ? "" : c.Blitz.ToString(),
-                c.BirthYear == 0 ? "" : c.BirthYear.ToString(),
-            ]).ToArray());
 
     private static ChessLabTableEvent ProfileTable(IReadOnlyList<ChessPlayerProfile> profiles)
         => new("Acquired player profiles",

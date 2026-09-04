@@ -220,13 +220,6 @@ public static class NpgsqlFoundryReads
         NpgsqlRead.ExecuteScalarAsync<object>(conn, "SELECT laplace.relation_type_id(@c)",
             p => p.AddWithValue("c", canonical), ct: ct, label: "warm_relation_type_id");
 
-    public static Task SetCorpusMaxRowsAsync(
-        NpgsqlConnection conn, int corpusMax, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteNonQueryAsync(conn, """
-            SELECT set_config('laplace_substrate.corpus_max_rows', @v, false)
-            """,
-            p => p.AddWithValue("v", corpusMax.ToString()), ct: ct, label: "set_corpus_max_rows");
-
     public static Task<object?> HighwayMaskRefreshAsync(
         NpgsqlConnection conn, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ExecuteScalarAsync<object>(conn, """

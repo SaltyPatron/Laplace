@@ -7,7 +7,11 @@ internal static class PgnGames
 {
     public static IEnumerable<string> StreamGames(string path)
     {
-        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        // Provider exports are specified and served as UTF-8. Reject malformed input instead
+        // of silently replacing bytes with U+FFFD and minting corrupted player/game identities.
+        using var reader = new StreamReader(
+            path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+            detectEncodingFromByteOrderMarks: true);
         var sb = new StringBuilder(2048);
         bool inGame = false;
         string? line;
@@ -38,6 +42,6 @@ internal static class PgnGames
         if (i < 0) return "";
         i += tag.Length + 3;
         int j = game.IndexOf('"', i);
-        return j > i ? game[i..j].Trim() : "";
+        return j > i ? game[i..j].Trim().Normalize(NormalizationForm.FormC) : "";
     }
 }

@@ -1,4 +1,4 @@
-export type LabCategory = 'substrate' | 'diagnostics' | 'lichess';
+export type LabCategory = 'substrate' | 'diagnostics' | 'import';
 
 export interface LabExperiment {
   kind: string;
@@ -25,9 +25,9 @@ export const LAB_CATEGORIES: { id: LabCategory; label: string; blurb: string }[]
     blurb: 'Quick sanity checks on search strength and game review.',
   },
   {
-    id: 'lichess',
-    label: 'Lichess & data',
-    blurb: 'Fetch games for ingest, and run the bot against live opponents.',
+    id: 'import',
+    label: 'Import profiles & games',
+    blurb: 'Find and import FIDE, Chess.com, and Lichess identities; games are optional.',
   },
 ];
 
@@ -143,7 +143,7 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
       'Leave “Ingest all games” on for the complete available archive; turn it off to apply a cap.',
       'Add a FIDE ID to connect the online account to an official real-world identity.',
     ],
-    category: 'lichess',
+    category: 'import',
     recordsLive: false,
   },
   {
@@ -152,10 +152,20 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     tagline: 'Resolve a real name to official FIDE candidates before associating an account.',
     description:
       'Searches the official FIDE ratings database and returns FIDE ID, name, title, federation, ratings, and birth year for disambiguation.',
-    expect: ['Ranked candidate table with official FIDE IDs', 'Standard, rapid, and blitz ratings where published'],
-    tips: ['Search either “Magnus Carlsen” or “Carlsen, Magnus”, then paste the selected FIDE ID into player ingest.'],
-    category: 'lichess',
+    expect: ['Ranked candidate table with official FIDE IDs', 'One-click profile import without downloading games'],
+    tips: ['Search either “Magnus Carlsen” or “Carlsen, Magnus”, then import the selected official profile.'],
+    category: 'import',
     recordsLive: false,
+  },
+  {
+    kind: 'fide-profile',
+    title: 'Import one FIDE profile',
+    tagline: 'Write one selected official identity without downloading games.',
+    description: 'Loads the selected identity and all published rating planes from FIDE’s official rating-list estate, then writes it to Laplace.',
+    expect: ['One durable Chess_Player profile', 'Standard, rapid, and blitz source ratings where published'],
+    tips: ['Usually use the Import profile button on a FIDE search result.'],
+    category: 'import',
+    recordsLive: true,
   },
   {
     kind: 'player-profile',
@@ -165,7 +175,7 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
       'Fetches the selected Chess.com or Lichess profile and an optional official FIDE profile, then writes their metadata and identity link as one substrate operation. If no FIDE ID is supplied, it shows official candidates from the provider real name.',
     expect: ['Provider and official profile table', 'Downloadable profile JSON', 'identity_links receipt or FIDE candidates'],
     tips: ['Use Find FIDE identity when several people share the same name; only an explicitly selected FIDE ID is associated.'],
-    category: 'lichess',
+    category: 'import',
     recordsLive: false,
   },
   {
@@ -176,7 +186,7 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
       'Reads FIDE’s official open, women, junior, or girls ranking for standard, rapid, or blitz; fetches each selected profile; and writes the cohort in one substrate operation.',
     expect: ['Official ranked player table', 'Profile acquisition progress', 'profiles_ingested receipt'],
     tips: ['Start with 25 to inspect the cohort; the official pages currently publish up to 100 per list.'],
-    category: 'lichess',
+    category: 'import',
     recordsLive: true,
   },
 ];

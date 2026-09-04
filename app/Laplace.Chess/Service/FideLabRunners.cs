@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace Laplace.Chess.Service;
 
 /// <summary>
@@ -21,11 +19,7 @@ internal static class FideLabRunners
         IReadOnlyList<FidePlayerCandidate> candidates;
         if (query.Length is >= 4 and <= 12 && query.All(char.IsDigit))
         {
-            // An exact provider id is already a selected FIDE identity, not fuzzy
-            // discovery. Preserve the historical exact-ID contract and enrich that
-            // exact provider coordinate directly.
-            var profile = await ChessGameFetcher.FetchFideProfileAsync(query, ct);
-            candidates = [Candidate(profile)];
+            candidates = [await FideRatingList.FindByIdAsync(query, ct)];
         }
         else
         {
@@ -36,7 +30,7 @@ internal static class FideLabRunners
             throw new InvalidDataException(
                 $"FIDE published rating list returned no valid candidates for '{query}'.");
 
-        lab.Publish(slot, FideTable($"FIDE matches for {query}", candidates));
+        lab.Publish(slot, FideTable($"FIDE matches for {query}", candidates, actionable: true));
         lab.Publish(slot, new ChessLabMetricEvent("matches", candidates.Count));
         lab.UpdateSummary(slot, new ChessLabJobSummary(
             candidates.Count, candidates.Count,
@@ -60,7 +54,7 @@ internal static class FideLabRunners
             throw new InvalidDataException(
                 $"FIDE published rating list returned no valid players for cohort '{cohort}'.");
 
-        lab.Publish(slot, FideTable($"FIDE {cohort} top {candidates.Count}", candidates));
+        lab.Publish(slot, FideTable($"FIDE {cohort} top {candidates.Count}", candidates, actionable: true));
         if (!ingest)
         {
             lab.UpdateSummary(slot, new ChessLabJobSummary(
@@ -69,34 +63,9 @@ internal static class FideLabRunners
             return;
         }
 
-        // Discovery establishes provider ids and ranking facts. The selected profile
-        // pages then enrich those exact provider identities; names alone never assert
-        // cross-provider identity.
-        var fetched = new ConcurrentDictionary<string, ChessPlayerProfile>(StringComparer.Ordinal);
-        int done = 0;
-        await Parallel.ForEachAsync(
-            candidates,
-            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
-            async (candidate, token) =>
-            {
-                var profile = await ChessGameFetcher.FetchFideProfileAsync(candidate.FideId, token);
-                var facts = profile.Facts.ToDictionary(
-                    static x => x.Key, static x => x.Value, StringComparer.OrdinalIgnoreCase);
-                facts["cohort"] = cohort;
-                facts["rank"] = candidate.Rank?.ToString() ?? "";
-                facts["rating_list_standard"] = candidate.Standard.ToString();
-                facts["rating_list_rapid"] = candidate.Rapid.ToString();
-                facts["rating_list_blitz"] = candidate.Blitz.ToString();
-                fetched[candidate.FideId] = profile with { Facts = facts };
-
-                int current = Interlocked.Increment(ref done);
-                lab.UpdateSummary(slot, new ChessLabJobSummary(
-                    current, candidates.Count, $"profiles {current}/{candidates.Count}"));
-                lab.Publish(slot, new ChessLabProgressEvent(
-                    current, candidates.Count, candidate.Name));
-            });
-
-        var profiles = candidates.Select(candidate => fetched[candidate.FideId]).ToArray();
+        // The published list is already the authoritative FIDE profile estate. HTML
+        // profile pages are optional enrichment and cannot make admission all-or-nothing.
+        var profiles = candidates.Select(candidate => Profile(candidate, cohort)).ToArray();
         var liveHost = await lab.GetLiveHostAsync(ct);
         await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
         var result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
@@ -106,24 +75,46 @@ internal static class FideLabRunners
             $"{result.Profiles} official FIDE profiles ingested from {cohort}"));
     }
 
-    private static FidePlayerCandidate Candidate(ChessPlayerProfile profile)
+    public static async Task RunProfileAsync(
+        ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
-        int birthYear = profile.Facts.TryGetValue("birth_year", out var born)
-            && int.TryParse(born, out int year) ? year : 0;
-        return new FidePlayerCandidate(
-            profile.ProviderId,
-            profile.DisplayName,
-            profile.Title,
-            profile.Federation ?? "",
-            profile.Ratings.TryGetValue("standard", out int standard) ? standard : 0,
-            profile.Ratings.TryGetValue("rapid", out int rapid) ? rapid : 0,
-            profile.Ratings.TryGetValue("blitz", out int blitz) ? blitz : 0,
-            birthYear,
-            null);
+        string fideId = Config(slot.Job.Config, "fideId", "").Trim();
+        var candidate = await FideRatingList.FindByIdAsync(fideId, ct);
+        var profile = Profile(candidate, cohort: null);
+        var liveHost = await lab.GetLiveHostAsync(ct);
+        await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
+        var result = await ingestor.IngestPlayerProfilesAsync([profile], ct);
+        lab.Publish(slot, ProfileTable(profile));
+        lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(
+            result.Profiles, 1, $"{profile.DisplayName} imported from official FIDE list"));
     }
 
+    internal static ChessPlayerProfile Profile(FidePlayerCandidate candidate, string? cohort)
+    {
+        var ratings = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (candidate.Standard > 0) ratings["standard"] = candidate.Standard;
+        if (candidate.Rapid > 0) ratings["rapid"] = candidate.Rapid;
+        if (candidate.Blitz > 0) ratings["blitz"] = candidate.Blitz;
+        var facts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (candidate.BirthYear > 0) facts["birth_year"] = candidate.BirthYear.ToString();
+        if (!string.IsNullOrWhiteSpace(cohort)) facts["cohort"] = cohort;
+        if (candidate.Rank is { } rank) facts["rank"] = rank.ToString();
+        return new ChessPlayerProfile(
+            "fide", candidate.FideId, candidate.Name, candidate.Name, null,
+            candidate.Title, candidate.Federation, candidate.FideId, null,
+            [candidate.Name], [$"https://ratings.fide.com/profile/{candidate.FideId}"],
+            ratings, facts);
+    }
+
+    private static ChessLabTableEvent ProfileTable(ChessPlayerProfile profile)
+        => new("Imported FIDE profile",
+            ["FIDE ID", "Name", "Title", "Federation", "Ratings"],
+            [[profile.ProviderId, profile.DisplayName, profile.Title ?? "", profile.Federation ?? "",
+              string.Join(", ", profile.Ratings.Select(static x => $"{x.Key} {x.Value}"))]]);
+
     private static ChessLabTableEvent FideTable(
-        string title, IReadOnlyList<FidePlayerCandidate> candidates)
+        string title, IReadOnlyList<FidePlayerCandidate> candidates, bool actionable)
         => new(title,
             ["Rank", "FIDE ID", "Name", "Title", "Fed", "Standard", "Rapid", "Blitz", "Born"],
             candidates.Select(static c => (IReadOnlyList<string>)[
@@ -132,7 +123,8 @@ internal static class FideLabRunners
                 c.Rapid == 0 ? "" : c.Rapid.ToString(),
                 c.Blitz == 0 ? "" : c.Blitz.ToString(),
                 c.BirthYear == 0 ? "" : c.BirthYear.ToString(),
-            ]).ToArray());
+            ]).ToArray(),
+            actionable ? new ChessLabTableAction("FIDE · Import profile", "fide-profile", "fideId", 1) : null);
 
     private static string Config(IReadOnlyDictionary<string, string> cfg, string key, string fallback)
         => cfg.TryGetValue(key, out var value) ? value : fallback;

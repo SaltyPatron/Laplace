@@ -15,6 +15,7 @@ export interface LabEvent {
   title?: string;
   columns?: string[];
   rows?: string[][];
+  action?: { label: string; kind: string; configKey: string; valueColumn: number };
   // per-game
   index?: number;
   white?: string;
