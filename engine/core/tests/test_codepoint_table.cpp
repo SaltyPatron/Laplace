@@ -44,6 +44,40 @@ TEST(LaplaceCoreCodepointTable, PropertyAccessorsKnownValues) {
     EXPECT_EQ(codepoint_table_gb(0x0301u), LAPLACE_GB_EXTEND);
 }
 
+TEST(LaplaceCoreCodepointTable, UcdPropertyCensusRejectsAllOtherOrTruncatedTables) {
+    uint64_t aletter = 0;
+    uint64_t extend = 0;
+    uint64_t hebrew = 0;
+    uint64_t katakana = 0;
+    uint64_t regional_indicator = 0;
+
+    const codepoint_entry_t* records = nullptr;
+    uint64_t count = 0;
+    ASSERT_EQ(codepoint_table_records(&records, &count), 0);
+    ASSERT_NE(records, nullptr);
+    ASSERT_EQ(count, static_cast<uint64_t>(LAPLACE_PERFCACHE_RECORD_COUNT));
+
+    for (uint32_t cp = 0; cp < count; ++cp) {
+        const uint8_t wb = laplace_pc_wb(records[cp].flags);
+        const uint8_t gb = laplace_pc_gb(records[cp].flags);
+        if (wb == LAPLACE_WB_ALETTER) ++aletter;
+        if (gb == LAPLACE_GB_EXTEND) ++extend;
+        if (wb == LAPLACE_WB_HEBREW_LETTER) ++hebrew;
+        if (wb == LAPLACE_WB_KATAKANA) ++katakana;
+        if (wb == LAPLACE_WB_REGIONAL_INDICATOR) ++regional_indicator;
+    }
+
+    // These are deliberately broad Unicode-17 sanity floors, not exact release
+    // counts. They fail the historically dangerous grouped/truncated parse where
+    // almost everything silently becomes Other while tolerating legitimate future
+    // additions to the selected stable UCD release.
+    EXPECT_GE(aletter, 30000u);
+    EXPECT_GE(extend, 2000u);
+    EXPECT_GT(hebrew, 0u);
+    EXPECT_GT(katakana, 0u);
+    EXPECT_GT(regional_indicator, 0u);
+}
+
 TEST(LaplaceCoreCodepointTable, CanonicalDecomposition) {
     const uint32_t* seq = nullptr;
     uint32_t len = 0;
