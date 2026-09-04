@@ -2,26 +2,30 @@
   :root {
     color-scheme: light;
 
-    /* Tier A — Primitives */
-    --primitive-neutral-950: #0a2638;
-    --primitive-neutral-900: #f3f7f9;
-    --primitive-neutral-800: #ffffff;
-    --primitive-neutral-700: #eef3f6;
-    --primitive-neutral-600: #c7d5de;
-    --primitive-blue-500: #32749b;
-    /* Fill variant: white small text on blue-500 is 3.2:1 (fails WCAG 4.5:1, caught by
-       axe). blue-600 gives 5.2:1; use it wherever the accent is a text-bearing fill.
-       blue-500 stays for borders, glows and accents on dark surfaces. */
-    --primitive-blue-600: #18577d;
-    --primitive-teal-400: #006f6a;
-    --primitive-teal-600: #006a66;
-    --primitive-copper-400: #b66b3d;
-    --primitive-copper-600: #925231;
-    --primitive-red-500: #b63e4c;
-    --primitive-green-500: #18794e;
-    --primitive-yellow-500: #a66a12;
-    --primitive-text-100: #142c3b;
-    --primitive-text-400: #526879;
+    /*
+     * Laplace workshop palette.
+     *
+     * The product is a manufactured magical instrument: warm readable work
+     * surfaces, enamel-blue machinery, copper/brass structure, steel geometry,
+     * and cyan/green signal energy.  Dark belongs inside instruments and deep
+     * viewports; white/black are not the application canvas.
+     */
+    --primitive-neutral-950: #0d3145;
+    --primitive-neutral-900: #eadfcf;
+    --primitive-neutral-800: #f8f0e3;
+    --primitive-neutral-700: #f0e3d0;
+    --primitive-neutral-600: #bca27e;
+    --primitive-blue-500: #347daa;
+    --primitive-blue-600: #185b82;
+    --primitive-teal-400: #0b9d98;
+    --primitive-teal-600: #08746f;
+    --primitive-copper-400: #b76f3e;
+    --primitive-copper-600: #8f5635;
+    --primitive-red-500: #ae4350;
+    --primitive-green-500: #237d55;
+    --primitive-yellow-500: #a56b17;
+    --primitive-text-100: #162f3d;
+    --primitive-text-400: #586a70;
 
     --primitive-space-1: 0.25rem;
     --primitive-space-2: 0.45rem;
@@ -34,48 +38,65 @@
     --color-bg-surface: var(--primitive-neutral-900);
     --color-bg-panel: var(--primitive-neutral-800);
     --color-bg-panel-2: var(--primitive-neutral-700);
-    --color-bg-elevated: color-mix(in srgb, var(--primitive-neutral-700) 72%, var(--primitive-neutral-800));
+    --color-bg-elevated: color-mix(in srgb, var(--primitive-neutral-800) 82%, #fff8ea 18%);
     --color-bg-abyss: var(--primitive-neutral-950);
-    --color-bg-top: #f8fafb;
-    --color-viz-bg: #e4edf2;
-    --color-viz-label: #16384c;
-    --color-viz-label-bg: rgb(244 248 250 / 82%);
-    --color-navy: #0a2638;
-    --color-navy-raised: #10344a;
-    --color-navy-muted: #a9bdc9;
-    --color-border-default: var(--primitive-neutral-600);
+    --color-bg-top: #f4eadb;
+    --color-viz-bg: #10384d;
+    --color-viz-label: #f7edda;
+    --color-viz-label-bg: rgb(13 49 69 / 86%);
+    --color-navy: #123b56;
+    --color-navy-raised: #1a506d;
+    --color-navy-muted: #bed3dc;
+    --color-border-default: #b79b74;
+    --color-border-soft: color-mix(in srgb, var(--color-border-default) 50%, var(--color-bg-panel));
     --color-text-primary: var(--primitive-text-100);
     --color-text-muted: var(--primitive-text-400);
-    --color-accent: var(--primitive-teal-400);
+    --color-accent: var(--primitive-teal-600);
     --color-accent-fill: var(--primitive-teal-600);
     --color-signal: var(--primitive-teal-400);
+    --color-signal-hot: #45d8c9;
     --color-structure: var(--primitive-copper-600);
     --color-copper: var(--primitive-copper-400);
+    --color-brass: #c49a51;
     --color-steel: var(--primitive-blue-500);
+    --color-neon-gold: #e0ab36;
+    --color-neon-hot: #d8668b;
     --color-error: var(--primitive-red-500);
     --color-confirm: var(--primitive-green-500);
     --color-refute: var(--primitive-red-500);
     --color-draw: var(--primitive-yellow-500);
     --color-uncertain: var(--primitive-yellow-500);
 
-    /* WebGL/Three canvases are dark instruments inside the light product UI.
-       Their palette is a UI token contract too — do not duplicate legacy
-       purple/yellow/blue literals in renderer code. */
-    --viz-bg: #0a2638;
-    --viz-text: #eef6f9;
-    --viz-muted: #b9cad4;
-    --viz-signal: #69d9d1;
-    --viz-steel: #8fc4e2;
-    --viz-error: #ff8f9b;
+    /* Three/WebGL is a deep-blue instrument mounted in the warm workshop. */
+    --viz-bg: #10384d;
+    --viz-bg-deep: #0a2b3d;
+    --viz-text: #f7edda;
+    --viz-muted: #b9d0d8;
+    --viz-signal: #55e1d3;
+    --viz-steel: #8fc8e5;
+    --viz-copper: #d59a6f;
+    --viz-gold: #f1c75b;
+    --viz-hot: #ef7eaa;
+    --viz-error: #ff949e;
 
-    --material-enamel: var(--color-bg-panel);
+    --material-enamel:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--color-bg-panel) 94%, #fff9ef 6%),
+        var(--color-bg-panel));
     --material-raised:
       linear-gradient(180deg,
-        color-mix(in srgb, var(--color-bg-panel) 94%, var(--color-steel) 6%),
-        var(--color-bg-panel));
+        color-mix(in srgb, var(--color-bg-panel) 88%, #ffffff 12%),
+        color-mix(in srgb, var(--color-bg-panel-2) 82%, var(--color-bg-panel)));
+    --material-blue-enamel:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--color-navy-raised) 86%, var(--color-steel) 14%),
+        var(--color-navy));
     --shadow-instrument:
-      0 1px 2px color-mix(in srgb, var(--color-navy) 8%, transparent),
-      0 10px 28px color-mix(in srgb, var(--color-navy) 7%, transparent);
+      0 1px 1px rgb(74 48 28 / 14%),
+      0 9px 24px rgb(64 45 30 / 10%);
+    --shadow-energy:
+      0 0 0 1px color-mix(in srgb, var(--color-signal) 20%, transparent),
+      0 0 18px color-mix(in srgb, var(--color-signal) 16%, transparent);
 
     --space-1: var(--primitive-space-1);
     --space-2: var(--primitive-space-2);
@@ -84,13 +105,13 @@
     --space-5: var(--primitive-space-5);
     --space-6: var(--primitive-space-6);
 
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
+    --radius-sm: 5px;
+    --radius-md: 9px;
+    --radius-lg: 14px;
     --radius-pill: 99px;
 
     --font-sans: Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
-    --font-display: Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-display: Georgia, 'Times New Roman', serif;
     --font-mono: ui-monospace, 'Cascadia Code', monospace;
 
     --text-xs: 0.75rem;
@@ -107,9 +128,9 @@
 
     /* Tier C — Component */
     --button-primary-bg: var(--color-accent-fill);
-    --button-primary-fg: #fff;
-    --tooltip-bg: var(--color-bg-panel);
-    --tooltip-fg: var(--color-text-primary);
+    --button-primary-fg: #fffdf8;
+    --tooltip-bg: var(--color-navy);
+    --tooltip-fg: #f7edda;
 
     /* Legacy aliases (migration) */
     --bg: var(--color-bg-surface);
@@ -126,44 +147,6 @@
 
     font-size: 16px;
   }
-
-  /* Follow the host OS/browser preference without returning to the almost-black
-     pre-reskin UI. The dark surface stays in the same blue instrument family as
-     the header, so switching between system modes changes luminance without a
-     white ↔ black flash. */
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color-scheme: dark;
-
-      --primitive-neutral-950: #122f42;
-      --primitive-neutral-900: #17384c;
-      --primitive-neutral-800: #1e4055;
-      --primitive-neutral-700: #274b61;
-      --primitive-neutral-600: #4b6d7f;
-      --primitive-blue-500: #69add2;
-      --primitive-blue-600: #327da8;
-      --primitive-teal-400: #63cfc2;
-      --primitive-teal-600: #23756f;
-      --primitive-copper-400: #d99a72;
-      --primitive-copper-600: #b77b58;
-      --primitive-red-500: #ef7f89;
-      --primitive-green-500: #61cb91;
-      --primitive-yellow-500: #e4b762;
-      --primitive-text-100: #eef7fa;
-      --primitive-text-400: #b9ccd5;
-
-      --color-bg-top: #123247;
-      --color-viz-bg: #173b50;
-      --color-viz-label: #e4f0f5;
-      --color-viz-label-bg: rgb(10 38 56 / 78%);
-      --color-navy: #102d40;
-      --color-navy-raised: #1a4258;
-      --color-navy-muted: #b3cad5;
-      --shadow-instrument:
-        0 1px 2px rgb(3 18 28 / 24%),
-        0 10px 30px rgb(3 18 28 / 20%);
-    }
-  }
 }
 
 @layer base {
@@ -172,15 +155,10 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 1px;
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
   }
 
-  /* A bare <a> otherwise falls back to the UA's #0000ee, which is 1.88:1
-     against the panel background — axe reports it as a serious contrast
-     violation for every such link (149 nodes on the Lab page alone). The Link
-     primitive styles itself; this covers the anchors that are not it, and sits
-     in `base` so any component rule still wins. */
   a {
     color: var(--color-accent);
   }
@@ -189,10 +167,18 @@
     margin: 0;
     height: 100%;
     background-color: var(--color-bg-surface);
+    /*
+     * Paper grain + very faint magical-circuit construction lines.  The traces
+     * are deliberately below content contrast: they provide material identity,
+     * not wallpaper noise.
+     */
     background-image:
-      radial-gradient(circle at 72% -10%, color-mix(in srgb, var(--color-steel) 9%, transparent), transparent 34rem),
-      linear-gradient(180deg, var(--color-bg-top), var(--color-bg-surface) 22rem);
-    background-size: auto;
+      radial-gradient(circle at 13% 12%, rgb(255 251 242 / 78%) 0 0.7rem, transparent 22rem),
+      radial-gradient(circle at 86% 2%, color-mix(in srgb, var(--color-steel) 8%, transparent), transparent 31rem),
+      linear-gradient(90deg, transparent 0 7.95rem, rgb(143 86 53 / 5%) 8rem 8.05rem, transparent 8.1rem),
+      linear-gradient(0deg, transparent 0 7.95rem, rgb(52 125 170 / 4%) 8rem 8.05rem, transparent 8.1rem),
+      linear-gradient(180deg, var(--color-bg-top), var(--color-bg-surface) 24rem);
+    background-size: auto, auto, 16rem 16rem, 16rem 16rem, auto;
     background-attachment: fixed;
     color: var(--color-text-primary);
     font-family: var(--font-sans);
