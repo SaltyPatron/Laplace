@@ -8,19 +8,23 @@ namespace Laplace.Decomposers.Abstractions;
 public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord>, IIngestInventoryProvider,
     IIgnoresAmbientArtifactManifest
 {
-    public override Hash128 SourceId => UserPromptContent.Source;
-    public override string SourceName => "UserPrompt";
-    public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => UserPromptContent.TrustClass;
-    protected override double SourceTrust => UserPromptContent.WitnessWeight;
+    private static readonly ISourceManifest Manifest = SeedSourceManifest<DocumentSource>.Instance;
 
-    // Pillar 0 live: every file is its own provenance unit (source = content-DAG root,
-    // completion marker + metadata DAG per file), so completion is per-file, not the
-    // all-or-nothing source-level marker — new files in a completed directory just work.
+    public override Hash128 SourceId => DocumentSource.SourceId;
+    public override string SourceName => DocumentSource.SourceName;
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => DocumentSource.TrustClass;
+    protected override double SourceTrust => SourceTrust.StructuredCorpus;
+
     public override bool PerFileCompletion => true;
 
+    // Document files now use their semantic file-composition id for completion. The generic
+    // resume fingerprint is intentionally disabled here because it is an execution hash, not
+    // the file entity defined by Pillar 0.
+    public override bool PerFileResume => false;
+
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
+        => SourceVocabularyBootstrap.RegisterManifestAsync(context, Manifest, ct: ct);
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
@@ -49,10 +53,8 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
         new DocumentIngestHandler(LayerOrder) { IgnoreCompletedFiles = options.ReObservePresent };
 
     protected override IngestBatchConfig ConfigForFile(
-        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
-    {
-        return DocumentIngestSupport.PipelineConfig(fileLabel, reader, options);
-    }
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        DocumentIngestSupport.PipelineConfig(fileLabel, reader, options);
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
@@ -85,10 +87,6 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
         if (!Directory.Exists(path)) yield break;
 
-        // Provenance filter ONLY — not the source-code size heuristic. A 27 MB
-        // dictionary is the corpus, not a build artifact. IsVendoredOrBuildPath
-        // dropped webster-unabridged-dictionary-1913 and one Britannica volume
-        // here, silently, before enumeration (GH #754).
         foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
                                          .Where(f => !VendoredPathFilter.IsVendoredOrBuildLocation(f))
                                          .OrderBy(p => p, StringComparer.Ordinal))
@@ -104,10 +102,9 @@ public static class DocumentFileExtract
     {
         byte[] bytes = await ReadFileBytesAsync(file, ct);
         if (bytes.Length == 0) yield break;
-        // Match RepoDecomposer / GH #596: one malformed-encoding file must skip with a
-        // warning, not abort a multi-hundred-file document run (rc=1 for the process).
-        Hash128? fileRoot = ContentTierSpine.ResolveRoot(bytes);
-        if (fileRoot is null)
+
+        Hash128? contentRoot = ContentTierSpine.ResolveRoot(bytes);
+        if (contentRoot is null)
         {
             Trace.TraceWarning(
                 "DocumentFileExtract: skipping '{0}' — unresolvable content root " +
@@ -115,8 +112,29 @@ public static class DocumentFileExtract
                 relativePath);
             yield break;
         }
+
+        var metadata = FileMetadata.FromPath(file, relativePath);
+        FileIdentity fileIdentity;
+        try
+        {
+            fileIdentity = FileEntity.Resolve(bytes, metadata);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceWarning(
+                "DocumentFileExtract: skipping '{0}' — unresolvable file identity: {1}",
+                relativePath, ex.Message);
+            yield break;
+        }
+
+        Hash128 documentId = DocumentEntity.Resolve(contentRoot.Value);
         yield return new ContentIngestRecord(
-            bytes, SourceId: fileRoot.Value, Metadata: FileMetadata.FromPath(file, relativePath));
+            CanonicalUtf8: bytes,
+            SourceId: documentId,
+            Metadata: metadata,
+            ContentRootId: contentRoot.Value,
+            DocumentId: documentId,
+            FileId: fileIdentity.FileId);
     }
 
     private static async Task<byte[]> ReadFileBytesAsync(string file, CancellationToken ct)
