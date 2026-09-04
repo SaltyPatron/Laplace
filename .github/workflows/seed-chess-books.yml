@@ -7,13 +7,17 @@ name: Seed — chess books
 # out of seed-chess.yml: run 30751844265 fed a PGN to the openings TSV reader
 # because one shared input set drove four different decomposers.
 #
+# The Gutenberg mini-collection moved out of test-data on 2026-09-03. The
+# authoritative plain-text collection is /vault/Data/ProjectGutenberg/text;
+# test-data/text now contains only fixtures and is not a chess-book corpus.
+#
 # seed-chess.yml remains for batch/ladder runs. This is the explicit one.
 
 on:
   workflow_dispatch:
     inputs:
       path:
-        description: "override the default corpus ($LAPLACE_DATA_ROOT/test-data/text)"
+        description: "override the default corpus ($LAPLACE_DATA_ROOT/ProjectGutenberg/text)"
         type: string
         required: false
         default: ""
@@ -37,7 +41,7 @@ jobs:
         run: |
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
           p="${{ inputs.path }}"
-          [ -n "$p" ] || p="$root/test-data/text"
+          [ -n "$p" ] || p="$root/ProjectGutenberg/text"
           [ -e "$p" ] || { echo "::error::$p does not exist on this runner"; exit 1; }
           echo "resolved -> $p"
           echo "path=$p" >> "$GITHUB_OUTPUT"
