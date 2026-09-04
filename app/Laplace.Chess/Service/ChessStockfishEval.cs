@@ -13,11 +13,7 @@ namespace Laplace.Chess.Service;
 /// position with stockfish (side-to-move cp), attest HAS_EVAL deposits and eval-delta
 /// MOVE_QUALITY classes under the ChessStockfish source. Versioned and marker-gated
 /// like ChessAnalyze; GH #736: an engine verdict is a pure function of the position, so
-/// the unit is the LINE — a second playing of an analyzed line re-deposits nothing
-/// (folding the same engine verdict once per playing would be witness inflation of one
-/// witness). One pass per line per Version regardless of depth — bumping Version is the
-/// sanctioned re-run (re-running at a new depth without a version bump would
-/// double-witness the same facts).
+/// the unit is the LINE — a second playing of an analyzed line re-deposits nothing.
 /// </summary>
 public static class ChessStockfishEval
 {
@@ -37,7 +33,8 @@ public static class ChessStockfishEval
         ChessWitnessedGame Game,
         ChessComposed?[] Positions,
         int?[] Evals,
-        KeyValuePair<Hash128, int?>[] FreshEvaluations);
+        KeyValuePair<Hash128, int?>[] FreshEvaluations,
+        bool Complete);
 
     public static string? ClassifyLoss(int lossCp) => lossCp switch
     {
@@ -56,6 +53,12 @@ public static class ChessStockfishEval
             DepositPrepared(b, prepared);
     }
 
+    /// <summary>
+    /// Pure preparation. Successful per-position searches may be cached immediately, but the
+    /// line is not publishable until every reachable non-terminal position returned a verdict
+    /// and the movetext replay reached its declared end. This makes a line the atomic testimony
+    /// boundary: a timeout cannot mint a completion marker over a partial census.
+    /// </summary>
     internal static PreparedLine? PrepareGame(
         ChessWitnessedGame game,
         IPositionEvaluator eval,
@@ -69,6 +72,7 @@ public static class ChessStockfishEval
         var evals = new int?[n + 1];
         var composed = new ChessComposed?[n + 1];
         var fresh = new List<KeyValuePair<Hash128, int?>>();
+        bool complete = true;
 
         var cur = start.Initial;
         ChessComposed? carried = null;
@@ -88,20 +92,33 @@ public static class ChessStockfishEval
                     out bool newlyCached);
                 if (newlyCached)
                     fresh.Add(new KeyValuePair<Hash128, int?>(node.Position.Id, evals[ply]));
+                if (!evals[ply].HasValue)
+                    complete = false;
             }
 
             if (ply == n) break;
             var mv = San.Resolve(cur.Board, m.LegalActions(cur), game.Moves[ply]);
-            if (mv is null) break;
+            if (mv is null)
+            {
+                complete = false;
+                break;
+            }
             cur = m.Apply(cur, mv.Value);
             carried = ChessCompose.Position(cur.Board);
         }
 
-        return new PreparedLine(game, composed, evals, fresh.ToArray());
+        return new PreparedLine(game, composed, evals, fresh.ToArray(), complete);
     }
 
+    /// <summary>
+    /// Serial publication. Partial engine work lives only in the derived eval cache and is
+    /// retried/reused on the next pass; it never becomes partial substrate testimony and never
+    /// receives the line completion marker.
+    /// </summary>
     internal static void DepositPrepared(SubstrateChangeBuilder b, PreparedLine prepared)
     {
+        if (!prepared.Complete) return;
+
         var game = prepared.Game;
         var composed = prepared.Positions;
         var evals = prepared.Evals;
@@ -150,8 +167,6 @@ public static class ChessStockfishEval
         if (evalMemo is null || evalInflight is null)
         {
             int? value = eval.EvaluateCp(fen);
-            // Null means no observation was produced (timeout/dead process/etc.). Absence is
-            // not a reusable engine verdict, so let a replacement engine try again later.
             if (value.HasValue && evalMemo is not null && evalMemo.TryAdd(positionId, value))
                 newlyCached = true;
             return value;
