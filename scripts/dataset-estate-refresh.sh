@@ -598,8 +598,8 @@ source_estate_gate() {
     [[ "$header" == $'family\tartifact_or_path\tinstalled_identity\ttarget_identity\tstate\tdisposition_or_next_action\tauthority\tissue' ]] \
         || die "unexpected source-estate header: $SOURCE_ESTATE"
 
-    local family artifact installed target state action authority issue extra
-    while IFS=$'\t' read -r family artifact installed target state action authority issue extra; do
+    local family artifact _installed _target state action _authority _issue extra
+    while IFS=$'\t' read -r family artifact _installed _target state action _authority _issue extra; do
         ((line+=1))
         [[ -n "$family$artifact$state" ]] || continue
         [[ -z "${extra:-}" ]] || die "$SOURCE_ESTATE:$line has more than 8 fields"
