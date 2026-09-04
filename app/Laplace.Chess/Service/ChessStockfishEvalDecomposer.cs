@@ -24,11 +24,6 @@ public sealed class ChessStockfishEvalDecomposer
     private readonly ConcurrentDictionary<Hash128, Lazy<int?>> _evalInflight = new();
     private readonly string _cachePath;
 
-    /// <summary>depth = stockfish search depth per position (default 10 — the budget the v1
-    /// census testimony was recorded at). A budget change rides a version bump lawfully via
-    /// the #508 eviction verb: bump <see cref="ChessStockfishEval.Version"/>, then
-    /// `laplace evict ChessStockfish --rederive`. nodes &gt; 0 switches to a node-capped
-    /// search. evaluatorFactory overrides the process evaluator for tests.</summary>
     public ChessStockfishEvalDecomposer(
         int depth = 10, long nodes = 0, Func<IPositionEvaluator>? evaluatorFactory = null,
         string? evalCachePath = null)
@@ -66,12 +61,6 @@ public sealed class ChessStockfishEvalDecomposer
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessStockfishEval.SourceId, SourceName, ChessStockfishEval.TrustClassId, ct);
 
-    /// <summary>
-    /// Stockfish is CPU-bound external work, not a cheap builder callback. One uncapped wave is
-    /// exactly the machine compose width, which makes MonolithSegmenter dispatch one line to
-    /// each segment instead of buffering the entire 9k-line census into segment zero. An explicit
-    /// operator --batch remains the one override.
-    /// </summary>
     private static int ResolveEngineWave(DecomposerOptions options) =>
         options.BatchSize > 1
             ? options.BatchSize
@@ -81,8 +70,6 @@ public sealed class ChessStockfishEvalDecomposer
         IDecomposerContext context, DecomposerOptions options)
     {
         int wave = ResolveEngineWave(options);
-        // Use the complete profile, including its measured resident-byte field. The generic
-        // ComposeDecomposer profile projection carries only the first two scalar estimates.
         var profile = IngestSourceProfile.ChessAnalyze;
         var sized = IngestSizing.ResolveForSource(profile, wave);
         return new IngestBatchConfig
@@ -111,8 +98,6 @@ public sealed class ChessStockfishEvalDecomposer
                 + "Record games first: laplace ingest chess <pgn>");
 
         int wave = ResolveEngineWave(options);
-        // Hydrate one engine wave, not a RAM-sized generic chess batch. This gets the first
-        // useful line onto an engine immediately and keeps the dispatcher work-conserving.
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, wave,
@@ -130,18 +115,12 @@ public sealed class ChessStockfishEvalDecomposer
                + $"carries the v{ChessStockfishEval.Version} eval marker — nothing left to evaluate.")
             : null;
 
-    /// <summary>
-    /// Opt out of ComposeDecomposer's DirectComposeHandler. That handler explicitly declares
-    /// ParallelizeDeferredUnitCreation=false and calls Compose during the later serial builder
-    /// drain — exactly the wrong boundary for minutes of independent Stockfish work.
-    /// </summary>
     protected override IIngestRecordHandler<ChessStockfishEvalRecord> CreateHandler()
         => CreateEvalHandlerForTests();
 
     internal IIngestRecordHandler<ChessStockfishEvalRecord> CreateEvalHandlerForTests()
         => new EvalHandler(this);
 
-    // Compatibility path for direct ComposeDecomposer callers. Production uses EvalHandler.
     protected override void Compose(ChessStockfishEvalRecord record, SubstrateChangeBuilder b)
     {
         var evaluator = _pool.Rent();
@@ -161,8 +140,6 @@ public sealed class ChessStockfishEvalDecomposer
 
     private void Checkpoint(ChessStockfishEval.PreparedLine prepared)
     {
-        // Append only the values this line caused the shared memo to admit. The journal is
-        // fixed-record and cancellation-safe; normal completion compacts it into the snapshot.
         StockfishEvalCache.Append(
             _cachePath, ChessStockfishEval.Version, _depth, _nodes,
             prepared.FreshEvaluations);
@@ -230,7 +207,7 @@ public sealed class ChessStockfishEvalDecomposer
             public Hash128 DrainInto(
                 SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap)
             {
-                if (prepared is null) return default;
+                if (prepared is null || !prepared.Complete) return default;
                 ChessStockfishEval.DepositPrepared(builder, prepared);
                 return record.TrunkRootId;
             }
@@ -242,10 +219,6 @@ public sealed class ChessStockfishEvalDecomposer
     }
 }
 
-/// <summary>
-/// Stockfish-eval pipeline record; trunk root is the versioned per-LINE stockfish marker
-/// so re-runs dedup against the marker, never against the line.
-/// </summary>
 public sealed record ChessStockfishEvalRecord(ChessWitnessedGame Game) : ITrunkRootRecord
 {
     public Hash128 TrunkRootId => ChessStockfishEval.MarkerId(Game.LineId, ChessStockfishEval.Version);
