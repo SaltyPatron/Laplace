@@ -53,6 +53,7 @@ class HostTests(unittest.TestCase):
         self.hba = self.ident.with_name("pg_hba.conf")
         self.hba.write_text("test HBA must remain byte-identical\n")
         self.calls, self.accounts, self.enabled, self.active = [], {}, set(), set()
+        self.nginx_active = True
         self.fail_pg = self.fail_nginx = self.fail_timer_start = False
         self.host.run = self.run_command
         self.pwd_patch = patch.object(self.host.pwd, "getpwnam", side_effect=self.account)
@@ -98,7 +99,7 @@ class HostTests(unittest.TestCase):
                     return "enabled" if argv[2] in self.enabled else "disabled"
                 if "--property=ActiveState" in argv:
                     if argv[2] == "nginx.service":
-                        return "active"
+                        return "active" if self.nginx_active else "inactive"
                     return "active" if argv[2] in self.active else "inactive"
                 self.fail("unexpected systemctl property")
             elif argv[1] == "enable":
@@ -106,9 +107,11 @@ class HostTests(unittest.TestCase):
             elif argv[1] == "disable":
                 self.enabled.discard(argv[2])
             elif argv[1] == "start":
-                self.assertEqual("laplace-managed-host.timer", argv[2])
-                if self.fail_timer_start:
+                self.assertIn(argv[2], ("laplace-managed-host.timer", "nginx"))
+                if argv[2] == "laplace-managed-host.timer" and self.fail_timer_start:
                     raise subprocess.CalledProcessError(1, "test timer start")
+                if argv[2] == "nginx":
+                    self.nginx_active = True
                 self.active.add(argv[2])
             elif argv[1] == "stop":
                 self.assertEqual("laplace-managed-host.timer", argv[2])
@@ -174,6 +177,24 @@ class HostTests(unittest.TestCase):
         self.assertNotIn("bootstrap", self.host.sudoers_policy())
         self.assertNotIn("ALL=(ALL)", self.host.sudoers_policy())
         self.assertNotIn("*", self.host.sudoers_policy())
+
+    def test_reconciliation_restarts_inactive_nginx_before_reporting_healthy(self):
+        self.bootstrap()
+        self.nginx_active = False
+        self.assertIn("nginx_inactive", self.host.host_status()["issues"])
+        self.calls.clear()
+
+        self.reconcile()
+
+        self.assertIn(("/usr/bin/systemctl", "start", "nginx"), self.calls)
+        self.assertTrue(self.host.host_status()["healthy"])
+
+    def test_managed_tls_listener_cannot_take_down_primary_web_during_dhcp(self):
+        config = self.host.nginx_config("192.168.1.2", "192.168.1.0/24", "hart-server")
+
+        self.assertIn("listen 8443 ssl;", config)
+        self.assertNotIn("listen 192.168.1.2:8443", config)
+        self.assertIn("allow 192.168.1.0/24;", config)
 
     def test_reconciliation_restores_public_ca_from_private_authority_before_success(self):
         self.bootstrap()
