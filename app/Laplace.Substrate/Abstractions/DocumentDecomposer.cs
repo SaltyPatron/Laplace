@@ -131,7 +131,7 @@ public static class DocumentFileExtract
         Hash128 documentId = DocumentEntity.Resolve(contentRoot.Value);
         yield return new ContentIngestRecord(
             CanonicalUtf8: bytes,
-            SourceId: documentId,
+            SourceId: contentRoot.Value,
             Metadata: metadata,
             ContentRootId: contentRoot.Value,
             DocumentId: documentId,
