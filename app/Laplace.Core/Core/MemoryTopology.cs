@@ -82,10 +82,11 @@ public static class MemoryTopology
     /// Approx resident bytes one accumulated consensus relation holds in the client-side fold
     /// dictionary: a (3×16B) key + the Acc state + ConcurrentDictionary node/bucket overhead.
     ///
-    /// MEASURED 2026-08-23 (FoldMemoryTopologyMeasurementTests): the real accumulator shape --
-    /// Dictionary&lt;(Hash128,Hash128,Hash128?), Delta&gt; with Delta = 4 int64 -- costs
-    /// <b>112 bytes/entry</b> over 200,000 entries. This constant is 256, so it is 2.3x
-    /// conservative.
+    /// MEASURED 2026-09-04 (FoldMemoryTopologyMeasurementTests): the current accumulator
+    /// shape -- Dictionary&lt;(Hash128,Hash128,Hash128?), Delta&gt; with an inline first
+    /// rating period, optional overflow dictionary reference, and aggregate totals -- costs
+    /// <b>125 bytes/entry</b> over 200,000 entries on the production runner. This constant
+    /// is 224, so it remains 1.79x conservative without halving useful accumulator capacity.
     ///
     /// That is not free: accumulatorCapacity = budget / this, so the fold accumulator holds
     /// 44% of what memory actually allows and flushes correspondingly more often, and each
@@ -95,9 +96,9 @@ public static class MemoryTopology
     /// taken here: it needs an A/B on a cluster, not a guess swapped for a guess.
     ///
     /// The test pins both directions -- below the measurement is an under-reserved envelope,
-    /// above 4x is memory reserved for nothing.
+    /// above 2x is memory reserved for nothing.
     /// </summary>
-    public const int ConsensusFoldBytesPerRelation = 256;
+    public const int ConsensusFoldBytesPerRelation = 224;
 
     /// <summary>
     /// Conservative transient resident cost per cell while a fold chunk crosses
