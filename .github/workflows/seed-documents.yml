@@ -1,40 +1,31 @@
 name: Seed — documents
 
-# Document ingestion as its own first-class phase (previously shoehorned into the
-# generic ingest dropdown). Text rides the codepoint ladder via IngestDocumentAsync.
-# The <path> is single-file capable (IngestInput.ResolveFiles) — point it at one
-# file to validate in seconds, or a directory / corpus root for a full run.
-# Blank <path> falls back to the DATA_ROOT/test-data/text default. Delegates to
-# _ingest.yml; document carries a decomposer-gates.json entry (skip_layer_complete,
-# no consensus gates) so the gate is a lenient presence check.
+# Ordinary document ingestion is path-selected content. Dataset-estate MANIFEST.tsv files
+# belong to curated source acquisition and must not redefine a document run merely because
+# the selected folder happens to contain one.
+#
+# The Gutenberg estate moved out of test-data during the 2026-09-03 estate modernization.
+# `all-books` therefore runs the three actual document roots in sequence instead of pointing
+# DocumentDecomposer at /vault/Data/test-data and inheriting whichever MANIFEST.tsv another
+# workflow most recently installed there.
 
 on:
   workflow_dispatch:
     inputs:
       corpus:
-        # A dropdown of what is actually on the runner, because the corpus is
-        # static (same names on re-download). GitHub requires choice options to
-        # be literal YAML — they cannot be enumerated from disk at dispatch
-        # time — so this list is maintained against /vault/Data and `path`
-        # below stays as the escape hatch for anything not listed.
-        # A book is a book. Britannica, Sherlock Holmes, a chess manual and a
-        # radio handbook are the same kind of content differing only in topic,
-        # so the default is ALL of them in one path — DocumentDecomposer
-        # recurses with a *.txt filter, so one root covers every subject
-        # folder. The subsets below exist for topic-targeted work, not because
-        # the lane treats them differently.
-        description: "which corpus to ingest"
+        description: "which document estate to ingest"
         type: choice
         required: true
         default: all-books
         options:
-          - all-books         # DATA_ROOT/test-data — every .txt, all subjects (209 files, ~212 MB)
-          - literature-etc    # test-data/text only — Britannica, literature, science, chess books (201)
-          - electronics       # test-data/electronics only — ham radio, morse, wireless (8)
-          - smoke-alice       # one book. Validates the lane in seconds.
-          - path-override     # use the `path` input below
+          - all-books
+          - gutenberg
+          - fixtures
+          - electronics
+          - smoke-alice
+          - path-override
       path:
-        description: "explicit <path>, used only when corpus = path-override (single file, dir, or corpus root)"
+        description: "explicit path; when non-empty it wins over corpus (single file or directory)"
         type: string
         default: ""
       database:
@@ -51,76 +42,109 @@ permissions:
   contents: read
 
 jobs:
-  # Resolve the dropdown to a path. A reusable workflow's `with:` cannot hold a
-  # multi-line expression, so the mapping lives in a job whose output feeds it.
-  # DATA_ROOT is the runner's LAPLACE_DATA_ROOT (default /vault/Data), matching
-  # scripts/ingest-source.sh:8 — kept in one place here rather than repeated per
-  # option.
   resolve:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 2
     outputs:
+      mode: ${{ steps.pick.outputs.mode }}
       path: ${{ steps.pick.outputs.path }}
     steps:
       - id: pick
+        shell: bash
         run: |
+          set -euo pipefail
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
-
-          # An explicit path WINS over the corpus dropdown, and says so.
-          #
-          # This block used to read `path` only under corpus=path-override, so
-          # setting a path while leaving corpus at its default `all-books`
-          # SILENTLY ingested $root/test-data instead. MEASURED 2026-08-10: a run
-          # aimed at /vault/Data/ProjectGutenberg/Pierre-Simon-Laplace/
-          # gutenberg.org/58881 ingested `path='/vault/Data/test-data'` -- 209
-          # unrelated files -- with no notice, no warning and no error. The
-          # operator only found out by reading the corpus that came back.
-          #
-          # seed-code.yml already had the correct precedence (its resolve step:
-          # non-empty path wins, existence-checked, `::notice::` emitted). Two
-          # sibling workflows with the same two inputs disagreed on which one
-          # wins, and the one that discarded input was the silent one.
-          #
-          # Least surprise: if you typed a path, you meant it. An unusable path
-          # is an error, never a fallback to a default corpus -- silently
-          # ingesting the wrong 209 files is worse than failing.
           user_path="${{ inputs.path }}"
+
           if [ -n "$user_path" ]; then
-            if [ ! -e "$user_path" ]; then
-              echo "::error::path '$user_path' does not exist on this runner"; exit 1
-            fi
-            if [ "${{ inputs.corpus }}" != "path-override" ]; then
-              echo "::notice::path given -- corpus '${{ inputs.corpus }}' ignored for this run."
-            fi
-            echo "resolved explicit path -> $user_path"
+            [ -e "$user_path" ] || { echo "::error::path '$user_path' does not exist on this runner"; exit 1; }
+            echo "::notice::explicit path wins; corpus '${{ inputs.corpus }}' ignored"
+            echo "mode=single" >> "$GITHUB_OUTPUT"
             echo "path=$user_path" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           case "${{ inputs.corpus }}" in
-            all-books)      p="$root/test-data" ;;
-            literature-etc) p="$root/test-data/text" ;;
-            electronics)    p="$root/test-data/electronics" ;;
-            smoke-alice)    p="$root/test-data/text/alice.txt" ;;
-            path-override)  p="${{ inputs.path }}" ;;
-            *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
+            all-books)
+              echo "mode=all" >> "$GITHUB_OUTPUT"
+              echo "path=" >> "$GITHUB_OUTPUT"
+              ;;
+            gutenberg)
+              p="$root/ProjectGutenberg/text"
+              [ -d "$p" ] || { echo "::error::$p does not exist"; exit 1; }
+              echo "mode=single" >> "$GITHUB_OUTPUT"
+              echo "path=$p" >> "$GITHUB_OUTPUT"
+              ;;
+            fixtures)
+              p="$root/test-data/text"
+              [ -d "$p" ] || { echo "::error::$p does not exist"; exit 1; }
+              echo "mode=single" >> "$GITHUB_OUTPUT"
+              echo "path=$p" >> "$GITHUB_OUTPUT"
+              ;;
+            electronics)
+              p="$root/test-data/electronics"
+              [ -d "$p" ] || { echo "::error::$p does not exist"; exit 1; }
+              echo "mode=single" >> "$GITHUB_OUTPUT"
+              echo "path=$p" >> "$GITHUB_OUTPUT"
+              ;;
+            smoke-alice)
+              p=$(find "$root/ProjectGutenberg/text" -type f -iname '*alice*.txt' -print | LC_ALL=C sort | head -1)
+              [ -n "$p" ] || { echo "::error::no Alice text found under $root/ProjectGutenberg/text"; exit 1; }
+              echo "mode=single" >> "$GITHUB_OUTPUT"
+              echo "path=$p" >> "$GITHUB_OUTPUT"
+              ;;
+            path-override)
+              echo "::error::corpus=path-override requires the path input"; exit 1
+              ;;
+            *)
+              echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1
+              ;;
           esac
-          if [ -z "$p" ]; then
-            echo "::error::corpus=path-override requires the path input"; exit 1
-          fi
-          if [ ! -e "$p" ]; then
-            echo "::error::$p does not exist on this runner"; exit 1
-          fi
-          echo "resolved corpus '${{ inputs.corpus }}' -> $p"
-          echo "path=$p" >> "$GITHUB_OUTPUT"
 
-  seed:
+  seed-selected:
     needs: resolve
+    if: needs.resolve.outputs.mode == 'single'
     uses: ./.github/workflows/_ingest.yml
     with:
       source: document
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 480
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}
+
+  seed-gutenberg:
+    needs: resolve
+    if: needs.resolve.outputs.mode == 'all'
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: document
+      path: /vault/Data/ProjectGutenberg/text
+      database: ${{ inputs.database }}
+      timeout_minutes: 480
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}
+
+  seed-fixtures:
+    needs: [resolve, seed-gutenberg]
+    if: always() && needs.resolve.outputs.mode == 'all' && needs.seed-gutenberg.result == 'success'
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: document
+      path: /vault/Data/test-data/text
+      database: ${{ inputs.database }}
+      timeout_minutes: 120
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}
+
+  seed-electronics:
+    needs: [resolve, seed-fixtures]
+    if: always() && needs.resolve.outputs.mode == 'all' && needs.seed-fixtures.result == 'success'
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: document
+      path: /vault/Data/test-data/electronics
+      database: ${{ inputs.database }}
+      timeout_minutes: 120
       run_gate: true
       run_idempotency: ${{ inputs.run_idempotency }}
