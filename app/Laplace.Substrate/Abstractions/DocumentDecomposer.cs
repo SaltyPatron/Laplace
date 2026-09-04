@@ -5,21 +5,23 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord>, IIngestInventoryProvider
+public sealed class DocumentDecomposer
+    : DecomposerMultiFile<ContentIngestRecord, DocumentSource, FullScope>, IIngestInventoryProvider
 {
-    public override Hash128 SourceId => UserPromptContent.Source;
-    public override string SourceName => "UserPrompt";
     public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => UserPromptContent.TrustClass;
-    protected override double SourceTrust => UserPromptContent.WitnessWeight;
+    protected override double SourceTrust =>
+        Laplace.Decomposers.Abstractions.SourceTrust.StructuredCorpus;
 
-    // Pillar 0 live: every file is its own provenance unit (source = content-DAG root,
-    // completion marker + metadata DAG per file), so completion is per-file, not the
-    // all-or-nothing source-level marker — new files in a completed directory just work.
+    // A document path is ordinary digital content, not a curated dataset estate. A
+    // MANIFEST.tsv that happens to exist in a parent/shared folder must never replace the
+    // files the operator actually selected. This is the exact failure mode where the
+    // chess-book estate's 14 admitted artifacts hijacked a 200+ document run.
+    public override bool UsesArtifactManifest => false;
+
+    // Pillar 0 live: completion is per file, not the all-or-nothing source marker — new
+    // files in a completed directory just work. The marker is vendor-scoped so another
+    // decomposer consuming the same physical file cannot satisfy this lane's checkpoint.
     public override bool PerFileCompletion => true;
-
-    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
@@ -45,13 +47,14 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
     protected override IIngestRecordHandler<ContentIngestRecord> CreateHandlerForFile(
         string fileLabel, DecomposerOptions options) =>
-        new DocumentIngestHandler(LayerOrder) { IgnoreCompletedFiles = options.ReObservePresent };
+        new DocumentIngestHandler(LayerOrder, DocumentSource.SourceId)
+        {
+            IgnoreCompletedFiles = options.ReObservePresent,
+        };
 
     protected override IngestBatchConfig ConfigForFile(
-        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
-    {
-        return DocumentIngestSupport.PipelineConfig(fileLabel, reader, options);
-    }
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        DocumentIngestSupport.PipelineConfig(fileLabel, reader, options);
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
@@ -105,8 +108,8 @@ public static class DocumentFileExtract
         if (bytes.Length == 0) yield break;
         // Match RepoDecomposer / GH #596: one malformed-encoding file must skip with a
         // warning, not abort a multi-hundred-file document run (rc=1 for the process).
-        Hash128? fileRoot = ContentTierSpine.ResolveRoot(bytes);
-        if (fileRoot is null)
+        Hash128? contentRoot = ContentTierSpine.ResolveRoot(bytes);
+        if (contentRoot is null)
         {
             Trace.TraceWarning(
                 "DocumentFileExtract: skipping '{0}' — unresolvable content root " +
@@ -114,8 +117,12 @@ public static class DocumentFileExtract
                 relativePath);
             yield break;
         }
+
+        var metadata = FileMetadata.FromPath(file, relativePath);
         yield return new ContentIngestRecord(
-            bytes, SourceId: fileRoot.Value, Metadata: FileMetadata.FromPath(file, relativePath));
+            bytes,
+            SourceId: contentRoot.Value,
+            Metadata: metadata);
     }
 
     private static async Task<byte[]> ReadFileBytesAsync(string file, CancellationToken ct)
