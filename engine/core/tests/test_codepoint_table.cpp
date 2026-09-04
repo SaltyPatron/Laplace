@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 
 #include "laplace/core/codepoint_table.h"
+#include "laplace/core/perfcache_format.h"
 
 TEST(LaplaceCoreCodepointTable, Loaded) {
     EXPECT_TRUE(codepoint_table_is_loaded());
@@ -75,27 +78,52 @@ TEST(LaplaceCoreCodepointTable, RejectsBadPath) {
     EXPECT_NE(codepoint_table_lookup(0x41u), nullptr);
 }
 
+TEST(LaplaceCoreCodepointTable, RejectsStaleUcdVersionAndKeepsActiveTable) {
+    const std::filesystem::path original = LAPLACE_PERFCACHE_PATH_FOR_TESTS;
+    const std::filesystem::path mutated =
+        std::filesystem::temp_directory_path() / "laplace-stale-ucd-perfcache.bin";
+    std::error_code ec;
+    std::filesystem::remove(mutated, ec);
+    ASSERT_TRUE(std::filesystem::copy_file(
+        original, mutated, std::filesystem::copy_options::overwrite_existing));
 
+    {
+        std::fstream stream(mutated, std::ios::in | std::ios::out | std::ios::binary);
+        ASSERT_TRUE(stream.good());
+        laplace_perfcache_header_t header{};
+        stream.read(reinterpret_cast<char*>(&header), sizeof(header));
+        ASSERT_EQ(stream.gcount(), static_cast<std::streamsize>(sizeof(header)));
+        std::memset(header.ucd_version, 0, sizeof(header.ucd_version));
+        std::memcpy(header.ucd_version, "16.0.0", 6);
+        stream.seekp(0);
+        stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        ASSERT_TRUE(stream.good());
+    }
+
+    EXPECT_EQ(codepoint_table_load_perfcache(mutated.string().c_str()), -5);
+    EXPECT_TRUE(codepoint_table_is_loaded());
+    const codepoint_entry_t* a = codepoint_table_lookup(0x41u);
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->codepoint, 0x41u);
+    std::filesystem::remove(mutated, ec);
+}
 
 TEST(LaplaceWhitespaceLaw, AsciiAndUnicodeSpacesAreWhitespace) {
-    
     for (uint32_t cp : {0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x20u})
         EXPECT_TRUE(laplace_codepoint_is_whitespace(cp)) << "cp=" << cp;
-    
-    for (uint32_t cp : {0x00A0u,  
-                        0x1680u,  
+    for (uint32_t cp : {0x00A0u,
+                        0x1680u,
                         0x2000u, 0x2001u, 0x2002u, 0x2003u, 0x2004u, 0x2005u,
                         0x2006u, 0x2007u, 0x2008u, 0x2009u, 0x200Au,
-                        0x2028u,  
-                        0x2029u,  
-                        0x202Fu,  
-                        0x205Fu,  
-                        0x3000u}) 
+                        0x2028u,
+                        0x2029u,
+                        0x202Fu,
+                        0x205Fu,
+                        0x3000u})
         EXPECT_TRUE(laplace_codepoint_is_whitespace(cp)) << "cp=" << cp;
 }
 
 TEST(LaplaceWhitespaceLaw, LettersAndZwspAreNotWhitespace) {
-    
     for (uint32_t cp : {0x41u, 0x61u, 0x4E2Du, 0x200Bu, 0xFEFFu, 0x30u})
         EXPECT_FALSE(laplace_codepoint_is_whitespace(cp)) << "cp=" << cp;
 }
@@ -103,10 +131,8 @@ TEST(LaplaceWhitespaceLaw, LettersAndZwspAreNotWhitespace) {
 TEST(LaplaceWhitespaceLaw, AllWhitespaceTextOmniglottal) {
     EXPECT_TRUE(laplace_text_is_all_whitespace((const uint8_t*)"   ", 3));
     EXPECT_TRUE(laplace_text_is_all_whitespace((const uint8_t*)"\t\n ", 3));
-    
     const uint8_t ideo[] = {0xE3, 0x80, 0x80};
     EXPECT_TRUE(laplace_text_is_all_whitespace(ideo, sizeof(ideo)));
-    
     const uint8_t nbsp_sp[] = {0xC2, 0xA0, 0x20};
     EXPECT_TRUE(laplace_text_is_all_whitespace(nbsp_sp, sizeof(nbsp_sp)));
 }
@@ -115,7 +141,6 @@ TEST(LaplaceWhitespaceLaw, NonWhitespaceAndEmptyRejected) {
     EXPECT_FALSE(laplace_text_is_all_whitespace((const uint8_t*)"", 0));
     EXPECT_FALSE(laplace_text_is_all_whitespace((const uint8_t*)" a ", 3));
     EXPECT_FALSE(laplace_text_is_all_whitespace((const uint8_t*)"x", 1));
-    
     const uint8_t bad[] = {0xFF, 0xFE};
     EXPECT_FALSE(laplace_text_is_all_whitespace(bad, sizeof(bad)));
 }
