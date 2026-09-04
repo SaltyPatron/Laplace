@@ -13,10 +13,6 @@
  * the shipped T0 artifact. The generator already writes this exact release into
  * laplace_perfcache_header_t::ucd_version; accepting a different header would
  * silently change segmentation and therefore content identity.
- *
- * This constant deliberately mirrors engine/CMakeLists.txt's current stable
- * LAPLACE_UNICODE_VERSION. A follow-up can generate this definition from CMake;
- * the important runtime invariant is fail-closed version checking now.
  */
 #define LAPLACE_EXPECTED_UCD_VERSION "17.0.0"
 
@@ -137,8 +133,6 @@ int codepoint_table_load_perfcache(const char* path) {
     if (!pc_version_matches(h->ucd_version, LAPLACE_EXPECTED_UCD_VERSION)) {
         pc_unmap(base, len); return -5;
     }
-    /* Scoped blobs are dense prefixes: ascii=0x80, bmp=0x10000, full=0x110000.
-     * Lookup already returns NULL for cp >= record_count (out-of-scope). */
     if ((h->record_count != 0x80ull
          && h->record_count != 0x10000ull
          && h->record_count != (uint64_t)LAPLACE_PERFCACHE_RECORD_COUNT)
@@ -291,16 +285,8 @@ int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp) {
 }
 
 int laplace_codepoint_is_whitespace(uint32_t cp) {
-    switch (codepoint_table_wb(cp)) {
-        case LAPLACE_WB_CR:
-        case LAPLACE_WB_LF:
-        case LAPLACE_WB_NEWLINE:
-        case LAPLACE_WB_WSEGSPACE:
-            return 1;
-        default:
-            break;
-    }
-    return cp == 0x0009u || cp == 0x00A0u || cp == 0x2007u || cp == 0x202Fu;
+    const codepoint_entry_t* e = codepoint_table_lookup(cp);
+    return e ? (laplace_pc_white_space(e->flags) != 0u) : 0;
 }
 
 int laplace_text_is_all_whitespace(const uint8_t* utf8, size_t len) {
