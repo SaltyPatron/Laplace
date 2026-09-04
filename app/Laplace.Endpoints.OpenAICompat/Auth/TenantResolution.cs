@@ -200,9 +200,15 @@ internal static class OperatorAuth
 {
     public const string TokenHeader = "X-Laplace-Operator-Token";
 
-    /// <summary>Constant-time check of the operator token; false when unconfigured.</summary>
+    /// <summary>
+    /// Local/header-mode chess lab operations are intentionally available to the local operator
+    /// without a second credential. Remote/key-mode lab operations and all other operator
+    /// endpoints still require the configured operator secret.
+    /// </summary>
     public static bool IsAuthorized(HttpRequest request, LaplaceAuthOptions options)
     {
+        if (!options.KeyMode && request.Path.StartsWithSegments("/chess/lab"))
+            return true;
         if (string.IsNullOrWhiteSpace(options.OperatorToken))
             return false;
         var presented = request.Headers[TokenHeader].ToString();
