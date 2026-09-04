@@ -65,13 +65,14 @@ uint8_t map_incb(const char* s) {
 }
 
 struct UcdData {
-    std::vector<uint8_t> gb, wb, sb, incb, ccc;
+    std::vector<uint8_t> gb, wb, sb, incb, ccc, white_space;
     UcdData() {
         gb.assign(CP_COUNT, LAPLACE_GB_OTHER);
         wb.assign(CP_COUNT, LAPLACE_WB_OTHER);
         sb.assign(CP_COUNT, LAPLACE_SB_OTHER);
         incb.assign(CP_COUNT, LAPLACE_INCB_NONE);
         ccc.assign(CP_COUNT, 0);
+        white_space.assign(CP_COUNT, 0);
     }
 };
 
@@ -105,6 +106,7 @@ void on_start(void* u, const char* name, const char** a) {
     UcdData* d = ctx->d;
     auto gcb = attr(a,"GCB"); auto wbv = attr(a,"WB"); auto sbv = attr(a,"SB");
     auto inc = attr(a,"InCB"); auto cccv = attr(a,"ccc"); auto ep = attr(a,"ExtPict");
+    auto ws = attr(a,"WSpace");
 
     uint8_t gbid = gcb ? map_gb((const char*)gcb) : LAPLACE_GB_OTHER;
     if (ep && std::strcmp((const char*)ep,"Y")==0) gbid = LAPLACE_GB_EXTENDED_PICTOGRAPHIC;
@@ -112,9 +114,11 @@ void on_start(void* u, const char* name, const char** a) {
     uint8_t sbid = sbv ? map_sb((const char*)sbv) : LAPLACE_SB_OTHER;
     uint8_t inid = inc ? map_incb((const char*)inc) : LAPLACE_INCB_NONE;
     uint8_t ccv  = cccv ? (uint8_t)std::stoul((const char*)cccv, nullptr, 10) : 0;
+    uint8_t wsv  = (ws && std::strcmp((const char*)ws,"Y") == 0) ? 1u : 0u;
 
     for (uint32_t c = first; c <= last; ++c) {
-        d->gb[c]=gbid; d->wb[c]=wbid; d->sb[c]=sbid; d->incb[c]=inid; d->ccc[c]=ccv;
+        d->gb[c]=gbid; d->wb[c]=wbid; d->sb[c]=sbid; d->incb[c]=inid;
+        d->ccc[c]=ccv; d->white_space[c]=wsv;
     }
 }
 void on_end(void* u, const char* name) {
@@ -177,40 +181,15 @@ int parse_ducet(const char* path, DucetKeys& dk) {
         if ((cp>=0x3400&&cp<=0x4DBF)||(cp>=0x20000&&cp<=0x3FFFF)) return 0xFB80;
         return 0xFBC0;
     };
-    /* Hangul syllables are canonical compositions, not unweighted codepoints.
-     *
-     * U+AC00..U+D7A3 are the 11,172 precomposed syllables; allkeys.txt gives
-     * them no entry because UCA §7.1 says a canonical composition sorts as its
-     * decomposition. Falling through to the implicit branch below assigns them
-     * base 0xFBC0 -- above every real primary -- so all of Korean sorts AFTER
-     * every unassigned codepoint. MEASURED on the 17.0.0 blob before this fix:
-     *   U+AC00 GA          rank 206,233
-     *   U+0378 unassigned  rank 205,018
-     *   U+1100 jamo KIYEOK rank  25,257   <- where GA's weight should come from
-     *
-     * The decomposition is algorithmic (UAX #15 3.12), so this needs no table:
-     *   SIndex = s - SBase;  L = LBase + SIndex / NCount
-     * Keying on the leading jamo alone is sufficient for ordering because the
-     * syllable block is laid out L-major, then V, then T -- so two syllables
-     * sharing an L land on the same key and the sort's existing `a < b`
-     * codepoint tiebreak below orders V and T exactly as UCA would.
-     *
-     * The conjoining jamo are explicitly weighted and were parsed above, so
-     * dk.key[L] is populated by the time this runs.
-     *
-     * This moves ranks, which moves coords and hilbert_index. It does NOT move
-     * identity: entity ids are blake3 over the codepoint's UTF-8 bytes and
-     * never read rank or coord. Regenerating the blob is a geometry rebuild,
-     * not an id reseed. */
     {
         const uint32_t SBase = 0xAC00, LBase = 0x1100;
         const uint32_t VCount = 21, TCount = 28;
-        const uint32_t NCount = VCount * TCount;      /* 588  */
-        const uint32_t SCount = 19 * NCount;          /* 11172 */
+        const uint32_t NCount = VCount * TCount;
+        const uint32_t SCount = 19 * NCount;
         for (uint32_t s = SBase; s < SBase + SCount; ++s) {
             if (dk.explicit_[s]) continue;
             uint32_t L = LBase + (s - SBase) / NCount;
-            if (!dk.explicit_[L]) continue;           /* no jamo weight: leave implicit */
+            if (!dk.explicit_[L]) continue;
             dk.key[s] = dk.key[L];
             dk.explicit_[s] = 1;
         }
@@ -228,11 +207,6 @@ int parse_ducet(const char* path, DucetKeys& dk) {
 
 }
 
-/* Read the single entry of a ZIP archive in-process: locate it via the End Of
- * Central Directory + central-directory header (so data-descriptor zips, whose
- * local-header sizes are zero, still resolve), zlib raw-inflate the deflate
- * stream, and verify CRC32. No tar/unzip shell-out (which is flavor/PATH/console
- * dependent). Only stored + deflate methods; false on any malformed input. */
 static bool read_zip_single_entry(const char* zip_path, std::vector<uint8_t>& out) {
     std::ifstream f(zip_path, std::ios::binary);
     if (!f) return false;
@@ -248,8 +222,6 @@ static bool read_zip_single_entry(const char* zip_path, std::vector<uint8_t>& ou
              | ((uint32_t)z[o + 2] << 16) | ((uint32_t)z[o + 3] << 24);
     };
 
-    /* End Of Central Directory (sig 0x06054b50), scanning back over the optional
-     * trailing comment (<= 65535 bytes). */
     size_t eocd = SIZE_MAX;
     size_t floor_off = (z.size() > 22 + 0xFFFFu) ? z.size() - (22 + 0xFFFFu) : 0;
     for (size_t i = z.size() - 21; i-- > floor_off; ) {
@@ -261,7 +233,6 @@ static bool read_zip_single_entry(const char* zip_path, std::vector<uint8_t>& ou
     uint32_t cd_off = rd32(eocd + 16);
     if (n_entries == 0 || (size_t)cd_off + 46 > z.size()) return false;
 
-    /* First central-directory header (sig 0x02014b50) -- authoritative sizes. */
     size_t cd = cd_off;
     if (rd32(cd) != 0x02014b50u) return false;
     uint32_t method = rd16(cd + 10);
@@ -270,15 +241,14 @@ static bool read_zip_single_entry(const char* zip_path, std::vector<uint8_t>& ou
     uint32_t uncomp_size = rd32(cd + 24);
     uint32_t lh_off = rd32(cd + 42);
 
-    /* Local file header (sig 0x04034b50); payload follows its own name+extra. */
     if ((size_t)lh_off + 30 > z.size() || rd32(lh_off) != 0x04034b50u) return false;
     size_t data = (size_t)lh_off + 30 + rd16(lh_off + 26) + rd16(lh_off + 28);
     if (data + comp_size > z.size()) return false;
 
-    if (method == 0) {                        /* stored */
+    if (method == 0) {
         if (comp_size != uncomp_size) return false;
         out.assign(z.begin() + data, z.begin() + data + comp_size);
-    } else if (method == 8) {                 /* deflate */
+    } else if (method == 8) {
         out.assign(uncomp_size, 0);
         z_stream s{};
         if (inflateInit2(&s, -MAX_WBITS) != Z_OK) return false;
@@ -311,10 +281,6 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
         size_t n = std::strlen(ucdxml_path);
         is_zip = (n > 4 && std::strcmp(ucdxml_path + n - 4, ".zip") == 0);
     }
-    /* In-process read: zip -> central-directory + zlib raw-inflate (no tar/unzip
-     * shell-out, which is tar-flavor/PATH/console dependent); plain -> the file
-     * bytes. Either way the whole UCDXML is materialized then fed to the streaming
-     * SAX parser (ucd_xml.cpp) -- a one-time ~67MB seed, not a hot path. */
     std::vector<uint8_t> doc;
     if (is_zip) {
         if (!read_zip_single_entry(ucdxml_path, doc)) return -2;
@@ -354,7 +320,8 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
         hilbert128_t hb; hilbert4d_encode(coord, &hb);
         uint8_t u8[4]; size_t n = laplace_utf8_encode(cp, u8);
         hash128_t h; hash128_blake3(u8, n, &h);
-        uint32_t flags = laplace_pc_pack_flags(d.gb[cp], d.wb[cp], d.sb[cp], d.incb[cp], d.ccc[cp]);
+        uint32_t flags = laplace_pc_pack_flags(
+            d.gb[cp], d.wb[cp], d.sb[cp], d.incb[cp], d.ccc[cp], d.white_space[cp]);
 
         laplace_perfcache_record_t& r = out_records[cp];
         r.codepoint = cp;
