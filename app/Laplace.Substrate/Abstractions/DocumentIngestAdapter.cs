@@ -38,6 +38,11 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
     private readonly Hash128 _decomposerSourceId;
     private readonly ContentIngestHandler _inner;
 
+    public DocumentIngestHandler(int layerOrder)
+        : this(layerOrder, DocumentSource.SourceId)
+    {
+    }
+
     public DocumentIngestHandler(int layerOrder, Hash128 decomposerSourceId)
     {
         LayerOrder = layerOrder;
@@ -45,13 +50,8 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
         _inner = new ContentIngestHandler(decomposerSourceId);
     }
 
-    /// <summary>Layer the per-file completion marker is minted/checked at.</summary>
     public int LayerOrder { get; }
 
-    /// <summary>
-    /// Bypass the legacy content-root-only completion check inside the existence gate.
-    /// The multi-file scheduler already performs the authoritative vendor-scoped check.
-    /// </summary>
     public bool IgnoreCompletedFiles { get; init; }
 
     public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
@@ -72,8 +72,6 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
                 : ContentTierSpine.ResolveRoot(record.CanonicalUtf8) ?? default;
         if (contentRoot == default) return;
 
-        // The checkpoint is a fact about (this file content, this decomposer, this layer),
-        // not a global fact that any consumer of the same bytes may inherit.
         Laplace.Ingestion.LayerCompletion.EmitFileMarker(
             builder, contentRoot, _decomposerSourceId, LayerOrder);
 
