@@ -7,8 +7,7 @@ namespace Laplace.Decomposers.Abstractions;
 
 public sealed class DocumentDecomposer
     : DecomposerMultiFile<ContentIngestRecord, DocumentSource, FullScope>,
-      IIngestInventoryProvider,
-      IIgnoresArtifactManifest
+      IIngestInventoryProvider
 {
     public override int LayerOrder => 2;
     protected override double SourceTrust =>
