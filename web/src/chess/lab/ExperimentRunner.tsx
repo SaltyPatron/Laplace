@@ -204,8 +204,6 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
   const missingEngines = requiresFor(experiment).filter((name) => !engines[name]?.found);
   const blockedReason = missingEngines.length > 0
     ? `Install ${missingEngines.map((n) => ENGINE_LABELS[n] ?? n).join(', ')} on the server`
-    : operatorToken.length === 0
-      ? 'Enter the operator token to run imports or evaluations'
     : kind === 'fide-search' && (params.query ?? '').trim().length < 2
       ? 'Enter at least two characters for a FIDE search'
       : null;
@@ -338,7 +336,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
       )}
 
       <Panel title="Operator access">
-        <Field label="Operator token" help="Required to import profiles/games or run evaluations. Read, browse, and play remain public.">
+        <Field label="Operator token" help="Optional on local-dev/header-mode hosts; required only when this server is configured to require the operator credential.">
           <Input type="password" autoComplete="off" value={operatorToken}
                  aria-label="Operator token"
                  onChange={(e) => {
