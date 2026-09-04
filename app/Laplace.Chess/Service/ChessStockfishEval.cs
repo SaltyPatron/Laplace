@@ -33,20 +33,12 @@ public static class ChessStockfishEval
     private const double EvalWeight = 0.95;
     private const double QualityWeight = 0.9;
 
-    /// <summary>
-    /// Expensive, builder-independent half of one eval line. Chess composition and Stockfish
-    /// searches are pure with respect to the substrate writer, so they can run on different
-    /// compose workers. The prepared value is drained into the one non-thread-safe builder
-    /// later by <see cref="DepositPrepared"/>.
-    /// </summary>
     internal sealed record PreparedLine(
         ChessWitnessedGame Game,
         ChessComposed?[] Positions,
         int?[] Evals,
         KeyValuePair<Hash128, int?>[] FreshEvaluations);
 
-    // Centipawns lost (mover POV) → canonical MoveQuality token; null = no class fires.
-    // Silence is the non-event: a fine move deposits no quality row.
     public static string? ClassifyLoss(int lossCp) => lossCp switch
     {
         >= 300 => "blunder",
@@ -55,10 +47,6 @@ public static class ChessStockfishEval
         _ => null,
     };
 
-    /// <summary>
-    /// Compatibility entrypoint used by direct callers/tests. The production decomposer uses
-    /// PrepareGame on the compose pool and DepositPrepared on the serial builder drain.
-    /// </summary>
     public static void DeriveGame(
         SubstrateChangeBuilder b, ChessWitnessedGame game, IPositionEvaluator eval,
         ConcurrentDictionary<Hash128, int?>? evalMemo = null)
@@ -68,11 +56,6 @@ public static class ChessStockfishEval
             DepositPrepared(b, prepared);
     }
 
-    /// <summary>
-    /// Replay and evaluate one witnessed line without mutating a SubstrateChangeBuilder.
-    /// A run-scoped in-flight map makes a shared position one engine search even when many
-    /// line workers reach the same opening position concurrently.
-    /// </summary>
     internal static PreparedLine? PrepareGame(
         ChessWitnessedGame game,
         IPositionEvaluator eval,
@@ -91,8 +74,6 @@ public static class ChessStockfishEval
         ChessComposed? carried = null;
         for (int ply = 0; ply <= n; ply++)
         {
-            // Compose is pure here. Staging waits for DepositPrepared so worker threads never
-            // share a SubstrateChangeBuilder.
             var node = carried ?? ChessCompose.Position(cur.Board);
             composed[ply] = node;
 
@@ -119,10 +100,6 @@ public static class ChessStockfishEval
         return new PreparedLine(game, composed, evals, fresh.ToArray());
     }
 
-    /// <summary>
-    /// Cheap serial half of the lane: stage already-composed positions and deposit the
-    /// calculated testimony. No Stockfish process is touched here.
-    /// </summary>
     internal static void DepositPrepared(SubstrateChangeBuilder b, PreparedLine prepared)
     {
         var game = prepared.Game;
@@ -133,9 +110,6 @@ public static class ChessStockfishEval
         {
             if (composed[ply] is not { } node) continue;
             ChessGraph.EmitComposed(b, node, SourceId);
-
-            // ctx = the LINE: the verdict is line-grain testimony (pure function of the
-            // position reached along it), never per-playing provenance.
             if (evals[ply] is { } cp)
                 ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, game.LineId);
         }
@@ -176,14 +150,13 @@ public static class ChessStockfishEval
         if (evalMemo is null || evalInflight is null)
         {
             int? value = eval.EvaluateCp(fen);
-            if (evalMemo is not null && evalMemo.TryAdd(positionId, value))
+            // Null means no observation was produced (timeout/dead process/etc.). Absence is
+            // not a reusable engine verdict, so let a replacement engine try again later.
+            if (value.HasValue && evalMemo is not null && evalMemo.TryAdd(positionId, value))
                 newlyCached = true;
             return value;
         }
 
-        // One Lazy owns one position search. Losing workers wait for that result and then
-        // continue with their own engine on the next novel position instead of duplicating
-        // the opening search across every process.
         var candidate = new Lazy<int?>(
             () => eval.EvaluateCp(fen),
             LazyThreadSafetyMode.ExecutionAndPublication);
@@ -191,7 +164,7 @@ public static class ChessStockfishEval
         try
         {
             int? value = shared.Value;
-            if (evalMemo.TryAdd(positionId, value))
+            if (value.HasValue && evalMemo.TryAdd(positionId, value))
                 newlyCached = true;
             return value;
         }
