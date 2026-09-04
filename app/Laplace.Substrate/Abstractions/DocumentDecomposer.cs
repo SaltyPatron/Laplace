@@ -5,7 +5,8 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord>, IIngestInventoryProvider
+public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord>, IIngestInventoryProvider,
+    IIgnoresAmbientArtifactManifest
 {
     public override Hash128 SourceId => UserPromptContent.Source;
     public override string SourceName => "UserPrompt";
