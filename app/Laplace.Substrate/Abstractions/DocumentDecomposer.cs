@@ -14,9 +14,6 @@ public sealed class DocumentDecomposer
     protected override double SourceTrust =>
         Laplace.Decomposers.Abstractions.SourceTrust.StructuredCorpus;
 
-    // Pillar 0 live: completion is per file, not the all-or-nothing source marker — new
-    // files in a completed directory just work. The marker is vendor-scoped so another
-    // decomposer consuming the same physical file cannot satisfy this lane's checkpoint.
     public override bool PerFileCompletion => true;
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
@@ -45,7 +42,11 @@ public sealed class DocumentDecomposer
         string fileLabel, DecomposerOptions options) =>
         new DocumentIngestHandler(LayerOrder, DocumentSource.SourceId)
         {
-            IgnoreCompletedFiles = options.ReObservePresent,
+            // The outer multi-file resume gate is vendor-scoped by DocumentSource.SourceId.
+            // If this file reached the handler, it is NOT complete for this decomposer even
+            // when the same content root has a legacy or another-vendor marker. Do not let
+            // the old content-root-only gate suppress the missing provenance deposit.
+            IgnoreCompletedFiles = true,
         };
 
     protected override IngestBatchConfig ConfigForFile(
