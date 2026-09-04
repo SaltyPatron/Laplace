@@ -35,45 +35,50 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
 
 public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
-    private readonly ContentIngestHandler _inner = new(UserPromptContent.Source);
+    private readonly Hash128 _decomposerSourceId;
+    private readonly ContentIngestHandler _inner;
 
-    public DocumentIngestHandler(int layerOrder) => LayerOrder = layerOrder;
+    public DocumentIngestHandler(int layerOrder, Hash128 decomposerSourceId)
+    {
+        LayerOrder = layerOrder;
+        _decomposerSourceId = decomposerSourceId;
+        _inner = new ContentIngestHandler(decomposerSourceId);
+    }
 
-    /// <summary>Layer the per-file completion marker is minted/checked at — the
-    /// decomposer's layer, threaded in so the gate and the marker can never disagree.</summary>
+    /// <summary>Layer the per-file completion marker is minted/checked at.</summary>
     public int LayerOrder { get; }
 
-    /// <summary>--force (ReObservePresent): bypass the per-file completion-marker skip in
-    /// the existence gate and re-observe already-completed files.</summary>
+    /// <summary>
+    /// Bypass the legacy content-root-only completion check inside the existence gate.
+    /// The multi-file scheduler already performs the authoritative vendor-scoped check.
+    /// </summary>
     public bool IgnoreCompletedFiles { get; init; }
 
     public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
         _inner.CreateDeferredUnit(record);
 
-    public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
+    public void WalkWitness(
+        ContentIngestRecord record,
+        Hash128 root,
+        SubstrateChangeBuilder builder,
+        IIngestDeferredUnit unit)
     {
-        // Pillar 3a: a document emits its content DAG (entities + physicalities/trajectory) via
-        // the deferred unit ONLY. No per-node distributional attestations: sequence is the
-        // trajectory geometry, containment is containers_of + the point-match. The file's
-        // WITNESS is trunk-grain — the per-file completion marker plus the metadata DAG,
-        // deposited once per file, novel path only (the present path already skipped a
-        // marker-complete file in IngestExistenceGate; recomposes that reach here without a
-        // marker still deposit it, which is the "content known from another source" case).
         if (unit is PresentRootDeferredUnit) return;
 
-        // DrainInto legitimately returns default when the existence bitmap covered every
-        // node (content fully present, only the marker/metadata are novel) — the file root
-        // is the record's own per-file source id, not the drain result.
-        Hash128 fileRoot = record.SourceId != default
+        Hash128 contentRoot = record.SourceId != default
             ? record.SourceId
             : root != default
                 ? root
                 : ContentTierSpine.ResolveRoot(record.CanonicalUtf8) ?? default;
-        if (fileRoot == default) return;
+        if (contentRoot == default) return;
 
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, fileRoot, LayerOrder);
+        // The checkpoint is a fact about (this file content, this decomposer, this layer),
+        // not a global fact that any consumer of the same bytes may inherit.
+        Laplace.Ingestion.LayerCompletion.EmitFileMarker(
+            builder, contentRoot, _decomposerSourceId, LayerOrder);
+
         if (record.Metadata is { } metadata)
-            FileEntity.EmitMetadata(builder, fileRoot, metadata);
+            FileEntity.EmitMetadata(builder, contentRoot, metadata);
     }
 }
 
@@ -86,11 +91,11 @@ public static class DocumentIngestSupport
         var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options);
         return new()
         {
-            SourceId = UserPromptContent.Source,
+            SourceId = DocumentSource.SourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = ws.Batch,
             ProbeChunkSize = ws.ProbeChunk,
-            WitnessWeight = UserPromptContent.WitnessWeight,
+            WitnessWeight = DocumentSource.WitnessWeight,
             ContainmentReader = reader,
             WorkingSet = WorkingSetMode.Enabled,
             WorkingSetProbeInterval = ws.ProbeInterval,
