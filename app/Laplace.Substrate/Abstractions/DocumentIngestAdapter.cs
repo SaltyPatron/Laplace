@@ -63,9 +63,11 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
             || record.FileId == default
             || record.DocumentId == default)
         {
-            // Compatibility path for synthetic/unit-test records that do not represent a
-            // filesystem occurrence. They remain ordinary content and do not pretend to be
-            // a fully formed file/document provenance chain.
+            // Compatibility for synthetic records that predate explicit file/document ids.
+            Hash128 legacyFileRoot = record.SourceId != default ? record.SourceId : contentRoot;
+            Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, legacyFileRoot, LayerOrder);
+            if (record.Metadata is { } legacyMetadata)
+                FileEntity.EmitMetadata(builder, legacyFileRoot, legacyMetadata);
             return;
         }
 
@@ -87,9 +89,6 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
             throw new InvalidOperationException(
                 "DocumentIngestHandler: extracted document identity changed between open and compose");
 
-        // Completion belongs to the file composition, not to the shared content root.
-        // Same text in another path therefore remains independently ingestible, while an
-        // exact re-ingest of the same file occurrence true-skips at this id.
         Laplace.Ingestion.LayerCompletion.EmitFileMarker(
             builder,
             file.FileId,
@@ -111,7 +110,7 @@ public static class DocumentIngestSupport
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = ws.Batch,
             ProbeChunkSize = ws.ProbeChunk,
-            WitnessWeight = SourceTrust.StructuredCorpus,
+            WitnessWeight = RelationTypeRank.Associative * SourceTrust.StructuredCorpus,
             ContainmentReader = reader,
             WorkingSet = WorkingSetMode.Enabled,
             WorkingSetProbeInterval = ws.ProbeInterval,
