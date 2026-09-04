@@ -31,9 +31,13 @@ public sealed class FideRatingSnapshotTests
             Assert.Equal(archiveSha, loaded.ArchiveSha256);
             Assert.Equal(new[] { "2016192", "1503014" }, loaded.Players.Select(p => p.FideId).ToArray());
             Assert.Equal("Nakamura, Hikaru", loaded.Players[0].Name);
-            Assert.True(File.Exists(path + ".sha256"));
+            Assert.False(File.Exists(path + ".sha256"));
 
-            await File.AppendAllTextAsync(path, "tamper");
+            byte[] bytes = await File.ReadAllBytesAsync(path);
+            Assert.True(bytes.Length > 16);
+            bytes[bytes.Length / 2] ^= 0x5A;
+            await File.WriteAllBytesAsync(path, bytes);
+
             Assert.Null(await FideRatingSnapshot.TryLoadAsync(path, CancellationToken.None));
         }
         finally
@@ -43,11 +47,10 @@ public sealed class FideRatingSnapshotTests
     }
 
     [Fact]
-    public async Task Snapshot_InvalidChecksumSidecarFailsClosed()
+    public async Task Snapshot_InvalidArchiveDigestIsRejectedBeforeActivation()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"laplace-fide-snapshot-{Guid.NewGuid():N}");
         string path = Path.Combine(dir, "rating-list.snapshot.json.gz");
-        const string archiveSha = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         var players = new[]
         {
             new FideRatingList.Player(
@@ -57,11 +60,9 @@ public sealed class FideRatingSnapshotTests
 
         try
         {
-            await FideRatingSnapshot.SaveAsync(
-                path, players, DateTimeOffset.UtcNow, archiveSha, CancellationToken.None);
-            await File.WriteAllTextAsync(path + ".sha256", "not-a-checksum\n");
-
-            Assert.Null(await FideRatingSnapshot.TryLoadAsync(path, CancellationToken.None));
+            await Assert.ThrowsAsync<ArgumentException>(() => FideRatingSnapshot.SaveAsync(
+                path, players, DateTimeOffset.UtcNow, "not-a-sha", CancellationToken.None));
+            Assert.False(File.Exists(path));
         }
         finally
         {
