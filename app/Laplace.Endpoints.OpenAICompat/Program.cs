@@ -2,6 +2,7 @@ using System.Net;
 using System.Threading.RateLimiting;
 using Laplace.Chess.Service;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Microsoft.AspNetCore.HttpOverrides;
 using Laplace.Endpoints.OpenAICompat;
 using Laplace.Ops;
@@ -17,22 +18,20 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     WebRootPath = LaplaceInstall.WebRoot,
 });
 
-// LAPLACE_API_PORT lets a dev instance run beside the deployed one (which owns
-// the canonical port); unset, the canonical LaplaceInstall.EndpointPort binds.
 builder.WebHost.ConfigureKestrel(options =>
     options.ListenLocalhost(
         int.TryParse(Environment.GetEnvironmentVariable("LAPLACE_API_PORT"), out var devPort)
             ? devPort
             : LaplaceInstall.EndpointPort));
 
-// Shared ops logging (GH #602/#635): stdout console (consoleToStdErr:false — the build-time
-// OpenAPI generator fails on any stderr from the host) + the CSV sink read back as ops.app_log's
-// 'api' role (laplace-api.csv). Same foundation the console deployables use.
 builder.Host.UseSerilog((_, lc) =>
     lc.MinimumLevel.Information().ApplyLaplaceSinks("api", console: true, consoleToStdErr: false));
 
 builder.Services.AddOpenAiCompatServices();
 builder.Services.AddSingleton<AdminPostgresDataSources>();
+builder.Services.AddSingleton(sp => new ContentArtifactCloser(
+    sp.GetRequiredService<SubstrateClient>().DataSource,
+    message => sp.GetRequiredService<ILogger<ContentArtifactCloser>>().LogWarning("{Message}", message)));
 builder.Services.AddOpenApi();
 
 const int perTenantPerMinute = 300;
@@ -56,8 +55,6 @@ builder.Services.AddRateLimiter(options =>
                     QueueLimit = 0
                 });
 
-        // Partition by the presented API key when there is one (it IS the tenant
-        // credential); the spoofable header partition only remains for header mode.
         var partition = Laplace.Endpoints.OpenAICompat.Auth.ApiKeyTenantResolver.PresentedKey(ctx.Request);
         if (partition is null)
         {
@@ -124,6 +121,7 @@ app.MapBillingIdentityEndpoints();
 app.MapChessEndpoints();
 app.MapChessReadEndpoints();
 app.MapFeedbackEndpoints();
+app.MapUserContentEndpoints();
 
 app.MapFallback("/v1/{*path}", () => Results.Json(
     new Laplace.Api.Contracts.ErrorResponse(
