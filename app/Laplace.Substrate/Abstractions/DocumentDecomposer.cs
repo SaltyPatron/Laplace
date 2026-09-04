@@ -6,17 +6,13 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 public sealed class DocumentDecomposer
-    : DecomposerMultiFile<ContentIngestRecord, DocumentSource, FullScope>, IIngestInventoryProvider
+    : DecomposerMultiFile<ContentIngestRecord, DocumentSource, FullScope>,
+      IIngestInventoryProvider,
+      IIgnoresArtifactManifest
 {
     public override int LayerOrder => 2;
     protected override double SourceTrust =>
         Laplace.Decomposers.Abstractions.SourceTrust.StructuredCorpus;
-
-    // A document path is ordinary digital content, not a curated dataset estate. A
-    // MANIFEST.tsv that happens to exist in a parent/shared folder must never replace the
-    // files the operator actually selected. This is the exact failure mode where the
-    // chess-book estate's 14 admitted artifacts hijacked a 200+ document run.
-    public override bool UsesArtifactManifest => false;
 
     // Pillar 0 live: completion is per file, not the all-or-nothing source marker — new
     // files in a completed directory just work. The marker is vendor-scoped so another
@@ -87,10 +83,6 @@ public sealed class DocumentDecomposer
 
         if (!Directory.Exists(path)) yield break;
 
-        // Provenance filter ONLY — not the source-code size heuristic. A 27 MB
-        // dictionary is the corpus, not a build artifact. IsVendoredOrBuildPath
-        // dropped webster-unabridged-dictionary-1913 and one Britannica volume
-        // here, silently, before enumeration (GH #754).
         foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
                                          .Where(f => !VendoredPathFilter.IsVendoredOrBuildLocation(f))
                                          .OrderBy(p => p, StringComparer.Ordinal))
@@ -106,8 +98,6 @@ public static class DocumentFileExtract
     {
         byte[] bytes = await ReadFileBytesAsync(file, ct);
         if (bytes.Length == 0) yield break;
-        // Match RepoDecomposer / GH #596: one malformed-encoding file must skip with a
-        // warning, not abort a multi-hundred-file document run (rc=1 for the process).
         Hash128? contentRoot = ContentTierSpine.ResolveRoot(bytes);
         if (contentRoot is null)
         {
