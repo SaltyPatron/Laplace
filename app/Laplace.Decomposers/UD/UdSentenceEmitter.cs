@@ -56,8 +56,9 @@ public sealed class UdSentenceEmitContext
         VocabularyNames.TrackLanguage(canonicalNames, langCode);
 
         Hash128? sentenceRoot = s.TextUtf8 is { Length: > 0 } ? ctx.RootFor(s.TextUtf8) : null;
+        string xposScope = XposIdentityScope(langCode, fileLabel);
         Hash128 parseId = UdParseStructure.Emit(
-            b, s, langId, langCode, fileLabel, seenEntBatch,
+            b, s, langId, xposScope, fileLabel, seenEntBatch,
             seenSourceDeclarations, canonicalNames, ctx, sourceId);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             sentenceRoot ?? parseId,
@@ -66,6 +67,22 @@ public sealed class UdSentenceEmitContext
             sourceId,
             null,
             SourceTrust.AcademicCurated));
+    }
+
+    internal static string XposIdentityScope(string langCode, string fileLabel)
+    {
+        // UD XPOS is treebank/tagset specific, not merely language specific.
+        // FileLabel's durable form is ud/<treebank>/<split>; binding only the
+        // treebank keeps train/dev/test in one tagset while preventing two
+        // English treebanks from collapsing an equal surface tag such as NN.
+        const string Prefix = "ud/";
+        if (!fileLabel.StartsWith(Prefix, StringComparison.Ordinal)) return langCode;
+        int start = Prefix.Length;
+        int slash = fileLabel.IndexOf('/', start);
+        if (slash <= start) return langCode;
+        string treebank = fileLabel[start..slash];
+        if (!treebank.StartsWith("UD_", StringComparison.Ordinal)) return langCode;
+        return $"{langCode}/{treebank}";
     }
 
     internal static void CollectCanonicals(UdSentence s, List<byte[]> sink)
