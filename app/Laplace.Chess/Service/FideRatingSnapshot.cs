@@ -9,7 +9,7 @@ namespace Laplace.Chess.Service;
 /// Durable, derived projection of one successfully parsed FIDE rating publication.
 ///
 /// The XML/ZIP remains the provider artifact and the native XML grammar remains the
-/// field authority.  This snapshot only prevents an interactive read from paying the
+/// field authority. This snapshot only prevents an interactive read from paying the
 /// provider download + complete grammar projection again after every API restart.
 /// It is never admitted as an independent witness.
 /// </summary>
@@ -38,10 +38,22 @@ internal static class FideRatingSnapshot
             if (!string.IsNullOrWhiteSpace(configured))
                 return Path.GetFullPath(configured.Trim());
 
-            return Path.Combine(
-                LaplaceInstall.ResolveChessGamesDir(),
-                "fide",
-                SnapshotFileName);
+            try
+            {
+                return Path.Combine(
+                    LaplaceInstall.ResolveChessGamesDir(),
+                    "fide",
+                    SnapshotFileName);
+            }
+            catch (InvalidOperationException)
+            {
+                // Developer/test machines are not required to mount /vault/Data. Keep the
+                // derived cache outside the checkout rather than turning a missing corpus
+                // mount into an unrelated FIDE read failure.
+                string state = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(state)) state = Path.GetTempPath();
+                return Path.Combine(state, "laplace", "chess", "fide", SnapshotFileName);
+            }
         }
     }
 
