@@ -104,15 +104,20 @@ static SPIPlanPtr floor_plan   = NULL;
 static SPIPlanPtr semantic_plan = NULL;
 static SPIPlanPtr typed_semantic_plan = NULL;
 static SPIPlanPtr steering_plan = NULL;
-/* Nomination is a typed indexed neighborhood read, not a second score. S7 sees
- * the complete union and remains the only semantic scorer. Content classes are
- * supplied from the native content-type authority; no labels are rendered here. */
+/* Semantic nomination is a BOUNDED graph-backed proposal source, not a second
+ * score.  The previous shape expanded every edge adjacent to every routed
+ * frontier member, so a 290-node frontier admitted 195,492 content candidates
+ * before S7.  That silently erased ROUTE's beam and made one 40-step turn pay
+ * an estate-sized neighbor materialization at every emitted constituent.
+ *
+ * consensus.explore_web_neighbors applies the caller's already-declared top-k
+ * as a per-frontier beam.  S7 still sees the complete union of exact sequence
+ * proposals plus that bounded semantic beam and remains the only meaning
+ * scorer; no rendered labels or prompt-specific rules participate here. */
 static const char *semantic_query =
     "WITH neighbors(id) AS MATERIALIZED ("
-    " SELECT unnest($1::bytea[]) UNION SELECT c.object_id FROM laplace.consensus c"
-    " WHERE c.subject_id = ANY($1) AND c.object_id IS NOT NULL"
-    " UNION SELECT c.subject_id FROM laplace.consensus c"
-    " WHERE c.object_id = ANY($1))"
+    " SELECT unnest($1::bytea[]) UNION"
+    " SELECT n.nbr FROM consensus.explore_web_neighbors($1, $4) n)"
     " SELECT n.id FROM neighbors n JOIN laplace.entities e ON e.id = n.id"
     " WHERE e.type_id = ANY($2) AND NOT (n.id = ANY($3))"
     " AND EXISTS (SELECT 1 FROM laplace.physicalities p"
@@ -123,10 +128,9 @@ static const char *steer_query =
     "FROM generation.steer_candidates($1, $2, $3)";
 static const char *typed_semantic_query =
     "WITH neighbors(id) AS MATERIALIZED ("
-    " SELECT unnest($1::bytea[]) UNION SELECT c.object_id FROM laplace.consensus c"
-    " WHERE c.subject_id = ANY($1) AND c.object_id IS NOT NULL AND c.type_id = ANY($4)"
-    " UNION SELECT c.subject_id FROM laplace.consensus c"
-    " WHERE c.object_id = ANY($1) AND c.type_id = ANY($4) AND c.type_id = ANY($5))"
+    " SELECT unnest($1::bytea[]) UNION"
+    " SELECT n.nbr FROM consensus.explore_web_neighbors($1, $5, $4) n"
+    " WHERE n.type_id = ANY($5) AND (n.outbound OR n.type_id = ANY($6)))"
     " SELECT n.id FROM neighbors n JOIN laplace.entities e ON e.id = n.id"
     " WHERE e.type_id = ANY($2) AND NOT (n.id = ANY($3))"
     " AND EXISTS (SELECT 1 FROM laplace.physicalities p"
@@ -163,18 +167,18 @@ validate_relation_types(ArrayType *types)
 
 /*
  * Prepared once per backend and kept: the un-prepared path re-plans on every
- * emitted token of every walk. Proposal passes NULL deliberately: truncating
- * before S7 steering changes the answer.  The caller's top-k is applied only
- * after every exact-context candidate has its frontier score.
+ * emitted token of every walk. Exact sequence proposal passes NULL deliberately:
+ * truncating trajectory successors before S7 steering changes the answer. The
+ * semantic graph source is separately bounded by the declared beam above.
  */
 static void
 ensure_plans(void)
 {
     if (typed_semantic_plan == NULL)
     {
-        Oid types[5] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID,
-                         BYTEAARRAYOID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(typed_semantic_query, 5, types,
+        Oid types[6] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID,
+                         INT4OID, BYTEAARRAYOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(typed_semantic_query, 6, types,
             CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL || SPI_keepplan(plan) != 0)
             elog(ERROR, "walk_continuations: typed semantic plan failed");
@@ -206,8 +210,8 @@ ensure_plans(void)
     }
     if (semantic_plan == NULL)
     {
-        Oid argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(semantic_query, 3, argtypes,
+        Oid argtypes[4] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT4OID };
+        SPIPlanPtr plan = SPI_prepare_cursor(semantic_query, 4, argtypes,
                                              CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL || SPI_keepplan(plan) != 0)
             elog(ERROR, "walk_continuations: semantic proposal plan failed");
@@ -551,9 +555,9 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
              * graph. Witnessed sequence proposals can still repeat them. Routed
              * frontier members are eligible; they are not all prompt seeds. */
             ArrayType *visited = construct_array(ctx, ctx_len, BYTEAOID, -1, false, TYPALIGN_INT);
-            Datum args[5] = { PointerGetDatum(front), PointerGetDatum(types), PointerGetDatum(visited),
-                             PointerGetDatum(relation_types), (Datum)0 };
-            if (relation_types) args[4] = PointerGetDatum(laplace_symmetric_relation_types());
+            Datum args[6] = { PointerGetDatum(front), PointerGetDatum(types), PointerGetDatum(visited),
+                              Int32GetDatum(topk), PointerGetDatum(relation_types), (Datum)0 };
+            if (relation_types) args[5] = PointerGetDatum(laplace_symmetric_relation_types());
             HASHCTL ctl = {0};
             ctl.keysize = 16;
             ctl.entrysize = sizeof(CandIndex);
