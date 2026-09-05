@@ -8,8 +8,6 @@ namespace Laplace.Decomposers.Tests.OMW;
 public sealed class OMWLmfCoverageAuditTests
 {
     private const string Estate = "/vault/Data/.refresh-20260903/OMW-2.0";
-    private const string Proof = "/tmp/laplace-content-recovery-proof/omw2-coverage.json";
-
     [SkippableFact]
     public async Task All_32_Current_Lexicons_Parse_Without_Unknown_Fields_And_Reconcile_References()
     {
@@ -140,8 +138,8 @@ public sealed class OMWLmfCoverageAuditTests
             lexicons,
             unknownRelations.OrderBy(static value => value, StringComparer.Ordinal).ToArray(),
             requiredLexicons.OrderBy(static value => value, StringComparer.Ordinal).ToArray());
-        Directory.CreateDirectory(Path.GetDirectoryName(Proof)!);
-        await File.WriteAllTextAsync(Proof, JsonSerializer.Serialize(proof, new JsonSerializerOptions
+        await File.WriteAllTextAsync(TestIngestPaths.Receipt("omw2-coverage.json"),
+            JsonSerializer.Serialize(proof, new JsonSerializerOptions
         {
             WriteIndented = true,
         }));

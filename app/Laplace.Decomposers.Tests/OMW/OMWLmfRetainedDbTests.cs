@@ -124,10 +124,8 @@ public sealed class OMWLmfRetainedDbTests
         Hash128 english = OMWLmfEmitter.Identity("lexicon", "omw-en", "omw-en");
         await AssertEdgeAsync(dataSource, italian, OmwRelation.Requires, english);
 
-        string proofDirectory = "/tmp/laplace-content-recovery-proof";
-        Directory.CreateDirectory(proofDirectory);
         await File.WriteAllTextAsync(
-            Path.Combine(proofDirectory, "omw2-retained-db.json"),
+            TestIngestPaths.Receipt("omw2-retained-db.json"),
             JsonSerializer.Serialize(new
             {
                 Database = new NpgsqlConnectionStringBuilder(connectionString).Database,
