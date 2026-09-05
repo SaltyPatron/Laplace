@@ -300,7 +300,7 @@ public static class SourceEntityIdConventions
 
             var children = new List<Hash128>(opened.Count + 1)
             {
-                Hash128.OfCanonical("substrate/source/model/v1")
+                SubstrateCanonicalIds.Source("model")
             };
             foreach (string path in files)
                 children.Add(HashStreamChunked(opened[path]));
@@ -370,7 +370,7 @@ public static class SourceEntityIdConventions
         {
             var children = new List<Hash128>(_orderedPaths.Length + 1)
             {
-                Hash128.OfCanonical("substrate/source/model/v1")
+                SubstrateCanonicalIds.Source("model")
             };
             foreach (string path in _orderedPaths)
                 children.Add(Read(path, HashStreamChunked));
