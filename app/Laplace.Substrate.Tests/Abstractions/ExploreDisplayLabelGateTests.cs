@@ -25,17 +25,21 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.Contains("realize.render_text_batch(b.ids, 3)", sql, StringComparison.Ordinal);
         Assert.Contains("HAS_DEFINITION", sql, StringComparison.Ordinal);
         Assert.Contains("HasFileMetadata", sql, StringComparison.Ordinal);
+        Assert.Contains("WITH RECURSIVE", sql, StringComparison.Ordinal);
+        Assert.Contains("preview_spine", sql, StringComparison.Ordinal);
         Assert.Contains("ST_PointN(w.trajectory, 1)", sql, StringComparison.Ordinal);
         Assert.Contains("laplace_mantissa_unpack", sql, StringComparison.Ordinal);
+        Assert.Contains("s.depth < 32", sql, StringComparison.Ordinal);
         Assert.Contains("'Unrealized entity'", sql, StringComparison.Ordinal);
         Assert.Contains("entity.type_id", sql, StringComparison.Ordinal);
         Assert.Contains("never decides which projection runs", sql, StringComparison.OrdinalIgnoreCase);
 
-        // A preview reads one trajectory point. It must never unpack or dump the whole
-        // document merely to put text on a graph node, and the app must consume the installed
-        // projection rather than owning a second copy of the label law.
+        // A preview follows one ordered branch at each tier. It must never unpack siblings or
+        // reconstruct a full book/document merely to put text on a graph node, and the app
+        // must consume the installed projection rather than owning a second copy of the law.
         Assert.DoesNotContain("ST_DumpPoints", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("generation.trajectory_unpacked_points", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("constituents_closure", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("render_text_batch(p_ids, 0)", sql, StringComparison.Ordinal);
         Assert.Contains("realize.display_label_batch(@ids::bytea[])", app, StringComparison.Ordinal);
         Assert.DoesNotContain("HAS_DEFINITION", app, StringComparison.Ordinal);
