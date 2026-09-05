@@ -15,6 +15,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public static class NpgsqlDisplayLabels
 {
     public readonly record struct DisplayLabelRow(string IdHex, string Label, short? Tier);
+    public readonly record struct DisplayFacetRow(short Tier, string Type, bool Exists);
 
     /// <summary>
     /// Set-wise display-label policy, in order:
@@ -237,4 +238,45 @@ public static class NpgsqlDisplayLabels
                 param.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
             },
             timeoutSeconds: 30, ct: ct, label: "display_labels", onError: onError);
+
+    public static async Task<DisplayLabelRow?> ReadOneAsync(
+        NpgsqlConnection conn, byte[] id, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await ReadAsync(conn, [id], ct, onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary>
+    /// Entity tier/type/existence without rendering the entity body. The old explorer facet
+    /// helper performed render_text_fast(id, 8) merely to learn these fields, which meant
+    /// opening a high-tier entity could reconstruct the document before the page had even
+    /// elected what to show. Display text is owned by <see cref="ReadAsync"/> instead.
+    /// </summary>
+    public static async Task<DisplayFacetRow?> FacetAsync(
+        NpgsqlConnection conn, byte[] id, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(conn, """
+            WITH e AS MATERIALIZED (
+                SELECT tier, type_id
+                FROM laplace.entities
+                WHERE id = @id
+            ), labels AS MATERIALIZED (
+                SELECT realize.label_batch(ARRAY[e.type_id]) AS type_labels
+                FROM e
+            )
+            SELECT e.tier,
+                   COALESCE(NULLIF(labels.type_labels[1], ''), 'Entity') AS type_label,
+                   consensus.entity_exists(@id)
+            FROM e
+            CROSS JOIN labels
+            """,
+            static r => new DisplayFacetRow(
+                r.GetInt16(0), r.GetString(1), r.GetBoolean(2)),
+            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
+            timeoutSeconds: 10, ct: ct, label: "display_facet", onError: onError)
+            .ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
 }
