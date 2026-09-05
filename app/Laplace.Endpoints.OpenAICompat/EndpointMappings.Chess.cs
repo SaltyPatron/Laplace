@@ -192,10 +192,11 @@ internal static class ChessEndpoints
             });
         }).WithTags("chess-lab");
 
-        app.MapPost("/chess/lab/start", (HttpRequest request, LabStartRequest req,
-            ChessLabService lab, IOptions<Auth.LaplaceAuthOptions> auth) =>
+        // Chess Lab job authorization is owned by the normal /chess/* tenancy/API-key
+        // middleware. Do not layer a second shared-secret credential onto this surface;
+        // that was a temporary local-operator shortcut and is not the product auth model.
+        app.MapPost("/chess/lab/start", (LabStartRequest req, ChessLabService lab) =>
         {
-            if (!Auth.OperatorAuth.IsAuthorized(request, auth.Value)) return Results.Unauthorized();
             if (!Enum.TryParse<ChessLabJobKind>(req.Kind?.Replace("-", ""), ignoreCase: true, out var kind)
                 && !TryParseKind(req.Kind, out kind))
                 return Results.BadRequest(new { error = $"unknown kind '{req.Kind}'" });
@@ -206,11 +207,8 @@ internal static class ChessEndpoints
             return id is null ? Results.Problem("failed to start job") : Results.Json(new { jobId = id });
         }).WithTags("chess-lab");
 
-        app.MapPost("/chess/lab/stop/{jobId}", (HttpRequest request, string jobId,
-            ChessLabService lab, IOptions<Auth.LaplaceAuthOptions> auth) =>
-            !Auth.OperatorAuth.IsAuthorized(request, auth.Value)
-                ? Results.Unauthorized()
-                : Results.Json(new { stopped = lab.StopJob(jobId) })).WithTags("chess-lab");
+        app.MapPost("/chess/lab/stop/{jobId}", (string jobId, ChessLabService lab) =>
+            Results.Json(new { stopped = lab.StopJob(jobId) })).WithTags("chess-lab");
 
         app.MapGet("/chess/lab/jobs", (ChessLabService lab) =>
             Results.Json(lab.ListJobs())).WithTags("chess-lab");
@@ -285,10 +283,9 @@ internal static class ChessEndpoints
             return Results.File(path, contentType, name);
         }).WithTags("chess-lab");
 
-        app.MapPost("/chess/lab/jobs/{jobId}/ingest", async (HttpRequest request, string jobId,
-            ChessLabService lab, IOptions<Auth.LaplaceAuthOptions> auth, CancellationToken ct) =>
+        app.MapPost("/chess/lab/jobs/{jobId}/ingest", async (string jobId,
+            ChessLabService lab, CancellationToken ct) =>
         {
-            if (!Auth.OperatorAuth.IsAuthorized(request, auth.Value)) return Results.Unauthorized();
             var job = lab.GetJob(jobId);
             if (job is null || !job.Artifacts.TryGetValue("games.pgn", out var path) || !File.Exists(path))
                 return Results.NotFound(new { error = "no games.pgn artifact" });
