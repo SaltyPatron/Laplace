@@ -15,6 +15,13 @@ public sealed class ModelTokenEdgeETL
 {
     internal const int AnalyzerVersion = 6;
     private const string DerivationFamily = "model-existing-claims-bilinear";
+    private static readonly Hash128[] CircuitRelationTypeIds =
+    [
+        ModelDecomposer.SimilarToTypeId,
+        ModelDecomposer.AttendsTypeId,
+        ModelDecomposer.OvRelatesTypeId,
+        ModelDecomposer.CompletesToTypeId,
+    ];
     public static int TestimonyWidthPerCircuit => 0;
 
     public static string ResolvePlanesMode()
@@ -85,9 +92,8 @@ public sealed class ModelTokenEdgeETL
         if (entities.Count == 0) yield break;
 
         _firstPages.Clear();
-        foreach (string relation in new[] { "SIMILAR_TO", "ATTENDS", "OV_RELATES", "COMPLETES_TO" })
+        foreach (Hash128 typeId in CircuitRelationTypeIds)
         {
-            Hash128 typeId = RelationTypeRegistry.RelationTypeId(relation);
             _firstPages[typeId] = await reader.ReadCircuitCandidatesAsync(
                 entities, typeId, null, null, _pageSize, ct).ConfigureAwait(false);
         }
@@ -115,20 +121,14 @@ public sealed class ModelTokenEdgeETL
             _modelDir, _manifest, _tokens, _source, snapshot);
         var circuits = new ModelCircuitEstate(selected, rowByEntity);
         long emitted = 0;
-        foreach ((string relationName, Hash128 typeId) in new[]
-        {
-            ("SIMILAR_TO", ModelDecomposer.SimilarToTypeId),
-            ("ATTENDS", ModelDecomposer.AttendsTypeId),
-            ("OV_RELATES", ModelDecomposer.OvRelatesTypeId),
-            ("COMPLETES_TO", ModelDecomposer.CompletesToTypeId),
-        })
+        foreach (Hash128 typeId in CircuitRelationTypeIds)
         {
             if (_firstPages[typeId].Rows.Count == 0) continue;
             foreach (ModelCircuitDescriptor descriptor in circuits.Enumerate(typeId))
             {
                 ct.ThrowIfCancellationRequested();
                 await foreach (var change in EmitCircuitAsync(
-                                   relationName, descriptor.Plane,
+                                   typeId, descriptor.Plane,
                                    descriptor.Layer, descriptor.Head,
                                    descriptor.TensorNames, descriptor.Contraction,
                                    entities, rowByEntity, reader, commitEpoch, ct))
@@ -147,14 +147,13 @@ public sealed class ModelTokenEdgeETL
     }
 
     private async IAsyncEnumerable<SubstrateChange> EmitCircuitAsync(
-        string relationName, string plane, int layer, int head,
+        Hash128 typeId, string plane, int layer, int head,
         IReadOnlyList<string> tensorNames,
         NativeBilinearContraction circuit,
         IReadOnlyList<Hash128> vocabulary, IReadOnlyDictionary<Hash128, int> rowByEntity,
         ISubstrateReader reader, int commitEpoch,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        Hash128 typeId = RelationTypeRegistry.RelationTypeId(relationName);
         CircuitCandidatePage page = _firstPages[typeId];
         if (page.Rows.Count == 0) yield break;
 
