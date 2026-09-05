@@ -21,7 +21,7 @@ internal sealed class LaplaceAuthOptions
     /// <summary>"header" trusts X-Laplace-Tenant (local/dev); "key" requires a valid API key on /v1/*.</summary>
     public string Mode { get; set; } = "header";
 
-    /// <summary>Shared secret for operator endpoints (quote approval, key issuance, bootstrap).</summary>
+    /// <summary>Shared secret for explicit host/operator endpoints.</summary>
     public string? OperatorToken { get; set; }
 
     public bool KeyMode => string.Equals(Mode, "key", StringComparison.OrdinalIgnoreCase);
@@ -137,12 +137,10 @@ internal sealed class ApiKeyEnforcementMiddleware
     public async Task InvokeAsync(HttpContext context, ITenantResolver resolver)
     {
         var path = context.Request.Path.Value ?? "";
-        // Host lifecycle uses the operator credential, not a customer billing key
-        // and never the permissive tenant-header mode. Keep the legacy aliases in
-        // the same fail-closed policy so they cannot start a second bot.
-        if (IsUnder(path, "/v1/admin/services")
-            || path.Equals("/chess/lichess/start", StringComparison.OrdinalIgnoreCase)
-            || path.Equals("/chess/lichess/stop", StringComparison.OrdinalIgnoreCase))
+        // The dedicated host-administration surface still owns the temporary operator
+        // credential. Chess routes, including Lichess controls, follow the same normal
+        // /chess/* tenancy/API-key policy instead of inventing a second auth scheme.
+        if (IsUnder(path, "/v1/admin/services"))
         {
             if (!OperatorAuth.IsAuthorized(context.Request, _options))
             {
