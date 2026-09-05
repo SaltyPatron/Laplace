@@ -54,7 +54,7 @@ CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, label text, tier smallint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
-    WITH inp AS MATERIALIZED (
+    WITH RECURSIVE inp AS MATERIALIZED (
         SELECT x.id, x.ord, e.tier, e.type_id, e.first_observed_by
         FROM unnest(p_ids) WITH ORDINALITY AS x(id, ord)
         LEFT JOIN laplace.entities e ON e.id = x.id
@@ -150,23 +150,48 @@ BEGIN ATOMIC
             SELECT 1 FROM definition_owned o WHERE o.owner_id = t.owner_id)
     ),
 
-    -- A high-tier text preview follows exactly ONE first constituent. It never dumps the
-    -- whole trajectory and never reconstructs a book simply to put a label on one node.
-    preview_render_ids AS MATERIALIZED (
-        SELECT p.owner_id, p.ord,
-               CASE WHEN e.tier <= 3 THEN p.target_id ELSE head.child_id END AS render_id
+    -- A high-tier textual preview follows ONE ordered trunk-to-leaf spine until it
+    -- reaches sentence-or-shallower grain. It never expands siblings and never asks for
+    -- a descendants closure. This matters for books/chapters as much as documents: a
+    -- fixed one-level peek silently failed as soon as the first child was still tier > 3.
+    preview_seed AS MATERIALIZED (
+        SELECT p.owner_id, p.ord, p.target_id AS node_id, e.tier AS node_tier, 0 AS depth
         FROM text_targets p
         LEFT JOIN laplace.entities e ON e.id = p.target_id
-        LEFT JOIN LATERAL (
-            SELECT u.entity_id AS child_id
+    ),
+    preview_spine(owner_id, ord, node_id, node_tier, depth) AS (
+        SELECT s.owner_id, s.ord, s.node_id, s.node_tier, s.depth
+        FROM preview_seed s
+      UNION ALL
+        SELECT s.owner_id,
+               s.ord,
+               head.child_id,
+               head.child_tier,
+               s.depth + 1
+        FROM preview_spine s
+        CROSS JOIN LATERAL (
+            -- ST_PointN(trajectory,1) decodes exactly the first packed vertex. Do not
+            -- ST_DumpPoints / trajectory_unpacked_points here: those unpack every sibling
+            -- before a 48-ish character graph label has elected any need for them.
+            SELECT u.entity_id AS child_id,
+                   ((u.flags >> 1) & 31)::smallint AS child_tier
             FROM laplace.v_word_points w
             CROSS JOIN LATERAL public.laplace_mantissa_unpack(
                 public.ST_PointN(w.trajectory, 1)) u
-            WHERE w.id = p.target_id
+            WHERE w.id = s.node_id
               AND w.trajectory IS NOT NULL
             ORDER BY w.physicality_id
             LIMIT 1
-        ) head ON e.tier > 3
+        ) head
+        WHERE s.node_tier > 3
+          AND s.depth < 32
+    ),
+    preview_render_ids AS MATERIALIZED (
+        SELECT DISTINCT ON (p.owner_id)
+               p.owner_id, p.ord, p.node_id AS render_id
+        FROM preview_spine p
+        WHERE p.node_tier <= 3
+        ORDER BY p.owner_id, p.depth
     ),
     preview_indexed AS MATERIALIZED (
         SELECT p.owner_id, p.ord, p.render_id,
