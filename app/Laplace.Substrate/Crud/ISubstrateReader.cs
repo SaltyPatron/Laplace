@@ -7,6 +7,29 @@ namespace Laplace.SubstrateCRUD;
 public readonly record struct CircuitRelation(
     Hash128 Subject, Hash128 Object, Hash128 TypeId, double EffMu, long Witnesses);
 
+/// <summary>
+/// A keyset page of already-adjudicated token relations.  The page boundary is
+/// transport only: callers resume with the final (subject, object) key until
+/// the complete selected vocabulary has been examined.
+/// </summary>
+public readonly record struct CircuitCandidatePage(
+    IReadOnlyList<CircuitRelation> Rows,
+    Hash128? NextSubject,
+    Hash128? NextObject);
+
+/// <summary>
+/// One graph-bounded endpoint pair nominated for model analysis. Basis types
+/// prove only why OP3 returned the pair; they are never evidence for the model
+/// relation being evaluated.
+/// </summary>
+public readonly record struct CircuitPairProposal(
+    Hash128 Subject, Hash128 Object, IReadOnlyList<Hash128> BasisTypeIds);
+
+public readonly record struct CircuitPairProposalPage(
+    IReadOnlyList<CircuitPairProposal> Rows,
+    Hash128? NextSubject,
+    Hash128? NextObject);
+
 /// <summary>One relation crowding the consensus/attestations DEFAULT partition — a
 /// relation carrying real traffic that the manifest never flagged <c>hot = true</c>.</summary>
 public readonly record struct PartitionPressure(string Relation, long Rows, double PctOfDefault);
@@ -141,6 +164,33 @@ public interface ISubstrateReader
     Task<IReadOnlyList<CircuitRelation>> ClassifyCircuitAsync(
         IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<CircuitRelation>>(Array.Empty<CircuitRelation>());
+
+    /// <summary>
+    /// Returns existing consensus cells of one relation whose two endpoints are
+    /// both in <paramref name="vocabulary"/>.  This is the Phase-5a admission
+    /// boundary: a checkpoint may evaluate these claims, but cannot manufacture
+    /// an unbounded vocabulary-square candidate set.  <paramref name="pageSize"/>
+    /// bounds one database transfer only; it never selects a ranked prefix.
+    /// </summary>
+    Task<CircuitCandidatePage> ReadCircuitCandidatesAsync(
+        IReadOnlyList<Hash128> vocabulary, Hash128 typeId,
+        Hash128? afterSubject, Hash128? afterObject, int pageSize,
+        CancellationToken ct = default)
+        => Task.FromResult(new CircuitCandidatePage(Array.Empty<CircuitRelation>(), null, null));
+
+    /// <summary>
+    /// OP3 nomination for Phase 5b. It scans existing graph cells whose two
+    /// endpoints belong to the selected vocabulary and returns each endpoint
+    /// pair once. Existing relation kinds are retained as bounded provenance;
+    /// they do not corroborate <paramref name="targetTypeId"/>. A new target
+    /// claim still requires governed same-kind model corroboration before OP9.
+    /// </summary>
+    Task<CircuitPairProposalPage> ReadCircuitPairProposalsAsync(
+        IReadOnlyList<Hash128> vocabulary, Hash128 targetTypeId, bool targetSymmetric,
+        Hash128? afterSubject, Hash128? afterObject, int pageSize,
+        CancellationToken ct = default)
+        => Task.FromResult(new CircuitPairProposalPage(
+            Array.Empty<CircuitPairProposal>(), null, null));
 
 
 

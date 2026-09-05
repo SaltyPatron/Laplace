@@ -13,7 +13,7 @@ DECLARE
     src          bytea := public.laplace_hash128_blake3(convert_to('test/steer/source', 'UTF8'));
     ctx          bytea := public.laplace_hash128_blake3(convert_to('test/steer/context', 'UTF8'));
     noise        bytea := public.laplace_hash128_blake3(convert_to('test/steer/noise', 'UTF8'));
-    semantic     bytea := public.laplace_hash128_blake3(convert_to('test/steer/semantic', 'UTF8'));
+    semantic     bytea := laplace.word_id('ββ');
     frontier     bytea := public.laplace_hash128_blake3(convert_to('test/steer/frontier', 'UTF8'));
     unrelated    bytea := public.laplace_hash128_blake3(convert_to('test/steer/unrelated', 'UTF8'));
     sent_noise   bytea := public.laplace_hash128_blake3(convert_to('test/steer/sentence-noise', 'UTF8'));
@@ -21,6 +21,7 @@ DECLARE
     rel          bytea := laplace.relation_type_id('IS_A');
     t2flag       bigint := (2::bigint << 1);
     picked       bytea;
+    picked_stride integer;
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES
@@ -67,6 +68,22 @@ BEGIN
              public.laplace_mantissa_pack(semantic, 2, 1, t2flag)]),
          2, now());
 
+    -- The semantic output has actual canonical content, independent of every
+    -- sequence context. Admission never classifies candidates by rendered text.
+    INSERT INTO laplace.physicalities
+        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
+    VALUES
+        (public.laplace_hash128_blake3(convert_to('test/steer/content-identity', 'UTF8')),
+         semantic, 1, public.ST_SetSRID(public.ST_MakePoint(101, 1, 1, 1), 0),
+         decode('00000000000000000000000000000000', 'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(laplace.word_id('β'), 1, 1, 0),
+             public.laplace_mantissa_pack(laplace.word_id('β'), 2, 1, 0)]),
+         2, now());
+    IF realize.render_text(semantic) IS DISTINCT FROM 'ββ' THEN
+        RAISE EXCEPTION 'FAIL: semantic fixture is not realizable canonical content';
+    END IF;
+
     -- S7 has positive witnessed meaning for semantic and no opinion about noise.
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd,
@@ -96,6 +113,45 @@ BEGIN
         RAISE EXCEPTION 'FAIL: unattested sequence frequency outranked positive S7 meaning';
     END IF;
 
+    -- Remove every ctx -> semantic sequence observation. S6 sequence now knows
+    -- only noise, yet the independently witnessed semantic neighbor must enter
+    -- the union before S7 and be selected with no fabricated suffix evidence.
+    DELETE FROM laplace.physicalities WHERE entity_id = sent_sem;
+    IF EXISTS (SELECT 1 FROM generation.trajectory_continuations(ARRAY[ctx], NULL)
+               WHERE object_id = semantic) THEN
+        RAISE EXCEPTION 'FAIL: semantic candidate still exists in sequence proposals';
+    END IF;
+    SELECT g.entity, g.stride_used INTO picked, picked_stride
+    FROM generation.forward_walk_continuations(
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier]) g;
+    IF picked IS DISTINCT FROM semantic OR picked_stride IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION 'FAIL: witnessed semantic-only proposal missing or attributed a sequence stride';
+    END IF;
+
+    -- Routed semantic content is eligible even when COMPOSE already put it in
+    -- the frontier. It is not a prompt seed or fabricated sequence constituent.
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier, semantic]) g;
+    IF picked IS DISTINCT FROM semantic THEN
+        RAISE EXCEPTION 'FAIL: routed output content was mistaken for a prompt seed';
+    END IF;
+    IF (SELECT count(*) FROM generation.forward_walk_continuations(
+            ARRAY[ctx], 3, 1, 0.0, 8, 7, ARRAY[frontier, semantic])) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: semantic-only graph cycle repeated content without sequence testimony';
+    END IF;
+
+    -- A genuinely refuted semantic proposal must not become a fallback merely
+    -- because it was nominated by the neighborhood index.
+    UPDATE laplace.consensus SET rating = 1000000000000
+    WHERE subject_id = semantic AND type_id = rel AND object_id = frontier;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier]) g;
+    IF picked IS DISTINCT FROM noise THEN
+        RAISE EXCEPTION 'FAIL: refuted semantic-only proposal erased legitimate sequence fallback';
+    END IF;
+
     -- No positive semantic signal: unattested remains a legitimate sequence
     -- fallback rather than being reclassified as refuted.
     SELECT g.entity INTO picked
@@ -105,7 +161,16 @@ BEGIN
         RAISE EXCEPTION 'FAIL: unattested sequence fallback was lost when S7 had no positive signal';
     END IF;
 
-    RAISE NOTICE '✓ steering precedence: positive witnessed meaning outranks unattested frequency; unattested remains fallback';
+    -- An all-NULL route falls back to every prompt constituent, even when that
+    -- prompt is much longer than the rolling window's allocation.
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+             array_fill(ctx, ARRAY[64]), 1, 1, 0.0, 8, 7, ARRAY[NULL]::bytea[]) g;
+    IF picked IS DISTINCT FROM noise THEN
+        RAISE EXCEPTION 'FAIL: missing route lost a long prompt fallback';
+    END IF;
+
+    RAISE NOTICE '✓ steering precedence: positive witnessed meaning enters without sequence evidence; refutation preserves legitimate fallback';
 END $$;
-NOTICE:  ✓ steering precedence: positive witnessed meaning outranks unattested frequency; unattested remains fallback
+NOTICE:  ✓ steering precedence: positive witnessed meaning enters without sequence evidence; refutation preserves legitimate fallback
 ROLLBACK;

@@ -77,13 +77,12 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     // v6 retires the uncalibrated top-salience evidence lane. The source retains
     // ordered header provenance only until a governed token-pair contraction
     // can witness actual outcomes.
-    internal const int AnalyzerVersion = 6;
-
     // Checkpoint provenance lives in ModelCheckpoint as native ordered header
     // structure. Numeric values remain transient input to native contraction.
 
     public static Hash128 AnalysisMarkerId(Hash128 modelSource, string planesMode)
-        => Hash128.OfCanonical($"model/analyzed/{modelSource}/{planesMode}/v{AnalyzerVersion}");
+        => Hash128.OfCanonical(
+            $"model/analyzed/{modelSource}/{planesMode}/v{ModelTokenEdgeETL.AnalyzerVersion}");
 
     private readonly string _modelDir;
     private readonly Hash128 _source;
@@ -295,49 +294,14 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-        // Analyzer watermark (chess FilterUnanalyzedAsync parity): a completed
-        // pass at this (source, mode, version) must not re-fold its planes.
-        string planesMode = ModelTokenEdgeETL.ResolvePlanesMode();
-        Hash128 analysisMarker = AnalysisMarkerId(_source, planesMode);
-        if (!recorderRun)
-        {
-            byte[] bm = await context.Reader.EntitiesExistBitmapAsync([analysisMarker], ct);
-            if (bm.Length > 0 && (bm[0] & 1) != 0)
-            {
-                log.LogInformation(
-                    "phase=analyzer: planes mode '{Mode}' already derived at v{V} for '{Name}' "
-                    + "— skipping (a re-run would double-fold; bump AnalyzerVersion or evict the marker to re-derive)",
-                    planesMode, AnalyzerVersion, _sourceName);
-                yield break;
-            }
-        }
-
-        // Header/tokenizer admission is retained source structure. The former
-        // default emitted a top-salience token-to-circuit prefix and folded it as
-        // calibrated testimony. It is neither a contracted token-to-token
-        // observation nor a calibrated outcome, so no model evidence is emitted
-        // until the native contraction/admission pass owns OP4-OP9.
         if (recorderRun)
         {
-            // This is intentionally a pending receipt, never the analyzer's
-            // completion marker. The missing OP3 candidate reader and OP4 native
-            // contraction cannot be represented by header structure alone.
-            Hash128 pending = Hash128.OfCanonical(
-                $"model/analysis/pending/{_source}/{AnalyzerVersion}/native-token-pair-contraction-v1");
-            var pb = new SubstrateChangeBuilder(_source, "model/analysis-pending/native-token-pair-contraction", null,
-                entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
-            pb.AddEntity(pending, EntityTier.Word, AnalysisPendingTypeId, firstObservedBy: _source);
-            yield return pb.Build();
-            log.LogInformation(
-                "phase=edges: pending native token-pair contraction; header structure is not analysis completion");
-        }
-
-        if (!recorderRun)
-        {
-            var mb = new SubstrateChangeBuilder(_source, $"model/analysis-marker/{planesMode}", null,
-                entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
-            mb.AddEntity(analysisMarker, EntityTier.Word, AnalysisMarkerTypeId, firstObservedBy: _source);
-            yield return mb.Build();
+            var contraction = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, log);
+            await foreach (var change in contraction.EmitAsync(1, context.Reader, options, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return change;
+            }
         }
     }
 

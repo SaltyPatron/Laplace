@@ -603,7 +603,6 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _originalConnectionString = Environment.GetEnvironmentVariable("LAPLACE_DB");
-        string? substrateModule = Environment.GetEnvironmentVariable("LAPLACE_TEST_SUBSTRATE_MODULE");
         var testConnection = new NpgsqlConnectionStringBuilder(LaplaceInstall.PostgresConnectionString())
         {
             Database = DatabaseName,
@@ -659,7 +658,7 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
         await ApplySqlFileAsync(
             testConnection,
             grammarSourceIdSql,
-            string.IsNullOrWhiteSpace(substrateModule) ? null : "laplace_substrate");
+            "laplace_substrate");
         await ApplySqlFileAsync(testConnection, reconstructSql);
 
         command.CommandText = """

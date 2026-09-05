@@ -305,7 +305,7 @@ TEST(LaplaceCoreIntentStage, AddAttestationAllFieldsBigEndian) {
     ASSERT_EQ(need, intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ATTESTATIONS,
                                                   buf.data(), buf.size()));
     const uint8_t* p = buf.data() + kHeader;
-    EXPECT_EQ(13, (int16_t)read_be16(p)); p += 2;
+    EXPECT_EQ(14, (int16_t)read_be16(p)); p += 2;
     for (int f = 0; f < 6; ++f) {
         EXPECT_EQ(16u, read_be32(p)); p += 4;
         EXPECT_EQ((uint8_t)(0xA1 + f), *p);
@@ -323,6 +323,8 @@ TEST(LaplaceCoreIntentStage, AddAttestationAllFieldsBigEndian) {
     EXPECT_EQ(opp_rd, (int64_t)read_be64(p)); p += 8;
     EXPECT_EQ(8u, read_be32(p)); p += 4;
     EXPECT_EQ(opp_rating, (int64_t)read_be64(p)); p += 8;
+    EXPECT_EQ(1u, read_be32(p)); p += 4;
+    EXPECT_EQ(1u, *p); p += 1;
     EXPECT_EQ((uint32_t)-1, read_be32(p));
     intent_stage_free(s);
 }
@@ -679,9 +681,9 @@ TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
     while (off < body_end) {
         ASSERT_LE(off + 2, body_end);
         uint16_t cols = read_be16(buf.data() + off);
-        ASSERT_EQ(13u, cols) << "row " << rows << " at byte " << off << " has " << cols << " cols";
+        ASSERT_EQ(14u, cols) << "row " << rows << " at byte " << off << " has " << cols << " cols";
         off += 2;
-        for (int c = 0; c < 13; ++c) {
+        for (int c = 0; c < 14; ++c) {
             ASSERT_LE(off + 4, body_end) << "row " << rows << " field " << c << " len overruns";
             int32_t flen = (int32_t)read_be32(buf.data() + off);
             off += 4;
@@ -715,10 +717,10 @@ TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
         while (poff < pend) {
             ASSERT_LE(poff + 2, pend);
             uint16_t pc = read_be16(pbuf.data() + poff);
-            ASSERT_EQ(13u, pc) << "partition " << p << " row " << partitioned_rows
+            ASSERT_EQ(14u, pc) << "partition " << p << " row " << partitioned_rows
                                << " at byte " << poff << " has " << pc << " cols";
             poff += 2;
-            for (int c = 0; c < 13; ++c) {
+            for (int c = 0; c < 14; ++c) {
                 ASSERT_LE(poff + 4, pend);
                 int32_t fl = (int32_t)read_be32(pbuf.data() + poff);
                 poff += 4;
@@ -783,4 +785,22 @@ TEST(LaplaceCoreIntentStage, SemanticDigestDetectsChangedNativeEvidenceAndMultip
     ASSERT_EQ(0, intent_stage_semantic_digest_batch(twice, 2, &repeated));
     EXPECT_NE(0, std::memcmp(&one, &repeated, sizeof(one)));
     intent_stage_free(first); intent_stage_free(second);
+}
+
+TEST(LaplaceCoreIntentStage, SemanticDigestBindsFoldReplayDisposition) {
+    auto* replayable = intent_stage_new(0);
+    auto* transient = intent_stage_new(0);
+    ASSERT_NE(nullptr, replayable); ASSERT_NE(nullptr, transient);
+    hash128_t id = make_hash(31), subject = make_hash(32), type = make_hash(33);
+    ASSERT_EQ(0, intent_stage_add_attestation_mode(
+        replayable, &id, &subject, &type, &id, &subject, nullptr,
+        2, 1000000, 1, 1000000000, 100000000, 1500000000, 1, nullptr));
+    ASSERT_EQ(0, intent_stage_add_attestation_mode(
+        transient, &id, &subject, &type, &id, &subject, nullptr,
+        2, 1000000, 1, 1000000000, 100000000, 1500000000, 0, nullptr));
+    hash128_t one{}, two{};
+    ASSERT_EQ(0, intent_stage_semantic_digest(replayable, &one));
+    ASSERT_EQ(0, intent_stage_semantic_digest(transient, &two));
+    EXPECT_NE(0, std::memcmp(&one, &two, sizeof(one)));
+    intent_stage_free(replayable); intent_stage_free(transient);
 }

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Laplace.Engine.Core;
+using Laplace.Decomposers.Abstractions;
 using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
@@ -41,6 +42,32 @@ public sealed class SafetensorsContainerParser
         {
             int c = string.CompareOrdinal(a.FilePath, b.FilePath);
             return c != 0 ? c : a.DataStart.CompareTo(b.DataStart);
+        });
+        return all;
+    }
+
+    public static IReadOnlyList<TensorReference> ParseModel(
+        SourceEntityIdConventions.ModelContentSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        string[] files = snapshot.WeightPaths
+            .Where(path => path.EndsWith(".safetensors", StringComparison.Ordinal))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        if (files.Length == 0)
+            throw new FileNotFoundException("model-content snapshot contains no .safetensors weights");
+
+        var all = new List<TensorReference>();
+        foreach (string path in files)
+        {
+            IReadOnlyList<TensorReference> refs = snapshot.Read(path, ParseHeader);
+            foreach (TensorReference reference in refs) reference.FilePath = path;
+            all.AddRange(refs);
+        }
+        all.Sort((a, b) =>
+        {
+            int comparison = string.CompareOrdinal(a.FilePath, b.FilePath);
+            return comparison != 0 ? comparison : a.DataStart.CompareTo(b.DataStart);
         });
         return all;
     }

@@ -243,8 +243,6 @@ public static class SourceEntityIdConventions
 
     private const int ContentHashChunkBytes = 64 * 1024 * 1024;
 
-    private static readonly ConcurrentDictionary<string, Hash128> _modelSourceIdCache = new();
-
     public static Hash128 ContentHashSourceId(string domain, IReadOnlyList<string> files)
     {
         ArgumentNullException.ThrowIfNull(files);
@@ -269,45 +267,141 @@ public static class SourceEntityIdConventions
 
     public static Hash128? ModelContentSourceId(string modelDir)
     {
+        using ModelContentSnapshot? snapshot = OpenModelContentSnapshot(modelDir);
+        return snapshot?.SourceId;
+    }
+
+    public static ModelContentSnapshot? OpenModelContentSnapshot(string modelDir)
+    {
         if (string.IsNullOrEmpty(modelDir) || !Directory.Exists(modelDir)) return null;
 
         string[] weights = Directory.GetFiles(modelDir, "*.safetensors");
         if (weights.Length == 0) weights = Directory.GetFiles(modelDir, "*.gguf");
         if (weights.Length == 0) return null;
 
-        var files = new List<string>(weights.Length + 1);
+        var files = new List<string>(weights.Length + 2);
         string cfg = Path.Combine(modelDir, "config.json");
         if (File.Exists(cfg)) files.Add(cfg);
+        string tokenizer = Path.Combine(modelDir, SafetensorSnapshotWitness.TokenizerFile);
+        if (File.Exists(tokenizer)) files.Add(tokenizer);
         files.AddRange(weights);
         files.Sort(StringComparer.Ordinal);
 
-        var sig = new StringBuilder(modelDir);
-        foreach (var f in files)
+        // Open the complete selected file set before hashing any member.  The
+        // source id then names the bytes held by one coherent handle snapshot;
+        // path metadata is neither identity nor a digest cache key.
+        var opened = new Dictionary<string, FileStream>(files.Count, StringComparer.Ordinal);
+        try
         {
-            var fi = new FileInfo(f);
-            sig.Append('|').Append(f).Append(':').Append(fi.Length)
-               .Append(':').Append(fi.LastWriteTimeUtc.Ticks);
-        }
-        string key = sig.ToString();
-        if (_modelSourceIdCache.TryGetValue(key, out var cached)) return cached;
+            foreach (string path in files)
+                opened.Add(path, new FileStream(
+                    path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete,
+                    bufferSize: 1, FileOptions.SequentialScan));
 
-        Hash128 id = ContentHashSourceId("substrate/source/model/v1", files);
-        _modelSourceIdCache[key] = id;
-        return id;
+            var children = new List<Hash128>(opened.Count + 1)
+            {
+                Hash128.OfCanonical("substrate/source/model/v1")
+            };
+            foreach (string path in files)
+                children.Add(HashStreamChunked(opened[path]));
+            Hash128 sourceId = Hash128.Merkle(0, CollectionsMarshal.AsSpan(children));
+            return new ModelContentSnapshot(sourceId, weights, opened);
+        }
+        catch
+        {
+            foreach (FileStream stream in opened.Values) stream.Dispose();
+            throw;
+        }
+    }
+
+    public sealed class ModelContentSnapshot : IDisposable
+    {
+        private readonly Dictionary<string, FileStream> _streams;
+        private readonly string[] _orderedPaths;
+
+        internal ModelContentSnapshot(
+            Hash128 sourceId, IReadOnlyList<string> weightPaths,
+            Dictionary<string, FileStream> streams)
+        {
+            SourceId = sourceId;
+            WeightPaths = weightPaths.OrderBy(path => path, StringComparer.Ordinal).ToArray();
+            _streams = streams;
+            _orderedPaths = streams.Keys.OrderBy(path => path, StringComparer.Ordinal).ToArray();
+        }
+
+        public Hash128 SourceId { get; }
+        public IReadOnlyList<string> WeightPaths { get; }
+
+        public T Read<T>(string path, Func<Stream, T> read)
+        {
+            ArgumentNullException.ThrowIfNull(read);
+            if (!_streams.TryGetValue(path, out FileStream? stream))
+                throw new InvalidOperationException($"'{path}' is outside the held model-content snapshot");
+            lock (stream)
+            {
+                stream.Position = 0;
+                return read(stream);
+            }
+        }
+
+        public byte[] ReadRange(string path, long offset, long length)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(offset);
+            ArgumentOutOfRangeException.ThrowIfNegative(length);
+            if (length > int.MaxValue)
+                throw new InvalidDataException($"model tensor range is too large for one managed buffer: {length}");
+            return Read(path, stream =>
+            {
+                stream.Position = offset;
+                var bytes = new byte[(int)length];
+                int total = 0;
+                while (total < bytes.Length)
+                {
+                    int count = stream.Read(bytes, total, bytes.Length - total);
+                    if (count == 0)
+                        throw new IOException($"model snapshot '{path}' ended inside range [{offset}, {offset + length})");
+                    total += count;
+                }
+                return bytes;
+            });
+        }
+
+        public void VerifySourceId()
+        {
+            var children = new List<Hash128>(_orderedPaths.Length + 1)
+            {
+                Hash128.OfCanonical("substrate/source/model/v1")
+            };
+            foreach (string path in _orderedPaths)
+                children.Add(Read(path, HashStreamChunked));
+            Hash128 verified = Hash128.Merkle(0, CollectionsMarshal.AsSpan(children));
+            if (verified != SourceId)
+                throw new InvalidDataException(
+                    "model checkpoint bytes changed while the admitted source snapshot was in use");
+        }
+
+        public void Dispose()
+        {
+            foreach (FileStream stream in _streams.Values) stream.Dispose();
+            _streams.Clear();
+        }
     }
 
     private static Hash128 HashFileChunked(string path)
     {
+        using var fs = IngestIo.OpenSequentialRead(path);
+        return HashStreamChunked(fs);
+    }
+
+    private static Hash128 HashStreamChunked(Stream stream)
+    {
         var chunks = new List<Hash128>();
         byte[] buf = new byte[ContentHashChunkBytes];
-        using (var fs = IngestIo.OpenSequentialRead(path))
+        int n;
+        while ((n = ReadExact(stream, buf)) > 0)
         {
-            int n;
-            while ((n = ReadExact(fs, buf)) > 0)
-            {
-                chunks.Add(Hash128.Blake3(buf.AsSpan(0, n)));
-                if (n < buf.Length) break;
-            }
+            chunks.Add(Hash128.Blake3(buf.AsSpan(0, n)));
+            if (n < buf.Length) break;
         }
         if (chunks.Count == 0) return Hash128.Blake3(ReadOnlySpan<byte>.Empty);
         return Hash128.Merkle(0, CollectionsMarshal.AsSpan(chunks));

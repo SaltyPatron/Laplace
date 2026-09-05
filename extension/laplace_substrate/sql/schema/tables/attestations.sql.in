@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS attestations (
     --                       must fold exactly as the substrate did before, not
     --                       against a rating-0 opponent.
     opponent_rating_fp1e9 bigint    NOT NULL DEFAULT 1500000000000,
+    -- Transient-calibration receipts are durable categorical provenance but
+    -- their continuous native score was consumed atomically at ingest and is
+    -- deliberately unrecoverable.  Refold/evict must exclude these rows.
+    fold_replayable    boolean       NOT NULL DEFAULT true,
     highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
     PRIMARY KEY (id, type_id, subject_id)
 ) PARTITION BY LIST (type_id);
@@ -57,6 +61,8 @@ CREATE TABLE IF NOT EXISTS attestations (
 -- to write explicit opponent ratings; this recurses to existing partitions too.
 ALTER TABLE attestations ADD COLUMN IF NOT EXISTS opponent_rating_fp1e9
     bigint NOT NULL DEFAULT 1500000000000;
+ALTER TABLE attestations ADD COLUMN IF NOT EXISTS fold_replayable
+    boolean NOT NULL DEFAULT true;
 
 DO $$
 BEGIN

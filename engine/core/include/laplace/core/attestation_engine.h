@@ -35,6 +35,10 @@ typedef struct {
     uint8_t   object_is_null;
     uint8_t   context_is_null;
     uint8_t   is_aggregated;
+    /* Ordinary evidence is replayable from its durable score total.  A native
+     * transient-calibration receipt records only its categorical outcome and
+     * must never be sent through refold/evict score replay. */
+    uint8_t   fold_replayable;
 } laplace_attestation_staged_t;
 
 int laplace_relation_resolve(const char* surface, hash128_t* out_type_id);
@@ -113,6 +117,24 @@ int laplace_attestation_resolved_build(
     uint8_t          context_is_null,
     double           witness_weight,
     int              confirm,
+    int64_t          observation_count,
+    int64_t          now_unix_us,
+    laplace_attestation_staged_t* out);
+
+/* Builds a durable three-valued receipt from an already-resolved relation id.
+ * Its score is the categorical representative only; callers with a continuous
+ * native calibration must consume that value inside the same atomic fold and
+ * set fold_replayable false before staging the receipt. */
+int laplace_attestation_resolved_outcome_build(
+    const hash128_t* subject,
+    const hash128_t* type_id,
+    const hash128_t* object,
+    uint8_t          object_is_null,
+    const hash128_t* source,
+    const hash128_t* context,
+    uint8_t          context_is_null,
+    double           witness_weight,
+    int16_t          outcome,
     int64_t          observation_count,
     int64_t          now_unix_us,
     laplace_attestation_staged_t* out);

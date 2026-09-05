@@ -211,4 +211,65 @@ public class SubstrateChangeTests
             b.AddAttestation(new AttestationRow(H(4), H(1), H(50), H(2), src, null,
                 AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 99_000_000_000L)));
     }
+
+    [Fact]
+    public void Builder_TransientReceiptRequiresOneMatchingNonReplayableAttestation()
+    {
+        var src = SubstrateCanonicalIds.Source("Test");
+        var row = new AttestationRow(H(4), H(1), H(50), H(2), src, null,
+            AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L,
+            FoldReplayable: false);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            new SubstrateChangeBuilder(src, "missing-row")
+                .AddEphemeralFold(new(H(99), H(100), 700_000_000))
+                .Build());
+        Assert.Throws<ArgumentException>(() =>
+            new SubstrateChangeBuilder(src, "missing-receipt")
+                .AddAttestation(row)
+                .AddEphemeralFold(new(row.Id, default, 700_000_000)));
+
+        var change = new SubstrateChangeBuilder(src, "valid-transient")
+            .AddAttestation(row)
+            .AddEphemeralFold(new(row.Id, H(100), 700_000_000))
+            .Build();
+        Assert.Single(change.EphemeralFoldInputs);
+        Assert.False(Assert.Single(change.Attestations).FoldReplayable);
+    }
+
+    [Fact]
+    public void Builder_RejectsMixedReplayDispositionForOneReceipt()
+    {
+        var src = SubstrateCanonicalIds.Source("Test");
+        var replayable = new AttestationRow(H(4), H(1), H(50), H(2), src, null,
+            AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L);
+        var builder = new SubstrateChangeBuilder(src, "mixed-replay-mode")
+            .AddAttestation(replayable);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            builder.AddAttestation(replayable with { FoldReplayable = false }));
+    }
+
+    [Fact]
+    public void Builder_TransientReceiptOrderDoesNotChangeIntentIdentity()
+    {
+        var src = SubstrateCanonicalIds.Source("Test");
+        var first = new AttestationRow(H(4), H(1), H(50), H(2), src, null,
+            AttestationOutcome.Confirm, 0L, 1L, 1_000_000_000L, 30_000_000_000L,
+            FoldReplayable: false);
+        var second = first with { Id = H(5), SubjectId = H(3) };
+
+        var a = new SubstrateChangeBuilder(src, "transient-order")
+            .AddAttestation(first).AddAttestation(second)
+            .AddEphemeralFold(new(first.Id, H(100), 700_000_000))
+            .AddEphemeralFold(new(second.Id, H(101), 300_000_000))
+            .Build();
+        var b = new SubstrateChangeBuilder(src, "transient-order")
+            .AddAttestation(first).AddAttestation(second)
+            .AddEphemeralFold(new(second.Id, H(101), 300_000_000))
+            .AddEphemeralFold(new(first.Id, H(100), 700_000_000))
+            .Build();
+
+        Assert.Equal(a.Metadata.IntentId, b.Metadata.IntentId);
+    }
 }

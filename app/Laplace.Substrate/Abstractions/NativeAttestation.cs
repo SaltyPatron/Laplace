@@ -96,6 +96,51 @@ public static class NativeAttestation
         }
     }
 
+    /// <summary>
+    /// Produces a three-valued, native-oriented receipt for a relation the caller
+    /// already resolved.  The receipt remains categorical.  A lane with a
+    /// continuous native calculation must attach that value only as an atomic
+    /// <see cref="EphemeralFoldInput"/>. This method marks the receipt
+    /// non-replayable so it cannot later substitute 0/½/1 for that value.
+    /// </summary>
+    public static AttestationRow CategoricalResolvedOutcome(
+        Hash128 subject,
+        Hash128 typeId,
+        Hash128? obj,
+        Hash128 sourceId,
+        Hash128? contextId,
+        double witnessWeight,
+        AttestationOutcome outcome,
+        long observationCount = 1)
+    {
+        if (outcome is < AttestationOutcome.Refute or > AttestationOutcome.Confirm)
+            throw new ArgumentOutOfRangeException(nameof(outcome));
+        unsafe
+        {
+            var staged = default(AttestationStagedNative);
+            Hash128 objVal = obj ?? default;
+            Hash128 ctxVal = contextId ?? default;
+            int rc = NativeInterop.AttestationResolvedOutcomeBuild(
+                &subject,
+                &typeId,
+                obj is null ? null : &objVal,
+                (byte)(obj is null ? 1 : 0),
+                &sourceId,
+                contextId is null ? null : &ctxVal,
+                (byte)(contextId is null ? 1 : 0),
+                witnessWeight,
+                (short)outcome,
+                observationCount,
+                0,
+                &staged);
+            if (rc != 0) throw new InvalidOperationException($"attestation build failed: {rc}");
+            // The durable row is only the categorical receipt. Its continuous
+            // calibration accompanies it through EphemeralFoldInput and is
+            // consumed by the atomic consensus participant.
+            return ToRow(staged) with { FoldReplayable = false };
+        }
+    }
+
     public static AttestationRow ResolvedScored(
         Hash128 subject,
         Hash128 typeId,
@@ -302,5 +347,6 @@ public static class NativeAttestation
             s.ScoreFp1e9,
             s.OpponentRdFp1e9,
             s.OpponentRatingFp1e9,
-            s.IsAggregated != 0 ? s.SumScoreFp1e9 : null);
+            s.IsAggregated != 0 ? s.SumScoreFp1e9 : null,
+            FoldReplayable: s.FoldReplayable != 0);
 }

@@ -31,5 +31,7 @@ public sealed class AttestationStagedLayoutTests
             nameof(AttestationStagedNative.OpponentRatingFp1e9)));
         Assert.Equal(144, (int)Marshal.OffsetOf<AttestationStagedNative>(
             nameof(AttestationStagedNative.SumScoreFp1e9)));
+        Assert.Equal(155, (int)Marshal.OffsetOf<AttestationStagedNative>(
+            nameof(AttestationStagedNative.FoldReplayable)));
     }
 }

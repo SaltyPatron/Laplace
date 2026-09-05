@@ -47,6 +47,24 @@ BEGIN
         RAISE EXCEPTION 'refold_source: unknown source %', p_source_name;
     END IF;
 
+    -- A transient-calibration receipt has already consumed its continuous
+    -- native score inside the original atomic write.  It is durable provenance,
+    -- not a replayable fold input; rebuilding a cell from its categorical
+    -- receipt would silently replace the original model result with 0/½/1.
+    IF EXISTS (
+        SELECT 1
+        FROM laplace.attestations source_evidence
+        JOIN laplace.attestations transient_evidence
+          ON transient_evidence.type_id = source_evidence.type_id
+         AND transient_evidence.subject_id = source_evidence.subject_id
+         AND transient_evidence.object_id IS NOT DISTINCT FROM source_evidence.object_id
+        WHERE source_evidence.source_id = src
+          AND transient_evidence.fold_replayable = false
+    ) THEN
+        RAISE EXCEPTION 'refold_source: source % touches transient-calibration evidence; no score replay exists',
+            p_source_name;
+    END IF;
+
     SELECT array_agg(DISTINCT a.type_id) INTO rels
     FROM laplace.attestations a WHERE a.source_id = src;
     IF rels IS NULL THEN

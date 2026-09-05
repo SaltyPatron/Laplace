@@ -151,6 +151,24 @@ TEST(LaplaceAttestationEngine, ResolvedScored_NegativeBelowHalf) {
     EXPECT_EQ(LAPLACE_ATTESTATION_OUTCOME_REFUTE, staged.outcome);
 }
 
+TEST(LaplaceAttestationEngine, ResolvedOutcomeBuildsCategoricalDrawReceipt) {
+    hash128_t subj = hash_path("model/token/a");
+    hash128_t type = relation_type_id("ATTENDS");
+    hash128_t obj = hash_path("model/token/b");
+    hash128_t src = hash_path("model/checkpoint");
+    laplace_attestation_staged_t staged;
+
+    ASSERT_EQ(0, laplace_attestation_resolved_outcome_build(
+        &subj, &type, &obj, 0, &src, NULL, 1, 0.7,
+        LAPLACE_ATTESTATION_OUTCOME_DRAW, 1, 0, &staged));
+    EXPECT_EQ(LAPLACE_ATTESTATION_OUTCOME_DRAW, staged.outcome);
+    EXPECT_EQ(LAPLACE_GLICKO2_FP_SCALE / 2, staged.score_fp1e9);
+    EXPECT_EQ(1, staged.fold_replayable);
+
+    EXPECT_EQ(-1, laplace_attestation_resolved_outcome_build(
+        &subj, &type, &obj, 0, &src, NULL, 1, 0.7, 7, 1, 0, &staged));
+}
+
 TEST(LaplaceAttestationEngine, WitnessPhi_TrustedTighterThanCrank) {
     EXPECT_LT(laplace_attestation_witness_phi(1.0), laplace_attestation_witness_phi(0.1));
 }

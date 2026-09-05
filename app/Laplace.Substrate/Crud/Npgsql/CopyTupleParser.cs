@@ -65,6 +65,8 @@ internal static class CopyTupleParser
         public readonly List<int> CountValueOffsets = new();
         /// <summary>sum_score_fp1e9 — the fold's exact score total for this row.</summary>
         public readonly List<long> SumScores = new();
+        /// <summary>Whether durable score totals can be consumed by refold/evict.</summary>
+        public readonly List<bool> FoldReplayable = new();
         /// <summary>Offset of the 8 sum_score_fp1e9 value bytes, relative to row start.</summary>
         public readonly List<int> SumScoreValueOffsets = new();
         public readonly List<StagedRowRef> Rows = new();
@@ -72,7 +74,7 @@ internal static class CopyTupleParser
 
     private const int EntityFields = 4;
     private const int PhysicalityFields = 10;
-    private const int AttestationFields = 13;
+    private const int AttestationFields = 14;
 
     /// <summary>
     /// Fixed PGCOPY layout for <c>id,tier,type_id,first_observed_by=NULL</c>
@@ -218,6 +220,7 @@ internal static class CopyTupleParser
                 Hash128 id = default, subjectId = default, typeId = default;
                 Hash128 objectId = default, contextId = default;
                 long ts = 0, games = 0, sumScore = 0;
+                bool foldReplayable = true;
                 long countValOff = -1, sumValOff = -1;
                 WalkRow(p, len, ref off, AttestationFields, "attestations", (field, valOff, valLen) =>
                 {
@@ -241,6 +244,9 @@ internal static class CopyTupleParser
                             sumScore = ReadInt64(p, valOff, valLen, "attestations.sum_score_fp1e9");
                             sumValOff = valOff;
                             break;
+                        case 12:
+                            foldReplayable = ReadBool(p, valOff, valLen, "attestations.fold_replayable");
+                            break;
                     }
                 });
                 if (countValOff < 0)
@@ -256,6 +262,7 @@ internal static class CopyTupleParser
                 result.Counts.Add(games);
                 result.CountValueOffsets.Add(checked((int)(countValOff - rowStart)));
                 result.SumScores.Add(sumScore);
+                result.FoldReplayable.Add(foldReplayable);
                 result.SumScoreValueOffsets.Add(checked((int)(sumValOff - rowStart)));
                 result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
             }
@@ -314,6 +321,13 @@ internal static class CopyTupleParser
         if (valLen != 2)
             throw new InvalidOperationException($"{what}: expected 2-byte value, got {valLen}");
         return BinaryPrimitives.ReadInt16BigEndian(new ReadOnlySpan<byte>(p + valOff, 2));
+    }
+
+    private static unsafe bool ReadBool(byte* p, long valOff, int valLen, string what)
+    {
+        if (valLen != 1)
+            throw new InvalidOperationException($"{what}: expected 1-byte value, got {valLen}");
+        return p[valOff] != 0;
     }
 
     private static InvalidOperationException Corrupt(string table, long off, string why) =>

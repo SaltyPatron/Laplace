@@ -42,6 +42,7 @@ internal static class IngestCommands
     internal sealed record IngestCliArgs(
         string Source,
         string Path,
+        string SecondPath,
         LanguageFilter? LangOverride,
         bool? EmitCrossLanguageLinks,
         bool SkipEvidence,
@@ -120,6 +121,7 @@ internal static class IngestCommands
         return new(
             rest.Count > 0 ? rest[0] : "",
             rest.Count > 1 ? rest[1] : "",
+            rest.Count > 2 ? rest[2] : "",
             langs,
             emitCross,
             skipEvidence,
@@ -375,6 +377,51 @@ internal static class IngestCommands
         try { await PrintIngestValidationAsync(ds, dec, exactSourceValidation: false); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: safetensor deposition validation failed: {ex.Message}"); }
+        return 0;
+    }
+
+    internal static async Task<int> CorroborateSafetensorSnapshotsAsync(IngestCliArgs cli)
+    {
+        if (string.IsNullOrWhiteSpace(cli.Path) || string.IsNullOrWhiteSpace(cli.SecondPath))
+            return Fail(
+                "usage: laplace ingest model-corroborate <first-snapshot> <second-snapshot>\n"
+                + "  Both content-distinct snapshots must already be deposited model sources.");
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
+        HighwayPerfcache.LoadDefault();
+
+        using SelectedModelAnalysisEstate estate =
+            SelectedModelAnalysisEstate.Open(cli.Path, cli.SecondPath);
+        await using var ds = LaplaceDataSource.Create(
+            SubstrateAccess.Ingest,
+            b => b.ConnectionStringBuilder.CommandTimeout = 0,
+            ConnString);
+        var reader = new NpgsqlSubstrateReader(ds);
+        IReadOnlySet<Hash128> completed = await reader.HasSourcesCompletedAsync(
+            [estate.Left.SourceId, estate.Right.SourceId], layerOrder: 10);
+        if (completed.Count != 2)
+            return Fail(
+                "model-corroborate requires both selected checkpoint identities to be deposited "
+                + "before their calculated joint analysis can be admitted");
+
+        var loggerFactory = CliRuntime.LoggerFactory;
+        var inner = new NpgsqlSubstrateWriter(
+            ds, logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
+        var writer = new ConsensusAccumulatingWriter(
+            inner, ds, persistEvidence: ResolvePersistEvidence(cli),
+            logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
+        var sw = Stopwatch.StartNew();
+        ModelJointCorroborationResult result = await estate.AnalyzeAndApplyAsync(
+            commitEpoch: 1, reader, writer, CancellationToken.None);
+        await writer.DrainFoldsAsync();
+        sw.Stop();
+        Console.WriteLine(
+            $"model corroboration: sources={result.LeftSource},{result.RightSource} "
+            + $"proposed={result.ProposedPairs:N0} admitted={result.AdmittedPairs:N0} "
+            + $"receipts_inserted={result.AttestationsInserted:N0} "
+            + $"working_sets={result.WorkingSets:N0} replay={result.AnyJournalReplay} "
+            + $"native_peak_bytes={result.PeakNativeResidentBytes:N0} "
+            + $"score_peak_bytes={result.PeakTransientScoreBytes:N0} "
+            + $"elapsed_s={sw.Elapsed.TotalSeconds:F1}");
         return 0;
     }
 

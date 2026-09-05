@@ -1,0 +1,27 @@
+-- Phase-5a candidate admission.  The caller supplies the complete selected
+-- vocabulary and walks this stable keyset page-by-page; p_page_size is a wire
+-- bound, never a ranked top-K or semantic threshold.
+DROP FUNCTION IF EXISTS consensus.circuit_candidates(bytea[], bytea, bytea, bytea, integer);
+CREATE OR REPLACE FUNCTION consensus.circuit_candidates(
+    p_vocabulary bytea[], p_type_id bytea,
+    p_after_subject bytea, p_after_object bytea, p_page_size integer)
+    RETURNS TABLE(subject_id bytea, object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH selected(id) AS MATERIALIZED (
+        SELECT DISTINCT token_id
+        FROM unnest(p_vocabulary) AS token_id
+        WHERE octet_length(token_id) = 16
+    )
+    SELECT c.subject_id, c.object_id, c.type_id,
+           consensus.eff_mu_display(c.rating, c.rd), c.witness_count
+    FROM laplace.consensus c
+    JOIN selected subject ON subject.id = c.subject_id
+    JOIN selected object ON object.id = c.object_id
+    WHERE c.type_id = p_type_id
+      AND c.object_id IS NOT NULL
+      AND (p_after_subject IS NULL
+           OR (c.subject_id, c.object_id) > (p_after_subject, p_after_object))
+    ORDER BY c.subject_id, c.object_id
+    LIMIT p_page_size;
+END;
