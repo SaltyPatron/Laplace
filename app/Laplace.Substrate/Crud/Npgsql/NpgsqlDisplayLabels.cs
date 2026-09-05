@@ -8,9 +8,12 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 ///
 /// Identity and display are deliberately separate: the caller keeps the canonical hash id,
 /// while this read chooses a Unicode surface that a person can inspect. It never uses a
-/// content hash as a label. The expensive case (tier-4+ content) is previewed from one
-/// constituent, not recursively rendered in full, so a graph containing a book cannot turn
-/// a 1,024-node label pass into a 1,024-document reconstruction pass.
+/// content hash as a label.
+///
+/// High-tier rendering is intentionally NOT inferred from entity.type_id. GH #804 is explicit:
+/// form belongs to caller intent / containment, not a second type on the derivation. Therefore
+/// exact self-rendering stops at sentence grain; a higher-tier value is previewed only when a
+/// witnessed containment role says that value is text (currently definition/file metadata).
 /// </summary>
 public static class NpgsqlDisplayLabels
 {
@@ -20,7 +23,7 @@ public static class NpgsqlDisplayLabels
     /// <summary>
     /// Set-wise display-label policy, in order:
     /// canonical name; semantic name/lemma; exact shallow content; file name metadata;
-    /// bounded document/definition preview; relation name; type/source description;
+    /// containment-proven text/definition preview; relation name; type/source description;
     /// explicit "Unrealized entity". The hash remains available separately as IdHex.
     /// </summary>
     public static Task<IReadOnlyList<DisplayLabelRow>> ReadAsync(
@@ -57,8 +60,8 @@ public static class NpgsqlDisplayLabels
 
             -- A file is an occurrence/provenance envelope around global content. When that
             -- envelope is present, its recorded file name is a better UI label than making
-            -- the user inspect the content id. File metadata is a tiny known document, so
-            -- depth 4 is exact without ever expanding the user's file body.
+            -- the user inspect the content id. HasFileMetadata is containment evidence that
+            -- its object is textual metadata; no form is guessed from the entity itself.
             file_meta_choice AS MATERIALIZED (
                 SELECT DISTINCT ON (i.id)
                        i.id AS owner_id, i.ord, a.object_id AS metadata_id
@@ -96,13 +99,14 @@ public static class NpgsqlDisplayLabels
                 WHERE lines.line LIKE 'name=%'
             ),
 
-            -- Provider/catalog identities are not literal text and therefore correctly
-            -- abstain in realize.resolve_name_batch. For a display-only fallback, however,
-            -- an attested definition is useful. Choose one deterministic definition root;
-            -- the preview arm below still renders only one bounded text constituent.
-            definitions AS MATERIALIZED (
+            -- Provider/catalog identities are not literal text. HAS_DEFINITION is the
+            -- containment contract that says its OBJECT is text. It serves two cases:
+            --   concept id -> preview the definition it owns;
+            --   definition id -> preview itself because an incoming edge proves its role.
+            -- Nothing here asks entity.type_id whether the bytes "look like" text.
+            definition_owned AS MATERIALIZED (
                 SELECT DISTINCT ON (i.id)
-                       i.id AS owner_id, a.object_id AS target_id
+                       i.id AS owner_id, i.ord, a.object_id AS target_id
                 FROM inp i
                 JOIN laplace.attestations a
                   ON a.subject_id = i.id
@@ -110,27 +114,34 @@ public static class NpgsqlDisplayLabels
                 WHERE a.object_id IS NOT NULL
                 ORDER BY i.id, a.last_observed_at DESC, a.id
             ),
-            preview_targets AS MATERIALIZED (
-                SELECT i.id AS owner_id, i.ord,
-                       CASE
-                           WHEN i.tier > 3
-                            AND i.type_id = laplace.entity_type_id('Document')
-                               THEN i.id
-                           ELSE d.target_id
-                       END AS target_id
+            definition_text AS MATERIALIZED (
+                SELECT DISTINCT ON (i.id)
+                       i.id AS owner_id, i.ord, i.id AS target_id
                 FROM inp i
-                LEFT JOIN definitions d ON d.owner_id = i.id
-                WHERE (i.tier > 3 AND i.type_id = laplace.entity_type_id('Document'))
-                   OR d.target_id IS NOT NULL
+                JOIN laplace.attestations a
+                  ON a.object_id = i.id
+                 AND a.type_id = laplace.relation_type_id('HAS_DEFINITION')
+                ORDER BY i.id, a.last_observed_at DESC, a.id
             ),
+            text_targets AS MATERIALIZED (
+                SELECT * FROM definition_owned
+                UNION ALL
+                SELECT t.* FROM definition_text t
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM definition_owned o WHERE o.owner_id = t.owner_id)
+            ),
+
+            -- Preview policy is bounded by construction. Sentence-or-shallower targets can
+            -- render directly. A higher-tier text value reveals exactly ONE first constituent
+            -- through the packed trajectory and renders that child at depth 3. We never
+            -- ST_DumpPoints / reconstruct the whole book just to paint a graph node.
             preview_render_ids AS MATERIALIZED (
                 SELECT p.owner_id, p.ord,
                        CASE
                            WHEN e.tier <= 3 THEN p.target_id
-                           WHEN e.type_id = laplace.entity_type_id('Document') THEN head.child_id
-                           ELSE NULL
+                           ELSE head.child_id
                        END AS render_id
-                FROM preview_targets p
+                FROM text_targets p
                 LEFT JOIN laplace.entities e ON e.id = p.target_id
                 LEFT JOIN LATERAL (
                     SELECT u.entity_id AS child_id
@@ -142,7 +153,6 @@ public static class NpgsqlDisplayLabels
                     ORDER BY w.physicality_id
                     LIMIT 1
                 ) head ON e.tier > 3
-                      AND e.type_id = laplace.entity_type_id('Document')
             ),
             preview_indexed AS MATERIALIZED (
                 SELECT p.owner_id, p.ord, p.render_id,
@@ -165,9 +175,9 @@ public static class NpgsqlDisplayLabels
                 CROSS JOIN preview_rendered r
             ),
 
-            -- Types/sources are tiny governed identities. Batch them once so a truly
-            -- non-text modality still says what it IS and where it came from instead of
-            -- presenting an arbitrary 128-bit handle as though that were a human name.
+            -- Type/source are descriptive fallback metadata only; they NEVER select the
+            -- projection above. This gives non-text/opaque nodes a friendly provenance label
+            -- without pretending their codepoint derivation is a human-readable text body.
             type_indexed AS MATERIALIZED (
                 SELECT d.type_id,
                        row_number() OVER (ORDER BY d.type_id)::integer AS rn
