@@ -53,7 +53,9 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         string FileLabel,
         DateTimeOffset At,
         long Bytes = 0,
+        DateTimeOffset? ModifiedAt = null,
         byte[]? FileId = null,
+        byte[]? ResumeFingerprint = null,
         long Records = 0,
         long Entities = 0,
         long Physicalities = 0,
@@ -69,7 +71,83 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             MemoryTopology.FileJournalTransitBytesPerEvent);
     }
 
-    public void OnRunStart(string sourceName, int layerOrder, IngestInventory? inventory)
+    /// <summary>
+    /// Persist one already-accepted runtime artifact as a complete one-file run. Unlike the
+    /// asynchronous ingest-run callbacks, this method is an admission boundary: it returns only
+    /// after the run and occurrence rows commit together, so a successful API response cannot
+    /// silently lose the supplied size or modification-time observation.
+    /// </summary>
+    public async Task RecordAcceptedArtifactAsync(
+        string sourceName,
+        Hash128 sourceId,
+        string fileLabel,
+        Hash128 fileId,
+        long bytes,
+        DateTimeOffset? modifiedAt,
+        ApplyResult applied,
+        TimeSpan wallClock,
+        CancellationToken ct = default)
+    {
+        if (bytes < 0) throw new ArgumentOutOfRangeException(nameof(bytes));
+        ArgumentNullException.ThrowIfNull(applied);
+
+        Guid runId = Guid.NewGuid();
+        DateTimeOffset endedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset startedAt = endedAt - wallClock;
+        await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var transaction = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using var batch = new NpgsqlBatch(conn, transaction);
+
+        var run = new NpgsqlBatchCommand(
+            "INSERT INTO laplace.ingest_run_journal "
+            + "(run_id, source_name, source_id, layer, status, phase, started_at, ended_at, "
+            + "units_attempted, units_applied, entities, physicalities, attestations, "
+            + "files_done, files_total, input_units_done, input_units_total, "
+            + "throughput_elapsed_ms, evidence_persisted) "
+            + "VALUES ($1, $2, $3, 0, 'ok', 'complete', $4, $5, "
+            + "1, 1, $6, $7, $8, 1, 1, 1, 1, $9, $10)");
+        AddParameter(run, runId, NpgsqlDbType.Uuid);
+        AddParameter(run, sourceName, NpgsqlDbType.Text);
+        AddParameter(run, sourceId.ToBytes(), NpgsqlDbType.Bytea);
+        AddParameter(run, startedAt, NpgsqlDbType.TimestampTz);
+        AddParameter(run, endedAt, NpgsqlDbType.TimestampTz);
+        AddParameter(run, (long)applied.EntitiesInserted, NpgsqlDbType.Bigint);
+        AddParameter(run, (long)applied.PhysicalitiesInserted, NpgsqlDbType.Bigint);
+        AddParameter(run, (long)applied.AttestationsInserted, NpgsqlDbType.Bigint);
+        AddParameter(run, Math.Max(1L, (long)Math.Round(wallClock.TotalMilliseconds)), NpgsqlDbType.Bigint);
+        AddParameter(run, _evidencePersisted, NpgsqlDbType.Boolean);
+        batch.BatchCommands.Add(run);
+
+        var file = new NpgsqlBatchCommand(
+            "INSERT INTO laplace.ingest_file_journal "
+            + "(run_id, file_label, source_name, file_id, status, started_at, ended_at, "
+            + "bytes, modified_at, records, entities, physicalities, attestations) "
+            + "VALUES ($1, $2, $3, $4, 'ok', $5, $6, $7, $8, 1, $9, $10, $11)");
+        AddParameter(file, runId, NpgsqlDbType.Uuid);
+        AddParameter(file, fileLabel, NpgsqlDbType.Text);
+        AddParameter(file, sourceName, NpgsqlDbType.Text);
+        AddParameter(file, fileId.ToBytes(), NpgsqlDbType.Bytea);
+        AddParameter(file, startedAt, NpgsqlDbType.TimestampTz);
+        AddParameter(file, endedAt, NpgsqlDbType.TimestampTz);
+        AddParameter(file, bytes, NpgsqlDbType.Bigint);
+        AddParameter(file, (object?)modifiedAt ?? DBNull.Value, NpgsqlDbType.TimestampTz);
+        AddParameter(file, (long)applied.EntitiesAttempted, NpgsqlDbType.Bigint);
+        AddParameter(file, (long)applied.PhysicalitiesAttempted, NpgsqlDbType.Bigint);
+        AddParameter(file, (long)applied.AttestationsAttempted, NpgsqlDbType.Bigint);
+        batch.BatchCommands.Add(file);
+
+        await batch.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    public void OnRunStart(string sourceName, int layerOrder, IngestInventory? inventory) =>
+        OnRunStart(sourceName, layerOrder, inventory, artifactGraph: null);
+
+    public void OnRunStart(
+        string sourceName,
+        int layerOrder,
+        IngestInventory? inventory,
+        IngestArtifactGraph? artifactGraph)
     {
         _runId = Guid.NewGuid();
         _active = true;
@@ -88,8 +166,93 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = inventory?.TotalInputUnits ?? 0L });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });
+        PersistArtifactInventory(sourceName, artifactGraph);
         AcquireLivenessLock();
         StartFileJournalPump();
+    }
+
+    private void PersistArtifactInventory(string sourceName, IngestArtifactGraph? artifactGraph)
+    {
+        if (artifactGraph is null || artifactGraph.Artifacts.Count == 0) return;
+
+        try
+        {
+            using var conn = _ds.OpenConnection();
+            using var transaction = conn.BeginTransaction();
+            foreach (IngestArtifact[] artifacts in artifactGraph.Artifacts.Chunk(_fileJournalFlushRows))
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.Transaction = transaction;
+                cmd.CommandText =
+                    "INSERT INTO laplace.ingest_file_journal AS current_file "
+                    + "(run_id, file_label, source_name, artifact_id, relative_path, disposition, "
+                    + "disposition_reason, status, bytes, modified_at, started_at, ended_at) "
+                    + "SELECT $1, u.file_label, $2, u.artifact_id, u.relative_path, u.disposition, "
+                    + "u.reason, u.status, u.bytes, u.modified_at, now(), "
+                    + "CASE WHEN u.status = 'not-selected' THEN now() ELSE NULL END "
+                    + "FROM unnest($3, $4, $5, $6, $7, $8, $9, $10) "
+                    + "AS u(file_label, artifact_id, relative_path, disposition, reason, status, bytes, modified_at) "
+                    + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
+                    + "artifact_id = EXCLUDED.artifact_id, relative_path = EXCLUDED.relative_path, "
+                    + "disposition = EXCLUDED.disposition, disposition_reason = EXCLUDED.disposition_reason, "
+                    + "status = EXCLUDED.status, bytes = EXCLUDED.bytes, modified_at = EXCLUDED.modified_at, "
+                    + "ended_at = EXCLUDED.ended_at";
+                cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = sourceName, NpgsqlDbType = NpgsqlDbType.Text });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact => artifact.FileLabel).ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
+                });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact => artifact.Id).ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
+                });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact => artifact.RelativePath).ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
+                });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact => artifact.DispositionName).ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
+                });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact =>
+                            string.IsNullOrWhiteSpace(artifact.Notes) ? null : artifact.Notes)
+                        .ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
+                });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact =>
+                            artifact.IsSelected ? "inventoried" : "not-selected")
+                        .ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text,
+                });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact => artifact.Bytes ?? 0L).ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint,
+                });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = artifacts.Select(static artifact => artifact.ModifiedAt).ToArray(),
+                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz,
+                });
+                cmd.ExecuteNonQuery();
+            }
+            transaction.Commit();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"INGEST_ARTIFACT_INVENTORY_WRITE_FAILED run={_runId} "
+                + $"error=[{ex.GetType().Name}] {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -529,11 +692,16 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     /// is the same unit, and the second attempt is the one that decides its outcome.
     /// Leaving the first row in place would report a retried file by its failed attempt.
     /// </summary>
-    public void OnFileStarted(string sourceName, string fileLabel, long bytes = 0)
+    public void OnFileStarted(string sourceName, string fileLabel, long bytes = 0) =>
+        OnFileStarted(sourceName, fileLabel, bytes, modifiedAt: null);
+
+    public void OnFileStarted(
+        string sourceName, string fileLabel, long bytes, DateTimeOffset? modifiedAt)
     {
         if (!_active) return;
         _fileEvents.Enqueue(new FileJournalEvent(
-            FileJournalEventKind.Started, sourceName, fileLabel, DateTimeOffset.UtcNow, Bytes: bytes));
+            FileJournalEventKind.Started, sourceName, fileLabel, DateTimeOffset.UtcNow,
+            Bytes: bytes, ModifiedAt: modifiedAt));
     }
 
     public void OnFileFinished(
@@ -564,12 +732,14 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 
     public void OnFileComposed(
         string sourceName, string fileLabel, Hash128? fileId = null,
-        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0)
+        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0,
+        Hash128? resumeFingerprint = null)
     {
         if (!_active) return;
         _fileEvents.Enqueue(new FileJournalEvent(
             FileJournalEventKind.Composed, sourceName, fileLabel, DateTimeOffset.UtcNow,
-            FileId: fileId?.ToBytes(), Records: records, Entities: entities,
+            FileId: fileId?.ToBytes(), ResumeFingerprint: resumeFingerprint?.ToBytes(),
+            Records: records, Entities: entities,
             Physicalities: physicalities, Attestations: attestations));
     }
 
@@ -640,17 +810,21 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 {
                     var cmd = new NpgsqlBatchCommand(
                         "INSERT INTO laplace.ingest_file_journal AS current_file "
-                        + "(run_id, file_label, source_name, status, bytes, started_at) "
-                        + "SELECT $1, u.file_label, u.source_name, 'running', u.bytes, u.at "
-                        + "FROM unnest($2, $3, $4, $5) AS u(file_label, source_name, bytes, at) "
+                        + "(run_id, file_label, source_name, status, bytes, modified_at, started_at) "
+                        + "SELECT $1, u.file_label, u.source_name, 'running', u.bytes, u.modified_at, u.at "
+                        + "FROM unnest($2, $3, $4, $5, $6) "
+                        + "AS u(file_label, source_name, bytes, modified_at, at) "
                         + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
                         + "status = 'running', started_at = EXCLUDED.started_at, ended_at = NULL, error = NULL, "
-                        + "bytes = EXCLUDED.bytes, file_id = NULL, records = 0, entities = 0, "
+                        + "bytes = EXCLUDED.bytes, "
+                        + "modified_at = COALESCE(EXCLUDED.modified_at, current_file.modified_at), "
+                        + "file_id = NULL, resume_fingerprint = NULL, records = 0, entities = 0, "
                         + "physicalities = 0, attestations = 0");
                     AddParameter(cmd, _runId, NpgsqlDbType.Uuid);
                     AddParameter(cmd, started.Select(e => e.FileLabel).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
                     AddParameter(cmd, started.Select(e => e.SourceName).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
                     AddParameter(cmd, started.Select(e => e.Bytes).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, started.Select(e => e.ModifiedAt).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.TimestampTz);
                     AddParameter(cmd, started.Select(e => e.At).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.TimestampTz);
                     batch.BatchCommands.Add(cmd);
                 }
@@ -690,13 +864,14 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 {
                     var cmd = new NpgsqlBatchCommand(
                         "INSERT INTO laplace.ingest_file_journal AS current_file "
-                        + "(run_id, file_label, source_name, file_id, status, records, entities, physicalities, attestations, started_at) "
-                        + "SELECT $1, u.file_label, u.source_name, u.file_id, 'composed', u.records, "
+                        + "(run_id, file_label, source_name, file_id, resume_fingerprint, status, records, entities, physicalities, attestations, started_at) "
+                        + "SELECT $1, u.file_label, u.source_name, u.file_id, u.resume_fingerprint, 'composed', u.records, "
                         + "u.entities, u.physicalities, u.attestations, u.at "
-                        + "FROM unnest($2, $3, $4, $5, $6, $7, $8, $9) "
-                        + "AS u(file_label, source_name, file_id, records, entities, physicalities, attestations, at) "
+                        + "FROM unnest($2, $3, $4, $5, $6, $7, $8, $9, $10) "
+                        + "AS u(file_label, source_name, file_id, resume_fingerprint, records, entities, physicalities, attestations, at) "
                         + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
                         + "file_id = COALESCE(EXCLUDED.file_id, current_file.file_id), "
+                        + "resume_fingerprint = COALESCE(EXCLUDED.resume_fingerprint, current_file.resume_fingerprint), "
                         + "status = 'composed', "
                         + "records = EXCLUDED.records, entities = EXCLUDED.entities, "
                         + "physicalities = EXCLUDED.physicalities, attestations = EXCLUDED.attestations");
@@ -704,6 +879,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     AddParameter(cmd, composed.Select(e => e.FileLabel).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
                     AddParameter(cmd, composed.Select(e => e.SourceName).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
                     AddParameter(cmd, composed.Select(e => e.FileId).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bytea);
+                    AddParameter(cmd, composed.Select(e => e.ResumeFingerprint).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bytea);
                     AddParameter(cmd, composed.Select(e => e.Records).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
                     AddParameter(cmd, composed.Select(e => e.Entities).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
                     AddParameter(cmd, composed.Select(e => e.Physicalities).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);

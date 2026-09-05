@@ -12,4 +12,13 @@
     <InternalsVisibleTo Include="Laplace.Substrate.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="../../engine/core/grammars/**/queries/tags.scm">
+      <LogicalName>Laplace.GrammarTags.owned.%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../external/tree-sitter-grammars/**/queries/tags.scm">
+      <LogicalName>Laplace.GrammarTags.external.%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

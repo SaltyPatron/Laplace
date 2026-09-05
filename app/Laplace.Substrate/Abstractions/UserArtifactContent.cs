@@ -20,6 +20,8 @@ public static class UserArtifactContent
     public const string SourceBase = "UserContent";
 
     private static readonly string[] DeclaredRelations = ["CONTAINS", "HAS_ATTRIBUTION"];
+    public static string MembershipRelation => DeclaredRelations[0];
+    public static string AttributionRelation => DeclaredRelations[1];
 
     public readonly record struct TenantScope(
         string Tenant,
@@ -64,7 +66,7 @@ public static class UserArtifactContent
             scope.Source, $"bootstrap/user-content/{scope.Tenant}", parentIntentId: null);
         if (ContentEmitter.Emit(attribution, scope.Tenant, scope.Source) is { } tenantRoot)
             attribution.AddAttestation(NativeAttestation.Categorical(
-                scope.Source, "HAS_ATTRIBUTION", tenantRoot,
+                scope.Source, AttributionRelation, tenantRoot,
                 scope.Source, null, SourceTrust.SubstrateMandate));
 
         return [boot.Build(), attribution.Build()];
@@ -76,7 +78,7 @@ public static class UserArtifactContent
         string relativePath,
         byte[] contentUtf8,
         string? userKey,
-        DateTime modifiedUtc,
+        DateTime? modifiedUtc,
         out SubstrateChange change,
         out ArtifactIds ids)
     {
@@ -89,10 +91,10 @@ public static class UserArtifactContent
             throw new ArgumentException("artifact relative path is required", nameof(relativePath));
 
         var metadata = new FileMetadata(
-            name.Trim(), relativePath.Replace('\\', '/').Trim(),
-            contentUtf8.LongLength, modifiedUtc);
+            name, NormalizeRelativePath(relativePath),
+            contentUtf8.LongLength, modifiedUtc?.ToUniversalTime() ?? DateTime.UnixEpoch);
         FileIdentity file = FileEntity.Resolve(contentUtf8, metadata);
-        Hash128 documentId = DocumentEntity.Resolve(file.ContentRootId);
+        Hash128 documentId = file.ContentRootId;
 
         var builder = new SubstrateChangeBuilder(
             scope.Source,
@@ -109,14 +111,9 @@ public static class UserArtifactContent
         if (emittedFile != file)
             throw new InvalidOperationException("user artifact file identity changed during compose");
 
-        Hash128 emittedDocument = DocumentEntity.Emit(
-            builder, file.FileId, file.ContentRootId, contentUtf8);
-        if (emittedDocument != documentId)
-            throw new InvalidOperationException("user artifact document identity changed during compose");
-
         double weight = RelationTypeRank.Associative * SourceTrust.UserPrompt * scope.TenantTrust;
         builder.AddAttestation(NativeAttestation.Categorical(
-            scope.Source, "CONTAINS", file.FileId,
+            scope.Source, MembershipRelation, file.FileId,
             scope.Source, null, weight));
 
         if (!string.IsNullOrWhiteSpace(userKey))
@@ -125,7 +122,7 @@ public static class UserArtifactContent
                 throw new ArgumentException($"user key '{userKey}' is not a valid identifier", nameof(userKey));
             if (ContentEmitter.Emit(builder, userKey, scope.Source) is { } userRoot)
                 builder.AddAttestation(NativeAttestation.Categorical(
-                    file.FileId, "HAS_ATTRIBUTION", userRoot,
+                    file.FileId, AttributionRelation, userRoot,
                     scope.Source, null, weight));
         }
 
@@ -134,4 +131,7 @@ public static class UserArtifactContent
             file.FileId, documentId, file.ContentRootId, file.MetadataRootId, scope.Source);
         return true;
     }
+
+    public static string NormalizeRelativePath(string relativePath) =>
+        relativePath.Replace('\\', '/');
 }

@@ -1,6 +1,8 @@
 #include "laplace/core/trajectory.h"
 #include "laplace/core/mantissa.h"
 
+#include <limits.h>
+
 /* VERTEX POSITION IS THE ORDINAL. The packed `ordinal` field duplicates the
  * vertex's index in the LINESTRING, so it cannot disagree with it: measured
  * live 2026-08-15 over 291,412 physicalities / 3,519,140 constituents, zero
@@ -42,10 +44,11 @@ int trajectory_build(const hash128_t* entity_hashes,
     return trajectory_build_flagged(entity_hashes, NULL, n, out_xyzm);
 }
 
-int trajectory_build_rle(const hash128_t* constituents,
-                         size_t           n,
-                         double*          out_xyzm,
-                         size_t*          out_vertex_count) {
+int trajectory_build_flagged_rle(const hash128_t* constituents,
+                                 const uint64_t* flags,
+                                 size_t n,
+                                 double* out_xyzm,
+                                 size_t* out_vertex_count) {
     if (out_xyzm == NULL || out_vertex_count == NULL) return -1;
     if (constituents == NULL && n > 0) return -1;
 
@@ -55,7 +58,8 @@ int trajectory_build_rle(const hash128_t* constituents,
         size_t run = 1;
         while (i + run < n &&
                constituents[i + run].hi == constituents[i].hi &&
-               constituents[i + run].lo == constituents[i].lo) {
+               constituents[i + run].lo == constituents[i].lo &&
+               (!flags || flags[i + run] == flags[i])) {
             ++run;
         }
         /* Runs collapse, so position does NOT track the source ordinal here --
@@ -75,7 +79,7 @@ int trajectory_build_rle(const hash128_t* constituents,
             p.entity_id  = constituents[i];
             p.ordinal    = (ord <= TRAJECTORY_ORDINAL_MAX) ? (uint16_t)ord : (uint16_t)0;
             p.run_length = (uint16_t)chunk;
-            p.flags      = 0;
+            p.flags      = flags ? flags[i] : 0;
             mantissa_pack(&out_xyzm[v * 4], &p);
             ++v;
             emitted += chunk;
@@ -86,18 +90,115 @@ int trajectory_build_rle(const hash128_t* constituents,
     return 0;
 }
 
+int trajectory_build_rle(const hash128_t* constituents,
+                         size_t           n,
+                         double*          out_xyzm,
+                         size_t*          out_vertex_count) {
+    return trajectory_build_flagged_rle(constituents, NULL, n, out_xyzm, out_vertex_count);
+}
+
+int trajectory_constituent_count(const double* trajectory_xyzm,
+                                 size_t n_points,
+                                 size_t* out_count) {
+    if (!out_count || (trajectory_xyzm == NULL && n_points > 0)) return -1;
+    size_t expanded = 0;
+    for (size_t i = 0; i < n_points; ++i) {
+        mantissa_payload_t p;
+        mantissa_unpack(&trajectory_xyzm[i * 4], &p);
+        size_t run = p.run_length ? p.run_length : 1;
+        if (run > SIZE_MAX - expanded) return -1;
+        expanded += run;
+    }
+    *out_count = expanded;
+    return 0;
+}
+
+int trajectory_visit_constituents(const double* trajectory_xyzm,
+                                  size_t n_points,
+                                  trajectory_constituent_visitor_t visitor,
+                                  void* context) {
+    if (!visitor || (trajectory_xyzm == NULL && n_points > 0)) return -1;
+
+    /* `ordinal` is deliberately a prefix sum.  An RLE vertex describes a
+     * run, so its physical position and its packed ordinal cease to be the
+     * logical sequence position after the first run. */
+    size_t ordinal = 1;
+    for (size_t i = 0; i < n_points; ++i) {
+        mantissa_payload_t p;
+        mantissa_unpack(&trajectory_xyzm[i * 4], &p);
+        const size_t run = p.run_length ? p.run_length : 1;
+        if (run - 1 > SIZE_MAX - ordinal) return -1;
+        for (size_t j = 0; j < run; ++j) {
+            if (visitor(context, ordinal + j, &p.entity_id, p.flags) != 0)
+                return -1;
+        }
+        ordinal += run;
+    }
+    return 0;
+}
+
+typedef struct {
+    hash128_t* out_hashes;
+    size_t     out_cap;
+} trajectory_hash_output_t;
+
+static int trajectory_copy_hash(void* context,
+                                size_t ordinal,
+                                const hash128_t* entity_id,
+                                uint64_t flags) {
+    (void)flags;
+    trajectory_hash_output_t* output = (trajectory_hash_output_t*)context;
+    if (ordinal == 0 || ordinal > output->out_cap) return -1;
+    output->out_hashes[ordinal - 1] = *entity_id;
+    return 0;
+}
+
 int trajectory_constituents(const double* trajectory_xyzm,
                             size_t        n_points,
                             hash128_t*    out_hashes,
                             size_t        out_cap) {
     if (out_hashes == NULL) return -1;
     if (trajectory_xyzm == NULL && n_points > 0) return -1;
-    if (n_points > out_cap) return -1;
+    size_t expanded = 0;
+    if (trajectory_constituent_count(trajectory_xyzm, n_points, &expanded) != 0
+        || expanded > out_cap) return -1;
+    trajectory_hash_output_t output = { out_hashes, out_cap };
+    if (trajectory_visit_constituents(trajectory_xyzm, n_points,
+                                      trajectory_copy_hash, &output) != 0)
+        return -1;
+    return expanded > INT_MAX ? -1 : (int)expanded;
+}
 
-    for (size_t i = 0; i < n_points; ++i) {
-        mantissa_payload_t p;
-        mantissa_unpack(&trajectory_xyzm[i * 4], &p);
-        out_hashes[i] = p.entity_id;
+int trajectory_equivalent(const double* left_xyzm,
+                          size_t left_points,
+                          const double* right_xyzm,
+                          size_t right_points) {
+    if ((left_xyzm == NULL && left_points > 0)
+        || (right_xyzm == NULL && right_points > 0)) return -1;
+
+    size_t li = 0, ri = 0;
+    size_t left_remaining = 0, right_remaining = 0;
+    mantissa_payload_t left = {0}, right = {0};
+    while (li < left_points || left_remaining > 0
+           || ri < right_points || right_remaining > 0) {
+        if (left_remaining == 0) {
+            if (li >= left_points) return 0;
+            mantissa_unpack(&left_xyzm[li++ * 4], &left);
+            left_remaining = left.run_length ? left.run_length : 1;
+        }
+        if (right_remaining == 0) {
+            if (ri >= right_points) return 0;
+            mantissa_unpack(&right_xyzm[ri++ * 4], &right);
+            right_remaining = right.run_length ? right.run_length : 1;
+        }
+        if (left.entity_id.hi != right.entity_id.hi
+            || left.entity_id.lo != right.entity_id.lo
+            || left.flags != right.flags) return 0;
+
+        size_t consumed = left_remaining < right_remaining
+            ? left_remaining : right_remaining;
+        left_remaining -= consumed;
+        right_remaining -= consumed;
     }
-    return (int)n_points;
+    return 1;
 }

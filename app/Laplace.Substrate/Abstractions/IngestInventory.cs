@@ -31,10 +31,24 @@ public sealed record IngestArtifact(
     string Language,
     string Split,
     string AnnotationOrigin,
-    string Notes)
+    string Notes,
+    string? JournalLabel = null,
+    DateTimeOffset? ModifiedAt = null)
 {
     public string Id => $"{Source}/{Release}/{Artifact}";
+    public string FileLabel => JournalLabel ?? Id;
     public bool IsSelected => Disposition == IngestArtifactDisposition.Admitted;
+
+    public string DispositionName => Disposition switch
+    {
+        IngestArtifactDisposition.Admitted => "admitted",
+        IngestArtifactDisposition.EquivalentPackaging => "equivalent-packaging",
+        IngestArtifactDisposition.Superseded => "superseded",
+        IngestArtifactDisposition.ExcludedWithReason => "excluded-with-reason",
+        IngestArtifactDisposition.Unsupported => "unsupported-with-why-not",
+        IngestArtifactDisposition.Absent => "absent",
+        _ => throw new InvalidOperationException($"Unknown artifact disposition {Disposition}."),
+    };
 }
 
 public sealed class IngestArtifactGraph
@@ -51,6 +65,7 @@ public sealed class IngestArtifactGraph
         Artifacts = artifacts.ToArray();
         var identities = new HashSet<string>(StringComparer.Ordinal);
         var physicalPaths = new HashSet<string>(StringComparer.Ordinal);
+        var journalLabels = new HashSet<string>(StringComparer.Ordinal);
         foreach (var artifact in Artifacts)
         {
             if (string.IsNullOrWhiteSpace(artifact.Source)
@@ -67,6 +82,12 @@ public sealed class IngestArtifactGraph
             if (artifact.Bytes < 0)
                 throw new InvalidOperationException(
                     $"Artifact '{artifact.Id}' has a negative byte count.");
+            if (string.IsNullOrWhiteSpace(artifact.FileLabel))
+                throw new InvalidOperationException(
+                    $"Artifact '{artifact.Id}' has an empty journal label.");
+            if (!journalLabels.Add(artifact.FileLabel))
+                throw new InvalidOperationException(
+                    $"Artifact journal label is declared more than once: '{artifact.FileLabel}'.");
             if (!artifact.IsSelected && string.IsNullOrWhiteSpace(artifact.Notes))
                 throw new InvalidOperationException(
                     $"Artifact '{artifact.Id}' has disposition {artifact.Disposition} without a reason.");
@@ -185,7 +206,7 @@ public sealed class IngestArtifactGraph
         var selected = Selected;
         if (selected.Count == 0) return null;
         var files = selected
-            .Select(static artifact => new IngestFileSpec(artifact.Id, artifact.Path, 0))
+            .Select(static artifact => new IngestFileSpec(artifact.FileLabel, artifact.Path, 0))
             .ToArray();
         return new IngestInventory(unitType, 0, files, tracksFileCompletion);
     }
@@ -461,6 +482,19 @@ public interface IIngestInventoryProvider
 {
     Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context,
+        DecomposerOptions options,
+        CancellationToken ct = default);
+}
+
+/// <summary>
+/// Supplies one complete physical-artifact snapshot when an ordinary source directory has
+/// no explicit MANIFEST.tsv selection. The runner passes the admitted projection from this
+/// graph to both inventory and execution and gives the complete graph to observability.
+/// </summary>
+public interface IIngestArtifactGraphProvider
+{
+    Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath,
         DecomposerOptions options,
         CancellationToken ct = default);
 }

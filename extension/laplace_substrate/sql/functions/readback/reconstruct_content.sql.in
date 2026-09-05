@@ -1,0 +1,37 @@
+-- Exact canonical text-content reconstruction. The native renderer owns the complete,
+-- cycle-safe constituent walk and returns NULL rather than partial text when any child cannot
+-- be recovered. Re-resolving the assembled value through the canonical text identity surface
+-- prevents a malformed or non-text composition from being presented as exact content.
+--
+-- The result is canonical UTF-8 content, not an original artifact byte stream. Recovering an
+-- encoded file requires the format recipe and packaging state carried by its artifact trunk.
+CREATE OR REPLACE FUNCTION realize.reconstruct_content(p_id bytea, p_modality text)
+    RETURNS bytea
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH rendered AS MATERIALIZED (
+        SELECT realize.render_text(p_id) AS body
+    )
+    SELECT CASE
+        WHEN rendered.body IS NULL
+          OR CASE WHEN p_modality IS NULL THEN laplace.word_id(rendered.body)
+                  ELSE laplace.grammar_source_id(convert_to(rendered.body, 'UTF8'), p_modality)
+             END IS DISTINCT FROM p_id
+            THEN NULL::bytea
+        ELSE convert_to(rendered.body, 'UTF8')
+    END
+    FROM rendered;
+END;
+
+CREATE OR REPLACE FUNCTION realize.reconstruct_content(p_id bytea)
+    RETURNS bytea
+    LANGUAGE sql STABLE STRICT
+BEGIN ATOMIC
+    SELECT realize.reconstruct_content(p_id, NULL::text);
+END;
+
+COMMENT ON FUNCTION realize.reconstruct_content(bytea, text) IS
+    'Complete source UTF-8 verified by the declared native source grammar; NULL modality selects canonical text.';
+
+COMMENT ON FUNCTION realize.reconstruct_content(bytea) IS
+    'Complete canonical UTF-8 content for one text identity; NULL for absent, incomplete, cyclic, non-text, or identity-mismatched input.';

@@ -5,6 +5,7 @@ set(LAPLACE_SYNTHESIS_TEST_SOURCES
     test_arch_template.cpp
     test_feature_extractor.cpp
     test_gguf_writer.cpp
+    test_format_writer.cpp
     test_bf16_decoder.cpp
     test_tensor_dtype_codec.cpp
     test_safetensors_parser.cpp

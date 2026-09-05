@@ -7,7 +7,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class CodeDecomposer : GrammarComposeDecomposerMultiFile<CodeSource, FullScope>, IIngestInventoryProvider
+public sealed class CodeDecomposer : GrammarComposeDecomposerMultiFile<CodeSource, FullScope>,
+    IIngestInventoryProvider, IIngestArtifactGraphProvider
 {
     private static readonly HashSet<string> TemplateSuffixes =
         new(StringComparer.OrdinalIgnoreCase) { ".in" };
@@ -49,8 +50,15 @@ public sealed class CodeDecomposer : GrammarComposeDecomposerMultiFile<CodeSourc
             throw new InvalidOperationException(
                 $"CodeDecomposer: failed to read '{filePath}': {ex.Message}", ex);
         }
-        if (bytes.Length == 0) yield break;
-        yield return new GrammarComposeRecord(bytes, modality, SourceId: FileEntity.SourceId(bytes));
+        if (bytes.Length == 0)
+            throw new InvalidDataException(
+                $"CodeDecomposer: admitted source file '{filePath}' is empty");
+        string relativePath = fileLabel.StartsWith("code/", StringComparison.Ordinal)
+            ? fileLabel["code/".Length..]
+            : Path.GetFileName(filePath);
+        FileMetadata metadata = GrammarSourceFileSupport.MetadataFromPath(
+            filePath, relativePath, modality);
+        yield return new GrammarComposeRecord(bytes, modality, FileMetadata: metadata);
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -59,9 +67,27 @@ public sealed class CodeDecomposer : GrammarComposeDecomposerMultiFile<CodeSourc
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = EnumerateCodeFiles(context.EcosystemPath).Select(x => x.File).ToList();
-        return Task.FromResult(IngestInventory.FromFileUnits(
-            "source files", paths, options.MaxInputUnits, tracksFileCompletion: true));
+        var files = context.HasArtifactGraph
+            ? context.SelectedArtifacts.Select(static artifact =>
+                    new IngestFileSpec(artifact.FileLabel, artifact.Path, 1))
+                .ToList()
+            : EnumerateCodeFiles(context.EcosystemPath)
+                .Select(static file => new IngestFileSpec(
+                    Path.GetFileName(file.File), file.File, 1))
+                .ToList();
+        long total = options.MaxInputUnits > 0
+            ? Math.Min(files.Count, options.MaxInputUnits)
+            : files.Count;
+        return Task.FromResult<IngestInventory?>(
+            new IngestInventory("source files", total, files, TracksFileCompletion: true));
+    }
+
+    public Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath, DecomposerOptions options, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(GrammarSourceFileSupport.BuildArtifactGraph(
+            ecosystemPath, CodeSource.SourceName, "code", ModalityOf));
     }
 
     private static IEnumerable<(string File, string Modality)> EnumerateCodeFiles(string root)

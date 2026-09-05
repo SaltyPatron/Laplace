@@ -26,8 +26,9 @@ CREATE OR REPLACE FUNCTION generation.sentence_order(p_docs int DEFAULT 100000, 
         LIMIT p_docs
     ),
     g AS (
-        SELECT t.did, tc.ordinal AS ord, tc.entity_id AS sid
+        SELECT t.did, tc.ordinal + rs.i - 1 AS ord, tc.entity_id AS sid
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        CROSS JOIN LATERAL generate_series(1, GREATEST(tc.run_length, 1)) rs(i)
     ),
     bg AS (
         SELECT sid AS cur, lead(sid, p_gap) OVER (PARTITION BY did ORDER BY ord) AS nxt FROM g

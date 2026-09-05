@@ -8,6 +8,12 @@ public interface IIngestObservability
 {
     void OnRunStart(string sourceName, int layerOrder, IngestInventory? inventory);
 
+    void OnRunStart(
+        string sourceName,
+        int layerOrder,
+        IngestInventory? inventory,
+        IngestArtifactGraph? artifactGraph) => OnRunStart(sourceName, layerOrder, inventory);
+
     void OnIntentApplied(string sourceName, ApplyResult result);
 
     void OnIntentFailed(string sourceName, IngestFailure failure);
@@ -48,7 +54,8 @@ public interface IIngestObservability
 
     void OnFileComposed(
         string sourceName, string fileLabel, Hash128? fileId = null,
-        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0) { }
+        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0,
+        Hash128? resumeFingerprint = null) { }
 
     void OnFileFinished(
         string sourceName, string fileLabel, string status, string? error = null) { }

@@ -59,15 +59,11 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
                 : ContentTierSpine.ResolveRoot(record.CanonicalUtf8) ?? default;
         if (contentRoot == default) return;
 
-        if (record.Metadata is not { } metadata
-            || record.FileId == default
-            || record.DocumentId == default)
+        if (record.Metadata is not { } metadata)
         {
-            // Compatibility for synthetic records that predate explicit file/document ids.
+            // A bare content record has no physical file occurrence to compose.
             Hash128 legacyFileRoot = record.SourceId != default ? record.SourceId : contentRoot;
             Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, legacyFileRoot, LayerOrder);
-            if (record.Metadata is { } legacyMetadata)
-                FileEntity.EmitMetadata(builder, legacyFileRoot, legacyMetadata);
             return;
         }
 
@@ -76,16 +72,19 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
             DocumentSource.SourceId,
             record.CanonicalUtf8,
             metadata);
-        if (file.ContentRootId != contentRoot || file.FileId != record.FileId)
+        if (file.ContentRootId != contentRoot
+            || (record.FileId != default && file.FileId != record.FileId))
             throw new InvalidOperationException(
                 "DocumentIngestHandler: extracted file identity changed between open and compose");
+        builder.SetFileId(file.FileId);
 
-        Hash128 documentId = DocumentEntity.Emit(
-            builder,
-            file.FileId,
-            contentRoot,
-            record.CanonicalUtf8);
-        if (documentId != record.DocumentId)
+        // Format metadata is evidence only when the file's own bytes state it.
+        // A header with no title emits no work; filenames never stand in for titles.
+        if (metadata.FormatMetadata is { Title.Length: > 0 } native)
+            WorkEntity.Emit(builder, file.FileId, native.Title, native.Author);
+
+        // The plain-text document role does not remint or restage its content.
+        if (record.DocumentId != default && contentRoot != record.DocumentId)
             throw new InvalidOperationException(
                 "DocumentIngestHandler: extracted document identity changed between open and compose");
 

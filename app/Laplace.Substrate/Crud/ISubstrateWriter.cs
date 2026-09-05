@@ -48,6 +48,7 @@ public interface ISubstrateWriter
         long es = 0, ps = 0;
         var wall = TimeSpan.Zero;
         bool allShort = changes.Count > 0;
+        bool anyReplay = false;
         foreach (var change in changes)
         {
             var r = await ApplyAsync(change, ct);
@@ -57,8 +58,11 @@ public interface ISubstrateWriter
             rt += r.RoundTrips; wall += r.WallClock;
             es += r.EntitiesSkippedAtMerge; ps += r.PhysicalitiesSkippedAtMerge;
             allShort &= r.TrunkShortcircuitHit;
+            anyReplay |= r.JournalReplayHit;
         }
-        return new ApplyResult(ea, ei, pa, pi, aa, ai, rt, wall, allShort, es, ps);
+        return new ApplyResult(
+            ea, ei, pa, pi, aa, ai, rt, wall, allShort, es, ps,
+            anyReplay);
     }
 
     Task<ApplyResult> AppendAsync(

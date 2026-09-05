@@ -11,6 +11,10 @@ typedef struct format_writer format_writer_t;
 
 format_writer_t* format_writer_create(const char* format, const char* output_dir_path);
 
+/* Architecture tensor-spec dtype codes: 0=F32, 1=F16, 2=BF16.
+ * rank=0 is a scalar; zero-sized dimensions carry no payload. The writer copies
+ * each tensor to its temporary output stream before returning, so the caller can
+ * release/reuse data. Duplicate names and inconsistent byte counts are errors. */
 int format_writer_add_tensor(format_writer_t* w,
                              const char*      name,
                              int              dtype,

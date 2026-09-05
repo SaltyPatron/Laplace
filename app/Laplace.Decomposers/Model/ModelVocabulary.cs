@@ -12,8 +12,8 @@ public static class ModelVocabulary
     public static readonly IReadOnlyList<string> TypeNodeNames =
     [
         "Model_Recipe", "Model_Tokenizer", "Scalar", "Architecture",
-        "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane", "Model_AnalysisMarker",
-        "Model_Tensor", "Model_Checkpoint",
+        "Ngram", "Model_Layer", "Model_Circuit", "Model_Plane", "Model_AnalysisMarker", "Model_AnalysisPending",
+        "Model_Tensor", "Model_Checkpoint", "Model_TensorPath", "Model_Axis",
     ];
 
     public static readonly IReadOnlyList<string> Relations =

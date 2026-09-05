@@ -43,6 +43,19 @@ int content_witness_tree_build(
     size_t         len,
     tier_tree_t**  out_tree);
 
+/* Build the shared content ladder in recipe-declared source representation:
+ * validated original codepoints and byte offsets are retained for exact source
+ * replay. Natural-language content continues to use content_witness_tree_build. */
+int content_witness_source_tree_build(
+    const uint8_t* utf8,
+    size_t         len,
+    tier_tree_t**  out_tree);
+
+int laplace_content_source_root_id(
+    const uint8_t* utf8,
+    size_t         len,
+    hash128_t*     out_root_id);
+
 int content_witness_emit_tree(
     intent_stage_t*    stage,
     const tier_tree_t* tree,

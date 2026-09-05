@@ -280,7 +280,7 @@ public class WorkingSetApplyTests
         // Retry after commit-ambiguity: same change, same intent hash. The
         // journal token must block the additive attestation merge that a
         // plain re-apply would perform.
-        var replay = await writer.ApplyWorkingSetAsync(change);
+        var replay = await writer.ApplyWorkingSetAsync(new[] { change });
         Assert.True(replay.TrunkShortcircuitHit);
         Assert.Equal(0, replay.EntitiesInserted);
         Assert.Equal(0, replay.AttestationsInserted);
@@ -288,9 +288,90 @@ public class WorkingSetApplyTests
         var (games, _) = await AttStateAsync(H("att/journal"));
         Assert.Equal(4, games); // NOT 8 — replay did not double-count
 
+        // Observation time is operational freshness, not semantic payload: rebuilding
+        // the exact testimony later remains the same replay token.
+        var laterReplay = new SubstrateChangeBuilder(src, "journal-unit")
+            .AddEntity(Entity("journal/e1"))
+            .AddAttestation(Att("journal", 4, IntentStage.PgEpochUnixUs + 8_000_000))
+            .Build();
+        Assert.True((await writer.ApplyWorkingSetAsync(laterReplay)).JournalReplayHit);
+        (games, _) = await AttStateAsync(H("att/journal"));
+        Assert.Equal(4, games);
+
+        // A changed aggregate with the same row IDs is new semantic payload, so v2
+        // admits it instead of mistaking the legacy ID-only token for an exact replay.
+        var enriched = new SubstrateChangeBuilder(src, "journal-unit")
+            .AddEntity(Entity("journal/e1"))
+            .AddAttestation(Att("journal", 5, IntentStage.PgEpochUnixUs + 9_000_000))
+            .Build();
+        Assert.False((await writer.ApplyWorkingSetAsync(enriched)).JournalReplayHit);
+        (games, _) = await AttStateAsync(H("att/journal"));
+        Assert.Equal(9, games);
+
         // The same rows through the un-journaled lane DO merge (control).
         await writer.ApplyAsync(change);
         (games, _) = await AttStateAsync(H("att/journal"));
-        Assert.Equal(8, games);
+        Assert.Equal(13, games);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkingSetReplay_BothLegacySingletonAliasesPreventSilentPostUpgradeReapply(
+        bool rawIntentAlias)
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        string suffix = rawIntentAlias ? "raw" : "list-one";
+        var src = H($"source/legacy-journal/{suffix}");
+        var change = new SubstrateChangeBuilder(src, $"legacy-journal-unit/{suffix}")
+            .AddEntity(Entity($"legacy-journal/{suffix}/e1"))
+            .AddAttestation(Att($"legacy-journal/{suffix}", 3, IntentStage.PgEpochUnixUs))
+            .Build();
+        byte[] intentBytes = new byte[16];
+        change.Metadata.IntentId.WriteBytes(intentBytes);
+        Hash128 legacyAlias = rawIntentAlias
+            ? change.Metadata.IntentId
+            : Hash128.Blake3(intentBytes);
+
+        await using (var seed = _pg.DataSource.CreateCommand(
+            "INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id) VALUES ($1, $2)"))
+        {
+            seed.Parameters.AddWithValue(legacyAlias.ToBytes());
+            seed.Parameters.AddWithValue(src.ToBytes());
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        await Assert.ThrowsAsync<LegacyReplayRequiresReconciliationException>(
+            () => writer.ApplyWorkingSetAsync(change));
+        Assert.Equal(0L, await CountEntityAsync(H($"legacy-journal/{suffix}/e1")));
+    }
+
+    [Fact]
+    public async Task WorkingSetReplay_NativeStageDigestTracksSemanticsButNotClocks()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = H("source/native-replay");
+
+        SubstrateChange Change(long games, long observedAt)
+        {
+            var stage = IntentStage.New(1);
+            stage.AddAttestation(
+                H("att/native-replay"), H("subj"), H("rel"), null, H("source"), null,
+                (short)AttestationOutcome.Confirm, observedAt, games,
+                games * 1_000_000_000L, 30_000_000_000L);
+            return new SubstrateChangeBuilder(src, "native-replay-unit")
+                .AddIntentStage(stage)
+                .Build();
+        }
+
+        Assert.False((await writer.ApplyWorkingSetAsync(Change(
+            1, IntentStage.PgEpochUnixUs))).JournalReplayHit);
+        Assert.True((await writer.ApplyWorkingSetAsync(Change(
+            1, IntentStage.PgEpochUnixUs + 1_000_000))).JournalReplayHit);
+        Assert.False((await writer.ApplyWorkingSetAsync(Change(
+            2, IntentStage.PgEpochUnixUs + 2_000_000))).JournalReplayHit);
+
+        var (games, _) = await AttStateAsync(H("att/native-replay"));
+        Assert.Equal(3, games);
     }
 }

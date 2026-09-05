@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -16,13 +17,81 @@ public readonly record struct FileMetadata(
     string Name,
     string RelativePath,
     long SizeBytes,
-    DateTime ModifiedUtc)
+    DateTime ModifiedUtc,
+    string? Modality = null,
+    DocumentFormatMetadata? FormatMetadata = null)
 {
     /// <summary>Stable file-occurrence identity metadata.</summary>
-    public byte[] IdentityCanonicalUtf8() =>
-        Encoding.UTF8.GetBytes(
-            $"name={Name}\n" +
-            $"path={RelativePath.Replace('\\', '/')}\n");
+    public byte[] IdentityCanonicalUtf8()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream);
+        writer.WriteStartObject();
+        writer.WriteString("name", Name);
+        writer.WriteString("path", RelativePath.Replace('\\', '/'));
+        if (Modality is { Length: > 0 }) writer.WriteString("modality", Modality);
+        if (FormatMetadata is { } native)
+        {
+            writer.WritePropertyName("formatMetadata");
+            writer.WriteStartObject();
+            writer.WriteString("format", native.Format);
+            Write(writer, "ebookId", native.EbookId);
+            Write(writer, "title", native.Title);
+            Write(writer, "author", native.Author);
+            Write(writer, "language", native.Language);
+            Write(writer, "releaseDate", native.ReleaseDate);
+            Write(writer, "updatedDate", native.UpdatedDate);
+            Write(writer, "credits", native.Credits);
+            if (native.HeaderBoundaryByteOffset is { } offset)
+                writer.WriteNumber("headerBoundaryByteOffset", offset);
+            Write(writer, "headerBoundary", native.HeaderBoundary);
+            if (!native.HeaderStatus.Equals("complete", StringComparison.Ordinal))
+                writer.WriteString("headerStatus", native.HeaderStatus);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndObject();
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    public static FileMetadata ParseIdentityCanonicalUtf8(ReadOnlyMemory<byte> utf8)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(utf8);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || root.EnumerateObject().Count() is < 2 or > 4
+                || !root.TryGetProperty("name", out var name)
+                || name.ValueKind != JsonValueKind.String
+                || !root.TryGetProperty("path", out var path)
+                || path.ValueKind != JsonValueKind.String)
+                throw new InvalidDataException("invalid file identity metadata");
+            foreach (JsonProperty property in root.EnumerateObject())
+                if (property.Name is not "name" and not "path" and not "modality"
+                    and not "formatMetadata")
+                    throw new InvalidDataException("invalid file identity metadata");
+            string? modality = null;
+            if (root.TryGetProperty("modality", out var modalityValue))
+            {
+                if (modalityValue.ValueKind != JsonValueKind.String
+                    || string.IsNullOrWhiteSpace(modalityValue.GetString()))
+                    throw new InvalidDataException("invalid file identity metadata");
+                modality = modalityValue.GetString();
+            }
+            DocumentFormatMetadata? formatMetadata = root.TryGetProperty(
+                "formatMetadata", out var nativeValue)
+                ? ParseFormatMetadata(nativeValue)
+                : null;
+            return new FileMetadata(
+                name.GetString()!, path.GetString()!, 0, DateTime.UnixEpoch,
+                modality, formatMetadata);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("invalid file identity metadata", exception);
+        }
+    }
 
     /// <summary>Observed filesystem facts; never part of <see cref="FileEntity.Resolve"/>.</summary>
     public byte[] ObservationCanonicalUtf8() =>
@@ -41,6 +110,62 @@ public readonly record struct FileMetadata(
         var fi = new FileInfo(absolutePath);
         return new FileMetadata(fi.Name, relativePath, fi.Length, fi.LastWriteTimeUtc);
     }
+
+    private static void Write(Utf8JsonWriter writer, string name, string? value)
+    {
+        if (value is not null) writer.WriteString(name, value);
+    }
+
+    private static DocumentFormatMetadata ParseFormatMetadata(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object
+            || !value.TryGetProperty("format", out JsonElement format)
+            || format.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(format.GetString()))
+            throw new InvalidDataException("invalid format-native file metadata");
+        string[] allowed =
+        [
+            "format", "ebookId", "title", "author", "language", "releaseDate",
+            "updatedDate", "credits", "headerBoundaryByteOffset", "headerBoundary",
+            "headerStatus",
+        ];
+        foreach (JsonProperty property in value.EnumerateObject())
+            if (!allowed.Contains(property.Name, StringComparer.Ordinal))
+                throw new InvalidDataException("invalid format-native file metadata");
+        long? boundaryOffset = null;
+        if (value.TryGetProperty("headerBoundaryByteOffset", out JsonElement offset))
+        {
+            if (!offset.TryGetInt64(out long parsedOffset) || parsedOffset < 0)
+                throw new InvalidDataException("invalid format-native file metadata");
+            boundaryOffset = parsedOffset;
+        }
+        string? boundary = String(value, "headerBoundary");
+        if ((boundaryOffset is null) != (boundary is null))
+            throw new InvalidDataException("incomplete format-native header boundary");
+        string headerStatus = String(value, "headerStatus") ?? "complete";
+        if (string.IsNullOrWhiteSpace(headerStatus))
+            throw new InvalidDataException("invalid format-native header status");
+        return new DocumentFormatMetadata(
+            format.GetString()!,
+            String(value, "ebookId"),
+            String(value, "title"),
+            String(value, "author"),
+            String(value, "language"),
+            String(value, "releaseDate"),
+            String(value, "updatedDate"),
+            String(value, "credits"),
+            boundaryOffset,
+            boundary,
+            headerStatus);
+    }
+
+    private static string? String(JsonElement parent, string name)
+    {
+        if (!parent.TryGetProperty(name, out JsonElement value)) return null;
+        if (value.ValueKind != JsonValueKind.String)
+            throw new InvalidDataException("invalid format-native file metadata");
+        return value.GetString();
+    }
 }
 
 /// <summary>The three identities that make one file occurrence.</summary>
@@ -52,11 +177,11 @@ public readonly record struct FileIdentity(
 /// <summary>
 /// A file is a real composition in the Merkle DAG:
 ///
-/// <c>file_id = Merkle(Document, [content_root, identity_metadata_root])</c>.
+/// <c>file_id = Merkle([content_root, identity_metadata_root])</c>.
 ///
 /// The content node remains globally shared.  The metadata node is also ordinary content.
 /// The file id composes the two, so identical text at two paths is one content tree but two
-/// file occurrences.  Provenance then walks content -> document -> file -> corpus/user.
+/// file occurrences.  The file floor is derived from its children; document roles need not mint wrappers.
 /// </summary>
 public static class FileEntity
 {
@@ -70,28 +195,26 @@ public static class FileEntity
 
     public static FileIdentity Resolve(ReadOnlySpan<byte> contentUtf8, in FileMetadata metadata)
     {
-        Hash128 contentRoot = ContentTierSpine.ResolveRoot(contentUtf8)
-            ?? throw new InvalidOperationException(
-                "FileEntity.Resolve: content has no root (empty or invalid content)");
-
-        byte[] metadataUtf8 = metadata.IdentityCanonicalUtf8();
-        Hash128 metadataRoot = ContentTierSpine.ResolveRoot(metadataUtf8)
-            ?? throw new InvalidOperationException(
-                "FileEntity.Resolve: identity metadata has no content root");
-
-        Span<Hash128> constituents = stackalloc Hash128[2]
-        {
-            contentRoot,
-            metadataRoot,
-        };
-        Hash128 fileId = Hash128.Merkle(EntityTier.Document, constituents);
-        return new FileIdentity(contentRoot, metadataRoot, fileId);
+        using var contentTree = ContentTierSpine.BuildTree(contentUtf8)
+            ?? throw new InvalidOperationException("FileEntity.Resolve: content has no root");
+        return Resolve(RootComponent(contentTree), metadata);
     }
 
     /// <summary>
-    /// Stage the identity-metadata content tree and the file composition itself. The raw
-    /// content tree is staged by the modality/document handler; it is intentionally not
-    /// duplicated here. The returned file id can be used directly as the click/export id.
+    /// Resolve a file from an already-realized content root. Grammar and modality
+    /// lanes supply their native root here rather than rebuilding text tiers.
+    /// </summary>
+    public static FileIdentity Resolve(
+        in OrderedCompositionComponent contentRoot, in FileMetadata metadata)
+    {
+        using var metadataTree = ContentTierSpine.BuildTree(metadata.IdentityCanonicalUtf8())
+            ?? throw new InvalidOperationException("FileEntity.Resolve: metadata has no root");
+        return Compose(contentRoot, RootComponent(metadataTree), default);
+    }
+
+    /// <summary>
+    /// Stage the ordered file parent and its metadata through the common native composer.
+    /// Content is staged by the shared content pipeline; its identity remains reusable.
     /// </summary>
     public static FileIdentity Emit(
         SubstrateChangeBuilder builder,
@@ -99,50 +222,60 @@ public static class FileEntity
         byte[] canonicalContent,
         in FileMetadata metadata)
     {
-        var identity = Resolve(canonicalContent, metadata);
-        byte[] metadataUtf8 = metadata.IdentityCanonicalUtf8();
+        using var contentTree = ContentTierSpine.BuildTree(canonicalContent)
+            ?? throw new InvalidOperationException("FileEntity.Emit: content has no root");
+        return Emit(builder, parentSourceId, RootComponent(contentTree), metadata);
+    }
 
-        Hash128? emittedMetadata = ContentEmitter.Emit(builder, metadataUtf8, identity.FileId);
-        if (emittedMetadata is not { } metaRoot || metaRoot != identity.MetadataRootId)
-            throw new InvalidOperationException(
-                "FileEntity.Emit: metadata emission disagreed with resolved metadata identity");
-
-        builder.AddEntity(
-            identity.FileId,
-            EntityTier.Document,
-            EntityTypeRegistry.SourceFile,
-            parentSourceId);
-
-        if (TryRootCoordinate(canonicalContent, out var contentCoord)
-            && TryRootCoordinate(metadataUtf8, out var metadataCoord))
-        {
-            double[] coordinates =
-            [
-                contentCoord[0], contentCoord[1], contentCoord[2], contentCoord[3],
-                metadataCoord[0], metadataCoord[1], metadataCoord[2], metadataCoord[3],
-            ];
-            double[] center = Math4d.KarcherMean(coordinates);
-            Span<double> centerSpan = center;
-            Hash128[] constituents = [identity.ContentRootId, identity.MetadataRootId];
-            Hash128 physicalityId = PhysicalityId.Compute(identity.FileId, PhysicalityType.Content);
-            if (builder.TrySeePhysicality(physicalityId))
-            {
-                builder.AddPhysicalityPreSeen(new PhysicalityRow(
-                    Id: physicalityId,
-                    EntityId: identity.FileId,
-                    SourceId: parentSourceId,
-                    Type: PhysicalityType.Content,
-                    CoordX: center[0], CoordY: center[1], CoordZ: center[2], CoordM: center[3],
-                    HilbertIndex: Hilbert128.Encode(centerSpan),
-                    TrajectoryXyzm: Trajectory.Build(constituents),
-                    NConstituents: constituents.Length,
-                    AlignmentResidual: null,
-                    SourceDim: null,
-                    ObservedAtUnixUs: 0));
-            }
-        }
-
+    /// <summary>
+    /// Stage a containing file after the supplied content root has been staged by
+    /// its owning native grammar or modality composer.
+    /// </summary>
+    public static FileIdentity Emit(
+        SubstrateChangeBuilder builder,
+        Hash128 parentSourceId,
+        in OrderedCompositionComponent contentRoot,
+        in FileMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        using var metadataTree = ContentTierSpine.BuildTree(metadata.IdentityCanonicalUtf8())
+            ?? throw new InvalidOperationException("FileEntity.Emit: metadata has no root");
+        var identity = Compose(contentRoot, RootComponent(metadataTree), parentSourceId, builder.ContentStage);
+        if (!ContentTierSpine.EmitTree(
+                builder, metadataTree, identity.FileId, ReadOnlySpan<byte>.Empty, out var metadataRoot)
+            || metadataRoot != identity.MetadataRootId)
+            throw new InvalidOperationException("FileEntity.Emit: metadata staging changed its identity");
         return identity;
+    }
+
+    private static FileIdentity Compose(
+        in OrderedCompositionComponent contentRoot,
+        in OrderedCompositionComponent metadataRoot,
+        Hash128 sourceId,
+        IntentStage? stage = null)
+    {
+        var request = new OrderedCompositionRequest([contentRoot, metadataRoot],
+            EntityTypeRegistry.SourceFile, sourceId, 0);
+        OrderedCompositionResult result;
+        if (stage is null)
+            result = OrderedComposition.ComposeBatch([request])[0];
+        else
+        {
+            Span<OrderedCompositionResult> results = stackalloc OrderedCompositionResult[1];
+            OrderedComposition.StageBatch(stage, [request], results);
+            result = results[0];
+        }
+        return new FileIdentity(contentRoot.Id, metadataRoot.Id, result.Id);
+    }
+
+    private static unsafe OrderedCompositionComponent RootComponent(TierTree tree)
+    {
+        if (tree.NodeCount == 0)
+            throw new InvalidOperationException("file component has no canonical root");
+        var node = tree.GetNode(tree.NaturalUnitIndex());
+        return new(node.Id, node.Tier,
+            node.Coord[0], node.Coord[1], node.Coord[2], node.Coord[3],
+            node.Atom, node.Tier == 0);
     }
 
     /// <summary>
@@ -172,16 +305,4 @@ public static class FileEntity
             ?? throw new InvalidOperationException(
                 "FileEntity.SourceId: content has no root (empty file)");
 
-    private static bool TryRootCoordinate(byte[] canonical, out double[] coord)
-    {
-        coord = new double[4];
-        if (!TextEntityBuilder.TryDecomposeRoot(
-                canonical, out _, out _, out double x, out double y, out double z, out double m))
-            return false;
-        coord[0] = x;
-        coord[1] = y;
-        coord[2] = z;
-        coord[3] = m;
-        return true;
-    }
 }

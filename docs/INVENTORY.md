@@ -112,12 +112,13 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 30 (`extension/laplace_substrate/src/`)
+## Native extension sources — 32 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `chess_learned_moves.c`
 - `chess_syzygy.c`
 - `consensus_fold_step.c`
+- `constituents_closure.c`
 - `containers_of.c`
 - `content_resolve.c`
 - `descent_probe.c`
@@ -126,6 +127,7 @@ Chess:
 - `foundry_crawl.c`
 - `generate_walk.c`
 - `geometry_successors.c`
+- `grammar_source.c`
 - `graph_cascade.c`
 - `graph_contrast.c`
 - `graph_taxonomy.c`

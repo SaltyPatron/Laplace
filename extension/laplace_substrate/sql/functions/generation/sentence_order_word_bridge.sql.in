@@ -17,8 +17,9 @@ CREATE OR REPLACE FUNCTION generation.sentence_order_word_bridge(p_vocab bytea[]
         ORDER BY w.id, w.physicality_id LIMIT p_docs
     ),
     g AS (
-        SELECT t.did, tc.ordinal AS ord, tc.entity_id AS sid
+        SELECT t.did, tc.ordinal + rs.i - 1 AS ord, tc.entity_id AS sid
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        CROSS JOIN LATERAL generate_series(1, GREATEST(tc.run_length, 1)) rs(i)
     ),
     pairs AS (
         SELECT sid AS cur, lead(sid) OVER (PARTITION BY did ORDER BY ord) AS nxt FROM g
@@ -40,8 +41,9 @@ CREATE OR REPLACE FUNCTION generation.sentence_order_word_bridge(p_vocab bytea[]
     words AS (
         -- in-vocab join doubles as the content filter (whitespace/punctuation
         -- realize.constituents are not vocab laplace.entities)
-        SELECT st.sid, tc.ordinal AS ord, tc.entity_id AS wid
+        SELECT st.sid, tc.ordinal + rs.i - 1 AS ord, tc.entity_id AS wid
         FROM sent_traj st CROSS JOIN LATERAL laplace_trajectory_constituents(st.trajectory) tc
+        CROSS JOIN LATERAL generate_series(1, GREATEST(tc.run_length, 1)) rs(i)
         JOIN v ON v.id = tc.entity_id
     ),
     lastw  AS (SELECT DISTINCT ON (sid) sid, wid FROM words ORDER BY sid, ord DESC),

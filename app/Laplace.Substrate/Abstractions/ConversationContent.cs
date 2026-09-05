@@ -73,6 +73,7 @@ public static class ConversationContent
     /// family expansion happens in the builder loop below.
     /// </summary>
     private static readonly string[] DeclaredRelations = ["APPEARS_IN", "PRECEDES", "HAS_ATTRIBUTION"];
+    public static string MembershipRelation => DeclaredRelations[0];
 
     /// <summary>
     /// The three bootstrap changes for a tenant's first turn: prompt-source and

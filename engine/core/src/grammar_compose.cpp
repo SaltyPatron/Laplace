@@ -496,7 +496,10 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
                      const hash128_t* child_ids, const uint64_t* child_flags, size_t m) {
     double* traj = (double*)malloc(m * 4 * sizeof(double));
     if (!traj && m > 0) return -3;
-    if (m > 0 && trajectory_build_flagged(child_ids, child_flags, m, traj) != 0) {
+    size_t trajectory_vertices = 0;
+    if (m > 0 && (trajectory_build_flagged_rle(
+            child_ids, child_flags, m, traj, &trajectory_vertices) != 0
+        || trajectory_vertices > UINT32_MAX)) {
         free(traj);
         return -3;
     }
@@ -515,7 +518,7 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
     memcpy(p->coord, coord, 4 * sizeof(double));
     p->hilbert = *hb;
     p->trajectory_xyzm = traj;
-    p->trajectory_n = m * 4;
+    p->trajectory_n = trajectory_vertices * 4;
     p->n_constituents = m;
     return 0;
 }
@@ -1251,6 +1254,49 @@ hash128_t laplace_compose_root_id(const laplace_compose_result_t* r) {
     return r ? r->root_id : z;
 }
 
+int laplace_compose_root_placement(const laplace_compose_result_t* r,
+                                   double out_coord[4], uint8_t* out_tier,
+                                   uint32_t* out_atom, uint8_t* out_has_atom) {
+    if (!r || !out_coord || !out_tier || !out_atom || !out_has_atom)
+        return -1;
+    if (r->source_root_valid) {
+        memcpy(out_coord, r->source_root_coord, 4 * sizeof(double));
+        *out_tier = r->source_root_tier;
+        *out_atom = r->source_root_atom;
+        *out_has_atom = r->source_root_has_atom;
+        return 0;
+    }
+    /* A collapsed lexical root has no grammar wrapper physicality. Recover its
+     * native placement from the owned source tree rather than minting one. */
+    for (size_t i = 0; i < r->source_tree_count; ++i) {
+        tier_tree_t* tree = r->source_trees[i];
+        size_t count = tier_tree_node_count(tree);
+        if (count == 0 || count > UINT32_MAX) continue;
+        tier_node_view_t node;
+        uint32_t idx = laplace_tier_tree_collapse_index(tree, (uint32_t)(count - 1));
+        if (tier_tree_get_node(tree, idx, &node) != 0 ||
+            !hash128_equals(&node.id, &r->root_id)) continue;
+        memcpy(out_coord, node.coord, 4 * sizeof(double));
+        *out_tier = node.tier;
+        *out_atom = node.atom;
+        *out_has_atom = node.tier == 0 ? 1 : 0;
+        return 0;
+    }
+    for (size_t i = 0; i < r->phys_count; ++i) {
+        if (!hash128_equals(&r->physicalities[i].entity_id, &r->root_id)) continue;
+        memcpy(out_coord, r->physicalities[i].coord, 4 * sizeof(double));
+        *out_atom = 0;
+        *out_has_atom = 0;
+        for (size_t e = 0; e < r->entity_count; ++e) {
+            if (hash128_equals(&r->entities[e].id, &r->root_id)) {
+                *out_tier = r->entities[e].tier;
+                return 0;
+            }
+        }
+    }
+    return -2;
+}
+
 tier_tree_t* laplace_compose_get_tier_tree(const laplace_compose_result_t* r) {
     return r ? r->tree : NULL;
 }
@@ -1351,13 +1397,28 @@ int laplace_compose_drain_into_stage(
     size_t                          bitmap_bits) {
     if (!r || !stage || !source_id) return -1;
 
+    if (r->source_mode) {
+        for (size_t i = 0; i < r->source_tree_count; ++i) {
+            hash128_t ignored;
+            if (content_witness_emit_tree(stage, r->source_trees[i], source_id,
+                                          NULL, 0, &ignored) != 0)
+                return -1;
+        }
+    }
+
     compose_emit_filter_t filter = make_emit_filter(r, existing_bitmap, bitmap_bits);
 
     for (size_t i = 0; i < r->entity_count; ++i) {
         if (!entity_novel(&filter, i)) continue;
         const laplace_compose_entity_t* e = &r->entities[i];
         if (e->packaging) continue;   /* navigation only -- never a row */
-        if (intent_stage_witness_seen(stage, &e->id)) continue;
+        if (intent_stage_witness_seen(stage, &e->id)) {
+            if (intent_stage_lower_entity_tier(stage, &e->id, (int16_t)e->tier) < 0) {
+                free_emit_filter(&filter);
+                return -1;
+            }
+            continue;
+        }
         if (intent_stage_add_entity(stage, &e->id, (int16_t)e->tier, &e->type_id, source_id) != 0) {
             free_emit_filter(&filter);
             return -1;
@@ -1427,6 +1488,11 @@ void laplace_compose_result_free(laplace_compose_result_t* r) {
     free(r->precedes);
     free(r->spans);
     free(r->span_index);
+    if (r->source_trees) {
+        for (size_t i = 0; i < r->source_tree_count; ++i)
+            tier_tree_free(r->source_trees[i]);
+    }
+    free(r->source_trees);
     tier_tree_free(r->tree);
     free(r);
 }

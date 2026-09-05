@@ -29,10 +29,32 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
     public Task<ApplyResult> ApplyManyAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
-        => ApplyManyInternalAsync(changes, workingSetToken: null, ct);
+        => ApplyManyInternalAsync(
+            changes, legacyWorkingSetToken: null, transactionParticipant: null,
+            reconciliation: null, ct);
+
+    internal Task<ApplyResult> ApplyWorkingSetAtomicAsync(
+        IReadOnlyList<SubstrateChange> changes,
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task> transactionParticipant,
+        WorkingSetReconciliation? reconciliation,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        ArgumentNullException.ThrowIfNull(transactionParticipant);
+        return ApplyManyInternalAsync(
+            changes,
+            changes.Count == 0 ? null : WorkingSetToken(changes),
+            transactionParticipant,
+            reconciliation,
+            ct);
+    }
 
     private async Task<ApplyResult> ApplyManyInternalAsync(
-        IReadOnlyList<SubstrateChange> changes, Hash128? workingSetToken, CancellationToken ct)
+        IReadOnlyList<SubstrateChange> changes,
+        Hash128? legacyWorkingSetToken,
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? transactionParticipant,
+        WorkingSetReconciliation? reconciliation,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
         var sw = Stopwatch.StartNew();
@@ -70,7 +92,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         }
 
         Hash128? workingSetSource = null;
-        if (workingSetToken is not null)
+        if (legacyWorkingSetToken is not null)
         {
             workingSetSource = changes[0].Metadata.SourceId;
             for (int i = 1; i < changes.Count; i++)
@@ -175,6 +197,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 || managedStage.AttestationCount > 0))
             sourceStages.Add(managedStage);
 
+        Hash128? workingSetToken = legacyWorkingSetToken is { } legacy
+            ? ReplayTokenV2(legacy, sourceStages)
+            : null;
+        Hash128? legacySingletonToken = legacyWorkingSetToken is not null && changes.Count == 1
+            ? changes[0].Metadata.IntentId
+            : null;
+
         long entCount = sourceStages.Sum(s => (long)s.EntityCount);
         long physCount = sourceStages.Sum(s => (long)s.PhysicalityCount);
         long attCount = sourceStages.Sum(s => (long)s.AttestationCount);
@@ -190,7 +219,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             if (anyRows)
             {
                 var r = await ApplyStagesCoreAsync(
-                    sourceStages, workingSetToken, workingSetSource, ct);
+                    sourceStages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
+                    workingSetSource, transactionParticipant, reconciliation, ct);
                 entitiesInserted = r.e;
                 physicalitiesInserted = r.p;
                 attestationsInserted = r.a;
@@ -266,5 +296,16 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         SumScoreFp1e9 = a.SumScoreFp1e9 ?? 0,
         IsAggregated = (byte)(a.SumScoreFp1e9 is null ? 0 : 1),
     };
+
+    private static Hash128 ReplayTokenV2(
+        Hash128 legacyToken, IReadOnlyList<IntentStage> sourceStages)
+    {
+        Hash128 semanticDigest = IntentStage.SemanticDigestBatch(sourceStages);
+        Span<byte> payload = stackalloc byte[23 + 16 + 16];
+        "LaplaceReplayIntent/v2\0"u8.CopyTo(payload);
+        legacyToken.WriteBytes(payload.Slice(23, 16));
+        semanticDigest.WriteBytes(payload.Slice(39, 16));
+        return Hash128.Blake3(payload);
+    }
 
 }

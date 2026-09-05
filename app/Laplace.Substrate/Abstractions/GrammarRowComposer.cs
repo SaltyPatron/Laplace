@@ -4,24 +4,61 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
+public enum GrammarCompositionMode { CuratedRecord, FullSource }
 
 public sealed unsafe class GrammarRowComposer : IDisposable
 {
+    private static readonly Hash128 PrecedesTypeId = RelationTypeRegistry.RelationTypeId("PRECEDES");
+
+    internal static string DescribeContent(byte[] utf8)
+    {
+        int bad = -1;
+        for (int i = 0; i < utf8.Length;)
+        {
+            byte b = utf8[i];
+            int need = b < 0x80 ? 0 : (b & 0xE0) == 0xC0 ? 1 : (b & 0xF0) == 0xE0 ? 2
+                     : (b & 0xF8) == 0xF0 ? 3 : -1;
+            if (need < 0) { bad = i; break; }
+            if (i + need >= utf8.Length && need > 0) { bad = i; break; }
+            bool ok = true;
+            for (int j = 1; j <= need; j++)
+                if ((utf8[i + j] & 0xC0) != 0x80) { ok = false; break; }
+            if (!ok) { bad = i; break; }
+            i += need + 1;
+        }
+        string where = bad < 0 ? "utf8-valid" : $"first invalid byte at offset {bad}";
+        string hex = "";
+        if (bad >= 0)
+        {
+            int h0 = Math.Max(0, bad - 8), h1 = Math.Min(utf8.Length, bad + 8);
+            hex = " bytes[" + h0 + ".." + h1 + ")=" + Convert.ToHexString(utf8, h0, h1 - h0);
+            int p0 = Math.Max(0, bad - 80);
+            string ctxText = System.Text.Encoding.UTF8.GetString(utf8, p0, bad - p0);
+            hex += " preceding-text=\"" + ctxText.Replace('\n', ' ').Replace('\r', ' ') + "\"";
+        }
+        return $"len={utf8.Length}, {where}{hex}";
+    }
+
     private readonly byte[] _utf8;
     private readonly string _modalityId;
     private readonly Hash128 _sourceId;
     private readonly GrammarAst _ast;
+    private readonly GrammarCompositionMode _mode;
     private readonly object _sync = new();
     private IntPtr _compose;
     private IntPtr _probe;
     private bool _disposed;
 
-    public GrammarRowComposer(byte[] utf8, GrammarAst ast, Hash128 sourceId, string modalityId)
+    public GrammarRowComposer(byte[] utf8, GrammarAst ast, Hash128 sourceId, string modalityId,
+                              GrammarCompositionMode mode = GrammarCompositionMode.CuratedRecord)
     {
+        // Composition is also used by cold readback processes, before any ingestion.
+        CodepointPerfcache.LoadDefault();
         _utf8 = utf8;
         _ast = ast;
         _sourceId = sourceId;
         _modalityId = modalityId;
+        _mode = mode;
     }
 
     public Task<byte[]?> ProbeDescentBitmapAsync(ISubstrateReader reader, CancellationToken ct = default)
@@ -30,6 +67,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     public static bool TryProbeRowRoot(
         ReadOnlySpan<byte> utf8, GrammarAst ast, string modalityId, out Hash128 rootId, out byte tier)
     {
+        CodepointPerfcache.LoadDefault();
         rootId = default;
         tier = 0;
         byte tierLocal = 0;
@@ -54,14 +92,18 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             IntPtr result = IntPtr.Zero;
             fixed (byte* p = _utf8)
             {
-                int rc = NativeInterop.GrammarComposeProbe(
-                    p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
-                    _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
+                int rc = _mode == GrammarCompositionMode.FullSource
+                    ? NativeInterop.GrammarSourceCompose(
+                        p, (nuint)_utf8.Length, _ast.Handle, _modalityId, &result)
+                    : NativeInterop.GrammarComposeProbe(
+                        p, (nuint)_utf8.Length, _ast.Handle, _modalityId,
+                        _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
                 if (rc != 0 || result == IntPtr.Zero)
                     throw new InvalidOperationException(
-                        $"laplace_grammar_compose_probe returned {rc} ({GrammarEntityBuilder.DescribeContent(_utf8)})");
+                        $"laplace_grammar_compose_probe returned {rc} ({DescribeContent(_utf8)})");
             }
-            _probe = result;
+            if (_mode == GrammarCompositionMode.FullSource) _compose = result;
+            else _probe = result;
         }
     }
 
@@ -72,6 +114,11 @@ public sealed unsafe class GrammarRowComposer : IDisposable
 
     private void EnsureComposed(byte[]? existingBitmap)
     {
+        if (_mode == GrammarCompositionMode.FullSource)
+        {
+            EnsureProbed();
+            return;
+        }
         if (_compose != IntPtr.Zero) return;
         lock (_sync)
         {
@@ -109,7 +156,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                     _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
                 if (rc != 0 || result == IntPtr.Zero)
                     throw new InvalidOperationException(
-                        $"laplace_grammar_compose returned {rc} ({GrammarEntityBuilder.DescribeContent(_utf8)})");
+                        $"laplace_grammar_compose returned {rc} ({DescribeContent(_utf8)})");
             }
             _compose = result;
         }
@@ -276,7 +323,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             NativeInterop.ComposeGetPrecedes(ActiveResult, i, &pr);
             long sumScore = checked(pr.Games * Glicko2.FpScale);
             precedes.Add(NativeAttestation.Aggregated(
-                pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
+                pr.SubjectId, PrecedesTypeId, pr.ObjectId,
                 _sourceId, contextId: null,
                 games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
@@ -340,7 +387,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             NativeInterop.ComposeGetPrecedes(ActiveResult, i, &pr);
             long sumScore = checked(pr.Games * Glicko2.FpScale);
             precedesOut.Add(NativeAttestation.Aggregated(
-                pr.SubjectId, GrammarEntityBuilder.PrecedesTypeId, pr.ObjectId,
+                pr.SubjectId, PrecedesTypeId, pr.ObjectId,
                 _sourceId, contextId: null,
                 games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
@@ -401,6 +448,64 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         }
 
         return NativeInterop.ComposeRootId(ActiveResult);
+    }
+
+    /// <summary>
+    /// The already-composed grammar root as a constituent for a larger ordered
+    /// realization such as a containing file. This reuses the native grammar
+    /// placement; callers must drain this composer before they stage the parent.
+    /// </summary>
+    public OrderedCompositionComponent RootComponent()
+    {
+        EnsureComposed();
+        Hash128 rootId = NativeInterop.ComposeRootId(ActiveResult);
+        if (rootId == default)
+            throw new InvalidOperationException("grammar composition has no root");
+
+        if (_mode == GrammarCompositionMode.FullSource)
+        {
+            double* coord = stackalloc double[4];
+            byte sourceTier = 0, hasAtom = 0;
+            uint atom = 0;
+            int placementRc = NativeInterop.ComposeRootPlacement(
+                ActiveResult, coord, &sourceTier, &atom, &hasAtom);
+            if (placementRc != 0)
+                throw new InvalidOperationException($"full-source grammar root has no native placement ({placementRc})");
+            return new OrderedCompositionComponent(
+                rootId, sourceTier, coord[0], coord[1], coord[2], coord[3], atom, hasAtom != 0);
+        }
+
+        byte tier = 0;
+        bool foundEntity = false;
+        nuint entityCount = NativeInterop.ComposeEntityCount(ActiveResult);
+        for (nuint i = 0; i < entityCount; i++)
+        {
+            NativeInterop.ComposeEntityNative entity;
+            if (NativeInterop.ComposeGetEntity(ActiveResult, i, &entity) != 0)
+                continue;
+            if (entity.Id != rootId) continue;
+            tier = entity.Tier;
+            foundEntity = true;
+            break;
+        }
+        if (!foundEntity)
+            throw new InvalidOperationException("grammar composition root has no entity");
+
+        nuint physicalityCount = NativeInterop.ComposePhysicalityCount(ActiveResult);
+        for (nuint i = 0; i < physicalityCount; i++)
+        {
+            NativeInterop.ComposePhysicalityNative physicality;
+            if (NativeInterop.ComposeGetPhysicality(ActiveResult, i, &physicality) != 0
+                || physicality.EntityId != rootId)
+                continue;
+            return new OrderedCompositionComponent(
+                rootId, tier,
+                physicality.Coord0, physicality.Coord1,
+                physicality.Coord2, physicality.Coord3);
+        }
+
+        throw new InvalidOperationException(
+            "grammar composition root has no realized placement for ordered composition");
     }
 
     public bool TrySpanEntity(uint startByte, uint endByte, out Hash128 id)

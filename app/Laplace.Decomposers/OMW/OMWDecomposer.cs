@@ -7,9 +7,13 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
-public readonly record struct OmwIngestRecord(OmwRow Row, byte[] ValueUtf8);
+public readonly record struct OmwIngestRecord(
+    OmwRow Row,
+    byte[] ValueUtf8,
+    OmwLmfRecord? Lmf = null);
 
-public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSource, FullScope>, IIngestInventoryProvider
+public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSource, FullScope>,
+    IIngestInventoryProvider, IIngestArtifactGraphProvider
 {
     public static readonly Hash128 Source = OMWSource.SourceId;
     public static readonly Hash128 TrustClass = OMWSource.TrustClass;
@@ -34,6 +38,7 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
 
     private const string ChangesLabelPrefix = "omw-changes/";
     private const string FreqLabelPrefix = "omw-freq/";
+    internal const string LmfLabelPrefix = "omw-lmf/";
 
     private static int IndexOfNthTab(ReadOnlySpan<byte> line, int n)
     {
@@ -88,6 +93,13 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        if (fileLabel.StartsWith(LmfLabelPrefix, StringComparison.Ordinal))
+        {
+            await foreach (var record in OMWLmfParser.ReadAsync(filePath, fileLabel, ct))
+                yield return new OmwIngestRecord(default, [], record);
+            yield break;
+        }
+
         bool isChanges = fileLabel.StartsWith(ChangesLabelPrefix, StringComparison.Ordinal);
         bool isFreq = fileLabel.StartsWith(FreqLabelPrefix, StringComparison.Ordinal);
         string fileLang = isChanges ? "und"
@@ -136,7 +148,13 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
     protected override IIngestRecordHandler<OmwIngestRecord> CreateHandlerForFile(
         string fileLabel, DecomposerOptions options) =>
         new DirectComposeHandler<OmwIngestRecord>(
-            static (record, builder) => OMWEmitter.Emit(builder, record.Row, record.ValueUtf8));
+            static (record, builder) =>
+            {
+                if (record.Lmf is { } lmf)
+                    OMWLmfEmitter.Emit(builder, lmf);
+                else
+                    OMWEmitter.Emit(builder, record.Row, record.ValueUtf8);
+            });
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
@@ -150,10 +168,29 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
+        if (context.HasArtifactGraph)
+        {
+            var selected = context.SelectedArtifacts;
+            if (selected.Count == 0) return Task.FromResult<IngestInventory?>(null);
+            long total = options.MaxInputUnits > 0 ? options.MaxInputUnits : 0;
+            var specs = selected.Select(static artifact =>
+                    new IngestFileSpec(artifact.FileLabel, artifact.Path, 0))
+                .ToArray();
+            return Task.FromResult<IngestInventory?>(
+                new IngestInventory("WN-LMF records", total, specs, TracksFileCompletion: true));
+        }
+
         var paths = ListFiles(context.EcosystemPath, options).Select(f => f.Path).ToList();
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
         return Task.FromResult(IngestInventory.FromFiles(
             "records", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
+    }
+
+    public Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath, DecomposerOptions options, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(OMWLmfArtifacts.Build(ecosystemPath, options));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

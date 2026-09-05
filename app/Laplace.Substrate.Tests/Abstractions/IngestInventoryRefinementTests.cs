@@ -37,6 +37,20 @@ public sealed class IngestInventoryRefinementTests
     }
 
     [Fact]
+    public void ArtifactGraph_RejectsDuplicateJournalLabelThatWouldOverwriteDisposition()
+    {
+        var error = Assert.Throws<InvalidOperationException>(() => new IngestArtifactGraph(
+        [
+            Artifact("a", "/source/a.dat", IngestArtifactDisposition.Admitted)
+                with { JournalLabel = "shared-label" },
+            Artifact("b", "/source/b.dat", IngestArtifactDisposition.Unsupported, "unsupported")
+                with { JournalLabel = "shared-label" },
+        ]));
+
+        Assert.Contains("journal label is declared more than once", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ArtifactGraph_RequiresReasonForEveryNonAdmittedArtifact()
     {
         var error = Assert.Throws<InvalidOperationException>(() => new IngestArtifactGraph(

@@ -7,8 +7,9 @@ namespace Laplace.Decomposers.Abstractions;
 /// One canonical content payload plus optional structural provenance.
 ///
 /// <para><see cref="ContentRootId"/> is the globally shared content identity used for
-/// existence/dedup. <see cref="DocumentId"/> and <see cref="FileId"/> are explicit higher
-/// trunks for standard document/file content.</para>
+/// existence/dedup. <see cref="DocumentId"/> identifies the selected document composition;
+/// plain text uses the content root itself. <see cref="FileId"/> is the containing
+/// content-plus-metadata composition, not a fixed tier category.</para>
 ///
 /// <para><see cref="SourceId"/> is retained as the historical source/root slot so older
 /// record producers stay binary/source compatible. New document records fill the explicit

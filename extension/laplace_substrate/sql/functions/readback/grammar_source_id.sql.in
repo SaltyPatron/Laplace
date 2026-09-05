@@ -1,0 +1,5 @@
+-- Source admission and source readback share the native lossless grammar composer.
+CREATE OR REPLACE FUNCTION laplace.grammar_source_id(p_utf8 bytea, p_modality text)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_grammar_source_id'
+    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

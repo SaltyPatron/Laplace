@@ -1,34 +1,26 @@
-using System.Text;
 using System.Text.Json;
-using Xunit;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Xunit;
 
 namespace Laplace.Decomposers.Model.Tests;
 
 /// <summary>
-/// Ledger §6 step 1 — the checkpoint as content. A tensor entity's id is Blake3
-/// of its LITERAL byte range in the stored file; the checkpoint root is a Merkle
-/// over the ordered tensor ids; CONTAINS/PRECEDES carry membership and order
-/// scoped by the checkpoint. These are content-identity laws: a nondeterministic
-/// tensor id would silently break the cross-model merge (byte-identical tensors
-/// must collide), so determinism and structure shape are pinned here. No DB, no
-/// perfcache — raw Blake3 + native Merkle only.
+/// A checkpoint header is source provenance, not model knowledge. Its tensor
+/// names, dtypes, dimensions and order compose into native physical trajectories;
+/// literal tensor values neither enter identities nor emit attestations.
 /// </summary>
-public class ModelCheckpointTests
+public sealed class ModelCheckpointTests
 {
-    // Emit a minimal valid safetensors blob: [8-byte LE header len][JSON][data].
-    // n little-endian F32[2] tensors named t0..t(n-1), 8 data bytes each; the
-    // i-th tensor's 8 bytes are all byte value (seed + i) so contents are known.
-    private static string WriteSafetensors(string dir, int n, byte seed)
+    private static string WriteSafetensors(string dir, int n, byte seed, int width = 2)
     {
         var header = new Dictionary<string, object>();
         for (int i = 0; i < n; i++)
-            header[$"t{i}"] = new Dictionary<string, object>
+            header[$"encoder.layer.{i}.attention.weight"] = new Dictionary<string, object>
             {
                 ["dtype"] = "F32",
-                ["shape"] = new[] { 2 },
-                ["data_offsets"] = new[] { i * 8, i * 8 + 8 },
+                ["shape"] = new[] { width },
+                ["data_offsets"] = new[] { i * width * 4, (i + 1) * width * 4 },
             };
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(header);
         byte[] lenLe = BitConverter.GetBytes((long)json.Length);
@@ -38,12 +30,7 @@ public class ModelCheckpointTests
         using var fs = File.Create(path);
         fs.Write(lenLe);
         fs.Write(json);
-        for (int i = 0; i < n; i++)
-        {
-            var block = new byte[8];
-            Array.Fill(block, (byte)(seed + i));
-            fs.Write(block);
-        }
+        for (int i = 0; i < n * width * 4; i++) fs.WriteByte((byte)(seed + i));
         return dir;
     }
 
@@ -54,78 +41,96 @@ public class ModelCheckpointTests
         return d;
     }
 
-    [Fact]
-    public void TensorIds_AreDeterministic_AndContentAddressed()
+    private static (Hash128 Root, SubstrateChange Change) Stage(string dir)
     {
-        string a = WriteSafetensors(NewDir(), 3, seed: 10);
-        string b = WriteSafetensors(NewDir(), 3, seed: 10);   // byte-identical tensors, different dir
+        CodepointPerfcache.LoadDefault();
+        var tensors = SafetensorsContainerParser.ParseModel(dir);
+        var source = SubstrateCanonicalIds.Source("test-model");
+        var builder = new SubstrateChangeBuilder(source, "checkpoint/header", null);
+        Hash128 root = ModelCheckpoint.StageCheckpoint(builder, tensors, source);
+        return (root, builder.Build());
+    }
+
+    [Fact]
+    public void StageCheckpoint_UsesHeaderStructure_NotOpaqueTensorBytes()
+    {
+        string a = WriteSafetensors(NewDir(), n: 3, seed: 1);
+        string b = WriteSafetensors(NewDir(), n: 3, seed: 99);
         try
         {
-            var ta = SafetensorsContainerParser.ParseModel(a);
-            var tb = SafetensorsContainerParser.ParseModel(b);
+            var left = Stage(a);
+            var right = Stage(b);
 
-            var ida1 = ModelCheckpoint.TensorIds(ta);
-            var ida2 = ModelCheckpoint.TensorIds(ta);   // same file, twice
-            var idb = ModelCheckpoint.TensorIds(tb);     // identical content, other file
+            // Same ordered header, different literal weight bytes: one physical
+            // source structure. Values can only become evidence after calibrated
+            // token-to-token contraction, never checkpoint entities.
+            Assert.Equal(left.Root, right.Root);
+            Assert.Empty(left.Change.Attestations);
+            Assert.Empty(right.Change.Attestations);
 
-            Assert.Equal(ida1, ida2);                    // deterministic
-            Assert.Equal(ida1, idb);                     // content-addressed: same bytes → same id
-            Assert.Equal(3, ida1.Length);
-            Assert.Equal(ida1.Length, ida1.Distinct().Count()); // distinct contents → distinct ids
+            var leftStage = Assert.Single(left.Change.IntentStages);
+            Assert.True(leftStage.EntityCount >= 7, "tensor paths and checkpoint must be native-staged entities");
+            Assert.True(leftStage.PhysicalityCount >= 7, "each multi-part header must carry an ordered trajectory");
         }
         finally { Directory.Delete(a, true); Directory.Delete(b, true); }
     }
 
     [Fact]
-    public void DifferentBytes_ProduceDifferentTensorIds_AndDifferentRoot()
+    public void StageCheckpoint_HeaderShapeChangesMerkleStructure()
     {
-        string a = WriteSafetensors(NewDir(), 2, seed: 1);
-        string b = WriteSafetensors(NewDir(), 2, seed: 99);
+        string a = WriteSafetensors(NewDir(), n: 3, seed: 1, width: 2);
+        string b = WriteSafetensors(NewDir(), n: 3, seed: 1, width: 3);
         try
         {
-            var ta = SafetensorsContainerParser.ParseModel(a);
-            var tb = SafetensorsContainerParser.ParseModel(b);
-            var ida = ModelCheckpoint.TensorIds(ta);
-            var idb = ModelCheckpoint.TensorIds(tb);
-
-            Assert.NotEqual(ida[0], idb[0]);
-            Assert.NotEqual(
-                Hash128.Merkle(EntityTier.Document, ida),
-                Hash128.Merkle(EntityTier.Document, idb));
+            var left = Stage(a);
+            var right = Stage(b);
+            Assert.NotEqual(left.Root, right.Root);
         }
         finally { Directory.Delete(a, true); Directory.Delete(b, true); }
     }
 
-    [Fact]
-    public void StageCheckpoint_EmitsRootPlusTensors_WithContainsAndPrecedesStructure()
+    [SkippableFact]
+    public void MiniLmHeader_StagesOrderedProvenanceWithoutNumericPayload()
     {
-        const int n = 4;
-        string dir = WriteSafetensors(NewDir(), n, seed: 5);
+        const string model = "/vault/models/models--sentence-transformers--all-MiniLM-L6-v2";
+        string snapshots = Path.Combine(model, "snapshots");
+        string? snapshot = Directory.Exists(snapshots)
+            ? Directory.GetDirectories(snapshots).FirstOrDefault(
+                path => File.Exists(Path.Combine(path, "model.safetensors")))
+            : null;
+        if (snapshot is null) throw new SkipException("MiniLM safetensors snapshot is not available");
+
+        CodepointPerfcache.LoadDefault();
+        var tensors = SafetensorsContainerParser.ParseModel(snapshot);
+        Assert.True(tensors.Count > 0);
+        Hash128 source = SubstrateCanonicalIds.Source("test-minilm-header");
+        var builder = new SubstrateChangeBuilder(source, "checkpoint/header/minilm", null);
+        Hash128 root = ModelCheckpoint.StageCheckpoint(builder, tensors, source);
+        SubstrateChange change = builder.Build();
+
+        Assert.NotEqual(default, root);
+        Assert.Empty(change.Attestations);
+        IntentStage stage = Assert.Single(change.IntentStages);
+        Assert.True(stage.EntityCount >= tensors.Count + 1);
+        Assert.True(stage.PhysicalityCount >= tensors.Count + 1);
+    }
+
+    [Fact]
+    public void StageCheckpoint_RootTrajectoryCarriesOrderedTensorHeaders()
+    {
+        string dir = WriteSafetensors(NewDir(), n: 4, seed: 5);
         try
         {
-            var tensors = SafetensorsContainerParser.ParseModel(dir);
-            var source = SubstrateCanonicalIds.Source("test-model");
-            var b = new SubstrateChangeBuilder(source, "checkpoint/byte-ranges", null,
-                entityCapacity: n + 1, physicalityCapacity: 0, attestationCapacity: 2 * n);
+            var (root, change) = Stage(dir);
+            var stage = Assert.Single(change.IntentStages);
 
-            var root = ModelCheckpoint.StageCheckpoint(b, tensors, source);
-            var change = b.Build();
-
-            // n tensor entities + 1 checkpoint root
-            Assert.Equal(n + 1, change.Entities.Length);
-            Assert.Contains(change.Entities, e => e.Id == root);
-
-            int contains = change.Attestations.Count(x => x.TypeId == ModelCoordinates.ContainsTypeId);
-            int precedes = change.Attestations.Count(x => x.TypeId == ModelCoordinates.PrecedesTypeId);
-            Assert.Equal(n, contains);       // root CONTAINS each tensor
-            Assert.Equal(n - 1, precedes);   // tensors ordered by PRECEDES chain
-
-            // Every CONTAINS is rooted at the checkpoint (context = checkpoint law).
-            Assert.All(change.Attestations.Where(x => x.TypeId == ModelCoordinates.ContainsTypeId),
-                x => Assert.Equal(root, x.SubjectId));
-
-            // Root is a stable function of the ordered tensor ids.
-            Assert.Equal(Hash128.Merkle(EntityTier.Document, ModelCheckpoint.TensorIds(tensors)), root);
+            // Header structure is carried by staged entity/physicality tuples, not
+            // by the old structural-attestation scaffold. Four tensor headers plus
+            // their checkpoint parent require at least five native compositions.
+            Assert.NotEqual(default, root);
+            Assert.Equal(0, stage.AttestationCount);
+            Assert.True(stage.PhysicalityCount >= 5);
+            Assert.True(stage.EntityCount >= 5);
         }
         finally { Directory.Delete(dir, true); }
     }

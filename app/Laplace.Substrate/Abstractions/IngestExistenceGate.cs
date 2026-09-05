@@ -38,9 +38,13 @@ internal static class IngestExistenceGate
         Array.Fill(rootIndex, -1);
 
         static Hash128 CompletionIdFor(TRecord record, Hash128 contentRoot)
-            => record is ContentIngestRecord cr && cr.FileId != default
-                ? cr.FileId
+        {
+            if (record is not ContentIngestRecord cr) return contentRoot;
+            if (cr.FileId != default) return cr.FileId;
+            return cr.Metadata is { } metadata
+                ? FileEntity.Resolve(cr.CanonicalUtf8, metadata).FileId
                 : contentRoot;
+        }
 
         // Content presence and file completion are different identities. The content root
         // answers whether the shared DAG already exists. The file-composition id answers
@@ -266,12 +270,10 @@ internal static class IngestExistenceGate
             rootId = id.Value;
             return true;
         }
-        if (record is GrammarComposeRecord gcr)
-        {
-            if (gcr.SourceId is not { } id || id == default) return false;
-            rootId = id;
-            return true;
-        }
+        // A known plain-text root does not prove that a full source grammar has
+        // been admitted. Its syntax/gap composition must resolve through the same
+        // native source recipe before an existence decision can be made.
+        if (record is GrammarComposeRecord) return false;
         if (record is ITrunkRootRecord trunk)
         {
             rootId = trunk.TrunkRootId;

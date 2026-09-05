@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION @extschema@.laplace_trajectory_equivalent(left_traj geometry,
+                                                                     right_traj geometry)
+    RETURNS boolean
+    AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_equivalent'
+    LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

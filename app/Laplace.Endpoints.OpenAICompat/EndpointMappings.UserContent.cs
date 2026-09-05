@@ -1,6 +1,9 @@
 using System.Text;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.Engine.Core;
 using Laplace.Ingestion;
+using Laplace.SubstrateCRUD;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -21,11 +24,11 @@ internal static class UserContentEndpointMappings
             if (!TryReadContent(request, out var bytes, out var error))
                 return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_content", message = error } });
 
-            string name = request.Name?.Trim() ?? "";
-            if (name.Length == 0)
+            string name = request.Name ?? "";
+            if (string.IsNullOrWhiteSpace(name))
                 return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "name_required", message = "name is required" } });
 
-            string path = string.IsNullOrWhiteSpace(request.Path) ? name : request.Path!.Trim();
+            string path = string.IsNullOrWhiteSpace(request.Path) ? name : request.Path!;
             if (!ValidRelativePath(path))
                 return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_path", message = "path must be relative and may not contain '..' segments" } });
 
@@ -45,19 +48,84 @@ internal static class UserContentEndpointMappings
             {
                 return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_provenance", message = ex.Message } });
             }
+            catch (LegacyReplayRequiresReconciliationException ex)
+            {
+                return Results.Conflict(new { error = new { type = "reconciliation_required", code = "legacy_replay_requires_reconciliation", message = ex.Message } });
+            }
 
             if (ids is not { } value)
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
 
             var scope = UserArtifactContent.Resolve(tenant.TenantId);
             return Results.Ok(new UserContentWriteResponse(
-                value.FileId.ToString(),
-                value.DocumentId.ToString(),
-                value.ContentId.ToString(),
-                value.MetadataId.ToString(),
-                value.SourceId.ToString(),
+                Convert.ToHexStringLower(value.FileId.ToBytes()),
+                Convert.ToHexStringLower(value.DocumentId.ToBytes()),
+                Convert.ToHexStringLower(value.ContentId.ToBytes()),
+                Convert.ToHexStringLower(value.MetadataId.ToBytes()),
+                Convert.ToHexStringLower(value.SourceId.ToBytes()),
                 scope.SourceName,
-                bytes.LongLength));
+                bytes.LongLength,
+                Modality: null));
+        });
+
+        app.MapPost("/v1/content/code", async (
+            HttpContext http,
+            UserCodeArtifactWriteRequest request,
+            ITenantResolver tenants,
+            ContentArtifactCloser closer,
+            CancellationToken ct) =>
+        {
+            var tenant = await tenants.ResolveAsync(http, ct);
+            if (!TryReadContent(request.Text, request.ContentBase64, out var bytes, out var error))
+                return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_content", message = error } });
+
+            string name = request.Name ?? "";
+            if (string.IsNullOrWhiteSpace(name))
+                return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "name_required", message = "name is required" } });
+
+            string path = string.IsNullOrWhiteSpace(request.Path) ? name : request.Path!;
+            if (!ValidRelativePath(path))
+                return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_path", message = "path must be relative and may not contain '..' segments" } });
+
+            string? modality = ResolveGrammarModality(path);
+            if (modality is null)
+                return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "unsupported_grammar", message = "path extension has no registered grammar" } });
+
+            UserArtifactContent.ArtifactIds? ids;
+            try
+            {
+                ids = await closer.CloseCodeAsync(
+                    tenant.TenantId,
+                    name,
+                    path,
+                    bytes,
+                    modality,
+                    request.UserId,
+                    request.ModifiedAt?.UtcDateTime,
+                    ct);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = new { type = "invalid_request_error", code = "invalid_provenance", message = ex.Message } });
+            }
+            catch (LegacyReplayRequiresReconciliationException ex)
+            {
+                return Results.Conflict(new { error = new { type = "reconciliation_required", code = "legacy_replay_requires_reconciliation", message = ex.Message } });
+            }
+
+            if (ids is not { } value)
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+            var scope = UserArtifactContent.Resolve(tenant.TenantId);
+            return Results.Ok(new UserContentWriteResponse(
+                Convert.ToHexStringLower(value.FileId.ToBytes()),
+                Convert.ToHexStringLower(value.DocumentId.ToBytes()),
+                Convert.ToHexStringLower(value.ContentId.ToBytes()),
+                Convert.ToHexStringLower(value.MetadataId.ToBytes()),
+                Convert.ToHexStringLower(value.SourceId.ToBytes()),
+                scope.SourceName,
+                bytes.LongLength,
+                modality));
         });
 
         app.MapGet("/v1/content/{idHex}", async (
@@ -79,11 +147,18 @@ internal static class UserContentEndpointMappings
         UserTextArtifactWriteRequest request,
         out byte[] bytes,
         out string error)
+        => TryReadContent(request.Text, request.ContentBase64, out bytes, out error);
+
+    private static bool TryReadContent(
+        string? text,
+        string? contentBase64,
+        out byte[] bytes,
+        out string error)
     {
         bytes = [];
         error = "";
-        bool hasText = request.Text is not null;
-        bool hasBase64 = !string.IsNullOrWhiteSpace(request.ContentBase64);
+        bool hasText = text is not null;
+        bool hasBase64 = !string.IsNullOrWhiteSpace(contentBase64);
         if (hasText == hasBase64)
         {
             error = "provide exactly one of text or content_base64";
@@ -92,13 +167,13 @@ internal static class UserContentEndpointMappings
 
         if (hasText)
         {
-            bytes = Encoding.UTF8.GetBytes(request.Text!);
+            bytes = Encoding.UTF8.GetBytes(text!);
             return bytes.Length > 0 || Fail("content is empty", out error);
         }
 
         try
         {
-            bytes = Convert.FromBase64String(request.ContentBase64!);
+            bytes = Convert.FromBase64String(contentBase64!);
             if (bytes.Length == 0)
             {
                 error = "content is empty";
@@ -117,6 +192,16 @@ internal static class UserContentEndpointMappings
             error = "content_base64 must contain valid UTF-8 text bytes";
             return false;
         }
+    }
+
+    internal static string? ResolveGrammarModality(string path)
+    {
+        string extension = Path.GetExtension(path);
+        if (extension.Equals(".in", StringComparison.OrdinalIgnoreCase))
+            extension = Path.GetExtension(path[..^extension.Length]);
+        return extension.Length > 1
+            ? GrammarDecomposer.ModalityByExt(extension[1..].ToLowerInvariant())
+            : null;
     }
 
     private static bool Fail(string message, out string error)

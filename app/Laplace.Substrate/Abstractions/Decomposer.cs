@@ -386,7 +386,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
     {
         IReadOnlyList<(string Path, string Label)> files = IngestInput.ResolveScheduledFiles(
             context.SelectedArtifacts,
-            context.SelectedArtifacts.Count > 0 ? [] : ListFiles(context.EcosystemPath, options));
+            context.HasArtifactGraph ? [] : ListFiles(context.EcosystemPath, options));
         var labels = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (_, label) in files)
         {
@@ -760,7 +760,7 @@ public abstract class DecomposerMultiPhase : IDecomposer
         return context.SelectedArtifacts
             .Single(artifact => string.Equals(
                 Path.GetFullPath(artifact.Path), fullPath, StringComparison.Ordinal))
-            .Id;
+            .FileLabel;
     }
 }
 

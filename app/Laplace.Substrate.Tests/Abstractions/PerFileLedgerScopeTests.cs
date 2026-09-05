@@ -117,7 +117,8 @@ public sealed class PerFileLedgerScopeTests
 
         public void OnFileComposed(
             string sourceName, string fileLabel, Laplace.Engine.Core.Hash128? fileId = null,
-            long records = 0, long entities = 0, long physicalities = 0, long attestations = 0)
+            long records = 0, long entities = 0, long physicalities = 0, long attestations = 0,
+            Laplace.Engine.Core.Hash128? resumeFingerprint = null)
         {
             lock (_gate) { Composed.Add(fileLabel); SourceNames.Add(sourceName); }
         }

@@ -13,6 +13,7 @@ public sealed class SubstrateChangeBuilder
     private readonly Hash128? _parentIntentId;
     private long _inputUnitsConsumed;
     private int _commitEpoch;
+    private Hash128? _fileId;
 
     private readonly HashSet<Hash128> _seenEntities = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
@@ -56,6 +57,15 @@ public sealed class SubstrateChangeBuilder
     public SubstrateChangeBuilder SetCommitEpoch(int epoch)
     {
         _commitEpoch = epoch;
+        return this;
+    }
+
+    public SubstrateChangeBuilder SetFileId(Hash128 fileId)
+    {
+        if (_fileId is { } existing && existing != fileId)
+            throw new InvalidOperationException(
+                $"one ingest unit cannot claim two file identities: {existing} and {fileId}");
+        _fileId = fileId;
         return this;
     }
 
@@ -410,7 +420,6 @@ public sealed class SubstrateChangeBuilder
 
         var walks = _walks.ToImmutableArray();
         _walks.Clear();
-
         return new SubstrateChange(
             entities, physicalities, attestations,
             new SubstrateChangeMetadata(
@@ -420,7 +429,8 @@ public sealed class SubstrateChangeBuilder
                 IngestClock.Now(),
                 _parentIntentId,
                 _inputUnitsConsumed,
-                _commitEpoch),
+                _commitEpoch,
+                _fileId),
             stages,
             walks);
     }

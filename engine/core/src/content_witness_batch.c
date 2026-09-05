@@ -136,12 +136,15 @@ static int should_emit_compositional(const tier_tree_t* tree, uint32_t idx) {
 
 
 
-static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
+static int content_tree_build_mode(const uint8_t* utf8, size_t len,
+                                   int source_representation, tier_tree_t** out_tree) {
     if (len == 0) return -4;                          /* empty input */
     if (!codepoint_table_is_loaded()) return -3;       /* perfcache not loaded */
 
     tier_tree_t* tree = NULL;
-    if (laplace_text_decomposer_run(utf8, len, &tree) != 0 || !tree) return -5;  /* decomposer failure */
+    if ((source_representation
+            ? laplace_text_decomposer_run_source(utf8, len, &tree)
+            : laplace_text_decomposer_run(utf8, len, &tree)) != 0 || !tree) return -5;
     if (hash_composer_run(tree, codepoint_resolver, NULL) != 0) {
         tier_tree_free(tree);
         return -6;                                     /* hash-composer failure */
@@ -152,6 +155,10 @@ static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out
     }
     *out_tree = tree;
     return 0;
+}
+
+static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
+    return content_tree_build_mode(utf8, len, 0, out_tree);
 }
 
 int laplace_content_tree_build_public(
@@ -172,6 +179,21 @@ int laplace_content_root_id(
     int rc = content_tree_build(utf8, len, &tree);
     if (rc != 0) return rc;
 
+    tier_node_view_t root;
+    tier_tree_get_node(tree, natural_unit_index(tree), &root);
+    *out_root_id = root.id;
+    tier_tree_free(tree);
+    return 0;
+}
+
+int laplace_content_source_root_id(
+    const uint8_t* utf8,
+    size_t         len,
+    hash128_t*     out_root_id) {
+    if (!utf8 || !out_root_id) return -1;
+    tier_tree_t* tree = NULL;
+    int rc = content_tree_build_mode(utf8, len, 1, &tree);
+    if (rc != 0) return rc;
     tier_node_view_t root;
     tier_tree_get_node(tree, natural_unit_index(tree), &root);
     *out_root_id = root.id;
@@ -391,8 +413,8 @@ static int emit_node(
      * that should hash identically to its sole child's own physicality, which is exactly what
      * silently duplicated physicality rows against BuildTier0Seed's atomic (no-trajectory)
      * seeding of the same content -- see .scratchpad/02 Issue 25 residual. */
-    size_t n_traj = (m > 1) ? m : 0;
-    if (n_traj > 0) {
+    size_t n_traj = 0;
+    if (m > 1) {
         if (emit_scratch_reserve(scratch, m) != 0) return -2;
         for (uint32_t ci = 0; ci < m; ++ci) {
             tier_node_view_t ch;
@@ -402,8 +424,9 @@ static int emit_node(
                 ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);
         }
         traj = scratch->trajectory;
-        if (trajectory_build_flagged(
-                scratch->child_ids, scratch->flags, m, traj) != 0) return -2;
+        if (trajectory_build_flagged_rle(
+                scratch->child_ids, scratch->flags, m, traj, &n_traj) != 0
+            || n_traj > UINT32_MAX) return -2;
     }
 
     hash128_t phys_id;
@@ -413,7 +436,7 @@ static int emit_node(
     if (intent_stage_add_physicality(
             stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)n_traj,
-            (int32_t)n_traj, 1, 0.0, 1, 0, now_us) != 0) {
+            (int32_t)(m > 1 ? m : 0), 1, 0.0, 1, 0, now_us) != 0) {
         return -2;
     }
     return 0;
@@ -425,6 +448,14 @@ int content_witness_tree_build(
     tier_tree_t**  out_tree) {
     if (!utf8 || !out_tree) return -1;
     return content_tree_build(utf8, len, out_tree);
+}
+
+int content_witness_source_tree_build(
+    const uint8_t* utf8,
+    size_t         len,
+    tier_tree_t**  out_tree) {
+    if (!utf8 || !out_tree) return -1;
+    return content_tree_build_mode(utf8, len, 1, out_tree);
 }
 
 int content_witness_tree_root_id(

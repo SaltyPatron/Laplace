@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -7,7 +6,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Abstractions;
 
 public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord>, IIngestInventoryProvider,
-    IIgnoresAmbientArtifactManifest
+    IIngestArtifactGraphProvider, IIgnoresAmbientArtifactManifest
 {
     private static readonly ISourceManifest Manifest = SeedSourceManifest<DocumentSource>.Instance;
 
@@ -60,14 +59,31 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = EnumerateInputFiles(context.EcosystemPath).ToList();
+        var selected = context.SelectedArtifacts;
+        var paths = context.HasArtifactGraph
+            ? selected.Select(static artifact => artifact.Path).ToList()
+            : EnumerateInputFiles(context.EcosystemPath).ToList();
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        if (options.MaxInputUnits > 0)
-            return Task.FromResult(IngestInventory.FromFiles(
-                "documents", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
-        var specs = paths.Select(f => new IngestFileSpec(Path.GetFileName(f), f, 1)).ToList();
+        var specs = context.HasArtifactGraph
+            ? selected.Select(static artifact =>
+                    new IngestFileSpec(artifact.FileLabel, artifact.Path, 1))
+                .ToList()
+            : paths.Select(f => new IngestFileSpec(Path.GetFileName(f), f, 1)).ToList();
         return Task.FromResult<IngestInventory?>(
-            new IngestInventory("documents", paths.Count, specs, TracksFileCompletion: true));
+            new IngestInventory(
+                "documents",
+                options.MaxInputUnits > 0 ? Math.Min(paths.Count, options.MaxInputUnits) : paths.Count,
+                specs,
+                TracksFileCompletion: true));
+    }
+
+    public Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath,
+        DecomposerOptions options,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(BuildArtifactGraph(ecosystemPath));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -82,7 +98,8 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
         if (File.Exists(path))
         {
-            yield return Path.GetFullPath(path);
+            if (string.Equals(Path.GetExtension(path), ".txt", StringComparison.Ordinal))
+                yield return Path.GetFullPath(path);
             yield break;
         }
 
@@ -93,6 +110,79 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
     }
+
+    internal static IngestArtifactGraph? BuildArtifactGraph(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+
+        if (File.Exists(path))
+        {
+            string full = Path.GetFullPath(path);
+            bool supported = string.Equals(Path.GetExtension(full), ".txt", StringComparison.Ordinal);
+            return new IngestArtifactGraph(
+                [BuildArtifact(
+                    full,
+                    Path.GetFileName(full),
+                    supported ? IngestArtifactDisposition.Admitted : IngestArtifactDisposition.Unsupported,
+                    supported ? "" : "DocumentDecomposer currently admits plain-text .txt files only")]);
+        }
+
+        if (!Directory.Exists(path)) return null;
+
+        string root = Path.GetFullPath(path);
+        var artifacts = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .OrderBy(static file => file, StringComparer.Ordinal)
+            .Select(file =>
+            {
+                string full = Path.GetFullPath(file);
+                string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
+                if (VendoredPathFilter.IsVendoredOrBuildLocation(full))
+                    return BuildArtifact(
+                        full,
+                        relative,
+                        IngestArtifactDisposition.ExcludedWithReason,
+                        "vendored or build-tree artifact is outside DocumentDecomposer source ownership");
+                if (!string.Equals(Path.GetExtension(full), ".txt", StringComparison.Ordinal))
+                    return BuildArtifact(
+                        full,
+                        relative,
+                        IngestArtifactDisposition.Unsupported,
+                        "DocumentDecomposer currently admits plain-text .txt files only");
+                return BuildArtifact(full, relative, IngestArtifactDisposition.Admitted, "");
+            })
+            .ToArray();
+        return new IngestArtifactGraph(artifacts);
+    }
+
+    private static IngestArtifact BuildArtifact(
+        string fullPath,
+        string relativePath,
+        IngestArtifactDisposition disposition,
+        string reason)
+    {
+        var info = new FileInfo(fullPath);
+        return new IngestArtifact(
+            DocumentSource.SourceName,
+            "local",
+            relativePath,
+            relativePath,
+            fullPath,
+            disposition,
+            UpstreamUrl: "",
+            FetchedAtUtc: "",
+            Bytes: info.Length,
+            Sha256: "",
+            UpstreamChecksum: "",
+            MediaType: disposition == IngestArtifactDisposition.Admitted ? "text/plain" : "",
+            License: "",
+            Citation: "",
+            Language: "",
+            Split: "",
+            AnnotationOrigin: "local-filesystem",
+            Notes: reason,
+            JournalLabel: $"document/{relativePath}",
+            ModifiedAt: info.LastWriteTimeUtc);
+    }
 }
 
 /// <summary>Single-file document masticator — shared by multi-file workers and tests.</summary>
@@ -102,19 +192,19 @@ public static class DocumentFileExtract
         string file, string relativePath, [EnumeratorCancellation] CancellationToken ct)
     {
         byte[] bytes = await ReadFileBytesAsync(file, ct);
-        if (bytes.Length == 0) yield break;
+        if (bytes.Length == 0)
+            throw new InvalidDataException(
+                $"document '{relativePath}' is empty; an admitted document must have content");
 
         Hash128? contentRoot = ContentTierSpine.ResolveRoot(bytes);
         if (contentRoot is null)
-        {
-            Trace.TraceWarning(
-                "DocumentFileExtract: skipping '{0}' — unresolvable content root " +
-                "(malformed encoding or native content_root_id rejection)",
-                relativePath);
-            yield break;
-        }
+            throw new InvalidDataException(
+                $"document '{relativePath}' has invalid UTF-8 or failed canonical content identity");
 
-        var metadata = FileMetadata.FromPath(file, relativePath);
+        var metadata = FileMetadata.FromPath(file, relativePath) with
+        {
+            FormatMetadata = ProjectGutenbergMetadata.Extract(bytes),
+        };
         FileIdentity fileIdentity;
         try
         {
@@ -122,13 +212,12 @@ public static class DocumentFileExtract
         }
         catch (InvalidOperationException ex)
         {
-            Trace.TraceWarning(
-                "DocumentFileExtract: skipping '{0}' — unresolvable file identity: {1}",
-                relativePath, ex.Message);
-            yield break;
+            throw new InvalidDataException(
+                $"document '{relativePath}' failed canonical file identity: {ex.Message}", ex);
         }
 
-        Hash128 documentId = DocumentEntity.Resolve(contentRoot.Value);
+        // A plain-text document introduces no extra composition around its content.
+        Hash128 documentId = contentRoot.Value;
         yield return new ContentIngestRecord(
             CanonicalUtf8: bytes,
             SourceId: contentRoot.Value,

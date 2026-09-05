@@ -114,6 +114,12 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "trajectory_build_rle")]
     internal static partial int TrajectoryBuildRle(Hash128* constituents, nuint n, double* outXyzm, nuint* outVertexCount);
 
+    [LibraryImport(Library, EntryPoint = "trajectory_build_flagged_rle")]
+    internal static partial int TrajectoryBuildFlaggedRle(Hash128* constituents, ulong* flags, nuint n, double* outXyzm, nuint* outVertexCount);
+
+    [LibraryImport(Library, EntryPoint = "trajectory_constituent_count")]
+    internal static partial int TrajectoryConstituentCount(double* trajectoryXyzm, nuint nPoints, nuint* outCount);
+
     [LibraryImport(Library, EntryPoint = "trajectory_constituents")]
     internal static partial int TrajectoryConstituents(double* trajectoryXyzm, nuint nPoints, Hash128* outHashes, nuint outCap);
 
@@ -205,6 +211,10 @@ public static unsafe partial class NativeInterop
     public static partial int NormalizeNfcUtf8(
         byte* utf8, nuint len, byte** outUtf8, nuint* outLen);
 
+    [LibraryImport(Library, EntryPoint = "laplace_identity_key_normalize_utf8")]
+    internal static partial int IdentityKeyNormalizeUtf8(
+        byte* utf8, nuint len, byte** outUtf8, nuint* outLen);
+
     [LibraryImport(Library, EntryPoint = "tier_tree_id_array")]
     internal static partial IntPtr TierTreeIdArray(IntPtr tree);
 
@@ -240,6 +250,9 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "intent_stage_attestation_count")]
     internal static partial nuint IntentStageAttestationCount(IntPtr stage);
+
+    [LibraryImport(Library, EntryPoint = "intent_stage_semantic_digest_batch")]
+    internal static partial int IntentStageSemanticDigestBatch(IntPtr* stages, nuint count, Hash128* result);
 
     [LibraryImport(Library, EntryPoint = "intent_stage_copy_column_list")]
     internal static partial IntPtr IntentStageCopyColumnList(int table);
@@ -407,6 +420,10 @@ public static unsafe partial class NativeInterop
         byte* utf8, nuint len, IntPtr ast, string modalityId,
         Hash128 sourceId, Hash128 typeMetaId, IntPtr* outResult);
 
+    [LibraryImport(Library, EntryPoint = "laplace_grammar_source_compose", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int GrammarSourceCompose(
+        byte* utf8, nuint len, IntPtr ast, string modalityId, IntPtr* outResult);
+
     [LibraryImport(Library, EntryPoint = "laplace_grammar_compose_materialize_phys", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int GrammarComposeMaterializePhys(
         IntPtr result, byte* utf8, nuint len, IntPtr ast, string modalityId);
@@ -430,6 +447,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_compose_root_id")]
     public static partial Hash128 ComposeRootId(IntPtr result);
 
+    [LibraryImport(Library, EntryPoint = "laplace_compose_root_placement")]
+    internal static partial int ComposeRootPlacement(
+        IntPtr result, double* coord4, byte* outTier, uint* outAtom, byte* outHasAtom);
 
 
     [LibraryImport(Library, EntryPoint = "laplace_compose_get_tier_tree")]
@@ -569,6 +589,50 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "laplace_tier_tree_collapse_index")]
     internal static partial uint TierTreeCollapseIndex(IntPtr tree, uint idx);
+
+    [LibraryImport(Library, EntryPoint = "laplace_ordered_composition_stage_batch")]
+    internal static partial int OrderedCompositionStageBatch(
+        IntPtr stage,
+        OrderedCompositionRequestNative* requests,
+        nuint requestCount,
+        OrderedCompositionResultNative* outResults);
+
+    [LibraryImport(Library, EntryPoint = "laplace_ordered_composition_compose_batch")]
+    internal static partial int OrderedCompositionComposeBatch(
+        OrderedCompositionRequestNative* requests,
+        nuint requestCount,
+        OrderedCompositionResultNative* outResults);
+
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    internal struct OrderedCompositionComponentNative
+    {
+        public Hash128 Id;
+        public double Coord0, Coord1, Coord2, Coord3;
+        public uint Atom;
+        public byte Tier;
+        public byte HasAtom;
+        private byte _pad1, _pad2;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    internal struct OrderedCompositionRequestNative
+    {
+        public IntPtr Components;
+        public UIntPtr ComponentCount;
+        public Hash128 TypeId;
+        public Hash128 SourceId;
+        public long ObservedAtUnixUs;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    internal struct OrderedCompositionResultNative
+    {
+        public Hash128 Id;
+        public double Coord0, Coord1, Coord2, Coord3;
+        public Hilbert128 Hilbert;
+        public byte Tier;
+        private byte _pad1, _pad2, _pad3, _pad4, _pad5, _pad6, _pad7;
+    }
 
     // --- Modality ladders above shared codepoint T0 (packaging buffers in, compose out) ---
     // Identity is digit→number→… trajectories (docs/invention/modality-ladder-law.md).

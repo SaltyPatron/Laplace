@@ -120,8 +120,8 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     ),
     scaffold AS (
         SELECT tc.entity_id AS entity_id,
-               count(*)::bigint AS weight,
-               row_number() OVER (ORDER BY count(*) DESC, tc.entity_id) AS rn
+               sum(GREATEST(tc.run_length, 1))::bigint AS weight,
+               row_number() OVER (ORDER BY sum(GREATEST(tc.run_length, 1)) DESC, tc.entity_id) AS rn
         FROM scaffold_traj t
         CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.trajectory) tc
         GROUP BY tc.entity_id

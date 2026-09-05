@@ -16,6 +16,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/trajectory.h
     include/laplace/core/tier_tree.h
     include/laplace/core/intent_stage.h
+    include/laplace/core/ordered_composition.h
     include/laplace/core/merkle_dedup.h
     include/laplace/core/hash_composer.h
     include/laplace/core/grapheme_floor.h
@@ -28,6 +29,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/word_break.h
     include/laplace/core/sentence_break.h
     include/laplace/core/normalize_nfc.h
+    include/laplace/core/identity_key.h
     include/laplace/core/text_decomposer.h
     include/laplace/core/content_witness_batch.h
     include/laplace/core/modality_atoms.h
@@ -67,6 +69,7 @@ set(LAPLACE_CORE_SOURCES
     src/trajectory.c
     src/tier_tree.c
     src/intent_stage.c
+    src/ordered_composition.c
     src/absence_filter.c
     src/merkle_dedup.c
     src/hash_composer.c
@@ -75,12 +78,14 @@ set(LAPLACE_CORE_SOURCES
     src/grammar_decomposer.c
     src/fide_xml.c
     src/grammar_compose.cpp
+    src/grammar_source_compose.c
     src/grammar_rows.c
     src/grammar_tags.c
     src/grapheme_break.c
     src/word_break.c
     src/sentence_break.c
     src/normalize_nfc.c
+    src/identity_key.c
     src/text_decomposer.c
     src/content_witness_batch.c
     src/ucd_xml.cpp
@@ -127,6 +132,7 @@ if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
     set(ZLIB_ROOT "${_laplace_pg_root}")
 endif()
 find_package(ZLIB REQUIRED)
+find_package(ICU COMPONENTS uc REQUIRED)
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
 
@@ -136,7 +142,7 @@ if(WIN32)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
-        PRIVATE blake3 ZLIB::ZLIB)
+        PRIVATE blake3 ZLIB::ZLIB ICU::uc)
 endif()
 
 
@@ -322,7 +328,7 @@ target_include_directories(laplace_core
 
 target_link_libraries(laplace_core
     PUBLIC  laplace_eigen
-    PRIVATE blake3 ZLIB::ZLIB
+    PRIVATE blake3 ZLIB::ZLIB ICU::uc
 )
 if(NOT WIN32)
     find_package(Threads REQUIRED)
