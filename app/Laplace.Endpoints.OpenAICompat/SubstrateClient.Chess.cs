@@ -230,18 +230,24 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Name to player, in one round trip. chess.player_id() reproduces the decomposer's own
-    /// name folding ("Tal, Mikhail" -> "mikhail tal") and hashes the canonical key, so the
-    /// typed name lands on the identical id the ingest wrote — or on nothing. The rating comes
-    /// from his folded cell; no cell means the substrate has never witnessed him at a board.
+    /// Name to player by the decomposer's content address. The same candidate SQL used by
+    /// the roster search owns the standing-cell selection, so exact search cannot fall back
+    /// to an arbitrary OUTCOME edge while the list is scoped to Chess_Result.
     /// </summary>
     public async Task<ChessPlayerRow?> ChessFindPlayerAsync(string name, CancellationToken ct)
     {
-        var rows = await NpgsqlSubstrateReads.ChessFindPlayerAsync(
-            _dataSource, name, ct, TranslateReadError);
-        if (rows.Count == 0) return null;
-        var r = rows[0];
-        return new ChessPlayerRow(0, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu);
+        var canonical = PlayerAlias.Canonical(name);
+        var rows = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
+            _dataSource,
+            [name, canonical, canonical.Replace(" ", "", StringComparison.Ordinal)],
+            2000, ct, TranslateReadError);
+        var expectedId = Convert.ToHexString(ChessVocabulary.PlayerId(name).ToBytes());
+        foreach (var r in rows)
+        {
+            if (!string.Equals(r.IdHex, expectedId, StringComparison.OrdinalIgnoreCase)) continue;
+            return new ChessPlayerRow(0, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu);
+        }
+        return null;
     }
 
     /// <summary>The career page: record by colour, the Elo the source tagged, the rivals.</summary>
