@@ -104,13 +104,14 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
             SELECT laplace.content_id(@bytes) = @id,
                    realize.render_bytes_batch(ARRAY[@id, NULL::bytea, @id])
                      IS NOT DISTINCT FROM ARRAY[@bytes, NULL::bytea, @bytes],
+                   realize.render_bytes(@id, NULL) IS NOT DISTINCT FROM @bytes,
                    realize.render_text(@id) IS NULL
             """;
         command.Parameters.Add("bytes", NpgsqlDbType.Bytea).Value = bytes;
         command.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id.ToBytes();
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
-        for (int i = 0; i < 3; ++i) Assert.True(reader.GetBoolean(i));
+        for (int i = 0; i < 4; ++i) Assert.True(reader.GetBoolean(i));
     }
 
     [Fact]

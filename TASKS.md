@@ -32,6 +32,9 @@
   inventory and 34 document tests passed. Retained generic-worker run admitted a complete
   41,815-byte artifact with exact reconstruction, work relations, metadata and physical
   journal identity; 2,504 durable rows in 1.985 seconds at the operator boundary.
+- OMW now consumes shared native libxml2 SAX batches instead of a private managed
+  XML parser. Namespace/attribute/text/topology tests pass; all 32 real lexicons
+  reconcile against the independent inventory, test-host peak RSS 256 MiB.
 - Existing SafeTensors codec repaired for exact scalar/empty/Unicode-name output,
   bounded export memory, and write-error propagation. Native 3/3 and independent
   safetensors.numpy readback passed. Full model export route remains unconnected.
@@ -49,7 +52,10 @@
 - Acceptance: combined managed/database 27/27; native closure affected DB 7/7;
   native core 43/43; intent stage 23/23; atomic writer 2/2; bootstrap reconciliation
   5/5; singleton replay compatibility 3/3; source policy 25/25.
-  Final combined build/DEV/BAT, CI and production deployment remain outstanding.
+  Final combined policy/build/DEV passed: 2,873 checks executed, 13 skipped
+  (native 510 executed/1 skipped; managed 2,361 executed/12 skipped; UCI/browser
+  suites executed). NUL/Morse/Python exact HTTP reads passed after final isolated
+  database restart. GitHub CI and original production deployment remain outstanding.
 
 Earlier entries below are historical; they are not current delivery claims.
 

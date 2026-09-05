@@ -7,5 +7,7 @@ CREATE OR REPLACE FUNCTION realize.render_bytes_batch(p_ids bytea[], p_max_depth
 
 CREATE OR REPLACE FUNCTION realize.render_bytes(p_id bytea, p_max_depth integer DEFAULT 0)
     RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_render_bytes'
-    LANGUAGE C STABLE;
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT (realize.render_bytes_batch(ARRAY[p_id], COALESCE(p_max_depth, 0)))[1];
+END;
