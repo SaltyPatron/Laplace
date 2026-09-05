@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Laplace.Chess.Service;
-using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -98,23 +97,21 @@ internal static class ChessEndpoints
         app.MapGet("/chess/lichess/status", async (ILichessStatusClient lichess, CancellationToken ct) =>
             Results.Json(await lichess.StatusAsync(ct))).WithTags("chess");
 
-        app.MapPost("/chess/lichess/start", async (HttpRequest request, LichessStartRequest req,
-            IServiceControl services, IOptions<Auth.LaplaceAuthOptions> auth, CancellationToken ct) =>
+        // These are part of the chess product surface and use the same /chess/*
+        // tenancy/API-key policy as the rest of it. The previous second shared-secret
+        // operator token and HTTPS-only browser gate were temporary scaffolding, not
+        // the product auth model.
+        app.MapPost("/chess/lichess/start", async (LichessStartRequest req,
+            IServiceControl services, CancellationToken ct) =>
         {
-            if (!Auth.OperatorAuth.IsAuthorized(request, auth.Value)) return Results.Unauthorized();
-            if (!ServiceControlEndpoints.IsSafeTransport(request)) return Results.BadRequest(new { error = "https_required" });
             if (req.Depth is not null || req.MaxConcurrent is not null || req.Substrate is not null || req.Speeds is not null)
                 return Results.BadRequest(new { error = "managed_configuration", message = "Set LAPLACE_LICHESS_* server-side and restart the service." });
             return await ServiceControlEndpoints.ExecuteAsync(services, ManagedService.Lichess, ServiceAction.Start, ct);
         }).WithTags("chess");
 
-        app.MapPost("/chess/lichess/stop", async (HttpRequest request, IServiceControl services,
-            IOptions<Auth.LaplaceAuthOptions> auth, CancellationToken ct) =>
-        {
-            if (!Auth.OperatorAuth.IsAuthorized(request, auth.Value)) return Results.Unauthorized();
-            if (!ServiceControlEndpoints.IsSafeTransport(request)) return Results.BadRequest(new { error = "https_required" });
-            return await ServiceControlEndpoints.ExecuteAsync(services, ManagedService.Lichess, ServiceAction.Stop, ct);
-        }).WithTags("chess");
+        app.MapPost("/chess/lichess/stop", async (IServiceControl services, CancellationToken ct) =>
+            await ServiceControlEndpoints.ExecuteAsync(services, ManagedService.Lichess, ServiceAction.Stop, ct))
+            .WithTags("chess");
 
         app.MapGet("/chess/lab/catalog", () =>
         {
@@ -201,7 +198,7 @@ internal static class ChessEndpoints
                 && !TryParseKind(req.Kind, out kind))
                 return Results.BadRequest(new { error = $"unknown kind '{req.Kind}'" });
             if (kind == ChessLabJobKind.LichessBot)
-                return Results.Conflict(new { error = "managed_service", message = "Use the authenticated lichess service controls; the API must not start a second bot." });
+                return Results.Conflict(new { error = "managed_service", message = "Use the Lichess service controls; the API must not start a second bot." });
             var config = req.Config?.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()) ?? new Dictionary<string, string>();
             var id = lab.StartJob(kind, config);
             return id is null ? Results.Problem("failed to start job") : Results.Json(new { jobId = id });
