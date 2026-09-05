@@ -84,11 +84,51 @@ public sealed class FideRatingListTests
     public void Search_PreservesRecordsAcrossBoundedGrammarBatches()
     {
         const int count = 4105; // deliberately crosses the 4096-record grammar batch boundary
+        byte[] estate = BuildEstate(count, needleAt: count - 1);
+
+        using var xml = new MemoryStream(estate);
+        var player = Assert.Single(FideRatingList.SearchXml(xml, "Needle", 5));
+        Assert.Equal((8000000 + count - 1).ToString(), player.FideId);
+        Assert.Equal("Needle, Player", player.Name);
+        Assert.Equal("IM", player.Title);
+    }
+
+    [Fact]
+    public void Projection_SingleAndParallelWorkersAreFieldAndOrderEquivalent()
+    {
+        const int count = 8209; // three physical batches; semantic output must not care
+        byte[] estate = BuildEstate(count, needleAt: count - 3);
+
+        using var serialXml = new MemoryStream(estate, writable: false);
+        var serial = FideRatingList.ProjectXml(serialXml, parseWorkers: 1);
+
+        using var parallelXml = new MemoryStream(estate, writable: false);
+        var parallel = FideRatingList.ProjectXml(parallelXml, parseWorkers: 4);
+
+        Assert.Equal(count, serial.Length);
+        Assert.Equal(serial, parallel);
+        Assert.Equal((8000000).ToString(), parallel[0].FideId);
+        Assert.Equal((8000000 + count - 1).ToString(), parallel[^1].FideId);
+        Assert.Equal("Needle, Player", parallel[^3].Name);
+    }
+
+    [Fact]
+    public void Projection_CancelledBeforeWorkDoesNotParseEstate()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        using var xml = Stream();
+        Assert.Throws<OperationCanceledException>(() =>
+            FideRatingList.ProjectXml(xml, parseWorkers: 4, cts.Token));
+    }
+
+    private static byte[] BuildEstate(int count, int needleAt)
+    {
         var source = new StringBuilder("<?xml version=\"1.0\"?><playerslist>");
         for (int i = 0; i < count; i++)
         {
             string id = (8000000 + i).ToString();
-            string name = i == count - 1 ? "Needle, Player" : $"Fixture, Player {i}";
+            string name = i == needleAt ? "Needle, Player" : $"Fixture, Player {i}";
             source.Append("<player><fideid>").Append(id)
                 .Append("</fideid><name>").Append(name)
                 .Append("</name><country>USA</country><sex>M</sex><title>M</title>")
@@ -97,12 +137,7 @@ public sealed class FideRatingListTests
                 .Append("</player>");
         }
         source.Append("</playerslist>");
-
-        using var xml = new MemoryStream(Encoding.UTF8.GetBytes(source.ToString()));
-        var player = Assert.Single(FideRatingList.SearchXml(xml, "Needle", 5));
-        Assert.Equal((8000000 + count - 1).ToString(), player.FideId);
-        Assert.Equal("Needle, Player", player.Name);
-        Assert.Equal("IM", player.Title);
+        return Encoding.UTF8.GetBytes(source.ToString());
     }
 
     private static MemoryStream Stream()
