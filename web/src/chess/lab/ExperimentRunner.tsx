@@ -137,10 +137,6 @@ export interface ExperimentRunnerProps {
  */
 export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerProps) {
   const importSurface = categories.length === 1 && categories[0] === 'import';
-  // The lab is not an operator-credential form. Header/local mode is intentionally usable
-  // without a second secret; key-mode deployments can still supply a token from the operator
-  // surface through sessionStorage, but it never blocks browsing or local execution here.
-  const operatorToken = sessionStorage.getItem('laplace.operatorToken') ?? '';
   const [catalog, setCatalog] = useState<LabCatalog | null>(null);
   const [jobs, setJobs] = useState<LabJob[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -265,7 +261,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
     setStarting(true);
     setErr(null);
     try {
-      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind, config: params }, { operatorToken });
+      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind, config: params });
       openJob({ id: r.jobId, kind, state: 'Pending', summary: { done: 0, total: 0 }, artifacts: {} });
       void refresh();
     } catch (e) {
@@ -280,7 +276,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
     setStarting(true);
     setErr(null);
     try {
-      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind: actionKind, config }, { operatorToken });
+      const r = await apiPost<{ jobId: string }>('/chess/lab/start', { kind: actionKind, config });
       setKind(actionKind);
       openJob({ id: r.jobId, kind: actionKind, state: 'Pending', summary: { done: 0, total: 0 }, artifacts: {} });
       void refresh();
@@ -293,7 +289,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
 
   const stopJob = async () => {
     if (!active) return;
-    try { await apiPost(`/chess/lab/stop/${active.id}`, {}, { operatorToken }); void refresh(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    try { await apiPost(`/chess/lab/stop/${active.id}`, {}); void refresh(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
 
   return (
@@ -460,7 +456,7 @@ export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerPr
               ) : active.kind.toLowerCase().replaceAll('-', '') === 'lichessfetch' && active.summary.message?.includes('new games') ? (
                 <Muted>Games and player profiles were ingested during this run. PGN is retained as the source artifact.</Muted>
               ) : (
-                <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {}, { operatorToken })}>Ingest PGN to substrate</Button>
+                <Button onClick={() => apiPost(`/chess/lab/jobs/${active.id}/ingest`, {})}>Ingest PGN to substrate</Button>
               )}
             </div>
           )}
