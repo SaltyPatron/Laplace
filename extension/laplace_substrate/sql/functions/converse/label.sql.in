@@ -130,10 +130,12 @@ BEGIN ATOMIC
     ),
 
     -- The relation taxonomy, not this display function, owns the definition vocabulary.
-    -- Asking for the family keeps this site free of a second relation-id literal while
-    -- remaining foldable/partition-prunable through the generated manifest law.
+    -- Use the already-installed family-members accessor rather than depending on the
+    -- generated foldable helper: extension upgrades regenerate that helper later in the
+    -- script, and a BEGIN ATOMIC dependency would otherwise make its DROP/replace fail.
     definition_types AS MATERIALIZED (
-        SELECT consensus.relation_family_ids('HAS_DEFINITION') AS ids
+        SELECT COALESCE(array_agg(f.id), '{}'::bytea[]) AS ids
+        FROM consensus.relation_family_members('HAS_DEFINITION') f
     ),
 
     -- A concept can own text through the governed definition family, and a definition
