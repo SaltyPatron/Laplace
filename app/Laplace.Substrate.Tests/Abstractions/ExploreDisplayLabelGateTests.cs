@@ -22,7 +22,9 @@ public sealed class ExploreDisplayLabelGateTests
 
         Assert.Contains("CREATE OR REPLACE FUNCTION realize.display_label_batch", sql, StringComparison.Ordinal);
         Assert.Contains("realize.resolve_name_batch(p_ids)", sql, StringComparison.Ordinal);
-        Assert.Contains("realize.render_text_batch(b.ids, 3)", sql, StringComparison.Ordinal);
+        Assert.Contains("realize.render_text_batch(b.ids)", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("realize.render_text_batch(b.ids, 3)", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("realize.render_text_batch(b.ids, 4)", sql, StringComparison.Ordinal);
         Assert.Contains("consensus.relation_family_ids('HAS_DEFINITION')", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("relation_type_id('HAS_DEFINITION')", sql, StringComparison.Ordinal);
         Assert.Contains("HasFileMetadata", sql, StringComparison.Ordinal);
