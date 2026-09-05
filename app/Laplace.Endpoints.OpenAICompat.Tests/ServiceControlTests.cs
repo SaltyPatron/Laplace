@@ -44,7 +44,7 @@ public sealed class ServiceControlTests
     [Theory]
     [InlineData(null)]
     [InlineData("incorrect")]
-    public async Task HeaderModeAndForgedTenantCannotAuthorizeServiceControls(string? presented)
+    public async Task HeaderModeAndForgedTenantCannotAuthorizeAdminServiceControls(string? presented)
     {
         await using var factory = new Factory();
         using var client = factory.Client();
@@ -52,7 +52,6 @@ public sealed class ServiceControlTests
         if (presented is not null) client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, presented);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v1/admin/services/mcp")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/v1/admin/services/mcp/stop", new { })).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/chess/lichess/start", new { })).StatusCode);
         Assert.Empty(factory.Control.Calls);
     }
 
@@ -140,6 +139,26 @@ public sealed class ServiceControlTests
         await using var factory = new Factory(mode: "key");
         using var client = factory.Client();
         using var reply = await client.PostAsJsonAsync("/chess/lab/start", new { kind = "lichess-bot" });
+        Assert.Equal(HttpStatusCode.Unauthorized, reply.StatusCode);
+        Assert.Empty(factory.Control.Calls);
+    }
+
+    [Fact]
+    public async Task LichessChessControlsHaveNoOperatorTokenOrHttpsRoadblockInHeaderMode()
+    {
+        await using var factory = new Factory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("http://localhost") });
+        using var reply = await client.PostAsJsonAsync("/chess/lichess/start", new { });
+        Assert.Equal(HttpStatusCode.Accepted, reply.StatusCode);
+        Assert.Equal((ManagedService.Lichess, ServiceAction.Start), Assert.Single(factory.Control.Calls));
+    }
+
+    [Fact]
+    public async Task LichessChessControlsUseNormalChessApiKeyPolicyInKeyMode()
+    {
+        await using var factory = new Factory(mode: "key");
+        using var client = factory.Client();
+        using var reply = await client.PostAsJsonAsync("/chess/lichess/start", new { });
         Assert.Equal(HttpStatusCode.Unauthorized, reply.StatusCode);
         Assert.Empty(factory.Control.Calls);
     }
