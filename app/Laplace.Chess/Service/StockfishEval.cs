@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Threading;
 
 namespace Laplace.Chess.Service;
@@ -14,10 +14,9 @@ public interface IPositionEvaluator
 }
 
 /// <summary>
-/// One stockfish process speaking UCI, evaluated synchronously at a fixed depth.
-/// Mate scores map to the same magnitude convention PgnEvals.ParseToken uses for
-/// "#N" tokens (sign · (20000 − N·100)), so stockfish evals and PGN-carried evals
-/// are comparable on the HAS_EVAL axis.
+/// One stockfish process speaking UCI, evaluated synchronously at a fixed depth/node budget.
+/// Mate scores map to the same magnitude convention PgnEvals.ParseToken uses for "#N" tokens
+/// so stockfish evals and PGN-carried evals are comparable on the HAS_EVAL axis.
 /// </summary>
 public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
 {
@@ -43,14 +42,28 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
             CreateNoWindow = true,
         }) ?? throw new InvalidOperationException($"failed to start stockfish at {exePath}");
 
-        Send("uci");
-        WaitFor("uciok", TimeSpan.FromSeconds(10));
-        // One thread per engine instance — parallelism comes from the pool, not from
-        // oversubscribing each engine against the compose workers.
-        Send("setoption name Threads value 1");
-        Send("setoption name Hash value 16");
-        Send("isready");
-        WaitFor("readyok", TimeSpan.FromSeconds(10));
+        // Redirected stderr used to be left unread forever. A noisy/broken engine could fill
+        // that pipe and block before stdout produced bestmove, presenting as an ingest hang.
+        _proc.ErrorDataReceived += static (_, _) => { };
+        _proc.BeginErrorReadLine();
+
+        try
+        {
+            Send("uci");
+            WaitFor("uciok", TimeSpan.FromSeconds(10));
+            // One thread per engine instance — parallelism comes from the pool, not from
+            // oversubscribing each engine against the compose workers.
+            Send("setoption name Threads value 1");
+            Send("setoption name Hash value 16");
+            Send("isready");
+            WaitFor("readyok", TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            TerminateProcess();
+            _proc.Dispose();
+            throw;
+        }
     }
 
     public bool Broken => _broken || _proc.HasExited;
@@ -64,11 +77,15 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
             Send(_nodes > 0 ? $"go nodes {_nodes}" : $"go depth {_depth}");
 
             int? last = null;
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-            while (DateTime.UtcNow < deadline)
+            long deadline = DeadlineAfter(TimeSpan.FromSeconds(30));
+            while (true)
             {
-                string? line = _proc.StandardOutput.ReadLine();
-                if (line is null) { _broken = true; return null; }
+                string? line = ReadLineUntil(deadline);
+                if (line is null)
+                {
+                    _broken = true;
+                    return null;
+                }
                 if (line.StartsWith("bestmove", StringComparison.Ordinal)) return last;
                 int si = line.IndexOf(" score ", StringComparison.Ordinal);
                 if (si < 0) continue;
@@ -77,11 +94,17 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
                 if (tok[0] == "cp" && int.TryParse(tok[1], out int cp))
                     last = cp;
                 else if (tok[0] == "mate" && int.TryParse(tok[1], out int mate))
-                    // mate 0 = side to move is already mated (checkmate delivered against them).
                     last = mate == 0 ? -20_000
                          : Math.Sign(mate) * (20_000 - Math.Min(Math.Abs(mate), 100) * 100);
             }
-            _broken = true; // engine hung past the deadline — stop trusting this instance
+        }
+        catch (TimeoutException)
+        {
+            // ReadLine() used to block *inside* the deadline loop, so the 30-second timeout
+            // was fictitious. ReadLineAsync+WaitAsync makes the deadline enforceable even if
+            // the engine stops producing output.
+            _broken = true;
+            try { Send("stop"); } catch { }
             return null;
         }
         catch (Exception)
@@ -91,15 +114,24 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
         }
     }
 
-    private void Send(string cmd) => _proc.StandardInput.WriteLine(cmd);
+    private void Send(string cmd)
+    {
+        _proc.StandardInput.WriteLine(cmd);
+        _proc.StandardInput.Flush();
+    }
 
     private void WaitFor(string marker, TimeSpan timeout)
     {
-        _proc.StandardInput.Flush();
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
+        long deadline = DeadlineAfter(timeout);
+        while (true)
         {
-            string? line = _proc.StandardOutput.ReadLine();
+            string? line;
+            try { line = ReadLineUntil(deadline); }
+            catch (TimeoutException)
+            {
+                _broken = true;
+                throw new InvalidOperationException($"stockfish never answered '{marker}' before timeout");
+            }
             if (line is null) break;
             if (line.StartsWith(marker, StringComparison.Ordinal)) return;
         }
@@ -107,39 +139,51 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
         throw new InvalidOperationException($"stockfish never answered '{marker}'");
     }
 
+    private string? ReadLineUntil(long deadline)
+    {
+        long remainingTicks = deadline - Stopwatch.GetTimestamp();
+        if (remainingTicks <= 0) throw new TimeoutException();
+        var remaining = TimeSpan.FromSeconds(remainingTicks / (double)Stopwatch.Frequency);
+        return _proc.StandardOutput.ReadLineAsync()
+            .WaitAsync(remaining)
+            .GetAwaiter()
+            .GetResult();
+    }
+
+    private static long DeadlineAfter(TimeSpan timeout)
+    {
+        double ticks = timeout.TotalSeconds * Stopwatch.Frequency;
+        return checked(Stopwatch.GetTimestamp() + (long)Math.Ceiling(ticks));
+    }
+
     private int _disposed;
 
     public void Dispose()
     {
-        // Idempotent. Dispose reaches this object from three directions — an explicit call,
-        // the pool's ProcessExit handler, and (previously) the finalizer — and at shutdown
-        // more than one of them fires.
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         try { if (!_proc.HasExited) Send("quit"); } catch { }
-        try { if (!_proc.WaitForExit(1000)) _proc.Kill(entireProcessTree: true); } catch { }
+        TerminateProcess();
         _proc.Dispose();
     }
 
-    // NO FINALIZER. There used to be one, and it called _proc.HasExited / _proc.Kill().
-    //
-    // A finalizer must never touch another FINALIZABLE managed object. System.Diagnostics.Process
-    // has its own finalizer and the runtime does not order finalization, so by the time this one
-    // ran _proc could already be finalized — its SafeProcessHandle closed underneath it. Reading
-    // HasExited or calling Kill through that handle faults in native code, which is precisely the
-    // observed failure: every test passes, then the test host dies during teardown with no
-    // managed exception and no failing assertion. `catch { }` cannot help; the fault is below the
-    // CLR, not an exception.
-    //
-    // Nothing is leaked by dropping it. Process carries its own finalizer for the handle, the
-    // pool's ProcessExit hook still quits engines on a normal exit, and any child that outlives
-    // the parent is reaped by the OS. A finalizer was the one mechanism here that could not be
-    // made safe.
+    private void TerminateProcess()
+    {
+        try
+        {
+            if (!_proc.HasExited && !_proc.WaitForExit(1000))
+                _proc.Kill(entireProcessTree: true);
+        }
+        catch { }
+    }
+
+    // NO FINALIZER. System.Diagnostics.Process has its own finalizer and there is no safe
+    // finalization order between the two managed objects. Pool/process-exit disposal owns
+    // normal teardown; the OS owns the last-resort child cleanup.
 }
 
 /// <summary>
-/// Rent/return pool of evaluators for the parallel compose workers. Broken engines are
-/// discarded on return and replaced lazily. All engines are killed on process exit —
-/// decomposers have no disposal lifecycle in the ingest runner, so the pool guards itself.
+/// Rent/return pool of evaluators for the compose workers. Broken engines are discarded on
+/// return and replaced lazily. All engines are killed on process exit.
 /// </summary>
 public sealed class StockfishEvaluatorPool : IDisposable
 {
