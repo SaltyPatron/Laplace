@@ -25,7 +25,8 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.Contains("realize.render_text_batch(b.ids)", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("realize.render_text_batch(b.ids, 3)", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("realize.render_text_batch(b.ids, 4)", sql, StringComparison.Ordinal);
-        Assert.Contains("consensus.relation_family_ids('HAS_DEFINITION')", sql, StringComparison.Ordinal);
+        Assert.Contains("consensus.relation_family_members('HAS_DEFINITION')", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("consensus.relation_family_ids('HAS_DEFINITION')", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("relation_type_id('HAS_DEFINITION')", sql, StringComparison.Ordinal);
         Assert.Contains("HasFileMetadata", sql, StringComparison.Ordinal);
         Assert.Contains("WITH RECURSIVE", sql, StringComparison.Ordinal);
@@ -40,6 +41,9 @@ public sealed class ExploreDisplayLabelGateTests
         // A preview follows one ordered branch at each tier. It must never unpack siblings or
         // reconstruct a full book/document merely to put text on a graph node, and the app
         // must consume the installed projection rather than owning a second copy of the law.
+        // The display function also must not create a pg_depend edge to the generated
+        // relation_family_ids helper: extension upgrades regenerate that helper later in the
+        // manifest and older upgrades still DROP it before recreating it.
         Assert.DoesNotContain("ST_DumpPoints", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("generation.trajectory_unpacked_points", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("constituents_closure", sql, StringComparison.Ordinal);
