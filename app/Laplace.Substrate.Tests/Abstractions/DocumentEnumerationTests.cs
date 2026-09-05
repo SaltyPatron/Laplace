@@ -14,6 +14,7 @@ namespace Laplace.Substrate.Tests.Abstractions;
 // ecosystem tree never gets enumerated for document ingest under the corpus's
 // identity. Before the fix, EnumerateInputFiles was a bare EnumerateFiles with
 // no filter.
+[Collection("GrammarPerfcache")]
 public sealed class DocumentEnumerationTests
 {
     [Fact]

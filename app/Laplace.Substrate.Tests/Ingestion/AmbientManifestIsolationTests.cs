@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Laplace.Ingestion.Tests;
 
+[Collection("GrammarPerfcache")]
 public sealed class AmbientManifestIsolationTests
 {
     [Fact]
