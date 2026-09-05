@@ -267,8 +267,17 @@ internal sealed partial class SubstrateClient
             var rows = await NpgsqlSubstrateReads.ExploreAnchorNeighborsAsync(
                 conn, anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm, anchor.TrajectoryWkt,
                 geodesicK, frechetK, frechetMax, Math.Max(DefaultCommandTimeoutSeconds, 20), ct);
-            return [.. rows.Select(r => new ExploreAnchorNeighborRow(
-                r.Axis, r.IdHex, r.Label ?? r.IdHex, r.Tier, r.Geodesic, r.Frechet))];
+            var labels = await ReadLabelsFastAsync(
+                conn, rows.Select(static r => r.IdHex).ToArray(), ct);
+            return [.. rows.Select(r =>
+            {
+                var hex = r.IdHex.ToLowerInvariant();
+                var display = labels.TryGetValue(hex, out var labeled)
+                    ? labeled.Label
+                    : string.IsNullOrWhiteSpace(r.Label) ? "unrealized entity" : r.Label;
+                return new ExploreAnchorNeighborRow(
+                    r.Axis, r.IdHex, display, r.Tier, r.Geodesic, r.Frechet);
+            })];
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
@@ -507,7 +516,8 @@ internal sealed partial class SubstrateClient
 
         // Native SPI web expansion (pg_laplace_explore_web): one connection,
         // undirected consensus probe, ≤fanout new nodes/frontier parent, all tiers.
-        // Labels via render_text_fast.
+        // Display names are resolved in one bounded post-rank batch. The hash stays
+        // in IdHex for navigation and never becomes visible node content.
         hops = Math.Max(0, hops);
         fanout = Math.Max(0, fanout);
         maxNodes = Math.Max(0, maxNodes);
@@ -555,12 +565,12 @@ internal sealed partial class SubstrateClient
 
                 if (!nodes.ContainsKey(sourceHex))
                 {
-                    nodes[sourceHex] = new ExploreGraphNode(sourceHex, sourceHex, hop, null);
+                    nodes[sourceHex] = new ExploreGraphNode(sourceHex, "unrealized entity", hop, null);
                     unlabeled.Add(sourceHex);
                 }
                 if (!nodes.ContainsKey(objectHex))
                 {
-                    nodes[objectHex] = new ExploreGraphNode(objectHex, objectHex, hop, null);
+                    nodes[objectHex] = new ExploreGraphNode(objectHex, "unrealized entity", hop, null);
                     unlabeled.Add(objectHex);
                 }
                 else if (hop < nodes[objectHex].Hop)
@@ -569,7 +579,9 @@ internal sealed partial class SubstrateClient
                 }
             }
 
-            // Batch-label endpoints + relation types through the native render path.
+            // Batch-label endpoints + relation types after graph ranking. Textual high-tier
+            // entities get a bounded first-descendant Unicode preview; non-text/unnamed
+            // entities get their type label or an explicit abstention, never their hash.
             var idsToLabel = unlabeled.Concat(typeIds).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (idsToLabel.Count > 0)
             {
@@ -612,20 +624,17 @@ internal sealed partial class SubstrateClient
         var result = new Dictionary<string, (string Label, short? Tier)>(StringComparer.OrdinalIgnoreCase);
         if (idHexes.Count == 0) return result;
 
-        var ids = new byte[idHexes.Count][];
+        var ids = new List<byte[]>(idHexes.Count);
         for (var i = 0; i < idHexes.Count; i++)
         {
             var parsed = TryParseIdHex(idHexes[i]);
-            if (parsed is null) continue;
-            ids[i] = parsed;
+            if (parsed is not null) ids.Add(parsed);
         }
 
-        foreach (var row in await NpgsqlSubstrateReads.LabelsFastAsync(conn, ids.Where(x => x is not null).ToArray()!, ct))
+        foreach (var row in await NpgsqlDisplayReads.DisplayLabelsAsync(conn, ids.ToArray(), ct))
         {
             var hex = row.IdHex.ToLowerInvariant();
-            var lab = row.Label ?? hex;
-            if (lab.Length > 48) lab = lab[..47] + "…";
-            result[hex] = (lab, row.Tier);
+            result[hex] = (row.Label, row.Tier);
         }
 
         return result;
