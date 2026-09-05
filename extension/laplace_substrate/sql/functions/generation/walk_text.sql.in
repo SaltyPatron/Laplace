@@ -21,16 +21,24 @@ BEGIN ATOMIC
         FROM converse.prompt_state(p_prompt) p
         WHERE p.id IS NOT NULL
     ), prompt_coherence AS MATERIALIZED (
-        SELECT c.ord, c.synset_id
+        SELECT c.ord, c.tok, c.synset_id, c.rel_type_id
         FROM converse.prompt_coherence(p_prompt) c
         WHERE c.synset_id IS NOT NULL
     ), ctx AS MATERIALIZED (
         SELECT array_agg(p.id ORDER BY p.ord) AS ids
         FROM prompt_state p
     ), resolved AS MATERIALIZED (
+        -- A named relation has explicit operands from the existing joint
+        -- election. Function words and relation namers remain ordered context;
+        -- they do not become alternative subjects of that requested operation.
         SELECT p.ord, p.id AS entity FROM prompt_state p
+        WHERE NOT EXISTS (SELECT 1 FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL)
         UNION ALL
         SELECT c.ord, c.synset_id FROM prompt_coherence c
+        WHERE c.rel_type_id IS NOT NULL OR NOT EXISTS (
+            SELECT 1 FROM prompt_coherence named WHERE named.rel_type_id IS NOT NULL)
+        UNION ALL
+        SELECT c.ord, c.tok FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL
     ), seeds AS MATERIALIZED (
         SELECT r.entity, min(r.ord) AS ord
         FROM resolved r
@@ -58,7 +66,9 @@ BEGIN ATOMIC
                      p_seed,
                      laplace.hash128_lo(public.laplace_hash128_blake3(
                          convert_to(p_prompt, 'UTF8')))),
-                 frontier.ids) g
+                 frontier.ids,
+                 (SELECT array_agg(DISTINCT c.rel_type_id)
+                  FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL)) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,

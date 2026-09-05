@@ -76,7 +76,9 @@
 #include "common/pg_prng.h"
 
 #include "laplace/core/hash128.h"
+#include "laplace/core/content_witness_batch.h"
 #include "spi_common.h"
+#include "relation_symmetry.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 
@@ -84,7 +86,8 @@ typedef struct Cand
 {
     Datum  obj;        /* bytea(16), caller-context copy */
     Datum  sep;        /* bytea(16) or (Datum) 0         */
-    int64  weight;     /* S6 sequence count              */
+    int64  weight;     /* S6 sequence count; 0 = no sequence testimony */
+    int    stride;     /* measured suffix length; semantic-only = 0 */
     double steer;      /* S7 signed consensus mass       */
     int64  edges;      /* S7 edge count; 0 = unattested  */
     double eff;        /* combined sampling weight       */
@@ -98,9 +101,65 @@ typedef struct CandIndex
 
 static SPIPlanPtr propose_plan = NULL;
 static SPIPlanPtr floor_plan   = NULL;
+static SPIPlanPtr semantic_plan = NULL;
+static SPIPlanPtr typed_semantic_plan = NULL;
+static SPIPlanPtr steering_plan = NULL;
+/* Nomination is a typed indexed neighborhood read, not a second score. S7 sees
+ * the complete union and remains the only semantic scorer. Content classes are
+ * supplied from the native content-type authority; no labels are rendered here. */
+static const char *semantic_query =
+    "WITH neighbors(id) AS MATERIALIZED ("
+    " SELECT unnest($1::bytea[]) UNION SELECT c.object_id FROM laplace.consensus c"
+    " WHERE c.subject_id = ANY($1) AND c.object_id IS NOT NULL"
+    " UNION SELECT c.subject_id FROM laplace.consensus c"
+    " WHERE c.object_id = ANY($1))"
+    " SELECT n.id FROM neighbors n JOIN laplace.entities e ON e.id = n.id"
+    " WHERE e.type_id = ANY($2) AND NOT (n.id = ANY($3))"
+    " AND EXISTS (SELECT 1 FROM laplace.physicalities p"
+    " WHERE p.entity_id = n.id AND p.type = 1 AND p.trajectory IS NOT NULL)"
+    " ORDER BY n.id";
 static const char *steer_query =
     "SELECT candidate, steer, edges "
-    "FROM generation.steer_candidates($1, $2)";
+    "FROM generation.steer_candidates($1, $2, $3)";
+static const char *typed_semantic_query =
+    "WITH neighbors(id) AS MATERIALIZED ("
+    " SELECT unnest($1::bytea[]) UNION SELECT c.object_id FROM laplace.consensus c"
+    " WHERE c.subject_id = ANY($1) AND c.object_id IS NOT NULL AND c.type_id = ANY($4)"
+    " UNION SELECT c.subject_id FROM laplace.consensus c"
+    " WHERE c.object_id = ANY($1) AND c.type_id = ANY($4) AND c.type_id = ANY($5))"
+    " SELECT n.id FROM neighbors n JOIN laplace.entities e ON e.id = n.id"
+    " WHERE e.type_id = ANY($2) AND NOT (n.id = ANY($3))"
+    " AND EXISTS (SELECT 1 FROM laplace.physicalities p"
+    " WHERE p.entity_id = n.id AND p.type = 1 AND p.trajectory IS NOT NULL)"
+    " ORDER BY n.id";
+
+static void
+validate_relation_types(ArrayType *types)
+{
+    Datum *elems;
+    bool  *nulls;
+    int    count;
+
+    if (ARR_NDIM(types) != 1 || ARR_ELEMTYPE(types) != BYTEAOID)
+        ereport(ERROR,
+                (errmsg("walk_continuations: relation types must be a 1-D bytea array")));
+    deconstruct_array(types, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &elems, &nulls, &count);
+    for (int i = 0; i < count; ++i)
+    {
+        if (nulls[i])
+            ereport(ERROR,
+                    (errmsg("walk_continuations: relation types must not contain NULL")));
+        if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(elems[i])) != 16)
+            ereport(ERROR,
+                    (errmsg("walk_continuations: relation type ids must be 16 bytes")));
+    }
+    if (count > 0)
+    {
+        pfree(elems);
+        pfree(nulls);
+    }
+}
 
 /*
  * Prepared once per backend and kept: the un-prepared path re-plans on every
@@ -111,6 +170,25 @@ static const char *steer_query =
 static void
 ensure_plans(void)
 {
+    if (typed_semantic_plan == NULL)
+    {
+        Oid types[5] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID,
+                         BYTEAARRAYOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(typed_semantic_query, 5, types,
+            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+            elog(ERROR, "walk_continuations: typed semantic plan failed");
+        typed_semantic_plan = plan;
+    }
+    if (steering_plan == NULL)
+    {
+        Oid types[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(steer_query, 3, types,
+            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+            elog(ERROR, "walk_continuations: steering plan failed");
+        steering_plan = plan;
+    }
     if (propose_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, INT4OID };
@@ -125,6 +203,15 @@ ensure_plans(void)
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "walk_continuations: SPI_keepplan(propose) failed");
         propose_plan = plan;
+    }
+    if (semantic_plan == NULL)
+    {
+        Oid argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(semantic_query, 3, argtypes,
+                                             CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+            elog(ERROR, "walk_continuations: semantic proposal plan failed");
+        semantic_plan = plan;
     }
     if (floor_plan == NULL)
     {
@@ -238,6 +325,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     int        n_frontier = 0, n_prompt = 0;
     Cand      *cand = NULL;
     int        cand_capacity = 0;
+    ArrayType *relation_types = PG_NARGS() > 7 && !PG_ARGISNULL(7) ?
+        PG_GETARG_ARRAYTYPE_P(7) : NULL;
     MemoryContext walk_cxt, old;
 
     if (PG_ARGISNULL(0))
@@ -260,6 +349,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("walk_continuations: spread must be finite and not negative")));
     if (ARR_NDIM(ctx_arr) != 1 || ARR_ELEMTYPE(ctx_arr) != BYTEAOID)
         ereport(ERROR, (errmsg("walk_continuations: context must be a 1-D bytea array")));
+    if (relation_types != NULL)
+        validate_relation_types(relation_types);
 
     InitMaterializedSRF(fcinfo, 0);
 
@@ -290,7 +381,9 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             (uint64) (MaxAllocSize / sizeof(Datum)))
         ereport(ERROR,
                 (errmsg("walk_continuations: requested walk exceeds PostgreSQL allocation capacity")));
-    if ((uint64) n_front_in + (uint64) max_order >
+    /* An empty/all-NULL routed frontier falls back to the entire prompt. */
+    int frontier_base_capacity = n_front_in > n_in ? n_front_in : n_in;
+    if ((uint64) frontier_base_capacity + (uint64) max_order >
             (uint64) (MaxAllocSize / sizeof(Datum)))
         ereport(ERROR,
                 (errmsg("walk_continuations: requested frontier exceeds PostgreSQL allocation capacity")));
@@ -301,7 +394,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
      * tail. The window is max_order — the SAME k the S6 context backoff already bounds
      * itself by — so the frontier introduces no constant of its own. */
     frontier = (Datum *) palloc(sizeof(Datum) *
-                                (n_front_in + max_order > 0 ? n_front_in + max_order : 1));
+                                (frontier_base_capacity + max_order > 0 ?
+                                 frontier_base_capacity + max_order : 1));
     for (int i = 0; i < n_in; i++)
     {
         bytea *b;
@@ -342,7 +436,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
     for (int32 step = 1; step <= steps; step++)
     {
-        int  n_cand = 0, used = 0;
+        int  n_cand = 0;
         int  pick = -1;
 
         CHECK_FOR_INTERRUPTS();
@@ -387,6 +481,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                     cand[n_cand].sep    = sep_null ? (Datum) 0 : copy_id_datum(sd);
                     MemoryContextSwitchTo(old);
                     cand[n_cand].weight = DatumGetInt64(wd);
+                    cand[n_cand].stride = k;
                     cand[n_cand].steer  = 0.0;
                     cand[n_cand].edges  = 0;
                     n_cand++;
@@ -398,7 +493,6 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             pfree(tail);
             if (found_candidates)
             {
-                used = k;
                 break;
             }
         }
@@ -431,13 +525,90 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 MemoryContextSwitchTo(old);
                 cand[n_cand].sep    = (Datum) 0;
                 cand[n_cand].weight = DatumGetInt64(wd);
+                cand[n_cand].stride = 0;
                 cand[n_cand].steer  = 0.0;
                 cand[n_cand].edges  = 0;
                 n_cand++;
             }
             if (SPI_tuptable != NULL)
                 SPI_freetuptable(SPI_tuptable);
-            used = 0;
+        }
+        /* ---- S6 semantic proposals from the same live frontier ---- */
+        {
+            Datum type_ids[5];
+            for (uint8 tier = 0; tier < 5; ++tier)
+            {
+                hash128_t type = laplace_content_tier_type_id(tier);
+                bytea *id = (bytea *) palloc(VARHDRSZ + 16);
+                SET_VARSIZE(id, VARHDRSZ + 16);
+                memcpy(VARDATA(id), &type, 16);
+                type_ids[tier] = PointerGetDatum(id);
+            }
+            ArrayType *types = construct_array(type_ids, 5, BYTEAOID, -1, false, TYPALIGN_INT);
+            ArrayType *front = construct_array(frontier, n_frontier, BYTEAOID, -1, false, TYPALIGN_INT);
+            /* The semantic graph walk is a simple path through content. Prompt
+             * seeds and already-emitted nodes do not re-enter solely through the
+             * graph. Witnessed sequence proposals can still repeat them. Routed
+             * frontier members are eligible; they are not all prompt seeds. */
+            ArrayType *visited = construct_array(ctx, ctx_len, BYTEAOID, -1, false, TYPALIGN_INT);
+            Datum args[5] = { PointerGetDatum(front), PointerGetDatum(types), PointerGetDatum(visited),
+                             PointerGetDatum(relation_types), (Datum)0 };
+            if (relation_types) args[4] = PointerGetDatum(laplace_symmetric_relation_types());
+            HASHCTL ctl = {0};
+            ctl.keysize = 16;
+            ctl.entrysize = sizeof(CandIndex);
+            ctl.hcxt = walk_cxt;
+            HTAB *seen = hash_create("semantic proposal union", n_cand + 32, &ctl,
+                                    HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            for (int i = 0; i < n_cand; ++i)
+                hash_search(seen, VARDATA_ANY(DatumGetByteaPP(cand[i].obj)), HASH_ENTER, NULL);
+            Portal portal = SPI_cursor_open(NULL,
+                                            relation_types ? typed_semantic_plan : semantic_plan,
+                                            args, NULL, true);
+            if (portal == NULL)
+                elog(ERROR, "walk_continuations: semantic proposal cursor open failed: %s",
+                     SPI_result_code_string(SPI_result));
+            for (;;)
+            {
+                SPI_cursor_fetch(portal, true, 50000);
+                if (SPI_processed == 0)
+                    break;
+                ensure_candidate_capacity(&cand, &cand_capacity,
+                                          (uint64)n_cand + SPI_processed, walk_cxt);
+                for (uint64 r = 0; r < SPI_processed; ++r)
+                {
+                    bool isnull, found;
+                    Datum id = SPI_getbinval(SPI_tuptable->vals[r],
+                                             SPI_tuptable->tupdesc, 1, &isnull);
+                    if (isnull) continue;
+                    bytea *bytes = DatumGetByteaPP(id);
+                    if (VARSIZE_ANY_EXHDR(bytes) != 16)
+                        elog(ERROR, "walk_continuations: semantic candidate id must be 16 bytes");
+                    hash_search(seen, VARDATA_ANY(bytes), HASH_ENTER, &found);
+                    if (found) continue;
+                    old = MemoryContextSwitchTo(walk_cxt);
+                    cand[n_cand].obj = copy_id_datum(id);
+                    MemoryContextSwitchTo(old);
+                    cand[n_cand].sep = (Datum)0;
+                    cand[n_cand].weight = 0;
+                    cand[n_cand].stride = 0;
+                    cand[n_cand].steer = 0.0;
+                    cand[n_cand].edges = 0;
+                    ++n_cand;
+                }
+                SPI_freetuptable(SPI_tuptable);
+                SPI_tuptable = NULL;
+                CHECK_FOR_INTERRUPTS();
+            }
+            if (SPI_tuptable != NULL)
+            {
+                SPI_freetuptable(SPI_tuptable);
+                SPI_tuptable = NULL;
+            }
+            SPI_cursor_close(portal);
+            hash_destroy(seen);
+            pfree(types); pfree(front); pfree(visited);
+            for (int i = 0; i < 5; ++i) pfree(DatumGetPointer(type_ids[i]));
         }
         if (n_cand == 0)
             break;
@@ -446,7 +617,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         {
             Datum     *objs;
             ArrayType *cand_a, *front_a;
-            Datum      args[2];
+            Datum      args[3];
             int        rc;
             HASHCTL    ctl;
             HTAB      *by_id;
@@ -459,12 +630,9 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
             args[0] = PointerGetDatum(cand_a);
             args[1] = PointerGetDatum(front_a);
-            {
-                Oid argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-
-                rc = SPI_execute_with_args(steer_query, 2, argtypes, args,
-                                           NULL, true, 0);
-            }
+            args[2] = PointerGetDatum(relation_types);
+            rc = SPI_execute_plan(steering_plan, args,
+                                   relation_types ? NULL : "  n", true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "walk_continuations: steer failed: %s",
                      SPI_result_code_string(rc));
@@ -513,6 +681,15 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             }
             if (SPI_tuptable != NULL)
                 SPI_freetuptable(SPI_tuptable);
+            /* One identity can have several witnessed separator alternatives.
+             * All alternatives share the same semantic score, not just the first. */
+            for (int i = 0; i < n_cand; ++i)
+            {
+                CandIndex *entry = hash_search(by_id,
+                    VARDATA_ANY(DatumGetByteaPP(cand[i].obj)), HASH_FIND, NULL);
+                cand[i].steer = cand[entry->index].steer;
+                cand[i].edges = cand[entry->index].edges;
+            }
             hash_destroy(by_id);
             pfree(objs);
             pfree(cand_a);
@@ -535,7 +712,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
             for (int i = 0; i < n_cand; i++)
             {
-                if (cand[i].weight > 0 && cand[i].edges > 0
+                if (cand[i].edges > 0
                     && cand[i].steer > 0.0 && isfinite(cand[i].steer))
                 {
                     has_positive_steer = true;
@@ -547,7 +724,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             {
                 if ((cand[i].edges > 0
                      && (cand[i].steer <= 0.0 || !isfinite(cand[i].steer)))
-                    || (has_positive_steer && cand[i].edges == 0))
+                    || (has_positive_steer && cand[i].edges == 0)
+                    || (cand[i].weight == 0 && cand[i].edges == 0))
                 {
                     pfree(DatumGetPointer(cand[i].obj));
                     if (cand[i].sep != (Datum) 0)
@@ -555,7 +733,9 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                     continue;
                 }
                 cand[m] = cand[i];
-                cand[m].eff = (double) cand[m].weight *
+                /* Neutral sequence prior for a semantic-only proposal; its
+                 * recorded sequence count remains zero. */
+                cand[m].eff = (cand[m].weight > 0 ? (double)cand[m].weight : 1.0) *
                               (cand[m].edges > 0 ? cand[m].steer : 1.0);
                 if (cand[m].eff <= 0.0 || !isfinite(cand[m].eff))
                 {
@@ -596,7 +776,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
             values[0] = Int32GetDatum(step);
             values[1] = cand[pick].obj;
-            values[2] = Int32GetDatum(used);
+            values[2] = Int32GetDatum(cand[pick].stride);
             if (cand[pick].sep != (Datum) 0)
                 values[3] = cand[pick].sep;
             else

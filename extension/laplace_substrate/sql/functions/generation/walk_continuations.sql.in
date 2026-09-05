@@ -1,11 +1,22 @@
 DROP FUNCTION IF EXISTS laplace.walk_continuations(bytea[], int, int, float8, int, bigint);
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
+        p_ctx bytea[], p_steps int, p_max_stride int,
+        p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
+        p_relation_types bytea[])
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
+    LANGUAGE C VOLATILE;
+
+CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_ctx bytea[], p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
         p_seed bigint DEFAULT NULL, p_frontier bytea[] DEFAULT NULL)
     RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
-    AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
-    LANGUAGE C VOLATILE;
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT * FROM generation.forward_walk_continuations(
+        p_ctx, p_steps, p_max_stride, p_spread, p_top_k, p_seed, p_frontier, NULL);
+END;
 
 -- Compatibility surface: preserve the installed parameter name `p_breadth` so
 -- CREATE OR REPLACE remains upgrade-safe for callers that bind by name. The

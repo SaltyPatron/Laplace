@@ -32,7 +32,15 @@
 -- NOT PARALLEL SAFE: reads consensus through SPI.
 DROP FUNCTION IF EXISTS laplace.steer_candidates(bytea[], bytea[], float8);
 CREATE OR REPLACE FUNCTION generation.steer_candidates(
-        p_candidates bytea[], p_frontier bytea[])
+        p_candidates bytea[], p_frontier bytea[], p_relation_types bytea[])
     RETURNS TABLE(candidate bytea, steer float8, edges bigint, covered bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_steer_candidates'
     LANGUAGE C VOLATILE;
+
+CREATE OR REPLACE FUNCTION generation.steer_candidates(
+        p_candidates bytea[], p_frontier bytea[])
+    RETURNS TABLE(candidate bytea, steer float8, edges bigint, covered bigint)
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT * FROM generation.steer_candidates(p_candidates, p_frontier, NULL);
+END;

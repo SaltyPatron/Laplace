@@ -19,8 +19,9 @@
  * (consensus is stored once per (subject, type, object), and a candidate may sit
  * on either end), and a both-directions OR join is the shape the read-side law
  * sends to C. It is done here as two indexed arms UNION ALL'd in a single
- * prepared statement — |cands| x |frontier| is bounded by the beam, so this is
- * one round trip per emitted token, not |cands| of them.
+ * prepared statement. The indexed frontier read is independent of candidate
+ * count; the native candidate hash filters its result in linear time. Semantic
+ * proposals are not limited to the sequence beam.
  *
  * SCORING IS walk_score.h, SHARED WITH walk_branches. S7 must not invent a second
  * ranking: if steering used a different weight than retrieval, the two halves of
@@ -47,6 +48,7 @@
 #include "laplace/core/hash128.h"
 #include "spi_common.h"
 #include "walk_score.h"
+#include "relation_symmetry.h"
 
 #include <math.h>       /* log1p — the coverage fold below */
 
@@ -73,18 +75,53 @@ typedef struct PairEntry
     double score;
 } PairEntry;
 
+static SPIPlanPtr steer_plan = NULL;
+static SPIPlanPtr typed_steer_plan = NULL;
 static const char *steer_query =
     "SELECT e.cand, e.front, e.type_id, e.rating, e.rd FROM ("
     "  SELECT c.subject_id AS cand, c.object_id AS front,"
     "         c.type_id, c.rating, c.rd"
     "    FROM laplace.consensus c"
-    "   WHERE c.subject_id = ANY($1) AND c.object_id = ANY($2)"
+    "   WHERE c.object_id = ANY($1)"
     "  UNION ALL"
     "  SELECT c.object_id, c.subject_id,"
     "         c.type_id, c.rating, c.rd"
     "    FROM laplace.consensus c"
-    "   WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2)"
+    "   WHERE c.subject_id = ANY($1) AND c.object_id IS NOT NULL"
     ") e";
+static const char *typed_steer_query =
+    "SELECT c.subject_id, c.object_id, c.type_id, c.rating, c.rd"
+    " FROM laplace.consensus c WHERE c.object_id = ANY($1)"
+    " AND c.type_id = ANY($2) AND c.type_id = ANY($3)"
+    " UNION ALL SELECT c.object_id, c.subject_id, c.type_id, c.rating, c.rd"
+    " FROM laplace.consensus c WHERE c.subject_id = ANY($1)"
+    " AND c.object_id IS NOT NULL AND c.type_id = ANY($2)";
+
+static void
+validate_id_array(ArrayType *array, const char *name, bool allow_nulls)
+{
+    Datum *elems;
+    bool  *nulls;
+    int    count;
+
+    if (ARR_NDIM(array) != 1 || ARR_ELEMTYPE(array) != BYTEAOID)
+        ereport(ERROR, (errmsg("steer_candidates: %s must be a 1-D bytea array", name)));
+    deconstruct_array(array, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &elems, &nulls, &count);
+    for (int i = 0; i < count; ++i)
+    {
+        if (nulls[i])
+        {
+            if (!allow_nulls)
+                ereport(ERROR, (errmsg("steer_candidates: %s must not contain NULL", name)));
+            continue;
+        }
+        if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(elems[i])) != 16)
+            ereport(ERROR, (errmsg("steer_candidates: %s ids must be 16 bytes", name)));
+    }
+    pfree(elems);
+    pfree(nulls);
+}
 
 Datum
 pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
@@ -95,8 +132,9 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
     Datum       *cand_elems;
     bool        *cand_nulls;
     int          n_cand;
-    Datum        args[2];
-    int          rc;
+    Datum        args[3];
+    bool         typed = PG_NARGS() > 2 && !PG_ARGISNULL(2);
+    ArrayType   *relation_types = typed ? PG_GETARG_ARRAYTYPE_P(2) : NULL;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         ereport(ERROR, (errmsg("steer_candidates: candidates and frontier must not be NULL")));
@@ -104,9 +142,10 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
     cand_arr  = PG_GETARG_ARRAYTYPE_P(0);
     front_arr = PG_GETARG_ARRAYTYPE_P(1);
 
-    if (ARR_NDIM(cand_arr) != 1 || ARR_ELEMTYPE(cand_arr) != BYTEAOID ||
-        ARR_NDIM(front_arr) != 1 || ARR_ELEMTYPE(front_arr) != BYTEAOID)
-        ereport(ERROR, (errmsg("steer_candidates: both arguments must be 1-D bytea arrays")));
+    validate_id_array(cand_arr, "candidates", true);
+    validate_id_array(front_arr, "frontier", true);
+    if (relation_types != NULL)
+        validate_id_array(relation_types, "relation types", false);
 
     InitMaterializedSRF(fcinfo, 0);
 
@@ -154,56 +193,101 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
         }
     }
 
-    args[0] = PointerGetDatum(cand_arr);
-    args[1] = PointerGetDatum(front_arr);
+    args[0] = PointerGetDatum(front_arr);
+    SPIPlanPtr *selected_plan = typed ? &typed_steer_plan : &steer_plan;
+    if (*selected_plan == NULL)
     {
-        Oid argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-
-        rc = SPI_execute_with_args(steer_query, 2, argtypes, args,
-                                   NULL, true, 0);
+        Oid argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(typed ? typed_steer_query : steer_query,
+                                            typed ? 3 : 1, argtypes,
+                                            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+            elog(ERROR, "steer_candidates: retained frontier plan failed");
+        *selected_plan = plan;
     }
-    if (rc != SPI_OK_SELECT)
-        elog(ERROR, "steer_candidates: edge read failed: %s", SPI_result_code_string(rc));
-
-    for (uint64 r = 0; r < SPI_processed; r++)
+    if (typed)
     {
-        HeapTuple   tup = SPI_tuptable->vals[r];
-        TupleDesc   td  = SPI_tuptable->tupdesc;
-        bool        isnull;
-        bytea      *cb  = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-        bytea      *fb  = DatumGetByteaPP(SPI_getbinval(tup, td, 2, &isnull));
-        bytea      *tb  = DatumGetByteaPP(SPI_getbinval(tup, td, 3, &isnull));
-        int64       rating = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-        int64       rd     = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
-        hash128_t   type_id;
-        SteerEntry *e;
-        PairEntry  *p;
-        char        pairkey[32];
-        bool        found;
+        args[1] = PointerGetDatum(relation_types);
+        args[2] = PointerGetDatum(laplace_symmetric_relation_types());
+    }
+    {
+        Portal portal = SPI_cursor_open(NULL, *selected_plan, args, NULL, true);
+        uint64 scanned = 0;
 
-        if (VARSIZE_ANY_EXHDR(cb) != 16 || VARSIZE_ANY_EXHDR(fb) != 16
-            || VARSIZE_ANY_EXHDR(tb) != 16)
-            continue;
-
-        memcpy(&type_id, VARDATA_ANY(tb), 16);
-        e = (SteerEntry *) hash_search(acc, VARDATA_ANY(cb), HASH_FIND, &found);
-        if (!found)
-            continue;   /* not one of ours — the arms cannot produce this, but be strict */
-
-        e->edges += 1;
-
-        memcpy(pairkey, VARDATA_ANY(cb), 16);
-        memcpy(pairkey + 16, VARDATA_ANY(fb), 16);
-        p = (PairEntry *) hash_search(pairs, pairkey, HASH_ENTER, &found);
-        if (!found)
+        if (portal == NULL)
+            elog(ERROR, "steer_candidates: edge cursor open failed: %s",
+                 SPI_result_code_string(SPI_result));
+        for (;;)
         {
-            p->score = 0.0;
-            e->covered += 1;
-        }
-        p->score += walk_edge_score(type_id, rating, rd);
+            SPI_cursor_fetch(portal, true, 50000);
+            if (SPI_processed == 0)
+                break;
+            for (uint64 r = 0; r < SPI_processed; r++)
+            {
+                HeapTuple   tup = SPI_tuptable->vals[r];
+                TupleDesc   td  = SPI_tuptable->tupdesc;
+                bool        isnull;
+                Datum       cd = SPI_getbinval(tup, td, 1, &isnull);
+                bytea      *cb;
+                Datum       fd;
+                bytea      *fb;
+                Datum       tdv;
+                bytea      *tb;
+                Datum       rating_d;
+                Datum       rd_d;
+                int64       rating;
+                int64       rd;
+                hash128_t   type_id;
+                SteerEntry *e;
+                PairEntry  *p;
+                char        pairkey[32];
+                bool        found;
 
-        if ((r & 0xFFFF) == 0)
-            CHECK_FOR_INTERRUPTS();
+                if (isnull) continue;
+                cb = DatumGetByteaPP(cd);
+                fd = SPI_getbinval(tup, td, 2, &isnull);
+                if (isnull) continue;
+                fb = DatumGetByteaPP(fd);
+                tdv = SPI_getbinval(tup, td, 3, &isnull);
+                if (isnull) continue;
+                tb = DatumGetByteaPP(tdv);
+                rating_d = SPI_getbinval(tup, td, 4, &isnull);
+                if (isnull) continue;
+                rating = DatumGetInt64(rating_d);
+                rd_d = SPI_getbinval(tup, td, 5, &isnull);
+                if (isnull) continue;
+                rd = DatumGetInt64(rd_d);
+                if (VARSIZE_ANY_EXHDR(cb) != 16 || VARSIZE_ANY_EXHDR(fb) != 16
+                    || VARSIZE_ANY_EXHDR(tb) != 16)
+                    continue;
+
+                memcpy(&type_id, VARDATA_ANY(tb), 16);
+                e = (SteerEntry *) hash_search(acc, VARDATA_ANY(cb), HASH_FIND, &found);
+                if (!found)
+                    continue;
+                e->edges += 1;
+                memcpy(pairkey, VARDATA_ANY(cb), 16);
+                memcpy(pairkey + 16, VARDATA_ANY(fb), 16);
+                p = (PairEntry *) hash_search(pairs, pairkey, HASH_ENTER, &found);
+                if (!found)
+                {
+                    p->score = 0.0;
+                    e->covered += 1;
+                }
+                p->score += walk_edge_score(type_id, rating, rd);
+                if (((scanned + r) & 0xFFFF) == 0)
+                    CHECK_FOR_INTERRUPTS();
+            }
+            scanned += SPI_processed;
+            SPI_freetuptable(SPI_tuptable);
+            SPI_tuptable = NULL;
+        }
+        if (SPI_tuptable != NULL)
+        {
+            SPI_freetuptable(SPI_tuptable);
+            SPI_tuptable = NULL;
+        }
+        SPI_cursor_close(portal);
     }
 
     /*
