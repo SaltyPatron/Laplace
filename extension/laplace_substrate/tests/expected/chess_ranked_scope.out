@@ -49,8 +49,8 @@ BEGIN
     END IF;
 END $$;
 SELECT 'chess ranked canonical result scope' AS probe, true AS ok;
-               probe                | ok 
-------------------------------------+----
+                probe                | ok 
+-------------------------------------+----
  chess ranked canonical result scope | t
 (1 row)
 
