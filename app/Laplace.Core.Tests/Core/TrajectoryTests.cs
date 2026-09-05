@@ -28,4 +28,19 @@ public sealed class TrajectoryTests
         Assert.Empty(Trajectory.Build(ReadOnlySpan<Hash128>.Empty));
         Assert.Empty(Trajectory.Constituents(ReadOnlySpan<double>.Empty));
     }
+
+    [Fact]
+    public void RepeatedFlaggedConstituents_CompactAndExpandInOrder()
+    {
+        var space = new Hash128(1, 2);
+        var token = new Hash128(3, 4);
+        Hash128[] ids = [space, space, space, token, space, space];
+        ulong atom = Trajectory.VertexFlags(0, hasAtom: true, atom: (uint)' ');
+        ulong deep = Trajectory.VertexFlags(47, hasAtom: false, atom: 0);
+
+        double[] xyzm = Trajectory.Build(ids, [atom, atom, atom, deep, atom, atom]);
+
+        Assert.Equal(3 * 4, xyzm.Length);
+        Assert.Equal(ids, Trajectory.Constituents(xyzm));
+    }
 }

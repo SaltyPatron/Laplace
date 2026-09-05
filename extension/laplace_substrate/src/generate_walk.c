@@ -1075,37 +1075,9 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 #define VFLAG_ATOM_SHIFT 31
 #define VFLAG_ATOM_MASK  ((int64) 0x1FFFFF)
 
-/*
- * ONE PREPARED LEVEL QUERY, WALKED IN C (was: realize.constituents_closure).
- *
- * The closure used to be a SQL function wrapping a WITH RECURSIVE, called once per
- * render. MEASURED 2026-08-07 on the foundation seed: 59 ms to return THREE rows,
- * and this is the most-called query in the system (1,496,183 calls / 19.6 h
- * cumulative). The breakdown says the recursion was never the problem:
- *
- *   planning                    ~30 ms   v_word_points is a view over partitioned
- *                                        physicalities, re-planned on EVERY call
- *   ST_NPoints in the sort key  ~11 ms   PostGIS per row, for a tiebreak that only
- *                                        5,063 entities in the substrate need
- *   the recursive term          ~5.4 ms  the part that looks like the cost
- *
- * A SQL function cannot fix the first line: an invoked SQL body is planned per
- * invocation. A prepared plan is planned ONCE per backend and executed with bound
- * parameters thereafter, which is what SPI_keepplan buys — so the walk moves here
- * and SQL is left holding one indexed level query.
- *
- * LEVEL-SYNCHRONOUS, NOT PER-NODE. Each iteration executes this once with the whole
- * frontier as a bound bytea[]; `= ANY($1)` is the index condition and prunes the
- * HASH sublevel per element. Depth for words is 2-3 levels, so a render costs a
- * handful of executions rather than one re-planned recursion — and never one query
- * per node, which is the RBAR shape the read law bans.
- *
- * The DISTINCT ON tiebreak is preserved exactly (physicality_id, then ST_NPoints
- * DESC): 5,063 entities carry two type-1 rows with the same (entity_id, type, id)
- * and different trajectories, and without the second key the PLAN decided which
- * survived — so batch size changed the answer. ST_NPoints prefers the finer
- * decomposition, the one that reaches the tier-0 floor and reconstructs the text.
- */
+/* One batch closure request supplies native assembly. constituents_closure.c
+ * owns the shared frontier walk and deterministic manifest selection; this
+ * renderer consumes ordered edges and expands their run lengths into text. */
 static const char *CLOSURE_QUERY =
     "SELECT parent_id, child_id, run_length, flags "
     "FROM realize.constituents_closure($1, $2) "
@@ -1113,10 +1085,17 @@ static const char *CLOSURE_QUERY =
 
 static SPIPlanPtr closure_plan = NULL;
 
+typedef struct RenderMemoKey
+{
+    char id[16];
+    int32 depth;
+} RenderMemoKey;
+
 typedef struct RenderMemoEntry
 {
-    char  key[16];
+    RenderMemoKey key;
     char *text;
+    int length;
 } RenderMemoEntry;
 
 typedef struct ClosureChild
@@ -1281,25 +1260,31 @@ fetch_constituents_closure(Datum *roots, int n_roots, int32 max_depth)
 }
 
 static const char *
-render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
+render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth, int *length)
 {
-    char key[16];
+    RenderMemoKey key = {0};
     bool found;
     RenderMemoEntry *e;
     bytea *idb = DatumGetByteaPP(id);
 
     if (VARSIZE_ANY_EXHDR(idb) != 16)
         ereport(ERROR, (errmsg("render_text: entity id must be 16 bytes")));
-    memcpy(key, VARDATA_ANY(idb), 16);
+    memcpy(key.id, VARDATA_ANY(idb), 16);
+    // Full renders share results by identity; previews depend on remaining depth.
+    key.depth = max_depth == 0 ? 0 : depth;
 
-    e = (RenderMemoEntry *) hash_search(memo, key, HASH_ENTER, &found);
-    if (found)
+    e = (RenderMemoEntry *) hash_search(memo, &key, HASH_ENTER, &found);
+    if (found) {
+        *length = e->length;
         return e->text;
+    }
     e->text = NULL;
+    e->length = 0;
+    *length = 0;
 
     if (max_depth == 0 || depth < max_depth)
     {
-        ClosureParent *pe = (ClosureParent *) hash_search(closure, key, HASH_FIND, &found);
+        ClosureParent *pe = (ClosureParent *) hash_search(closure, key.id, HASH_FIND, &found);
 
         if (found && pe->n > 0)
         {
@@ -1317,19 +1302,22 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
                 }
                 else
                 {
+                    int child_length;
                     const char *child_text = render_node(closure, memo, pe->kids[r].child,
-                                                         depth + 1, max_depth);
+                                                         depth + 1, max_depth, &child_length);
                     if (child_text != NULL)
                         for (int32 k = 0; k < pe->kids[r].run; k++)
-                            appendStringInfoString(&out, child_text);
+                            appendBinaryStringInfo(&out, child_text, child_length);
                     else if (!append_codepoint_render(&out, pe->kids[r].child))
                         ok = false;
                 }
             }
 
-            e = (RenderMemoEntry *) hash_search(memo, key, HASH_FIND, &found);
+            e = (RenderMemoEntry *) hash_search(memo, &key, HASH_FIND, &found);
             Assert(found);
             e->text = ok ? out.data : NULL;
+            e->length = ok ? out.len : 0;
+            *length = e->length;
             return e->text;
         }
     }
@@ -1339,10 +1327,12 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
         initStringInfo(&out);
         if (append_codepoint_render(&out, id))
         {
-            e = (RenderMemoEntry *) hash_search(memo, key, HASH_FIND, &found);
+            e = (RenderMemoEntry *) hash_search(memo, &key, HASH_FIND, &found);
             Assert(found);
             e->text = out.data;
+            e->length = out.len;
         }
+        *length = e->length;
         return e->text;
     }
 }
@@ -1350,98 +1340,87 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
 PG_FUNCTION_INFO_V1(pg_laplace_render_text);
 PG_FUNCTION_INFO_V1(pg_laplace_render_text_fast);
 PG_FUNCTION_INFO_V1(pg_laplace_render_text_batch);
+PG_FUNCTION_INFO_V1(pg_laplace_render_bytes);
+PG_FUNCTION_INFO_V1(pg_laplace_render_bytes_batch);
+
+Datum pg_laplace_render_text_batch(PG_FUNCTION_ARGS);
+Datum pg_laplace_render_bytes_batch(PG_FUNCTION_ARGS);
+static Datum render_batch(FunctionCallInfo fcinfo, bool as_bytes);
+
+/* Scalar entry points use the same batch operation, including closure selection,
+ * validation, cycle handling and native assembly. */
+static Datum
+render_single(Datum id, int32 max_depth, bool as_bytes, bool *isnull)
+{
+    ArrayType *ids = construct_array(&id, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+    Datum result = DirectFunctionCall2(as_bytes ? pg_laplace_render_bytes_batch : pg_laplace_render_text_batch,
+                                       PointerGetDatum(ids), Int32GetDatum(max_depth));
+    Datum *items;
+    bool *nulls;
+    int count;
+    deconstruct_array(DatumGetArrayTypeP(result), as_bytes ? BYTEAOID : TEXTOID, -1, false,
+                      TYPALIGN_INT, &items, &nulls, &count);
+    Assert(count == 1);
+    *isnull = nulls[0];
+    return nulls[0] ? (Datum) 0 : items[0];
+}
 
 Datum
 pg_laplace_render_text(PG_FUNCTION_ARGS)
 {
-    Datum   id;
-    int32   max_depth;
-    HASHCTL ctl;
-    HTAB   *memo;
-    HTAB   *closure;
-    const char *rendered;
-    MemoryContext caller_cxt = CurrentMemoryContext;
-
+    bool isnull;
+    Datum result;
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-    id = PG_GETARG_DATUM(0);
-    max_depth = PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1);
-    if (max_depth < 0)
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("render_text: max_depth must be zero or positive")));
-
-    if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "render_text: SPI_connect failed");
-    ensure_render_plans();
-
-    memset(&ctl, 0, sizeof(ctl));
-    ctl.keysize = 16;
-    ctl.entrysize = sizeof(RenderMemoEntry);
-    memo = hash_create("render_text memo", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
-
-    closure = fetch_constituents_closure(&id, 1, max_depth);
-    rendered = render_node(closure, memo, id, 0, max_depth);
-
-    if (rendered == NULL || rendered[0] == '\0')
-    {
-        SPI_finish();
+    result = render_single(PG_GETARG_DATUM(0),
+                           PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1), false, &isnull);
+    if (isnull)
         PG_RETURN_NULL();
-    }
-    else
-    {
-        MemoryContext spi_cxt = MemoryContextSwitchTo(caller_cxt);
-        text *result = cstring_to_text(rendered);
-        MemoryContextSwitchTo(spi_cxt);
-        SPI_finish();
-        PG_RETURN_TEXT_P(result);
-    }
+    return result;
 }
 
 Datum
 pg_laplace_render_text_fast(PG_FUNCTION_ARGS)
 {
-    Datum   id;
-    int32   max_depth = 8;
-    HASHCTL ctl;
-    HTAB   *memo;
-    HTAB   *closure;
-    const char *rendered;
-    MemoryContext caller_cxt = CurrentMemoryContext;
-
+    bool isnull;
+    Datum result;
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-    id = PG_GETARG_DATUM(0);
-    if (PG_NARGS() > 1 && !PG_ARGISNULL(1))
-        max_depth = PG_GETARG_INT32(1);
-
-    if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "render_text_fast: SPI_connect failed");
-    ensure_render_plans();
-
-    memset(&ctl, 0, sizeof(ctl));
-    ctl.keysize = 16;
-    ctl.entrysize = sizeof(RenderMemoEntry);
-    memo = hash_create("render_text_fast memo", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
-
-    closure = fetch_constituents_closure(&id, 1, max_depth);
-    rendered = render_node(closure, memo, id, 0, max_depth);
-
-    if (rendered == NULL || rendered[0] == '\0')
-    {
-        SPI_finish();
+    result = render_single(PG_GETARG_DATUM(0),
+                           PG_NARGS() > 1 && !PG_ARGISNULL(1)
+                               ? PG_GETARG_INT32(1) : 8, false, &isnull);
+    if (isnull)
         PG_RETURN_NULL();
-    }
-    MemoryContext spi_cxt = MemoryContextSwitchTo(caller_cxt);
-    text *result = cstring_to_text(rendered);
-    MemoryContextSwitchTo(spi_cxt);
-    SPI_finish();
-    PG_RETURN_TEXT_P(result);
+    return result;
+}
+
+Datum
+pg_laplace_render_bytes(PG_FUNCTION_ARGS)
+{
+    bool isnull;
+    if (PG_ARGISNULL(0)) PG_RETURN_NULL();
+    Datum result = render_single(PG_GETARG_DATUM(0),
+        PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1), true, &isnull);
+    if (isnull) PG_RETURN_NULL();
+    return result;
 }
 
 Datum
 pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
 {
+    return render_batch(fcinfo, false);
+}
+
+Datum
+pg_laplace_render_bytes_batch(PG_FUNCTION_ARGS)
+{
+    return render_batch(fcinfo, true);
+}
+
+static Datum
+render_batch(FunctionCallInfo fcinfo, bool as_bytes)
+{
+    Oid output_type = as_bytes ? BYTEAOID : TEXTOID;
     ArrayType  *arr;
     int32       max_depth;
     Datum      *elems;
@@ -1467,7 +1446,7 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
                  errmsg("render_text_batch: max_depth must be zero or positive")));
 
     if (ARR_NDIM(arr) == 0)
-        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(output_type));
     if (ARR_NDIM(arr) != 1)
         ereport(ERROR, (errmsg("render_text_batch: ids must be 1-dimensional")));
     if (ARR_ELEMTYPE(arr) != BYTEAOID)
@@ -1492,7 +1471,7 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
     closure = fetch_constituents_closure(roots, n_roots, max_depth);
 
     memset(&mctl, 0, sizeof(mctl));
-    mctl.keysize = 16;
+    mctl.keysize = sizeof(RenderMemoKey);
     mctl.entrysize = sizeof(RenderMemoEntry);
     memo = hash_create("render_text_batch memo", 1024, &mctl, HASH_ELEM | HASH_BLOBS);
 
@@ -1505,13 +1484,20 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
             out_nulls[i] = true;
             continue;
         }
-        rendered = render_node(closure, memo, elems[i], 0, max_depth);
-        if (rendered == NULL || rendered[0] == '\0')
+        int rendered_length;
+        rendered = render_node(closure, memo, elems[i], 0, max_depth, &rendered_length);
+        // PostgreSQL text cannot represent U+0000. The bytea content surface can;
+        // never truncate an admitted Unicode sequence to fit a text result.
+        if (rendered == NULL || rendered_length == 0
+            || (!as_bytes && memchr(rendered, 0, rendered_length) != NULL))
             out_nulls[i] = true;
         else
         {
             MemoryContext old = MemoryContextSwitchTo(caller_cxt);
-            out[i] = CStringGetTextDatum(rendered);
+            bytea *value = (bytea *) palloc(VARHDRSZ + rendered_length);
+            SET_VARSIZE(value, VARHDRSZ + rendered_length);
+            memcpy(VARDATA(value), rendered, rendered_length);
+            out[i] = PointerGetDatum(value);
             MemoryContextSwitchTo(old);
         }
     }
@@ -1521,7 +1507,7 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
         int dims[1] = { n };
         int lbs[1] = { 1 };
         result = construct_md_array(out, out_nulls, 1, dims, lbs,
-                                  TEXTOID, -1, false, TYPALIGN_INT);
+                                  output_type, -1, false, TYPALIGN_INT);
     }
     PG_RETURN_ARRAYTYPE_P(result);
 }

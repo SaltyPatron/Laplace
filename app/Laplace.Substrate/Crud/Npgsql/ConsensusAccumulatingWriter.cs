@@ -108,6 +108,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private readonly SemaphoreSlim _foldDepth =
         new(FoldSizing.PipelineDepth, FoldSizing.PipelineDepth);
     private readonly object _foldChainLock = new();
+    private readonly SemaphoreSlim _atomicWorkingSetGate = new(1, 1);
     private volatile bool _bulkRun;
 
     private long _observations;
@@ -200,18 +201,29 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     public async Task<ApplyResult> ApplyManyAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
-        => await ApplyCoreAsync(changes, workingSet: false, append: false, default, ct);
+        => await ApplyCoreAsync(
+            changes, workingSet: false, append: false, default, reconciliation: null, ct);
 
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyWorkingSetAsync(new[] { change }, ct);
 
     public async Task<ApplyResult> ApplyWorkingSetAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
-        => await ApplyCoreAsync(changes, workingSet: true, append: false, default, ct);
+        => await ApplyCoreAsync(
+            changes, workingSet: true, append: false, default, reconciliation: null, ct);
+
+    internal Task<ApplyResult> ApplyLegacyBootstrapWorkingSetAsync(
+        IReadOnlyList<SubstrateChange> changes,
+        Hash128 legacyMarkerAttestationId,
+        CancellationToken ct = default) =>
+        ApplyCoreAsync(
+            changes, workingSet: true, append: false, default,
+            new WorkingSetReconciliation(legacyMarkerAttestationId), ct);
 
     public async Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
-        => await ApplyCoreAsync(changes, workingSet: false, append: true, sourceId, ct);
+        => await ApplyCoreAsync(
+            changes, workingSet: false, append: true, sourceId, reconciliation: null, ct);
 
     /// <summary>
     /// STRUCT, not a class (2026-07-21). One 32-byte heap allocation per merged
@@ -252,7 +264,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     private async Task<ApplyResult> ApplyCoreAsync(
         IReadOnlyList<SubstrateChange> changes, bool workingSet, bool append,
-        Hash128 sourceId, CancellationToken ct)
+        Hash128 sourceId, WorkingSetReconciliation? reconciliation, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
         if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
@@ -271,11 +283,50 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // retried batch folds exactly once (a throw below leaves consensus
             // untouched for this batch).
             var forwarded = ForwardChanges(changes);
-            var result = append
-                ? await _inner.AppendAsync(forwarded, sourceId, ct)
-                : workingSet
-                    ? await _inner.ApplyWorkingSetAsync(forwarded, ct)
-                    : await _inner.ApplyManyAsync(forwarded, ct);
+            bool atomicWorkingSet = workingSet
+                && delta is { Count: > 0 }
+                && _persistEvidence
+                && _inner is NpgsqlSubstrateWriter;
+            AtomicFoldStats atomicStats = default;
+            ApplyResult result;
+            if (atomicWorkingSet)
+            {
+                await _atomicWorkingSetGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    result = await ((NpgsqlSubstrateWriter)_inner).ApplyWorkingSetAtomicAsync(
+                        forwarded,
+                        async (connection, transaction, token) =>
+                        {
+                            atomicStats = await UpsertDeltaInTransactionAsync(
+                                delta!, connection, transaction, token).ConfigureAwait(false);
+                        },
+                        reconciliation,
+                        ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _atomicWorkingSetGate.Release();
+                }
+
+                if (!result.JournalReplayHit)
+                {
+                    Interlocked.Add(ref _cellsFolded, atomicStats.Cells);
+                    Interlocked.Add(ref _consensusBackendTicks, atomicStats.ConsensusBackendTicks);
+                    Interlocked.Add(ref _highwayMaskBackendTicks, atomicStats.MaskBackendTicks);
+                    Interlocked.Add(ref _consensusUpsertCalls, atomicStats.FoldCalls);
+                    Interlocked.Add(ref _highwayMaskCalls, atomicStats.MaskCalls);
+                    Interlocked.Add(ref _highwayMaskPairs, atomicStats.MaskPairs);
+                }
+            }
+            else
+            {
+                result = append
+                    ? await _inner.AppendAsync(forwarded, sourceId, ct)
+                    : workingSet
+                        ? await _inner.ApplyWorkingSetAsync(forwarded, ct)
+                        : await _inner.ApplyManyAsync(forwarded, ct);
+            }
 
             // INVARIANT: one fold per claimed flush-journal token. A journal
             // hit means a prior apply of this exact working set committed —
@@ -285,7 +336,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // consensus; a journal hit must no-op evidence AND fold. The
             // guard sits OUTSIDE the bulk/inline split: an enqueued fold is
             // still a fold, so a replay must not reach the queue either.
-            if (delta is { Count: > 0 } && !result.JournalReplayHit)
+            if (!atomicWorkingSet && delta is { Count: > 0 } && !result.JournalReplayHit)
             {
                 // Evidence has committed and its replay journal will suppress this delta
                 // forever. From here the fold is an owed continuation, not cancellable
@@ -549,6 +600,159 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             stripped[i] = c;
         }
         return stripped;
+    }
+
+    private readonly record struct AtomicFoldStats(
+        long Cells,
+        long Masks,
+        long ConsensusBackendTicks,
+        long MaskBackendTicks,
+        long FoldCalls,
+        long MaskCalls,
+        long MaskPairs);
+
+    /// <summary>
+    /// Folds a journaled working set on the evidence writer's control transaction.
+    /// The v2 replay claim, additive attestation merge, consensus update, and mask
+    /// deposit therefore commit or roll back together.
+    /// </summary>
+    private async Task<AtomicFoldStats> UpsertDeltaInTransactionAsync(
+        Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta,
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken ct)
+    {
+        var cells = new ((Hash128 S, Hash128 T, Hash128? O) Key, Hash128 Cid, Delta D)[delta.Count];
+        int cellAt = 0;
+        foreach (var (key, value) in delta)
+            cells[cellAt++] = (key, ConsensusKeys.EdgeId(key.S, key.T, key.O ?? default), value);
+        Array.Sort(cells, static (x, y) =>
+        {
+            int c = x.Key.T.CompareToBytewise(y.Key.T);
+            if (c != 0) return c;
+            c = x.Cid.CompareToBytewise(y.Cid);
+            return c != 0 ? c : x.Key.S.CompareToBytewise(y.Key.S);
+        });
+
+        bool directRoute = await SupportsDirectConsensusRouteAsync(connection, ct).ConfigureAwait(false);
+        long folded = 0;
+        long foldCalls = 0;
+        long foldStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        for (int runStart = 0; runStart < cells.Length;)
+        {
+            int runEnd = runStart + 1;
+            while (runEnd < cells.Length && cells[runEnd].Key.T == cells[runStart].Key.T)
+                runEnd++;
+            Hash128 type = cells[runStart].Key.T;
+            for (int off = runStart; off < runEnd; off += FoldSizing.ChunkCells)
+            {
+                int count = Math.Min(FoldSizing.ChunkCells, runEnd - off);
+                var subjects = new byte[count][];
+                var objects = new byte[count][];
+                var phis = new long[count];
+                var opponents = new long[count];
+                var games = new long[count];
+                var sums = new long[count];
+                var timestamps = new DateTime[count];
+                int periodCount = 0;
+                for (int i = 0; i < count; i++)
+                    periodCount = checked(periodCount + PeriodCount(in cells[off + i].D));
+                var periodOffsets = new long[count + 1];
+                var periodOpponents = new long[periodCount];
+                var periodPhis = new long[periodCount];
+                var periodGames = new long[periodCount];
+                var periodSums = new long[periodCount];
+                int periodAt = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    var cell = cells[off + i];
+                    subjects[i] = cell.Key.S.ToBytes();
+                    objects[i] = cell.Key.O?.ToBytes()!;
+                    phis[i] = cell.D.FirstPeriod.PhiFp1e9;
+                    opponents[i] = cell.D.FirstPeriod.OpponentRatingFp1e9;
+                    games[i] = cell.D.Games;
+                    sums[i] = cell.D.SumScoreFp1e9;
+                    timestamps[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);
+                    periodOffsets[i] = periodAt;
+                    WritePeriods(
+                        in cell.D, periodOpponents, periodPhis,
+                        periodGames, periodSums, ref periodAt);
+                }
+                periodOffsets[count] = periodAt;
+
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandTimeout = 0;
+                command.CommandText = directRoute
+                    ? "SELECT consensus.upsert_type($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)"
+                    : "SELECT consensus.upsert($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)";
+                command.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = directRoute ? type.ToBytes() : subjects,
+                    NpgsqlDbType = directRoute
+                        ? NpgsqlDbType.Bytea
+                        : NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                });
+                command.Parameters.AddWithValue(
+                    NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                    directRoute ? subjects : Enumerable.Repeat(type.ToBytes(), count).ToArray());
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, objects);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, phis);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, games);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, sums);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.TimestampTz, timestamps);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, opponents);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOffsets);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOpponents);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodPhis);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodGames);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodSums);
+                folded += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+                foldCalls++;
+            }
+            runStart = runEnd;
+        }
+        long foldTicks = System.Diagnostics.Stopwatch.GetTimestamp() - foldStarted;
+
+        var maskPairs = new HashSet<(Hash128 Entity, Hash128 Type)>(cells.Length * 2);
+        foreach (var cell in cells)
+        {
+            maskPairs.Add((cell.Key.S, cell.Key.T));
+            if (cell.Key.O is { } objectId) maskPairs.Add((objectId, cell.Key.T));
+        }
+        var orderedPairs = maskPairs.ToList();
+        orderedPairs.Sort(static (x, y) =>
+        {
+            int c = x.Entity.CompareToBytewise(y.Entity);
+            return c != 0 ? c : x.Type.CompareToBytewise(y.Type);
+        });
+
+        long masks = 0;
+        long maskCalls = 0;
+        long maskStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        for (int off = 0; off < orderedPairs.Count; off += FoldSizing.ChunkCells)
+        {
+            int count = Math.Min(FoldSizing.ChunkCells, orderedPairs.Count - off);
+            var entities = new byte[count][];
+            var maskTypes = new byte[count][];
+            for (int i = 0; i < count; i++)
+            {
+                entities[i] = orderedPairs[off + i].Entity.ToBytes();
+                maskTypes[i] = orderedPairs[off + i].Type.ToBytes();
+            }
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandTimeout = 0;
+            command.CommandText = "SELECT consensus.highway_mask_deposit($1,$2)";
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, entities);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, maskTypes);
+            masks += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+            maskCalls++;
+        }
+        long maskTicks = System.Diagnostics.Stopwatch.GetTimestamp() - maskStarted;
+        return new AtomicFoldStats(
+            folded, masks, foldTicks, maskTicks,
+            foldCalls, maskCalls, orderedPairs.Count);
     }
 
     /// <summary>

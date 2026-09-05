@@ -592,7 +592,8 @@ pg_laplace_vertex_tier(PG_FUNCTION_ARGS)
  * one except to reimplement the packing, which would be a second implementation
  * of the identity encoding and is exactly what must never exist.
  *
- * This is not a second implementation: it calls trajectory_build() from
+ * This is not a second implementation: it calls the canonical RLE trajectory
+ * packer from
  * engine/core, the same function the compose path calls, so a trajectory produced
  * here is byte-identical to one produced during ingest. Same code, one more
  * binding.
@@ -638,14 +639,16 @@ pg_laplace_trajectory_build(PG_FUNCTION_ARGS)
 
     require_xyzm_capacity((Size) n, "laplace_trajectory_build");
     double *xyzm = (double *) palloc(sizeof(double) * 4 * (Size) n);
-    if (trajectory_build(ids, (size_t) n, xyzm) != 0)
+    size_t vertex_count = 0;
+    if (trajectory_build_rle(ids, (size_t) n, xyzm, &vertex_count) != 0
+        || vertex_count > UINT32_MAX)
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("laplace_trajectory_build: packer rejected %d id(s)", n)));
 
     /* ZM linestring: the same shape physicalities.trajectory carries. */
-    POINTARRAY *pa = ptarray_construct(1 /*hasz*/, 1 /*hasm*/, (uint32_t) n);
-    for (int i = 0; i < n; ++i)
+    POINTARRAY *pa = ptarray_construct(1 /*hasz*/, 1 /*hasm*/, (uint32_t) vertex_count);
+    for (size_t i = 0; i < vertex_count; ++i)
     {
         POINT4D pt;
         pt.x = xyzm[i * 4 + 0];
@@ -737,6 +740,96 @@ pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
 
 
 
+
+typedef struct
+{
+    ReturnSetInfo *rsinfo;
+} trajectory_expanded_emit_t;
+
+static int
+emit_expanded_trajectory_constituent(void *context, size_t ordinal,
+                                     const hash128_t *entity_id, uint64_t flags)
+{
+    trajectory_expanded_emit_t *emit = (trajectory_expanded_emit_t *) context;
+    if (ordinal > PG_INT32_MAX)
+        return -1;
+
+    bytea *eid_out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
+    SET_VARSIZE(eid_out, VARHDRSZ + sizeof(hash128_t));
+    memcpy(VARDATA(eid_out), entity_id, sizeof(hash128_t));
+
+    Datum values[3];
+    bool nulls[3] = {false, false, false};
+    values[0] = Int32GetDatum((int32) ordinal);
+    values[1] = PointerGetDatum(eid_out);
+    values[2] = Int64GetDatum((int64) flags);
+    tuplestore_putvalues(emit->rsinfo->setResult, emit->rsinfo->setDesc,
+                         values, nulls);
+    return 0;
+}
+
+/* The legacy constituents surface returns stored RLE vertices.  This one
+ * returns logical members and delegates prefix-sum ordinals and expansion to
+ * the core trajectory kernel, so no SQL/C# caller derives them from geometry
+ * vertex positions. */
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_expanded_constituents);
+
+Datum
+pg_laplace_trajectory_expanded_constituents(PG_FUNCTION_ARGS)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    InitMaterializedSRF(fcinfo, 0);
+
+    GSERIALIZED *g;
+    LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
+    size_t n = 0;
+    double *xyzm = geom_to_xyzm_buffer(
+        l, "laplace_trajectory_expanded_constituents", &n);
+
+    trajectory_expanded_emit_t emit = { rsinfo };
+    if (trajectory_visit_constituents(xyzm, n,
+                                      emit_expanded_trajectory_constituent,
+                                      &emit) != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                 errmsg("laplace_trajectory_expanded_constituents: logical ordinal exceeds int4")));
+
+    pfree(xyzm);
+    lwgeom_free(l);
+    return (Datum) 0;
+}
+
+/* Logical trajectory equality. Stored vertex count and RLE chunk boundaries
+ * are encoding details; the core compares the ordered ids, multiplicity, and
+ * complete flag payload without expanding either manifest. */
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_equivalent);
+
+Datum
+pg_laplace_trajectory_equivalent(PG_FUNCTION_ARGS)
+{
+    GSERIALIZED *left_serialized;
+    GSERIALIZED *right_serialized;
+    LWGEOM *left = lwgeom_from_datum(PG_GETARG_DATUM(0), &left_serialized);
+    LWGEOM *right = lwgeom_from_datum(PG_GETARG_DATUM(1), &right_serialized);
+    size_t left_points = 0;
+    size_t right_points = 0;
+    double *left_xyzm = geom_to_xyzm_buffer(
+        left, "laplace_trajectory_equivalent", &left_points);
+    double *right_xyzm = geom_to_xyzm_buffer(
+        right, "laplace_trajectory_equivalent", &right_points);
+
+    int equivalent = trajectory_equivalent(
+        left_xyzm, left_points, right_xyzm, right_points);
+    pfree(right_xyzm);
+    pfree(left_xyzm);
+    lwgeom_free(right);
+    lwgeom_free(left);
+    if (equivalent < 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("laplace_trajectory_equivalent: invalid trajectory")));
+    PG_RETURN_BOOL(equivalent == 1);
+}
 
 PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituent_ids);
 

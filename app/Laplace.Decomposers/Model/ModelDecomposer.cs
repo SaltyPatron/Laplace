@@ -73,19 +73,14 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
     // double-fold consensus) and deposits it as its final change. Bump the
     // version to evict + re-derive without touching the witnessed layer.
     public static readonly Hash128 AnalysisMarkerTypeId = EntityTypeRegistry.Id("Model_AnalysisMarker");
-    // v2: v1 marker on hart-desktop was deposited by a stale CLI tree that ran
-    // planes mode 'factors' before the factors branch existed (derived nothing).
-    // v3: factor-trajectory layout v2 (FactorTrajectory law — arena vertex +
-    // per-token testimony headers + all planes q/k/ov/mlp/emb); v2 rows were
-    // q/k-only anonymous layout, superseded and evictable.
-    // v4: slice -> circuit-coordinate APPEARS_IN anatomy links added to the
-    // factors pass (SQL navigation); trajectories unchanged (insert-if-absent
-    // skips them on re-run — only the anatomy attestations are novel).
-    internal const int AnalyzerVersion = 5;
+    public static readonly Hash128 AnalysisPendingTypeId = EntityTypeRegistry.Id("Model_AnalysisPending");
+    // v6 retires the uncalibrated top-salience evidence lane. The source retains
+    // ordered header provenance only until a governed token-pair contraction
+    // can witness actual outcomes.
+    internal const int AnalyzerVersion = 6;
 
-    // Ledger §6 step 1 — the checkpoint as CONTENT — lives in ModelCheckpoint
-    // (Blake3 of literal tensor byte ranges → Merkle root, CONTAINS/PRECEDES),
-    // mirroring ModelCoordinates' structure law. The model never enters an id.
+    // Checkpoint provenance lives in ModelCheckpoint as native ordered header
+    // structure. Numeric values remain transient input to native contraction.
 
     public static Hash128 AnalysisMarkerId(Hash128 modelSource, string planesMode)
         => Hash128.OfCanonical($"model/analyzed/{modelSource}/{planesMode}/v{AnalyzerVersion}");
@@ -182,8 +177,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-        // Model ingest is one recorder pass: checkpoint, tokenizer and recipe
-        // anatomy plus bounded calculated circuit testimony.
+        // Model ingest admits checkpoint, tokenizer, and recipe provenance. It
+        // does not emit model evidence before native calibrated contraction.
         bool recorderRun = ModelTokenEdgeETL.ResolvePlanesMode() == "structure";
 
         if (recorderRun)
@@ -194,9 +189,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             await foreach (var batch in RunPhaseAsync(new SynthRecipePhase(this, manifest, log), context, options, ct))
                 yield return batch;
 
-            // §6 step 1 — the checkpoint as content: tensor byte-range identities +
-            // Merkle root + CONTAINS/PRECEDES structure. Recipe-only models (no
-            // weight blobs) skip it; a single deposit, insert-if-absent.
+            // Ordered safetensors header structure is the checkpoint provenance.
+            // Recipe-only models (no weight blobs) skip this source body.
             SubstrateChange? checkpointChange = null;
             try
             {
@@ -218,6 +212,10 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
             if (checkpointChange is not null)
                 yield return checkpointChange;
+
+            // Numerical checkpoint values are consumed only by the governed
+            // native token-pair contraction. No per-tensor factor, rank, or
+            // floating-point representation is persisted as model structure.
         }
 
         if (manifest.Coverage == Coverage.Unsupported)
@@ -297,8 +295,6 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-        const int finalEpoch = 1;
-
         // Analyzer watermark (chess FilterUnanalyzedAsync parity): a completed
         // pass at this (source, mode, version) must not re-fold its planes.
         string planesMode = ModelTokenEdgeETL.ResolvePlanesMode();
@@ -316,12 +312,24 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
         }
 
-        var classifier = new HeadClassifier(context.Reader, Source, log);
-        var edges = new ModelTokenEdgeETL(_modelDir, manifest, tokens, Source, log, classifier);
-        await foreach (var change in edges.EmitAsync(finalEpoch, context.Reader, options, ct))
+        // Header/tokenizer admission is retained source structure. The former
+        // default emitted a top-salience token-to-circuit prefix and folded it as
+        // calibrated testimony. It is neither a contracted token-to-token
+        // observation nor a calibrated outcome, so no model evidence is emitted
+        // until the native contraction/admission pass owns OP4-OP9.
+        if (recorderRun)
         {
-            ct.ThrowIfCancellationRequested();
-            yield return change;
+            // This is intentionally a pending receipt, never the analyzer's
+            // completion marker. The missing OP3 candidate reader and OP4 native
+            // contraction cannot be represented by header structure alone.
+            Hash128 pending = Hash128.OfCanonical(
+                $"model/analysis/pending/{_source}/{AnalyzerVersion}/native-token-pair-contraction-v1");
+            var pb = new SubstrateChangeBuilder(_source, "model/analysis-pending/native-token-pair-contraction", null,
+                entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 0);
+            pb.AddEntity(pending, EntityTier.Word, AnalysisPendingTypeId, firstObservedBy: _source);
+            yield return pb.Build();
+            log.LogInformation(
+                "phase=edges: pending native token-pair contraction; header structure is not analysis completion");
         }
 
         if (!recorderRun)
@@ -392,27 +400,20 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
         }
 
-        // Matches ModelTokenEdgeETL's emission. It scales with CIRCUITS, not
-        // vocabulary: checkpoint content remains the lossless record and each
-        // circuit emits a bounded testimony prefix.
-        // This used to read `circuits * distinctVocab` and matched the emission
-        // that made TinyLlama a 45.8M-row deposit; leaving it would over-estimate
-        // the unit count ~125x and make every progress line meaningless.
-        if (ModelTokenEdgeETL.ResolvePlanesMode() == "structure")
+        // The admitted source consists of tokenizer content plus the ordered
+        // safetensors header. Native OP0-OP3 structure is retained; OP4-OP9
+        // token-pair evidence is intentionally deferred until calibrated.
+        long headerTensors = 0;
+        foreach (string path in Directory.GetFiles(_modelDir, "*.safetensors"))
         {
-            // Per layer: attention + OV heads, plus either one dense MLP circuit or
-            // one router coordinate per expert.
-            int numExperts = 0;
-            try { numExperts = ModelConfigReader.Read(configPath).Config.NumExperts; }
-            catch (Exception) { }
-            long mlpSlots = Math.Max(1, numExperts);
-            long circuits = (2L * Math.Max(1, r.NumHeads) + mlpSlots) * r.NumLayers;
-            long testimony = circuits * ModelTokenEdgeETL.TestimonyWidthPerCircuit;
-            return distinctVocab + testimony;
+            try { headerTensors += SafetensorsContainerParser.ParseHeader(path).Count; }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    $"ModelDecomposer: safetensors header parse failed for unit estimate: {ex.Message}");
+            }
         }
-        long perLayerPlanes = 3L * distinctVocab * distinctVocab * r.NumLayers;
-        long similarTo = distinctVocab * distinctVocab;
-        return distinctVocab + perLayerPlanes + similarTo;
+        return checked(distinctVocab + Math.Max(1, headerTensors));
     }
 
     private abstract class ModelComposePhase<T> : ComposeDecomposerPhase<T>

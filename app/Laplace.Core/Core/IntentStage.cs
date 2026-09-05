@@ -66,6 +66,32 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
+    public Hash128 SemanticDigest() => SemanticDigestBatch([this]);
+
+    public static unsafe Hash128 SemanticDigestBatch(IReadOnlyList<IntentStage> stages)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        lock (LaplaceCoreGate.Native)
+        {
+            var handles = new IntPtr[stages.Count];
+            for (int i = 0; i < handles.Length; i++)
+            {
+                IntentStage stage = stages[i]
+                    ?? throw new ArgumentException("stage must not be null", nameof(stages));
+                stage.ThrowIfDisposed();
+                handles[i] = stage.handle;
+            }
+            Hash128 result = default;
+            fixed (IntPtr* pointers = handles)
+            {
+                int rc = NativeInterop.IntentStageSemanticDigestBatch(pointers, (nuint)handles.Length, &result);
+                GC.KeepAlive(stages);
+                if (rc != 0) throw new InvalidOperationException("native intent semantic digest failed");
+            }
+            return result;
+        }
+    }
+
     public static string CopyColumnList(IntentStageTable table)
     {
         IntPtr p = NativeInterop.IntentStageCopyColumnList((int)table);

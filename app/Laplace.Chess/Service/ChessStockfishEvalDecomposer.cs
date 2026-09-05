@@ -61,28 +61,22 @@ public sealed class ChessStockfishEvalDecomposer
         => _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessStockfishEval.SourceId, SourceName, ChessStockfishEval.TrustClassId, ct);
 
-    private static int ResolveEngineWave(DecomposerOptions options) =>
-        options.BatchSize > 1
-            ? options.BatchSize
-            : Math.Max(1, IngestTopology.Current.ComposeWorkers);
-
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
     {
-        int wave = ResolveEngineWave(options);
         var profile = IngestSourceProfile.ChessAnalyze;
-        var sized = IngestSizing.ResolveForSource(profile, wave);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options);
         return new IngestBatchConfig
         {
             SourceId = SourceId,
             BatchLabelPrefix = BatchLabelPrefix,
-            BatchSize = wave,
-            ProbeChunkSize = sized.ProbeChunkSize,
+            BatchSize = ws.Batch,
+            ProbeChunkSize = ws.ProbeChunk,
             ContainmentReader = context.Reader,
             MaxInputUnits = options.MaxInputUnits,
             WorkingSet = WorkingSetMode.Enabled,
-            WorkingSetProbeInterval = wave,
-            WorkingSetRecordCap = wave,
+            WorkingSetProbeInterval = ws.ProbeInterval,
+            WorkingSetRecordCap = ws.RecordCap,
             WorkingSetProfile = profile,
         };
     }
@@ -97,7 +91,7 @@ public sealed class ChessStockfishEvalDecomposer
                 "ChessStockfishEval requires a live Postgres substrate (NpgsqlSubstrateReader). "
                 + "Record games first: laplace ingest chess <pgn>");
 
-        int wave = ResolveEngineWave(options);
+        int wave = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.ChessAnalyze, options);
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, wave,

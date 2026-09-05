@@ -333,8 +333,8 @@ static int emit_node(
 
     double* traj = NULL;
     size_t m = node.child_count;
-    size_t n_traj = (m > 1) ? m : 0;
-    if (n_traj > 0) {
+    size_t n_traj = 0;
+    if (m > 1) {
         hash128_t* child_ids = (hash128_t*)malloc(m * sizeof(hash128_t));
         uint64_t*  flags     = (uint64_t*)malloc(m * sizeof(uint64_t));
         if (!child_ids || !flags) {
@@ -349,7 +349,8 @@ static int emit_node(
                 ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);
         }
         traj = (double*)malloc(m * 4 * sizeof(double));
-        if (!traj || trajectory_build_flagged(child_ids, flags, m, traj) != 0) {
+        if (!traj || trajectory_build_flagged_rle(
+                child_ids, flags, m, traj, &n_traj) != 0 || n_traj > UINT32_MAX) {
             free(child_ids); free(flags); free(traj);
             return -2;
         }
@@ -362,7 +363,7 @@ static int emit_node(
     if (intent_stage_add_physicality(
             stage, &phys_id, &node.id, 1,
             node.coord, &node.hilbert, traj, (uint32_t)n_traj,
-            (int32_t)n_traj, 1, 0.0, 1, 0, now_us) != 0) {
+            (int32_t)(m > 1 ? m : 0), 1, 0.0, 1, 0, now_us) != 0) {
         free(traj);
         return -2;
     }

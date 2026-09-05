@@ -3,13 +3,26 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-// Pillar 0: SourceId is the per-file FILE-ENTITY provenance (content DAG root, see
-// FileEntity) when the producing stream computed it; default(Hash128) means "fall back to the
-// decomposer's static config source" for streams not yet converted to per-file provenance.
-// Metadata carries the file's own facts (name/path/size/mtime) for the metadata DAG the
-// handler hangs off the trunk — provenance payload only, never part of identity.
+/// <summary>
+/// One canonical content payload plus optional structural provenance.
+///
+/// <para><see cref="ContentRootId"/> is the globally shared content identity used for
+/// existence/dedup. <see cref="DocumentId"/> identifies the selected document composition;
+/// plain text uses the content root itself. <see cref="FileId"/> is the containing
+/// content-plus-metadata composition, not a fixed tier category.</para>
+///
+/// <para><see cref="SourceId"/> is retained as the historical source/root slot so older
+/// record producers stay binary/source compatible. New document records fill the explicit
+/// ids and the deferred content emitter uses <see cref="DocumentId"/> as the nearest trunk.</para>
+/// </summary>
 public readonly record struct ContentIngestRecord(
-    byte[] CanonicalUtf8, int Sequence = 0, Hash128 SourceId = default, FileMetadata? Metadata = null);
+    byte[] CanonicalUtf8,
+    int Sequence = 0,
+    Hash128 SourceId = default,
+    FileMetadata? Metadata = null,
+    Hash128 ContentRootId = default,
+    Hash128 DocumentId = default,
+    Hash128 FileId = default);
 
 public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
@@ -17,9 +30,15 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
 
     public ContentIngestHandler(Hash128 sourceId) => _sourceId = sourceId;
 
-    public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
-        new ContentDeferredUnit(record.CanonicalUtf8,
-            record.SourceId.Equals(default(Hash128)) ? _sourceId : record.SourceId);
+    public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record)
+    {
+        Hash128 directSource = record.DocumentId != default
+            ? record.DocumentId
+            : record.SourceId != default
+                ? record.SourceId
+                : _sourceId;
+        return new ContentDeferredUnit(record.CanonicalUtf8, directSource);
+    }
 
     public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
     {
@@ -36,17 +55,9 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
         {
             _canonical = canonical;
             _sourceId = sourceId;
-            // The heavy content-tier-tree build happens HERE, at construction — and
-            // CreateDeferredUnit is invoked on the pinned parallel workers inside
-            // IngestDescentFlush.ComposeBatchAsync. content_tree_build is lock-free, per-call,
-            // and reads the perfcache read-only, so the decompose fans out across cores. Building
-            // it lazily (below) instead ran every file one-at-a-time in the sequential
-            // FinalizePendingAsync loop — the single-core "compose" bottleneck.
             _tree = ContentTierSpine.BuildTree(canonical);
         }
 
-        // Fallback only: the tree is normally already built by the constructor on a compose
-        // worker. This keeps the probe correct if a unit is ever created off that path.
         public TierTree? TreeForBatchProbe => _tree ??= ContentTierSpine.BuildTree(_canonical);
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>

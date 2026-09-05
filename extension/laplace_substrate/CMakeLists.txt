@@ -77,9 +77,11 @@ set(EXT_C_SOURCES
     src/recall_route.c
     src/perfcache.c
     src/content_resolve.c
+    src/grammar_source.c
     src/descent_probe.c
     src/fold_route.c
     src/containers_of.c
+    src/constituents_closure.c
     src/geometry_successors.c
     src/highway_mask.c
     src/model_factor.c

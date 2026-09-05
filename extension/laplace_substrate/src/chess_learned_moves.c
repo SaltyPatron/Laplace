@@ -65,8 +65,9 @@ static const char *FOLD_QUERY =
     "  WHERE c.type_id = laplace.relation_type_id('HAS_RESULT')"
     "  LIMIT CASE WHEN $1 <= 0 THEN NULL ELSE $1 END"
     ") "
-    "SELECT t.entity_id, t.ordinal, g.white_score "
-    "FROM g CROSS JOIN LATERAL public.laplace_trajectory_constituents(g.trajectory) t";
+    "SELECT t.entity_id, t.ordinal + rs.i - 1, g.white_score "
+    "FROM g CROSS JOIN LATERAL public.laplace_trajectory_constituents(g.trajectory) t "
+    "CROSS JOIN LATERAL generate_series(1, GREATEST(t.run_length, 1)) rs(i)";
 
 static SPIPlanPtr fold_plan = NULL;
 

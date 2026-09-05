@@ -79,8 +79,20 @@ const uint8_t* intent_stage_tuple_ptr(
     intent_stage_table_t  table,
     size_t*               out_len);
 
+/* Versioned semantic replay digest. Row order and stage partitioning do not
+ * matter; duplicate multiplicity does. Observation timestamps are excluded. */
+int intent_stage_semantic_digest_batch(const intent_stage_t* const* stages,
+                                      size_t count, hash128_t* out);
+int intent_stage_semantic_digest(const intent_stage_t* stage, hash128_t* out);
+
 int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id);
 int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id);
+
+/* Same content can occur at multiple representation floors. If its entity row
+ * is already staged, retain the lowest observed floor without minting a second
+ * row for the same id. Returns 1 when an entity row was found, 0 when absent,
+ * and -1 for invalid input. */
+int intent_stage_lower_entity_tier(intent_stage_t* stage, const hash128_t* id, int16_t tier);
 
 /*
  * Splits `src` into `part_count` new stages, each safe to commit as an independent

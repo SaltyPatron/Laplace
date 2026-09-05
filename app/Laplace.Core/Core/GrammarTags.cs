@@ -23,7 +23,9 @@ public static unsafe class GrammarTags
                 rc = NativeInterop.GrammarTagsRun(recipe, t, (nuint)tagsScm.Length, u, (nuint)utf8.Length, &outTags, &n);
             }
         }
-        if (rc != 0 || outTags == null) return Array.Empty<TagCapture>();
+        if (rc != 0)
+            throw new InvalidOperationException($"native grammar tag query failed ({rc})");
+        if (outTags == null) return Array.Empty<TagCapture>();
 
         try
         {
@@ -52,8 +54,12 @@ public static unsafe class GrammarTags
         lock (_cache)
         {
             if (_cache.TryGetValue(modality, out var cached)) return cached;
-            var path = LocateTagsScm(modality);
-            byte[]? bytes = path is not null && File.Exists(path) ? File.ReadAllBytes(path) : null;
+            byte[]? bytes = ReadEmbeddedTags(modality);
+            if (bytes is null)
+            {
+                var path = LocateTagsScm(modality);
+                bytes = path is not null && File.Exists(path) ? File.ReadAllBytes(path) : null;
+            }
             _cache[modality] = bytes;
             return bytes;
         }
@@ -65,6 +71,23 @@ public static unsafe class GrammarTags
         ["typescript"] = "typescript",
         ["php"] = "php",
     };
+
+    private static byte[]? ReadEmbeddedTags(string modality)
+    {
+        _repoSubpath.TryGetValue(modality, out string? subpath);
+        string owned = $"Laplace.GrammarTags.owned.{modality}/queries/tags.scm";
+        string external = $"Laplace.GrammarTags.external.tree-sitter-{modality}/"
+            + (subpath is null ? "" : subpath + "/") + "queries/tags.scm";
+        var assembly = typeof(GrammarTags).Assembly;
+        string[] names = assembly.GetManifestResourceNames();
+        string? resource = names.FirstOrDefault(name => name.Replace('\\', '/') == owned)
+            ?? names.FirstOrDefault(name => name.Replace('\\', '/') == external);
+        if (resource is null) return null;
+        using Stream input = assembly.GetManifestResourceStream(resource)!;
+        using var output = new MemoryStream();
+        input.CopyTo(output);
+        return output.ToArray();
+    }
 
     private static string? LocateTagsScm(string modality)
     {

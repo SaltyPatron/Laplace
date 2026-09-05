@@ -9,6 +9,8 @@ public interface IDecomposerContext
 
     IReadOnlyList<IngestArtifact> SelectedArtifacts => Array.Empty<IngestArtifact>();
 
+    bool HasArtifactGraph => SelectedArtifacts.Count > 0;
+
     ISubstrateWriter Writer { get; }
 
     ISubstrateReader Reader { get; }

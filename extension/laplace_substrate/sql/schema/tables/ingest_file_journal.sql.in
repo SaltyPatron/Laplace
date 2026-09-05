@@ -17,6 +17,8 @@
 -- a status the C# side emits and this list omits raises 23514, the writer logs
 -- INGEST_FILE_JOURNAL_WRITE_FAILED and does not abort the ingest, and the row
 -- stays 'running' forever, indistinguishable from a killed file.
+--   inventoried        admitted by the run snapshot; not opened yet
+--   not-selected       inventoried with an explicit non-admitted disposition
 --   running           opened, not yet finished
 --   composed          extraction/composition complete; waiting for its boundary to apply
 --   ok                applied to completion, marker deposited
@@ -28,8 +30,10 @@ CREATE TABLE IF NOT EXISTS ingest_file_journal (
     file_label    text         NOT NULL,
     source_name   text         NOT NULL,
     file_id       bytea        CHECK (file_id IS NULL OR octet_length(file_id) = 16),
+    resume_fingerprint bytea    CHECK (resume_fingerprint IS NULL OR octet_length(resume_fingerprint) = 16),
     status        text         NOT NULL DEFAULT 'running'
-        CHECK (status IN ('running','composed','ok','skipped-complete','failed','cancelled')),
+        CHECK (status IN ('inventoried','not-selected','running','composed','ok',
+                          'skipped-complete','failed','cancelled')),
     started_at    timestamptz  NOT NULL DEFAULT now(),
     ended_at      timestamptz,
     bytes         bigint       NOT NULL DEFAULT 0,
@@ -38,8 +42,31 @@ CREATE TABLE IF NOT EXISTS ingest_file_journal (
     physicalities bigint       NOT NULL DEFAULT 0,
     attestations  bigint       NOT NULL DEFAULT 0,
     error         text,
+    modified_at   timestamptz,
+    artifact_id   text,
+    relative_path text,
+    disposition   text         NOT NULL DEFAULT 'admitted'
+        CHECK (disposition IN ('admitted','equivalent-packaging','superseded',
+                               'excluded-with-reason','unsupported-with-why-not','absent')),
+    disposition_reason text,
     PRIMARY KEY (run_id, file_label)
 );
+
+-- Observed filesystem time is occurrence metadata, never file identity. Keep it nullable:
+-- an upload with no supplied mtime has no such observation and must not fabricate one.
+ALTER TABLE ingest_file_journal
+    ADD COLUMN IF NOT EXISTS modified_at timestamptz;
+ALTER TABLE ingest_file_journal
+    ADD COLUMN IF NOT EXISTS resume_fingerprint bytea
+        CHECK (resume_fingerprint IS NULL OR octet_length(resume_fingerprint) = 16);
+ALTER TABLE ingest_file_journal
+    ADD COLUMN IF NOT EXISTS artifact_id text;
+ALTER TABLE ingest_file_journal
+    ADD COLUMN IF NOT EXISTS relative_path text;
+ALTER TABLE ingest_file_journal
+    ADD COLUMN IF NOT EXISTS disposition text NOT NULL DEFAULT 'admitted';
+ALTER TABLE ingest_file_journal
+    ADD COLUMN IF NOT EXISTS disposition_reason text;
 
 -- The read this table exists for: which files did a run finish, and which one was
 -- it holding when it died.
@@ -60,5 +87,10 @@ DO $$
 BEGIN
     ALTER TABLE ingest_file_journal DROP CONSTRAINT IF EXISTS ingest_file_journal_status_check;
     ALTER TABLE ingest_file_journal ADD CONSTRAINT ingest_file_journal_status_check
-        CHECK (status IN ('running','composed','ok','skipped-complete','failed','cancelled'));
+        CHECK (status IN ('inventoried','not-selected','running','composed','ok',
+                          'skipped-complete','failed','cancelled'));
+    ALTER TABLE ingest_file_journal DROP CONSTRAINT IF EXISTS ingest_file_journal_disposition_check;
+    ALTER TABLE ingest_file_journal ADD CONSTRAINT ingest_file_journal_disposition_check
+        CHECK (disposition IN ('admitted','equivalent-packaging','superseded',
+                               'excluded-with-reason','unsupported-with-why-not','absent'));
 END $$;

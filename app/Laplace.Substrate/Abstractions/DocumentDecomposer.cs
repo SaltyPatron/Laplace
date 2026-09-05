@@ -1,26 +1,30 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Abstractions;
 
 public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord>, IIngestInventoryProvider,
-    IIgnoresAmbientArtifactManifest
+    IIngestArtifactGraphProvider, IIgnoresAmbientArtifactManifest
 {
-    public override Hash128 SourceId => UserPromptContent.Source;
-    public override string SourceName => "UserPrompt";
-    public override int LayerOrder => 2;
-    public override Hash128 TrustClassId => UserPromptContent.TrustClass;
-    protected override double SourceTrust => UserPromptContent.WitnessWeight;
+    private static readonly ISourceManifest Manifest = SeedSourceManifest<DocumentSource>.Instance;
 
-    // Pillar 0 live: every file is its own provenance unit (source = content-DAG root,
-    // completion marker + metadata DAG per file), so completion is per-file, not the
-    // all-or-nothing source-level marker — new files in a completed directory just work.
+    public override Hash128 SourceId => DocumentSource.SourceId;
+    public override string SourceName => DocumentSource.SourceName;
+    public override int LayerOrder => 2;
+    public override Hash128 TrustClassId => DocumentSource.TrustClass;
+    protected override double SourceTrust => TC.StructuredCorpus;
+
     public override bool PerFileCompletion => true;
 
+    // Document files now use their semantic file-composition id for completion. The generic
+    // resume fingerprint is intentionally disabled here because it is an execution hash, not
+    // the file entity defined by Pillar 0.
+    public override bool PerFileResume => false;
+
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
+        => SourceVocabularyBootstrap.RegisterManifestAsync(context, Manifest, ct: ct);
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
@@ -49,22 +53,37 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
         new DocumentIngestHandler(LayerOrder) { IgnoreCompletedFiles = options.ReObservePresent };
 
     protected override IngestBatchConfig ConfigForFile(
-        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
-    {
-        return DocumentIngestSupport.PipelineConfig(fileLabel, reader, options);
-    }
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        DocumentIngestSupport.PipelineConfig(fileLabel, reader, options);
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = EnumerateInputFiles(context.EcosystemPath).ToList();
+        var selected = context.SelectedArtifacts;
+        var paths = context.HasArtifactGraph
+            ? selected.Select(static artifact => artifact.Path).ToList()
+            : EnumerateInputFiles(context.EcosystemPath).ToList();
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        if (options.MaxInputUnits > 0)
-            return Task.FromResult(IngestInventory.FromFiles(
-                "documents", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
-        var specs = paths.Select(f => new IngestFileSpec(Path.GetFileName(f), f, 1)).ToList();
+        var specs = context.HasArtifactGraph
+            ? selected.Select(static artifact =>
+                    new IngestFileSpec(artifact.FileLabel, artifact.Path, 1))
+                .ToList()
+            : paths.Select(f => new IngestFileSpec(Path.GetFileName(f), f, 1)).ToList();
         return Task.FromResult<IngestInventory?>(
-            new IngestInventory("documents", paths.Count, specs, TracksFileCompletion: true));
+            new IngestInventory(
+                "documents",
+                options.MaxInputUnits > 0 ? Math.Min(paths.Count, options.MaxInputUnits) : paths.Count,
+                specs,
+                TracksFileCompletion: true));
+    }
+
+    public Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath,
+        DecomposerOptions options,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(BuildArtifactGraph(ecosystemPath));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -79,20 +98,90 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
         if (File.Exists(path))
         {
-            yield return Path.GetFullPath(path);
+            if (string.Equals(Path.GetExtension(path), ".txt", StringComparison.Ordinal))
+                yield return Path.GetFullPath(path);
             yield break;
         }
 
         if (!Directory.Exists(path)) yield break;
 
-        // Provenance filter ONLY — not the source-code size heuristic. A 27 MB
-        // dictionary is the corpus, not a build artifact. IsVendoredOrBuildPath
-        // dropped webster-unabridged-dictionary-1913 and one Britannica volume
-        // here, silently, before enumeration (GH #754).
         foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
                                          .Where(f => !VendoredPathFilter.IsVendoredOrBuildLocation(f))
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
+    }
+
+    internal static IngestArtifactGraph? BuildArtifactGraph(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+
+        if (File.Exists(path))
+        {
+            string full = Path.GetFullPath(path);
+            bool supported = string.Equals(Path.GetExtension(full), ".txt", StringComparison.Ordinal);
+            return new IngestArtifactGraph(
+                [BuildArtifact(
+                    full,
+                    Path.GetFileName(full),
+                    supported ? IngestArtifactDisposition.Admitted : IngestArtifactDisposition.Unsupported,
+                    supported ? "" : "DocumentDecomposer currently admits plain-text .txt files only")]);
+        }
+
+        if (!Directory.Exists(path)) return null;
+
+        string root = Path.GetFullPath(path);
+        var artifacts = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .OrderBy(static file => file, StringComparer.Ordinal)
+            .Select(file =>
+            {
+                string full = Path.GetFullPath(file);
+                string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
+                if (VendoredPathFilter.IsVendoredOrBuildLocation(full))
+                    return BuildArtifact(
+                        full,
+                        relative,
+                        IngestArtifactDisposition.ExcludedWithReason,
+                        "vendored or build-tree artifact is outside DocumentDecomposer source ownership");
+                if (!string.Equals(Path.GetExtension(full), ".txt", StringComparison.Ordinal))
+                    return BuildArtifact(
+                        full,
+                        relative,
+                        IngestArtifactDisposition.Unsupported,
+                        "DocumentDecomposer currently admits plain-text .txt files only");
+                return BuildArtifact(full, relative, IngestArtifactDisposition.Admitted, "");
+            })
+            .ToArray();
+        return new IngestArtifactGraph(artifacts);
+    }
+
+    private static IngestArtifact BuildArtifact(
+        string fullPath,
+        string relativePath,
+        IngestArtifactDisposition disposition,
+        string reason)
+    {
+        var info = new FileInfo(fullPath);
+        return new IngestArtifact(
+            DocumentSource.SourceName,
+            "local",
+            relativePath,
+            relativePath,
+            fullPath,
+            disposition,
+            UpstreamUrl: "",
+            FetchedAtUtc: "",
+            Bytes: info.Length,
+            Sha256: "",
+            UpstreamChecksum: "",
+            MediaType: disposition == IngestArtifactDisposition.Admitted ? "text/plain" : "",
+            License: "",
+            Citation: "",
+            Language: "",
+            Split: "",
+            AnnotationOrigin: "local-filesystem",
+            Notes: reason,
+            JournalLabel: $"document/{relativePath}",
+            ModifiedAt: info.LastWriteTimeUtc);
     }
 }
 
@@ -103,20 +192,39 @@ public static class DocumentFileExtract
         string file, string relativePath, [EnumeratorCancellation] CancellationToken ct)
     {
         byte[] bytes = await ReadFileBytesAsync(file, ct);
-        if (bytes.Length == 0) yield break;
-        // Match RepoDecomposer / GH #596: one malformed-encoding file must skip with a
-        // warning, not abort a multi-hundred-file document run (rc=1 for the process).
-        Hash128? fileRoot = ContentTierSpine.ResolveRoot(bytes);
-        if (fileRoot is null)
+        if (bytes.Length == 0)
+            throw new InvalidDataException(
+                $"document '{relativePath}' is empty; an admitted document must have content");
+
+        Hash128? contentRoot = ContentTierSpine.ResolveRoot(bytes);
+        if (contentRoot is null)
+            throw new InvalidDataException(
+                $"document '{relativePath}' has invalid UTF-8 or failed canonical content identity");
+
+        var metadata = FileMetadata.FromPath(file, relativePath) with
         {
-            Trace.TraceWarning(
-                "DocumentFileExtract: skipping '{0}' — unresolvable content root " +
-                "(malformed encoding or native content_root_id rejection)",
-                relativePath);
-            yield break;
+            FormatMetadata = ProjectGutenbergMetadata.Extract(bytes),
+        };
+        FileIdentity fileIdentity;
+        try
+        {
+            fileIdentity = FileEntity.Resolve(bytes, metadata);
         }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidDataException(
+                $"document '{relativePath}' failed canonical file identity: {ex.Message}", ex);
+        }
+
+        // A plain-text document introduces no extra composition around its content.
+        Hash128 documentId = contentRoot.Value;
         yield return new ContentIngestRecord(
-            bytes, SourceId: fileRoot.Value, Metadata: FileMetadata.FromPath(file, relativePath));
+            CanonicalUtf8: bytes,
+            SourceId: contentRoot.Value,
+            Metadata: metadata,
+            ContentRootId: contentRoot.Value,
+            DocumentId: documentId,
+            FileId: fileIdentity.FileId);
     }
 
     private static async Task<byte[]> ReadFileBytesAsync(string file, CancellationToken ct)

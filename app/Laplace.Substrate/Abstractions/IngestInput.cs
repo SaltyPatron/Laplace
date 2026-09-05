@@ -84,7 +84,7 @@ public static class IngestInput
         IReadOnlyList<(string Path, string Label)> discoveredFiles) =>
         selectedArtifacts.Count > 0
             ? selectedArtifacts
-                .Select(static artifact => (artifact.Path, artifact.Id))
+                .Select(static artifact => (artifact.Path, artifact.FileLabel))
                 .ToArray()
             : discoveredFiles;
 

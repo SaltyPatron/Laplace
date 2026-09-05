@@ -49,6 +49,10 @@ typedef struct {
     size_t   row_count;
 } byte_buf_t;
 
+static size_t row_byte_len(const uint8_t* src, size_t len, size_t off);
+static int row_field_at(const uint8_t* data, size_t len, size_t off, int field_1based,
+                        const uint8_t** out, int32_t* out_len);
+
 static int buf_reserve(byte_buf_t* b, size_t additional) {
     if (b->len > SIZE_MAX - additional) return -1;
     const size_t needed = b->len + additional;
@@ -246,6 +250,32 @@ int intent_stage_witness_seen(const intent_stage_t* stage, const hash128_t* id) 
 
 int intent_stage_witness_record(intent_stage_t* stage, const hash128_t* id) {
     return witness_record_unlocked(stage, id);
+}
+
+int intent_stage_lower_entity_tier(intent_stage_t* stage, const hash128_t* id, int16_t tier) {
+    if (!stage || !id || tier < 0 || tier > 255) return -1;
+    byte_buf_t* entities = &stage->entities;
+    size_t offset = 0;
+    while (offset < entities->len) {
+        size_t row_len = row_byte_len(entities->data, entities->len, offset);
+        if (row_len == 0) return -1;
+        const uint8_t* staged_id = NULL;
+        const uint8_t* staged_tier = NULL;
+        int32_t id_len = 0, tier_len = 0;
+        if (row_field_at(entities->data, entities->len, offset, 1, &staged_id, &id_len) != 0
+            || row_field_at(entities->data, entities->len, offset, 2, &staged_tier, &tier_len) != 0)
+            return -1;
+        if (id_len == 16 && tier_len == 2 && memcmp(staged_id, id, 16) == 0) {
+            const int16_t current = (int16_t)(((uint16_t)staged_tier[0] << 8) | staged_tier[1]);
+            if (tier < current) {
+                const uint16_t encoded = htobe16((uint16_t)tier);
+                memcpy((uint8_t*)staged_tier, &encoded, sizeof(encoded));
+            }
+            return 1;
+        }
+        offset += row_len;
+    }
+    return 0;
 }
 
 intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
@@ -693,4 +723,75 @@ const uint8_t* intent_stage_tuple_ptr(
     if (!src) { if (out_len) *out_len = 0; return NULL; }
     if (out_len) *out_len = src->len;
     return src->data;
+}
+
+
+static int semantic_hash_compare(const void* a, const void* b) {
+    return memcmp(a, b, sizeof(hash128_t));
+}
+
+int intent_stage_semantic_digest_batch(const intent_stage_t* const* stages,
+                                      size_t count, hash128_t* out) {
+    if (!out || (count && !stages)) return -1;
+    size_t rows = 0;
+    for (size_t s = 0; s < count; ++s) {
+        if (!stages[s]) return -1;
+        for (int t = 1; t <= 3; ++t) {
+            const byte_buf_t* b = stage_buf(stages[s], (intent_stage_table_t)t);
+            if (b->row_count > SIZE_MAX - rows) return -1;
+            rows += b->row_count;
+        }
+    }
+    if (rows > (SIZE_MAX - 8) / sizeof(hash128_t)) return -1;
+    /* Stable version prefix followed by sorted, table-tagged row digests. */
+    uint8_t* hashes = (uint8_t*)malloc(8 + rows * sizeof(hash128_t));
+    if (!hashes) return -1;
+    memcpy(hashes, "LPISv001", 8);
+    byte_buf_t row = {0};
+    size_t at = 0;
+    int rc = -1;
+    for (size_t s = 0; s < count; ++s) {
+        for (int t = 1; t <= 3; ++t) {
+            const byte_buf_t* b = stage_buf(stages[s], (intent_stage_table_t)t);
+            int fields = t == 1 ? ENTITY_COL_COUNT :
+                         t == 2 ? PHYSICALITY_COL_COUNT : ATTESTATION_COL_COUNT;
+            int omitted = t == 2 ? 10 : t == 3 ? 8 : 0;
+            size_t offset = 0;
+            for (size_t n = 0; n < b->row_count; ++n) {
+                size_t len = row_byte_len(b->data, b->len, offset);
+                if (!len || at >= rows) goto done;
+                row.len = 0;
+                if (buf_append_u8(&row, (uint8_t)t)) goto done;
+                size_t field_offset = offset + 2;
+                for (int f = 1; f <= fields; ++f) {
+                    if (field_offset + 4 > offset + len) goto done;
+                    int32_t length = (int32_t)be32_at(b->data + field_offset);
+                    field_offset += 4;
+                    if (length < -1 || (length > 0 && (size_t)length > offset + len - field_offset)) goto done;
+                    if (f != omitted) {
+                        if (buf_append_u8(&row, (uint8_t)f) || buf_append_be32(&row, length)) goto done;
+                        if (length > 0 && buf_append(&row, b->data + field_offset, (size_t)length)) goto done;
+                    }
+                    if (length > 0) field_offset += (size_t)length;
+                }
+                if (field_offset != offset + len) goto done;
+                hash128_t digest;
+                hash128_blake3(row.data, row.len, &digest);
+                memcpy(hashes + 8 + at++ * sizeof(digest), &digest, sizeof(digest));
+                offset += len;
+            }
+            if (offset != b->len) goto done;
+        }
+    }
+    if (rows > 1) qsort(hashes + 8, rows, sizeof(hash128_t), semantic_hash_compare);
+    hash128_blake3(hashes, 8 + rows * sizeof(hash128_t), out);
+    rc = 0;
+done:
+    free(row.data);
+    free(hashes);
+    return rc;
+}
+
+int intent_stage_semantic_digest(const intent_stage_t* stage, hash128_t* out) {
+    return intent_stage_semantic_digest_batch(&stage, 1, out);
 }

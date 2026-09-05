@@ -29,26 +29,51 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
     public Task<ApplyResult> ApplyManyAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
-        => ApplyManyInternalAsync(changes, workingSetToken: null, ct);
+        => ApplyManyInternalAsync(
+            changes, legacyWorkingSetToken: null, transactionParticipant: null,
+            reconciliation: null, ct);
+
+    internal Task<ApplyResult> ApplyWorkingSetAtomicAsync(
+        IReadOnlyList<SubstrateChange> changes,
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task> transactionParticipant,
+        WorkingSetReconciliation? reconciliation,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        ArgumentNullException.ThrowIfNull(transactionParticipant);
+        return ApplyManyInternalAsync(
+            changes,
+            changes.Count == 0 ? null : WorkingSetToken(changes),
+            transactionParticipant,
+            reconciliation,
+            ct);
+    }
 
     private async Task<ApplyResult> ApplyManyInternalAsync(
-        IReadOnlyList<SubstrateChange> changes, Hash128? workingSetToken, CancellationToken ct)
+        IReadOnlyList<SubstrateChange> changes,
+        Hash128? legacyWorkingSetToken,
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? transactionParticipant,
+        WorkingSetReconciliation? reconciliation,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
         var sw = Stopwatch.StartNew();
         int roundTrips = 0;
 
-        int entitiesAttempted = 0, physAttempted = 0, attAttempted = 0;
-        for (int i = 0; i < changes.Count; i++)
+        int managedEntitiesAttempted = 0, managedPhysAttempted = 0, managedAttAttempted = 0;
+        checked
         {
-            if (!changes[i].TestimonyWalks.IsDefaultOrEmpty)
-                throw new InvalidOperationException(
-                    "testimony walks reached the evidence writer: walks are the consensus-only "
-                    + "journal (the accumulating writer journals and strips them); evidence-"
-                    + "persisting deposits emit AttestationRows at the decomposer");
-            entitiesAttempted += changes[i].Entities.Length;
-            physAttempted += changes[i].Physicalities.Length;
-            attAttempted += changes[i].Attestations.Length;
+            for (int i = 0; i < changes.Count; i++)
+            {
+                if (!changes[i].TestimonyWalks.IsDefaultOrEmpty)
+                    throw new InvalidOperationException(
+                        "testimony walks reached the evidence writer: walks are the consensus-only "
+                        + "journal (the accumulating writer journals and strips them); evidence-"
+                        + "persisting deposits emit AttestationRows at the decomposer");
+                managedEntitiesAttempted += changes[i].Entities.Length;
+                managedPhysAttempted += changes[i].Physicalities.Length;
+                managedAttAttempted += changes[i].Attestations.Length;
+            }
         }
         if (changes.Count == 0)
             return new ApplyResult(0, 0, 0, 0, 0, 0, 0, sw.Elapsed, false);
@@ -70,7 +95,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         }
 
         Hash128? workingSetSource = null;
-        if (workingSetToken is not null)
+        if (legacyWorkingSetToken is not null)
         {
             workingSetSource = changes[0].Metadata.SourceId;
             for (int i = 1; i < changes.Count; i++)
@@ -83,22 +108,34 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
 
 
+        int entitiesAttempted = managedEntitiesAttempted;
+        int physAttempted = managedPhysAttempted;
+        int attAttempted = managedAttAttempted;
         var prebuiltStages = new List<IntentStage>();
         foreach (var c in changes)
         {
             if (c.IntentStages.IsDefaultOrEmpty) continue;
             foreach (var pre in c.IntentStages)
-                if (!pre.IsInvalid) prebuiltStages.Add(pre);
+            {
+                if (pre.IsInvalid) continue;
+                prebuiltStages.Add(pre);
+                checked
+                {
+                    entitiesAttempted += pre.EntityCount;
+                    physAttempted += pre.PhysicalityCount;
+                    attAttempted += pre.AttestationCount;
+                }
+            }
         }
 
 
 
 
         IntentStage? managedStage = null;
-        if (entitiesAttempted > 0 || physAttempted > 0 || attAttempted > 0)
+        if (managedEntitiesAttempted > 0 || managedPhysAttempted > 0 || managedAttAttempted > 0)
         {
             managedStage = IntentStage.New(
-                Math.Max(Math.Max(entitiesAttempted, physAttempted), attAttempted));
+                Math.Max(Math.Max(managedEntitiesAttempted, managedPhysAttempted), managedAttAttempted));
             Span<double> coord = stackalloc double[4];
             var seenEntity = new HashSet<Hash128>();
             var seenPhys = new HashSet<Hash128>();
@@ -175,6 +212,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 || managedStage.AttestationCount > 0))
             sourceStages.Add(managedStage);
 
+        Hash128? workingSetToken = legacyWorkingSetToken is { } legacy
+            ? ReplayTokenV2(legacy, sourceStages)
+            : null;
+        Hash128? legacySingletonToken = legacyWorkingSetToken is not null && changes.Count == 1
+            ? changes[0].Metadata.IntentId
+            : null;
+
         long entCount = sourceStages.Sum(s => (long)s.EntityCount);
         long physCount = sourceStages.Sum(s => (long)s.PhysicalityCount);
         long attCount = sourceStages.Sum(s => (long)s.AttestationCount);
@@ -190,7 +234,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             if (anyRows)
             {
                 var r = await ApplyStagesCoreAsync(
-                    sourceStages, workingSetToken, workingSetSource, ct);
+                    sourceStages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
+                    workingSetSource, transactionParticipant, reconciliation, ct);
                 entitiesInserted = r.e;
                 physicalitiesInserted = r.p;
                 attestationsInserted = r.a;
@@ -266,5 +311,16 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         SumScoreFp1e9 = a.SumScoreFp1e9 ?? 0,
         IsAggregated = (byte)(a.SumScoreFp1e9 is null ? 0 : 1),
     };
+
+    private static Hash128 ReplayTokenV2(
+        Hash128 legacyToken, IReadOnlyList<IntentStage> sourceStages)
+    {
+        Hash128 semanticDigest = IntentStage.SemanticDigestBatch(sourceStages);
+        Span<byte> payload = stackalloc byte[23 + 16 + 16];
+        "LaplaceReplayIntent/v2\0"u8.CopyTo(payload);
+        legacyToken.WriteBytes(payload.Slice(23, 16));
+        semanticDigest.WriteBytes(payload.Slice(39, 16));
+        return Hash128.Blake3(payload);
+    }
 
 }

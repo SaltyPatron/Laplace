@@ -8,7 +8,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, FullScope>, IIngestInventoryProvider
+public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, FullScope>,
+    IIngestInventoryProvider, IIngestArtifactGraphProvider
 {
     public static readonly Hash128 Source = RepoSource.SourceId;
     public static readonly Hash128 TrustClass = RepoSource.TrustClass;
@@ -70,25 +71,14 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         if (modality is null) yield break;
         byte[] bytes;
         try { bytes = await File.ReadAllBytesAsync(filePath, ct); }
-        catch (IOException ex)
+        catch (Exception ex)
         {
-            System.Diagnostics.Trace.TraceWarning(
-                $"RepoDecomposer: failed to read '{filePath}': {ex.Message}");
-            yield break;
+            throw new InvalidOperationException(
+                $"RepoDecomposer: failed to read '{filePath}': {ex.Message}", ex);
         }
-        if (bytes.Length == 0) yield break;
-
-        Hash128? sourceId;
-        try
-        {
-            sourceId = FileEntity.SourceId(bytes);
-        }
-        catch (InvalidOperationException ex)
-        {
-            System.Diagnostics.Trace.TraceWarning(
-                $"RepoDecomposer: skipping '{filePath}' — unresolvable content root: {ex.Message}");
-            yield break;
-        }
+        if (bytes.Length == 0)
+            throw new InvalidDataException(
+                $"RepoDecomposer: admitted source file '{filePath}' is empty");
 
         string relPath = fileLabel.StartsWith("repo/", StringComparison.Ordinal)
             ? fileLabel["repo/".Length..]
@@ -110,7 +100,8 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
             ConceptAnchorKey: relPath,
             ConceptCategoryTypeId: FileTypeId,
             ParentContainerId: _repoId,
-            SourceId: sourceId);
+            FileMetadata: GrammarSourceFileSupport.MetadataFromPath(
+                filePath, relPath, modality));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -121,11 +112,29 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        if (!Directory.Exists(context.EcosystemPath))
+        if (!Directory.Exists(context.EcosystemPath) && !context.HasArtifactGraph)
             return Task.FromResult<IngestInventory?>(null);
-        var paths = EnumerateRepoFiles(context.EcosystemPath).Select(x => x.File).ToList();
-        return Task.FromResult(IngestInventory.FromFileUnits(
-            "repository files", paths, options.MaxInputUnits, tracksFileCompletion: true));
+        var files = context.HasArtifactGraph
+            ? context.SelectedArtifacts.Select(static artifact =>
+                    new IngestFileSpec(artifact.FileLabel, artifact.Path, 1))
+                .ToList()
+            : EnumerateRepoFiles(context.EcosystemPath)
+                .Select(static file => new IngestFileSpec(
+                    Path.GetFileName(file.File), file.File, 1))
+                .ToList();
+        long total = options.MaxInputUnits > 0
+            ? Math.Min(files.Count, options.MaxInputUnits)
+            : files.Count;
+        return Task.FromResult<IngestInventory?>(
+            new IngestInventory("repository files", total, files, TracksFileCompletion: true));
+    }
+
+    public Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath, DecomposerOptions options, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(GrammarSourceFileSupport.BuildArtifactGraph(
+            ecosystemPath, RepoSource.SourceName, "repo", ModalityFor));
     }
 
     private static void StageRepoRoot(SubstrateChangeBuilder b, string repoCanonical, Hash128 repoId)
@@ -194,7 +203,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         }
     }
 
-    private static string? ModalityFor(string file)
+    internal static string? ModalityFor(string file)
     {
         string fileName = Path.GetFileName(file);
         string ext = Path.GetExtension(file);

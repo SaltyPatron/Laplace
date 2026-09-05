@@ -318,3 +318,33 @@ TEST(LaplaceCoreMantissa, TestimonyScoreCeilingBoundsSummedWitnesses) {
     EXPECT_EQ(0,  laplace_testimony_pack_walk(id, at_cap,   nullptr, 1, v));
     EXPECT_EQ(-2, laplace_testimony_pack_walk(id, over_cap, nullptr, 1, v));
 }
+
+TEST(LaplaceCoreMantissa, OrdinaryVertexTierExtendsToUint8WithoutTouchingSpecialPayloads) {
+    const uint8_t tiers[] = {0, 1, 31, 32, 63, 127, 255};
+    for (uint8_t tier : tiers) {
+        uint64_t flags = laplace_vertex_flags(tier, tier == 0, 0x41);
+        mantissa_payload_t in = {{0x11, 0x22}, 3, 1, flags}, out{};
+        double point[4];
+        mantissa_pack(point, &in);
+        mantissa_unpack(point, &out);
+        EXPECT_EQ(out.flags, flags);
+        EXPECT_EQ(laplace_vflag_tier(out.flags), tier);
+        EXPECT_EQ(laplace_vflag_has_atom(out.flags), tier == 0);
+        if (tier == 0) { EXPECT_EQ(laplace_vflag_atom(out.flags), 0x41u); }
+    }
+
+    /* Testimony/factor layouts retain their existing payload bits and never
+     * trigger the ordinary-tier extension decoder. */
+    const uint64_t testimony = LAPLACE_VFLAG_TESTIMONY
+        | ((uint64_t)0x1234567 << LAPLACE_VFLAG_SCORE_SHIFT);
+    const uint64_t factor = LAPLACE_VFLAG_FACTOR
+        | ((uint64_t)0xAABBCCDD << LAPLACE_VFLAG_F5_SHIFT)
+        | ((uint64_t)6 << LAPLACE_VFLAG_FCOUNT_SHIFT);
+    for (uint64_t flags : {testimony, factor}) {
+        mantissa_payload_t in = {{0x33, 0x44}, 1, 1, flags}, out{};
+        double point[4];
+        mantissa_pack(point, &in);
+        mantissa_unpack(point, &out);
+        EXPECT_EQ(out.flags, flags);
+    }
+}

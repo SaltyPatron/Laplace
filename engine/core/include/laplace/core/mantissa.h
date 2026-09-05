@@ -18,6 +18,14 @@ typedef struct {
 #define LAPLACE_VFLAG_HAS_ATOM      (1ULL << 0)
 #define LAPLACE_VFLAG_TIER_SHIFT    1u
 #define LAPLACE_VFLAG_TIER_MASK     0x1FULL
+/* Ordinary content vertices historically carried a five-bit tier in bits 1-5.
+ * Deep source composition needs all uint8 floors. Bits 43-46 are unused by
+ * atom (bits 31-51), testimony (bits 6-42), and factor (bits 7-42) payloads;
+ * the extension marker therefore leaves every legacy payload byte-for-byte.
+ * It is emitted only for non-atom, non-special ordinary vertices at tier >31. */
+#define LAPLACE_VFLAG_TIER_EXT_SHIFT 43u
+#define LAPLACE_VFLAG_TIER_EXT_MASK  0x7ULL
+#define LAPLACE_VFLAG_TIER_EXT       (1ULL << 46)
 #define LAPLACE_VFLAG_ATOM_SHIFT    31u
 #define LAPLACE_VFLAG_ATOM_MASK     0x1FFFFFULL
 
@@ -46,9 +54,14 @@ typedef struct {
 
 static inline uint64_t laplace_vertex_flags(uint8_t tier, int has_atom, uint32_t atom) {
     uint64_t f = ((uint64_t)(tier & LAPLACE_VFLAG_TIER_MASK)) << LAPLACE_VFLAG_TIER_SHIFT;
-    if (has_atom)
+    if (has_atom) {
         f |= LAPLACE_VFLAG_HAS_ATOM
           |  ((uint64_t)(atom & LAPLACE_VFLAG_ATOM_MASK)) << LAPLACE_VFLAG_ATOM_SHIFT;
+    } else if (tier > LAPLACE_VFLAG_TIER_MASK) {
+        f |= LAPLACE_VFLAG_TIER_EXT
+          |  (((uint64_t)(tier >> 5) & LAPLACE_VFLAG_TIER_EXT_MASK)
+              << LAPLACE_VFLAG_TIER_EXT_SHIFT);
+    }
     return f;
 }
 
@@ -58,7 +71,12 @@ static inline int laplace_vflag_has_atom(uint64_t flags) {
     return (flags & LAPLACE_VFLAG_HAS_ATOM) != 0;
 }
 static inline uint8_t laplace_vflag_tier(uint64_t flags) {
-    return (uint8_t)((flags >> LAPLACE_VFLAG_TIER_SHIFT) & LAPLACE_VFLAG_TIER_MASK);
+    uint8_t tier = (uint8_t)((flags >> LAPLACE_VFLAG_TIER_SHIFT) & LAPLACE_VFLAG_TIER_MASK);
+    if ((flags & LAPLACE_VFLAG_TIER_EXT) != 0
+        && (flags & (LAPLACE_VFLAG_HAS_ATOM | LAPLACE_VFLAG_TESTIMONY | LAPLACE_VFLAG_FACTOR)) == 0)
+        tier |= (uint8_t)(((flags >> LAPLACE_VFLAG_TIER_EXT_SHIFT)
+                           & LAPLACE_VFLAG_TIER_EXT_MASK) << 5);
+    return tier;
 }
 static inline uint32_t laplace_vflag_atom(uint64_t flags) {
     return (uint32_t)((flags >> LAPLACE_VFLAG_ATOM_SHIFT) & LAPLACE_VFLAG_ATOM_MASK);

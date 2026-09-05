@@ -28,9 +28,10 @@ CREATE OR REPLACE FUNCTION converse.session_turns(p_session bytea, p_limit int D
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
 WITH traj AS MATERIALIZED (
-    SELECT t.ordinal, t.entity_id AS turn_id
+    SELECT t.ordinal + rs.i - 1 AS ordinal, t.entity_id AS turn_id
     FROM laplace.physicalities p
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) t
+    CROSS JOIN LATERAL generate_series(1, GREATEST(t.run_length, 1)) rs(i)
     WHERE p.entity_id = p_session AND p.type = 1
     ORDER BY t.ordinal
     LIMIT COALESCE(p_limit, 2147483647)

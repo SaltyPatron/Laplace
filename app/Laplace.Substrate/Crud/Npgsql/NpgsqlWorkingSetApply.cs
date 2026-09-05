@@ -312,7 +312,7 @@ public sealed partial class NpgsqlSubstrateWriter
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(change);
-        return ApplyManyInternalAsync(new[] { change }, change.Metadata.IntentId, ct);
+        return ApplyWorkingSetAsync((IReadOnlyList<SubstrateChange>)new[] { change }, ct);
     }
 
     public Task<ApplyResult> ApplyWorkingSetAsync(
@@ -320,8 +320,12 @@ public sealed partial class NpgsqlSubstrateWriter
     {
         ArgumentNullException.ThrowIfNull(changes);
         if (changes.Count == 0)
-            return ApplyManyInternalAsync(changes, workingSetToken: null, ct);
-        return ApplyManyInternalAsync(changes, WorkingSetToken(changes), ct);
+            return ApplyManyInternalAsync(
+                changes, legacyWorkingSetToken: null, transactionParticipant: null,
+                reconciliation: null, ct);
+        return ApplyManyInternalAsync(
+            changes, WorkingSetToken(changes), transactionParticipant: null,
+            reconciliation: null, ct);
     }
 
     private static Hash128 WorkingSetToken(IReadOnlyList<SubstrateChange> changes)
@@ -332,12 +336,42 @@ public sealed partial class NpgsqlSubstrateWriter
         return Hash128.Blake3(buf);
     }
 
-    private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt, bool journalHit)>
+    private static async Task InsertJournalReceiptAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Hash128 token,
+        Hash128? source,
+        string receiptKind,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = receiptKind == "applied"
+            ? "INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id) VALUES ($1, $2)"
+            : "INSERT INTO laplace.ingest_flush_journal"
+                + " (working_set_id, source_id, receipt_kind) VALUES ($1, $2, $3)";
+        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, token.ToBytes());
+        command.Parameters.Add(new NpgsqlParameter
+        {
+            Value = source is { } sourceId ? sourceId.ToBytes() : DBNull.Value,
+            NpgsqlDbType = NpgsqlDbType.Bytea,
+        });
+        if (receiptKind != "applied")
+            command.Parameters.AddWithValue(NpgsqlDbType.Text, receiptKind);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt,
+        bool journalHit)>
         ApplyStagesCoreAsync(
-            IReadOnlyList<IntentStage> stages,
-            Hash128? workingSetToken,
-            Hash128? workingSetSource,
-            CancellationToken ct)
+        IReadOnlyList<IntentStage> stages,
+        Hash128? workingSetToken,
+        Hash128? legacyWorkingSetToken,
+        Hash128? legacySingletonToken,
+        Hash128? workingSetSource,
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? transactionParticipant,
+        WorkingSetReconciliation? reconciliation,
+        CancellationToken ct)
     {
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
@@ -506,8 +540,10 @@ public sealed partial class NpgsqlSubstrateWriter
                 await using var journal = conn.CreateCommand();
                 journal.Transaction = tx;
                 journal.CommandText =
-                    "INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id) "
-                    + "VALUES ($1, $2) ON CONFLICT (working_set_id) DO NOTHING";
+                    "SELECT CASE WHEN working_set_id = $1 THEN 1 ELSE 2 END AS result"
+                    + " FROM laplace.ingest_flush_journal"
+                    + " WHERE working_set_id = $1 OR working_set_id = $3 OR working_set_id = $4"
+                    + " ORDER BY result LIMIT 1";
                 journal.Parameters.Add(new NpgsqlParameter
                 { Value = token.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
                 journal.Parameters.Add(new NpgsqlParameter
@@ -515,16 +551,67 @@ public sealed partial class NpgsqlSubstrateWriter
                     Value = workingSetSource is { } source ? source.ToBytes() : DBNull.Value,
                     NpgsqlDbType = NpgsqlDbType.Bytea,
                 });
-                int claimed = await journal.ExecuteNonQueryAsync(ct);
-                rtJournal++;
-                if (claimed == 0)
+                journal.Parameters.Add(new NpgsqlParameter
                 {
+                    Value = legacyWorkingSetToken is { } legacy
+                        ? legacy.ToBytes()
+                        : DBNull.Value,
+                    NpgsqlDbType = NpgsqlDbType.Bytea,
+                });
+                journal.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = legacySingletonToken is { } singleton
+                        ? singleton.ToBytes()
+                        : DBNull.Value,
+                    NpgsqlDbType = NpgsqlDbType.Bytea,
+                });
+                object? replay = await journal.ExecuteScalarAsync(ct);
+                rtJournal++;
+                if (replay is not null)
+                {
+                    int replayKind = Convert.ToInt32(replay);
                     await tx.RollbackAsync(CancellationToken.None);
+                    if (replayKind == 2)
+                        throw new LegacyReplayRequiresReconciliationException(
+                            legacyWorkingSetToken!.Value);
                     _log.LogInformation(
-                        "WORKING_SET_REPLAY token={Token} already journaled — skipping apply",
+                        "WORKING_SET_REPLAY token={Token} already journaled — skipping apply (v2)",
                         token);
                     return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true);
                 }
+
+                if (reconciliation is not null)
+                {
+                    var verified = await LegacyBootstrapVerifier.VerifyAsync(
+                        conn, tx, reconciliation, entBlobs, ents.Rows,
+                        physBlobs, phys.Rows, attBlobs, atts.Rows, ct).ConfigureAwait(false);
+                    rtJournal += verified.RoundTrips;
+                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled)
+                    {
+                        await InsertJournalReceiptAsync(
+                            conn, tx, token, workingSetSource,
+                            receiptKind: "reconciled-existing", ct).ConfigureAwait(false);
+                        rtJournal++;
+                        await tx.CommitAsync(ct).ConfigureAwait(false);
+                        if (epochRoute)
+                        {
+                            await using var last = conn.CreateCommand();
+                            last.CommandText = "SELECT last_value FROM laplace.apply_write_epoch";
+                            _epochAfterLastCommit = (long)(await last.ExecuteScalarAsync(ct))!;
+                            Interlocked.Exchange(ref _epochOwnBumpsSinceBaseline, 0);
+                            rtEpoch++;
+                        }
+                        _log.LogInformation(
+                            "WORKING_SET_RECONCILED token={Token} verified legacy bootstrap and recorded v2 receipt",
+                            token);
+                        return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true);
+                    }
+                }
+
+                await InsertJournalReceiptAsync(
+                    conn, tx, token, workingSetSource, receiptKind: "applied", ct)
+                    .ConfigureAwait(false);
+                rtJournal++;
             }
 
             // Run-persisted-id fast path: an id THIS run already COPYed-and-committed is
@@ -969,14 +1056,38 @@ public sealed partial class NpgsqlSubstrateWriter
                         entBlobs, keptEnts, ct);
                 }
                 eIns = keptEntCount;
-                var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
-                    physBlobs, keptPhys, ct);
-                var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
-                    attBlobs, keptAtts, ct);
-                await Task.WhenAll(physCopyTask, attCopyTask);
-                rtCopy += physCopyTask.Result + attCopyTask.Result;
-                pIns = keptPhys.Count;
-                aIns = keptAtts.Count;
+                // A claimed working-set token is the exactly-once boundary for
+                // additive testimony. Entity and physicality copies may commit
+                // independently: their content-addressed identities are
+                // re-verified and subtracted on a retry. Attestation COPY and
+                // its additive merge cannot: if either committed before this
+                // control transaction's journal row, a retry would merge the
+                // same observations again. Keep all evidence writes on the
+                // control transaction with the journal.
+                if (workingSetToken is not null)
+                {
+                    rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
+                        physBlobs, keptPhys, ct);
+                    pIns = keptPhys.Count;
+                    if (keptAtts.Count > 0)
+                    {
+                        await CopyKeptAsync(conn, "attestations", IntentStageTable.Attestations,
+                            attBlobs, keptAtts, 0, keptAtts.Count, ct);
+                        aIns = keptAtts.Count;
+                        rtCopy++;
+                    }
+                }
+                else
+                {
+                    var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
+                        physBlobs, keptPhys, ct);
+                    var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
+                        attBlobs, keptAtts, ct);
+                    await Task.WhenAll(physCopyTask, attCopyTask);
+                    rtCopy += physCopyTask.Result + attCopyTask.Result;
+                    pIns = keptPhys.Count;
+                    aIns = keptAtts.Count;
+                }
 
             }
 
@@ -1045,13 +1156,35 @@ public sealed partial class NpgsqlSubstrateWriter
                         chunks.Add((type, off, Math.Min(mergeChunk, typeEnd - off)));
                     typeOff = typeEnd;
                 }
+                long mergeFolded = 0;
+                int mergeRt = 0;
+                if (workingSetToken is not null)
+                {
+                    // The merge is additive evidence. It has to share the
+                    // control transaction with the working-set journal for the
+                    // same reason as attestation COPY above: a later failure
+                    // must roll both back together so the exact V2 retry owns
+                    // one and only one merge.
+                    await using (var guc = conn.CreateCommand())
+                    {
+                        guc.Transaction = tx;
+                        guc.CommandText = "SET LOCAL enable_mergejoin = off; "
+                            + "SET LOCAL enable_hashjoin = off";
+                        await guc.ExecuteNonQueryAsync(ct);
+                    }
+                    bool directRoute = await SupportsDirectAttestationMergeRouteAsync(conn, ct);
+                    var merged = await MergeAttestationChunksAsync(
+                        conn, tx, directRoute, chunks, mergeRows, ct);
+                    mergeFolded = merged.Folded;
+                    mergeRt = merged.RoundTrips;
+                }
+                else
+                {
                 int mergeGroups = (int)Math.Min(ApplyParallelism, Math.Max(1, chunks.Count));
                 var bins = new List<(Hash128 Type, int Off, int Len)>[mergeGroups];
                 for (int g = 0; g < mergeGroups; g++) bins[g] = new();
                 for (int c = 0; c < chunks.Count; c++) bins[c % mergeGroups].Add(chunks[c]);
 
-                long mergeFolded = 0;
-                int mergeRt = 0;
                 await CpuTopology.RunPinnedAsyncParallel(mergeGroups, async (g, token) =>
                 {
                     if (bins[g].Count == 0) return;
@@ -1089,72 +1222,13 @@ public sealed partial class NpgsqlSubstrateWriter
                         await guc.ExecuteNonQueryAsync(token);
                     }
                     if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
-                    await using var merge = mconn.CreateCommand();
-                    merge.Transaction = mtx;
-                    merge.CommandTimeout = 0;
-                    merge.CommandText = directRoute
-                        ? "SELECT consensus.attestation_merge_type($1, $2, $3, $4, $5, $6)"
-                        : "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
-                    merge.Parameters.Add(new NpgsqlParameter
-                    {
-                        Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
-                        NpgsqlDbType = directRoute
-                            ? NpgsqlDbType.Bytea
-                            : NpgsqlDbType.Array | NpgsqlDbType.Bytea
-                    });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    merge.Parameters.Add(new NpgsqlParameter
-                    { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-                    await merge.PrepareAsync(token);
-                    foreach (var (type, off, m) in bins[g])
-                    {
-                        var ids = new byte[m][];
-                        var subjects = new byte[m][];
-                        var games = new long[m];
-                        var sums = new long[m];
-                        var ts = new DateTime[m];
-                        for (int i = 0; i < m; i++)
-                        {
-                            var r = mergeRows[off + i];
-                            ids[i] = r.Id.ToBytes();
-                            subjects[i] = r.Subj.ToBytes();
-                            games[i] = r.Games;
-                            sums[i] = r.Sum;
-                            ts[i] = r.Ts;
-                        }
-                        if (directRoute)
-                        {
-                            merge.Parameters[0].Value = type.ToBytes();
-                            merge.Parameters[1].Value = ids;
-                            merge.Parameters[2].Value = subjects;
-                            merge.Parameters[3].Value = games;
-                            merge.Parameters[4].Value = sums;
-                            merge.Parameters[5].Value = ts;
-                        }
-                        else
-                        {
-                            var legacyTypes = new byte[m][];
-                            Array.Fill(legacyTypes, type.ToBytes());
-                            merge.Parameters[0].Value = ids;
-                            merge.Parameters[1].Value = legacyTypes;
-                            merge.Parameters[2].Value = subjects;
-                            merge.Parameters[3].Value = games;
-                            merge.Parameters[4].Value = sums;
-                            merge.Parameters[5].Value = ts;
-                        }
-                        Interlocked.Add(ref mergeFolded,
-                            (long)(await merge.ExecuteScalarAsync(token) ?? 0L));
-                        Interlocked.Increment(ref mergeRt);
-                    }
+                    var merged = await MergeAttestationChunksAsync(
+                        mconn, mtx, directRoute, bins[g], mergeRows, token);
+                    Interlocked.Add(ref mergeFolded, merged.Folded);
+                    Interlocked.Add(ref mergeRt, merged.RoundTrips);
                     await mtx.CommitAsync(token);
                 }, ct);
+                }
                 aFold += mergeFolded;
                 rtMerge += mergeRt;
                 _log.LogInformation(
@@ -1162,6 +1236,13 @@ public sealed partial class NpgsqlSubstrateWriter
                     mergeRows.Count, mergeSw.ElapsedMilliseconds,
                     mergeRows.Count / Math.Max(1e-3, mergeSw.Elapsed.TotalSeconds));
             }
+
+            // Consensus acceptance is supplied only by the accumulating writer
+            // for a freshly claimed V2 working set. It shares this transaction
+            // with the evidence and replay token: a failure leaves no accepted
+            // journal claim, while a retry that sees the claim cannot refold.
+            if (transactionParticipant is not null && workingSetToken is not null)
+                await transactionParticipant(conn, tx, ct);
 
             await tx.CommitAsync(ct);
 
@@ -2003,6 +2084,81 @@ public sealed partial class NpgsqlSubstrateWriter
         long sortMs = sw.ElapsedMilliseconds;
         return await CopyPayloadsParallelAsync(
             tableName, table, kept.Count, groups, payloads, sortMs, ct);
+    }
+
+    private static async Task<(long Folded, int RoundTrips)> MergeAttestationChunksAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, bool directRoute,
+        IReadOnlyList<(Hash128 Type, int Off, int Len)> chunks,
+        IReadOnlyList<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts)> rows,
+        CancellationToken ct)
+    {
+        await using var merge = connection.CreateCommand();
+        merge.Transaction = transaction;
+        merge.CommandTimeout = 0;
+        merge.CommandText = directRoute
+            ? "SELECT consensus.attestation_merge_type($1, $2, $3, $4, $5, $6)"
+            : "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
+        merge.Parameters.Add(new NpgsqlParameter
+        {
+            Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
+            NpgsqlDbType = directRoute
+                ? NpgsqlDbType.Bytea
+                : NpgsqlDbType.Array | NpgsqlDbType.Bytea
+        });
+        merge.Parameters.Add(new NpgsqlParameter
+        { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        merge.Parameters.Add(new NpgsqlParameter
+        { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+        merge.Parameters.Add(new NpgsqlParameter
+        { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+        merge.Parameters.Add(new NpgsqlParameter
+        { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+        merge.Parameters.Add(new NpgsqlParameter
+        { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+        await merge.PrepareAsync(ct);
+
+        long folded = 0;
+        int roundTrips = 0;
+        foreach (var (type, off, count) in chunks)
+        {
+            var ids = new byte[count][];
+            var subjects = new byte[count][];
+            var games = new long[count];
+            var sums = new long[count];
+            var timestamps = new DateTime[count];
+            for (int i = 0; i < count; i++)
+            {
+                var row = rows[off + i];
+                ids[i] = row.Id.ToBytes();
+                subjects[i] = row.Subj.ToBytes();
+                games[i] = row.Games;
+                sums[i] = row.Sum;
+                timestamps[i] = row.Ts;
+            }
+            if (directRoute)
+            {
+                merge.Parameters[0].Value = type.ToBytes();
+                merge.Parameters[1].Value = ids;
+                merge.Parameters[2].Value = subjects;
+                merge.Parameters[3].Value = games;
+                merge.Parameters[4].Value = sums;
+                merge.Parameters[5].Value = timestamps;
+            }
+            else
+            {
+                var types = new byte[count][];
+                Array.Fill(types, type.ToBytes());
+                merge.Parameters[0].Value = ids;
+                merge.Parameters[1].Value = types;
+                merge.Parameters[2].Value = subjects;
+                merge.Parameters[3].Value = games;
+                merge.Parameters[4].Value = sums;
+                merge.Parameters[5].Value = timestamps;
+            }
+            folded += (long)(await merge.ExecuteScalarAsync(ct) ?? 0L);
+            roundTrips++;
+        }
+        return (folded, roundTrips);
     }
 
     private static async Task CopyFilteredAsync(

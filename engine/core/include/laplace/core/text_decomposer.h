@@ -14,6 +14,14 @@ int laplace_text_decomposer_run(
     size_t         len,
     tier_tree_t**  out_tree);
 
+/* Source recipes declare when original codepoints are semantic. This uses the
+ * same UAX ladder and hashing kernel as ordinary text, but keeps validated
+ * input UTF-8 instead of NFC-normalizing it first. */
+int laplace_text_decomposer_run_source(
+    const uint8_t* utf8,
+    size_t         len,
+    tier_tree_t**  out_tree);
+
 /* Reconstruct the tree's canonical text from its tier-0 codepoint atoms and
  * require a byte-identical match with tier_tree_text(). This is the final
  * identity/offset gate for #1039: a tree whose spans or atoms no longer encode

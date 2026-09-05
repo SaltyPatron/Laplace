@@ -1,6 +1,6 @@
--- Per-file state for one ingest run. Running and failed files sort first so a
--- bounded UI read shows the actionable part of a large corpus (FrameNet can
--- contain roughly fifteen thousand files) rather than an arbitrary prefix.
+-- Physical artifact inventory and admitted-file lifecycle for one ingest run.
+-- Actionable admitted states sort first; explicit non-selected dispositions remain
+-- readable after completed files instead of disappearing during source selection.
 DROP FUNCTION IF EXISTS laplace.ingest_files(uuid, int);
 
 CREATE OR REPLACE FUNCTION ops.ingest_files(p_run_id uuid, p_limit int DEFAULT 200)
@@ -14,9 +14,11 @@ BEGIN ATOMIC
         CASE status
             WHEN 'running' THEN 0
             WHEN 'composed' THEN 1
-            WHEN 'failed' THEN 2
-            WHEN 'cancelled' THEN 3
-            ELSE 4
+            WHEN 'inventoried' THEN 2
+            WHEN 'failed' THEN 3
+            WHEN 'cancelled' THEN 4
+            WHEN 'not-selected' THEN 6
+            ELSE 5
         END,
         COALESCE(ended_at, started_at) DESC,
         file_label

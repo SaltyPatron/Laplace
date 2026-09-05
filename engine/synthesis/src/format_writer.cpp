@@ -1,10 +1,14 @@
 #include "laplace/synthesis/format_writer.h"
 
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <sys/stat.h>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -18,194 +22,172 @@
 #endif
 
 namespace {
-
+// These are the architecture tensor-spec ABI codes, not the decode codec enum.
 const char* dtype_str(int dtype) {
     switch (dtype) {
         case 0: return "F32";
         case 1: return "F16";
         case 2: return "BF16";
-        default: return "BF16";
-    }
-}
-
-size_t dtype_elem_size(int dtype) {
-    switch (dtype) {
-        case 0: return 4;
-        case 1: return 2;
-        case 2: return 2;
-        default: return 2;
+        default: return nullptr;
     }
 }
 
 bool mkdir_p(const std::string& path) {
     struct stat st;
     if (stat(path.c_str(), &st) == 0) return S_ISDIR(st.st_mode);
-    if (laplace_mkdir(path.c_str()) != 0 && errno != EEXIST) return false;
-    return true;
-}
-
-bool write_file(const std::string& path, const void* data, size_t len) {
-    FILE* f = std::fopen(path.c_str(), "wb");
-    if (!f) return false;
-    bool ok = (std::fwrite(data, 1, len, f) == len);
-    std::fclose(f);
-    return ok;
+    return laplace_mkdir(path.c_str()) == 0;
 }
 
 bool write_file(const std::string& path, const std::string& content) {
-    return write_file(path, content.data(), content.size());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    bool ok = std::fwrite(content.data(), 1, content.size(), f) == content.size();
+    return std::fclose(f) == 0 && ok;
+}
+
+std::string json_string(const std::string& value) {
+    static const char hex[] = "0123456789abcdef";
+    std::string out = "\"";
+    for (unsigned char c : value) {
+        if (c == '"' || c == '\\') { out += '\\'; out += c; }
+        else if (c < 0x20) {
+            out += "\\u00"; out += hex[c >> 4]; out += hex[c & 15];
+        } else out += c;
+    }
+    out += '"';
+    return out;
 }
 
 struct TensorRecord {
-    std::string          name;
-    int                  dtype;
-    std::vector<size_t>  shape;
-    std::vector<uint8_t> data;
+    std::string name;
+    int dtype;
+    std::vector<size_t> shape;
+    size_t offset;
+    size_t bytes;
 };
-
 }
 
 struct format_writer {
-    std::string              format;
-    std::string              output_dir;
+    std::string output_dir;
     std::vector<TensorRecord> tensors;
-    std::string              config_json;
-    std::string              tokenizer_json;
+    std::unordered_set<std::string> names;
+    std::string config_json;
+    std::string tokenizer_json;
+    FILE* payload = nullptr;
+    size_t payload_bytes = 0;
+    bool failed = false;
+    bool finalized = false;
+    ~format_writer() { if (payload) std::fclose(payload); }
 };
 
 extern "C"
 format_writer_t* format_writer_create(const char* format, const char* output_dir_path) {
-    if (!format || !output_dir_path) return nullptr;
-    if (std::strcmp(format, "safetensors") != 0) return nullptr;
+    if (!format || !output_dir_path || std::strcmp(format, "safetensors") != 0)
+        return nullptr;
     if (!mkdir_p(output_dir_path)) return nullptr;
-
     auto* w = new format_writer();
-    w->format     = format;
     w->output_dir = output_dir_path;
+    // Tensor bytes are streamed once. Export size does not become resident RAM.
+    w->payload = std::tmpfile();
+    if (!w->payload) { delete w; return nullptr; }
     return w;
 }
 
 extern "C"
-int format_writer_add_tensor(format_writer_t* w,
-                             const char*      name,
-                             int              dtype,
-                             const size_t*    shape,
-                             size_t           rank,
-                             const void*      data,
-                             size_t           data_len) {
-    if (!w || !name || !shape || !data || rank == 0) return -1;
-
-    TensorRecord tr;
-    tr.name  = name;
-    tr.dtype = dtype;
-    for (size_t d = 0; d < rank; ++d) tr.shape.push_back(shape[d]);
-
-    size_t n_elements = 1;
-    for (size_t s : tr.shape) n_elements *= s;
-    const size_t expected = n_elements * dtype_elem_size(dtype);
-    if (expected != data_len) return -1;
-
-    tr.data.resize(data_len);
-    std::memcpy(tr.data.data(), data, data_len);
+int format_writer_add_tensor(format_writer_t* w, const char* name, int dtype,
+                             const size_t* shape, size_t rank,
+                             const void* data, size_t data_len) {
+    if (!w || w->failed || w->finalized || !name || (rank && !shape)
+        || (data_len && !data) || !dtype_str(dtype)
+        || std::strcmp(name, "__metadata__") == 0 || w->names.count(name)) return -1;
+    size_t elements = 1;
+    for (size_t i = 0; i < rank; ++i) {
+        if (shape[i] > static_cast<size_t>(std::numeric_limits<int64_t>::max())) return -1;
+        if (shape[i] && elements > std::numeric_limits<size_t>::max() / shape[i]) return -1;
+        elements *= shape[i];
+    }
+    size_t element_bytes = dtype == 0 ? 4 : 2;
+    if (elements > std::numeric_limits<size_t>::max() / element_bytes
+        || elements * element_bytes != data_len
+        || w->payload_bytes > std::numeric_limits<size_t>::max() - data_len) return -1;
+    if (data_len && std::fwrite(data, 1, data_len, w->payload) != data_len) {
+        w->failed = true;
+        return -1;
+    }
+    TensorRecord tr{name, dtype, {}, w->payload_bytes, data_len};
+    if (rank) tr.shape.assign(shape, shape + rank);
     w->tensors.push_back(std::move(tr));
+    w->names.insert(name);
+    w->payload_bytes += data_len;
     return 0;
 }
 
 extern "C"
 int format_writer_set_config(format_writer_t* w, const char* config_json, size_t len) {
-    if (!w || !config_json) return -1;
+    if (!w || w->failed || w->finalized || !config_json) return -1;
     w->config_json.assign(config_json, len);
     return 0;
 }
 
 extern "C"
 int format_writer_set_tokenizer(format_writer_t* w, const char* tokenizer_json, size_t len) {
-    if (!w || !tokenizer_json) return -1;
+    if (!w || w->failed || w->finalized || !tokenizer_json) return -1;
     w->tokenizer_json.assign(tokenizer_json, len);
     return 0;
 }
 
 extern "C"
 int format_writer_finalize(format_writer_t* w) {
-    if (!w) return -1;
-
-    std::vector<size_t> offsets(w->tensors.size(), 0);
-    size_t cur = 0;
-    for (size_t i = 0; i < w->tensors.size(); ++i) {
-        offsets[i] = cur;
-        cur += w->tensors[i].data.size();
-    }
-
-    std::string header_json = "{";
+    if (!w || w->failed || w->finalized) return -1;
+    std::string header = "{\"__metadata__\":{\"format\":\"pt\"}";
+    std::string index = "{\"metadata\":{\"total_size\":" + std::to_string(w->payload_bytes)
+        + "},\"weight_map\":{";
     bool first = true;
-    for (size_t i = 0; i < w->tensors.size(); ++i) {
-        const TensorRecord& tr = w->tensors[i];
-        if (!first) header_json += ',';
-        first = false;
-
-        std::string shape_arr = "[";
-        for (size_t d = 0; d < tr.shape.size(); ++d) {
-            if (d > 0) shape_arr += ',';
-            shape_arr += std::to_string(tr.shape[d]);
+    for (const auto& tr : w->tensors) {
+        const std::string name = json_string(tr.name);
+        header += ',' + name + ":{\"dtype\":\"" + dtype_str(tr.dtype) + "\",\"shape\":[";
+        for (size_t i = 0; i < tr.shape.size(); ++i) {
+            if (i) header += ',';
+            header += std::to_string(tr.shape[i]);
         }
-        shape_arr += ']';
-
-        char entry[1024];
-        std::snprintf(entry, sizeof(entry),
-            R"("%s":{"dtype":"%s","shape":%s,"data_offsets":[%zu,%zu]})",
-            tr.name.c_str(),
-            dtype_str(tr.dtype),
-            shape_arr.c_str(),
-            offsets[i],
-            offsets[i] + tr.data.size());
-        header_json += entry;
-    }
-    header_json += '}';
-
-    const std::string shard_path = w->output_dir + "/model.safetensors";
-    FILE* f = std::fopen(shard_path.c_str(), "wb");
-    if (!f) return -1;
-
-    const uint64_t header_len = (uint64_t)header_json.size();
-    uint8_t hlen_bytes[8];
-    for (int b = 0; b < 8; ++b)
-        hlen_bytes[b] = (uint8_t)((header_len >> (8 * b)) & 0xFF);
-    std::fwrite(hlen_bytes, 1, 8, f);
-    std::fwrite(header_json.data(), 1, header_json.size(), f);
-
-    for (size_t i = 0; i < w->tensors.size(); ++i) {
-        const std::vector<uint8_t>& d = w->tensors[i].data;
-        if (std::fwrite(d.data(), 1, d.size(), f) != d.size()) {
-            std::fclose(f);
-            return -1;
-        }
-    }
-    std::fclose(f);
-
-    std::string index_json = R"({"metadata":{"format":"pt"},"weight_map":{)";
-    first = true;
-    for (const TensorRecord& tr : w->tensors) {
-        if (!first) index_json += ',';
+        header += "],\"data_offsets\":[" + std::to_string(tr.offset) + ','
+            + std::to_string(tr.offset + tr.bytes) + "]}";
+        if (!first) index += ',';
         first = false;
-        index_json += '"';
-        index_json += tr.name;
-        index_json += R"(":"model.safetensors")";
+        index += name + ":\"model.safetensors\"";
     }
-    index_json += "}}";
-    write_file(w->output_dir + "/model.safetensors.index.json", index_json);
-
-    if (!w->config_json.empty())
-        write_file(w->output_dir + "/config.json", w->config_json);
-    if (!w->tokenizer_json.empty())
-        write_file(w->output_dir + "/tokenizer.json", w->tokenizer_json);
-
-    const char* provenance = R"({"generator":"laplace_substrate","format":"safetensors_substrate_v0","sparse_by_construction":true,"zero_fill_policy":"no_attestation_exact_zero"})";
-    write_file(w->output_dir + "/provenance.json",
-               provenance, std::strlen(provenance));
-
+    header += '}';
+    header.append((8 - header.size() % 8) % 8, ' ');
+    index += "}}";
+    if (std::fflush(w->payload) != 0 || std::fseek(w->payload, 0, SEEK_SET) != 0) return -1;
+    const std::string shard = w->output_dir + "/model.safetensors";
+    const std::string pending = shard + ".partial";
+    FILE* out = std::fopen(pending.c_str(), "wb");
+    if (!out) return -1;
+    uint64_t header_len = header.size();
+    uint8_t length[8];
+    for (int i = 0; i < 8; ++i) length[i] = static_cast<uint8_t>(header_len >> (8 * i));
+    bool ok = std::fwrite(length, 1, 8, out) == 8
+        && std::fwrite(header.data(), 1, header.size(), out) == header.size();
+    std::array<unsigned char, 65536> buffer;
+    size_t remaining = w->payload_bytes;
+    while (ok && remaining) {
+        size_t n = remaining < buffer.size() ? remaining : buffer.size();
+        ok = std::fread(buffer.data(), 1, n, w->payload) == n
+            && std::fwrite(buffer.data(), 1, n, out) == n;
+        remaining -= n;
+    }
+    ok = std::fclose(out) == 0 && ok;
+    if (!ok) { std::remove(pending.c_str()); return -1; }
+    // Do not report a completed export while a requested sidecar failed to write.
+    if (!write_file(w->output_dir + "/model.safetensors.index.json", index)
+        || (!w->config_json.empty() && !write_file(w->output_dir + "/config.json", w->config_json))
+        || (!w->tokenizer_json.empty() && !write_file(w->output_dir + "/tokenizer.json", w->tokenizer_json))) {
+        std::remove(pending.c_str()); return -1;
+    }
+    if (std::rename(pending.c_str(), shard.c_str()) != 0) return -1;
+    w->finalized = true;
     return 0;
 }
 
-extern "C" void format_writer_free(format_writer_t* w) {
-    delete w;
-}
+extern "C" void format_writer_free(format_writer_t* w) { delete w; }

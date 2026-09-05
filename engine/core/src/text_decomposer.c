@@ -43,7 +43,9 @@ int laplace_text_decomposer_validate_roundtrip(const tier_tree_t* tree) {
     return (leaves > 0 && cursor == text_len) ? 0 : -2;
 }
 
-int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
+static int laplace_text_decomposer_run_impl(const uint8_t* utf8, size_t len,
+                                            int preserve_source_representation,
+                                            tier_tree_t** out_tree) {
     if (!out_tree) return -1;
     *out_tree = NULL;
     if (!utf8 && len > 0) return -1;
@@ -64,8 +66,22 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
 
     const uint8_t* work = utf8;
     size_t work_len = len;
-    uint8_t* owned = NULL;  /* the buffer the tree will own — NFC output or an input copy */
-    {
+    uint8_t* owned = NULL;  /* the buffer the tree will own — source bytes or NFC output */
+    if (preserve_source_representation) {
+        /* Source grammar recipes own byte-exact replay. Validate the original
+         * UTF-8 but do not rewrite its codepoints: U+0065 U+0301 and U+00E9
+         * are distinct source representations even when ordinary text search
+         * converges them through NFC. */
+        for (size_t i = 0; i < len;) {
+            uint32_t cp; size_t consumed;
+            if (laplace_utf8_decode(utf8 + i, len - i, &cp, &consumed) != 0)
+                return -2;
+            i += consumed;
+        }
+        owned = (uint8_t*)malloc(len);
+        if (!owned) return -3;
+        memcpy(owned, utf8, len);
+    } else {
         int has_non_ascii = 0;
         for (size_t i = 0; i < len; ++i) { if (utf8[i] >= 0x80) { has_non_ascii = 1; break; } }
         if (has_non_ascii) {
@@ -75,14 +91,11 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
              * Malformed input keeps its own contract: validate first so bad
              * UTF-8 stays -2 (the grapheme floor's code) and -6 is reserved
              * for the normalizer failing on VALID input. */
-            {
-                size_t i2 = 0;
-                while (i2 < len) {
-                    uint32_t cp; size_t consumed;
-                    if (laplace_utf8_decode(utf8 + i2, len - i2, &cp, &consumed) != 0)
-                        return -2;
-                    i2 += consumed;
-                }
+            for (size_t i = 0; i < len;) {
+                uint32_t cp; size_t consumed;
+                if (laplace_utf8_decode(utf8 + i, len - i, &cp, &consumed) != 0)
+                    return -2;
+                i += consumed;
             }
             size_t nfc_len = 0;
             if (laplace_normalize_nfc_utf8(utf8, len, &owned, &nfc_len) != 0
@@ -95,9 +108,8 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
         } else {
             /* ASCII input: copy so the tree still owns the exact bytes its
              * offsets index — consumers slice tier_tree_text, never the
-             * caller's buffer (the caller's may be freed or, post-NFC in the
-             * other arm, laid out differently). */
-            owned = (uint8_t*)malloc(len > 0 ? len : 1);
+             * caller's buffer. */
+            owned = (uint8_t*)malloc(len);
             if (!owned) return -3;
             memcpy(owned, utf8, len);
         }
@@ -270,4 +282,13 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
     laplace_grapheme_floor_free(&floor);
     *out_tree = tree;
     return 0;
+}
+
+
+int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
+    return laplace_text_decomposer_run_impl(utf8, len, 0, out_tree);
+}
+
+int laplace_text_decomposer_run_source(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
+    return laplace_text_decomposer_run_impl(utf8, len, 1, out_tree);
 }

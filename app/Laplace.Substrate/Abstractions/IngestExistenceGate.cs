@@ -23,8 +23,6 @@ internal static class IngestExistenceGate
     {
         if (records.Count == 0) return [];
 
-        // Relation triples carry TWO content roots (subject + object); the single-root
-        // machinery below cannot gate them, so they get a dedicated both-roots pass.
         if (records is List<RelationTripleRecord> triples && handler is RelationTripleHandler tripleHandler)
         {
             var sc = await RemovePresentTriplesAsync(
@@ -35,24 +33,26 @@ internal static class IngestExistenceGate
         var shortcircuited = new List<(TRecord, long)>();
         var perFile = handler as DocumentIngestHandler;
         var roots = new List<(int Index, Hash128 RootId)>();
-        var presentFileRoots = new List<(int Index, Hash128 RootId)>();
+        var presentFileRoots = new List<(int Index, Hash128 CompletionId)>();
         var rootIndex = new int[records.Count];
         Array.Fill(rootIndex, -1);
 
-        // Per-file provenance lane (Pillar 0): a present ROOT is not a finished FILE.
-        // The file is done only when its completion marker attests it — so a present
-        // root either true-skips (marker present: zero rows, zero testimony, no merge)
-        // or COMPOSES (marker absent: content emission no-ops under the bitmap and
-        // WalkWitness deposits the marker + metadata). --force (ReObservePresent)
-        // bypasses the marker skip and re-observes.
+        static Hash128 CompletionIdFor(TRecord record, Hash128 contentRoot)
+        {
+            if (record is not ContentIngestRecord cr) return contentRoot;
+            if (cr.FileId != default) return cr.FileId;
+            return cr.Metadata is { } metadata
+                ? FileEntity.Resolve(cr.CanonicalUtf8, metadata).FileId
+                : contentRoot;
+        }
+
+        // Content presence and file completion are different identities. The content root
+        // answers whether the shared DAG already exists. The file-composition id answers
+        // whether THIS occurrence (content + identity metadata) already completed.
         for (int i = 0; i < records.Count; i++)
         {
             if (!TryResolveRoot(records[i], handler, out var rootId, out var unresolvable))
             {
-                // Permanently bad content (not just "this record type doesn't apply
-                // here") — exclude from novel too, or the compose path downstream hits
-                // the exact same throw on retry. Reuses the shortcircuit exclusion
-                // marker; this record is neither present nor composed, just dropped.
                 if (unresolvable) rootIndex[i] = -2;
                 continue;
             }
@@ -62,8 +62,8 @@ internal static class IngestExistenceGate
                 if (perFile is not null)
                 {
                     if (!perFile.IgnoreCompletedFiles)
-                        presentFileRoots.Add((i, rootId));
-                    continue; // marker absent (or forced): compose for the marker deposit
+                        presentFileRoots.Add((i, CompletionIdFor(records[i], rootId)));
+                    continue;
                 }
                 ApplyWitness(records[i], rootId, handler, builder);
                 reader.MarkProven([rootId]);
@@ -73,11 +73,6 @@ internal static class IngestExistenceGate
                 continue;
             }
 
-            // Root already probed absent within this working set: it cannot
-            // have appeared since our own unwritten working set began, so
-            // skip the re-probe and let the record flow through the normal
-            // deferred-unit path (stage witness-dedup absorbs re-emission,
-            // WalkWitness still counts the observation).
             if (probedAbsent is not null && probedAbsent.Contains(rootId)) continue;
 
             rootIndex[i] = roots.Count;
@@ -103,8 +98,8 @@ internal static class IngestExistenceGate
                 {
                     (confirmed ??= []).Add(roots[k].RootId);
                     if (!perFile.IgnoreCompletedFiles)
-                        presentFileRoots.Add((i, roots[k].RootId));
-                    continue; // marker absent (or forced): compose for the marker deposit
+                        presentFileRoots.Add((i, CompletionIdFor(records[i], roots[k].RootId)));
+                    continue;
                 }
                 ApplyWitness(records[i], roots[k].RootId, handler, builder);
                 reader.MarkProven([roots[k].RootId]);
@@ -115,18 +110,13 @@ internal static class IngestExistenceGate
             if (confirmed is { Count: > 0 }) reader.MarkProven(confirmed);
         }
 
-        // Presence and file-completion are separate facts, but both are batch questions.
-        // The former already used one entities bitmap; the latter used to issue one marker
-        // query per present record in both the cached-root and fresh-bitmap branches. On a
-        // repeated document ingest that made database round trips proportional to rows even
-        // though ISubstrateReader exposes this set-valued operation explicitly.
         if (perFile is not null && presentFileRoots.Count > 0)
         {
-            var candidates = presentFileRoots.Select(static x => x.RootId).Distinct().ToArray();
+            var candidates = presentFileRoots.Select(static x => x.CompletionId).Distinct().ToArray();
             var completed = await reader.HasSourcesCompletedAsync(
                 candidates, perFile.LayerOrder, ct).ConfigureAwait(false);
-            foreach (var (i, rootId) in presentFileRoots)
-                if (completed.Contains(rootId))
+            foreach (var (i, completionId) in presentFileRoots)
+                if (completed.Contains(completionId))
                 {
                     shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
                     rootIndex[i] = -2;
@@ -145,12 +135,6 @@ internal static class IngestExistenceGate
         return shortcircuited.ToArray();
     }
 
-    // Two-root existence gate for relation triples: a record short-circuits (skips BOTH
-    // tier-tree composes in CreateDeferredUnit) only when subject AND object phrases are
-    // proven present; its testimony — the edge plus POS/synset/language facts — is still
-    // emitted for every short-circuited record (testimony is per-record, never deduped).
-    // Root ids come from the same native ContentRootId the ContentIngestRecord branch
-    // trusts; identity is exact, so a resolved root equals the composed tree's root.
     private static async Task<(RelationTripleRecord Record, long Units)[]> RemovePresentTriplesAsync(
         List<RelationTripleRecord> records,
         RelationTripleHandler handler,
@@ -164,7 +148,6 @@ internal static class IngestExistenceGate
         var roots = new (Hash128 Subject, Hash128 Object)[records.Count];
         var removed = new bool[records.Count];
 
-        // Distinct unproven roots probed once per batch (phrases repeat heavily in triples).
         var probeIds = new List<Hash128>();
         var probeSlot = new Dictionary<Hash128, int>();
         var candidates = new List<(int Index, int SubjectSlot, int ObjectSlot)>();
@@ -192,8 +175,6 @@ internal static class IngestExistenceGate
                     || TextDecomposer.ContentRootId(obj) is not { } o0) continue;
                 (sRoot, oRoot) = (s0, o0);
             }
-            // Malformed phrase: fall through to the deferred-unit path, whose TryBuild
-            // logs and skips it exactly as before this gate existed.
             catch (InvalidOperationException) { continue; }
             roots[i] = (sRoot, oRoot);
 
@@ -207,8 +188,6 @@ internal static class IngestExistenceGate
                 continue;
             }
 
-            // A root already probed absent within this working set cannot have appeared
-            // since our own unwritten working set began — compose normally, no re-probe.
             if (probedAbsent is not null
                 && ((!sProven && probedAbsent.Contains(sRoot))
                     || (!oProven && probedAbsent.Contains(oRoot))))
@@ -252,13 +231,6 @@ internal static class IngestExistenceGate
         TRecord record, IIngestRecordHandler<TRecord> handler, out Hash128 rootId)
         => TryResolveRoot(record, handler, out rootId, out _);
 
-    /// <summary>
-    /// <paramref name="unresolvable"/> distinguishes "this record type doesn't apply
-    /// here, let it flow to the normal compose path" (false) from "this exact content
-    /// will never resolve, drop it now" (true) — a record content-hashing threw is not
-    /// recoverable by retrying downstream, so the caller must exclude it from
-    /// <c>novel</c> too, not just from the present-root short-circuit.
-    /// </summary>
     private static bool TryResolveRoot<TRecord>(
         TRecord record, IIngestRecordHandler<TRecord> handler, out Hash128 rootId, out bool unresolvable)
     {
@@ -269,8 +241,14 @@ internal static class IngestExistenceGate
                 gr.LineUtf8, gr.Ast, grammar.ModalityId, out rootId, out _);
         if (record is ContentIngestRecord cr && handler is ContentIngestHandler or DocumentIngestHandler)
         {
-            // Per-file provenance streams already resolved the root as the record's
-            // source id — reuse it instead of recomputing over the whole content.
+            if (cr.ContentRootId != default)
+            {
+                rootId = cr.ContentRootId;
+                return true;
+            }
+            // Backward-compatible synthetic records historically stored the content root in
+            // SourceId. New document records keep SourceId for structural provenance and fill
+            // ContentRootId explicitly.
             if (cr.SourceId != default)
             {
                 rootId = cr.SourceId;
@@ -281,12 +259,6 @@ internal static class IngestExistenceGate
             {
                 id = TextDecomposer.ContentRootId(cr.CanonicalUtf8);
             }
-            // Malformed content (bad encoding, etc.) — skip this one record rather than
-            // crash the whole batch, matching the RelationTripleRecord branch above and
-            // CodeDecomposer's own unreadable-file handling. A single bad file among
-            // hundreds must not take down an otherwise-good run. Marked unresolvable so
-            // the caller drops it outright — the same bytes would throw the same way if
-            // retried through the normal compose path downstream.
             catch (InvalidOperationException ex)
             {
                 System.Diagnostics.Trace.TraceWarning(
@@ -298,16 +270,10 @@ internal static class IngestExistenceGate
             rootId = id.Value;
             return true;
         }
-        if (record is GrammarComposeRecord gcr)
-        {
-            // SourceId is opt-in per caller (GH #592): only RepoDecomposer computes it
-            // today (a repo file's content hash). CodeDecomposer/TinyCodesDecomposer
-            // records leave it null and fall through unchanged — no existence-gate
-            // short-circuit for them, same behavior as before this case existed.
-            if (gcr.SourceId is not { } id || id == default) return false;
-            rootId = id;
-            return true;
-        }
+        // A known plain-text root does not prove that a full source grammar has
+        // been admitted. Its syntax/gap composition must resolve through the same
+        // native source recipe before an existence decision can be made.
+        if (record is GrammarComposeRecord) return false;
         if (record is ITrunkRootRecord trunk)
         {
             rootId = trunk.TrunkRootId;
@@ -325,11 +291,6 @@ internal static class IngestExistenceGate
             handler.WalkWitness(record, rootId, builder, PresentRootDeferredUnit.Instance);
     }
 
-    /// <summary>
-    /// A short-circuited record never creates a <c>GrammarDeferredUnit</c>, the only
-    /// other release of the native AST — so it must be released here, after the
-    /// witness walk. Nothing downstream reads a short-circuited record's AST.
-    /// </summary>
     private static void ReleaseNativeArtifacts<TRecord>(
         TRecord record, IIngestRecordHandler<TRecord> handler)
     {
@@ -339,12 +300,6 @@ internal static class IngestExistenceGate
 
 }
 
-/// <summary>
-/// Sentinel unit handed to <c>WalkWitness</c> when the existence gate short-circuits an
-/// already-present root — the discriminator handlers use to tell the present path from a
-/// real compose (do NOT infer it from <c>TreeForBatchProbe == null</c>, which other unit
-/// shapes legitimately return). Public so decomposer assemblies can discriminate the same way.
-/// </summary>
 public sealed class PresentRootDeferredUnit : IIngestDeferredUnit
 {
     public static readonly PresentRootDeferredUnit Instance = new();

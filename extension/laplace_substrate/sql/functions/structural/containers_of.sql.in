@@ -4,12 +4,9 @@
 -- e.g. structural.containers_of(laplace.word_id('chess'), 2) returns the sentences containing
 -- "chess" (hop 1) and the documents containing those sentences (hop 2).
 --
--- Native (see containers_of.c for the full rationale): a single SQL query
--- checking trajectory containment against a large frontier array defeats
--- physicalities_constituents_gin's cost estimation and falls back to a full
--- scan (measured 850ms for a query that should be sub-millisecond). This
--- drives the walk as a sequence of cached, single-key SPI probes instead,
--- each of which the GIN index serves in ~2ms regardless of table size.
+-- Native C owns frontier expansion and deduplication. Each hop uses one fixed
+-- typed overlap query over the complete frontier. The caller's result bound is
+-- passed into that query. Its retained plan avoids repeated partition planning.
 DROP FUNCTION IF EXISTS laplace.containers_of(bytea, int, int);
 CREATE OR REPLACE FUNCTION structural.containers_of(
     p_entity   bytea,

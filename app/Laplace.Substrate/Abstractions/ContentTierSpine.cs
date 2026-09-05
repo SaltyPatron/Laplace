@@ -28,8 +28,14 @@ public static class ContentTierSpine
     private static int _rootMemoCount;
 
     /// <summary>Leaf-to-trunk compose: UAX #29 segmentation + Merkle ids (CPU only).</summary>
-    public static TierTree? BuildTree(ReadOnlySpan<byte> canonicalUtf8) =>
-        IntentStage.BuildContentTree(canonicalUtf8);
+    public static TierTree? BuildTree(ReadOnlySpan<byte> canonicalUtf8)
+    {
+        // Identity reconstruction is a valid cold-process entry point. Keep
+        // the shared text composer self-sufficient just as GrammarRowComposer
+        // is, rather than requiring every reader to have ingested first.
+        CodepointPerfcache.LoadDefault();
+        return IntentStage.BuildContentTree(canonicalUtf8);
+    }
 
     /// <summary>Root id without building a full tree when the native fast path applies.</summary>
     /// <remarks>
@@ -40,6 +46,7 @@ public static class ContentTierSpine
     public static Hash128? ResolveRoot(ReadOnlySpan<byte> canonicalUtf8)
     {
         if (canonicalUtf8.IsEmpty) return null;
+        CodepointPerfcache.LoadDefault();
         var key = Hash128.Blake3(canonicalUtf8);
         if (RootMemo.TryGetValue(key, out var cached)) return cached;
         Hash128? cheap;

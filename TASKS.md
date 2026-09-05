@@ -1,3 +1,64 @@
+## Recovery implementation — current evidence, 2026-09-05
+
+- Worktree `/tmp/laplace-content-recovery`, existing PR #1496. Not yet on main or
+  installed in original production. Historical checkpoints below are superseded.
+- Native full-source composition preserves exact Python bytes, grammar structure,
+  dynamic tier floors, and RLE flags. File trunk owns content and identity metadata;
+  path/bytes/mtime observations persist separately. Generic CodeDecomposer worker tested.
+- Native constituent closure replaces recursive SQL. Florence: 8,420 edges, zero
+  differences; HTTP exact 15,119-byte reads after DB reload 856/176/192 ms.
+- Shared journaled writer now commits evidence, consensus fold, and replay receipt in
+  one transaction. Native semantic digest covers admitted payload, independent of row
+  order/stage partition/clocks. Injected merge/fold failures roll back; retry/replay tested.
+- Fresh public upload repeated across process restart: evidence and consensus unchanged;
+  only file observations advance. Verified legacy bootstrap can receive a reconciled
+  receipt without recounting; partial/mismatched/artifact history returns 409 unchanged.
+- Morse source from `/vault/Data/test-data/electronics/international-morse-code.txt`:
+  exact 2,594-byte HTTP POST/GET, file db25a4eb16c82b3c5d81e505b32b9902 has two children,
+  existing content ef5e41c6013c481cdf2af28096678cf5 and metadata
+  da8bba849715df83965c2e822a2360b9. Original database remains untouched.
+- OMW 2.0: all 32 lexicons parsed and inventoried against raw XML (570 MB), 18 tests
+  passed. Italian artifact set was ingested into retained recovery DB; dependency omw-en
+  remains unresolved. Canonical alias/inverse direction tests pass; the retained Italian
+  artifact has no relation records and does not establish whole-estate relation coverage.
+- Reverse native containment now selects indexed physical candidates before entity
+  hydration and retains its typed SPI plan. Morse content→file: 70.38 ms cold,
+  8.83 ms warm / 1,806 buffers, versus 563 ms / 1.15M buffers; exact parent verified.
+  Two-hop Morse word traversal: four containers, 24.24 ms. Cycle test also passed.
+- Native logical trajectory equivalence replaces per-row SQL expansion in historical
+  reconciliation. Disjoint historical artifact cells are accepted without recounting;
+  overlapping/incomplete/mismatched bootstrap evidence remains a nonmutating conflict.
+- Gutenberg format metadata and shared work composition implemented; actual 195-file
+  inventory and 34 document tests passed. Retained generic-worker run admitted a complete
+  41,815-byte artifact with exact reconstruction, work relations, metadata and physical
+  journal identity; 2,504 durable rows in 1.985 seconds at the operator boundary.
+- OMW now consumes shared native libxml2 SAX batches instead of a private managed
+  XML parser. Namespace/attribute/text/topology tests pass; all 32 real lexicons
+  reconcile against the independent inventory, test-host peak RSS 256 MiB.
+- Existing SafeTensors codec repaired for exact scalar/empty/Unicode-name output,
+  bounded export memory, and write-error propagation. Native 3/3 and independent
+  safetensors.numpy readback passed. Full model export route remains unconnected.
+- Model checkpoint headers now use native ordered source structures; actual MiniLM
+  header ingestion verified. Native token-pair contraction and transient calibration
+  into standing are active in `/tmp/laplace-model-recovery`; raw weights/factors are
+  not a semantic archive. No full model ingestion, export, code generation, or
+  conversation delivery claimed.
+- Unicode reconstruction now uses a length-bearing native byte renderer; singleton,
+  embedded, repeated/RLE and nested U+0000 pass actual database reconstruction (8/8).
+  Native-stage attempted counts include prebuilt rows; actual writer tests pass 13/13.
+- Retained runtime: localhost:18081, laplace_recovery_demo on isolated socket
+  `/tmp/laplace-content-pg/socket`; hosted services skipped. Evidence files under
+  `/tmp/laplace-content-recovery-proof`.
+- Acceptance: combined managed/database 27/27; native closure affected DB 7/7;
+  native core 43/43; intent stage 23/23; atomic writer 2/2; bootstrap reconciliation
+  5/5; singleton replay compatibility 3/3; source policy 25/25.
+  Final combined policy/build/DEV passed: 2,873 checks executed, 13 skipped
+  (native 510 executed/1 skipped; managed 2,361 executed/12 skipped; UCI/browser
+  suites executed). NUL/Morse/Python exact HTTP reads passed after final isolated
+  database restart. GitHub CI and original production deployment remain outstanding.
+
+Earlier entries below are historical; they are not current delivery claims.
+
 # Reconstructed task state — 2026-08-24
 
 Status vocabulary: DONE = landed AND verified against the running artifact.

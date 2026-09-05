@@ -4,16 +4,13 @@ using Xunit;
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
-/// The export service always runs `synthesize substrate`, the GGUF writer. `format` used to
-/// select only the filename EXTENSION, so format="safetensors" produced GGUF bytes in a file
-/// named .safetensors and returned Format="safetensors" — an artifact that lies about what it
-/// is. There is no SafeTensors export anywhere in the tree; SafeTensors appears only as an
-/// ingest witness. Refusing is the only honest answer until a writer exists.
+/// The HTTP export service binds the GGUF synthesis command. Its advertised formats
+/// must reflect complete route integration, even when another native codec exists.
 /// </summary>
 public sealed class FoundryExportFormatTests
 {
     [Fact]
-    public void OnlyFormatsWithAWriterAreWritable()
+    public void OnlyFormatsWithAnIntegratedExportPathAreWritable()
         => Assert.Equal(new[] { "gguf" }, CliFoundryExportService.WritableFormats.Order(StringComparer.Ordinal));
 
     [Theory]

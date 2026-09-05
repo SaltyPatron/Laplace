@@ -89,13 +89,18 @@
       ]
     },
     "document": {
-      "decomposer": "UserPrompt",
+      "decomposer": "DocumentDecomposer",
       "layer": 2,
       "prerequisites": [
         "iso639"
       ],
-      "consensus_gates": [],
-      "content_only": true
+      "consensus_gates": [
+        {
+          "relation": "CONTAINS",
+          "min": 1,
+          "constant_rating_ok": "structural file-to-document containment -- the edge is membership, not a ranked claim"
+        }
+      ]
     },
     "wordnet": {
       "decomposer": "WordNetDecomposer",

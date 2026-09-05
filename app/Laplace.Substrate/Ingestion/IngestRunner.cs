@@ -112,9 +112,13 @@ public sealed class IngestRunner
             ecosystemPath,
             options.RequireArtifactManifest,
             allowAmbientManifest: decomposer is not IIgnoresAmbientArtifactManifest);
+        if (artifactGraph is null && decomposer is IIngestArtifactGraphProvider graphProvider)
+            artifactGraph = await graphProvider.DescribeArtifactsAsync(
+                ecosystemPath, options.DecomposerOptions, ct);
         var ctx = new InternalContext(
             EcosystemPath: ecosystemPath,
             SelectedArtifacts: artifactGraph?.Selected ?? Array.Empty<IngestArtifact>(),
+            HasArtifactGraph: artifactGraph is not null,
             Writer: new InitializationAccountingWriter(_writer, counters),
             Reader: _reader,
             Logger: _loggerFactory.CreateLogger($"Decomposer:{decomposer.SourceName}"),
@@ -133,7 +137,7 @@ public sealed class IngestRunner
             pathIsDir ? "dir" : pathIsFile ? "file" : "missing");
 
         var inventory = await ResolveInventoryAsync(decomposer, ctx, artifactGraph, options, ct);
-        _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
+        _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory, artifactGraph);
         using var obsScope = IngestObservabilityScope.Begin(_obs, decomposer.SourceName);
         log.LogInformation(
             "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",
@@ -1114,6 +1118,7 @@ public sealed class IngestRunner
     private sealed record InternalContext(
         string EcosystemPath,
         IReadOnlyList<IngestArtifact> SelectedArtifacts,
+        bool HasArtifactGraph,
         ISubstrateWriter Writer,
         ISubstrateReader Reader,
         ILogger Logger,

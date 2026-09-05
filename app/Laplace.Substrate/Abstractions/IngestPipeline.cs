@@ -491,6 +491,16 @@ public sealed class IngestBatchConfig
 
 public static class IngestBatchPipeline
 {
+    private static void CaptureSemanticFileId(
+        ref Hash128? current, Hash128? candidate, string fileLabel)
+    {
+        if (candidate is not { } fileId) return;
+        if (current is { } existing && existing != fileId)
+            throw new InvalidOperationException(
+                $"file '{fileLabel}' emitted conflicting semantic identities {existing} and {fileId}");
+        current = fileId;
+    }
+
     /// <summary>How often a still-composing file republishes its counters. Advisory,
     /// so the cost is one coalesced UPDATE per file per interval, never per change.</summary>
     private const long FileProgressIntervalMs = 2_000;
@@ -882,7 +892,8 @@ public static class IngestBatchPipeline
             {
                 Console.Error.WriteLine($"INGEST_FILE_SKIPPED file={label} reason=marker-complete");
                 Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
-                    Laplace.Ingestion.IngestObservabilityScope.SourceName, label, fileRoot);
+                    Laplace.Ingestion.IngestObservabilityScope.SourceName, label,
+                    resumeFingerprint: fileRoot);
                 // Still a true skip -- zero rows, zero testimony, no re-fold -- but it must
                 // COUNT. FilesTotal comes from enumeration and includes skipped files, while
                 // _filesDone only advances when a period boundary reaches TrackIntent. A bare
@@ -917,6 +928,7 @@ public static class IngestBatchPipeline
             var enumerator = changes.GetAsyncEnumerator(ct);
             SubstrateChange? fileFailure = null;
             long fileEntities = 0, filePhysicalities = 0, fileAttestations = 0;
+            Hash128? semanticFileId = null;
             // Wall-clock throttle, not a record count: files differ by five orders of
             // magnitude in size (UD: 4,577 B to 360,217,466 B), so any per-N-records
             // trigger is either silent on the big ones or a flood on the small ones.
@@ -940,6 +952,7 @@ public static class IngestBatchPipeline
                         break;
                     }
                     unitsConsumed += change.Metadata.InputUnitsConsumed;
+                    CaptureSemanticFileId(ref semanticFileId, change.Metadata.FileId, label);
                     var rowCounts = CountRows(change);
                     fileEntities += rowCounts.Entities;
                     filePhysicalities += rowCounts.Physicalities;
@@ -973,11 +986,12 @@ public static class IngestBatchPipeline
             // complete, which is the same resume situation as a kill — recording it 'ok'
             // would claim a completeness the marker itself refuses to assert.
             Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
-                Laplace.Ingestion.IngestObservabilityScope.SourceName, label, fileRoot,
+                Laplace.Ingestion.IngestObservabilityScope.SourceName, label, semanticFileId,
                 records: unitsConsumed - unitsAtFileStart,
                 entities: fileEntities,
                 physicalities: filePhysicalities,
-                attestations: fileAttestations);
+                attestations: fileAttestations,
+                resumeFingerprint: fileRoot);
 
             yield return fileFailure
                 ?? (fileRoot is { } fr && !hitCap && resume is { } rp
@@ -1187,7 +1201,7 @@ public static class IngestBatchPipeline
                         // Recording it is how a resumed run accounts for the prefix it did not redo.
                         Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
                             Laplace.Ingestion.IngestObservabilityScope.SourceName,
-                            source.FileLabel, fileRoot);
+                            source.FileLabel, resumeFingerprint: fileRoot);
                         // Counts, for the reason spelled out on the sequential path's skip:
                         // FilesTotal counts enumerated files, _filesDone counts boundaries, so
                         // dropping the boundary makes an already-complete file read as
@@ -1222,12 +1236,15 @@ public static class IngestBatchPipeline
 
                     long fileUnits = 0;
                     long fileEntities = 0, filePhysicalities = 0, fileAttestations = 0;
+                    Hash128? semanticFileId = null;
                     SubstrateChange? fileFailure = null;
                     try
                     {
                         await foreach (var change in changes)
                         {
                             fileUnits += change.Metadata.InputUnitsConsumed;
+                            CaptureSemanticFileId(
+                                ref semanticFileId, change.Metadata.FileId, source.FileLabel);
                             var rowCounts = CountRows(change);
                             fileEntities += rowCounts.Entities;
                             filePhysicalities += rowCounts.Physicalities;
@@ -1246,11 +1263,12 @@ public static class IngestBatchPipeline
                     }
                     Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
                         Laplace.Ingestion.IngestObservabilityScope.SourceName, source.FileLabel,
-                        fileRoot,
+                        semanticFileId,
                         records: fileUnits,
                         entities: fileEntities,
                         physicalities: filePhysicalities,
-                        attestations: fileAttestations);
+                        attestations: fileAttestations,
+                        resumeFingerprint: fileRoot);
                     // Publish compose accounting before the boundary becomes visible to the
                     // apply consumer. The runner terminalizes the file when that boundary is
                     // applied; reversing these two operations lets a fast consumer enqueue

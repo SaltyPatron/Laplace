@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -13,6 +14,8 @@
 #include "laplace/core/grammar_compose.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/mantissa.h"
+#include "laplace/core/trajectory.h"
 
 namespace {
 
@@ -358,3 +361,185 @@ TEST(GrammarCompose, PartiallyValidChildSpanDoesNotCrash) {
 }
 
 }  
+
+TEST(GrammarSourceCompose, RecursivelyRealizesAstSpansAndSourceOrder) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
+    ASSERT_NE(recipe, nullptr);
+    const char* src = "1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}"; // Delimiters and repeat are uncovered source gaps.
+    const size_t len = std::strlen(src);
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(reinterpret_cast<const uint8_t*>(src), len, recipe, &ast), 0);
+
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_source_compose(
+        reinterpret_cast<const uint8_t*>(src), len, ast, "tsv", &result), 0);
+    ASSERT_NE(result, nullptr);
+    EXPECT_GT(laplace_compose_entity_count(result), 0u);
+    EXPECT_GT(laplace_compose_physicality_count(result), 0u);
+
+    const size_t node_count = laplace_ast_node_count(ast);
+    std::vector<laplace_ast_node_t> nodes(node_count);
+    std::vector<std::vector<uint32_t>> children(node_count);
+    for (size_t i = 0; i < node_count; ++i) {
+        ASSERT_EQ(laplace_ast_get_node(ast, i, &nodes[i]), 0);
+        hash128_t mapped;
+        EXPECT_EQ(laplace_compose_span_lookup(result, nodes[i].start_byte, nodes[i].end_byte, &mapped), 0);
+        if (nodes[i].parent != LAPLACE_AST_ROOT) children[nodes[i].parent].push_back((uint32_t)i);
+    }
+    for (auto& v : children) std::sort(v.begin(), v.end(), [&nodes](uint32_t a, uint32_t b) {
+        return nodes[a].start_byte < nodes[b].start_byte;
+    });
+    // Recipe punctuation is a first-class lexical component too, so a tag or
+    // traversal can resolve it without falling back to a decoded-row identity.
+    hash128_t first_tab, second_tab;
+    EXPECT_EQ(laplace_compose_span_lookup(result, 1, 2, &first_tab), 0);
+    EXPECT_EQ(laplace_compose_span_lookup(result, 11, 12, &second_tab), 0);
+    EXPECT_TRUE(hash128_equals(&first_tab, &second_tab));
+
+    // Every realized AST container carries exactly its immediate child spans and
+    // the uncovered bytes between them, in source order. This catches a root-only
+    // composition, dropped punctuation, and lost repeated lexical constituents.
+    for (size_t parent = 0; parent < node_count; ++parent) {
+        if (children[parent].empty()) continue;
+        hash128_t parent_id;
+        ASSERT_EQ(laplace_compose_span_lookup(result, nodes[parent].start_byte,
+                                              nodes[parent].end_byte, &parent_id), 0);
+        std::vector<hash128_t> expected;
+        uint32_t cursor = nodes[parent].start_byte;
+        for (uint32_t child : children[parent]) {
+            if (nodes[child].start_byte > cursor) {
+                hash128_t gap;
+                ASSERT_EQ(laplace_content_source_root_id(reinterpret_cast<const uint8_t*>(src + cursor),
+                                                  nodes[child].start_byte - cursor, &gap), 0);
+                expected.push_back(gap);
+            }
+            hash128_t child_id;
+            ASSERT_EQ(laplace_compose_span_lookup(result, nodes[child].start_byte,
+                                                  nodes[child].end_byte, &child_id), 0);
+            expected.push_back(child_id);
+            cursor = nodes[child].end_byte;
+        }
+        if (cursor < nodes[parent].end_byte) {
+            hash128_t gap;
+            ASSERT_EQ(laplace_content_source_root_id(reinterpret_cast<const uint8_t*>(src + cursor),
+                                              nodes[parent].end_byte - cursor, &gap), 0);
+            expected.push_back(gap);
+        }
+        laplace_compose_physicality_t physicality{};
+        bool found = false;
+        for (size_t p = 0; p < laplace_compose_physicality_count(result); ++p) {
+            ASSERT_EQ(laplace_compose_get_physicality(result, p, &physicality), 0);
+            if (hash128_equals(&physicality.entity_id, &parent_id)) { found = true; break; }
+        }
+        if (expected.size() == 1) {
+            /* The same content identity can have a physicality from another
+             * AST occurrence; the singleton itself adds no self trajectory. */
+            EXPECT_TRUE(hash128_equals(&parent_id, &expected[0]));
+            continue;
+        }
+        ASSERT_TRUE(found) << "non-singleton AST node was not persisted";
+        ASSERT_EQ(physicality.n_constituents, expected.size());
+        std::vector<hash128_t> actual(expected.size());
+        ASSERT_EQ(trajectory_constituents(physicality.trajectory_xyzm,
+                                          physicality.trajectory_n / 4,
+                                          actual.data(), actual.size()),
+                  static_cast<int>(expected.size()));
+        for (size_t i = 0; i < expected.size(); ++i)
+            EXPECT_TRUE(hash128_equals(&actual[i], &expected[i])) << "parent=" << parent << " ordinal=" << i;
+    }
+
+    double root_coord[4]; uint8_t root_tier = 0, root_has_atom = 0; uint32_t root_atom = 0;
+    EXPECT_EQ(laplace_compose_root_placement(result, root_coord, &root_tier, &root_atom, &root_has_atom), 0);
+    hash128_t root_id = laplace_compose_root_id(result);
+    hash128_t zero{};
+    EXPECT_FALSE(hash128_equals(&root_id, &zero));
+    EXPECT_GE(root_tier, 1);
+
+    laplace_compose_result_free(result);
+    laplace_ast_free(ast);
+}
+
+TEST(GrammarSourceCompose, NormalizedLexicalIdentityNeedsRawByteRepresentationForNfdReplay) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("json");
+    ASSERT_NE(recipe, nullptr);
+    const char* nfc = "{\"v\":\"caf\xC3\xA9\"}";
+    const char* nfd = "{\"v\":\"cafe\xCC\x81\"}";
+    laplace_ast_t *nfc_ast = nullptr, *nfd_ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(reinterpret_cast<const uint8_t*>(nfc), std::strlen(nfc), recipe, &nfc_ast), 0);
+    ASSERT_EQ(laplace_grammar_parse(reinterpret_cast<const uint8_t*>(nfd), std::strlen(nfd), recipe, &nfd_ast), 0);
+    laplace_compose_result_t *nfc_result = nullptr, *nfd_result = nullptr;
+    ASSERT_EQ(laplace_grammar_source_compose(reinterpret_cast<const uint8_t*>(nfc), std::strlen(nfc), nfc_ast, "json", &nfc_result), 0);
+    ASSERT_EQ(laplace_grammar_source_compose(reinterpret_cast<const uint8_t*>(nfd), std::strlen(nfd), nfd_ast, "json", &nfd_result), 0);
+
+    hash128_t nfc_id = laplace_compose_root_id(nfc_result);
+    hash128_t nfd_id = laplace_compose_root_id(nfd_result);
+    EXPECT_FALSE(hash128_equals(&nfc_id, &nfd_id));
+
+    laplace_compose_result_free(nfc_result);
+    laplace_compose_result_free(nfd_result);
+    laplace_ast_free(nfc_ast);
+    laplace_ast_free(nfd_ast);
+}
+
+TEST(GrammarSourceCompose, SingletonAstRootHasNativePlacementWithoutGrammarWrapper) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
+    ASSERT_NE(recipe, nullptr);
+    const char* src = "x";
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(reinterpret_cast<const uint8_t*>(src), 1, recipe, &ast), 0);
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_source_compose(reinterpret_cast<const uint8_t*>(src), 1, ast, "tsv", &result), 0);
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(0u, laplace_compose_physicality_count(result));
+    double coord[4]; uint8_t tier = 0, has_atom = 0; uint32_t atom = 0;
+    EXPECT_EQ(0, laplace_compose_root_placement(result, coord, &tier, &atom, &has_atom));
+    hash128_t root_id = laplace_compose_root_id(result), zero{};
+    EXPECT_FALSE(hash128_equals(&root_id, &zero));
+    EXPECT_TRUE(std::isfinite(coord[0]));
+    laplace_compose_result_free(result);
+    laplace_ast_free(ast);
+}
+
+TEST(GrammarSourceCompose, DeepSourceFloorsRoundTripPastLegacyFiveBitTier) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("json");
+    ASSERT_NE(recipe, nullptr);
+    constexpr int depth = 40;
+    std::string src(depth, '[');
+    src += "0";
+    src.append(depth, ']');
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(reinterpret_cast<const uint8_t*>(src.data()), src.size(), recipe, &ast), 0);
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_source_compose(reinterpret_cast<const uint8_t*>(src.data()), src.size(),
+                                             ast, "json", &result), 0);
+    ASSERT_NE(result, nullptr);
+
+    double root_coord[4]; uint8_t root_tier = 0, has_atom = 0; uint32_t atom = 0;
+    ASSERT_EQ(laplace_compose_root_placement(result, root_coord, &root_tier, &atom, &has_atom), 0);
+    ASSERT_GT(root_tier, 31);
+    hash128_t root_id = laplace_compose_root_id(result);
+    laplace_compose_physicality_t root_phys{};
+    bool found = false;
+    for (size_t i = 0; i < laplace_compose_physicality_count(result); ++i) {
+        ASSERT_EQ(laplace_compose_get_physicality(result, i, &root_phys), 0);
+        if (hash128_equals(&root_phys.entity_id, &root_id)) { found = true; break; }
+    }
+    ASSERT_TRUE(found);
+    uint8_t max_child_tier = 0;
+    for (size_t i = 0; i < root_phys.n_constituents; ++i) {
+        mantissa_payload_t child{};
+        mantissa_unpack(root_phys.trajectory_xyzm + i * 4, &child);
+        max_child_tier = std::max(max_child_tier, laplace_vflag_tier(child.flags));
+    }
+    EXPECT_EQ(root_tier, (uint8_t)(max_child_tier + 1));
+
+    hash128_t text_type;
+    hash128_blake3_str("Text", &text_type);
+    for (size_t i = 0; i < laplace_compose_entity_count(result); ++i) {
+        laplace_compose_entity_t entity{};
+        ASSERT_EQ(laplace_compose_get_entity(result, i, &entity), 0);
+        EXPECT_TRUE(hash128_equals(&entity.type_id, &text_type));
+    }
+    laplace_compose_result_free(result);
+    laplace_ast_free(ast);
+}

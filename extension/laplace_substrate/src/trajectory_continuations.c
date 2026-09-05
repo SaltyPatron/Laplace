@@ -11,6 +11,7 @@
 
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "trajectory_wkb.h"
 
 #include "laplace/core/mantissa.h"
 
@@ -97,6 +98,25 @@ static bool
 is_separator(HTAB *separators, const char *id)
 {
     return hash_search(separators, id, HASH_FIND, NULL) != NULL;
+}
+
+static void
+ensure_raw_capacity(char **raw, int *raw_cap, size_t required)
+{
+    if (required > INT_MAX || required > MaxAllocSize / 16)
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("trajectory_continuations: expanded trajectory exceeds allocation capacity")));
+    if (required <= (size_t) *raw_cap)
+        return;
+
+    size_t cap = *raw_cap > 0 ? (size_t) *raw_cap : 16;
+    while (cap < required) {
+        if (cap > (size_t) INT_MAX / 2) { cap = required; break; }
+        cap *= 2;
+    }
+    *raw = *raw == NULL ? (char *) palloc(cap * 16) : (char *) repalloc(*raw, cap * 16);
+    *raw_cap = (int) cap;
 }
 
 static void
@@ -333,56 +353,27 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
             Datum                wkb_datum = SPI_getbinval(tuple, desc, 1, &wkb_null);
             bytea               *wkb;
             const unsigned char *b;
-            Size                 len;
-            uint32               wkb_type;
             uint32               npoints;
-            Size                 need;
 
             if (wkb_null)
                 continue;
 
             wkb = DatumGetByteaPP(wkb_datum);
-            b = (const unsigned char *) VARDATA_ANY(wkb);
-            len = (Size) VARSIZE_ANY_EXHDR(wkb);
+            b = laplace_trajectory_wkb_points(wkb, &npoints);
 
-            /* ISO WKB from ST_AsBinary: byte order, uint32 type, then for
-             * LINESTRING ZM (3002) uint32 npoints and npoints*4 float8s;
-             * POINT ZM (3001) is one vertex with no count. Same framing checks
-             * as geometry_successors.c -- machine-order NDR only, and anything
-             * else is refused loudly rather than mis-decoded. */
-            if (len < 5 || b[0] != 1)
-                elog(ERROR,
-                     "trajectory_continuations: unexpected WKB framing "
-                     "(len=%zu, order=%d)", (size_t) len, len > 0 ? b[0] : -1);
-            memcpy(&wkb_type, b + 1, 4);
-            if (wkb_type == 3001u)
+            size_t expanded = 0;
+            for (uint32 v = 0; v < npoints; v++)
             {
-                npoints = 1;
-                b += 5;
-                need = (Size) 32;
+                double vertex[4];
+                mantissa_payload_t payload;
+                memcpy(vertex, b + (Size) v * 32, 32);
+                mantissa_unpack(vertex, &payload);
+                size_t run = payload.run_length ? payload.run_length : 1;
+                if (run > SIZE_MAX - expanded)
+                    ereport(ERROR, (errmsg("trajectory_continuations: invalid RLE run total")));
+                expanded += run;
             }
-            else if (wkb_type == 3002u)
-            {
-                if (len < 9)
-                    elog(ERROR, "trajectory_continuations: truncated WKB");
-                memcpy(&npoints, b + 5, 4);
-                b += 9;
-                need = (Size) npoints * 32;
-            }
-            else
-                elog(ERROR,
-                     "trajectory_continuations: trajectory is not POINT/"
-                     "LINESTRING ZM (wkb type %u)", wkb_type);
-            if ((Size) (len - (Size) (b - (const unsigned char *) VARDATA_ANY(wkb))) < need)
-                elog(ERROR, "trajectory_continuations: truncated WKB body");
-
-            if ((int) npoints > raw_cap)
-            {
-                raw_cap = (int) npoints;
-                raw = raw == NULL
-                    ? (char *) palloc((Size) raw_cap * 16)
-                    : (char *) repalloc(raw, (Size) raw_cap * 16);
-            }
+            ensure_raw_capacity(&raw, &raw_cap, expanded);
 
             n_raw = 0;
             for (uint32 v = 0; v < npoints; v++)
@@ -392,8 +383,12 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
 
                 memcpy(vertex, b + (Size) v * 32, 32);
                 mantissa_unpack(vertex, &payload);
-                memcpy(raw + (Size) n_raw * 16, &payload.entity_id, 16);
-                n_raw++;
+                int run = payload.run_length ? payload.run_length : 1;
+                for (int j = 0; j < run; j++)
+                {
+                    memcpy(raw + (Size) n_raw * 16, &payload.entity_id, 16);
+                    n_raw++;
+                }
             }
 
             scan_trajectory(raw, n_raw, context, n_context,

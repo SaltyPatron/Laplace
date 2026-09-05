@@ -37,7 +37,11 @@ public sealed record SubstrateChangeMetadata(
 
 
 
-    int CommitEpoch = 0);
+    int CommitEpoch = 0,
+
+    // Physical artifact identity produced by the source-native composer. This is
+    // distinct from an execution resume fingerprint and is carried to the file journal.
+    Hash128? FileId = null);
 
 public sealed record EntityRow(
     Hash128 Id,

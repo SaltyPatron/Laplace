@@ -1,3 +1,4 @@
+using System.Reflection;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
@@ -41,6 +42,12 @@ public sealed class ChessPlayerExactLookupLawTests
 
     private static string FindRepoRoot()
     {
+        string? stamped = typeof(ChessPlayerExactLookupLawTests).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(static attribute => attribute.Key == "LaplaceRepoRoot")?.Value;
+        if (stamped is not null && File.Exists(Path.Combine(stamped, "app", "Laplace.slnx")))
+            return stamped;
+
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {

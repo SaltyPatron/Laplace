@@ -68,6 +68,17 @@ typedef struct {
     size_t                           span_index_cap;
     hash128_t                        root_id;
     tier_tree_t*                     tree;
+    /* Full-source mode owns one content tree for every lexical leaf/gap. */
+    tier_tree_t**                    source_trees;
+    size_t                           source_tree_count;
+    uint8_t                          source_mode;
+    /* The full-source root can lawfully collapse to a lexical content node.
+     * Keep its placement here because such a root has no wrapper physicality. */
+    double                           source_root_coord[4];
+    uint32_t                         source_root_atom;
+    uint8_t                          source_root_tier;
+    uint8_t                          source_root_has_atom;
+    uint8_t                          source_root_valid;
 } laplace_compose_result_t;
 
 int laplace_grammar_compose(
@@ -86,6 +97,15 @@ int laplace_grammar_compose_probe(
     const char*                 modality_id,
     hash128_t                   source_id,
     hash128_t                   type_meta_id,
+    laplace_compose_result_t**  out);
+
+/* Lossless source grammar: every AST node composes its immediate children and
+ * uncovered source-byte gaps; lexical spans use the shared content tree. */
+int laplace_grammar_source_compose(
+    const uint8_t*              utf8,
+    size_t                      len,
+    laplace_ast_t*              ast,
+    const char*                 modality_id,
     laplace_compose_result_t**  out);
 
 int laplace_grammar_compose_materialize_phys(
@@ -124,6 +144,12 @@ size_t laplace_compose_entity_count(const laplace_compose_result_t* r);
 size_t laplace_compose_physicality_count(const laplace_compose_result_t* r);
 size_t laplace_compose_precedes_count(const laplace_compose_result_t* r);
 hash128_t laplace_compose_root_id(const laplace_compose_result_t* r);
+
+/* Returns the actual placement of a full-source root, including a collapsed
+ * lexical root. No entity or self physicality is minted for that case. */
+int laplace_compose_root_placement(const laplace_compose_result_t* r,
+                                   double out_coord[4], uint8_t* out_tier,
+                                   uint32_t* out_atom, uint8_t* out_has_atom);
 
 tier_tree_t* laplace_compose_get_tier_tree(const laplace_compose_result_t* r);
 

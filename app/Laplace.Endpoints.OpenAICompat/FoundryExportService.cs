@@ -36,25 +36,16 @@ internal sealed class CliFoundryExportService : IFoundryExportService
         string? filename,
         CancellationToken ct)
     {
-        // THE RESPONSE MUST NOT NAME A FORMAT THIS DID NOT WRITE.
-        //
-        // `format` used to select only the filename EXTENSION, while the command below is
-        // always `synthesize substrate` -- the GGUF writer. There is no SafeTensors export
-        // anywhere in the tree (SafeTensors appears only as an INGEST witness:
-        // SafetensorSnapshotWitness / IngestSafetensorSnapshotAsync). So
-        // format="safetensors" produced GGUF bytes in a file named .safetensors and
-        // returned Format="safetensors" to the caller -- an artifact that lies about what
-        // it is, which is worse than refusing, because the caller has no way to notice.
-        //
-        // Refuse instead. When a real writer exists, add it here and to WritableFormats
-        // together, so the two cannot disagree.
+        // This route invokes the GGUF synthesis CLI. The native SafeTensors codec
+        // exists, but this route does not yet bind its tensors, metadata and receipts.
+        // Advertise a format only when the complete export path actually writes it.
         string requested = (format ?? "").Trim();
         if (requested.Length == 0) requested = "gguf";
         if (!WritableFormats.Contains(requested))
             throw new ArgumentException(
                 $"foundry export cannot produce '{requested}'. Writable formats: "
                 + string.Join(", ", WritableFormats.Order(StringComparer.Ordinal))
-                + ". SafeTensors is an ingest format here, not an export target.",
+                + ". SafeTensors export is not yet connected to this route.",
                 nameof(format));
         var ext = requested.ToLowerInvariant();
 

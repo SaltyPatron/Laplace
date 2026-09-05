@@ -16,7 +16,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// ...) without this assembly needing to know it exists — see <see cref="NpgsqlRead"/>'s
 /// own remark on why translation is a delegate and not a fixed type here.
 /// </summary>
-public static class NpgsqlSubstrateReads
+public static partial class NpgsqlSubstrateReads
 {
     internal static int RequestedLimit(int limit) => Math.Max(0, limit);
 
@@ -2601,13 +2601,11 @@ public static class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT d.id, p.entity_id,
-                   row_number() OVER (PARTITION BY d.id ORDER BY p.ord, rep.n)::integer
+            SELECT d.id, p.entity_id, p.ord::integer
             FROM unnest(@ids) AS d(id)
             CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id)
                  WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
-            CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
-            ORDER BY d.id, p.ord, rep.n
+            ORDER BY d.id, p.ord
             """,
             static r => new TrajectoryConstituentRow(
                 (byte[])r[0], (byte[])r[1], r.GetInt32(2)),
@@ -2625,15 +2623,12 @@ public static class NpgsqlSubstrateReads
             NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType[] types,
             CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT d.id, lane.type, p.entity_id,
-                   row_number() OVER (
-                       PARTITION BY d.id, lane.type ORDER BY p.ord, rep.n)::integer
+            SELECT d.id, lane.type, p.entity_id, p.ord::integer
             FROM unnest(@ids) AS d(id)
             CROSS JOIN unnest(@types) AS lane(type)
             CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id, lane.type)
                  WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
-            CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
-            ORDER BY d.id, lane.type, p.ord, rep.n
+            ORDER BY d.id, lane.type, p.ord
             """,
             static r => new TypedTrajectoryConstituentRow(
                 (byte[])r[0], (PhysicalityType)r.GetInt16(1), (byte[])r[2], r.GetInt32(3)),
@@ -2652,13 +2647,11 @@ public static class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType type,
         CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT d.id, p.entity_id,
-                   row_number() OVER (PARTITION BY d.id ORDER BY p.ord, rep.n)::integer
+            SELECT d.id, p.entity_id, p.ord::integer
             FROM unnest(@ids) AS d(id)
             CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id, @type)
                  WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
-            CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
-            ORDER BY d.id, p.ord, rep.n
+            ORDER BY d.id, p.ord
             """,
             static r => new TrajectoryConstituentRow(
                 (byte[])r[0], (byte[])r[1], r.GetInt32(2)),
@@ -3017,16 +3010,14 @@ public static class NpgsqlSubstrateReads
                 -- outer window over a lateral join. Measured — the same document rebuilt to
                 -- 101 tokens on one run and 107 on the next.
                 --
-                -- run_length is RUN-LENGTH ENCODING, floored at 1: a token repeated N times
-                -- consecutively packs into ONE point. Dropping it silently shortens every
-                -- document that repeats a token — which a chess movetext does constantly.
-                SELECT d.id AS doc_id, p.entity_id, p.ord AS tord, rep.n AS repeat_ix
+                -- The common unpacker expands RLE with the native trajectory
+                -- kernel. Every row is one logical token, including repeats.
+                SELECT d.id AS doc_id, p.entity_id, p.ord AS tord
                 FROM doc d
                 CROSS JOIN LATERAL (
                     SELECT t.entity_id, t.run_length, o AS ord
                     FROM generation.trajectory_unpacked_points(d.id) WITH ORDINALITY AS t(entity_id, run_length, ctier, o)
                 ) p
-                CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
             ),
             distinct_ids AS (
                 SELECT COALESCE(array_agg(DISTINCT entity_id), '{}'::bytea[]) AS a FROM tok
@@ -3038,7 +3029,7 @@ public static class NpgsqlSubstrateReads
                      LATERAL unnest(realize.batch(b.a, NULL)) WITH ORDINALITY AS t(txt, j)
                 WHERE p.i = t.j
             )
-            SELECT tok.doc_id, string_agg(label.txt, ' ' ORDER BY tok.tord, tok.repeat_ix)
+            SELECT tok.doc_id, string_agg(label.txt, ' ' ORDER BY tok.tord)
             FROM tok JOIN label ON label.eid = tok.entity_id
             GROUP BY tok.doc_id
             """,

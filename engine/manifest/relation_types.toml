@@ -394,6 +394,16 @@ symmetry = "asymmetric"
 parent = null
 family_root = "EVOKES_FRAME"
 
+# A physical file, recording, or scan identifies the work expressed by that
+# artifact. Work identity comes from format-native title/author metadata (#799).
+[[relation]]
+canonical = "EXPRESSES"
+bit = 223
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "EXPRESSES"
+
 # HOT: Wiktionary inflection edges — one per surface form; 3.7M rows / 4.7%.
 [[relation]]
 canonical = "FORM_OF"
@@ -785,6 +795,16 @@ rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_TITLECASE_MAPPING"
+
+# Work -> its format-native title content. Titles attach to the shared work,
+# never to one edition's file occurrence (#799).
+[[relation]]
+canonical = "HAS_TITLE"
+bit = 224
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_TITLE"
 
 [[relation]]
 canonical = "HAS_UPPERCASE_MAPPING"

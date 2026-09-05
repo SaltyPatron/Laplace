@@ -138,7 +138,7 @@ public sealed class DocumentIngestPipelineTests
     }
 
     [Fact]
-    public async Task DocumentFileExtract_InvalidUtf8_YieldsNoRecord()
+    public async Task DocumentFileExtract_InvalidUtf8_ReportsFailure()
     {
         string dir = Path.Combine(Path.GetTempPath(), "laplace596_" + Path.GetRandomFileName());
         try
@@ -146,10 +146,11 @@ public sealed class DocumentIngestPipelineTests
             Directory.CreateDirectory(dir);
             string file = Path.Combine(dir, "bad.txt");
             await File.WriteAllBytesAsync(file, new byte[] { 0xFF, 0xFE, (byte)'a' });
-            var records = new List<ContentIngestRecord>();
-            await foreach (var r in DocumentFileExtract.OpenAsync(file, "bad.txt", default))
-                records.Add(r);
-            Assert.Empty(records);
+            await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            {
+                await foreach (var record in DocumentFileExtract.OpenAsync(file, "bad.txt", default))
+                    Assert.Fail("Invalid UTF-8 must not emit a content record.");
+            });
         }
         finally
         {
@@ -180,16 +181,15 @@ public sealed class DocumentIngestPipelineTests
         var markerType = Laplace.Ingestion.LayerCompletion.RelationTypeId(2);
 
         var marker = Assert.Single(managed, a => a.TypeId == markerType);
-        Assert.Equal(fileRoot, marker.SubjectId);
-        Assert.Equal(fileRoot, marker.SourceId);
+        FileIdentity identity = FileEntity.Resolve(content, metadata);
+        Assert.NotEqual(fileRoot, identity.FileId);
+        Assert.Equal(identity.FileId, marker.SubjectId);
+        Assert.Equal(identity.FileId, marker.SourceId);
+        Assert.Equal(DocumentSource.SourceId, marker.ContextId);
+        Assert.DoesNotContain(managed, a => a.TypeId == FileEntity.MetadataRelationTypeId);
 
-        var meta = Assert.Single(managed, a => a.TypeId == FileEntity.MetadataRelationTypeId);
-        Assert.Equal(fileRoot, meta.SubjectId);
-        Assert.Equal(fileRoot, meta.SourceId);
-        Assert.Equal(ContentTierSpine.ResolveRoot(metadata.CanonicalUtf8()), meta.ObjectId);
-
-        // The file's content DAG landed under the file's own source id, and nothing
-        // besides marker + metadata was attested (Pillar 3a).
+        // Metadata-bearing records use the canonical file composition even when the
+        // caller leaves the optional precomputed ids unset.
         Assert.True(ContentEntityCount(changes) > 0);
         Assert.Equal(0, NonMarkerAttestationCount(changes));
     }
@@ -266,7 +266,7 @@ public sealed class DocumentIngestPipelineTests
     }
 
     [Fact]
-    public async Task DocumentMultiFileStream_ZeroByteFile_SkipsWithoutRecord()
+    public async Task DocumentMultiFileStream_ZeroByteFile_ReportsFailureWithoutHidingOtherFiles()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"laplace-doc-empty-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
@@ -276,10 +276,20 @@ public sealed class DocumentIngestPipelineTests
             await File.WriteAllTextAsync(Path.Combine(dir, "ok.txt"), "non-empty document.");
 
             int recordCount = 0;
+            int failures = 0;
             await foreach (var source in new DocumentMultiFileStream(dir).FilesAsync())
-            await foreach (var _ in source.RecordsAsync())
-                recordCount++;
-
+            {
+                try
+                {
+                    await foreach (var _ in source.RecordsAsync()) recordCount++;
+                }
+                catch (InvalidDataException)
+                {
+                    Assert.EndsWith("empty.txt", source.FileLabel);
+                    failures++;
+                }
+            }
+            Assert.Equal(1, failures);
             Assert.Equal(1, recordCount);
         }
         finally

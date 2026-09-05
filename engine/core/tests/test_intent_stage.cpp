@@ -736,3 +736,51 @@ TEST(LaplaceCoreIntentStage, AttestationStagingAtCiliScaleStaysAligned) {
     EXPECT_EQ(N, partitioned_rows) << "partitioning lost or duplicated rows";
     intent_stage_free(s);
 }
+
+
+TEST(LaplaceCoreIntentStage, SemanticDigestIgnoresOrderPartitionAndObservationClock) {
+    auto* first = intent_stage_new(0);
+    auto* second = intent_stage_new(0);
+    auto* split = intent_stage_new(0);
+    ASSERT_NE(nullptr, first); ASSERT_NE(nullptr, second); ASSERT_NE(nullptr, split);
+    hash128_t a = make_hash(11), b = make_hash(12), type = make_hash(13);
+    ASSERT_EQ(0, intent_stage_add_entity(first, &a, 1, &type, nullptr));
+    ASSERT_EQ(0, intent_stage_add_entity(first, &b, 2, &type, nullptr));
+    ASSERT_EQ(0, intent_stage_add_entity(second, &b, 2, &type, nullptr));
+    ASSERT_EQ(0, intent_stage_add_entity(split, &a, 1, &type, nullptr));
+    double coord[4] = {1, 0, 0, 0}; hilbert128_t hilbert{};
+    ASSERT_EQ(0, intent_stage_add_physicality(first, &a, &a, 1, coord, &hilbert,
+        nullptr, 0, 0, 1, 0, 1, 0, 1000000));
+    ASSERT_EQ(0, intent_stage_add_physicality(second, &a, &a, 1, coord, &hilbert,
+        nullptr, 0, 0, 1, 0, 1, 0, 2000000));
+    ASSERT_EQ(0, intent_stage_add_attestation(first, &b, &a, &type, &b, &a,
+        nullptr, 2, 1000000, 1, 1000000000, 100000000, 1500000000, nullptr));
+    ASSERT_EQ(0, intent_stage_add_attestation(second, &b, &a, &type, &b, &a,
+        nullptr, 2, 2000000, 1, 1000000000, 100000000, 1500000000, nullptr));
+    hash128_t one{}, two{};
+    const intent_stage_t* parts[] = {split, second};
+    ASSERT_EQ(0, intent_stage_semantic_digest(first, &one));
+    ASSERT_EQ(0, intent_stage_semantic_digest_batch(parts, 2, &two));
+    EXPECT_EQ(0, std::memcmp(&one, &two, sizeof(one)));
+    ASSERT_EQ(1, intent_stage_lower_entity_tier(first, &b, 1));
+    ASSERT_EQ(0, intent_stage_semantic_digest(first, &one));
+    EXPECT_NE(0, std::memcmp(&one, &two, sizeof(one)));
+    intent_stage_free(first); intent_stage_free(second); intent_stage_free(split);
+}
+
+TEST(LaplaceCoreIntentStage, SemanticDigestDetectsChangedNativeEvidenceAndMultiplicity) {
+    auto* first = intent_stage_new(0); auto* second = intent_stage_new(0);
+    hash128_t id = make_hash(21), subject = make_hash(22), type = make_hash(23);
+    ASSERT_EQ(0, intent_stage_add_attestation(first, &id, &subject, &type, &id, &subject,
+        nullptr, 2, 1000000, 1, 1000000000, 100000000, 1500000000, nullptr));
+    ASSERT_EQ(0, intent_stage_add_attestation(second, &id, &subject, &type, &id, &subject,
+        nullptr, 0, 1000000, 1, 0, 100000000, 1500000000, nullptr));
+    hash128_t one{}, two{}, repeated{};
+    ASSERT_EQ(0, intent_stage_semantic_digest(first, &one));
+    ASSERT_EQ(0, intent_stage_semantic_digest(second, &two));
+    EXPECT_NE(0, std::memcmp(&one, &two, sizeof(one)));
+    const intent_stage_t* twice[] = {first, first};
+    ASSERT_EQ(0, intent_stage_semantic_digest_batch(twice, 2, &repeated));
+    EXPECT_NE(0, std::memcmp(&one, &repeated, sizeof(one)));
+    intent_stage_free(first); intent_stage_free(second);
+}

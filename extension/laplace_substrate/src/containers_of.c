@@ -11,55 +11,44 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 
-/*
- * structural.containers_of(entity, max_hops, limit) -- the reverse of realize.constituents():
- * given an entity, walk UP the composition hierarchy and return every entity
- * of a higher tier whose trajectory contains it (directly, hop=1, or
- * transitively through intermediate tiers, hop>1) -- e.g. a word -> the
- * sentences containing that word (hop 1) -> the documents containing those
- * sentences (hop 2).
- *
- * Why this is native and not a single SQL statement: physicalities_constituents_gin
- * (GIN index on laplace_trajectory_constituent_ids(trajectory)) resolves a
- * single-key `@> ARRAY[id]` probe in ~2ms regardless of table size (confirmed
- * via EXPLAIN ANALYZE -- Bitmap Index Scan, not a sequential/BRIN scan). But
- * Postgres's GIN cost model badly mis-estimates a *multi-key* `&&`/`@>` probe
- * against a large bound array (order-1000+ elements, as a single hop's
- * frontier commonly is) -- confirmed live: the same containment check
- * reformulated as one `trajectory && $1::bytea[]` query against a
- * ~1200-element array made the planner abandon the GIN index entirely for a
- * Parallel Bitmap Heap Scan over ALL candidate-tier entities with a per-row
- * recheck filter (850ms for what should be a sub-millisecond lookup; 873366
- * rows discarded by index recheck alone). A SQL-level LATERAL rewrite (one
- * probe per frontier element, expressed as a correlated subquery) fared
- * worse still under concurrent load.
- *
- * Native C owns frontier expansion and deduplication. Each hop executes one
- * bound overlap query, but deliberately does not keep a process-wide SPI plan:
- * the partitioned index cycle can replace the GIN tree, and frontier cardinality
- * changes the useful plan. A kept generic plan preserves a stale shape for the
- * backend lifetime. SPI_execute_with_args plans against the current indexes and
- * bound array on each hop.
- */
+/* Reverse composition traversal: C owns one frontier and a visited set; PostgreSQL
+ * resolves each complete frontier through one fixed typed membership read. Keep
+ * the prepared plan across calls rather than planning all partition joins at
+ * every hop. PostgreSQL invalidates retained plans when their dependencies change.
+ * LIMIT stays in the candidate query so it constrains work before hydration. */
 
-/* LIMIT $2 is IN THE QUERY TEXT, and it has to be. SPI_execute_plan's count
- * argument stops the executor FETCHING, which is not the same thing: the plan is
- * a Bitmap Index Scan, and the bitmap for every match is built before the first
- * tuple is produced. Capping the fetch skips no bitmap work at all.
- *
- * MEASURED on 'water' at 37.4M entities, same rows returned:
- *   SPI count = limit_rows (no LIMIT in text)   3,245 ms
- *   LIMIT $2 as a bound parameter                  40.4 ms
- * 80x on the former generic kept plan; planning each hop custom retains the SQL
- * bound while allowing the live index/cardinality shape to participate.
- *
- * The limit remains a parameter so the statement identity is stable and the
- * caller's bound is visible to custom planning. */
+/* Materialize indexed membership before entity hydration. Joining v_word_points
+ * inside the bounded candidate read let the planner price the LIMIT against an
+ * inflated entity join cardinality, selecting a full physicality btree walk.
+ * Retained Morse file: 1 parent, 1.15M buffer hits / 563 ms before; the identical
+ * candidate set through GIN used 1,806 hits / 19 ms including hydration.
+ * The C frontier/deduplication and caller's bound are unchanged. */
 static const char *CONTAINERS_QUERY =
-    "SELECT w.id, w.tier, w.type_id "
-    "FROM laplace.v_word_points w "
-    "WHERE public.laplace_trajectory_constituent_ids(w.trajectory) && $1::bytea[] "
-    "LIMIT $2";
+    "WITH candidates AS MATERIALIZED ("
+    " SELECT p.entity_id FROM laplace.physicalities p "
+    " WHERE p.type = 1 AND p.trajectory IS NOT NULL "
+    " AND public.laplace_trajectory_constituent_ids(p.trajectory) && $1::bytea[] "
+    " LIMIT $2) "
+    "SELECT e.id, e.tier, e.type_id "
+    "FROM candidates c JOIN laplace.entities e ON e.id = c.entity_id";
+
+static SPIPlanPtr containers_plan = NULL;
+
+static void
+ensure_containers_plan(void)
+{
+    if (containers_plan != NULL)
+        return;
+    Oid argtypes[2] = { BYTEAARRAYOID, INT4OID };
+    SPIPlanPtr plan = SPI_prepare_cursor(CONTAINERS_QUERY, 2, argtypes,
+                                         CURSOR_OPT_GENERIC_PLAN);
+    if (plan == NULL)
+        elog(ERROR, "containers_of: SPI_prepare failed: %s",
+             SPI_result_code_string(SPI_result));
+    if (SPI_keepplan(plan) != 0)
+        elog(ERROR, "containers_of: SPI_keepplan failed");
+    containers_plan = plan;
+}
 
 PG_FUNCTION_INFO_V1(pg_laplace_containers_of);
 
@@ -93,6 +82,8 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "containers_of: SPI_connect failed");
+
+    ensure_containers_plan();
 
     frontier = (Datum *) palloc(sizeof(Datum));
     frontier[0] = copy_bytea_datum(PointerGetDatum(prompt));
@@ -137,7 +128,6 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
         {
             ArrayType *fr_arr = construct_array(frontier, n_frontier, BYTEAOID, -1,
                                                 false, TYPALIGN_INT);
-            Oid   argtypes[2] = { BYTEAARRAYOID, INT4OID };
             Datum args[2];
             char  nulls[2] = {' ', ' '};
             int   rc;
@@ -165,8 +155,7 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
              * so "the first limit_rows containers" was already an arbitrary subset
              * of the matches. Capping the fetch changes WHICH arbitrary rows come
              * back, not how many the caller is promised. */
-            rc = SPI_execute_with_args(CONTAINERS_QUERY, 2, argtypes,
-                                       args, nulls, true,
+            rc = SPI_execute_plan(containers_plan, args, nulls, true,
                                        unlimited ? 0 : limit_rows);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "containers_of: probe query failed: %s",
