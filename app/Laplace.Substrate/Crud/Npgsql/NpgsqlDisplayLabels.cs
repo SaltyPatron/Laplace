@@ -88,10 +88,11 @@ public static class NpgsqlDisplayLabels
             ),
             file_label AS MATERIALIZED (
                 SELECT f.owner_id,
-                       NULLIF(substr(line, length('name=') + 1), '') AS label
+                       NULLIF(substr(lines.line, length('name=') + 1), '') AS label
                 FROM file_meta_text f
-                CROSS JOIN LATERAL unnest(string_to_array(COALESCE(f.txt, ''), E'\n')) AS line
-                WHERE line LIKE 'name=%'
+                CROSS JOIN LATERAL unnest(
+                    string_to_array(COALESCE(f.txt, ''), E'\n')) AS lines(line)
+                WHERE lines.line LIKE 'name=%'
             ),
 
             -- Provider/catalog identities are not literal text and therefore correctly
