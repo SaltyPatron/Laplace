@@ -298,6 +298,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         forwarded,
                         async (connection, transaction, token) =>
                         {
+                            if (_bulkRun)
+                            {
+                                Interlocked.CompareExchange(
+                                    ref _foldSpanStarted,
+                                    System.Diagnostics.Stopwatch.GetTimestamp(),
+                                    comparand: 0);
+                            }
                             atomicStats = await UpsertDeltaInTransactionAsync(
                                 delta!, connection, transaction, token).ConfigureAwait(false);
                         },
