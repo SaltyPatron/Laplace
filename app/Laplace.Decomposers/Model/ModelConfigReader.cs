@@ -34,12 +34,10 @@ public static class ModelConfigReader
         if (!File.Exists(configJsonPath))
             return Unsupported("(no config.json)", "(unknown)");
 
-        byte[] raw;
-        JsonDocument doc;
         try
         {
-            raw = File.ReadAllBytes(configJsonPath);
-            doc = JsonDocument.Parse(raw);
+            byte[] raw = File.ReadAllBytes(configJsonPath);
+            return Read(raw);
         }
         catch (Exception ex)
         {
@@ -47,6 +45,12 @@ public static class ModelConfigReader
                 $"ModelConfigReader: failed to read/parse '{configJsonPath}': {ex.Message}");
             return Unsupported("(unparseable config.json)", "(unknown)");
         }
+
+    }
+
+    public static Result Read(ReadOnlyMemory<byte> raw)
+    {
+        JsonDocument doc = JsonDocument.Parse(raw);
 
         using (doc)
         {

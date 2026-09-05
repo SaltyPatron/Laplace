@@ -41,6 +41,11 @@ public sealed class LlamaTokenizerParser
     public static IReadOnlyList<TokenRecord> Parse(string tokenizerJsonPath)
     {
         byte[] jsonBytes = File.ReadAllBytes(tokenizerJsonPath);
+        return Parse(jsonBytes);
+    }
+
+    public static IReadOnlyList<TokenRecord> Parse(ReadOnlyMemory<byte> jsonBytes)
+    {
         using var doc = JsonDocument.Parse(jsonBytes);
 
         JsonElement vocab;

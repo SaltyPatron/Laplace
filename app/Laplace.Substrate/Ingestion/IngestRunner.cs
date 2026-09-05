@@ -236,18 +236,21 @@ public sealed class IngestRunner
                 CpuTopology.RequirePerformanceCorePin();
 
                 var sbatch = new List<SubstrateChange>(batchSize);
+                using var sbatchOwnership = new ApplyEnvelopeBatchOwner(sbatch);
                 int sbatchRows = 0;
                 Hash128? sbatchSource = null;
                 await foreach (var intent in decomposer
                     .DecomposeAsync(ctx, options.DecomposerOptions, runCt).WithCancellation(runCt))
                 {
+                    using var transfer = new ApplyEnvelopeTransfer(intent);
                     Interlocked.Increment(ref counters._unitsProduced);
                     long units = intent.Metadata.InputUnitsConsumed;
                     if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
                     options.Progress?.Report(MakeProgress(counters));
                     if (!workingSet && batchSize == 1 && commitRows == 0)
                     {
-                        await ProcessOneIntentAsync(intent, decomposer, options, rng,
+                        transfer.Complete();
+                        await ProcessOwnedIntentAsync(intent, decomposer, options, rng,
                                                     counters, failures, log, runCt);
                         continue;
                     }
@@ -255,7 +258,7 @@ public sealed class IngestRunner
                     if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                             sbatchSource, intent.Metadata.SourceId))
                     {
-                        await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                        await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
@@ -265,7 +268,7 @@ public sealed class IngestRunner
                     if (workingSet && sbatch.Count > 0
                         && wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
                     {
-                        await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                        await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
@@ -273,13 +276,14 @@ public sealed class IngestRunner
                         sbatchSource = null;
                     }
                     sbatch.Add(intent);
+                    transfer.Complete();
                     sbatchSource ??= intent.Metadata.SourceId;
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
                     if (ShouldFlushWithCap(sbatch.Count, sbatchRows)
                         || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
                     {
-                        await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                        await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
@@ -288,7 +292,7 @@ public sealed class IngestRunner
                     }
                 }
                 if (sbatch.Count > 0)
-                    await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                    await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                             counters, failures, log, workingSet, runCt);
             }
             else
@@ -298,7 +302,8 @@ public sealed class IngestRunner
                 long bufferedRows = 0;
                 long byteBudget = Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes;
                 long bufferedBytes = 0;
-                var drained = new SemaphoreSlim(0, channelCap);
+                using var drained = new SemaphoreSlim(0, channelCap);
+                using var pipelineCts = CancellationTokenSource.CreateLinkedTokenSource(runCt);
 
                 var channel = Channel.CreateBounded<SubstrateChange>(
                     new BoundedChannelOptions(channelCap)
@@ -313,8 +318,10 @@ public sealed class IngestRunner
                     try
                     {
                         await foreach (var intent in decomposer
-                            .DecomposeAsync(ctx, options.DecomposerOptions, runCt).WithCancellation(runCt))
+                            .DecomposeAsync(ctx, options.DecomposerOptions, producerCt)
+                            .WithCancellation(producerCt))
                         {
+                            using var transfer = new ApplyEnvelopeTransfer(intent);
                             Interlocked.Increment(ref counters._unitsProduced);
                             long units = intent.Metadata.InputUnitsConsumed;
                             if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
@@ -330,6 +337,7 @@ public sealed class IngestRunner
                             Interlocked.Add(ref bufferedRows, r);
                             Interlocked.Add(ref bufferedBytes, b);
                             await channel.Writer.WriteAsync(intent, producerCt);
+                            transfer.Complete();
                         }
                         channel.Writer.TryComplete();
                     }
@@ -337,23 +345,26 @@ public sealed class IngestRunner
                     {
                         channel.Writer.TryComplete(ex);
                     }
-                }, "ingest-decompose-pcore", runCt);
+                }, "ingest-decompose-pcore", pipelineCts.Token);
 
                 async Task FlushBatchAsync(List<SubstrateChange> b)
                 {
                     if (b.Count == 0) return;
-                    await ProcessBatchAsync(b, decomposer, options, rng,
+                    await ProcessOwnedBatchAsync(b, decomposer, options, rng,
                         counters, failures, log, workingSet, runCt).ConfigureAwait(false);
                     b.Clear();
                 }
 
                 var batch = new List<SubstrateChange>(batchSize);
+                await using var pipelineCleanup = new ApplyPipelineCleanup(
+                    pipelineCts, producer, batch, channel.Reader);
                 int batchRows = 0;
                 Hash128? batchSource = null;
                 while (await channel.Reader.WaitToReadAsync(runCt))
                 {
                     while (channel.Reader.TryRead(out var intent))
                     {
+                        using var transfer = new ApplyEnvelopeTransfer(intent);
                         runCt.ThrowIfCancellationRequested();
                         Interlocked.Add(ref bufferedRows, -RowsOf(intent));
                         Interlocked.Add(ref bufferedBytes, -BytesOf(intent));
@@ -361,7 +372,8 @@ public sealed class IngestRunner
 
                         if (!workingSet && batchSize == 1 && commitRows == 0)
                         {
-                            await ProcessOneIntentAsync(intent, decomposer, options, rng,
+                            transfer.Complete();
+                            await ProcessOwnedIntentAsync(intent, decomposer, options, rng,
                                                          counters, failures, log, runCt);
                             continue;
                         }
@@ -383,6 +395,7 @@ public sealed class IngestRunner
                             batchSource = null;
                         }
                         batch.Add(intent);
+                        transfer.Complete();
                         batchSource ??= intent.Metadata.SourceId;
                         batchRows += RowsOf(intent);
                         wsBytes += ib;
@@ -639,6 +652,27 @@ public sealed class IngestRunner
                 p.Relation, p.Rows, p.PctOfDefault, p.Relation);
     }
 
+    private async Task ProcessOwnedIntentAsync(
+        SubstrateChange intent,
+        IDecomposer decomposer,
+        IngestRunOptions options,
+        Random rng,
+        RunCounters counters,
+        List<IngestFailure> failures,
+        ILogger log,
+        CancellationToken ct)
+    {
+        try
+        {
+            await ProcessOneIntentAsync(
+                intent, decomposer, options, rng, counters, failures, log, ct);
+        }
+        finally
+        {
+            intent.ApplyEnvelope?.Dispose();
+        }
+    }
+
     private async Task ProcessOneIntentAsync(
         SubstrateChange intent,
         IDecomposer decomposer,
@@ -662,7 +696,11 @@ public sealed class IngestRunner
                     var delay = options.RetryPolicy.DelayBeforeAttempt(attempt - 1, rng);
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
                 }
-                var apply = await _writer.ApplyAsync(intent, ct);
+                Func<CancellationToken, ValueTask>? verifier =
+                    SubstrateApplyEnvelope.ComposeVerifier([intent]);
+                var apply = verifier is null
+                    ? await _writer.ApplyAsync(intent, ct)
+                    : await _writer.ApplyWorkingSetAsync([intent], verifier, ct);
 
                 if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsApplied);
                 Interlocked.Add(ref counters._entitiesInserted, apply.EntitiesInserted);
@@ -721,6 +759,28 @@ public sealed class IngestRunner
         if (options.AbortOnTransientExhaustion && lastEx is not null) throw lastEx;
     }
 
+    private async Task ProcessOwnedBatchAsync(
+        List<SubstrateChange> batch,
+        IDecomposer decomposer,
+        IngestRunOptions options,
+        Random rng,
+        RunCounters counters,
+        List<IngestFailure> failures,
+        ILogger log,
+        bool workingSet,
+        CancellationToken ct)
+    {
+        try
+        {
+            await ProcessBatchAsync(
+                batch, decomposer, options, rng, counters, failures, log, workingSet, ct);
+        }
+        finally
+        {
+            SubstrateApplyEnvelope.Release(batch);
+        }
+    }
+
     private async Task ProcessBatchAsync(
         List<SubstrateChange> batch,
         IDecomposer decomposer,
@@ -749,7 +809,11 @@ public sealed class IngestRunner
                     var delay = options.RetryPolicy.DelayBeforeAttempt(attempt - 1, rng);
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
                 }
-                var apply = workingSet
+                Func<CancellationToken, ValueTask>? verifier =
+                    SubstrateApplyEnvelope.ComposeVerifier(batch);
+                var apply = verifier is not null
+                    ? await _writer.ApplyWorkingSetAsync(batch, verifier, ct)
+                    : workingSet
                     ? await _writer.ApplyWorkingSetAsync(batch, ct)
                     : await _writer.ApplyManyAsync(batch, ct);
 
@@ -1040,6 +1104,40 @@ public sealed class IngestRunner
             c.RoundTrips,
             c.UnitsProduced,
             c.InputUnitsComposed);
+    }
+
+    private sealed class ApplyEnvelopeTransfer(SubstrateChange change) : IDisposable
+    {
+        private bool _completed;
+
+        internal void Complete() => _completed = true;
+
+        public void Dispose()
+        {
+            if (!_completed) change.ApplyEnvelope?.Dispose();
+        }
+    }
+
+    private sealed class ApplyEnvelopeBatchOwner(IReadOnlyList<SubstrateChange> changes) : IDisposable
+    {
+        public void Dispose() => SubstrateApplyEnvelope.Release(changes);
+    }
+
+    private sealed class ApplyPipelineCleanup(
+        CancellationTokenSource cancellation,
+        Task producer,
+        IReadOnlyList<SubstrateChange> batch,
+        ChannelReader<SubstrateChange> reader) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            cancellation.Cancel();
+            try { await producer.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            SubstrateApplyEnvelope.Release(batch);
+            while (reader.TryRead(out SubstrateChange? abandoned))
+                abandoned.ApplyEnvelope?.Dispose();
+        }
     }
 
     private sealed class RunCounters

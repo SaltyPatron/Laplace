@@ -24,6 +24,16 @@ BEGIN ATOMIC
         JOIN selected object ON object.id = c.object_id
         WHERE c.object_id IS NOT NULL
           AND c.type_id <> p_target_type
+          AND NOT EXISTS (
+              SELECT 1
+              FROM laplace.consensus existing
+              WHERE existing.type_id = p_target_type
+                AND (
+                    (existing.subject_id = c.subject_id
+                     AND existing.object_id = c.object_id)
+                    OR (p_target_symmetric
+                        AND existing.subject_id = c.object_id
+                        AND existing.object_id = c.subject_id)))
     )
     SELECT n.subject_id, n.object_id,
            array_agg(DISTINCT n.basis_type_id ORDER BY n.basis_type_id)

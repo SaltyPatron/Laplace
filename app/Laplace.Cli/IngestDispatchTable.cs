@@ -92,6 +92,7 @@ internal static class IngestDispatchTable
         ("recipe",   cli => IngestCommands.IngestRecipeAsync(cli)),
         ("agents",   cli => IngestCommands.IngestAgentsAsync(cli)),
         ("omw-probe", cli => IngestCommands.OmwProbeAsync(cli)),
+        ("model-corroborate", cli => IngestCommands.CorroborateSafetensorSnapshotsAsync(cli)),
 
         // GH #600: `chess` records AND derives the calculated layer in ONE fused
         // Compose pass, reusing the in-memory parse — no second Postgres hydrate.

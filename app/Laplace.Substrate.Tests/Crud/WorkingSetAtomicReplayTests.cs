@@ -251,40 +251,51 @@ public sealed class WorkingSetAtomicReplayTests
         var receiptB = NativeAttestation.CategoricalResolvedOutcome(
             subject, relation, obj, sourceB, H("mixed/context/b"),
             witnessWeight: 0.5, AttestationOutcome.Refute);
-        SubstrateChange changeA = new SubstrateChangeBuilder(
-                sourceA, $"model/corroboration/{orchestration}/a")
-            .AddAttestation(receiptA)
-            .AddEphemeralFold(new(receiptA.Id, H("mixed/calculation/a"), 900_000_000))
-            .Build();
-        SubstrateChange changeB = new SubstrateChangeBuilder(
-                sourceB, $"model/corroboration/{orchestration}/b")
-            .AddAttestation(receiptB)
-            .AddEphemeralFold(new(receiptB.Id, H("mixed/calculation/b"), 100_000_000))
-            .Build();
-
-        await using var writer = new ConsensusAccumulatingWriter(
-            new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+        int lifetimeDisposals = 0;
         int verifications = 0;
         ValueTask VerifyBeforeCommit(CancellationToken _)
         {
+            if (Volatile.Read(ref lifetimeDisposals) != 0)
+                return ValueTask.FromException(new ObjectDisposedException("model snapshot"));
             if (Interlocked.Increment(ref verifications) == 1)
                 return ValueTask.FromException(new InvalidDataException(
                     "injected source snapshot verification failure"));
             return ValueTask.CompletedTask;
         }
+        using var envelopeOwner = SubstrateApplyEnvelope.Own(
+            new DelegateDisposable(() => Interlocked.Increment(ref lifetimeDisposals)),
+            VerifyBeforeCommit);
+        SubstrateChange changeA = new SubstrateChangeBuilder(
+                sourceA, $"model/corroboration/{orchestration}/a")
+            .AddAttestation(receiptA)
+            .AddEphemeralFold(new(receiptA.Id, H("mixed/calculation/a"), 900_000_000))
+            .Build() with { ApplyEnvelope = envelopeOwner.Retain() };
+        SubstrateChange changeB = new SubstrateChangeBuilder(
+                sourceB, $"model/corroboration/{orchestration}/b")
+            .AddAttestation(receiptB)
+            .AddEphemeralFold(new(receiptB.Id, H("mixed/calculation/b"), 100_000_000))
+            .Build() with { ApplyEnvelope = envelopeOwner.Retain() };
+        envelopeOwner.Dispose();
+
+        await using var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+        SubstrateChange[] forward = [changeB, changeA];
+        SubstrateChange[] reverse = [changeA, changeB];
+        Func<CancellationToken, ValueTask> verifier =
+            SubstrateApplyEnvelope.ComposeVerifier(forward)!;
 
         // The verifier runs after the fold participant. Its failure must still
         // roll evidence, consensus, journal, and source ownership back together.
         await Assert.ThrowsAsync<InvalidDataException>(
             () => writer.ApplyWorkingSetAsync(
-                [changeB, changeA], VerifyBeforeCommit));
+                forward, verifier));
         Assert.Null(await EvidenceAsync(receiptA.Id, relation, subject));
         Assert.Null(await EvidenceAsync(receiptB.Id, relation, subject));
         Assert.Equal((0L, 0L), await JournalOwnersAsync(sourceA, sourceB));
         Assert.Null(await ConsensusRowAsync(subject, relation, obj));
 
         ApplyResult retry = await writer.ApplyWorkingSetAsync(
-            [changeB, changeA], VerifyBeforeCommit);
+            forward, verifier);
         Assert.False(retry.JournalReplayHit);
         var evidenceA = await EvidenceAsync(receiptA.Id, relation, subject);
         var evidenceB = await EvidenceAsync(receiptB.Id, relation, subject);
@@ -302,7 +313,7 @@ public sealed class WorkingSetAtomicReplayTests
         // Mixed-source ordering is transport only: the same complete analysis
         // replays even when the caller supplies its source changes in reverse.
         ApplyResult replay = await writer.ApplyWorkingSetAsync(
-            [changeA, changeB], VerifyBeforeCommit);
+            reverse, SubstrateApplyEnvelope.ComposeVerifier(reverse)!);
         Assert.True(replay.JournalReplayHit);
         Assert.Equal(2, verifications);
         Assert.Equal(1, (await EvidenceAsync(receiptA.Id, relation, subject))!.Value.Games);
@@ -316,6 +327,15 @@ public sealed class WorkingSetAtomicReplayTests
         sourceProof.Parameters.AddWithValue(relation.ToBytes());
         sourceProof.Parameters.AddWithValue(obj.ToBytes());
         Assert.Equal(2, Convert.ToInt64(await sourceProof.ExecuteScalarAsync()));
+
+        SubstrateApplyEnvelope.Release(forward);
+        Assert.Equal(1, lifetimeDisposals);
+    }
+
+    private sealed class DelegateDisposable(Action dispose) : IDisposable
+    {
+        private Action? _dispose = dispose;
+        public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke();
     }
 
     [Fact]

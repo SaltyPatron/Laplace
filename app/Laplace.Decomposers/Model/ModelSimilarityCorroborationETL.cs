@@ -115,8 +115,7 @@ public sealed class ModelSimilarityCorroborationETL
         Hash128 rightContext = ModelTokenEdgeETL.CircuitContextForVersion(
             ModelTokenEdgeETL.AnalyzerVersion, _right.SourceId,
             "embedding", -1, -1, [_right.Manifest.Embedding!.Name]);
-        double witnessWeight = RelationTypeRegistry.Resolve("SIMILAR_TO").Rank
-                               * SourceTrust.AiModelProbe;
+        double sourceTrust = SourceTrust.AiModelProbe;
 
         Hash128? afterSubject = null;
         Hash128? afterObject = null;
@@ -152,10 +151,10 @@ public sealed class ModelSimilarityCorroborationETL
                     _left.SourceId, _right.SourceId, typeId, page.Rows);
                 SubstrateChange leftChange = BuildSourceChange(
                     _left.SourceId, leftContext, typeId, page.Rows, admitted,
-                    leftScores, leftOutcomes, witnessWeight, orchestrationId, commitEpoch);
+                    leftScores, leftOutcomes, sourceTrust, orchestrationId, commitEpoch);
                 SubstrateChange rightChange = BuildSourceChange(
                     _right.SourceId, rightContext, typeId, page.Rows, admitted,
-                    rightScores, rightOutcomes, witnessWeight, orchestrationId, commitEpoch);
+                    rightScores, rightOutcomes, sourceTrust, orchestrationId, commitEpoch);
                 yield return new ModelCorroborationWorkingSet(
                     orchestrationId, [leftChange, rightChange],
                     page.Rows.Count, admitted.Count,
@@ -215,7 +214,7 @@ public sealed class ModelSimilarityCorroborationETL
         Hash128 source, Hash128 circuitContext, Hash128 typeId,
         IReadOnlyList<CircuitPairProposal> proposals, IReadOnlyList<int> admitted,
         IReadOnlyList<long> scores, IReadOnlyList<short> outcomes,
-        double witnessWeight, Hash128 orchestrationId, int commitEpoch)
+        double sourceTrust, Hash128 orchestrationId, int commitEpoch)
     {
         var builder = new SubstrateChangeBuilder(
                 source, $"model/corroboration/{orchestrationId}",
@@ -228,7 +227,7 @@ public sealed class ModelSimilarityCorroborationETL
             CircuitPairProposal proposal = proposals[i];
             AttestationRow receipt = NativeAttestation.CategoricalResolvedOutcome(
                 proposal.Subject, typeId, proposal.Object, source, circuitContext,
-                witnessWeight, (AttestationOutcome)outcomes[i]);
+                sourceTrust, (AttestationOutcome)outcomes[i]);
             builder.AddAttestation(receipt);
             builder.AddEphemeralFold(new EphemeralFoldInput(
                 receipt.Id,

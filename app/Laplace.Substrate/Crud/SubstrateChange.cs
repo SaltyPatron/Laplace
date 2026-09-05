@@ -14,6 +14,12 @@ public sealed record SubstrateChange(
     ImmutableArray<EphemeralFoldInput> EphemeralFoldInputs = default)
 {
     public bool CountsAsUnit { get; init; } = true;
+
+    /// <summary>
+    /// Optional retained source-input lifetime and transaction-bound verifier.
+    /// The ingest runner owns this lease after the change is emitted.
+    /// </summary>
+    public SubstrateApplyEnvelope? ApplyEnvelope { get; init; }
 }
 
 public sealed record TestimonyWalkRow(
