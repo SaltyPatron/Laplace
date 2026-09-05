@@ -11,6 +11,7 @@ DECLARE
     type_d   bytea := public.laplace_hash128_blake3('test/display/type/document');
     type_b   bytea := public.laplace_hash128_blake3('test/display/type/book');
     type_c   bytea := public.laplace_hash128_blake3('test/display/type/concept');
+    rel_meta bytea := laplace.entity_type_id('RelationType');
     wolf     bytea := laplace.word_id('狼');
     stop     bytea := laplace.word_id('。');
     ending   bytea := laplace.word_id('終');
@@ -26,7 +27,12 @@ DECLARE
     labels   text[];
     ids      bytea[];
 BEGIN
+    -- relation_family_members enumerates the governed RelationType roster. A lawful
+    -- attestation fixture therefore declares the relation type it uses, exactly like
+    -- production source bootstrap does; inventing an evidence row without its governed
+    -- type entity would be testing an impossible partially-bootstrapped substrate.
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+        (defrel, 0, rel_meta, src),
         (wolf, 0, type_cp, src),
         (stop, 0, type_cp, src),
         (ending, 0, type_cp, src),
