@@ -190,6 +190,9 @@ BEGIN ATOMIC
     ),
 
     -- Descriptive metadata is a fallback only; it never decides which projection runs.
+    -- label_batch historically sat on top of render(), so reject anything that merely
+    -- round-tripped a 128-bit identity handle. That rejection happens ONLY in metadata
+    -- lanes: literal text whose actual contents are 32 hex characters remains literal text.
     type_indexed AS MATERIALIZED (
         SELECT d.type_id, row_number() OVER (ORDER BY d.type_id)::integer AS rn
         FROM (SELECT DISTINCT i.type_id FROM inp i WHERE i.type_id IS NOT NULL) d
@@ -203,7 +206,11 @@ BEGIN ATOMIC
         FROM type_batch b
     ),
     type_label AS MATERIALIZED (
-        SELECT t.type_id, NULLIF(replace(r.labels[t.rn], '_', ' '), '') AS label
+        SELECT t.type_id,
+               CASE
+                   WHEN r.labels[t.rn] ~ '^[0-9A-Fa-f]{32}(…|\.\.\.)?$' THEN NULL
+                   ELSE NULLIF(replace(r.labels[t.rn], '_', ' '), '')
+               END AS label
         FROM type_indexed t
         CROSS JOIN type_rendered r
     ),
@@ -224,14 +231,22 @@ BEGIN ATOMIC
         FROM source_batch b
     ),
     source_label AS MATERIALIZED (
-        SELECT s.source_id, NULLIF(r.labels[s.rn], '') AS label
+        SELECT s.source_id,
+               CASE
+                   WHEN r.labels[s.rn] ~ '^[0-9A-Fa-f]{32}(…|\.\.\.)?$' THEN NULL
+                   ELSE NULLIF(r.labels[s.rn], '')
+               END AS label
         FROM source_indexed s
         CROSS JOIN source_rendered r
     )
     SELECT i.id,
            COALESCE(
                NULLIF(canonical.name, ''),
-               NULLIF(names.labels[i.ord], ''),
+               CASE
+                   WHEN names.labels[i.ord] ~ '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP]|[0-9A-Fa-f]{32}(…|\.\.\.)?)$'
+                       THEN NULL
+                   ELSE NULLIF(names.labels[i.ord], '')
+               END,
                shallow.label,
                file_label.label,
                preview.label,
