@@ -141,6 +141,53 @@ BEGIN
         RAISE EXCEPTION 'FAIL: semantic-only graph cycle repeated content without sequence testimony';
     END IF;
 
+    -- A declared asymmetric operation must not reverse its operands. The
+    -- existing semantic -> frontier IS_A evidence is not frontier -> semantic.
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier], ARRAY[rel]) g;
+    IF picked IS DISTINCT FROM noise THEN
+        RAISE EXCEPTION 'FAIL: typed operation reversed asymmetric testimony';
+    END IF;
+
+    -- Stronger evidence for another operation cannot override the requested
+    -- relation. Both proposals pass through the same native score and sampler.
+    INSERT INTO laplace.consensus
+        (id, subject_id, type_id, object_id, rating, rd,
+         volatility, witness_count, last_observed_at)
+    VALUES
+        (laplace.consensus_id(frontier, rel, noise), frontier, rel, noise,
+         2500000000000, 30000000000, 60000000, 5, now()),
+        (laplace.consensus_id(frontier, laplace.relation_type_id('HAS_PART'), semantic),
+         frontier, laplace.relation_type_id('HAS_PART'), semantic,
+         1800000000000, 30000000000, 60000000, 5, now());
+    SELECT g.entity, g.stride_used INTO picked, picked_stride
+    FROM generation.forward_walk_continuations(
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier],
+             ARRAY[laplace.relation_type_id('HAS_PART')]) g;
+    IF picked IS DISTINCT FROM semantic OR picked_stride IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION 'FAIL: typed operand lost to unrelated relation mass';
+    END IF;
+    DELETE FROM laplace.consensus WHERE subject_id = frontier;
+
+    -- The canonical relation manifest owns symmetry: the same typed operation
+    -- may traverse reverse-stored evidence when its relation is symmetric.
+    INSERT INTO laplace.consensus
+        (id, subject_id, type_id, object_id, rating, rd,
+         volatility, witness_count, last_observed_at)
+    VALUES
+        (laplace.consensus_id(semantic, laplace.relation_type_id('IS_ANTONYM_OF'), frontier),
+         semantic, laplace.relation_type_id('IS_ANTONYM_OF'), frontier,
+         1800000000000, 30000000000, 60000000, 5, now());
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier],
+             ARRAY[laplace.relation_type_id('IS_ANTONYM_OF')]) g;
+    IF picked IS DISTINCT FROM semantic THEN
+        RAISE EXCEPTION 'FAIL: typed operation lost reverse-stored symmetric evidence';
+    END IF;
+    DELETE FROM laplace.consensus WHERE subject_id = semantic AND type_id <> rel;
+
     -- A genuinely refuted semantic proposal must not become a fallback merely
     -- because it was nominated by the neighborhood index.
     UPDATE laplace.consensus SET rating = 1000000000000
