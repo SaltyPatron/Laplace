@@ -74,7 +74,9 @@ BEGIN ATOMIC
         FROM shallow_indexed s
     ),
     shallow_rendered AS MATERIALIZED (
-        SELECT b.ids, realize.render_text_batch(b.ids, 3) AS labels
+        -- The candidate is already bounded to sentence-or-shallower grain. Render that
+        -- elected content exactly; do not fit an arbitrary recursion depth to it.
+        SELECT b.ids, realize.render_text_batch(b.ids) AS labels
         FROM shallow_batch b
     ),
     shallow AS MATERIALIZED (
@@ -108,7 +110,9 @@ BEGIN ATOMIC
         FROM file_meta_indexed m
     ),
     file_meta_rendered AS MATERIALIZED (
-        SELECT b.ids, realize.render_text_batch(b.ids, 4) AS labels
+        -- Metadata is already the tiny elected file envelope; exact rendering is both
+        -- cheaper than rendering the file body and faithful to the Merkle content law.
+        SELECT b.ids, realize.render_text_batch(b.ids) AS labels
         FROM file_meta_batch b
     ),
     file_meta_text AS MATERIALIZED (
@@ -185,9 +189,9 @@ BEGIN ATOMIC
                s.depth + 1
         FROM preview_spine s
         CROSS JOIN LATERAL (
-            -- ST_PointN(trajectory,1) decodes exactly the first packed vertex. Do not
-            -- ST_DumpPoints / trajectory_unpacked_points here: those unpack every sibling
-            -- before a 48-ish character graph label has elected any need for them.
+            -- Decode exactly the first packed trajectory vertex. A display preview must
+            -- not bulk-unpack siblings before the small graph label has elected any need
+            -- for them.
             SELECT u.entity_id AS child_id,
                    ((u.flags >> 1) & 31)::smallint AS child_tier
             FROM laplace.v_word_points w
@@ -219,7 +223,9 @@ BEGIN ATOMIC
         FROM preview_indexed p
     ),
     preview_rendered AS MATERIALIZED (
-        SELECT b.ids, realize.render_text_batch(b.ids, 3) AS labels
+        -- The expensive high-tier election has already collapsed each root to one
+        -- sentence-or-shallower descendant. Render that elected descendant exactly.
+        SELECT b.ids, realize.render_text_batch(b.ids) AS labels
         FROM preview_batch b
     ),
     preview AS MATERIALIZED (
