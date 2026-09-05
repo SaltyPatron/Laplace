@@ -10,7 +10,8 @@ public sealed record SubstrateChange(
     SubstrateChangeMetadata Metadata,
     ImmutableArray<IntentStage> IntentStages = default,
     ImmutableArray<TestimonyWalkRow> TestimonyWalks = default,
-    ImmutableArray<string> CanonicalNames = default)
+    ImmutableArray<string> CanonicalNames = default,
+    ImmutableArray<EphemeralFoldInput> EphemeralFoldInputs = default)
 {
     public bool CountsAsUnit { get; init; } = true;
 }
@@ -24,6 +25,18 @@ public sealed record TestimonyWalkRow(
     int Count,
     long GamesTotal,
     long ObservedAtUnixUs);
+
+/// <summary>
+/// A continuous score consumed by the canonical consensus fold in the same
+/// transaction as its categorical receipt.  Scores are process-local only and
+/// deliberately absent from COPY, evidence, and replay digests.  The receipt
+/// id and calculation receipt make a retry identity-sensitive without turning
+/// the score into durable witness data.
+/// </summary>
+public sealed record EphemeralFoldInput(
+    Hash128 AttestationId,
+    Hash128 CalculationReceiptId,
+    long ScoreFp1e9);
 
 public sealed record SubstrateChangeMetadata(
     Hash128 IntentId,
@@ -90,4 +103,5 @@ public sealed record AttestationRow(
     // witnessed opponent rating (or neutral when the source did not publish one).
     long OpponentRatingFp1e9 = 1_500_000_000_000,
     long? SumScoreFp1e9 = null,
-    Mask256 HighwayMask = default);
+    Mask256 HighwayMask = default,
+    bool FoldReplayable = true);

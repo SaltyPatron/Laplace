@@ -36,7 +36,7 @@ public sealed class WorkingSetQueryShapeTests
         var native = File.ReadAllText(Path.Combine(
             repoRoot, "extension", "laplace_substrate", "src", "fold_route.c"));
 
-        Assert.Contains("consensus.attestation_merge_type($1, $2, $3, $4, $5, $6)",
+        Assert.Contains("consensus.attestation_merge_type($1, $2, $3, $4, $5, $6, $7)",
             apply, StringComparison.Ordinal);
         // $9-$13 carry exact per-cell rating-period group offsets and values.
         Assert.Contains("consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",

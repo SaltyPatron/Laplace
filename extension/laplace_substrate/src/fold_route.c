@@ -988,19 +988,20 @@ fold_run_states(const InArray *phis, const InArray *opps,
 static const char *MERGE_SQL =
     "MERGE INTO laplace.attestations a "
     "USING unnest($1::bytea[], $2::bytea[], $3::int8[], $4::int8[], "
-    "             $5::timestamptz[]) "
-    "      AS b(id, s, games, sum, ts) "
+    "             $5::timestamptz[], $6::boolean[]) "
+    "      AS b(id, s, games, sum, ts, fold_replayable) "
     "ON a.type_id = '\\x%s'::bytea AND a.subject_id = b.s AND a.id = b.id "
     "WHEN MATCHED THEN UPDATE SET "
     "   observation_count = a.observation_count + b.games, "
     "   sum_score_fp1e9   = a.sum_score_fp1e9 + b.sum, "
-    "   last_observed_at  = GREATEST(a.last_observed_at, b.ts)";
+    "   last_observed_at  = GREATEST(a.last_observed_at, b.ts), "
+    "   fold_replayable   = a.fold_replayable AND b.fold_replayable";
 
 Datum
 pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
 {
     const char *label = "attestation_merge";
-    InArray     ids, types, subjects, games, sums, ts;
+    InArray     ids, types, subjects, games, sums, ts, fold_replayable;
     int64       affected = 0;
     int         run_start;
 
@@ -1010,13 +1011,15 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
     in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &games);
     in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &sums);
     in_array(fcinfo, 5, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
+    in_array(fcinfo, 6, BOOLOID, 1, true, 'c', false, label, &fold_replayable);
     if (types.n != ids.n || subjects.n != ids.n || games.n != ids.n ||
-        sums.n != ids.n || ts.n != ids.n)
+        sums.n != ids.n || ts.n != ids.n || fold_replayable.n != ids.n)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
                  errmsg("%s: parallel arrays must share length "
-                        "(%d/%d/%d/%d/%d/%d)", label,
-                        ids.n, types.n, subjects.n, games.n, sums.n, ts.n)));
+                        "(%d/%d/%d/%d/%d/%d/%d)", label,
+                        ids.n, types.n, subjects.n, games.n, sums.n, ts.n,
+                        fold_replayable.n)));
     if (ids.n == 0)
         PG_RETURN_INT64(0);
 
@@ -1032,10 +1035,10 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
         int            run_n = 0;
         int            i = run_start;
         SPIPlanPtr     plan;
-        Datum          vals[5];
-        static const Oid argtypes[5] =
+        Datum          vals[6];
+        static const Oid argtypes[6] =
             {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
-             1185 /* timestamptz[] */};
+             1185 /* timestamptz[] */, BOOLARRAYOID};
         int            rc;
 
         while (i < ids.n &&
@@ -1046,7 +1049,7 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
         }
 
         plan = typed_plan(&merge_plans, "attestation_merge plans", type16,
-                          MERGE_SQL, 5, argtypes);
+                          MERGE_SQL, 6, argtypes);
         vals[0] = PointerGetDatum(array_window(ids.array, ids.elems, NULL,
                                               ids.n, run_start, run_n,
                                               BYTEAOID, -1, false, 'i'));
@@ -1062,6 +1065,9 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
         vals[4] = PointerGetDatum(array_window(ts.array, ts.elems, NULL,
                                               ts.n, run_start, run_n,
                                               TIMESTAMPTZOID, 8, true, 'd'));
+        vals[5] = PointerGetDatum(array_window(
+            fold_replayable.array, fold_replayable.elems, NULL,
+            fold_replayable.n, run_start, run_n, BOOLOID, 1, true, 'c'));
 
         rc = SPI_execute_plan(plan, vals, NULL, false, 0);
         if (rc != SPI_OK_MERGE)
@@ -1086,12 +1092,12 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 {
     const char    *label = "attestation_merge_type";
     const uint8_t *type16;
-    InArray        ids, subjects, games, sums, ts;
+    InArray        ids, subjects, games, sums, ts, fold_replayable;
     SPIPlanPtr     plan;
-    Datum          vals[5];
-    static const Oid argtypes[5] =
+    Datum          vals[6];
+    static const Oid argtypes[6] =
         {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
-         1185 /* timestamptz[] */};
+         1185 /* timestamptz[] */, BOOLARRAYOID};
     int rc;
 
     if (PG_ARGISNULL(0))
@@ -1104,7 +1110,9 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
     in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &games);
     in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &sums);
     in_array(fcinfo, 5, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
-    if (subjects.n != ids.n || games.n != ids.n || sums.n != ids.n || ts.n != ids.n)
+    in_array(fcinfo, 6, BOOLOID, 1, true, 'c', false, label, &fold_replayable);
+    if (subjects.n != ids.n || games.n != ids.n || sums.n != ids.n || ts.n != ids.n
+        || fold_replayable.n != ids.n)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
                  errmsg("%s: parallel arrays must share length", label)));
@@ -1116,12 +1124,13 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
     plan = typed_plan(&merge_plans, "attestation_merge plans", type16,
-                      MERGE_SQL, 5, argtypes);
+                      MERGE_SQL, 6, argtypes);
     vals[0] = PointerGetDatum(ids.array);
     vals[1] = PointerGetDatum(subjects.array);
     vals[2] = PointerGetDatum(games.array);
     vals[3] = PointerGetDatum(sums.array);
     vals[4] = PointerGetDatum(ts.array);
+    vals[5] = PointerGetDatum(fold_replayable.array);
     rc = SPI_execute_plan(plan, vals, NULL, false, 0);
     if (rc != SPI_OK_MERGE)
         ereport(ERROR,

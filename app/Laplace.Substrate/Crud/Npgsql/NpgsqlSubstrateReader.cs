@@ -436,6 +436,87 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         return rows;
     }
 
+    public async Task<CircuitCandidatePage> ReadCircuitCandidatesAsync(
+        IReadOnlyList<Hash128> vocabulary, Hash128 typeId,
+        Hash128? afterSubject, Hash128? afterObject, int pageSize,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(vocabulary);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
+        if (vocabulary.Count == 0)
+            return new CircuitCandidatePage(Array.Empty<CircuitRelation>(), null, null);
+
+        // The SQL function de-duplicates defensively.  Keeping this array in the
+        // caller's canonical tokenizer order preserves a single transport shape;
+        // it does not rank or select candidates.
+        var ids = new byte[vocabulary.Count][];
+        for (int i = 0; i < vocabulary.Count; i++) ids[i] = vocabulary[i].ToBytes();
+
+        await using var cmd = _ds.CreateCommand(
+            "SELECT subject_id, object_id, type_id, eff_mu, witnesses "
+            + "FROM consensus.circuit_candidates($1, $2, $3, $4, $5)");
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea, Value = ids });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = typeId.ToBytes() });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = (object?)afterSubject?.ToBytes() ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = (object?)afterObject?.ToBytes() ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Integer, Value = pageSize });
+
+        var rows = new List<CircuitRelation>(pageSize);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new CircuitRelation(
+                Hash128.FromBytes((byte[])reader[0]),
+                Hash128.FromBytes((byte[])reader[1]),
+                Hash128.FromBytes((byte[])reader[2]),
+                reader.IsDBNull(3) ? 0.0 : (double)reader.GetDecimal(3),
+                reader.IsDBNull(4) ? 0L : reader.GetInt64(4)));
+        }
+
+        return rows.Count == pageSize
+            ? new CircuitCandidatePage(rows, rows[^1].Subject, rows[^1].Object)
+            : new CircuitCandidatePage(rows, null, null);
+    }
+
+    public async Task<CircuitPairProposalPage> ReadCircuitPairProposalsAsync(
+        IReadOnlyList<Hash128> vocabulary, Hash128 targetTypeId, bool targetSymmetric,
+        Hash128? afterSubject, Hash128? afterObject, int pageSize,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(vocabulary);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
+        if (vocabulary.Count == 0)
+            return new CircuitPairProposalPage(Array.Empty<CircuitPairProposal>(), null, null);
+
+        var ids = new byte[vocabulary.Count][];
+        for (int i = 0; i < vocabulary.Count; i++) ids[i] = vocabulary[i].ToBytes();
+        await using var cmd = _ds.CreateCommand(
+            "SELECT subject_id, object_id, basis_type_ids "
+            + "FROM consensus.circuit_pair_proposals($1, $2, $3, $4, $5, $6)");
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea, Value = ids });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = targetTypeId.ToBytes() });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Boolean, Value = targetSymmetric });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = (object?)afterSubject?.ToBytes() ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = (object?)afterObject?.ToBytes() ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Integer, Value = pageSize });
+
+        var rows = new List<CircuitPairProposal>(pageSize);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            byte[][] basisBytes = reader.GetFieldValue<byte[][]>(2);
+            var basis = new Hash128[basisBytes.Length];
+            for (int i = 0; i < basis.Length; i++) basis[i] = Hash128.FromBytes(basisBytes[i]);
+            rows.Add(new CircuitPairProposal(
+                Hash128.FromBytes(reader.GetFieldValue<byte[]>(0)),
+                Hash128.FromBytes(reader.GetFieldValue<byte[]>(1)),
+                basis));
+        }
+        return rows.Count == pageSize
+            ? new CircuitPairProposalPage(rows, rows[^1].Subject, rows[^1].Object)
+            : new CircuitPairProposalPage(rows, null, null);
+    }
+
     public async Task<IReadOnlyList<double>> GetEdgeStrengthsAsync(
         IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, Hash128 typeId, CancellationToken ct = default)
     {

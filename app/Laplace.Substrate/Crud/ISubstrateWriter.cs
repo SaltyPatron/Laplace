@@ -88,6 +88,18 @@ public interface ISubstrateWriter
     Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);
 
+    /// <summary>
+    /// Applies one working set and runs an input-integrity verifier after every
+    /// evidence/consensus mutation but before the transaction commits. Writers
+    /// without a transactional participant lane must reject this contract.
+    /// </summary>
+    Task<ApplyResult> ApplyWorkingSetAsync(
+        IReadOnlyList<SubstrateChange> changes,
+        Func<CancellationToken, ValueTask> precommitVerifier,
+        CancellationToken ct = default) =>
+        Task.FromException<ApplyResult>(new InvalidOperationException(
+            "this writer cannot verify source integrity inside the working-set transaction"));
+
     Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
         => Task.FromResult((0, 0, 0));

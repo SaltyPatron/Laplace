@@ -24,4 +24,5 @@ public struct AttestationStagedNative
     public byte ObjectIsNull;
     public byte ContextIsNull;
     public byte IsAggregated;
+    public byte FoldReplayable;
 }

@@ -1,0 +1,36 @@
+-- Phase-5b OP3 nomination. Existing graph kinds bound the pair estate but do
+-- not confirm p_target_type; two independent model witnesses must still agree
+-- on that exact target kind before OP9. The complete selected vocabulary is
+-- walked by endpoint keyset. p_page_size is only a wire/memory bound.
+DROP FUNCTION IF EXISTS consensus.circuit_pair_proposals(bytea[], bytea, boolean, bytea, bytea, integer);
+CREATE OR REPLACE FUNCTION consensus.circuit_pair_proposals(
+    p_vocabulary bytea[], p_target_type bytea, p_target_symmetric boolean,
+    p_after_subject bytea, p_after_object bytea, p_page_size integer)
+    RETURNS TABLE(subject_id bytea, object_id bytea, basis_type_ids bytea[])
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH selected(id) AS MATERIALIZED (
+        SELECT DISTINCT token_id
+        FROM unnest(p_vocabulary) AS token_id
+        WHERE octet_length(token_id) = 16
+    ), nominated AS MATERIALIZED (
+        SELECT CASE WHEN p_target_symmetric AND c.subject_id > c.object_id
+                    THEN c.object_id ELSE c.subject_id END AS subject_id,
+               CASE WHEN p_target_symmetric AND c.subject_id > c.object_id
+                    THEN c.subject_id ELSE c.object_id END AS object_id,
+               c.type_id AS basis_type_id
+        FROM laplace.consensus c
+        JOIN selected subject ON subject.id = c.subject_id
+        JOIN selected object ON object.id = c.object_id
+        WHERE c.object_id IS NOT NULL
+          AND c.type_id <> p_target_type
+    )
+    SELECT n.subject_id, n.object_id,
+           array_agg(DISTINCT n.basis_type_id ORDER BY n.basis_type_id)
+    FROM nominated n
+    WHERE p_after_subject IS NULL
+       OR (n.subject_id, n.object_id) > (p_after_subject, p_after_object)
+    GROUP BY n.subject_id, n.object_id
+    ORDER BY n.subject_id, n.object_id
+    LIMIT p_page_size;
+END;

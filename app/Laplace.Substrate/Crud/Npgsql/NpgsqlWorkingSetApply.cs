@@ -90,7 +90,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
         await using var probe = connection.CreateCommand();
         probe.CommandText = "SELECT to_regprocedure("
-            + "'consensus.attestation_merge_type(bytea,bytea[],bytea[],bigint[],bigint[],timestamptz[])') "
+            + "'consensus.attestation_merge_type(bytea,bytea[],bytea[],bigint[],bigint[],timestamptz[],boolean[])') "
             + "IS NOT NULL";
         bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
         Interlocked.CompareExchange(
@@ -323,16 +323,75 @@ public sealed partial class NpgsqlSubstrateWriter
             return ApplyManyInternalAsync(
                 changes, legacyWorkingSetToken: null, transactionParticipant: null,
                 reconciliation: null, ct);
+        changes = CanonicalWorkingSetOrder(changes);
         return ApplyManyInternalAsync(
             changes, WorkingSetToken(changes), transactionParticipant: null,
             reconciliation: null, ct);
     }
 
+    private static IReadOnlyList<SubstrateChange> CanonicalWorkingSetOrder(
+        IReadOnlyList<SubstrateChange> changes)
+    {
+        if (changes.Count < 2) return changes;
+        Hash128 firstSource = changes[0].Metadata.SourceId;
+        bool mixed = false;
+        for (int i = 1; i < changes.Count; i++)
+            if (changes[i].Metadata.SourceId != firstSource) { mixed = true; break; }
+        if (!mixed) return changes;
+
+        return changes
+            .OrderBy(change => change.Metadata.SourceId, Hash128BytewiseOrder)
+            .ThenBy(change => change.Metadata.IntentId, Hash128BytewiseOrder)
+            .ToArray();
+    }
+
+    private static readonly IComparer<Hash128> Hash128BytewiseOrder =
+        Comparer<Hash128>.Create(static (left, right) => left.CompareToBytewise(right));
+
     private static Hash128 WorkingSetToken(IReadOnlyList<SubstrateChange> changes)
     {
-        var buf = new byte[changes.Count * 16];
+        int ephemeralCount = 0;
         for (int i = 0; i < changes.Count; i++)
+            if (!changes[i].EphemeralFoldInputs.IsDefaultOrEmpty)
+                ephemeralCount = checked(ephemeralCount + changes[i].EphemeralFoldInputs.Length);
+
+        // Preserve every historical ordinary token byte-for-byte. Transient
+        // inputs additionally bind their opaque calculation receipt, so a
+        // directly-constructed SubstrateChange cannot replay-hit a different
+        // deterministic native calculation. The score itself is deliberately
+        // absent: the receipt binds the calculation without becoming a value
+        // channel for the continuous result.
+        if (ephemeralCount == 0)
+        {
+            var ordinary = new byte[changes.Count * 16];
+            for (int i = 0; i < changes.Count; i++)
+                changes[i].Metadata.IntentId.WriteBytes(ordinary.AsSpan(i * 16, 16));
+            return Hash128.Blake3(ordinary);
+        }
+
+        var inputs = new List<EphemeralFoldInput>(ephemeralCount);
+        var buf = new byte[checked(changes.Count * 16 + 4 + ephemeralCount * 32)];
+        for (int i = 0; i < changes.Count; i++)
+        {
             changes[i].Metadata.IntentId.WriteBytes(buf.AsSpan(i * 16, 16));
+            if (!changes[i].EphemeralFoldInputs.IsDefaultOrEmpty)
+                inputs.AddRange(changes[i].EphemeralFoldInputs);
+        }
+        inputs.Sort(static (x, y) =>
+        {
+            int c = x.AttestationId.CompareToBytewise(y.AttestationId);
+            return c != 0 ? c : x.CalculationReceiptId.CompareToBytewise(y.CalculationReceiptId);
+        });
+        int offset = changes.Count * 16;
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+            buf.AsSpan(offset, 4), ephemeralCount);
+        offset += 4;
+        foreach (var input in inputs)
+        {
+            input.AttestationId.WriteBytes(buf.AsSpan(offset, 16));
+            input.CalculationReceiptId.WriteBytes(buf.AsSpan(offset + 16, 16));
+            offset += 32;
+        }
         return Hash128.Blake3(buf);
     }
 
@@ -341,23 +400,32 @@ public sealed partial class NpgsqlSubstrateWriter
         NpgsqlTransaction transaction,
         Hash128 token,
         Hash128? source,
+        IReadOnlyList<Hash128> sources,
         string receiptKind,
         CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = receiptKind == "applied"
-            ? "INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id) VALUES ($1, $2)"
-            : "INSERT INTO laplace.ingest_flush_journal"
-                + " (working_set_id, source_id, receipt_kind) VALUES ($1, $2, $3)";
+        command.CommandText =
+            "WITH receipt AS ("
+            + " INSERT INTO laplace.ingest_flush_journal"
+            + " (working_set_id, source_id, receipt_kind) VALUES ($1, $2, $3)"
+            + " RETURNING working_set_id)"
+            + " INSERT INTO laplace.ingest_flush_journal_sources (working_set_id, source_id)"
+            + " SELECT receipt.working_set_id, source_id"
+            + " FROM receipt CROSS JOIN unnest($4::bytea[]) AS source_id";
         command.Parameters.AddWithValue(NpgsqlDbType.Bytea, token.ToBytes());
         command.Parameters.Add(new NpgsqlParameter
         {
             Value = source is { } sourceId ? sourceId.ToBytes() : DBNull.Value,
             NpgsqlDbType = NpgsqlDbType.Bytea,
         });
-        if (receiptKind != "applied")
-            command.Parameters.AddWithValue(NpgsqlDbType.Text, receiptKind);
+        command.Parameters.AddWithValue(NpgsqlDbType.Text, receiptKind);
+        command.Parameters.Add(new NpgsqlParameter
+        {
+            Value = sources.Select(sourceId => sourceId.ToBytes()).ToArray(),
+            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+        });
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
@@ -369,6 +437,7 @@ public sealed partial class NpgsqlSubstrateWriter
         Hash128? legacyWorkingSetToken,
         Hash128? legacySingletonToken,
         Hash128? workingSetSource,
+        IReadOnlyList<Hash128> workingSetSources,
         Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? transactionParticipant,
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct)
@@ -376,17 +445,20 @@ public sealed partial class NpgsqlSubstrateWriter
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
-        // 13 since opponent_rating_fp1e9 (GH #1321) — must track
+        // 14 since fold_replayable (model transient-fold receipts) — must track
         // ATTESTATION_COL_COUNT in engine/core/src/intent_stage.c. This validator
         // is what caught the mismatch when the column landed, which is what it is
         // for: a COPY blob whose field count disagrees with the target table is a
         // silent column-shift, not a parse error.
-        var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 13, "attestations");
+        var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 14, "attestations");
         long blobMs = prepSw.ElapsedMilliseconds;
 
         var ents = CopyTupleParser.ParseEntities(entBlobs);
         var phys = CopyTupleParser.ParsePhysicalities(physBlobs);
         var atts = CopyTupleParser.ParseAttestations(attBlobs);
+        if (transactionParticipant is null && atts.FoldReplayable.Any(static replayable => !replayable))
+            throw new InvalidOperationException(
+                "non-replayable categorical evidence requires the atomic consensus participant");
         long parseMs = prepSw.ElapsedMilliseconds;
 
         // Distinct entity ids in first-seen order across EVERY staged intent.
@@ -429,7 +501,7 @@ public sealed partial class NpgsqlSubstrateWriter
         // representative = latest-ts staged row, observation counts sum, and
         // sum_score_fp1e9 sums with them — the persisted evidence stays the
         // exact record of what the group folded.
-        var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games, long Sum)>(atts.Ids.Count);
+        var attGroups = new Dictionary<Hash128, (int RepIdx, long MaxTs, long Games, long Sum, bool FoldReplayable)>(atts.Ids.Count);
         // The keyed attestation probe needs the partition keys parallel to
         // the probed ids: id alone cannot prune LIST(type_id)->HASH(subject).
         // The first-occurrence source index rides along so the structural
@@ -442,15 +514,18 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             if (attGroups.TryGetValue(atts.Ids[i], out var g))
             {
+                if (g.FoldReplayable != atts.FoldReplayable[i])
+                    throw new InvalidOperationException(
+                        $"attestation {atts.Ids[i]} mixes replayable and transient observations in one working set");
                 long games = AttestationMergeMath.SafeAddGames(g.Games, atts.Counts[i]);
                 long sum = AttestationMergeMath.SafeAddScores(g.Sum, atts.SumScores[i]);
                 attGroups[atts.Ids[i]] = atts.TimestampsPgUs[i] > g.MaxTs
-                    ? (i, atts.TimestampsPgUs[i], games, sum)
-                    : (g.RepIdx, g.MaxTs, games, sum);
+                    ? (i, atts.TimestampsPgUs[i], games, sum, g.FoldReplayable)
+                    : (g.RepIdx, g.MaxTs, games, sum, g.FoldReplayable);
             }
             else
             {
-                attGroups[atts.Ids[i]] = (i, atts.TimestampsPgUs[i], atts.Counts[i], atts.SumScores[i]);
+                attGroups[atts.Ids[i]] = (i, atts.TimestampsPgUs[i], atts.Counts[i], atts.SumScores[i], atts.FoldReplayable[i]);
                 probeAttIds.Add(atts.Ids[i]);
                 probeAttTypes.Add(atts.TypeIds[i]);
                 probeAttSubjects.Add(atts.SubjectIds[i]);
@@ -589,7 +664,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled)
                     {
                         await InsertJournalReceiptAsync(
-                            conn, tx, token, workingSetSource,
+                            conn, tx, token, workingSetSource, workingSetSources,
                             receiptKind: "reconciled-existing", ct).ConfigureAwait(false);
                         rtJournal++;
                         await tx.CommitAsync(ct).ConfigureAwait(false);
@@ -609,7 +684,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
 
                 await InsertJournalReceiptAsync(
-                    conn, tx, token, workingSetSource, receiptKind: "applied", ct)
+                    conn, tx, token, workingSetSource, workingSetSources,
+                    receiptKind: "applied", ct)
                     .ConfigureAwait(false);
                 rtJournal++;
             }
@@ -952,13 +1028,14 @@ public sealed partial class NpgsqlSubstrateWriter
             // type's hash leaves and seeks the leaf PK — the bare-id UPDATE
             // it replaces Append-scanned every attestation leaf per chunk
             // (~10s/chunk flat, the OMW 9-minute merge).
-            var mergeRows = new List<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts)>();
+            var mergeRows = new List<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts, bool FoldReplayable)>();
             foreach (var (id, g) in attGroups)
             {
                 if (presentAtts.Contains(id))
                 {
                     mergeRows.Add((atts.TypeIds[g.RepIdx], atts.SubjectIds[g.RepIdx], id,
-                        g.Games, g.Sum, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs)));
+                        g.Games, g.Sum, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs),
+                        g.FoldReplayable));
                 }
                 else
                 {
@@ -2089,15 +2166,15 @@ public sealed partial class NpgsqlSubstrateWriter
     private static async Task<(long Folded, int RoundTrips)> MergeAttestationChunksAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, bool directRoute,
         IReadOnlyList<(Hash128 Type, int Off, int Len)> chunks,
-        IReadOnlyList<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts)> rows,
+        IReadOnlyList<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts, bool FoldReplayable)> rows,
         CancellationToken ct)
     {
         await using var merge = connection.CreateCommand();
         merge.Transaction = transaction;
         merge.CommandTimeout = 0;
         merge.CommandText = directRoute
-            ? "SELECT consensus.attestation_merge_type($1, $2, $3, $4, $5, $6)"
-            : "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
+            ? "SELECT consensus.attestation_merge_type($1, $2, $3, $4, $5, $6, $7)"
+            : "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6, $7)";
         merge.Parameters.Add(new NpgsqlParameter
         {
             Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
@@ -2115,6 +2192,8 @@ public sealed partial class NpgsqlSubstrateWriter
         { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
         merge.Parameters.Add(new NpgsqlParameter
         { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+        merge.Parameters.Add(new NpgsqlParameter
+        { Value = Array.Empty<bool>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Boolean });
         await merge.PrepareAsync(ct);
 
         long folded = 0;
@@ -2126,6 +2205,7 @@ public sealed partial class NpgsqlSubstrateWriter
             var games = new long[count];
             var sums = new long[count];
             var timestamps = new DateTime[count];
+            var foldReplayable = new bool[count];
             for (int i = 0; i < count; i++)
             {
                 var row = rows[off + i];
@@ -2134,6 +2214,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 games[i] = row.Games;
                 sums[i] = row.Sum;
                 timestamps[i] = row.Ts;
+                foldReplayable[i] = row.FoldReplayable;
             }
             if (directRoute)
             {
@@ -2143,6 +2224,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 merge.Parameters[3].Value = games;
                 merge.Parameters[4].Value = sums;
                 merge.Parameters[5].Value = timestamps;
+                merge.Parameters[6].Value = foldReplayable;
             }
             else
             {
@@ -2154,6 +2236,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 merge.Parameters[3].Value = games;
                 merge.Parameters[4].Value = sums;
                 merge.Parameters[5].Value = timestamps;
+                merge.Parameters[6].Value = foldReplayable;
             }
             folded += (long)(await merge.ExecuteScalarAsync(ct) ?? 0L);
             roundTrips++;

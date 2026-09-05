@@ -167,6 +167,24 @@ BEGIN
     RAISE LOG 'evict_source: start — source %, % relation(s)',
         encode(p_source, 'hex'), COALESCE(cardinality(rels), 0);
 
+    -- Deleting a source followed by score replay is invalid for a cell carrying
+    -- a transient-calibration receipt: the numeric model score was intentionally
+    -- never persisted.  Refuse before the first DELETE rather than retaining a
+    -- stale consensus value or fabricating a categorical replacement.
+    IF EXISTS (
+        SELECT 1
+        FROM laplace.attestations source_evidence
+        JOIN laplace.attestations transient_evidence
+          ON transient_evidence.type_id = source_evidence.type_id
+         AND transient_evidence.subject_id = source_evidence.subject_id
+         AND transient_evidence.object_id IS NOT DISTINCT FROM source_evidence.object_id
+        WHERE source_evidence.source_id = p_source
+          AND transient_evidence.fold_replayable = false
+    ) THEN
+        RAISE EXCEPTION 'evict_source: source % touches transient-calibration evidence; no score replay exists',
+            encode(p_source, 'hex');
+    END IF;
+
     FOREACH rel IN ARRAY COALESCE(rels, ARRAY[]::bytea[]) LOOP
         LOOP
             TRUNCATE _evict_cells;
@@ -344,7 +362,13 @@ BEGIN
     -- Replay claims are applied source state. Keeping them after retraction makes a
     -- deterministic re-derive silently no-op. Historical NULL-owned rows cannot be
     -- attributed safely and intentionally remain untouched.
-    DELETE FROM laplace.ingest_flush_journal WHERE source_id = p_source;
+    DELETE FROM laplace.ingest_flush_journal receipt
+    WHERE receipt.source_id = p_source
+       OR EXISTS (
+           SELECT 1
+           FROM laplace.ingest_flush_journal_sources owner
+           WHERE owner.working_set_id = receipt.working_set_id
+             AND owner.source_id = p_source);
     GET DIAGNOSTICS replay_total = ROW_COUNT;
     IF replay_total > 0 THEN COMMIT; END IF;
 

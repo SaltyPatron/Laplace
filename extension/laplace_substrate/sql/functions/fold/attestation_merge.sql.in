@@ -43,14 +43,19 @@
 -- attestation identity pins (subject, type, object, source, context) — every
 -- merge of the same row re-witnesses under the same source and relation, so
 -- the incoming phi IS the stored phi; the merge keeps the existing value.
+-- fold_replayable is monotone false: once any observation consumed a transient
+-- calibration, the durable categorical sum can never become a refold input.
 DROP FUNCTION IF EXISTS laplace.attestation_merge(bytea[], bytea[], bytea[], bigint[], bigint[], timestamptz[]);
+DROP FUNCTION IF EXISTS consensus.attestation_merge(bytea[], bytea[], bytea[], bigint[], bigint[], timestamptz[]);
+DROP FUNCTION IF EXISTS consensus.attestation_merge_type(bytea, bytea[], bytea[], bigint[], bigint[], timestamptz[]);
 CREATE OR REPLACE FUNCTION consensus.attestation_merge(
     p_ids      bytea[],
     p_types    bytea[],
     p_subjects bytea[],
     p_games    bigint[],
     p_sums     bigint[],
-    p_ts       timestamptz[])
+    p_ts       timestamptz[],
+    p_fold_replayable boolean[])
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_attestation_merge'
     LANGUAGE C VOLATILE;
@@ -64,7 +69,8 @@ CREATE OR REPLACE FUNCTION consensus.attestation_merge_type(
     p_subjects bytea[],
     p_games    bigint[],
     p_sums     bigint[],
-    p_ts       timestamptz[])
+    p_ts       timestamptz[],
+    p_fold_replayable boolean[])
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_attestation_merge_type'
     LANGUAGE C VOLATILE;

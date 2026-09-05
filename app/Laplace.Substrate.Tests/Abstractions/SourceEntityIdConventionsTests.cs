@@ -101,6 +101,69 @@ public class SourceEntityIdConventionsTests
     }
 
     [Fact]
+    public void Model_DifferentTokenizerSameWeights_DistinctId()
+    {
+        var a = NewTempDir();
+        var b = NewTempDir();
+        try
+        {
+            var bytes = Encoding.ASCII.GetBytes(new string('W', 4096));
+            WriteModel(a, bytes, "{\"hidden\":8}");
+            WriteModel(b, bytes, "{\"hidden\":8}");
+            File.WriteAllText(Path.Combine(a, SafetensorSnapshotWitness.TokenizerFile), "{\"vocab\":{\"a\":0}}");
+            File.WriteAllText(Path.Combine(b, SafetensorSnapshotWitness.TokenizerFile), "{\"vocab\":{\"b\":0}}");
+
+            Assert.NotEqual(SourceEntityIdConventions.ModelContentSourceId(a),
+                            SourceEntityIdConventions.ModelContentSourceId(b));
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public void Model_SameSizeAndRestoredTimestampContentChange_RehashesBytes()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            string weightPath = Path.Combine(dir, "model.safetensors");
+            WriteModel(dir, Encoding.ASCII.GetBytes(new string('A', 4096)), "{\"hidden\":8}");
+            DateTime originalTimestamp = File.GetLastWriteTimeUtc(weightPath);
+            Hash128 first = SourceEntityIdConventions.ModelContentSourceId(dir)!.Value;
+
+            File.WriteAllBytes(weightPath, Encoding.ASCII.GetBytes(new string('B', 4096)));
+            File.SetLastWriteTimeUtc(weightPath, originalTimestamp);
+            Hash128 second = SourceEntityIdConventions.ModelContentSourceId(dir)!.Value;
+
+            Assert.NotEqual(first, second);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void Model_HeldSnapshotKeepsClaimedWeightBytesAfterPathReplacement()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            byte[] admitted = Encoding.ASCII.GetBytes(new string('A', 4096));
+            byte[] replacement = Encoding.ASCII.GetBytes(new string('B', 4096));
+            string weightPath = Path.Combine(dir, "model.safetensors");
+            string movedPath = Path.Combine(dir, "admitted.safetensors.old");
+            WriteModel(dir, admitted, "{\"hidden\":8}");
+
+            using SourceEntityIdConventions.ModelContentSnapshot snapshot =
+                SourceEntityIdConventions.OpenModelContentSnapshot(dir)!;
+            File.Move(weightPath, movedPath);
+            File.WriteAllBytes(weightPath, replacement);
+
+            Assert.Equal(admitted, snapshot.ReadRange(weightPath, 0, admitted.Length));
+            Assert.NotEqual(snapshot.SourceId,
+                SourceEntityIdConventions.ModelContentSourceId(dir)!.Value);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
     public void Model_NoWeightFiles_ReturnsNull()
     {
         var d = NewTempDir();

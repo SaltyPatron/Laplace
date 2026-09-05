@@ -256,6 +256,7 @@ static int attestation_resolved_finish(
         (int64_t)(laplace_attestation_witness_opponent_rating(witness_weight) * (double)LAPLACE_GLICKO2_FP_SCALE);
     out->sum_score_fp1e9 = sum_score_fp1e9;
     out->is_aggregated = is_aggregated;
+    out->fold_replayable = 1;
 
     return laplace_attestation_id_compute(
         &out->subject_id, &out->type_id,
@@ -410,8 +411,31 @@ int laplace_attestation_resolved_build(
     int64_t          observation_count,
     int64_t          now_unix_us,
     laplace_attestation_staged_t* out) {
+    return laplace_attestation_resolved_outcome_build(
+        subject, type_id, object, object_is_null, source, context, context_is_null,
+        witness_weight,
+        confirm ? LAPLACE_ATTESTATION_OUTCOME_CONFIRM : LAPLACE_ATTESTATION_OUTCOME_REFUTE,
+        observation_count, now_unix_us, out);
+}
+
+int laplace_attestation_resolved_outcome_build(
+    const hash128_t* subject,
+    const hash128_t* type_id,
+    const hash128_t* object,
+    uint8_t          object_is_null,
+    const hash128_t* source,
+    const hash128_t* context,
+    uint8_t          context_is_null,
+    double           witness_weight,
+    int16_t          outcome,
+    int64_t          observation_count,
+    int64_t          now_unix_us,
+    laplace_attestation_staged_t* out) {
     if (!subject || !type_id || !source || !out) return -1;
     if (observation_count < 0) return -1;
+    if (outcome != LAPLACE_ATTESTATION_OUTCOME_REFUTE &&
+        outcome != LAPLACE_ATTESTATION_OUTCOME_DRAW &&
+        outcome != LAPLACE_ATTESTATION_OUTCOME_CONFIRM) return -1;
 
     hash128_t subj;
     hash128_t obj;
@@ -445,10 +469,11 @@ int laplace_attestation_resolved_build(
     if (laplace_relation_lookup(type_id, &def) == 0 && def != NULL)
         witness_weight = def->rank * witness_weight;
 
-    double score = confirm ? 1.0 : 0.0;
-    int64_t score_fp = (int64_t)(score * (double)LAPLACE_GLICKO2_FP_SCALE);
-    int16_t outcome;
-    if (laplace_attestation_outcome_from_score_fp(score_fp, &outcome) != 0) return -1;
+    int64_t score_fp = outcome == LAPLACE_ATTESTATION_OUTCOME_CONFIRM
+        ? LAPLACE_GLICKO2_FP_SCALE
+        : outcome == LAPLACE_ATTESTATION_OUTCOME_DRAW
+            ? LAPLACE_GLICKO2_FP_SCALE / 2
+            : 0;
 
     staged_clear_aggregated(out);
     return attestation_resolved_finish(
@@ -637,10 +662,11 @@ static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_sta
     hash128_t* ctx_ptr = a->context_is_null ? NULL : (hash128_t*)&a->context_id;
     int64_t sum_score;
     if (staged_sum_score_total(a, &sum_score) != 0) return -1;
-    return intent_stage_add_attestation(
+    return intent_stage_add_attestation_mode(
         stage, &a->id, &a->subject_id, &a->type_id, obj_ptr, &a->source_id, ctx_ptr,
         a->outcome, a->last_observed_at_unix_us, a->observation_count,
-        sum_score, a->opponent_rd_fp1e9, a->opponent_rating_fp1e9, NULL);
+        sum_score, a->opponent_rd_fp1e9, a->opponent_rating_fp1e9,
+        a->fold_replayable, NULL);
 }
 
 int laplace_attestation_categorical_add(
@@ -701,12 +727,12 @@ int laplace_attestation_staged_batch_add(
         const hash128_t* ctx_ptr = a->context_is_null ? NULL : &a->context_id;
         int64_t sum_score;
         if (staged_sum_score_total(a, &sum_score) != 0) return -2;
-        if (intent_stage_add_attestation(
+        if (intent_stage_add_attestation_mode(
                 stage, &a->id, &a->subject_id, &a->type_id, obj_ptr,
                 &a->source_id, ctx_ptr, a->outcome,
                 a->last_observed_at_unix_us, a->observation_count,
                 sum_score, a->opponent_rd_fp1e9, a->opponent_rating_fp1e9,
-                masks ? masks + (size_t)i * 32u : NULL) != 0)
+                a->fold_replayable, masks ? masks + (size_t)i * 32u : NULL) != 0)
             return -2;
     }
     return 0;

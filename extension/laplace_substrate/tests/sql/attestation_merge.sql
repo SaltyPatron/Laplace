@@ -37,7 +37,7 @@ BEGIN
     affected := consensus.attestation_merge(
         ARRAY[a1, a2], ARRAY[rel_hot, rel_dyn], ARRAY[subj, subj],
         ARRAY[5, 2]::bigint[], ARRAY[5000000000, 1000000000]::bigint[],
-        ARRAY[t2, t0]);
+        ARRAY[t2, t0], ARRAY[false, true]);
     IF affected <> 2 THEN
         RAISE EXCEPTION 'FAIL: merge affected % rows, expected 2', affected;
     END IF;
@@ -56,6 +56,9 @@ BEGIN
     IF row1.last_observed_at <> t2 THEN
         RAISE EXCEPTION 'FAIL: last_observed_at=%, expected advanced to %', row1.last_observed_at, t2;
     END IF;
+    IF row1.fold_replayable THEN
+        RAISE EXCEPTION 'FAIL: a transient deposit must make the merged receipt non-replayable';
+    END IF;
 
     SELECT * INTO row2 FROM laplace.attestations
     WHERE type_id = rel_dyn AND subject_id = subj AND id = a2;
@@ -67,6 +70,9 @@ BEGIN
     END IF;
     IF row2.opponent_rd_fp1e9 <> phi2 THEN
         RAISE EXCEPTION 'FAIL: opponent_rd_fp1e9=%, merge must keep the stored per-deposit phi %', row2.opponent_rd_fp1e9, phi2;
+    END IF;
+    IF NOT row2.fold_replayable THEN
+        RAISE EXCEPTION 'FAIL: ordinary replayable deposits must remain replayable';
     END IF;
     IF row2.last_observed_at <> t1 THEN
         RAISE EXCEPTION 'FAIL: last_observed_at=%, GREATEST must keep the newer stored %', row2.last_observed_at, t1;
@@ -87,7 +93,7 @@ BEGIN
     affected := consensus.attestation_merge(
         ARRAY[a1, ghost], ARRAY[rel_hot, rel_hot], ARRAY[subj, subj],
         ARRAY[1, 1]::bigint[], ARRAY[500000000, 500000000]::bigint[],
-        ARRAY[t2, t2]);
+        ARRAY[t2, t2], ARRAY[true, true]);
     IF affected <> 1 THEN
         RAISE EXCEPTION 'FAIL: repeat-call merge affected %, expected 1 (ghost id merges nothing)', affected;
     END IF;

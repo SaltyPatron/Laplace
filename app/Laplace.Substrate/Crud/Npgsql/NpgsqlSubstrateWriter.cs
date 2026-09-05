@@ -41,6 +41,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
     {
         ArgumentNullException.ThrowIfNull(changes);
         ArgumentNullException.ThrowIfNull(transactionParticipant);
+        changes = CanonicalWorkingSetOrder(changes);
         return ApplyManyInternalAsync(
             changes,
             changes.Count == 0 ? null : WorkingSetToken(changes),
@@ -92,14 +93,17 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         }
 
         Hash128? workingSetSource = null;
+        Hash128[] workingSetSources = [];
         if (legacyWorkingSetToken is not null)
         {
-            workingSetSource = changes[0].Metadata.SourceId;
-            for (int i = 1; i < changes.Count; i++)
-                if (changes[i].Metadata.SourceId != workingSetSource.Value)
-                    throw new InvalidOperationException(
-                        "one working-set apply cannot mix decomposer sources; replay ownership "
-                        + "and source eviction require a single vendor source boundary");
+            workingSetSources = changes.Select(change => change.Metadata.SourceId)
+                .Distinct()
+                .OrderBy(source => source, Hash128BytewiseOrder)
+                .ToArray();
+            workingSetSource = workingSetSources.Length == 1 ? workingSetSources[0] : null;
+            if (reconciliation is not null && workingSetSources.Length != 1)
+                throw new InvalidOperationException(
+                    "legacy bootstrap reconciliation requires one source-owned working set");
         }
 
 
@@ -220,7 +224,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             {
                 var r = await ApplyStagesCoreAsync(
                     sourceStages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
-                    workingSetSource, transactionParticipant, reconciliation, ct);
+                    workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct);
                 entitiesInserted = r.e;
                 physicalitiesInserted = r.p;
                 attestationsInserted = r.a;
@@ -295,6 +299,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         OpponentRatingFp1e9 = a.OpponentRatingFp1e9,
         SumScoreFp1e9 = a.SumScoreFp1e9 ?? 0,
         IsAggregated = (byte)(a.SumScoreFp1e9 is null ? 0 : 1),
+        FoldReplayable = (byte)(a.FoldReplayable ? 1 : 0),
     };
 
     private static Hash128 ReplayTokenV2(

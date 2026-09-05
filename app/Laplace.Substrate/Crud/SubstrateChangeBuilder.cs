@@ -30,6 +30,7 @@ public sealed class SubstrateChangeBuilder
     private readonly Dictionary<Hash128, int> _attestationIndex = new();
     private readonly List<IntentStage> _intentStages = new();
     private readonly List<TestimonyWalkRow> _walks = new();
+    private readonly List<EphemeralFoldInput> _ephemeralFolds = new();
 
     public SubstrateChangeBuilder(
         Hash128 sourceId,
@@ -371,6 +372,9 @@ public sealed class SubstrateChangeBuilder
         if (_attestationIndex.TryGetValue(row.Id, out int at))
         {
             var prior = _attestations[at];
+            if (prior.FoldReplayable != row.FoldReplayable)
+                throw new InvalidOperationException(
+                    $"attestation fold invariant violated: receipt {row.Id} mixes replayable and transient observations in one intent");
             if (prior.OpponentRdFp1e9 != row.OpponentRdFp1e9)
                 throw new InvalidOperationException(
                     $"attestation fold invariant violated: relation observed with φ={row.OpponentRdFp1e9} after φ={prior.OpponentRdFp1e9} in one intent");
@@ -400,14 +404,45 @@ public sealed class SubstrateChangeBuilder
         return this;
     }
 
+    /// <summary>
+    /// Adds a native-calibration score for atomic, in-memory consensus folding.
+    /// The paired attestation must be a non-replayable categorical receipt; the
+    /// score itself never enters durable evidence or the intent identity.
+    /// </summary>
+    public SubstrateChangeBuilder AddEphemeralFold(EphemeralFoldInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.ScoreFp1e9 < 0 || input.ScoreFp1e9 > 1_000_000_000)
+            throw new ArgumentOutOfRangeException(nameof(input), "score must be on the native 1e9 scale");
+        if (input.CalculationReceiptId == default)
+            throw new ArgumentException("calculation receipt id must be nonzero", nameof(input));
+        _ephemeralFolds.Add(input);
+        return this;
+    }
+
     public SubstrateChange Build()
     {
         var entities = _entities.ToImmutable();
         var physicalities = _physicalities.ToImmutable();
         var attestations = _attestations.ToImmutable();
 
+        var ephemeralFolds = _ephemeralFolds.ToImmutableArray();
+        var receiptInputs = new Dictionary<Hash128, EphemeralFoldInput>(ephemeralFolds.Length);
+        foreach (var input in ephemeralFolds)
+        {
+            if (!_attestationIndex.TryGetValue(input.AttestationId, out int index))
+                throw new InvalidOperationException(
+                    $"ephemeral fold receipt {input.AttestationId} has no staged attestation");
+            if (attestations[index].FoldReplayable)
+                throw new InvalidOperationException(
+                    $"ephemeral fold receipt {input.AttestationId} must be marked non-replayable");
+            if (!receiptInputs.TryAdd(input.AttestationId, input))
+                throw new InvalidOperationException(
+                    $"one attestation receipt may carry only one ephemeral fold input: {input.AttestationId}");
+        }
+
         var intentId = ComputeIntentId(_sourceId, _sourceContentUnitName,
-                                        entities, physicalities, attestations);
+                                        entities, physicalities, attestations, ephemeralFolds);
 
 
 
@@ -432,7 +467,9 @@ public sealed class SubstrateChangeBuilder
                 _commitEpoch,
                 _fileId),
             stages,
-            walks);
+            walks,
+            default,
+            ephemeralFolds);
     }
 
     private static Hash128 ComputeIntentId(
@@ -440,13 +477,15 @@ public sealed class SubstrateChangeBuilder
         string unitName,
         ImmutableArray<EntityRow> entities,
         ImmutableArray<PhysicalityRow> physicalities,
-        ImmutableArray<AttestationRow> attestations)
+        ImmutableArray<AttestationRow> attestations,
+        ImmutableArray<EphemeralFoldInput> ephemeralFolds)
     {
         int nameByteCount = System.Text.Encoding.UTF8.GetByteCount(unitName);
         long total = 16L + nameByteCount
                      + 4L + (long)entities.Length * 16
                      + 4L + (long)physicalities.Length * 16
-                     + 4L + (long)attestations.Length * 16;
+                     + 4L + (long)attestations.Length * 16
+                     + 4L + (long)ephemeralFolds.Length * 32;
         if (total > int.MaxValue)
         {
             throw new OverflowException(
@@ -462,6 +501,16 @@ public sealed class SubstrateChangeBuilder
         WriteLengthAndIds(buf.AsSpan(), ref offset, entities, e => e.Id);
         WriteLengthAndIds(buf.AsSpan(), ref offset, physicalities, p => p.Id);
         WriteLengthAndIds(buf.AsSpan(), ref offset, attestations, a => a.Id);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(offset, 4), ephemeralFolds.Length);
+        offset += 4;
+        var bytewise = new Hash128Bytewise();
+        foreach (var input in ephemeralFolds
+                     .OrderBy(x => x.AttestationId, bytewise)
+                     .ThenBy(x => x.CalculationReceiptId, bytewise))
+        {
+            input.AttestationId.WriteBytes(buf.AsSpan(offset, 16)); offset += 16;
+            input.CalculationReceiptId.WriteBytes(buf.AsSpan(offset, 16)); offset += 16;
+        }
         return Hash128.Blake3(buf);
     }
 

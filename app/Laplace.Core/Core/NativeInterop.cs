@@ -772,6 +772,21 @@ public static unsafe partial class NativeInterop
         long nowUnixUs,
         AttestationStagedNative* outStaged);
 
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_resolved_outcome_build")]
+    internal static partial int AttestationResolvedOutcomeBuild(
+        Hash128* subjectId,
+        Hash128* typeId,
+        Hash128* objectId,
+        byte objectIsNull,
+        Hash128* source,
+        Hash128* context,
+        byte contextIsNull,
+        double witnessWeight,
+        short outcome,
+        long observationCount,
+        long nowUnixUs,
+        AttestationStagedNative* outStaged);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_scored_build", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int AttestationCategoricalScoredBuild(
         string surfaceRelation,

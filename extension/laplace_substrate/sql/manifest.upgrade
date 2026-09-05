@@ -125,6 +125,8 @@ functions/consensus/consensus_out.sql.in
 functions/consensus/consensus_by_ids.sql.in
 functions/consensus/consensus_in.sql.in
 functions/consensus/classify_circuit.sql.in
+functions/consensus/circuit_candidates.sql.in
+functions/consensus/circuit_pair_proposals.sql.in
 functions/consensus/walk_branches.sql.in
 functions/consensus/walk_strongest.sql.in
 functions/consensus/consensus_stats.sql.in

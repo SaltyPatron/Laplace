@@ -36,11 +36,11 @@ static const char* const kPhysicalityColumns =
 static const char* const kAttestationColumns =
     "id, subject_id, type_id, object_id, source_id, context_id, "
     "outcome, last_observed_at, observation_count, "
-    "sum_score_fp1e9, opponent_rd_fp1e9, opponent_rating_fp1e9, highway_mask";
+    "sum_score_fp1e9, opponent_rd_fp1e9, opponent_rating_fp1e9, fold_replayable, highway_mask";
 
 #define ENTITY_COL_COUNT       4
 #define PHYSICALITY_COL_COUNT 10
-#define ATTESTATION_COL_COUNT 13
+#define ATTESTATION_COL_COUNT 14
 
 typedef struct {
     uint8_t* data;
@@ -141,6 +141,11 @@ static int buf_append_field_int4(byte_buf_t* b, int32_t v) {
 static int buf_append_field_int8(byte_buf_t* b, int64_t v) {
     if (buf_append_be32(b, 8) != 0) return -1;
     return buf_append_be64(b, v);
+}
+
+static int buf_append_field_bool(byte_buf_t* b, uint8_t v) {
+    if (buf_append_be32(b, 1) != 0) return -1;
+    return buf_append_u8(b, v ? 1 : 0);
 }
 
 static int buf_append_field_float8(byte_buf_t* b, double v) {
@@ -398,7 +403,7 @@ int intent_stage_add_physicality(
     return 0;
 }
 
-int intent_stage_add_attestation(
+int intent_stage_add_attestation_mode(
     intent_stage_t*  stage,
     const hash128_t* id,
     const hash128_t* subject_id,
@@ -412,6 +417,7 @@ int intent_stage_add_attestation(
     int64_t          sum_score_fp1e9,
     int64_t          opponent_rd_fp1e9,
     int64_t          opponent_rating_fp1e9,
+    uint8_t          fold_replayable,
     const uint8_t*   highway_mask) {
     if (!stage || !id || !subject_id || !type_id || !source_id) return -1;
     if (observation_count < 0) return -1;
@@ -439,6 +445,7 @@ int intent_stage_add_attestation(
     if (buf_append_field_int8(b, sum_score_fp1e9) != 0) return -1;
     if (buf_append_field_int8(b, opponent_rd_fp1e9) != 0) return -1;
     if (buf_append_field_int8(b, opponent_rating_fp1e9) != 0) return -1;
+    if (buf_append_field_bool(b, fold_replayable) != 0) return -1;
     if (highway_mask) {
         if (buf_append_field_bytes(b, highway_mask, 32) != 0) return -1;
     } else {
@@ -446,6 +453,18 @@ int intent_stage_add_attestation(
     }
     b->row_count++;
     return 0;
+}
+
+int intent_stage_add_attestation(
+    intent_stage_t* stage, const hash128_t* id, const hash128_t* subject_id,
+    const hash128_t* type_id, const hash128_t* object_id, const hash128_t* source_id,
+    const hash128_t* context_id, int16_t outcome, int64_t last_observed_at_unix_us,
+    int64_t observation_count, int64_t sum_score_fp1e9, int64_t opponent_rd_fp1e9,
+    int64_t opponent_rating_fp1e9, const uint8_t* highway_mask) {
+    return intent_stage_add_attestation_mode(
+        stage, id, subject_id, type_id, object_id, source_id, context_id, outcome,
+        last_observed_at_unix_us, observation_count, sum_score_fp1e9,
+        opponent_rd_fp1e9, opponent_rating_fp1e9, 1, highway_mask);
 }
 
 static uint32_t be32_at(const uint8_t* p) {

@@ -40,6 +40,50 @@ public static partial class NativeInterop
         int* outRows, int* outCols, double* outVals, long* outScores,
         nuint cap, nuint* outCount, int* overflow);
 
+    [LibraryImport(Library, EntryPoint = "bilinear_candidates_calibrate")]
+    public static unsafe partial int BilinearCandidatesCalibrate(
+        double* left, nuint nLeft, double* right, nuint nRight, nuint rank,
+        int* rows, int* cols, nuint pairCount,
+        long* outScoresFp1e9, short* outOutcomes, double* outArenaRms);
+
+    [LibraryImport(Library, EntryPoint = "bilinear_arena_rms")]
+    public static unsafe partial int BilinearArenaRms(
+        double* left, nuint nLeft, double* right, nuint nRight, nuint rank,
+        double* outArenaRms);
+
+    [LibraryImport(Library, EntryPoint = "bilinear_candidates_calibrate_at_arena")]
+    public static unsafe partial int BilinearCandidatesCalibrateAtArena(
+        double* left, nuint nLeft, double* right, nuint nRight, nuint rank,
+        int* rows, int* cols, nuint pairCount, double arenaRms,
+        long* outScoresFp1e9, short* outOutcomes);
+
+    [LibraryImport(Library, EntryPoint = "bilinear_direct_contraction_create")]
+    public static unsafe partial int BilinearDirectContractionCreate(
+        float* leftRows, float* rightRows, nuint vocabularyRows, nuint dimension,
+        int* tokenRows, int* entityIndexes, nuint tokenCount, nuint entityCount,
+        IntPtr* context, double* arenaRms, nuint* residentBytes);
+
+    [LibraryImport(Library, EntryPoint = "bilinear_projected_contraction_create")]
+    public static unsafe partial int BilinearProjectedContractionCreate(
+        float* embeddingRows, nuint vocabularyRows, nuint dimension,
+        int* tokenRows, int* entityIndexes, nuint tokenCount, nuint entityCount,
+        float* leftWeight, float* leftBias, float* rightWeight, float* rightBias,
+        nuint rank, IntPtr* context, double* arenaRms, nuint* residentBytes);
+
+    [LibraryImport(Library, EntryPoint = "bilinear_contraction_candidates_calibrate")]
+    public static unsafe partial int BilinearContractionCandidatesCalibrate(
+        IntPtr context, int* rows, int* cols, nuint pairCount,
+        long* outScoresFp1e9, short* outOutcomes);
+
+    [LibraryImport(Library, EntryPoint = "bilinear_contraction_free")]
+    public static partial void BilinearContractionFree(IntPtr context);
+
+    [LibraryImport(Library, EntryPoint = "model_circuit_calibrate_glicko")]
+    public static unsafe partial int ModelCircuitCalibrateGlicko(
+        long* scoresFp1e9, long* opponentRatingsFp1e9, long* opponentRdsFp1e9,
+        nuint circuitCount, nuint candidateCount,
+        long* outScoresFp1e9, short* outOutcomes);
+
     [LibraryImport(Library, EntryPoint = "project_embedding")]
     public static unsafe partial int ProjectEmbedding(
         float* pts, nuint n, nuint d, float* w, nuint r, double* outp);
@@ -54,6 +98,11 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "expand_kv_heads_d")]
     public static unsafe partial int ExpandKvHeadsD(
         double* kv, nuint n, nuint nHeads, nuint nKv, nuint headDim, double* outp);
+
+    [LibraryImport(Library, EntryPoint = "transpose_column_block_f")]
+    public static unsafe partial int TransposeColumnBlockF(
+        float* matrix, nuint rows, nuint cols,
+        nuint columnBegin, nuint columnCount, float* output);
 
     [LibraryImport(Library, EntryPoint = "center_columns_f")]
     public static unsafe partial int CenterColumnsF(float* m, nuint n, nuint d);

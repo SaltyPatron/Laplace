@@ -202,7 +202,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     public async Task<ApplyResult> ApplyManyAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => await ApplyCoreAsync(
-            changes, workingSet: false, append: false, default, reconciliation: null, ct);
+            changes, workingSet: false, append: false, default,
+            reconciliation: null, precommitVerifier: null, ct);
 
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyWorkingSetAsync(new[] { change }, ct);
@@ -210,7 +211,19 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     public async Task<ApplyResult> ApplyWorkingSetAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => await ApplyCoreAsync(
-            changes, workingSet: true, append: false, default, reconciliation: null, ct);
+            changes, workingSet: true, append: false, default,
+            reconciliation: null, precommitVerifier: null, ct);
+
+    public async Task<ApplyResult> ApplyWorkingSetAsync(
+        IReadOnlyList<SubstrateChange> changes,
+        Func<CancellationToken, ValueTask> precommitVerifier,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(precommitVerifier);
+        return await ApplyCoreAsync(
+            changes, workingSet: true, append: false, default,
+            reconciliation: null, precommitVerifier, ct);
+    }
 
     internal Task<ApplyResult> ApplyLegacyBootstrapWorkingSetAsync(
         IReadOnlyList<SubstrateChange> changes,
@@ -218,12 +231,14 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         CancellationToken ct = default) =>
         ApplyCoreAsync(
             changes, workingSet: true, append: false, default,
-            new WorkingSetReconciliation(legacyMarkerAttestationId), ct);
+            new WorkingSetReconciliation(legacyMarkerAttestationId),
+            precommitVerifier: null, ct);
 
     public async Task<ApplyResult> AppendAsync(
         IReadOnlyList<SubstrateChange> changes, Hash128 sourceId, CancellationToken ct = default)
         => await ApplyCoreAsync(
-            changes, workingSet: false, append: true, sourceId, reconciliation: null, ct);
+            changes, workingSet: false, append: true, sourceId,
+            reconciliation: null, precommitVerifier: null, ct);
 
     /// <summary>
     /// STRUCT, not a class (2026-07-21). One 32-byte heap allocation per merged
@@ -264,7 +279,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     private async Task<ApplyResult> ApplyCoreAsync(
         IReadOnlyList<SubstrateChange> changes, bool workingSet, bool append,
-        Hash128 sourceId, WorkingSetReconciliation? reconciliation, CancellationToken ct)
+        Hash128 sourceId, WorkingSetReconciliation? reconciliation,
+        Func<CancellationToken, ValueTask>? precommitVerifier,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
         if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
@@ -274,6 +291,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
 
             var delta = BuildDelta(changes);
+            bool hasEphemeralFolds = changes.Any(c => !c.EphemeralFoldInputs.IsDefaultOrEmpty);
 
             // A fold that already failed in the background poisons the run
             // NOW, before any more evidence lands.
@@ -287,6 +305,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 && delta is { Count: > 0 }
                 && _persistEvidence
                 && _inner is NpgsqlSubstrateWriter;
+            if (precommitVerifier is not null && !atomicWorkingSet)
+                throw new InvalidOperationException(
+                    "source integrity verification requires the atomic evidence-and-consensus writer");
+            if (hasEphemeralFolds && !atomicWorkingSet)
+                throw new InvalidOperationException(
+                    "ephemeral fold inputs require the journaled atomic writer; "
+                    + "a categorical receipt cannot be score-replayed after a separate commit");
             AtomicFoldStats atomicStats = default;
             ApplyResult result;
             if (atomicWorkingSet)
@@ -300,6 +325,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         {
                             atomicStats = await UpsertDeltaInTransactionAsync(
                                 delta!, connection, transaction, token).ConfigureAwait(false);
+                            if (precommitVerifier is not null)
+                                await precommitVerifier(token).ConfigureAwait(false);
                         },
                         reconciliation,
                         ct).ConfigureAwait(false);
@@ -361,6 +388,18 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         // sharding never has to care about change boundaries (one 512 MiB working
         // set is often ONE change — splitting per change would leave every core
         // but one idle).
+        var ephemeralByReceipt = new Dictionary<Hash128, EphemeralFoldInput>();
+        foreach (var c in changes)
+        {
+            if (c.EphemeralFoldInputs.IsDefaultOrEmpty) continue;
+            foreach (var input in c.EphemeralFoldInputs)
+            {
+                if (input.ScoreFp1e9 < 0 || input.ScoreFp1e9 > 1_000_000_000
+                    || input.CalculationReceiptId == default
+                    || !ephemeralByReceipt.TryAdd(input.AttestationId, input))
+                    throw new InvalidOperationException("invalid or duplicate ephemeral fold input");
+            }
+        }
         List<ImmutableArray<AttestationRow>>? blocks = null;
         long total = 0;
         foreach (var c in changes)
@@ -376,7 +415,36 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             (blocks ??= new()).Add(c.Attestations);
             total += c.Attestations.Length;
         }
-        if (blocks is null || total == 0) return null;
+        if (blocks is null || total == 0)
+        {
+            if (ephemeralByReceipt.Count != 0)
+                throw new InvalidOperationException(
+                    "ephemeral fold input has no foldable staged receipt");
+            return null;
+        }
+
+        // A receipt key in the transient side channel is meaningful only when
+        // it resolves to the exact non-replayable evidence row that will join
+        // this fold.  Silently ignoring a typo, an ops marker, or a row omitted
+        // by a completion boundary would commit a categorical receipt without
+        // its calibrated observation.
+        var resolvedEphemeralReceipts = new HashSet<Hash128>();
+        foreach (var atts in blocks)
+        foreach (var a in atts)
+        {
+            bool hasEphemeral = ephemeralByReceipt.ContainsKey(a.Id);
+            if (!a.FoldReplayable && !hasEphemeral)
+                throw new InvalidOperationException(
+                    $"non-replayable receipt {a.Id} has no atomic ephemeral fold input");
+            if (!hasEphemeral) continue;
+            if (a.FoldReplayable || OpsMarkerTypeIds.Contains(a.TypeId)
+                || !resolvedEphemeralReceipts.Add(a.Id))
+                throw new InvalidOperationException(
+                    $"ephemeral fold receipt {a.Id} is not one unique foldable non-replayable attestation");
+        }
+        if (resolvedEphemeralReceipts.Count != ephemeralByReceipt.Count)
+            throw new InvalidOperationException(
+                "ephemeral fold input has no matching foldable staged receipt");
 
         // MERGE IS ORDER-INDEPENDENT, SO IT PARALLELIZES EXACTLY (2026-07-21).
         // Every combine op is integer: SafeAddGames / SafeAddScores over
@@ -397,7 +465,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         if (workers == 1)
         {
             var single = NewDeltaMap((int)Math.Min(total, int.MaxValue));
-            long obs = MergeRange(blocks, 0, total, single);
+            long obs = MergeRange(blocks, 0, total, single, ephemeralByReceipt);
             Interlocked.Add(ref _observations, obs);
             return single.Count == 0 ? null : single;
         }
@@ -410,7 +478,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             long start = per * w;
             long end = Math.Min(total, start + per);
             var map = NewDeltaMap((int)Math.Max(0, Math.Min(end - start, int.MaxValue)));
-            shardObs[w] = end > start ? MergeRange(blocks, start, end, map) : 0;
+            shardObs[w] = end > start ? MergeRange(blocks, start, end, map, ephemeralByReceipt) : 0;
             shards[w] = map;
         });
 
@@ -460,7 +528,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     /// <paramref name="map"/>; returns the observation count it consumed.</summary>
     private static long MergeRange(
         List<ImmutableArray<AttestationRow>> blocks, long start, long end,
-        Dictionary<(Hash128, Hash128, Hash128?), Delta> map)
+        Dictionary<(Hash128, Hash128, Hash128?), Delta> map,
+        IReadOnlyDictionary<Hash128, EphemeralFoldInput> ephemeralByReceipt)
     {
         long obs = 0;
         long pos = 0;
@@ -476,7 +545,14 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             {
                 var a = atts[i];
                 if (OpsMarkerTypeIds.Contains(a.TypeId)) continue;
+                bool hasEphemeral = ephemeralByReceipt.TryGetValue(a.Id, out var ephemeral);
+                if (!a.FoldReplayable && !hasEphemeral)
+                    throw new InvalidOperationException(
+                        $"non-replayable receipt {a.Id} has no atomic ephemeral fold input");
                 var key = (a.SubjectId, a.TypeId, a.ObjectId);
+                long score = hasEphemeral
+                    ? checked(ephemeral!.ScoreFp1e9 * a.ObservationCount)
+                    : AttestationMergeMath.RowScoreTotal(a);
                 ref var d = ref CollectionsMarshal.GetValueRefOrAddDefault(map, key, out bool existed);
                 if (!existed)
                 {
@@ -484,7 +560,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     d.FirstAggregate = new()
                     {
                         Games = a.ObservationCount,
-                        SumScoreFp1e9 = AttestationMergeMath.RowScoreTotal(a),
+                        SumScoreFp1e9 = score,
                     };
                     d.Games = d.FirstAggregate.Games;
                     d.SumScoreFp1e9 = d.FirstAggregate.SumScoreFp1e9;
@@ -494,7 +570,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 {
                     FoldInto(ref d, a.OpponentRdFp1e9, a.OpponentRatingFp1e9,
                              a.ObservationCount,
-                             AttestationMergeMath.RowScoreTotal(a), a.LastObservedAtUnixUs);
+                             score, a.LastObservedAtUnixUs);
                 }
                 obs += a.ObservationCount;
             }
