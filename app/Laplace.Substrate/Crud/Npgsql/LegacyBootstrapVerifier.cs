@@ -175,14 +175,20 @@ internal static class LegacyBootstrapVerifier
         IReadOnlyList<StagedRowRef> rows,
         CancellationToken ct)
     {
-        var columns = Enumerable.Range(0, 12).Select(_ => new List<object>(rows.Count)).ToArray();
+        var columns = Enumerable.Range(0, 11).Select(_ => new List<object>(rows.Count)).ToArray();
+        var replayable = new List<bool>(rows.Count);
         var masks = new List<byte[]>(rows.Count);
         var objectNull = new List<bool>(rows.Count);
         var contextNull = new List<bool>(rows.Count);
         var maskNull = new List<bool>(rows.Count);
         for (int i = 0; i < rows.Count; i++)
         {
-            byte[]?[] f = Fields(CopyRow(blobs, rows[i]), 13);
+            // Keep this decoder pinned to intent_stage.c::kAttestationColumns.
+            // fold_replayable was inserted before highway_mask when the native
+            // stage widened from 13 to 14 columns; treating field 13 as the mask
+            // makes every legacy-reconciliation path fail before it can compare
+            // the staged evidence with the installed evidence.
+            byte[]?[] f = Fields(CopyRow(blobs, rows[i]), 14);
             columns[0].Add(Required(f[0]));
             columns[1].Add(Required(f[1]));
             columns[2].Add(Required(f[2]));
@@ -194,7 +200,8 @@ internal static class LegacyBootstrapVerifier
             columns[8].Add(Int64(f[9]));
             columns[9].Add(Int64(f[10]));
             columns[10].Add(Int64(f[11]));
-            masks.Add(f[12] ?? []); maskNull.Add(f[12] is null);
+            replayable.Add(Bool(f[12]));
+            masks.Add(f[13] ?? []); maskNull.Add(f[13] is null);
         }
 
         await using var command = connection.CreateCommand();
@@ -204,22 +211,23 @@ internal static class LegacyBootstrapVerifier
               SELECT * FROM unnest(
                 $1::bytea[], $2::bytea[], $3::bytea[], $4::bytea[], $5::boolean[],
                 $6::bytea[], $7::bytea[], $8::boolean[], $9::smallint[], $10::bigint[],
-                $11::bigint[], $12::bigint[], $13::bigint[], $14::bytea[], $15::boolean[])
+                $11::bigint[], $12::bigint[], $13::bigint[], $14::boolean[],
+                $15::bytea[], $16::boolean[])
               AS x(id, subject_id, type_id, object_value, object_null, source_id,
                    context_value, context_null, outcome, games, score_sum,
-                   opponent_rd, opponent_rating, highway_mask, mask_null)
+                   opponent_rd, opponent_rating, fold_replayable, highway_mask, mask_null)
             ), expected AS (
               SELECT id, subject_id, type_id,
                      CASE WHEN object_null THEN NULL ELSE object_value END object_id,
                      source_id,
                      CASE WHEN context_null THEN NULL ELSE context_value END context_id,
                      outcome, sum(games)::bigint games, sum(score_sum)::bigint score_sum,
-                     opponent_rd, opponent_rating,
+                     opponent_rd, opponent_rating, fold_replayable,
                      CASE WHEN mask_null THEN NULL ELSE highway_mask END highway_mask
               FROM expected_rows
               GROUP BY id, subject_id, type_id, object_value, object_null, source_id,
                        context_value, context_null, outcome, opponent_rd, opponent_rating,
-                       highway_mask, mask_null
+                       fold_replayable, highway_mask, mask_null
             ), matched AS (
               SELECT expected.*,
                      stored.observation_count stored_games,
@@ -238,6 +246,7 @@ internal static class LegacyBootstrapVerifier
                AND stored.outcome = expected.outcome
                AND stored.opponent_rd_fp1e9 = expected.opponent_rd
                AND stored.opponent_rating_fp1e9 = expected.opponent_rating
+               AND stored.fold_replayable = expected.fold_replayable
                AND stored.highway_mask IS NOT DISTINCT FROM expected.highway_mask
             ), cells AS (
               SELECT DISTINCT subject_id, type_id, object_id FROM expected
@@ -289,6 +298,7 @@ internal static class LegacyBootstrapVerifier
         Add(command, Cast<long>(columns[8]), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
         Add(command, Cast<long>(columns[9]), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
         Add(command, Cast<long>(columns[10]), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+        Add(command, replayable.ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Boolean);
         Add(command, masks.ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bytea);
         Add(command, maskNull.ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Boolean);
         return await command.ExecuteScalarAsync(ct) is true;
@@ -326,6 +336,18 @@ internal static class LegacyBootstrapVerifier
 
     private static byte[] Required(byte[]? value) =>
         value ?? throw new InvalidDataException("required staged field is null");
+    private static bool Bool(byte[]? value)
+    {
+        byte[] bytes = Required(value);
+        if (bytes.Length != 1)
+            throw new InvalidDataException($"expected 1 byte for bool, got {bytes.Length}");
+        return bytes[0] switch
+        {
+            0 => false,
+            1 => true,
+            _ => throw new InvalidDataException($"invalid PostgreSQL bool byte {bytes[0]}")
+        };
+    }
     private static short Int16(byte[]? value) =>
         BinaryPrimitives.ReadInt16BigEndian(Required(value));
     private static int Int32(byte[]? value) =>
