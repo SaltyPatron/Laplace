@@ -1,0 +1,11 @@
+-- Length-bearing UTF-8 assembly. Text renderers share this native batch kernel;
+-- this surface additionally preserves Unicode NUL through PostgreSQL bytea.
+CREATE OR REPLACE FUNCTION realize.render_bytes_batch(p_ids bytea[], p_max_depth integer DEFAULT 0)
+    RETURNS bytea[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_render_bytes_batch'
+    LANGUAGE C STABLE;
+
+CREATE OR REPLACE FUNCTION realize.render_bytes(p_id bytea, p_max_depth integer DEFAULT 0)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_render_bytes'
+    LANGUAGE C STABLE;

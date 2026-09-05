@@ -1095,6 +1095,7 @@ typedef struct RenderMemoEntry
 {
     RenderMemoKey key;
     char *text;
+    int length;
 } RenderMemoEntry;
 
 typedef struct ClosureChild
@@ -1259,7 +1260,7 @@ fetch_constituents_closure(Datum *roots, int n_roots, int32 max_depth)
 }
 
 static const char *
-render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
+render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth, int *length)
 {
     RenderMemoKey key = {0};
     bool found;
@@ -1273,9 +1274,13 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
     key.depth = max_depth == 0 ? 0 : depth;
 
     e = (RenderMemoEntry *) hash_search(memo, &key, HASH_ENTER, &found);
-    if (found)
+    if (found) {
+        *length = e->length;
         return e->text;
+    }
     e->text = NULL;
+    e->length = 0;
+    *length = 0;
 
     if (max_depth == 0 || depth < max_depth)
     {
@@ -1297,11 +1302,12 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
                 }
                 else
                 {
+                    int child_length;
                     const char *child_text = render_node(closure, memo, pe->kids[r].child,
-                                                         depth + 1, max_depth);
+                                                         depth + 1, max_depth, &child_length);
                     if (child_text != NULL)
                         for (int32 k = 0; k < pe->kids[r].run; k++)
-                            appendStringInfoString(&out, child_text);
+                            appendBinaryStringInfo(&out, child_text, child_length);
                     else if (!append_codepoint_render(&out, pe->kids[r].child))
                         ok = false;
                 }
@@ -1310,6 +1316,8 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
             e = (RenderMemoEntry *) hash_search(memo, &key, HASH_FIND, &found);
             Assert(found);
             e->text = ok ? out.data : NULL;
+            e->length = ok ? out.len : 0;
+            *length = e->length;
             return e->text;
         }
     }
@@ -1322,7 +1330,9 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
             e = (RenderMemoEntry *) hash_search(memo, &key, HASH_FIND, &found);
             Assert(found);
             e->text = out.data;
+            e->length = out.len;
         }
+        *length = e->length;
         return e->text;
     }
 }
@@ -1330,21 +1340,25 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
 PG_FUNCTION_INFO_V1(pg_laplace_render_text);
 PG_FUNCTION_INFO_V1(pg_laplace_render_text_fast);
 PG_FUNCTION_INFO_V1(pg_laplace_render_text_batch);
+PG_FUNCTION_INFO_V1(pg_laplace_render_bytes);
+PG_FUNCTION_INFO_V1(pg_laplace_render_bytes_batch);
 
 Datum pg_laplace_render_text_batch(PG_FUNCTION_ARGS);
+Datum pg_laplace_render_bytes_batch(PG_FUNCTION_ARGS);
+static Datum render_batch(FunctionCallInfo fcinfo, bool as_bytes);
 
 /* Scalar entry points use the same batch operation, including closure selection,
  * validation, cycle handling and native assembly. */
 static Datum
-render_single(Datum id, int32 max_depth, bool *isnull)
+render_single(Datum id, int32 max_depth, bool as_bytes, bool *isnull)
 {
     ArrayType *ids = construct_array(&id, 1, BYTEAOID, -1, false, TYPALIGN_INT);
-    Datum result = DirectFunctionCall2(pg_laplace_render_text_batch,
+    Datum result = DirectFunctionCall2(as_bytes ? pg_laplace_render_bytes_batch : pg_laplace_render_text_batch,
                                        PointerGetDatum(ids), Int32GetDatum(max_depth));
     Datum *items;
     bool *nulls;
     int count;
-    deconstruct_array(DatumGetArrayTypeP(result), TEXTOID, -1, false,
+    deconstruct_array(DatumGetArrayTypeP(result), as_bytes ? BYTEAOID : TEXTOID, -1, false,
                       TYPALIGN_INT, &items, &nulls, &count);
     Assert(count == 1);
     *isnull = nulls[0];
@@ -1359,7 +1373,7 @@ pg_laplace_render_text(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     result = render_single(PG_GETARG_DATUM(0),
-                           PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1), &isnull);
+                           PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1), false, &isnull);
     if (isnull)
         PG_RETURN_NULL();
     return result;
@@ -1374,15 +1388,39 @@ pg_laplace_render_text_fast(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     result = render_single(PG_GETARG_DATUM(0),
                            PG_NARGS() > 1 && !PG_ARGISNULL(1)
-                               ? PG_GETARG_INT32(1) : 8, &isnull);
+                               ? PG_GETARG_INT32(1) : 8, false, &isnull);
     if (isnull)
         PG_RETURN_NULL();
     return result;
 }
 
 Datum
+pg_laplace_render_bytes(PG_FUNCTION_ARGS)
+{
+    bool isnull;
+    if (PG_ARGISNULL(0)) PG_RETURN_NULL();
+    Datum result = render_single(PG_GETARG_DATUM(0),
+        PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1), true, &isnull);
+    if (isnull) PG_RETURN_NULL();
+    return result;
+}
+
+Datum
 pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
 {
+    return render_batch(fcinfo, false);
+}
+
+Datum
+pg_laplace_render_bytes_batch(PG_FUNCTION_ARGS)
+{
+    return render_batch(fcinfo, true);
+}
+
+static Datum
+render_batch(FunctionCallInfo fcinfo, bool as_bytes)
+{
+    Oid output_type = as_bytes ? BYTEAOID : TEXTOID;
     ArrayType  *arr;
     int32       max_depth;
     Datum      *elems;
@@ -1408,7 +1446,7 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
                  errmsg("render_text_batch: max_depth must be zero or positive")));
 
     if (ARR_NDIM(arr) == 0)
-        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(output_type));
     if (ARR_NDIM(arr) != 1)
         ereport(ERROR, (errmsg("render_text_batch: ids must be 1-dimensional")));
     if (ARR_ELEMTYPE(arr) != BYTEAOID)
@@ -1446,13 +1484,20 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
             out_nulls[i] = true;
             continue;
         }
-        rendered = render_node(closure, memo, elems[i], 0, max_depth);
-        if (rendered == NULL || rendered[0] == '\0')
+        int rendered_length;
+        rendered = render_node(closure, memo, elems[i], 0, max_depth, &rendered_length);
+        // PostgreSQL text cannot represent U+0000. The bytea content surface can;
+        // never truncate an admitted Unicode sequence to fit a text result.
+        if (rendered == NULL || rendered_length == 0
+            || (!as_bytes && memchr(rendered, 0, rendered_length) != NULL))
             out_nulls[i] = true;
         else
         {
             MemoryContext old = MemoryContextSwitchTo(caller_cxt);
-            out[i] = CStringGetTextDatum(rendered);
+            bytea *value = (bytea *) palloc(VARHDRSZ + rendered_length);
+            SET_VARSIZE(value, VARHDRSZ + rendered_length);
+            memcpy(VARDATA(value), rendered, rendered_length);
+            out[i] = PointerGetDatum(value);
             MemoryContextSwitchTo(old);
         }
     }
@@ -1462,7 +1507,7 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
         int dims[1] = { n };
         int lbs[1] = { 1 };
         result = construct_md_array(out, out_nulls, 1, dims, lbs,
-                                  TEXTOID, -1, false, TYPALIGN_INT);
+                                  output_type, -1, false, TYPALIGN_INT);
     }
     PG_RETURN_ARRAYTYPE_P(result);
 }
