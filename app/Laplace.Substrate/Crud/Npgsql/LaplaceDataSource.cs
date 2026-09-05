@@ -40,17 +40,21 @@ public enum SubstrateAccess
 public static class LaplaceDataSource
 {
     /// <summary>
-    /// Upper bound for a serving command. A substrate read slower than this should
-    /// surface as an error envelope, not as a hung client.
+    /// Upper bound for a serving command. The canonical conversational forward pass
+    /// performs forty stateful S6→S7→S8 emissions and is intentionally regression-
+    /// gated against shrinking that work to satisfy a timeout. On the current seeded
+    /// product estate it can legitimately exceed the former 30-second generic bound,
+    /// which made a healthy substrate surface as HTTP 503 after exactly that budget.
+    /// Keep serving bounded, but give the complete product operation enough room to
+    /// finish; individual commands may still choose tighter budgets.
     /// </summary>
-    public const int ServingCommandTimeoutSeconds = 30;
+    public const int ServingCommandTimeoutSeconds = 120;
 
     // Ingest fans out briefly, then spends long CPU-only intervals composing the next
-    // unit.  Keeping every fan-out connection alive for Npgsql's five-minute default
-    // is why completed COMMIT/bitmap lanes remain visible as dozens of idle backends.
-    // Prune surplus owners after one serving-command window; MinPoolSize=0 means the
-    // pool owns no permanent PostgreSQL sessions.
-    public const int PoolIdleLifetimeSeconds = ServingCommandTimeoutSeconds;
+    // unit. Keep surplus pooled owners short-lived even though a live serving command
+    // may now run longer; idle-pool retention and an in-flight command budget are
+    // different resource laws. MinPoolSize=0 means the pool owns no permanent sessions.
+    public const int PoolIdleLifetimeSeconds = 30;
     public const int PoolPruningIntervalSeconds = 5;
 
     /// <summary>
@@ -97,8 +101,8 @@ public static class LaplaceDataSource
 
         // LAPLACE_DB carries `Command Timeout=0` (unbounded) for the ingest CLI. A
         // request/response path must never inherit it: a slow substrate query would
-        // hang the caller forever instead of surfacing a 503 envelope. Individual
-        // commands may still set a tighter per-command budget.
+        // hang the caller forever instead of surfacing a bounded error envelope.
+        // Individual commands may still set a tighter per-command budget.
         if (b.CommandTimeout <= 0 || b.CommandTimeout > ServingCommandTimeoutSeconds)
             b.CommandTimeout = ServingCommandTimeoutSeconds;
 
