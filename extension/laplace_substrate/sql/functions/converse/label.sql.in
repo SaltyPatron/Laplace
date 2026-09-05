@@ -36,3 +36,277 @@ CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
             '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$', ''),
             ''))
 $$;
+
+-- realize.display_label_batch — the FINAL bounded-display projection used by Explore.
+--
+-- This is intentionally NOT the semantic contract of realize.label(). `label` must abstain
+-- when an entity has no name/surface. A product display still needs something intelligible
+-- to paint after its candidate set has been elected. The display projection therefore adds
+-- bounded, containment-owned previews and descriptive metadata while keeping identity in a
+-- separate id column. It NEVER uses encode(id,'hex') as a human label.
+--
+-- GH #804: form is caller/containment-owned, not inferred from entity.type_id. Exact
+-- self-rendering stops at sentence grain. Higher-tier text is previewed only when a
+-- witnessed role proves textual containment (the governed HAS_DEFINITION family or
+-- HasFileMetadata); opaque or non-text content falls through to a name, relation,
+-- type/source description, or explicit "Unrealized entity" rather than being silently
+-- projected through a text lens.
+CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
+    RETURNS TABLE(id bytea, label text, tier smallint)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    WITH RECURSIVE inp AS MATERIALIZED (
+        SELECT x.id, x.ord, e.tier, e.type_id, e.first_observed_by
+        FROM unnest(p_ids) WITH ORDINALITY AS x(id, ord)
+        LEFT JOIN laplace.entities e ON e.id = x.id
+    ),
+    names AS MATERIALIZED (
+        SELECT realize.resolve_name_batch(p_ids) AS labels
+    ),
+    shallow_indexed AS MATERIALIZED (
+        SELECT i.id, i.ord, i.id AS render_id,
+               row_number() OVER (ORDER BY i.ord)::integer AS rn
+        FROM inp i
+        WHERE i.tier <= 3
+    ),
+    shallow_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(s.render_id ORDER BY s.rn), '{}'::bytea[]) AS ids
+        FROM shallow_indexed s
+    ),
+    shallow_rendered AS MATERIALIZED (
+        -- The candidate is already bounded to sentence-or-shallower grain. Render that
+        -- elected content exactly; do not fit an arbitrary recursion depth to it.
+        SELECT b.ids, realize.render_text_batch(b.ids) AS labels
+        FROM shallow_batch b
+    ),
+    shallow AS MATERIALIZED (
+        SELECT s.id, NULLIF(r.labels[s.rn], '') AS label
+        FROM shallow_indexed s
+        CROSS JOIN shallow_rendered r
+    ),
+
+    -- File metadata is a containment-proven textual envelope, not a guess about the file
+    -- content's form. Render only the tiny metadata document and extract its filename.
+    file_meta_choice AS MATERIALIZED (
+        SELECT DISTINCT ON (i.id)
+               i.id AS owner_id, i.ord, a.object_id AS metadata_id
+        FROM inp i
+        JOIN laplace.attestations a
+          ON a.subject_id = i.id
+         -- Exact parity with SubstrateCanonicalIds.OfVersioned("type","HasFileMetadata").
+         -- Keep the key composition explicit by segment instead of reintroducing a raw
+         -- legacy type-path literal into production SQL.
+         AND a.type_id = realize.canonical_id(
+             concat_ws('/', 'substrate', 'type', 'HasFileMetadata', 'v1'))
+        WHERE a.object_id IS NOT NULL
+        ORDER BY i.id, a.last_observed_at DESC, a.id
+    ),
+    file_meta_indexed AS MATERIALIZED (
+        SELECT m.*, row_number() OVER (ORDER BY m.ord)::integer AS rn
+        FROM file_meta_choice m
+    ),
+    file_meta_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(m.metadata_id ORDER BY m.rn), '{}'::bytea[]) AS ids
+        FROM file_meta_indexed m
+    ),
+    file_meta_rendered AS MATERIALIZED (
+        -- Metadata is already the tiny elected file envelope; exact rendering is both
+        -- cheaper than rendering the file body and faithful to the Merkle content law.
+        SELECT b.ids, realize.render_text_batch(b.ids) AS labels
+        FROM file_meta_batch b
+    ),
+    file_meta_text AS MATERIALIZED (
+        SELECT m.owner_id, r.labels[m.rn] AS txt
+        FROM file_meta_indexed m
+        CROSS JOIN file_meta_rendered r
+    ),
+    file_label AS MATERIALIZED (
+        SELECT f.owner_id,
+               NULLIF(substr(lines.line, length('name=') + 1), '') AS label
+        FROM file_meta_text f
+        CROSS JOIN LATERAL unnest(
+            string_to_array(COALESCE(f.txt, ''), E'\n')) AS lines(line)
+        WHERE lines.line LIKE 'name=%'
+    ),
+
+    -- The relation taxonomy, not this display function, owns the definition vocabulary.
+    -- Asking for the family keeps this site free of a second relation-id literal while
+    -- remaining foldable/partition-prunable through the generated manifest law.
+    definition_types AS MATERIALIZED (
+        SELECT consensus.relation_family_ids('HAS_DEFINITION') AS ids
+    ),
+
+    -- A concept can own text through the governed definition family, and a definition
+    -- content id can be recognized as text through the inverse containment edge. This is
+    -- exactly the #804 caller/containment law: the role proves the projection;
+    -- entity.type_id does not.
+    definition_owned AS MATERIALIZED (
+        SELECT DISTINCT ON (i.id)
+               i.id AS owner_id, i.ord, a.object_id AS target_id
+        FROM inp i
+        CROSS JOIN definition_types d
+        JOIN laplace.attestations a
+          ON a.subject_id = i.id
+         AND a.type_id = ANY(d.ids)
+        WHERE a.object_id IS NOT NULL
+        ORDER BY i.id, a.last_observed_at DESC, a.id
+    ),
+    definition_text AS MATERIALIZED (
+        SELECT DISTINCT ON (i.id)
+               i.id AS owner_id, i.ord, i.id AS target_id
+        FROM inp i
+        CROSS JOIN definition_types d
+        JOIN laplace.attestations a
+          ON a.object_id = i.id
+         AND a.type_id = ANY(d.ids)
+        ORDER BY i.id, a.last_observed_at DESC, a.id
+    ),
+    text_targets AS MATERIALIZED (
+        SELECT * FROM definition_owned
+        UNION ALL
+        SELECT t.* FROM definition_text t
+        WHERE NOT EXISTS (
+            SELECT 1 FROM definition_owned o WHERE o.owner_id = t.owner_id)
+    ),
+
+    -- A high-tier textual preview follows ONE ordered trunk-to-leaf spine until it
+    -- reaches sentence-or-shallower grain. It never expands siblings and never asks for
+    -- a descendants closure. This matters for books/chapters as much as documents: a
+    -- fixed one-level peek silently failed as soon as the first child was still tier > 3.
+    preview_seed AS MATERIALIZED (
+        SELECT p.owner_id, p.ord, p.target_id AS node_id, e.tier AS node_tier, 0 AS depth
+        FROM text_targets p
+        LEFT JOIN laplace.entities e ON e.id = p.target_id
+    ),
+    preview_spine(owner_id, ord, node_id, node_tier, depth) AS (
+        SELECT s.owner_id, s.ord, s.node_id, s.node_tier, s.depth
+        FROM preview_seed s
+      UNION ALL
+        SELECT s.owner_id,
+               s.ord,
+               head.child_id,
+               head.child_tier,
+               s.depth + 1
+        FROM preview_spine s
+        CROSS JOIN LATERAL (
+            -- Decode exactly the first packed trajectory vertex. A display preview must
+            -- not bulk-unpack siblings before the small graph label has elected any need
+            -- for them.
+            SELECT u.entity_id AS child_id,
+                   ((u.flags >> 1) & 31)::smallint AS child_tier
+            FROM laplace.v_word_points w
+            CROSS JOIN LATERAL public.laplace_mantissa_unpack(
+                public.ST_PointN(w.trajectory, 1)) u
+            WHERE w.id = s.node_id
+              AND w.trajectory IS NOT NULL
+            ORDER BY w.physicality_id
+            LIMIT 1
+        ) head
+        WHERE s.node_tier > 3
+          AND s.depth < 32
+    ),
+    preview_render_ids AS MATERIALIZED (
+        SELECT DISTINCT ON (p.owner_id)
+               p.owner_id, p.ord, p.node_id AS render_id
+        FROM preview_spine p
+        WHERE p.node_tier <= 3
+        ORDER BY p.owner_id, p.depth
+    ),
+    preview_indexed AS MATERIALIZED (
+        SELECT p.owner_id, p.ord, p.render_id,
+               row_number() OVER (ORDER BY p.ord)::integer AS rn
+        FROM preview_render_ids p
+        WHERE p.render_id IS NOT NULL
+    ),
+    preview_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(p.render_id ORDER BY p.rn), '{}'::bytea[]) AS ids
+        FROM preview_indexed p
+    ),
+    preview_rendered AS MATERIALIZED (
+        -- The expensive high-tier election has already collapsed each root to one
+        -- sentence-or-shallower descendant. Render that elected descendant exactly.
+        SELECT b.ids, realize.render_text_batch(b.ids) AS labels
+        FROM preview_batch b
+    ),
+    preview AS MATERIALIZED (
+        SELECT p.owner_id,
+               NULLIF(regexp_replace(r.labels[p.rn], '[[:space:]]+', ' ', 'g'), '') AS label
+        FROM preview_indexed p
+        CROSS JOIN preview_rendered r
+    ),
+
+    -- Descriptive metadata is a fallback only; it never decides which projection runs.
+    -- label_batch historically sat on top of render(), so reject anything that merely
+    -- round-tripped a 128-bit identity handle. That rejection happens ONLY in metadata
+    -- lanes: literal text whose actual contents are 32 hex characters remains literal text.
+    type_indexed AS MATERIALIZED (
+        SELECT d.type_id, row_number() OVER (ORDER BY d.type_id)::integer AS rn
+        FROM (SELECT DISTINCT i.type_id FROM inp i WHERE i.type_id IS NOT NULL) d
+    ),
+    type_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(t.type_id ORDER BY t.rn), '{}'::bytea[]) AS ids
+        FROM type_indexed t
+    ),
+    type_rendered AS MATERIALIZED (
+        SELECT b.ids, realize.label_batch(b.ids) AS labels
+        FROM type_batch b
+    ),
+    type_label AS MATERIALIZED (
+        SELECT t.type_id,
+               CASE
+                   WHEN r.labels[t.rn] ~ '^[0-9A-Fa-f]{32}(…|\.\.\.)?$' THEN NULL
+                   ELSE NULLIF(replace(r.labels[t.rn], '_', ' '), '')
+               END AS label
+        FROM type_indexed t
+        CROSS JOIN type_rendered r
+    ),
+    source_indexed AS MATERIALIZED (
+        SELECT d.source_id, row_number() OVER (ORDER BY d.source_id)::integer AS rn
+        FROM (
+            SELECT DISTINCT i.first_observed_by AS source_id
+            FROM inp i
+            WHERE i.first_observed_by IS NOT NULL
+        ) d
+    ),
+    source_batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(s.source_id ORDER BY s.rn), '{}'::bytea[]) AS ids
+        FROM source_indexed s
+    ),
+    source_rendered AS MATERIALIZED (
+        SELECT b.ids, realize.label_batch(b.ids) AS labels
+        FROM source_batch b
+    ),
+    source_label AS MATERIALIZED (
+        SELECT s.source_id,
+               CASE
+                   WHEN r.labels[s.rn] ~ '^[0-9A-Fa-f]{32}(…|\.\.\.)?$' THEN NULL
+                   ELSE NULLIF(r.labels[s.rn], '')
+               END AS label
+        FROM source_indexed s
+        CROSS JOIN source_rendered r
+    )
+    SELECT i.id,
+           COALESCE(
+               NULLIF(canonical.name, ''),
+               CASE
+                   WHEN names.labels[i.ord] ~ '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP]|[0-9A-Fa-f]{32}(…|\.\.\.)?)$'
+                       THEN NULL
+                   ELSE NULLIF(names.labels[i.ord], '')
+               END,
+               shallow.label,
+               file_label.label,
+               preview.label,
+               NULLIF(consensus.relation_canonical(i.id), ''),
+               NULLIF(concat_ws(' · ', type_label.label, source_label.label), ''),
+               'Unrealized entity'),
+           i.tier
+    FROM inp i
+    CROSS JOIN names
+    LEFT JOIN shallow ON shallow.id = i.id
+    LEFT JOIN file_label ON file_label.owner_id = i.id
+    LEFT JOIN preview ON preview.owner_id = i.id
+    LEFT JOIN type_label ON type_label.type_id = i.type_id
+    LEFT JOIN source_label ON source_label.source_id = i.first_observed_by
+    LEFT JOIN laplace.canonical_names canonical ON canonical.id = i.id
+    ORDER BY i.ord;
+END;
