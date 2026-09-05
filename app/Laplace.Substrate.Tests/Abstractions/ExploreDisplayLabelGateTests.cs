@@ -10,27 +10,35 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class ExploreDisplayLabelGateTests
 {
     [Fact]
-    public void DisplayLabels_AreSetWiseBoundedAndNeverUseTheHashAsTheLabel()
+    public void DisplayLabels_AreInstalledSetWiseBoundedAndNeverUseTheHashAsTheLabel()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
-        var path = Path.Combine(root, "app", "Laplace.Substrate", "Crud", "Npgsql",
+        var sqlPath = Path.Combine(root, "extension", "laplace_substrate", "sql", "functions",
+            "converse", "label.sql.in");
+        var sql = File.ReadAllText(sqlPath);
+        var appPath = Path.Combine(root, "app", "Laplace.Substrate", "Crud", "Npgsql",
             "NpgsqlDisplayLabels.cs");
-        var source = File.ReadAllText(path);
+        var app = File.ReadAllText(appPath);
 
-        Assert.Contains("realize.resolve_name_batch(@ids::bytea[])", source, StringComparison.Ordinal);
-        Assert.Contains("realize.render_text_batch(b.ids, 3)", source, StringComparison.Ordinal);
-        Assert.Contains("HAS_DEFINITION", source, StringComparison.Ordinal);
-        Assert.Contains("HasFileMetadata", source, StringComparison.Ordinal);
-        Assert.Contains("ST_PointN(w.trajectory, 1)", source, StringComparison.Ordinal);
-        Assert.Contains("laplace_mantissa_unpack", source, StringComparison.Ordinal);
-        Assert.Contains("type/source description", source, StringComparison.Ordinal);
-        Assert.Contains("'Unrealized entity'", source, StringComparison.Ordinal);
+        Assert.Contains("CREATE OR REPLACE FUNCTION realize.display_label_batch", sql, StringComparison.Ordinal);
+        Assert.Contains("realize.resolve_name_batch(p_ids)", sql, StringComparison.Ordinal);
+        Assert.Contains("realize.render_text_batch(b.ids, 3)", sql, StringComparison.Ordinal);
+        Assert.Contains("HAS_DEFINITION", sql, StringComparison.Ordinal);
+        Assert.Contains("HasFileMetadata", sql, StringComparison.Ordinal);
+        Assert.Contains("ST_PointN(w.trajectory, 1)", sql, StringComparison.Ordinal);
+        Assert.Contains("laplace_mantissa_unpack", sql, StringComparison.Ordinal);
+        Assert.Contains("'Unrealized entity'", sql, StringComparison.Ordinal);
+        Assert.Contains("entity.type_id", sql, StringComparison.Ordinal);
+        Assert.Contains("never decides which projection runs", sql, StringComparison.OrdinalIgnoreCase);
 
         // A preview reads one trajectory point. It must never unpack or dump the whole
-        // document merely to put text on a graph node.
-        Assert.DoesNotContain("ST_DumpPoints", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("generation.trajectory_unpacked_points", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("realize.render_text_batch(@ids::bytea[], 0)", source, StringComparison.Ordinal);
+        // document merely to put text on a graph node, and the app must consume the installed
+        // projection rather than owning a second copy of the label law.
+        Assert.DoesNotContain("ST_DumpPoints", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("generation.trajectory_unpacked_points", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("render_text_batch(p_ids, 0)", sql, StringComparison.Ordinal);
+        Assert.Contains("realize.display_label_batch(@ids::bytea[])", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("HAS_DEFINITION", app, StringComparison.Ordinal);
     }
 
     [Fact]
