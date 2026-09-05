@@ -810,18 +810,18 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         {
             int count = Math.Min(FoldSizing.ChunkCells, orderedPairs.Count - off);
             var entities = new byte[count][];
-            var types = new byte[count][];
+            var maskTypes = new byte[count][];
             for (int i = 0; i < count; i++)
             {
                 entities[i] = orderedPairs[off + i].Entity.ToBytes();
-                types[i] = orderedPairs[off + i].Type.ToBytes();
+                maskTypes[i] = orderedPairs[off + i].Type.ToBytes();
             }
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandTimeout = 0;
             command.CommandText = "SELECT consensus.highway_mask_deposit($1,$2)";
             command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, entities);
-            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, types);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, maskTypes);
             masks += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
             maskCalls++;
         }

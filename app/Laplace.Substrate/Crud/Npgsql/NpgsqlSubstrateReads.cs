@@ -16,7 +16,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// ...) without this assembly needing to know it exists — see <see cref="NpgsqlRead"/>'s
 /// own remark on why translation is a delegate and not a fixed type here.
 /// </summary>
-public static class NpgsqlSubstrateReads
+public static partial class NpgsqlSubstrateReads
 {
     internal static int RequestedLimit(int limit) => Math.Max(0, limit);
 

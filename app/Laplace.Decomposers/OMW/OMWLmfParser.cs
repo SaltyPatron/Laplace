@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
-using System.Xml;
-using System.Xml.Linq;
+using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.OMW;
 
@@ -101,87 +100,83 @@ internal static class OMWLmfParser
             yield break;
         }
 
-        await using var stream = new FileStream(
-            filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = XmlReader.Create(stream, new XmlReaderSettings
-        {
-            Async = true,
-            // OMW 2.0 names the public WN-LMF DTD. The records are self-contained and
-            // network resolution is forbidden; ignore the declaration rather than making
-            // a current, valid release depend on network availability.
-            DtdProcessing = DtdProcessing.Ignore,
-            XmlResolver = null,
-            IgnoreComments = true,
-            IgnoreProcessingInstructions = true,
-        });
-
         string lexiconId = LexiconFromPath(filePath) ?? "omw-unknown";
         string language = lexiconId.StartsWith("omw-", StringComparison.Ordinal)
             ? lexiconId[4..] : "und";
 
-        while (await reader.ReadAsync().ConfigureAwait(false))
+        await foreach (XmlRecordFrame frame in XmlRecordReader.ReadAsync(
+            filePath, recordDepth: 2, ct: ct).ConfigureAwait(false))
         {
             ct.ThrowIfCancellationRequested();
-            if (reader.NodeType != XmlNodeType.Element) continue;
-            switch (reader.LocalName)
+            XmlRecordNode node = frame.Node;
+            if (frame.Kind == XmlRecordFrameKind.Text)
             {
-                case "Lexicon":
-                    ValidateAttributes(reader, "id", "label", "language", "email", "license",
-                        "version", "url", "citation");
-                    lexiconId = Attr(reader, "id", lexiconId);
-                    language = Attr(reader, "language", language);
-                    yield return new OmwLmfLexicon(
-                        lexiconId,
-                        Attr(reader, "label"),
-                        language,
-                        Attr(reader, "version"),
-                        Attr(reader, "license"),
-                        Attr(reader, "url"),
-                        Attr(reader, "citation"),
-                        Attr(reader, "email"));
-                    break;
+                if (!string.IsNullOrWhiteSpace(node.Value))
+                    throw new InvalidDataException(
+                        $"{filePath}: unsupported text directly inside '{node.Name}'.");
+                continue;
+            }
+            if (frame.Kind == XmlRecordFrameKind.ContainerHeader)
+            {
+                switch (node.Name)
+                {
+                    case "LexicalResource":
+                        ValidateElement(node, [], []);
+                        break;
+                    case "Lexicon":
+                        ValidateElement(node,
+                            ["id", "label", "language", "email", "license",
+                             "version", "url", "citation"], []);
+                        lexiconId = node.Attribute("id", lexiconId);
+                        language = node.Attribute("language", language);
+                        yield return new OmwLmfLexicon(
+                            lexiconId,
+                            node.Attribute("label"),
+                            language,
+                            node.Attribute("version"),
+                            node.Attribute("license"),
+                            node.Attribute("url"),
+                            node.Attribute("citation"),
+                            node.Attribute("email"));
+                        break;
+                    default:
+                        throw new InvalidDataException(
+                            $"{filePath}: unsupported WN-LMF container '{node.Name}'.");
+                }
+                continue;
+            }
+
+            switch (node.Name)
+            {
                 case "Requires":
-                    ValidateAttributes(reader, "ref", "version");
+                    ValidateElement(node, ["ref", "version"], []);
                     yield return new OmwLmfRequires(
-                        lexiconId, language, Attr(reader, "ref"), Attr(reader, "version"));
+                        lexiconId, language, node.Attribute("ref"), node.Attribute("version"));
                     break;
                 case "LexicalEntry":
-                {
-                    using var subtree = reader.ReadSubtree();
-                    XElement element = await XElement.LoadAsync(
-                        subtree, LoadOptions.None, ct).ConfigureAwait(false);
-                    yield return ParseEntry(element, lexiconId, language);
+                    yield return ParseEntry(node, lexiconId, language);
                     break;
-                }
                 case "Synset":
-                {
-                    using var subtree = reader.ReadSubtree();
-                    XElement element = await XElement.LoadAsync(
-                        subtree, LoadOptions.None, ct).ConfigureAwait(false);
-                    yield return ParseSynset(element, lexiconId, language);
+                    yield return ParseSynset(node, lexiconId, language);
                     break;
-                }
                 case "SyntacticBehaviour":
-                    ValidateAttributes(reader, "id", "subcategorizationFrame");
+                    ValidateElement(node, ["id", "subcategorizationFrame"], []);
                     yield return new OmwLmfSyntacticBehaviour(
-                        lexiconId, language, Attr(reader, "id"),
-                        Attr(reader, "subcategorizationFrame"));
-                    break;
-                case "LexicalResource":
+                        lexiconId, language, node.Attribute("id"),
+                        node.Attribute("subcategorizationFrame"));
                     break;
                 default:
                     throw new InvalidDataException(
-                        $"{filePath}: unsupported WN-LMF element '{reader.LocalName}'.");
+                        $"{filePath}: unsupported WN-LMF element '{node.Name}'.");
             }
         }
     }
 
     private static OmwLmfLexicalEntry ParseEntry(
-        XElement element, string lexicon, string language)
+        XmlRecordNode element, string lexicon, string language)
     {
         ValidateElement(element, ["id", "index"], ["Lemma", "Form", "Sense"]);
-        XElement? lemma = Children(element, "Lemma").FirstOrDefault();
+        XmlRecordNode? lemma = Children(element, "Lemma").FirstOrDefault();
         if (lemma is not null)
             ValidateElement(lemma, ["writtenForm", "partOfSpeech", "type"], []);
         var forms = Children(element, "Form")
@@ -191,9 +186,9 @@ internal static class OMWLmfParser
                 var tags = Children(form, "Tag").Select(static tag =>
                 {
                     ValidateElement(tag, ["category"], []);
-                    return new OmwLmfTag(Attr(tag, "category"), tag.Value.Trim());
+                    return new OmwLmfTag(tag.Attribute("category"), tag.Value.Trim());
                 }).ToArray();
-                return new OmwLmfForm(Attr(form, "writtenForm"), tags);
+                return new OmwLmfForm(form.Attribute("writtenForm"), tags);
             })
             .Where(static form => form.WrittenForm.Length > 0)
             .ToArray();
@@ -202,49 +197,49 @@ internal static class OMWLmfParser
             ValidateElement(sense,
                 ["id", "synset", "n", "identifier", "subcat", "adjposition", "lexicalized"],
                 ["Count", "SenseRelation"]);
-            XElement? count = Children(sense, "Count").FirstOrDefault();
+            XmlRecordNode? count = Children(sense, "Count").FirstOrDefault();
             if (count is not null) ValidateElement(count, [], []);
             return new OmwLmfSense(
-                Attr(sense, "id"),
-                Attr(sense, "synset"),
-                Attr(sense, "n"),
-                Attr(sense, "identifier"),
-                Attr(sense, "subcat"),
-                Attr(sense, "adjposition"),
-                Attr(sense, "lexicalized"),
+                sense.Attribute("id"),
+                sense.Attribute("synset"),
+                sense.Attribute("n"),
+                sense.Attribute("identifier"),
+                sense.Attribute("subcat"),
+                sense.Attribute("adjposition"),
+                sense.Attribute("lexicalized"),
                 count?.Value.Trim() ?? "",
                 Children(sense, "SenseRelation").Select(ParseRelation).ToArray());
         }).ToArray();
         return new OmwLmfLexicalEntry(
             lexicon,
             language,
-            Attr(element, "id"),
-            Attr(element, "index"),
-            lemma is null ? "" : Attr(lemma, "writtenForm"),
-            lemma is null ? "" : Attr(lemma, "partOfSpeech"),
-            lemma is null ? "" : Attr(lemma, "type"),
+            element.Attribute("id"),
+            element.Attribute("index"),
+            lemma?.Attribute("writtenForm") ?? "",
+            lemma?.Attribute("partOfSpeech") ?? "",
+            lemma?.Attribute("type") ?? "",
             forms,
             senses);
     }
 
     private static OmwLmfSynset ParseSynset(
-        XElement element, string lexicon, string language)
+        XmlRecordNode element, string lexicon, string language)
     {
         ValidateElement(element,
             ["id", "ili", "partOfSpeech", "members", "lexicalized", "lexfile", "identifier"],
             ["Definition", "Example", "SynsetRelation"]);
-        foreach (XElement child in Children(element, "Definition").Concat(Children(element, "Example")))
+        foreach (XmlRecordNode child in Children(element, "Definition").Concat(Children(element, "Example")))
             ValidateElement(child, [], []);
         return new OmwLmfSynset(
             lexicon,
             language,
-            Attr(element, "id"),
-            Attr(element, "ili"),
-            Attr(element, "partOfSpeech"),
-            Attr(element, "lexicalized"),
-            Attr(element, "lexfile"),
-            Attr(element, "identifier"),
-            Attr(element, "members").Split(' ', StringSplitOptions.RemoveEmptyEntries),
+            element.Attribute("id"),
+            element.Attribute("ili"),
+            element.Attribute("partOfSpeech"),
+            element.Attribute("lexicalized"),
+            element.Attribute("lexfile"),
+            element.Attribute("identifier"),
+            element.Attribute("members").Split(' ', StringSplitOptions.RemoveEmptyEntries),
             Children(element, "Definition").Select(static e => e.Value.Trim())
                 .Where(static value => value.Length > 0).ToArray(),
             Children(element, "Example").Select(static e => e.Value.Trim())
@@ -252,71 +247,34 @@ internal static class OMWLmfParser
             Children(element, "SynsetRelation").Select(ParseRelation).ToArray());
     }
 
-    private static OmwLmfRelation ParseRelation(XElement element)
+    private static OmwLmfRelation ParseRelation(XmlRecordNode element)
     {
         ValidateElement(element, ["target", "relType", "confidence"], []);
         double? confidence = double.TryParse(
-            Attr(element, "confidence"),
+            element.Attribute("confidence"),
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture,
             out double parsed) ? parsed : null;
         return new OmwLmfRelation(
-            Attr(element, "target"), Attr(element, "relType"), confidence);
+            element.Attribute("target"), element.Attribute("relType"), confidence);
     }
 
-    private static IEnumerable<XElement> Children(XElement element, string localName) =>
-        element.Elements().Where(child => child.Name.LocalName == localName);
-
-    private static string Attr(XElement element, string localName) =>
-        element.Attributes().FirstOrDefault(attr => attr.Name.LocalName == localName)?.Value ?? "";
-
-    private static string Attr(XmlReader reader, string localName, string fallback = "")
-    {
-        if (!reader.HasAttributes) return fallback;
-        for (int i = 0; i < reader.AttributeCount; i++)
-        {
-            reader.MoveToAttribute(i);
-            if (reader.LocalName == localName)
-            {
-                string value = reader.Value;
-                reader.MoveToElement();
-                return value;
-            }
-        }
-        reader.MoveToElement();
-        return fallback;
-    }
-
-    private static void ValidateAttributes(XmlReader reader, params string[] allowed)
-    {
-        if (!reader.HasAttributes) return;
-        string elementName = reader.LocalName;
-        var set = allowed.ToHashSet(StringComparer.Ordinal);
-        for (int i = 0; i < reader.AttributeCount; i++)
-        {
-            reader.MoveToAttribute(i);
-            if (reader.Prefix == "xmlns" || reader.Name == "xmlns") continue;
-            if (!set.Contains(reader.LocalName))
-                throw new InvalidDataException(
-                    $"unsupported WN-LMF attribute '{reader.LocalName}' on '{elementName}'.");
-        }
-        reader.MoveToElement();
-    }
+    private static IEnumerable<XmlRecordNode> Children(
+        XmlRecordNode element, string localName) => element.ChildrenNamed(localName);
 
     private static void ValidateElement(
-        XElement element,
+        XmlRecordNode element,
         IReadOnlyCollection<string> allowedAttributes,
         IReadOnlyCollection<string> allowedChildren)
     {
-        foreach (XAttribute attribute in element.Attributes())
-            if (!attribute.IsNamespaceDeclaration
-                && !allowedAttributes.Contains(attribute.Name.LocalName, StringComparer.Ordinal))
+        foreach (XmlRecordAttribute attribute in element.Attributes)
+            if (!allowedAttributes.Contains(attribute.Name, StringComparer.Ordinal))
                 throw new InvalidDataException(
-                    $"unsupported WN-LMF attribute '{attribute.Name.LocalName}' on '{element.Name.LocalName}'.");
-        foreach (XElement child in element.Elements())
-            if (!allowedChildren.Contains(child.Name.LocalName, StringComparer.Ordinal))
+                    $"unsupported WN-LMF attribute '{attribute.Name}' on '{element.Name}'.");
+        foreach (XmlRecordNode child in element.Children)
+            if (!allowedChildren.Contains(child.Name, StringComparer.Ordinal))
                 throw new InvalidDataException(
-                    $"unsupported WN-LMF child '{child.Name.LocalName}' on '{element.Name.LocalName}'.");
+                    $"unsupported WN-LMF child '{child.Name}' on '{element.Name}'.");
     }
 
     private static string? LexiconFromPath(string path)

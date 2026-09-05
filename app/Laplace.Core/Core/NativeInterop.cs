@@ -215,6 +215,24 @@ public static unsafe partial class NativeInterop
     internal static partial int IdentityKeyNormalizeUtf8(
         byte* utf8, nuint len, byte** outUtf8, nuint* outLen);
 
+    [LibraryImport(Library, EntryPoint = "laplace_xml_stream_new")]
+    internal static partial int XmlStreamNew(IntPtr* outStream);
+
+    [LibraryImport(Library, EntryPoint = "laplace_xml_stream_feed")]
+    internal static partial int XmlStreamFeed(
+        IntPtr stream,
+        byte* utf8,
+        nuint length,
+        int final,
+        NativeXmlEvent** outEvents,
+        nuint* outCount);
+
+    [LibraryImport(Library, EntryPoint = "laplace_xml_stream_error")]
+    internal static partial IntPtr XmlStreamError(IntPtr stream);
+
+    [LibraryImport(Library, EntryPoint = "laplace_xml_stream_free")]
+    internal static partial void XmlStreamFree(IntPtr stream);
+
     [LibraryImport(Library, EntryPoint = "tier_tree_id_array")]
     internal static partial IntPtr TierTreeIdArray(IntPtr tree);
 

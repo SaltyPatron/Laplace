@@ -10,15 +10,15 @@ CREATE OR REPLACE FUNCTION realize.reconstruct_content(p_id bytea, p_modality te
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH rendered AS MATERIALIZED (
-        SELECT realize.render_text(p_id) AS body
+        SELECT realize.render_bytes(p_id) AS body
     )
     SELECT CASE
         WHEN rendered.body IS NULL
-          OR CASE WHEN p_modality IS NULL THEN laplace.word_id(rendered.body)
-                  ELSE laplace.grammar_source_id(convert_to(rendered.body, 'UTF8'), p_modality)
+          OR CASE WHEN p_modality IS NULL THEN laplace.content_id(rendered.body)
+                  ELSE laplace.grammar_source_id(rendered.body, p_modality)
              END IS DISTINCT FROM p_id
             THEN NULL::bytea
-        ELSE convert_to(rendered.body, 'UTF8')
+        ELSE rendered.body
     END
     FROM rendered;
 END;

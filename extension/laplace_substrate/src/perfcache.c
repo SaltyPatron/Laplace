@@ -279,7 +279,7 @@ laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
         else
         {
             
-            if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF))
+            if (cp >= 0xD800 && cp <= 0xDFFF)
                 return false;
             *out_cp = cp;
             return true;

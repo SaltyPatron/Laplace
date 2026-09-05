@@ -61,17 +61,20 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         var sw = Stopwatch.StartNew();
         int roundTrips = 0;
 
-        int entitiesAttempted = 0, physAttempted = 0, attAttempted = 0;
-        for (int i = 0; i < changes.Count; i++)
+        int managedEntitiesAttempted = 0, managedPhysAttempted = 0, managedAttAttempted = 0;
+        checked
         {
-            if (!changes[i].TestimonyWalks.IsDefaultOrEmpty)
-                throw new InvalidOperationException(
-                    "testimony walks reached the evidence writer: walks are the consensus-only "
-                    + "journal (the accumulating writer journals and strips them); evidence-"
-                    + "persisting deposits emit AttestationRows at the decomposer");
-            entitiesAttempted += changes[i].Entities.Length;
-            physAttempted += changes[i].Physicalities.Length;
-            attAttempted += changes[i].Attestations.Length;
+            for (int i = 0; i < changes.Count; i++)
+            {
+                if (!changes[i].TestimonyWalks.IsDefaultOrEmpty)
+                    throw new InvalidOperationException(
+                        "testimony walks reached the evidence writer: walks are the consensus-only "
+                        + "journal (the accumulating writer journals and strips them); evidence-"
+                        + "persisting deposits emit AttestationRows at the decomposer");
+                managedEntitiesAttempted += changes[i].Entities.Length;
+                managedPhysAttempted += changes[i].Physicalities.Length;
+                managedAttAttempted += changes[i].Attestations.Length;
+            }
         }
         if (changes.Count == 0)
             return new ApplyResult(0, 0, 0, 0, 0, 0, 0, sw.Elapsed, false);
@@ -109,22 +112,34 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
 
 
+        int entitiesAttempted = managedEntitiesAttempted;
+        int physAttempted = managedPhysAttempted;
+        int attAttempted = managedAttAttempted;
         var prebuiltStages = new List<IntentStage>();
         foreach (var c in changes)
         {
             if (c.IntentStages.IsDefaultOrEmpty) continue;
             foreach (var pre in c.IntentStages)
-                if (!pre.IsInvalid) prebuiltStages.Add(pre);
+            {
+                if (pre.IsInvalid) continue;
+                prebuiltStages.Add(pre);
+                checked
+                {
+                    entitiesAttempted += pre.EntityCount;
+                    physAttempted += pre.PhysicalityCount;
+                    attAttempted += pre.AttestationCount;
+                }
+            }
         }
 
 
 
 
         IntentStage? managedStage = null;
-        if (entitiesAttempted > 0 || physAttempted > 0 || attAttempted > 0)
+        if (managedEntitiesAttempted > 0 || managedPhysAttempted > 0 || managedAttAttempted > 0)
         {
             managedStage = IntentStage.New(
-                Math.Max(Math.Max(entitiesAttempted, physAttempted), attAttempted));
+                Math.Max(Math.Max(managedEntitiesAttempted, managedPhysAttempted), managedAttAttempted));
             Span<double> coord = stackalloc double[4];
             var seenEntity = new HashSet<Hash128>();
             var seenPhys = new HashSet<Hash128>();

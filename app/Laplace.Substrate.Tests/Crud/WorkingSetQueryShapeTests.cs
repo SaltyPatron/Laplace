@@ -1,4 +1,6 @@
 using Laplace.Decomposers.Abstractions.Tests;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Xunit;
 
 namespace Laplace.Ingestion.Tests;
@@ -42,7 +44,14 @@ public sealed class WorkingSetQueryShapeTests
         Assert.Contains("consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
             fold, StringComparison.Ordinal);
         Assert.DoesNotContain("types[i] =", apply, StringComparison.Ordinal);
-        Assert.DoesNotContain("types[i] =", fold, StringComparison.Ordinal);
+        string atomicFold = MethodSource(fold, "UpsertDeltaInTransactionAsync")
+            .Split("var maskPairs", StringSplitOptions.None)[0];
+        string laneFold = MethodSource(fold, "DispatchDeltaAsync")
+            .Split("async Task DepositAsync", StringSplitOptions.None)[0];
+        Assert.Contains("consensus.upsert_type", atomicFold, StringComparison.Ordinal);
+        Assert.Contains("consensus.upsert_type", laneFold, StringComparison.Ordinal);
+        Assert.DoesNotContain("types[i] =", atomicFold, StringComparison.Ordinal);
+        Assert.DoesNotContain("types[i] =", laneFold, StringComparison.Ordinal);
         Assert.Contains("if (start == 0 && n == total)", native, StringComparison.Ordinal);
         Assert.Contains("return original;", native, StringComparison.Ordinal);
         Assert.Contains("fold_run_states", native, StringComparison.Ordinal);
@@ -53,6 +62,13 @@ public sealed class WorkingSetQueryShapeTests
             native,
             StringComparison.Ordinal);
     }
+
+    private static string MethodSource(string source, string name) =>
+        CSharpSyntaxTree.ParseText(source).GetRoot()
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Single(method => method.Identifier.ValueText == name)
+            .ToFullString();
 
     [Fact]
     public void WorkingSetApply_HasOneCoordinationOwner_NoInMemoryClaimPolling()

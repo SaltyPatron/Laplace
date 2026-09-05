@@ -84,6 +84,36 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         Assert.Equal(canonical, actual);
     }
 
+    [Theory]
+    [InlineData("\0")]
+    [InlineData("a\0b")]
+    [InlineData("\0\0")]
+    [InlineData("First sentence. Second \0 β sentence.\n")]
+    public async Task ReconstructUtf8Async_PreservesUnicodeNul(string content)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(content);
+        Hash128 source = Hash128.OfCanonical($"reconstruct-nul/source/{Guid.NewGuid():N}");
+        var builder = new SubstrateChangeBuilder(source, "test/reconstruct/nul");
+        Assert.True(builder.ContentStage.TryAddContentWitness(bytes, source, out Hash128 id));
+        await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(builder.Build());
+        Assert.Equal(bytes, await NpgsqlContentReconstructor.ReconstructUtf8Async(_pg.DataSource, id));
+
+        await using var connection = await _pg.DataSource.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT laplace.content_id(@bytes) = @id,
+                   realize.render_bytes_batch(ARRAY[@id, NULL::bytea, @id])
+                     IS NOT DISTINCT FROM ARRAY[@bytes, NULL::bytea, @bytes],
+                   realize.render_bytes(@id, NULL) IS NOT DISTINCT FROM @bytes,
+                   realize.render_text(@id) IS NULL
+            """;
+        command.Parameters.Add("bytes", NpgsqlDbType.Bytea).Value = bytes;
+        command.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id.ToBytes();
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        for (int i = 0; i < 4; ++i) Assert.True(reader.GetBoolean(i));
+    }
+
     [Fact]
     public async Task ReconstructUtf8Async_RejectsAnIncompleteContentIdentity()
     {

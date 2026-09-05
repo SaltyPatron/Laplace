@@ -149,10 +149,16 @@ public sealed class GutenbergRetainedDbTests
             expresses.ToBytes(), work.WorkId.ToBytes());
         Assert.True(reverseEditions >= 1);
 
-        string proofDirectory = "/tmp/laplace-content-recovery-proof";
-        Directory.CreateDirectory(proofDirectory);
+        string? configuredReceiptDirectory =
+            Environment.GetEnvironmentVariable("LAPLACE_TEST_RECEIPT_DIR");
+        string receiptDirectory = !string.IsNullOrWhiteSpace(configuredReceiptDirectory)
+            ? Path.GetFullPath(configuredReceiptDirectory.Trim())
+            : Path.Combine(
+                Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic(),
+                "build", "test-receipts");
+        Directory.CreateDirectory(receiptDirectory);
         await File.WriteAllTextAsync(
-            Path.Combine(proofDirectory, "gutenberg-retained-db.json"),
+            Path.Combine(receiptDirectory, "gutenberg-retained-db.json"),
             JsonSerializer.Serialize(new
             {
                 Database = new NpgsqlConnectionStringBuilder(connectionString).Database,

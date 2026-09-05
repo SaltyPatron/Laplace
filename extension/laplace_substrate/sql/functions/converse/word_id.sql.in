@@ -2,3 +2,10 @@ CREATE OR REPLACE FUNCTION laplace.word_id(p_text text)
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_word_id'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+-- Same native length-bearing UTF-8 identity operation, including U+0000 which
+-- PostgreSQL text cannot transport. This is not a second content hash algorithm.
+CREATE OR REPLACE FUNCTION laplace.content_id(p_utf8 bytea)
+    RETURNS bytea
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_id'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

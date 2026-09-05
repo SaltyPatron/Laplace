@@ -373,6 +373,64 @@ public class NpgsqlSubstrateWriterTests
             + $"got {result.RoundTrips}");
     }
 
+    [Fact]
+    public async Task ApplyAsync_ReportsAttemptedRowsFromNativeStage()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var scope = Guid.NewGuid().ToString("N");
+        var src = Hash128.OfCanonical($"source/test/native-stage-counts/{scope}");
+        var typeId = await EnsureTestTypeAsync(src);
+        var relationTypeId = await EnsureTestRelationTypeAsync(src, $"HAS_NATIVE_STAGE_{scope}");
+        var entityId = Hash128.OfCanonical($"entity/test/native-stage-counts/{scope}");
+        var physicalityId = Hash128.OfCanonical($"physicality/test/native-stage-counts/{scope}");
+        var attestationId = Hash128.OfCanonical($"attestation/test/native-stage-counts/{scope}");
+        using var stage = IntentStage.New(3);
+        stage.AddEntity(entityId, 2, typeId, src);
+        double[] coord = [0.1, 0.2, 0.3, 0.4];
+        stage.AddPhysicality(
+            physicalityId, entityId, (short)PhysicalityType.Content,
+            coord, Hilbert128.Encode(coord), ReadOnlySpan<double>.Empty,
+            nConstituents: 0, alignmentResidual: null, sourceDim: null,
+            observedAtUnixUs: IntentStage.PgEpochUnixUs);
+        stage.AddAttestation(
+            attestationId, entityId, relationTypeId, null, src, null,
+            (short)AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs,
+            1, 1_000_000_000L, 30_000_000_000L);
+
+        ApplyResult result = await writer.ApplyAsync(
+            new SubstrateChangeBuilder(src, "native-stage-counts")
+                .AddIntentStage(stage)
+                .Build());
+
+        Assert.Equal(1, result.EntitiesAttempted);
+        Assert.Equal(1, result.PhysicalitiesAttempted);
+        Assert.Equal(1, result.AttestationsAttempted);
+        Assert.Equal(1, result.EntitiesInserted);
+        Assert.Equal(1, result.PhysicalitiesInserted);
+        Assert.Equal(1, result.AttestationsInserted);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ReportsLogicalManagedAndNativeRowsBeforeDeduplication()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var scope = Guid.NewGuid().ToString("N");
+        var src = Hash128.OfCanonical($"source/test/mixed-stage-counts/{scope}");
+        var typeId = await EnsureTestTypeAsync(src);
+        var sharedId = Hash128.OfCanonical($"entity/test/mixed-stage-counts/{scope}");
+        using var stage = IntentStage.New(1);
+        stage.AddEntity(sharedId, 2, typeId, src);
+
+        ApplyResult result = await writer.ApplyAsync(
+            new SubstrateChangeBuilder(src, "mixed-stage-counts")
+                .AddEntity(sharedId, 2, typeId, src)
+                .AddIntentStage(stage)
+                .Build());
+
+        Assert.Equal(2, result.EntitiesAttempted);
+        Assert.Equal(1, result.EntitiesInserted);
+    }
+
     private async Task<Hash128> EnsureTestTypeAsync(Hash128 source)
     {
         var typeId = Hash128.OfCanonical("TestFixture");

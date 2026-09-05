@@ -22,6 +22,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/grapheme_floor.h
     include/laplace/core/grammar_registry.h
     include/laplace/core/grammar_decomposer.h
+    include/laplace/core/xml_stream.h
     include/laplace/core/fide_xml.h
     include/laplace/core/grammar_compose.h
     include/laplace/core/grammar_tags.h
@@ -76,6 +77,7 @@ set(LAPLACE_CORE_SOURCES
     src/grapheme_floor.c
     src/grammar_registry.c
     src/grammar_decomposer.c
+    src/xml_stream.c
     src/fide_xml.c
     src/grammar_compose.cpp
     src/grammar_source_compose.c
@@ -132,6 +134,7 @@ if(WIN32 AND NOT ZLIB_ROOT AND DEFINED ENV{PGBIN})
     set(ZLIB_ROOT "${_laplace_pg_root}")
 endif()
 find_package(ZLIB REQUIRED)
+find_package(LibXml2 REQUIRED)
 find_package(ICU COMPONENTS uc REQUIRED)
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
@@ -142,7 +145,7 @@ if(WIN32)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(laplace_core_static
         PUBLIC  laplace_eigen
-        PRIVATE blake3 ZLIB::ZLIB ICU::uc)
+        PRIVATE blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2)
 endif()
 
 
@@ -328,7 +331,7 @@ target_include_directories(laplace_core
 
 target_link_libraries(laplace_core
     PUBLIC  laplace_eigen
-    PRIVATE blake3 ZLIB::ZLIB ICU::uc
+    PRIVATE blake3 ZLIB::ZLIB ICU::uc LibXml2::LibXml2
 )
 if(NOT WIN32)
     find_package(Threads REQUIRED)

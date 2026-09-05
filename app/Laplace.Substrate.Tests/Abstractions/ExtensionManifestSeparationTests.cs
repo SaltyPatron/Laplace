@@ -47,11 +47,10 @@ public sealed class ExtensionManifestSeparationTests
     }
 
     [Fact]
-    public void RecoveredIndexPaths_FailLoudWithoutSessionStateOrStalePlans()
+    public void RecoveredIndexPaths_FailLoudWithoutSessionSearchPath()
     {
         var cycle = Read(
             "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
-        var containers = Read("extension", "laplace_substrate", "src", "containers_of.c");
         var entityIndex = Read(
             "extension", "laplace_substrate", "sql", "indexes",
             "physicalities_entity_btree.sql.in");
@@ -61,9 +60,6 @@ public sealed class ExtensionManifestSeparationTests
         Assert.DoesNotContain("CREATE INDEX IF NOT EXISTS", cycle);
         Assert.Contains("RebuildOneValidAsync", cycle);
         Assert.Contains("IndexValidityAsync", cycle);
-
-        Assert.DoesNotContain("SPI_keepplan", containers);
-        Assert.Contains("SPI_execute_with_args", containers);
 
         Assert.Contains("(entity_id, id)", entityIndex);
         Assert.DoesNotContain("IF NOT EXISTS", entityIndex);
