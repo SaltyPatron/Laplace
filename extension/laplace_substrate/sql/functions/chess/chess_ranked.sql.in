@@ -27,6 +27,12 @@ BEGIN ATOMIC
         LEFT JOIN laplace.consensus c
           ON c.subject_id = e.id
          AND c.type_id = laplace.relation_type_id('OUTCOME')
+         -- Player standing has exactly one canonical rating cell:
+         -- (Chess_Player, OUTCOME, Chess_Result).  OUTCOME is shared by other
+         -- chess judgments, so joining only by subject+type admitted unrelated
+         -- or legacy OUTCOME objects into the roster and could duplicate one
+         -- player with a different rating/witness population.
+         AND c.object_id = laplace.entity_type_id('Chess_Result')
         WHERE e.type_id = laplace.entity_type_id('Chess_Player')
     ),
     page AS MATERIALIZED (
