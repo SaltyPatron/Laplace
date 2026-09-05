@@ -1,3 +1,4 @@
+using System.Globalization;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -507,7 +508,9 @@ internal sealed partial class SubstrateClient
 
         // Native SPI web expansion (pg_laplace_explore_web): one connection,
         // undirected consensus probe, ≤fanout new nodes/frontier parent, all tiers.
-        // Labels via render_text_fast.
+        // Display text is resolved after the bounded graph election: semantic names,
+        // exact shallow Unicode, one-constituent document/definition previews, then
+        // governed type/source fallbacks. The entity hash remains identity only.
         hops = Math.Max(0, hops);
         fanout = Math.Max(0, fanout);
         maxNodes = Math.Max(0, maxNodes);
@@ -569,7 +572,7 @@ internal sealed partial class SubstrateClient
                 }
             }
 
-            // Batch-label endpoints + relation types through the native render path.
+            // Batch-label endpoints + relation types only after the graph is bounded.
             var idsToLabel = unlabeled.Concat(typeIds).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (idsToLabel.Count > 0)
             {
@@ -620,15 +623,27 @@ internal sealed partial class SubstrateClient
             ids[i] = parsed;
         }
 
-        foreach (var row in await NpgsqlSubstrateReads.LabelsFastAsync(conn, ids.Where(x => x is not null).ToArray()!, ct))
+        foreach (var row in await NpgsqlDisplayLabels.ReadAsync(
+                     conn, ids.Where(x => x is not null).ToArray()!, ct))
         {
             var hex = row.IdHex.ToLowerInvariant();
-            var lab = row.Label ?? hex;
-            if (lab.Length > 48) lab = lab[..47] + "…";
-            result[hex] = (lab, row.Tier);
+            result[hex] = (TrimGraphLabel(row.Label), row.Tier);
         }
 
         return result;
+    }
+
+    private static string TrimGraphLabel(string label)
+    {
+        // Display labels are Unicode surfaces, not byte strings. Collapse UI-only
+        // whitespace and truncate on grapheme boundaries so an emoji/combining sequence is
+        // never split merely because the graph sprite has a compact text budget.
+        label = string.Join(' ', label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (label.Length == 0) return "Unrealized entity";
+
+        var starts = StringInfo.ParseCombiningCharacters(label);
+        if (starts.Length <= 48) return label;
+        return label[..starts[47]] + "…";
     }
 
     private static byte[]? TryParseIdHex(string idHex)
