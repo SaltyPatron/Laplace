@@ -27,6 +27,10 @@ BEGIN ATOMIC
         LEFT JOIN laplace.consensus c
           ON c.subject_id = e.id
          AND c.type_id = laplace.relation_type_id('OUTCOME')
+         -- Player standing has exactly one canonical result cell. Joining only
+         -- by subject+relation admitted unrelated/legacy result objects into the
+         -- roster and could duplicate one player with a different fold state.
+         AND c.object_id = laplace.entity_type_id('Chess_Result')
         WHERE e.type_id = laplace.entity_type_id('Chess_Player')
     ),
     page AS MATERIALIZED (

@@ -31,7 +31,6 @@ export function LichessPanel() {
   const [depth, setDepth] = useState(DEFAULT_LICHESS_DEPTH);
   const [maxConcurrent, setMaxConcurrent] = useState(2);
   const [substrate, setSubstrate] = useState(true);
-  const [operatorToken, setOperatorToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -73,9 +72,9 @@ export function LichessPanel() {
     setErr(null);
     try {
       if (on) {
-        await apiPost('/chess/lichess/start', {}, { operatorToken });
+        await apiPost('/chess/lichess/start', {});
       } else {
-        await apiPost('/chess/lichess/stop', {}, { operatorToken });
+        await apiPost('/chess/lichess/stop', {});
         setActiveGameId(null);
         setChat([]);
       }
@@ -131,16 +130,10 @@ export function LichessPanel() {
       {err && <Alert>{err}</Alert>}
 
       <div className={styles.controls}>
-        <Field label="Operator token" help="Kept only in this component's memory; service controls require HTTPS.">
-          <Input type="password" autoComplete="off" value={operatorToken}
-            disabled={window.location.protocol !== 'https:'}
-            onChange={(e) => setOperatorToken(e.target.value)} />
-        </Field>
-        {window.location.protocol !== 'https:' && <Alert>Open the HTTPS service URL to use operator controls.</Alert>}
         <Field label="Listen on Lichess" help="Accepts standard challenges while on. Challenge the bot account from lichess.org." layout="row">
           <Toggle
             checked={status?.running ?? connected}
-            disabled={!operatorToken || busy || window.location.protocol !== 'https:'}
+            disabled={busy}
             onCheckedChange={(on) => void setConnected(on)}
             aria-label="Listen on Lichess"
           />

@@ -30,6 +30,13 @@ public sealed class ChessPlayerExactLookupLawTests
         Assert.True(fuzzy > terminal,
             "fuzzy candidate expansion must occur only after the exact-hit terminal branch");
         Assert.DoesNotContain(".Concat(exact", source, StringComparison.Ordinal);
+
+        // The old exact reader asked generic edges_raw to choose the best OUTCOME edge with
+        // LIMIT 1. OUTCOME is shared, so that can disagree with the roster's canonical
+        // (player, OUTCOME, Chess_Result) standing cell. Exact lookup must use the same
+        // canonical candidate projection as the list, whose SQL exact CTE short-circuits
+        // fuzzy expansion when the content-addressed player exists.
+        Assert.DoesNotContain("NpgsqlSubstrateReads.ChessFindPlayerAsync(", source, StringComparison.Ordinal);
     }
 
     private static string FindRepoRoot()
