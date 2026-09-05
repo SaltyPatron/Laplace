@@ -55,12 +55,13 @@ BEGIN
         (public.laplace_hash128_blake3('test/display/physicality/document'), doc, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.3,0.3,0.3,0.3),0), decode(repeat('33',16),'hex'),
          public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(sent1,1,1,0),
-             public.laplace_mantissa_pack(sent2,2,1,0)]), 2, now()),
+             -- vertex flags carry the contextual constituent tier (tier << 1).
+             public.laplace_mantissa_pack(sent1,1,1,6),
+             public.laplace_mantissa_pack(sent2,2,1,6)]), 2, now()),
         (public.laplace_hash128_blake3('test/display/physicality/book'), book, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.4,0.4,0.4,0.4),0), decode(repeat('34',16),'hex'),
          public.ST_MakeLine(ARRAY[
-             public.laplace_mantissa_pack(doc,1,1,0)]), 1, now());
+             public.laplace_mantissa_pack(doc,1,1,8)]), 1, now());
 
     INSERT INTO laplace.attestations
         (id, subject_id, type_id, object_id, source_id, context_id, outcome,
