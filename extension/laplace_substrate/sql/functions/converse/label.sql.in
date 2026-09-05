@@ -47,9 +47,10 @@ $$;
 --
 -- GH #804: form is caller/containment-owned, not inferred from entity.type_id. Exact
 -- self-rendering stops at sentence grain. Higher-tier text is previewed only when a
--- witnessed role proves textual containment (HAS_DEFINITION / HasFileMetadata); opaque or
--- non-text content falls through to a name, relation, type/source description, or explicit
--- "Unrealized entity" rather than being silently projected through a text lens.
+-- witnessed role proves textual containment (the governed HAS_DEFINITION family or
+-- HasFileMetadata); opaque or non-text content falls through to a name, relation,
+-- type/source description, or explicit "Unrealized entity" rather than being silently
+-- projected through a text lens.
 CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, label text, tier smallint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
@@ -124,16 +125,25 @@ BEGIN ATOMIC
         WHERE lines.line LIKE 'name=%'
     ),
 
-    -- A concept can own text through HAS_DEFINITION, and a definition content id can be
-    -- recognized as text through the inverse containment edge. This is exactly the #804
-    -- caller/containment law: the role proves the projection; entity.type_id does not.
+    -- The relation taxonomy, not this display function, owns the definition vocabulary.
+    -- Asking for the family keeps this site free of a second relation-id literal while
+    -- remaining foldable/partition-prunable through the generated manifest law.
+    definition_types AS MATERIALIZED (
+        SELECT consensus.relation_family_ids('HAS_DEFINITION') AS ids
+    ),
+
+    -- A concept can own text through the governed definition family, and a definition
+    -- content id can be recognized as text through the inverse containment edge. This is
+    -- exactly the #804 caller/containment law: the role proves the projection;
+    -- entity.type_id does not.
     definition_owned AS MATERIALIZED (
         SELECT DISTINCT ON (i.id)
                i.id AS owner_id, i.ord, a.object_id AS target_id
         FROM inp i
+        CROSS JOIN definition_types d
         JOIN laplace.attestations a
           ON a.subject_id = i.id
-         AND a.type_id = laplace.relation_type_id('HAS_DEFINITION')
+         AND a.type_id = ANY(d.ids)
         WHERE a.object_id IS NOT NULL
         ORDER BY i.id, a.last_observed_at DESC, a.id
     ),
@@ -141,9 +151,10 @@ BEGIN ATOMIC
         SELECT DISTINCT ON (i.id)
                i.id AS owner_id, i.ord, i.id AS target_id
         FROM inp i
+        CROSS JOIN definition_types d
         JOIN laplace.attestations a
           ON a.object_id = i.id
-         AND a.type_id = laplace.relation_type_id('HAS_DEFINITION')
+         AND a.type_id = ANY(d.ids)
         ORDER BY i.id, a.last_observed_at DESC, a.id
     ),
     text_targets AS MATERIALIZED (
