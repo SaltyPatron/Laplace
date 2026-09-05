@@ -19,8 +19,8 @@
   da8bba849715df83965c2e822a2360b9. Original database remains untouched.
 - OMW 2.0: all 32 lexicons parsed and inventoried against raw XML (570 MB), 18 tests
   passed. Italian artifact set was ingested into retained recovery DB; dependency omw-en
-  remains unresolved. Canonical alias/inverse direction tests pass; the retained Italian
-  artifact has no relation records and does not establish whole-estate relation coverage.
+  remains unresolved. Canonical relation alias/direction fixes now under verification;
+  prior row-count proof does not establish corrected relation semantics.
 - Reverse native containment now selects indexed physical candidates before entity
   hydration and retains its typed SPI plan. Morse content→file: 70.38 ms cold,
   8.83 ms warm / 1,806 buffers, versus 563 ms / 1.15M buffers; exact parent verified.
@@ -29,37 +29,129 @@
   reconciliation. Disjoint historical artifact cells are accepted without recounting;
   overlapping/incomplete/mismatched bootstrap evidence remains a nonmutating conflict.
 - Gutenberg format metadata and shared work composition implemented; actual 195-file
-  inventory and 34 document tests passed. Retained generic-worker run admitted a complete
-  41,815-byte artifact with exact reconstruction, work relations, metadata and physical
-  journal identity; 2,504 durable rows in 1.985 seconds at the operator boundary.
-- OMW now consumes shared native libxml2 SAX batches instead of a private managed
-  XML parser. Namespace/attribute/text/topology tests pass; all 32 real lexicons
-  reconcile against the independent inventory, test-host peak RSS 256 MiB.
+  inventory and 28 document tests passed. Final recognition/native-normalization review
+  and retained generic-worker ingestion are active, not delivered.
 - Existing SafeTensors codec repaired for exact scalar/empty/Unicode-name output,
   bounded export memory, and write-error propagation. Native 3/3 and independent
   safetensors.numpy readback passed. Full model export route remains unconnected.
-- Model checkpoint headers now use native ordered source structures; actual MiniLM
-  header ingestion verified. Native token-pair contraction and transient calibration
-  into standing are active in `/tmp/laplace-model-recovery`; raw weights/factors are
-  not a semantic archive. No full model ingestion, export, code generation, or
-  conversation delivery claimed.
-- Unicode reconstruction now uses a length-bearing native byte renderer; singleton,
-  embedded, repeated/RLE and nested U+0000 pass actual database reconstruction (8/8).
-  Native-stage attempted counts include prebuilt rows; actual writer tests pass 13/13.
+- Model work active: replace checkpoint-only hash attestations with native ordered
+  structural trajectories and inspect real MiniLM tensor ingestion. No model ingestion,
+  export, code generation, or full conversation delivery claimed.
 - Retained runtime: localhost:18081, laplace_recovery_demo on isolated socket
   `/tmp/laplace-content-pg/socket`; hosted services skipped. Evidence files under
   `/tmp/laplace-content-recovery-proof`.
 - Acceptance: combined managed/database 27/27; native closure affected DB 7/7;
   native core 43/43; intent stage 23/23; atomic writer 2/2; bootstrap reconciliation
-  5/5; singleton replay compatibility 3/3; source policy 25/25.
-  Final combined policy/build/DEV passed: 2,873 checks executed, 13 skipped
-  (native 510 executed/1 skipped; managed 2,361 executed/12 skipped; UCI/browser
-  suites executed). NUL/Morse/Python exact HTTP reads passed after final isolated
-  database restart. GitHub CI and original production deployment remain outstanding.
+  3/3; singleton replay compatibility 3/3. Full integration/CI/deployment outstanding.
 
-Earlier entries below are historical; they are not current delivery claims.
+# Active recovery — 2026-09-05
 
-# Reconstructed task state — 2026-08-24
+The acceptance boundary is the connected Laplace product defined by the invention,
+current inventor corrections, and both repositories' applicable issue history.
+Component results and the historical notes below are not current delivery claims.
+
+| Work | Existing owners | Current obligation / demonstrable result |
+|---|---|---|
+| Reconcile invention and implementation | Laplace invention/specs; Refactor #184 | Active. Resolve documented answers before asking the inventor; distinguish superseded descriptions from current requirements. |
+| Production digital-content ingestion | Laplace #1049, #799, #802, #806, #1010; PR #1496; Refactor #53, #57, #195 | Active implementation on PR #1496. Finish one shared file/content/metadata/provenance route, dynamic grammar-fed tier floors, exact reconstruction and bidirectional traversal. Preserve existing reusable content. |
+| Selected source estate and ETL | Laplace #1403, #967, #1153; Refactor #171, #195, #223 | Reconcile selected releases/artifacts in /vault/Data and /vault/models; shared native composition and bulk apply; complete artifact dispositions and metadata; physical batching must not change identity. |
+| Standing and evidence | Laplace #1303, #1321; Refactor #16, #110 | Preserve observations, derivations, independent evidence and contextual standing as distinct state; demonstrate actual outcome-driven updates through their consumers. |
+| Cognition and language realization | Laplace #1401, #1478, #921; Refactor #17, #18, #60, #132, #182 | Whole-input interpretation through shared typed native operations to a completed semantic act and language realization; no rank-one topic, regex, substring or template substitute. |
+| Gödel / procedural learning | Refactor #19, #169, #218, #221, #222 | Persistent successes/failures, validated skills, contextual habits and equivalent acceleration; demonstrate changed subsequent execution without self-corroboration. |
+| Optional model ingestion and model synthesis | Laplace #927, #928; Refactor #20, #61, #71, #129, #223 | Exact reusable model structure and calibrated behavioral evidence; same substrate operators drive scoped target generation; demonstrate external-runtime behavior, not merely a loadable file. |
+| Unified product navigation / UX | Laplace #1404; Refactor #21, #68 | Deferred presentation work per inventor. Shared search/rank/entity/structure/evidence traversal; Hikaru player-name resolution and king/substring distinction remain required. |
+| Integration and installed behavior | Existing owning PRs; Refactor #22, #23 | Preserve valid work, avoid overlapping PRs, verify actual installed native/public behavior. No destructive reseed inferred from stale notes. |
+
+## Verified baseline and limits
+
+- Original database is populated. SQL, MCP and HTTP reproduced the same defective
+  continuation for “The opposite of hot is”; callable adapters do not prove cognition.
+- International Morse Code has canonical content root
+  `ef5e41c6013c481cdf2af28096678cf5`, currently stored at floor 4. Native-backed SQL
+  reconstruction reproduced the source's 2,594 bytes exactly; a sentence child
+  ascended to that root. This does **not** establish a proper file entity trunk.
+- Current `FileEntity.SourceId()` aliases content identity; metadata is attached by
+  a relation. PR #1496 owns the unfinished content/file/document/work correction.
+- Ingest journal `file_id` is a separate resume fingerprint, not a navigable content
+  identity. Journal completion and staged counts cannot certify artifact structure.
+- Tier is compositional floor, never a universal category number. “Hello” does not
+  gain another content identity merely by serving as a title or document. Actual
+  multi-child compositions, including a file's content and metadata, have their own
+  identities. Segmentation/roles are modality- and grammar-specific.
+- Refactor's existing interrupted rebase is preserved; its deployment state does
+  not establish the state of the original populated database.
+
+## Current bounded assignments
+
+- Primary: integrated artifact callers, endpoint integration, review and combined acceptance.
+- `content_contract` (Sol/high): authority review complete; real HTTP/database tenant
+  occurrence checks passed (2/2). Public IDs are canonical lowercase hex; POST → GET uses
+  the returned ID. File → [content, metadata] and content → file assertions passed.
+- `native_content_path` (Terra/high): generic ordered native composition/staging
+  implemented; six focused native checks and managed builds passed.
+- `artifact_pr_review` (Sol/high): native-backed canonical reconstruction implemented;
+  three isolated PostgreSQL checks passed against the final static SQL definition.
+
+Implementation is in `/tmp/laplace-content-recovery`, extending the existing PR branch.
+These local results are not merged, installed, or delivered product behavior.
+
+## Integration findings — not delivery claims
+
+- The existing PR branch is available in `/tmp/laplace-content-recovery`, based on
+  `1e5d628b44820b6dafcec6235a65e42faf17dcca`; the original working tree and the
+  Refactor rebase remain undisturbed.
+- The original PR `DocumentEntity.Resolve` bypassed `hash_composer_compose_node` and hashed a
+  singleton through raw `Hash128.Merkle`, reminting a wrapper. The generic native
+  composer already collapses singletons. Its fixed document category/floor and
+  tests requiring content/document inequality must be reconciled together.
+- The original PR `FileEntity.Emit` used a fixed document floor and Karcher mean instead of
+  deriving the parent floor and consuming the canonical composition calculation.
+  The correction belongs to the shared native composition boundary.
+- Recipe-declared name/path may participate in the file's metadata composition
+  under #1049 without salting the underlying content identity. Mtime/transfer size
+  remain observational. No new inventor decision is needed on this distinction.
+- #799 already defines canonical work descriptor content from title/author;
+  attributed claims and referential interpretation remain separate. Do not reopen
+  this as an unanswered invention question without conflicting higher authority.
+- Preserve useful native text/grammar compose, bulk drain, trajectory decode and
+  batched containment implementations. Verify existing bindings before adding an
+  ABI; do not create another file-specific composition engine.
+- Implemented locally: removed the plain-text document reminting wrapper; native
+  ordered composition now derives file floor, identity, coordinates and trajectory.
+  Five artifact identity/staging checks passed, including the singleton “Hello”.
+- Artifact export checks the tenant's recorded admission, not global
+  `first_observed_by`. An isolated HTTP/database check confirms that two admitting
+  tenants share one artifact while an unrelated tenant cannot export it.
+- Reconstruction uses the existing native renderer through fixed SQL and verifies
+  canonical identity before returning UTF-8. Three database checks passed for
+  normalization, missing constituents and cycles; the endpoint builds cleanly.
+- Export requires a confirmed tenant occurrence, SourceFile type, exactly two
+  constituents and a matching recomputed file identity. Prompt contexts require
+  confirmed outcomes. Isolated actual-writer tests reject false-type membership,
+  refuted file membership and refuted prompt membership with HTTP 404.
+- Metadata identity now uses fixed-field escaped JSON: embedded newlines cannot
+  alias distinct name/path pairs. Both pairs round-trip in the collision regression.
+  Admission preserves leading/trailing name/path characters instead of trimming them.
+- Existing reusable structured path confirmed: `laplace_grammar_compose` produces
+  native roots/tiers/trajectories; `laplace_compose_drain_into_stage` is its bulk drain.
+  `GrammarRowComposer` already owns that result and borrowed containment tree. The
+  next content integration is a root-component accessor plus FileEntity overload
+  accepting that prepared root, rather than another format-specific file engine.
+- Remaining: original encoding/BOM/format-byte reconstruction; reusable modality/
+  format grammars including paragraph/page/section structure; observational metadata
+  persistence; multi-document artifact envelopes; complete physical source inventory
+  and coverage; shared prepared composition to eliminate repeated tree construction;
+  flag-preserving trajectory RLE; installed integration and operator measurements.
+  The current ordered native trajectory preserves repetitions and atom flags exactly,
+  but its flagged codec does not yet provide run-length encoding.
+
+---
+
+# Historical reconstructed task state — 2026-08-24
+
+The following is retained as historical evidence. Its database counts, branch/CI
+state, priority declarations and assertion that the seed must be discarded are not
+current findings or authorization.
 
 Status vocabulary: DONE = landed AND verified against the running artifact.
 PARTIAL = landed, some part unverified. OPEN = not started or not finished.
