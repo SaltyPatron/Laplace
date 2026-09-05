@@ -171,9 +171,10 @@ internal sealed partial class SubstrateClient
                 if (resolved is { Exists: true } value)
                 {
                     var facts = await ReadSalientFactsAsync(conn, value.Id, 3, ct);
+                    var display = await NpgsqlDisplayLabels.ReadOneAsync(conn, value.Id, ct);
                     return new ExploreResolveResponse(
                         IdHex: Convert.ToHexStringLower(value.Id),
-                        Label: value.Label,
+                        Label: display?.Label ?? "Unrealized entity",
                         RefKind: value.RefKind,
                         Exists: true,
                         PreviewFacts: facts);
@@ -202,9 +203,17 @@ internal sealed partial class SubstrateClient
 
             if (resolved is not { } unresolved) return null;
 
+            var unresolvedLabel = unresolved.Label;
+            if (string.IsNullOrWhiteSpace(unresolvedLabel) || LooksLikeEntityHex(unresolvedLabel))
+            {
+                await using var conn = await _dataSource.OpenConnectionAsync(ct);
+                unresolvedLabel = (await NpgsqlDisplayLabels.ReadOneAsync(conn, unresolved.Id, ct))?.Label
+                    ?? "Unrealized entity";
+            }
+
             return new ExploreResolveResponse(
                 IdHex: Convert.ToHexStringLower(unresolved.Id),
-                Label: unresolved.Label,
+                Label: unresolvedLabel,
                 RefKind: unresolved.RefKind,
                 Exists: false,
                 PreviewFacts: []);
@@ -268,8 +277,11 @@ internal sealed partial class SubstrateClient
             var rows = await NpgsqlSubstrateReads.ExploreAnchorNeighborsAsync(
                 conn, anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm, anchor.TrajectoryWkt,
                 geodesicK, frechetK, frechetMax, Math.Max(DefaultCommandTimeoutSeconds, 20), ct);
+            var labels = await ReadDisplayLabelsAsync(
+                conn, rows.Select(r => r.IdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
             return [.. rows.Select(r => new ExploreAnchorNeighborRow(
-                r.Axis, r.IdHex, r.Label ?? r.IdHex, r.Tier, r.Geodesic, r.Frechet))];
+                r.Axis, r.IdHex, DisplayLabel(labels, r.IdHex, r.Label),
+                r.Tier, r.Geodesic, r.Frechet))];
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
@@ -408,10 +420,16 @@ internal sealed partial class SubstrateClient
 
             // Entity-id KNN with real S³ coords — not label→prompt_state re-resolve,
             // and not decorative Math.sin positions on the glome.
-            var structural = (await NpgsqlSubstrateReads.StructuralNeighborsAsync(conn, id, k, ct))
-                .Where(r => !string.IsNullOrWhiteSpace(r.Label))
+            var structuralRows = await NpgsqlSubstrateReads.StructuralNeighborsAsync(conn, id, k, ct);
+            var structuralLabels = await ReadDisplayLabelsAsync(
+                conn,
+                structuralRows.Where(r => r.IdHex is not null)
+                    .Select(r => r.IdHex!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                ct);
+            var structural = structuralRows
                 .Select(r => new ExploreNeighborRow(
-                    Neighbor: r.Label!.Trim(), Geodesic: r.Geodesic, Frechet: r.Frechet,
+                    Neighbor: DisplayLabel(structuralLabels, r.IdHex, r.Label),
+                    Geodesic: r.Geodesic, Frechet: r.Frechet,
                     Axis: "structural", NeighborIdHex: r.IdHex?.ToLowerInvariant(),
                     X: r.X, Y: r.Y, Z: r.Z, M: r.M, Radius: r.Radius))
                 .ToList();
@@ -440,8 +458,12 @@ internal sealed partial class SubstrateClient
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             if (await ReadLabelAsync(conn, id, ct) is null) return null;
 
-            var members = (await NpgsqlSubstrateReads.ConceptMembersAsync(conn, id, limit, ct))
-                .Select(r => new ExploreMemberRow(r.IdHex, r.Label, r.Kind, r.EffMu, r.Witnesses))
+            var memberRows = await NpgsqlSubstrateReads.ConceptMembersAsync(conn, id, limit, ct);
+            var labels = await ReadDisplayLabelsAsync(
+                conn, memberRows.Select(r => r.IdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
+            var members = memberRows
+                .Select(r => new ExploreMemberRow(
+                    r.IdHex, DisplayLabel(labels, r.IdHex, r.Label), r.Kind, r.EffMu, r.Witnesses))
                 .ToList();
 
             return new ExploreMembersResponse(idHex.ToLowerInvariant(), members);
@@ -488,8 +510,12 @@ internal sealed partial class SubstrateClient
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             if (await ReadLabelAsync(conn, id, ct) is null) return null;
 
-            var containers = (await NpgsqlSubstrateReads.ContainersAsync(conn, id, maxHops, limit, ct))
-                .Select(r => new ExploreContainerRow(r.IdHex, r.Label, r.Tier, r.Type, r.Hops))
+            var containerRows = await NpgsqlSubstrateReads.ContainersAsync(conn, id, maxHops, limit, ct);
+            var labels = await ReadDisplayLabelsAsync(
+                conn, containerRows.Select(r => r.IdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
+            var containers = containerRows
+                .Select(r => new ExploreContainerRow(
+                    r.IdHex, DisplayLabel(labels, r.IdHex, r.Label), r.Tier, r.Type, r.Hops))
                 .ToList();
 
             return new ExploreContainersResponse(idHex.ToLowerInvariant(), containers);
@@ -576,18 +602,22 @@ internal sealed partial class SubstrateClient
             var idsToLabel = unlabeled.Concat(typeIds).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (idsToLabel.Count > 0)
             {
-                var labels = await ReadLabelsFastAsync(conn, idsToLabel, ct);
+                var labels = await ReadDisplayLabelsAsync(conn, idsToLabel, ct);
                 foreach (var (hex, entry) in labels)
                 {
                     if (nodes.TryGetValue(hex, out var node))
-                        nodes[hex] = node with { Label = entry.Label, Tier = node.Tier ?? entry.Tier };
+                        nodes[hex] = node with
+                        {
+                            Label = TrimGraphLabel(entry.Label),
+                            Tier = node.Tier ?? entry.Tier,
+                        };
                 }
 
                 for (var i = 0; i < edges.Count; i++)
                 {
                     var e = edges[i];
                     if (labels.TryGetValue(e.Type, out var tl))
-                        edges[i] = e with { Type = tl.Label };
+                        edges[i] = e with { Type = TrimGraphLabel(tl.Label) };
                 }
             }
 
@@ -609,28 +639,39 @@ internal sealed partial class SubstrateClient
         }
     }
 
-    private static async Task<Dictionary<string, (string Label, short? Tier)>> ReadLabelsFastAsync(
+    private static async Task<Dictionary<string, (string Label, short? Tier)>> ReadDisplayLabelsAsync(
         NpgsqlConnection conn, IReadOnlyList<string> idHexes, CancellationToken ct)
     {
         var result = new Dictionary<string, (string Label, short? Tier)>(StringComparer.OrdinalIgnoreCase);
         if (idHexes.Count == 0) return result;
 
-        var ids = new byte[idHexes.Count][];
-        for (var i = 0; i < idHexes.Count; i++)
+        var ids = new List<byte[]>(idHexes.Count);
+        foreach (var idHex in idHexes)
         {
-            var parsed = TryParseIdHex(idHexes[i]);
-            if (parsed is null) continue;
-            ids[i] = parsed;
+            var parsed = TryParseIdHex(idHex);
+            if (parsed is not null) ids.Add(parsed);
         }
 
-        foreach (var row in await NpgsqlDisplayLabels.ReadAsync(
-                     conn, ids.Where(x => x is not null).ToArray()!, ct))
+        if (ids.Count == 0) return result;
+        foreach (var row in await NpgsqlDisplayLabels.ReadAsync(conn, ids.ToArray(), ct))
         {
             var hex = row.IdHex.ToLowerInvariant();
-            result[hex] = (TrimGraphLabel(row.Label), row.Tier);
+            result[hex] = (row.Label, row.Tier);
         }
 
         return result;
+    }
+
+    private static string DisplayLabel(
+        IReadOnlyDictionary<string, (string Label, short? Tier)> labels,
+        string? idHex,
+        string? fallback)
+    {
+        if (idHex is not null && labels.TryGetValue(idHex, out var found))
+            return found.Label;
+        if (!string.IsNullOrWhiteSpace(fallback) && !LooksLikeEntityHex(fallback))
+            return fallback.Trim();
+        return "Unrealized entity";
     }
 
     private static string TrimGraphLabel(string label)
@@ -653,23 +694,24 @@ internal sealed partial class SubstrateClient
         catch (FormatException) { return null; }
     }
 
-    private static Task<string?> ReadLabelAsync(NpgsqlConnection conn, byte[] id, CancellationToken ct) =>
-        NpgsqlSubstrateReads.LabelOrHexAsync(conn, id, ct);
+    private static async Task<string?> ReadLabelAsync(NpgsqlConnection conn, byte[] id, CancellationToken ct)
+        => (await NpgsqlDisplayLabels.ReadOneAsync(conn, id, ct))?.Label;
 
     /// <summary>
-    /// <see cref="NpgsqlSubstrateReads.EntityFacetsAsync"/> returns no row for an unwitnessed
-    /// id — the fallback to <see cref="ReadLabelAsync"/> is safe because NpgsqlRead fully
-    /// drains and disposes its reader before returning, so there is no Npgsql MARS conflict
-    /// running a second command on this connection right after.
+    /// Tier/type/existence are read without rendering the entity body; display text has its own
+    /// bounded policy in NpgsqlDisplayLabels. This prevents opening a high-tier document from
+    /// reconstructing it merely to paint the page heading.
     /// </summary>
     private static async Task<(string Label, short? Tier, string? Type, bool Exists)> ReadEntityFacetsAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct)
     {
-        if (await NpgsqlSubstrateReads.EntityFacetsAsync(conn, id, ct) is { } f)
-            return (f.Label, f.Tier, f.Type, f.Exists);
+        var display = await NpgsqlDisplayLabels.ReadOneAsync(conn, id, ct);
+        if (display is null) return (null!, null, null, false);
 
-        var fallbackLabel = await ReadLabelAsync(conn, id, ct);
-        return fallbackLabel is null ? (null!, null, null, false) : (fallbackLabel, null, null, false);
+        var facet = await NpgsqlDisplayLabels.FacetAsync(conn, id, ct);
+        return facet is { } f
+            ? (display.Value.Label, f.Tier, f.Type, f.Exists)
+            : (display.Value.Label, display.Value.Tier, null, false);
     }
 
     private static async Task<long> ReadEvidenceCountAsync(NpgsqlConnection conn, byte[] id, CancellationToken ct)
@@ -722,6 +764,17 @@ internal sealed partial class SubstrateClient
             }
         }
 
+        var labels = await ReadDisplayLabelsAsync(
+            conn, rows.Select(r => r.EntityIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            rows[i] = new ExploreConsensusRow(
+                r.Direction, r.Type, r.EntityIdHex,
+                DisplayLabel(labels, r.EntityIdHex, r.EntityLabel),
+                r.EffMu, r.Witnesses);
+        }
+
         return rows;
     }
 
@@ -729,10 +782,12 @@ internal sealed partial class SubstrateClient
         NpgsqlConnection conn, byte[] id, CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.SensesAsync(conn, id, ct);
+        var labels = await ReadDisplayLabelsAsync(
+            conn, rows.Select(r => r.SynsetIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
         return [.. rows.Select(s => new ExploreSenseRow(
             SenseIdHex: s.SenseIdHex,
             SynsetIdHex: s.SynsetIdHex,
-            SynsetLabel: s.SynsetLabel,
+            SynsetLabel: DisplayLabel(labels, s.SynsetIdHex, s.SynsetLabel),
             EffMu: s.EffMu,
             Witnesses: s.Witnesses))];
     }
@@ -771,11 +826,13 @@ internal sealed partial class SubstrateClient
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.EvidenceReceiptAsync(conn, id, limit, ct);
+        var labels = await ReadDisplayLabelsAsync(
+            conn, rows.Select(r => r.ObjectIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
         return [.. rows.Select(e => new LabeledEvidenceItem(
             TypeId: e.TypeIdHex,
             TypeLabel: e.TypeLabel,
             ObjectId: e.ObjectIdHex,
-            ObjectLabel: e.ObjectLabel,
+            ObjectLabel: DisplayLabel(labels, e.ObjectIdHex, e.ObjectLabel),
             SourceId: "",
             SourceLabel: e.SourceLabels ?? "",
             ContextId: null,
