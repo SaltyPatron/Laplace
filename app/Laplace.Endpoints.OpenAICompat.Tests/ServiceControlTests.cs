@@ -125,13 +125,22 @@ public sealed class ServiceControlTests
     }
 
     [Fact]
-    public async Task OldLabRouteCannotBypassManagedLichessOwnership()
+    public async Task LabRouteHasNoSecondaryOperatorCredential_AndCannotBypassManagedLichessOwnership()
     {
         await using var factory = new Factory();
         using var client = factory.Client();
-        client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, "operator-test-only");
         using var reply = await client.PostAsJsonAsync("/chess/lab/start", new { kind = "lichess-bot" });
         Assert.Equal(HttpStatusCode.Conflict, reply.StatusCode);
+        Assert.Empty(factory.Control.Calls);
+    }
+
+    [Fact]
+    public async Task LabRouteStillUsesNormalChessApiKeyPolicyInKeyMode()
+    {
+        await using var factory = new Factory(mode: "key");
+        using var client = factory.Client();
+        using var reply = await client.PostAsJsonAsync("/chess/lab/start", new { kind = "lichess-bot" });
+        Assert.Equal(HttpStatusCode.Unauthorized, reply.StatusCode);
         Assert.Empty(factory.Control.Calls);
     }
 
