@@ -49,6 +49,7 @@ BEGIN ATOMIC
         LEFT JOIN laplace.consensus o
           ON o.subject_id = p.player
          AND o.type_id = laplace.relation_type_id('OUTCOME')
+         AND o.object_id = laplace.entity_type_id('Chess_Result')
     ),
     page AS MATERIALIZED (
         SELECT r.*

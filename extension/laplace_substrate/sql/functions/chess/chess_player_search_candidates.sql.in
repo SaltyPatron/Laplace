@@ -69,6 +69,7 @@ BEGIN ATOMIC
             FROM laplace.consensus c
             WHERE c.subject_id = p.player
               AND c.type_id = ANY (consensus.relation_family_ids('OUTCOME'))
+              AND c.object_id = laplace.entity_type_id('Chess_Result')
             ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.id
             LIMIT 1
         ) o ON true

@@ -1,0 +1,5 @@
+-- Display identity and display text are different contracts. A graph node keeps its
+-- exact content id, but the label must be Unicode/name/description — never that id
+-- rendered back as arbitrary hex. High-tier text preview is containment-owned (#804).
+\set ECHO none
+NOTICE:  display labels: id separate, Unicode exact, bounded containment preview, no hash fallback

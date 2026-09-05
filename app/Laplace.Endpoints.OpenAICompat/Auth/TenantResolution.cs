@@ -21,7 +21,7 @@ internal sealed class LaplaceAuthOptions
     /// <summary>"header" trusts X-Laplace-Tenant (local/dev); "key" requires a valid API key on /v1/*.</summary>
     public string Mode { get; set; } = "header";
 
-    /// <summary>Shared secret for operator endpoints (quote approval, key issuance, bootstrap).</summary>
+    /// <summary>Shared secret for explicit host/operator endpoints.</summary>
     public string? OperatorToken { get; set; }
 
     public bool KeyMode => string.Equals(Mode, "key", StringComparison.OrdinalIgnoreCase);
@@ -137,12 +137,10 @@ internal sealed class ApiKeyEnforcementMiddleware
     public async Task InvokeAsync(HttpContext context, ITenantResolver resolver)
     {
         var path = context.Request.Path.Value ?? "";
-        // Host lifecycle uses the operator credential, not a customer billing key
-        // and never the permissive tenant-header mode. Keep the legacy aliases in
-        // the same fail-closed policy so they cannot start a second bot.
-        if (IsUnder(path, "/v1/admin/services")
-            || path.Equals("/chess/lichess/start", StringComparison.OrdinalIgnoreCase)
-            || path.Equals("/chess/lichess/stop", StringComparison.OrdinalIgnoreCase))
+        // The dedicated host-administration surface still owns the temporary operator
+        // credential. Chess routes, including Lichess controls, follow the same normal
+        // /chess/* tenancy/API-key policy instead of inventing a second auth scheme.
+        if (IsUnder(path, "/v1/admin/services"))
         {
             if (!OperatorAuth.IsAuthorized(context.Request, _options))
             {
@@ -200,15 +198,9 @@ internal static class OperatorAuth
 {
     public const string TokenHeader = "X-Laplace-Operator-Token";
 
-    /// <summary>
-    /// Local/header-mode chess lab operations are intentionally available to the local operator
-    /// without a second credential. Remote/key-mode lab operations and all other operator
-    /// endpoints still require the configured operator secret.
-    /// </summary>
+    /// <summary>Constant-time comparison for the remaining explicit host/operator controls.</summary>
     public static bool IsAuthorized(HttpRequest request, LaplaceAuthOptions options)
     {
-        if (!options.KeyMode && request.Path.StartsWithSegments("/chess/lab"))
-            return true;
         if (string.IsNullOrWhiteSpace(options.OperatorToken))
             return false;
         var presented = request.Headers[TokenHeader].ToString();

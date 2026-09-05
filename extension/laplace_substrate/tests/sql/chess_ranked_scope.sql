@@ -1,0 +1,68 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+
+BEGIN;
+
+-- A Chess_Player can have more than one consensus cell using the outcome relation.
+-- Only the canonical result object is the player's standing. A different object must
+-- never duplicate the player or inject its carrier into the leaderboard/search result.
+DO $$
+DECLARE
+    player bytea := chess.player_id('rank-scope-probe');
+    rogue  bytea := decode(repeat('e2', 16), 'hex');
+    src    bytea := laplace.source_id('ChessPgn');
+    n bigint;
+    g bigint;
+    r double precision;
+BEGIN
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+        (player, 0, laplace.entity_type_id('Chess_Player'), src),
+        (rogue,  0, laplace.entity_type_id('Chess_Result'), src)
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO laplace.consensus
+        (id, subject_id, type_id, object_id, rating, rd, volatility,
+         witness_count, last_observed_at)
+    VALUES
+        (decode(repeat('e3', 16), 'hex'), player, laplace.relation_type_id('OUTCOME'),
+         laplace.entity_type_id('Chess_Result'),
+         1900000000000, 50000000000, 60000000, 40, now()),
+        (decode(repeat('e4', 16), 'hex'), player, laplace.relation_type_id('OUTCOME'),
+         rogue,
+         9223372036854775807, 350000000000, 60000000, 999, now());
+
+    SELECT count(*), max(games), max(rating)
+      INTO n, g, r
+      FROM chess.ranked(10)
+     WHERE player_id = player;
+
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'leaderboard duplicated one player across outcome objects: % rows', n;
+    END IF;
+    IF g <> 40 THEN
+        RAISE EXCEPTION 'leaderboard read witness count from the wrong outcome object: %', g;
+    END IF;
+    IF r <> 1900.0 THEN
+        RAISE EXCEPTION 'leaderboard read rating from the wrong outcome object: %', r;
+    END IF;
+
+    SELECT count(*), max(games), max(rating)
+      INTO n, g, r
+      FROM chess.player_search_candidates(ARRAY['rank-scope-probe'], 10)
+     WHERE player_id = player;
+
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'exact player search duplicated one player across outcome objects: % rows', n;
+    END IF;
+    IF g <> 40 THEN
+        RAISE EXCEPTION 'exact player search read witness count from the wrong outcome object: %', g;
+    END IF;
+    IF r <> 1900.0 THEN
+        RAISE EXCEPTION 'exact player search read rating from the wrong outcome object: %', r;
+    END IF;
+END $$;
+
+SELECT 'chess ranked canonical result scope' AS probe, true AS ok;
+
+ROLLBACK;
