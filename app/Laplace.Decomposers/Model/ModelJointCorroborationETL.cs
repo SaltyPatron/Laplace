@@ -14,8 +14,13 @@ namespace Laplace.Decomposers.Model;
 public sealed class ModelJointCorroborationETL
 {
     private const string Family = "model-joint-circuit-corroboration";
-    private static readonly string[] TargetNames =
-        ["SIMILAR_TO", "ATTENDS", "OV_RELATES", "COMPLETES_TO"];
+    private static readonly Hash128[] TargetTypeIds =
+    [
+        ModelDecomposer.SimilarToTypeId,
+        ModelDecomposer.AttendsTypeId,
+        ModelDecomposer.OvRelatesTypeId,
+        ModelDecomposer.CompletesToTypeId,
+    ];
 
     private readonly SelectedModelAnalysisInput _left;
     private readonly SelectedModelAnalysisInput _right;
@@ -51,10 +56,11 @@ public sealed class ModelJointCorroborationETL
         Dictionary<Hash128, int> rowByEntity = IndexVocabulary(vocabulary);
         var leftEstate = new ModelCircuitEstate(_left, rowByEntity);
         var rightEstate = new ModelCircuitEstate(_right, rowByEntity);
-        foreach (string targetName in TargetNames)
+        foreach (Hash128 targetTypeId in TargetTypeIds)
         {
+            RelationTypeRegistry.RelationTypeResolution target = ResolveTarget(targetTypeId);
             await foreach (ModelCorroborationWorkingSet set in AnalyzeTargetCoreAsync(
-                               targetName, commitEpoch, reader,
+                               target, commitEpoch, reader,
                                vocabulary, leftEstate, rightEstate, ct).ConfigureAwait(false))
                 yield return set;
         }
@@ -67,22 +73,20 @@ public sealed class ModelJointCorroborationETL
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
-        if (!TargetNames.Contains(targetName, StringComparer.Ordinal))
-            throw new ArgumentOutOfRangeException(nameof(targetName), targetName,
-                "target is not a declared model contraction relation");
+        RelationTypeRegistry.RelationTypeResolution target = ResolveTarget(targetName);
         Hash128[] vocabulary = CommonVocabulary(_left.Tokens, _right.Tokens);
         if (vocabulary.Length == 0) yield break;
         Dictionary<Hash128, int> rowByEntity = IndexVocabulary(vocabulary);
         var leftEstate = new ModelCircuitEstate(_left, rowByEntity);
         var rightEstate = new ModelCircuitEstate(_right, rowByEntity);
         await foreach (ModelCorroborationWorkingSet set in AnalyzeTargetCoreAsync(
-                           targetName, commitEpoch, reader,
+                           target, commitEpoch, reader,
                            vocabulary, leftEstate, rightEstate, ct).ConfigureAwait(false))
             yield return set;
     }
 
     private async IAsyncEnumerable<ModelCorroborationWorkingSet> AnalyzeTargetCoreAsync(
-        string targetName,
+        RelationTypeRegistry.RelationTypeResolution target,
         int commitEpoch,
         ISubstrateReader reader,
         Hash128[] vocabulary,
@@ -90,8 +94,6 @@ public sealed class ModelJointCorroborationETL
         ModelCircuitEstate rightEstate,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        RelationTypeRegistry.RelationTypeResolution target =
-            RelationTypeRegistry.Resolve(targetName);
         Dictionary<Hash128, int> rowByEntity = IndexVocabulary(vocabulary);
 
         List<CircuitPairProposal> proposals = await ReadCompleteProposalEstateAsync(
@@ -151,6 +153,36 @@ public sealed class ModelJointCorroborationETL
                 orchestration, [leftChange, rightChange], count, admitted.Count,
                 _left.Snapshot, _right.Snapshot);
         }
+    }
+
+    private static RelationTypeRegistry.RelationTypeResolution ResolveTarget(Hash128 targetTypeId)
+    {
+        foreach (RelationTypeRegistry.RelationTypeResolution target in RelationTypeRegistry.AllCanonical())
+        {
+            if (target.Id == targetTypeId && IsDeclaredTarget(target.Id))
+                return target;
+        }
+        throw new InvalidOperationException(
+            $"declared model contraction relation {targetTypeId} is not registered");
+    }
+
+    private static RelationTypeRegistry.RelationTypeResolution ResolveTarget(string targetName)
+    {
+        foreach (RelationTypeRegistry.RelationTypeResolution target in RelationTypeRegistry.AllCanonical())
+        {
+            if (IsDeclaredTarget(target.Id)
+                && string.Equals(target.Canonical, targetName, StringComparison.Ordinal))
+                return target;
+        }
+        throw new ArgumentOutOfRangeException(nameof(targetName), targetName,
+            "target is not a declared model contraction relation");
+    }
+
+    private static bool IsDeclaredTarget(Hash128 typeId)
+    {
+        foreach (Hash128 declared in TargetTypeIds)
+            if (declared == typeId) return true;
+        return false;
     }
 
     private ModelTargetVote? ScoreModel(
