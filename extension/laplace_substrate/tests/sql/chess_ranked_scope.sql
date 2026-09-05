@@ -6,10 +6,10 @@ BEGIN;
 
 -- A Chess_Player can have more than one consensus cell using the outcome relation.
 -- Only the canonical result object is the player's standing. A different object must
--- never duplicate the player or inject its carrier into the leaderboard.
+-- never duplicate the player or inject its carrier into the leaderboard/search result.
 DO $$
 DECLARE
-    player bytea := decode(repeat('e1', 16), 'hex');
+    player bytea := chess.player_id('rank-scope-probe');
     rogue  bytea := decode(repeat('e2', 16), 'hex');
     src    bytea := laplace.source_id('ChessPgn');
     n bigint;
@@ -45,6 +45,21 @@ BEGIN
     END IF;
     IF r <> 1900.0 THEN
         RAISE EXCEPTION 'leaderboard read rating from the wrong outcome object: %', r;
+    END IF;
+
+    SELECT count(*), max(games), max(rating)
+      INTO n, g, r
+      FROM chess.player_search_candidates(ARRAY['rank-scope-probe'], 10)
+     WHERE player_id = player;
+
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'exact player search duplicated one player across outcome objects: % rows', n;
+    END IF;
+    IF g <> 40 THEN
+        RAISE EXCEPTION 'exact player search read witness count from the wrong outcome object: %', g;
+    END IF;
+    IF r <> 1900.0 THEN
+        RAISE EXCEPTION 'exact player search read rating from the wrong outcome object: %', r;
     END IF;
 END $$;
 
