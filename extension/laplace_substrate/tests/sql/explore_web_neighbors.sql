@@ -79,8 +79,8 @@ BEGIN
       (laplace.consensus_id(n2, rel_b, m4), n2, rel_b, m4,
        neutral + 110000000000, sharp_rd, 60000000, 2, '2026-01-01 00:00:00+00');
 
-    -- The frontier executor must be the set form of the established scalar
-    -- contract, not a subtly different scan hidden behind a batch signature.
+    -- With no deposited masks the untyped implementation must retain the full
+    -- parent fallback, and the set form must remain exactly the scalar contract.
     WITH batched AS (
         SELECT b.frontier_id, b.nbr, b.type_id, b.rating, b.rd,
                b.witness_count, b.outbound
@@ -97,7 +97,7 @@ BEGIN
     )
     SELECT count(*) INTO mismatches FROM delta;
     IF mismatches <> 0 THEN
-        RAISE EXCEPTION 'FAIL: batched/scalar parity has % mismatched rows', mismatches;
+        RAISE EXCEPTION 'FAIL: fallback batched/scalar parity has % mismatched rows', mismatches;
     END IF;
 
     -- The masked path prunes named relation partitions but still probes the
@@ -113,7 +113,53 @@ BEGIN
     )
     SELECT count(*) INTO mismatches FROM delta;
     IF mismatches <> 0 THEN
-        RAISE EXCEPTION 'FAIL: masked/full parity has % mismatched rows', mismatches;
+        RAISE EXCEPTION 'FAIL: masked/full fallback parity has % mismatched rows', mismatches;
+    END IF;
+
+    -- Now deposit the same governed relation bits the production entity writer
+    -- carries. From this point the untyped overload is required to take its
+    -- highway-mask fast path. Compare it against the explicit masked overload so
+    -- a branch that merely returns fewer rows cannot pass as an optimization.
+    UPDATE laplace.entities
+       SET highway_mask = consensus.highway_mask_from_bits(ARRAY[
+           consensus.relation_highway_bit(rel_a)::int,
+           consensus.relation_highway_bit(rel_b)::int
+       ])
+     WHERE id = ANY(subjects);
+
+    WITH fast_scan AS (
+        SELECT * FROM consensus.explore_web_neighbors(subjects, 32)
+    ), masked_scan AS (
+        SELECT * FROM consensus.explore_web_neighbors(subjects, governed, 32)
+    ), delta AS (
+        (SELECT * FROM fast_scan EXCEPT ALL SELECT * FROM masked_scan)
+        UNION ALL
+        (SELECT * FROM masked_scan EXCEPT ALL SELECT * FROM fast_scan)
+    )
+    SELECT count(*) INTO mismatches FROM delta;
+    IF mismatches <> 0 THEN
+        RAISE EXCEPTION 'FAIL: highway-mask fast path has % mismatched rows', mismatches;
+    END IF;
+
+    -- Batched/scalar parity must remain true after switching implementation
+    -- branches; scalar calls get the same deposited mask on their one root.
+    WITH batched AS (
+        SELECT b.frontier_id, b.nbr, b.type_id, b.rating, b.rd,
+               b.witness_count, b.outbound
+        FROM consensus.explore_web_neighbors(subjects, 32) b
+    ), scalar AS (
+        SELECT f.frontier_id, e.nbr, e.type_id, e.rating, e.rd,
+               e.witness_count, e.outbound
+        FROM unnest(subjects) AS f(frontier_id)
+        CROSS JOIN LATERAL consensus.explore_web_neighbors(f.frontier_id, 32) e
+    ), delta AS (
+        (SELECT * FROM batched EXCEPT ALL SELECT * FROM scalar)
+        UNION ALL
+        (SELECT * FROM scalar EXCEPT ALL SELECT * FROM batched)
+    )
+    SELECT count(*) INTO mismatches FROM delta;
+    IF mismatches <> 0 THEN
+        RAISE EXCEPTION 'FAIL: fast-path batched/scalar parity has % mismatched rows', mismatches;
     END IF;
 
     SELECT count(*)
@@ -256,7 +302,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: two-seed fanout expected 4 discoveries, got %', multi_seed_rows;
     END IF;
 
-    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, per-parent expansion, self/revisit suppression, and total tie order all hold';
+    RAISE NOTICE '✓ explore_web_neighbors: fallback + highway-mask parity, per-parent expansion, self/revisit suppression, and total tie order all hold';
 END $$;
 
 ROLLBACK;
