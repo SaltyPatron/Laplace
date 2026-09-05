@@ -34,7 +34,7 @@ public sealed class ExploreDisplayLabelGateTests
     }
 
     [Fact]
-    public void ExploreGraph_UsesDisplayLabelsAndKeepsHashOnlyAsIdentity()
+    public void ExploreSurfaces_UseDisplayLabelsAndKeepHashOnlyAsIdentity()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
         var path = Path.Combine(root, "app", "Laplace.Endpoints.OpenAICompat",
@@ -42,9 +42,12 @@ public sealed class ExploreDisplayLabelGateTests
         var source = File.ReadAllText(path);
 
         Assert.Contains("NpgsqlDisplayLabels.ReadAsync", source, StringComparison.Ordinal);
+        Assert.Contains("NpgsqlDisplayLabels.ReadOneAsync", source, StringComparison.Ordinal);
+        Assert.Contains("NpgsqlDisplayLabels.FacetAsync", source, StringComparison.Ordinal);
         Assert.Contains("StringInfo.ParseCombiningCharacters", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("var lab = row.Label ?? hex", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("Label = entry.Label", source, StringComparison.Ordinal);
         Assert.Contains("Label = TrimGraphLabel(entry.Label)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("var lab = row.Label ?? hex", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("r.Label ?? r.IdHex", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("NpgsqlSubstrateReads.LabelOrHexAsync", source, StringComparison.Ordinal);
     }
 }
