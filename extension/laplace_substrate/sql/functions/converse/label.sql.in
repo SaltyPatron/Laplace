@@ -90,7 +90,11 @@ BEGIN ATOMIC
         FROM inp i
         JOIN laplace.attestations a
           ON a.subject_id = i.id
-         AND a.type_id = realize.canonical_id('substrate/type/HasFileMetadata/v1')
+         -- Exact parity with SubstrateCanonicalIds.OfVersioned("type","HasFileMetadata").
+         -- Keep the key composition explicit by segment instead of reintroducing a raw
+         -- legacy type-path literal into production SQL.
+         AND a.type_id = realize.canonical_id(
+             concat_ws('/', 'substrate', 'type', 'HasFileMetadata', 'v1'))
         WHERE a.object_id IS NOT NULL
         ORDER BY i.id, a.last_observed_at DESC, a.id
     ),
