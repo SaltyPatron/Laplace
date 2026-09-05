@@ -1,0 +1,65 @@
+name: Live chat current-main profile
+
+on:
+  push:
+    branches: [diag/live-chat-current-20260905]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+env:
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  PGDATABASE: laplace
+
+jobs:
+  profile:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact diagnostic revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Measure current deployed dog forward-pass stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGHOST=/var/run/postgresql PGUSER=laplace_admin PGDATABASE=laplace
+          export PGOPTIONS='-c statement_timeout=30000ms'
+          "$LAPLACE_PG_PREFIX/bin/psql" -X -w <<'SQL'
+          \timing on
+          \set ON_ERROR_STOP off
+          \echo CHAT_PROFILE prompt_state
+          SELECT count(*) FROM converse.prompt_state('dog');
+          \echo CHAT_PROFILE prompt_coherence
+          SELECT count(*) FROM converse.prompt_coherence('dog');
+          \echo CHAT_PROFILE orient_topic
+          SELECT count(*) FROM converse.orient_topic('dog', NULL);
+          \echo CHAT_PROFILE route
+          SELECT count(*) FROM generation.forward_route_trace('dog', 2, 8, NULL);
+          \echo CHAT_PROFILE frontier
+          SELECT count(*) FROM generation.forward_frontier('dog', 2, 8, NULL);
+          \echo CHAT_PROFILE proposal_word
+          SELECT count(*) FROM generation.trajectory_continuations(
+              ARRAY[laplace.word_id('dog')]::bytea[], NULL);
+
+          \echo CHAT_PROFILE forward_1
+          SELECT count(*) FROM generation.forward_text('dog', 1, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE forward_2
+          SELECT count(*) FROM generation.forward_text('dog', 2, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE forward_4
+          SELECT count(*) FROM generation.forward_text('dog', 4, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE forward_8
+          SELECT count(*) FROM generation.forward_text('dog', 8, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE forward_16
+          SELECT count(*) FROM generation.forward_text('dog', 16, 5, 0.6, 10, 42, 2, 8, NULL);
+          \echo CHAT_PROFILE chat_default
+          SELECT converse.chat('dog');
+          SQL
