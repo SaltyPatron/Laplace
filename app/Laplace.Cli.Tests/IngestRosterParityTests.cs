@@ -29,6 +29,7 @@ public sealed class IngestRosterParityTests
             "code",
             "frame-video",
             "model",
+            "model-corroborate",
             "omw-probe",
             "openings",
             "parquet",
@@ -61,7 +62,10 @@ public sealed class IngestRosterParityTests
     // 20 -> 21 for chess-transitions: the dedicated substrate-sourced backfill
     // for deterministic position transitions. Keeping it separate from analysis
     // prevents a transition upgrade from replaying unrelated testimony.
-    private const int OperationalOnlyRouteCeiling = 22;
+    // 22 -> 23 for model-corroborate: an operator-supplied analysis across two
+    // already-deposited model snapshots. It consumes substrate/model state and is not
+    // a seed-cadence source, so operational-only is the explicit classification.
+    private const int OperationalOnlyRouteCeiling = 23;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
