@@ -3,8 +3,6 @@ using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
-using Npgsql;
-using NpgsqlTypes;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -23,7 +21,7 @@ internal sealed partial class SubstrateClient
         var conversation = ConversationContent.Resolve(tenant);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        if (await HasUserArtifactOccurrenceAsync(
+        if (await NpgsqlSubstrateReads.HasConfirmedUserArtifactOccurrenceAsync(
                 conn, requested, userArtifacts.Source.ToBytes(), ct).ConfigureAwait(false))
         {
             var vertices = await NpgsqlSubstrateReads.PackedTrajectoryVerticesAsync(
@@ -81,7 +79,7 @@ internal sealed partial class SubstrateClient
                 || reconstructed.MetadataRootId != metadataId)
                 return null;
 
-            var observation = await ReadArtifactObservationAsync(
+            var observation = await NpgsqlSubstrateReads.UserArtifactObservationAsync(
                 conn, userArtifacts.SourceName, requested, ct).ConfigureAwait(false);
 
             return new UserContentExportResponse(
@@ -103,7 +101,7 @@ internal sealed partial class SubstrateClient
                 ModifiedAt: observation?.ModifiedAt);
         }
 
-        var promptContexts = await ReadPromptContextsAsync(
+        var promptContexts = await NpgsqlSubstrateReads.ConfirmedPromptContextsAsync(
             conn, requested, conversation.PromptSource.ToBytes(), ct).ConfigureAwait(false);
         if (promptContexts.Count == 0) return null;
 
@@ -127,88 +125,6 @@ internal sealed partial class SubstrateClient
             Contexts: promptContexts,
             Bytes: null,
             ModifiedAt: null);
-    }
-
-    private static async Task<(long Bytes, DateTimeOffset? ModifiedAt)?> ReadArtifactObservationAsync(
-        NpgsqlConnection conn,
-        string sourceName,
-        byte[] fileId,
-        CancellationToken ct)
-    {
-        await using var cmd = new NpgsqlCommand("""
-            SELECT bytes, modified_at
-            FROM laplace.ingest_file_journal
-            WHERE source_name = @source_name
-              AND file_id = @file
-              AND status = 'ok'
-            ORDER BY ended_at DESC NULLS LAST, run_id DESC
-            LIMIT 1
-            """, conn);
-        cmd.Parameters.Add("source_name", NpgsqlDbType.Text).Value = sourceName;
-        cmd.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
-        return (
-            reader.GetInt64(0),
-            reader.IsDBNull(1) ? null : reader.GetFieldValue<DateTimeOffset>(1));
-    }
-
-    private static async Task<bool> HasUserArtifactOccurrenceAsync(
-        NpgsqlConnection conn,
-        byte[] fileId,
-        byte[] sourceId,
-        CancellationToken ct)
-    {
-        // Shared canonical content has no exclusive owner. Admission of this exact
-        // artifact by this tenant is the access boundary, regardless of first arrival.
-        await using var cmd = new NpgsqlCommand("""
-            SELECT EXISTS (
-                SELECT 1
-                FROM laplace.attestations a
-                JOIN laplace.entities e
-                  ON e.id = a.object_id
-                 AND e.type_id = @file_type
-                WHERE a.subject_id = @source AND a.source_id = @source
-                  AND a.object_id = @file AND a.type_id = @type
-                  AND a.outcome = @outcome
-            )
-            """, conn);
-        cmd.Parameters.Add("source", NpgsqlDbType.Bytea).Value = sourceId;
-        cmd.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
-        cmd.Parameters.Add("type", NpgsqlDbType.Bytea).Value =
-            RelationTypeRegistry.RelationTypeId(UserArtifactContent.MembershipRelation).ToBytes();
-        cmd.Parameters.Add("file_type", NpgsqlDbType.Bytea).Value =
-            EntityTypeRegistry.SourceFile.ToBytes();
-        cmd.Parameters.Add("outcome", NpgsqlDbType.Smallint).Value = (short)AttestationOutcome.Confirm;
-        return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) is true;
-    }
-
-    private static async Task<IReadOnlyList<string>> ReadPromptContextsAsync(
-        NpgsqlConnection conn,
-        byte[] subjectId,
-        byte[] promptSourceId,
-        CancellationToken ct)
-    {
-        byte[] appearsIn = RelationTypeRegistry.RelationTypeId(ConversationContent.MembershipRelation).ToBytes();
-        await using var cmd = new NpgsqlCommand("""
-            SELECT DISTINCT encode(COALESCE(context_id, object_id), 'hex')
-            FROM laplace.attestations
-            WHERE subject_id = @subject
-              AND source_id = @source
-              AND type_id = @type
-              AND outcome = @outcome
-            ORDER BY 1
-            """, conn);
-        cmd.Parameters.Add("subject", NpgsqlDbType.Bytea).Value = subjectId;
-        cmd.Parameters.Add("source", NpgsqlDbType.Bytea).Value = promptSourceId;
-        cmd.Parameters.Add("type", NpgsqlDbType.Bytea).Value = appearsIn;
-        cmd.Parameters.Add("outcome", NpgsqlDbType.Smallint).Value =
-            (short)AttestationOutcome.Confirm;
-        var result = new List<string>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            result.Add(reader.GetString(0));
-        return result;
     }
 
     private static byte[]? ParseEntityId(string idHex)

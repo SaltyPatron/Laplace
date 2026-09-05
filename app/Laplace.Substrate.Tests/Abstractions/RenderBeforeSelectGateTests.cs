@@ -190,7 +190,7 @@ public sealed class RenderBeforeSelectGateTests
     }
 
     [Fact]
-    public void ExactRendering_WalksTheCompleteCycleSafeDag()
+    public void ExactRendering_DoesNotDeclareAnImplicitDepthCeiling()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var sqlRoot = Path.Combine(repoRoot, "extension", "laplace_substrate", "sql");
@@ -213,12 +213,9 @@ public sealed class RenderBeforeSelectGateTests
         var closure = File.ReadAllText(Path.Combine(
             FunctionsRoot(repoRoot), "readback", "constituents_closure.sql.in"));
         Assert.Contains("p_max_depth integer DEFAULT 0", closure, StringComparison.Ordinal);
-        Assert.Contains("CYCLE entity_id SET is_cycle USING path", closure, StringComparison.Ordinal);
 
-        var native = File.ReadAllText(Path.Combine(
-            repoRoot, "extension", "laplace_substrate", "src", "generate_walk.c"));
-        Assert.Contains("if (max_depth == 0 || depth < max_depth)", native,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("render_text_batch($1, 32)", native, StringComparison.Ordinal);
+        // Cycle termination, exact bytes and scalar/batch depth behavior execute
+        // against PostgreSQL in NpgsqlContentReconstructorTests. Native plan caching
+        // and traversal implementation are not specified by source-string assertions.
     }
 }

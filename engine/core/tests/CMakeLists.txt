@@ -30,6 +30,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_identity_key.cpp
     test_text_decomposer.cpp
     test_text_roundtrip_gate.cpp
+    test_xml_stream.cpp
     test_grammar_decomposer.cpp
     test_grammar_compose.cpp
     test_grammar_tags.cpp

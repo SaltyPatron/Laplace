@@ -27,7 +27,14 @@ native=(
 )
 
 mapfile -t outputs < <(
-  find "$ROOT/app" -type f -path '*/bin/Release/*/*.dll' -printf '%h\n' 2>/dev/null | sort -u
+  for dir in "$ROOT"/app/*/bin/Release/*; do
+    [[ -d "$dir" ]] && printf '%s\n' "$dir"
+  done
+  if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+    for dir in "$LAPLACE_BUILD_ROOT"/app/bin/*/Release/*; do
+      [[ -d "$dir" ]] && printf '%s\n' "$dir"
+    done
+  fi
 )
 
 if (( ${#outputs[@]} == 0 )); then
@@ -47,7 +54,10 @@ done
 # The strongest contract is the same one NativeArtifactIdentityTests asserts: at least the
 # core test host's app-local image must be byte-identical to build/engine/core.
 core_test="$ROOT/app/Laplace.Core.Tests/bin/Release/net10.0/liblaplace_core.so"
-if [[ -d "$ROOT/app/Laplace.Core.Tests/bin/Release/net10.0" ]]; then
+if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+  core_test="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Core.Tests/Release/net10.0/liblaplace_core.so"
+fi
+if [[ -d "$(dirname "$core_test")" ]]; then
   [[ -f "$core_test" ]] || {
     echo "::error::managed core test output has no app-local liblaplace_core.so after sync" >&2
     exit 1
