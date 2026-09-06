@@ -77,7 +77,7 @@ if [ -z "$engine_link" ]; then
 fi
 engine_dir="$(dirname "$engine_link")"
 
-rm -rf "$INSTALL_ROOT/lib" "$INSTALL_ROOT/include/laplace"
+rm -rf "${INSTALL_ROOT:?}/lib" "${INSTALL_ROOT:?}/include/laplace"
 mkdir -p "$INSTALL_ROOT/lib" "$INSTALL_ROOT/include/laplace"
 # Preserve SONAME symlinks (.so -> .so.2 -> .so.2.0.0); the legacy extension's
 # DT_NEEDED entry resolves the same staged canonical bytes at build and runtime.
