@@ -81,3 +81,4 @@ python3 scripts/test-forward-prompt-analysis.py
 # both legal release forms (drop/rebind) and the unsafe rebind/ordering cases with
 # a synthetic manifest before the live-catalog checker uses that model.
 python3 scripts/test-upgrade-drop-order.py
+python3 scripts/test-sql-manifest-dependencies.py
