@@ -1,78 +1,172 @@
 -- converse.prompt_coherence(prompt): joint orientation + sense resolution.
 --
--- NATIVE (src/prompt_coherence.c). The SQL body this replaces hung converse.chat() for
--- every prompt -- >280s measured 2026-07-27 after the UD ingest -- and was taken
--- off the hot path in the same change that ported it. It was SQL doing what the
--- substrate law puts in C: set-returning functions as table sources (one
--- lexical.senses() per token, one bubble_up per candidate relation type), relation-name
--- identifiers split with string_to_array per row, and an O(n^2) join of 277-315
--- candidate senses against each other through an OR of both directions that no
--- consensus index can serve. Rewriting it as two indexed joins behind a
--- MATERIALIZED fence still measured 82s.
+-- MULTI-TOKEN NATIVE (src/prompt_coherence.c). The SQL body this replaced hung
+-- converse.chat() for every prompt -- >280s measured 2026-07-27 after the UD
+-- ingest -- because it joined the complete candidate field against itself. The
+-- C implementation remains the canonical joint election whenever there is more
+-- than one resolved prompt token: SQL fetches sets; C does the membership math.
 --
--- The C form is the same computation as a MEMBERSHIP SCAN: candidates fetched
--- once, then one indexed range read per direction with an O(1) hash probe per
--- edge. consensus.relation_rank and the canonical name come from the manifest in C
--- (laplace_relation_lookup), and the name's object token becomes a content id
--- through the same hash the substrate uses everywhere -- so no per-row SQL
--- function call survives anywhere in the read.
+-- SINGLE-TOKEN FAST PATH (GH #409). Joint coherence and relation naming are
+-- mathematically empty when the prompt has exactly one resolved token: there is
+-- no OTHER token to contribute either signal. Streaming every incident edge into
+-- C anyway made the one-word product proof pay work proportional to the token's
+-- graph degree. On the full 2026-09-06 estate the live `dog` request exhausted
+-- the 30s API budget while readiness and ordinary substrate reads remained green.
+--
+-- For that exact cardinality, this wrapper keeps the same candidate source and
+-- comparator dimensions but performs the only remaining graph quantity --
+-- total_mass -- as two set aggregates in PostgreSQL. This is not a word/prompt
+-- special case and contains no language or surface literal: any one-token prompt
+-- takes the same path. Candidate language is still read from witnessed
+-- HAS_LANGUAGE edges, and absent language remains distinct from disagreement.
 --
 -- Returns, per prompt token, its best sense and the signals it was chosen by:
 --   specificity  coherence / own rated mass. A candidate with no direct prompt
---                evidence reports zero; structural rarity is a separate
---                diagnostic and is never substituted into this differently
---                dimensioned scalar.
---   coherence    rated mass to the OTHER tokens' candidate senses
---   rel_mass     scale-free SHARE of the candidate's own witnessed mass carried in a
---                relation type another token NAMES (raw mass = rel_mass * total_mass;
---                "what are the X of Y" shape, where X is a relation not a peer)
---   total_mass   ALL rated mass on the candidate -- specificity's denominator,
---                exposed for the electors' inverse-mass fallback (below)
+--                evidence reports zero; structural rarity is separate.
+--   coherence    rated mass to OTHER tokens' candidate senses
+--   rel_mass     scale-free share carried in a relation another token names
+--   total_mass   all rated mass incident to the candidate token + synset
 --
--- RANK ON SPECIFICITY, NEVER ON MASS. Every mass-shaped scalar tried here has
--- elected function words, because they are wired to everything: denote_mu picked
--- the article and TZAR, highway breadth tied "a" with "pawn", and raw coherence
--- put `is`/`of`/`was` first on every prompt measured. The share of a candidate's
--- own mass that reaches the rest of the prompt is scale-free and separates them
--- cleanly -- measured on "What is a pawn in chess?": total mass a = 4.28e16,
--- chess = 5.28e14, pawn = 2.63e13, and pawn/chess elect correctly.
---
--- THE SINGLE-CONTENT-WORD LIMIT (2026-08-01). A prompt with one content word
--- has no pair to cohere with: every candidate returns specificity 0 and the
--- election fell through to denote_mu, which favors function words -- "What is
--- a glacier?" elected the article (denote_mu 1169.7 vs 1082.3) and answered
--- about the letter A. total_mass (specificity's denominator, computed here all
--- along and discarded) is now a column; the INVERSE-mass election it was first
--- exposed for was REFUTED by measurement on the foundation-only seed (the
--- article's elected sense is LATIN SMALL LETTER A, 5.85e12 -- BELOW glacier,
--- dog and napoleon; the 4.28e16 article of the earlier notes was a UD-era
--- token, not a law), and mass DESC fails "parts of a car" (parts > car). The
--- The elector sites declared and pinned by ElectorArchitectureGateTests instead
--- break the all-silent case by ord DESC -- recency among sense-bearing candidates,
--- resolve_last_word's semantics restricted to tokens the graph holds senses for.
--- total_mass stays exposed: it is the signal that consensus.refuted the premise, and the
--- election diagnostic reads it.
+-- The public signature remains unchanged so every BEGIN ATOMIC caller keeps its
+-- recorded dependency. The private native binding uses the same installed C
+-- symbol and descriptor; no server-image change or restart is required.
 DROP FUNCTION IF EXISTS laplace.prompt_coherence(text);
+
+CREATE OR REPLACE FUNCTION converse.prompt_coherence_native(p_prompt text)
+    RETURNS TABLE(ord int, tok bytea, synset_id bytea,
+                  coherence double precision, denote_mu numeric, peers bigint,
+                  rel_type_id bytea, rel_mass double precision,
+                  specificity double precision, total_mass double precision)
+    AS 'MODULE_PATHNAME', 'pg_laplace_prompt_coherence'
+    LANGUAGE C STABLE STRICT;
+
 CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision,
                   specificity double precision, total_mass double precision)
--- witnesses + lang_agree ARE computed and ARE the comparator's new sort keys
--- (src/prompt_coherence.c), but they are NOT declared here yet, deliberately.
---
--- laplace_substrate is in shared_preload_libraries, so the postmaster pins the
--- image and every backend inherits it by fork; an installed .so is inert until
--- PostgreSQL restarts. Widening this TABLE without that restart puts a 12-column
--- descriptor in front of a 10-column C function, and tuplestore_putvalues then
--- reads two Datums past the end of its stack arrays -- an overread on the live
--- converse path, observed 2026-08-05 returning NULLs for both columns.
---
--- The C symbol-integrity gate does NOT catch this: every symbol resolves. Symbol
--- existence is not signature agreement, and nothing in the sync path compares
--- returned column counts across the image boundary.
---
--- Re-add both columns in the same change that bounces PostgreSQL. Until then the
--- keys still rank -- they live in the comparator, not in the output.
-    AS 'MODULE_PATHNAME', 'pg_laplace_prompt_coherence'
-    LANGUAGE C STABLE;
+    LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    resolved_count bigint;
+    only_ord       int;
+    only_tok       bytea;
+    only_lang      bytea;
+BEGIN
+    -- prompt_state is evaluated once on the fast path. array_agg preserves the
+    -- row alongside its language without a scalar lookup or rendered label.
+    SELECT count(*),
+           (array_agg(p.ord      ORDER BY p.ord))[1],
+           (array_agg(p.id       ORDER BY p.ord))[1],
+           (array_agg(p.language ORDER BY p.ord))[1]
+      INTO resolved_count, only_ord, only_tok, only_lang
+      FROM converse.prompt_state(p_prompt) p
+     WHERE p.id IS NOT NULL;
+
+    IF resolved_count <> 1 THEN
+        RETURN QUERY
+        SELECT n.ord, n.tok, n.synset_id, n.coherence, n.denote_mu, n.peers,
+               n.rel_type_id, n.rel_mass, n.specificity, n.total_mass
+          FROM converse.prompt_coherence_native(p_prompt) n;
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    WITH bubble AS MATERIALIZED (
+        -- Empty domain context deliberately keeps the complete candidate field;
+        -- this is the same call shape used by the native joint elector.
+        SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
+          FROM taxonomy.bubble_up_batch(
+                   ARRAY[only_tok], ARRAY[]::bytea[], NULL) b
+         WHERE b.term = only_tok
+           AND b.synset_id IS NOT NULL
+    ),
+    sense_ids AS MATERIALIZED (
+        SELECT ARRAY(SELECT DISTINCT b.sense_id
+                       FROM bubble b
+                      WHERE b.sense_id IS NOT NULL
+                      ORDER BY b.sense_id) AS ids
+    ),
+    language_ranked AS MATERIALIZED (
+        SELECT l.word, l.lang,
+               row_number() OVER (
+                   PARTITION BY l.word
+                   ORDER BY l.mu DESC, l.lang) AS rn
+          FROM sense_ids s
+          CROSS JOIN LATERAL converse.word_language_candidates_batch(s.ids) l
+    ),
+    candidates AS MATERIALIZED (
+        SELECT b.sense_id,
+               b.synset_id,
+               b.base_eff_mu,
+               b.witnesses,
+               CASE
+                   WHEN only_lang IS NULL OR lr.lang IS NULL THEN 0
+                   WHEN only_lang = lr.lang THEN 1
+                   ELSE -1
+               END AS lang_agree
+          FROM bubble b
+          LEFT JOIN language_ranked lr
+            ON lr.word = b.sense_id
+           AND lr.rn = 1
+    ),
+    probe_ids AS MATERIALIZED (
+        SELECT ARRAY(
+            SELECT DISTINCT q.id
+              FROM (
+                    SELECT c.synset_id AS id FROM candidates c
+                    UNION ALL
+                    SELECT only_tok
+                   ) q
+             WHERE q.id IS NOT NULL
+             ORDER BY q.id
+        ) AS ids
+    ),
+    -- Preserve pc_scan_edges' denominator exactly: outgoing and incoming mass
+    -- both count, including a self-loop in both directions. Unknown/dynamic
+    -- relation ids contribute zero here just as laplace_relation_lookup does in C.
+    mass_arms AS MATERIALIZED (
+        SELECT c.subject_id AS id,
+               sum(COALESCE(consensus.relation_rank(c.type_id), 0.0)
+                   * ((c.rating - 2 * c.rd)::double precision)) AS mass
+          FROM probe_ids p
+          JOIN laplace.consensus c ON c.subject_id = ANY (p.ids)
+         GROUP BY c.subject_id
+        UNION ALL
+        SELECT c.object_id AS id,
+               sum(COALESCE(consensus.relation_rank(c.type_id), 0.0)
+                   * ((c.rating - 2 * c.rd)::double precision)) AS mass
+          FROM probe_ids p
+          JOIN laplace.consensus c ON c.object_id = ANY (p.ids)
+         GROUP BY c.object_id
+    ),
+    mass AS MATERIALIZED (
+        SELECT m.id, sum(m.mass)::double precision AS mass
+          FROM mass_arms m
+         GROUP BY m.id
+    ),
+    ranked AS MATERIALIZED (
+        SELECT c.*,
+               COALESCE(ms.mass, 0.0) + COALESCE(mt.mass, 0.0) AS total_mass
+          FROM candidates c
+          LEFT JOIN mass ms ON ms.id = c.synset_id
+          LEFT JOIN mass mt ON mt.id = only_tok
+    )
+    SELECT only_ord,
+           only_tok,
+           r.synset_id,
+           0.0::double precision AS coherence,
+           r.base_eff_mu::numeric AS denote_mu,
+           0::bigint AS peers,
+           NULL::bytea AS rel_type_id,
+           0.0::double precision AS rel_mass,
+           0.0::double precision AS specificity,
+           r.total_mass::double precision
+      FROM ranked r
+     ORDER BY r.lang_agree DESC,
+              r.witnesses DESC,
+              r.base_eff_mu DESC NULLS LAST,
+              r.total_mass DESC,
+              r.synset_id
+     LIMIT 1;
+END;
+$$;
