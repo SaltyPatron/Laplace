@@ -1,0 +1,75 @@
+-- The legacy extension supplies only durable physicality candidates.  The
+-- selected terminal entity/path and forward receipt must come back through the
+-- canonical Laplace-Refactor cognition engine.
+BEGIN;
+DO $$
+DECLARE
+    type_t bytea := public.laplace_hash128_blake3('Type');
+    container_id bytea := public.laplace_hash128_blake3('test/refactor/container');
+    a bytea := public.laplace_hash128_blake3('test/refactor/a');
+    b bytea := public.laplace_hash128_blake3('test/refactor/b');
+    p bytea := public.laplace_hash128_blake3('test/refactor/physicality');
+    got bytea;
+    got_set bytea[];
+    receipt bytea;
+    output_fp bytea;
+BEGIN
+    INSERT INTO laplace.entities(id, type_id, created_at)
+    VALUES
+        (container_id, type_t, now()),
+        (a, type_t, now()),
+        (b, type_t, now())
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO laplace.physicalities(
+        id, entity_id, type, coord, hilbert_index, trajectory,
+        n_constituents, observed_at)
+    VALUES (
+        p, container_id, 1,
+        'SRID=0;POINT ZM (0 0 0 0)'::geometry,
+        decode(repeat('00', 16), 'hex'),
+        public.laplace_trajectory_build(ARRAY[a, b]),
+        2, now())
+    ON CONFLICT (id) DO NOTHING;
+
+    SELECT entity_id, forward_receipt_id, output_fingerprint
+      INTO got, receipt, output_fp
+      FROM converse.refactor_cognition(a, 1, 1, NULL, 1, NULL, true);
+    IF got IS DISTINCT FROM container_id THEN
+        RAISE EXCEPTION 'container mismatch: expected %, got %', encode(container_id, 'hex'), encode(got, 'hex');
+    END IF;
+    IF octet_length(receipt) <> 32 OR receipt = decode(repeat('00', 32), 'hex')
+       OR octet_length(output_fp) <> 32 OR output_fp = decode(repeat('00', 32), 'hex') THEN
+        RAISE EXCEPTION 'canonical engine did not return nonzero receipts';
+    END IF;
+
+    SELECT entity_id INTO got
+      FROM converse.refactor_cognition(b, 4, 1, NULL, 1, NULL, true);
+    IF got IS DISTINCT FROM a THEN
+        RAISE EXCEPTION 'predecessor mismatch: expected %, got %', encode(a, 'hex'), encode(got, 'hex');
+    END IF;
+
+    SELECT entity_id INTO got
+      FROM converse.refactor_cognition(a, 8, 1, NULL, 1, NULL, true);
+    IF got IS DISTINCT FROM b THEN
+        RAISE EXCEPTION 'successor mismatch: expected %, got %', encode(b, 'hex'), encode(got, 'hex');
+    END IF;
+
+    SELECT entity_id INTO got
+      FROM converse.refactor_cognition(a, 16, 1, NULL, 1, NULL, true);
+    IF got IS DISTINCT FROM b THEN
+        RAISE EXCEPTION 'co-occurrence mismatch: expected %, got %', encode(b, 'hex'), encode(got, 'hex');
+    END IF;
+
+    SELECT array_agg(entity_id ORDER BY entity_id)
+      INTO got_set
+      FROM converse.refactor_cognition(container_id, 2, 2, NULL, 1, NULL, true);
+    IF got_set IS DISTINCT FROM ARRAY[
+        LEAST(a, b), GREATEST(a, b)
+    ]::bytea[] THEN
+        RAISE EXCEPTION 'constituent set mismatch';
+    END IF;
+END
+$$;
+DO
+ROLLBACK;
