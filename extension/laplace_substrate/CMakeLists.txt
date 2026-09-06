@@ -88,7 +88,37 @@ set(EXT_C_SOURCES
     src/lexical_case.c
     src/steered_walk.c
     src/realize_batch.c
+    src/refactor_cognition.c
 )
+
+# The compatibility extension never carries a second cognition implementation.
+# Build the exact pinned Laplace-Refactor engine as a dependency and link this
+# storage/transport adapter to it.  The build-tree prefix removes any root/manual
+# install prerequisite; install() copies the canonical engine beside the PG
+# module and the module resolves it through $ORIGIN.
+set(LAPLACE_REFACTOR_ENGINE_PREFIX
+    "${CMAKE_BINARY_DIR}/refactor-engine-prefix"
+    CACHE PATH "Build/install prefix for the canonical Laplace-Refactor engine")
+set(_refactor_engine_stamp
+    "${LAPLACE_REFACTOR_ENGINE_PREFIX}/.laplace-refactor-engine-revision")
+set(_refactor_engine_library
+    "${LAPLACE_REFACTOR_ENGINE_PREFIX}/lib/liblaplace_engine.so")
+set(_refactor_engine_header
+    "${LAPLACE_REFACTOR_ENGINE_PREFIX}/include/laplace/cognition_observation_request.h")
+if(NOT WIN32)
+    add_custom_command(
+        OUTPUT "${_refactor_engine_stamp}"
+        BYPRODUCTS "${_refactor_engine_library}" "${_refactor_engine_header}"
+        COMMAND ${CMAKE_COMMAND} -E env
+            "LAPLACE_EXTERNAL=${CMAKE_BINARY_DIR}/refactor-engine-external"
+            "LAPLACE_WORK_ROOT=${CMAKE_BINARY_DIR}/refactor-engine-work"
+            "LAPLACE_REFACTOR_ENGINE_PREFIX=${LAPLACE_REFACTOR_ENGINE_PREFIX}"
+            ${BASH} "${PROJECT_SOURCE_DIR}/scripts/build-refactor-engine.sh"
+        DEPENDS "${PROJECT_SOURCE_DIR}/scripts/build-refactor-engine.sh"
+        COMMENT "Building pinned canonical Laplace-Refactor cognition engine"
+        VERBATIM)
+    add_custom_target(laplace_refactor_engine DEPENDS "${_refactor_engine_stamp}")
+endif()
 
 if(WIN32)
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
@@ -112,19 +142,30 @@ if(WIN32)
     )
 else()
     add_library(${EXT_NAME} MODULE ${EXT_C_SOURCES})
+    add_dependencies(${EXT_NAME} laplace_refactor_engine)
     set_target_properties(${EXT_NAME} PROPERTIES
         PREFIX ""
         OUTPUT_NAME ${EXT_NAME}
+        BUILD_RPATH "${LAPLACE_REFACTOR_ENGINE_PREFIX}/lib"
+        INSTALL_RPATH "$ORIGIN"
     )
     target_include_directories(${EXT_NAME} SYSTEM PRIVATE
         ${LAPLACE_PG_INCLUDEDIR_SERVER}
+    )
+    target_include_directories(${EXT_NAME} PRIVATE
+        "${LAPLACE_REFACTOR_ENGINE_PREFIX}/include"
     )
     # In-tree deps resolve via CMake's automatic build-tree RPATH; never add
     # -Wl,-rpath build dirs here — literal linker rpaths survive `cmake
     # --install` untouched, so the installed .so keeps resolving
     # liblaplace_dynamics out of the CI workspace build tree (a stub no-MKL
     # rebuild there crash-looped the production postmaster, 2026-07-16).
-    target_link_libraries(${EXT_NAME} PRIVATE laplace_core laplace_dynamics)
+    target_link_libraries(${EXT_NAME} PRIVATE
+        laplace_core
+        laplace_dynamics
+        blake3
+        "${_refactor_engine_library}"
+    )
 endif()
 
 configure_file(
@@ -211,6 +252,9 @@ if(NOT WIN32)
             DESTINATION ${LAPLACE_EXT_LIBDIR}
             PERMISSIONS ${LAPLACE_INSTALL_EXEC_PERMS}
     )
+    install(DIRECTORY "${LAPLACE_REFACTOR_ENGINE_PREFIX}/lib/"
+        DESTINATION ${LAPLACE_EXT_LIBDIR}
+        FILES_MATCHING PATTERN "liblaplace_engine.so*")
     install(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
         ${EXT_BUILT_SQL}
