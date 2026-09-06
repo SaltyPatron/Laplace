@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject extension manifests that bind a source view after a literal SQL consumer.
+"""Reject manifests that bind views or functions after their literal SQL consumers.
 
 Fresh CREATE EXTENSION starts with no pre-existing views, while upgrade/dev databases
 can retain old views and accidentally hide a broken manifest order. This check keeps
@@ -25,6 +25,12 @@ CREATE_VIEW_RE = re.compile(
 )
 VIEW_REF_RE = re.compile(r"\blaplace\.(v_[a-z0-9_]+)\b", re.IGNORECASE)
 DROP_VIEW_RE = re.compile(r"^\s*DROP\s+VIEW\b", re.IGNORECASE)
+FUNCTION_RE = re.compile(
+    r"\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+([a-z_][\w]*\.[a-z_][\w]*)\s*\(",
+    re.IGNORECASE,
+)
+ATOMIC_RE = re.compile(r"\bBEGIN\s+ATOMIC\b(.*?)\bEND\s*;", re.IGNORECASE | re.DOTALL)
+CALL_RE = re.compile(r"\b([a-z_][\w]*\.[a-z_][\w]*)\s*\(", re.IGNORECASE)
 
 
 def manifest_modules(path: Path) -> list[str]:
@@ -115,11 +121,33 @@ def validate_manifest(path: Path) -> list[str]:
     return errors
 
 
+def validate_atomic_dependencies(path: Path) -> list[str]:
+    modules = manifest_modules(path)
+    texts = {
+        module: "\n".join(sql_without_line_comments(available_module_text(module) or ""))
+        for module in modules
+    }
+    owners: dict[str, str] = {}
+    for module in modules:
+        for match in FUNCTION_RE.finditer(texts[module]):
+            owners.setdefault(match.group(1).lower(), module)
+    positions = {module: index for index, module in enumerate(modules)}
+    errors: list[str] = []
+    for module in modules:
+        for body in ATOMIC_RE.finditer(texts[module]):
+            for call in set(CALL_RE.findall(body.group(1))):
+                owner = owners.get(call.lower())
+                if owner is not None and positions[owner] > positions[module]:
+                    errors.append(f"{path.name}: {module} binds {call} before {owner}")
+    return errors
+
+
 def main() -> int:
     errors: list[str] = []
     try:
         for manifest in MANIFESTS:
             errors.extend(validate_manifest(manifest))
+            errors.extend(validate_atomic_dependencies(manifest))
     except ValueError as exc:
         errors.append(str(exc))
 

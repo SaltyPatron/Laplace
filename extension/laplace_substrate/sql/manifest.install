@@ -3,6 +3,7 @@ schema/laplace_substrate_version.sql.in
 schema/tables/entities.sql.in
 schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
+schema/tables/attestation_witness_columns.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
@@ -321,6 +322,9 @@ functions/consensus/consensus_walk_edges.sql.in
 functions/consensus/consensus_neighbors_directed.sql.in
 functions/consensus/consensus_neighbors_undirected.sql.in
 functions/consensus/foundry_crawl_neighbors.sql.in
+functions/highway/relation_highway.sql.in
+functions/highway/laplace_highway_mask_bits.sql.in
+functions/relation/relation_mask_types.sql.in
 functions/consensus/explore_web_neighbors.sql.in
 functions/consensus/explore_web.sql.in
 functions/generation/forward_frontier.sql.in
@@ -392,7 +396,6 @@ functions/geometry/entity_container_degree.sql.in
 functions/highway/laplace_highway_match.sql.in
 functions/highway/laplace_highway_popcount.sql.in
 functions/highway/laplace_highway_band_mask.sql.in
-functions/highway/relation_highway.sql.in
 functions/highway/consensus_band_edges.sql.in
 functions/ops/substrate_pulse.sql.in
 functions/ops/ingest_runs.sql.in
@@ -406,8 +409,6 @@ functions/structural/mesh_position.sql.in
 functions/taxonomy/taxonomy_tree.sql.in
 functions/ops/band_leaders.sql.in
 functions/ops/entity_record.sql.in
-functions/highway/laplace_highway_mask_bits.sql.in
-functions/relation/relation_mask_types.sql.in
 functions/highway/laplace_highway_ready.sql.in
 functions/chess/laplace_chess_position_ready.sql.in
 functions/highway/laplace_highway_mask_from_bits.sql.in

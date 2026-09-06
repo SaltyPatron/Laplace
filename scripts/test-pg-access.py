@@ -113,7 +113,7 @@ class PeerMapTests(unittest.TestCase):
 
 
 class DatabaseHealthScriptTests(unittest.TestCase):
-    def _run_health(self, *, connect_fail=False):
+    def _run_health(self, *, connect_fail=False, missing_writer_column=False):
         with tempfile.TemporaryDirectory(prefix="laplace-db-health-test-") as temporary:
             temp = Path(temporary)
             fake_bin = temp / "bin"
@@ -153,6 +153,10 @@ elif "SELECT extversion FROM pg_extension" in query:
     print("test-ext")
 elif "string_agg(name" in query:
     print("")
+elif "FROM laplace.attestations WHERE false" in query:
+    if os.environ.get("FAKE_PSQL_MISSING_WRITER_COLUMN") == "1":
+        print('column "fold_replayable" does not exist', file=sys.stderr)
+        raise SystemExit(1)
 elif "FROM pg_index" in query and "count(*)" in query:
     print("0")
 elif "FROM pg_constraint" in query and "count(*)" in query:
@@ -173,6 +177,8 @@ else:
             env["FAKE_PSQL_LOG"] = str(log)
             if connect_fail:
                 env["FAKE_PSQL_CONNECT_FAIL"] = "1"
+            if missing_writer_column:
+                env["FAKE_PSQL_MISSING_WRITER_COLUMN"] = "1"
 
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/check-database-health.sh"), "laplace"],
@@ -200,6 +206,12 @@ else:
         self.assertIn("database 'laplace' is not connectable", result.stderr)
         self.assertEqual(1, len(calls))
         self.assertEqual("SELECT 1", calls[0][-1])
+
+    def test_health_rejects_current_extension_with_old_writer_schema(self):
+        result, calls = self._run_health(missing_writer_column=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("attestation writer columns are missing", result.stderr)
+        self.assertNotIn("DB_HEALTH_OK", result.stdout)
 
 
 if __name__ == "__main__":
