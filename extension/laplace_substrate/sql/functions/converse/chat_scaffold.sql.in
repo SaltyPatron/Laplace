@@ -88,3 +88,32 @@ BEGIN
     END;
 END;
 $$;
+
+-- Cross-repository convergence boundary.  The C symbol is a storage adapter to
+-- the canonical Laplace-Refactor cognition engine; it returns the actual terminal
+-- entity/path records selected by that engine plus its forward receipt.  No
+-- endpoint-specific search/operation/completion policy lives in this SQL wrapper.
+DROP FUNCTION IF EXISTS converse.refactor_cognition(bytea, integer, integer, bytea, integer, bytea, boolean);
+CREATE OR REPLACE FUNCTION converse.refactor_cognition(
+        p_anchor            bytea,
+        p_relation_mask     integer DEFAULT 31,
+        p_maximum_results   integer DEFAULT 8,
+        p_goal              bytea DEFAULT NULL,
+        p_max_depth         integer DEFAULT 2,
+        p_context           bytea DEFAULT NULL,
+        p_terminal_results  boolean DEFAULT true)
+    RETURNS TABLE(
+        rank                            integer,
+        entity_id                       bytea,
+        path_id                         bytea,
+        terminal_state_id               bytea,
+        total_cost                      bigint,
+        transition_count                bigint,
+        independent_evidence_root_count bigint,
+        relation_family                 integer,
+        source_layer                    integer,
+        direction                       integer,
+        forward_receipt_id              bytea,
+        output_fingerprint              bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_refactor_cognition'
+    LANGUAGE C STABLE PARALLEL RESTRICTED;
