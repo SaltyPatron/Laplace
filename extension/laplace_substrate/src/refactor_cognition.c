@@ -446,7 +446,6 @@ pg_laplace_refactor_cognition(PG_FUNCTION_ARGS)
         LAPLACE_COGNITION_OBSERVATION_CANDIDATE_PROVIDER_ABI_MAJOR;
     provider.abi_minor =
         LAPLACE_COGNITION_OBSERVATION_CANDIDATE_PROVIDER_ABI_MINOR;
-    hash_start((blake3_hasher[1]){{0}}, "unused"); /* keep -Wmissing-prototypes honest */
     {
         blake3_hasher hasher;
         hash_start(&hasher, "laplace.legacy.candidate-provider/v1");
