@@ -3,6 +3,7 @@ schema/laplace_substrate_version.sql.in
 schema/tables/entities.sql.in
 schema/tables/physicalities.sql.in
 schema/tables/attestations.sql.in
+schema/tables/attestation_witness_columns.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in

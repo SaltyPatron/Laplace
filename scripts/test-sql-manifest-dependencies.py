@@ -39,7 +39,7 @@ class ManifestTests(unittest.TestCase):
     def test_existing_attestation_tables_receive_additive_writer_columns(self):
         upgrade = checker.SQL_ROOT / "manifest.upgrade"
         modules = checker.manifest_modules(upgrade)
-        owner = "schema/tables/attestations.sql.in"
+        owner = "schema/tables/attestation_witness_columns.sql.in"
         self.assertIn(owner, modules)
         self.assertLess(modules.index(owner), modules.index("functions/fold/attestation_merge.sql.in"))
         self.assertIn("ADD COLUMN IF NOT EXISTS fold_replayable", checker.available_module_text(owner))
