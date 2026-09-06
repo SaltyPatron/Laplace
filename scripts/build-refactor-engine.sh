@@ -64,18 +64,33 @@ clone_exact "$TREE_SITTER_REPO" "$TREE_SITTER_REVISION" "$TREE_SITTER_ROOT"
 rm -rf "$BUILD_ROOT"
 cmake -S "$SOURCE_ROOT" -B "$BUILD_ROOT" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
     -DBUILD_TESTING=OFF \
     -DLAPLACE_OUTPUT_ROOT="$BUILD_ROOT/output" \
     -DLAPLACE_BLAKE3_SOURCE="$BLAKE3_ROOT" \
     -DLAPLACE_TREE_SITTER_SOURCE="$TREE_SITTER_ROOT"
-cmake --build "$BUILD_ROOT" --target laplace_engine laplace_unicode_numeric --parallel "${LAPLACE_BUILD_JOBS:-2}"
-cmake --install "$BUILD_ROOT"
+cmake --build "$BUILD_ROOT" --target laplace_engine --parallel "${LAPLACE_BUILD_JOBS:-2}"
+
+engine_link="$(find "$BUILD_ROOT" -name 'liblaplace_engine.so' -print -quit)"
+if [ -z "$engine_link" ]; then
+    echo "refactor-engine: build did not produce liblaplace_engine.so" >&2
+    exit 1
+fi
+engine_dir="$(dirname "$engine_link")"
+
+rm -rf "$INSTALL_ROOT/lib" "$INSTALL_ROOT/include/laplace"
+mkdir -p "$INSTALL_ROOT/lib" "$INSTALL_ROOT/include/laplace"
+# Preserve SONAME symlinks (.so -> .so.2 -> .so.2.0.0); the legacy extension's
+# DT_NEEDED entry resolves the same staged canonical bytes at build and runtime.
+cp -a "$engine_dir"/liblaplace_engine.so* "$INSTALL_ROOT/lib/"
+cp -a "$SOURCE_ROOT/engine/include/laplace/." "$INSTALL_ROOT/include/laplace/"
+if [ -d "$BUILD_ROOT/generated/laplace" ]; then
+    cp -a "$BUILD_ROOT/generated/laplace/." "$INSTALL_ROOT/include/laplace/"
+fi
 
 if [ ! -f "$INSTALL_ROOT/lib/liblaplace_engine.so" ] \
    || [ ! -f "$INSTALL_ROOT/include/laplace/cognition_observation_request.h" ]; then
-    echo "refactor-engine: install did not produce canonical engine/header" >&2
+    echo "refactor-engine: staged closure is incomplete" >&2
     exit 1
 fi
 printf '%s\n' "$REF_REVISION" > "$STAMP"
-echo "refactor-engine: installed $REF_REVISION at $INSTALL_ROOT"
+echo "refactor-engine: staged $REF_REVISION at $INSTALL_ROOT"
