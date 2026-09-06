@@ -5,22 +5,22 @@ BEGIN;
 
 DO $$
 DECLARE
-    type_t bytea := public.laplace_hash128_blake3('Type');
-    container_id bytea := public.laplace_hash128_blake3('test/refactor/container');
-    a bytea := public.laplace_hash128_blake3('test/refactor/a');
-    b bytea := public.laplace_hash128_blake3('test/refactor/b');
-    p bytea := public.laplace_hash128_blake3('test/refactor/physicality');
+    type_t bytea := public.laplace_hash128_blake3('Type'::bytea);
+    container_id bytea := public.laplace_hash128_blake3('test/refactor/container'::bytea);
+    a bytea := public.laplace_hash128_blake3('test/refactor/a'::bytea);
+    b bytea := public.laplace_hash128_blake3('test/refactor/b'::bytea);
+    p bytea := public.laplace_hash128_blake3('test/refactor/physicality'::bytea);
     got bytea;
     got_set bytea[];
     receipt bytea;
     output_fp bytea;
 BEGIN
-    INSERT INTO laplace.entities(id, type_id, created_at)
+    INSERT INTO laplace.entities(id, tier, type_id, created_at)
     VALUES
-        (container_id, type_t, now()),
-        (a, type_t, now()),
-        (b, type_t, now())
-    ON CONFLICT (id) DO NOTHING;
+        (container_id, 0, type_t, now()),
+        (a, 0, type_t, now()),
+        (b, 0, type_t, now())
+    ON CONFLICT (id, tier) DO NOTHING;
 
     INSERT INTO laplace.physicalities(
         id, entity_id, type, coord, hilbert_index, trajectory,
