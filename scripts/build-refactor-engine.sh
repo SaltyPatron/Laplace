@@ -6,8 +6,7 @@ set -euo pipefail
 # Pin exact source identities so a normal setup-host/build never depends on a
 # moving branch or on an operator pre-populating a checkout.
 REF_REPO="https://github.com/SaltyPatron/Laplace-Refactor.git"
-# Updated to the #237 merge commit before this branch may merge to main.
-REF_REVISION="afbe38ba34b06a6dd2e49ba3a316118bc473622a"
+REF_REVISION="1f803d0cc6cea5fd5a9f83c8f29dcb81f5ff8a2b"
 BLAKE3_REPO="https://github.com/BLAKE3-team/BLAKE3.git"
 BLAKE3_REVISION="f3149ec5bb5449af877ba20377a11008ff499fa2"
 TREE_SITTER_REPO="https://github.com/tree-sitter/tree-sitter.git"
