@@ -28,10 +28,8 @@ public sealed class LegacyUpgradeRegressionTests(LocalPgFixture pg)
             SET LOCAL search_path=laplace,public;
             """);
         string module = Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
-            "extension", "laplace_substrate", "sql", "schema", "tables", "attestations.sql.in");
+            "extension", "laplace_substrate", "sql", "schema", "tables", "attestation_witness_columns.sql.in");
         string ddl = await File.ReadAllTextAsync(module);
-        // pg_extension_config_dump belongs to CREATE/ALTER EXTENSION, not DDL replay.
-        ddl = ddl[..ddl.IndexOf("SELECT pg_extension_config_dump", StringComparison.Ordinal)];
         await Execute(ddl);
         await Execute(ddl); // Upgrade is idempotent.
         await using var verify = new NpgsqlCommand("""
