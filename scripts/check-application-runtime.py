@@ -139,7 +139,8 @@ def installed_native_hashes(root, prefix):
         name = manifests[0].read_text().strip()
         if not re.fullmatch(r"laplace_execution_[0-9a-f]{16}", name):
             raise ValueError("invalid native execution module identity")
-        installed_paths = [*MODULES.values(), f"lib/postgresql/18/{name}.so"]
+        installed_paths = [*MODULES.values(), f"lib/postgresql/18/{name}.so",
+                           str(manifests[0].relative_to(expected_prefix))]
         for installed in installed_paths:
             expected = expected_prefix / installed
             actual = prefix / installed
