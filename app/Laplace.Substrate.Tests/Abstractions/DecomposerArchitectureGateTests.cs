@@ -20,7 +20,7 @@ public sealed class DecomposerArchitectureGateTests
         Assert.Same(IngestSourceProfile.UdSentence, source.SizingProfile);
         var profile = source.SizingProfile;
         var config = IngestPipelineDefaults.Compose(
-            source.SourceId, "profile-propagation", new DecomposerOptions(), null, profile);
+            source.SourceId, "profile-propagation", DecomposerOptions.Default, null, profile);
         Assert.Same(profile, config.WorkingSetProfile);
         Assert.Equal(80_000, config.WorkingSetProfile!.ResidentBytesPerComposeUnit);
     }

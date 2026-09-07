@@ -13,7 +13,7 @@ public sealed class ChessPgnDecomposerNovelGameTests
         IDecomposer source = new ChessPgnDecomposer();
         Assert.Same(IngestSourceProfile.ChessPgn, source.SizingProfile);
         var config = IngestPipelineDefaults.Compose(
-            source.SourceId, "chess-sizing", new DecomposerOptions(), null,
+            source.SourceId, "chess-sizing", DecomposerOptions.Default, null,
             source.SizingProfile);
         Assert.Same(source.SizingProfile, config.WorkingSetProfile);
         const long loggedBudget = 3_374_058_188;

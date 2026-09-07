@@ -762,7 +762,7 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
         }
 
         var quote = await _store.TryGetAsync(quoteId, ct);
-        if (quote is null)
+        if (quote is null || !string.Equals(quote.Tenant, tenant, StringComparison.Ordinal))
             return new QuoteExecutionGate(false, "quote_not_found", "Quote does not exist.", null);
 
         if (!string.Equals(quote.ServiceId, serviceId, StringComparison.OrdinalIgnoreCase))

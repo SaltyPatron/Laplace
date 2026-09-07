@@ -1,0 +1,1097 @@
+[
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -isystem /build/external/fathom/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/CMakeFiles/fathom_tb.dir/build/external/fathom/src/tbprobe.c.o -c /build/external/fathom/src/tbprobe.c",
+  "file": "/build/external/fathom/src/tbprobe.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter/lib/include -I/build/external/tree-sitter/lib/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/CMakeFiles/tree_sitter_rt.dir/build/external/tree-sitter/lib/src/lib.c.o -c /build/external/tree-sitter/lib/src/lib.c",
+  "file": "/build/external/tree-sitter/lib/src/lib.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/blake3/c -O3 -DNDEBUG -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -march=haswell -w -std=c17 -o _deps/blake3/CMakeFiles/blake3.dir/blake3.c.o -c /build/external/blake3/c/blake3.c",
+  "file": "/build/external/blake3/c/blake3.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/blake3/c -O3 -DNDEBUG -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -march=haswell -w -std=c17 -o _deps/blake3/CMakeFiles/blake3.dir/blake3_dispatch.c.o -c /build/external/blake3/c/blake3_dispatch.c",
+  "file": "/build/external/blake3/c/blake3_dispatch.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/blake3/c -O3 -DNDEBUG -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -march=haswell -w -std=c17 -o _deps/blake3/CMakeFiles/blake3.dir/blake3_portable.c.o -c /build/external/blake3/c/blake3_portable.c",
+  "file": "/build/external/blake3/c/blake3_portable.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/blake3/c -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o _deps/blake3/CMakeFiles/blake3.dir/blake3_avx2_x86-64_unix.S.o -c /build/external/blake3/c/blake3_avx2_x86-64_unix.S",
+  "file": "/build/external/blake3/c/blake3_avx2_x86-64_unix.S"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/blake3/c -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o _deps/blake3/CMakeFiles/blake3.dir/blake3_avx512_x86-64_unix.S.o -c /build/external/blake3/c/blake3_avx512_x86-64_unix.S",
+  "file": "/build/external/blake3/c/blake3_avx512_x86-64_unix.S"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/blake3/c -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o _deps/blake3/CMakeFiles/blake3.dir/blake3_sse2_x86-64_unix.S.o -c /build/external/blake3/c/blake3_sse2_x86-64_unix.S",
+  "file": "/build/external/blake3/c/blake3_sse2_x86-64_unix.S"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/blake3/c -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o _deps/blake3/CMakeFiles/blake3.dir/blake3_sse41_x86-64_unix.S.o -c /build/external/blake3/c/blake3_sse41_x86-64_unix.S",
+  "file": "/build/external/blake3/c/blake3_sse41_x86-64_unix.S"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/googletest/googlemock/include -I/build/external/googletest/googlemock -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIC -Wall -Wshadow -Wconversion -Wundef -Wno-implicit-float-size-conversion -ffp-model=precise -DGTEST_HAS_PTHREAD=1 -fexceptions -W -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wunused-parameter -Wcast-align -Winline -Wredundant-decls -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o _deps/googletest/googlemock/CMakeFiles/gmock.dir/src/gmock-all.cc.o -c /build/external/googletest/googlemock/src/gmock-all.cc",
+  "file": "/build/external/googletest/googlemock/src/gmock-all.cc"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DLAPLACE_MKL_CBWR_AVX2=1 -isystem /build/external/googletest/googlemock/include -isystem /build/external/googletest/googlemock -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIC -Wall -Wshadow -Wconversion -Wundef -Wno-implicit-float-size-conversion -ffp-model=precise -DGTEST_HAS_PTHREAD=1 -fexceptions -W -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wunused-parameter -Wcast-align -Winline -Wredundant-decls -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o _deps/googletest/googlemock/CMakeFiles/gmock_main.dir/src/gmock_main.cc.o -c /build/external/googletest/googlemock/src/gmock_main.cc",
+  "file": "/build/external/googletest/googlemock/src/gmock_main.cc"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/googletest/googletest/include -I/build/external/googletest/googletest -O3 -DNDEBUG -fPIC -Wall -Wshadow -Wconversion -Wundef -Wno-implicit-float-size-conversion -ffp-model=precise -DGTEST_HAS_PTHREAD=1 -fexceptions -W -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wunused-parameter -Wcast-align -Winline -Wredundant-decls -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o _deps/googletest/googletest/CMakeFiles/gtest.dir/src/gtest-all.cc.o -c /build/external/googletest/googletest/src/gtest-all.cc",
+  "file": "/build/external/googletest/googletest/src/gtest-all.cc"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DLAPLACE_MKL_CBWR_AVX2=1 -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIC -Wall -Wshadow -Wconversion -Wundef -Wno-implicit-float-size-conversion -ffp-model=precise -DGTEST_HAS_PTHREAD=1 -fexceptions -W -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wunused-parameter -Wcast-align -Winline -Wredundant-decls -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o _deps/googletest/googletest/CMakeFiles/gtest_main.dir/src/gtest_main.cc.o -c /build/external/googletest/googletest/src/gtest_main.cc",
+  "file": "/build/external/googletest/googletest/src/gtest_main.cc"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/version.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/version.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/version.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/math4d.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/math4d.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/math4d.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/hash128.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/hash128.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/hash128.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/hilbert4d.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/hilbert4d.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/hilbert4d.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/mantissa.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/mantissa.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/mantissa.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/super_fibonacci.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/super_fibonacci.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/super_fibonacci.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/modality_decimal.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/modality_decimal.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/modality_decimal.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/modality_witness.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/modality_witness.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/modality_witness.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/image_decomposer.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/image_decomposer.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/image_decomposer.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/audio_decomposer.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/audio_decomposer.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/audio_decomposer.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/media_decode.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/media_decode.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/media_decode.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/media_decode_impl.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/media_decode_impl.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/media_decode_impl.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/media_decode_vorbis.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/media_decode_vorbis.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/media_decode_vorbis.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/glicko2.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/glicko2.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/glicko2.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/score.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/score.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/score.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/codepoint_table.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/codepoint_table.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/codepoint_table.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/chess_position_table.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/chess_position_table.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/chess_position_table.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/modality_number_table.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/modality_number_table.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/modality_number_table.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/CMakeFiles/laplace_core.dir/src/astar.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/astar.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/astar.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/trajectory.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/trajectory.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/trajectory.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/tier_tree.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/tier_tree.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/tier_tree.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/intent_stage.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/intent_stage.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/intent_stage.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/ordered_composition.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/ordered_composition.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/ordered_composition.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/absence_filter.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/absence_filter.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/absence_filter.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/merkle_dedup.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/merkle_dedup.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/merkle_dedup.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/hash_composer.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/hash_composer.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/hash_composer.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/grapheme_floor.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grapheme_floor.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grapheme_floor.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/grammar_registry.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_registry.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_registry.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/grammar_decomposer.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_decomposer.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_decomposer.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/xml_stream.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/xml_stream.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/xml_stream.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/fide_xml.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/fide_xml.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/fide_xml.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/CMakeFiles/laplace_core.dir/src/grammar_compose.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_compose.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_compose.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/grammar_source_compose.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_source_compose.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_source_compose.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/grammar_rows.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_rows.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_rows.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/grammar_tags.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_tags.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grammar_tags.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/grapheme_break.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/grapheme_break.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/grapheme_break.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/word_break.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/word_break.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/word_break.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/sentence_break.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/sentence_break.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/sentence_break.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/normalize_nfc.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/normalize_nfc.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/normalize_nfc.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/identity_key.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/identity_key.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/identity_key.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/text_decomposer.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/text_decomposer.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/text_decomposer.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/content_witness_batch.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/content_witness_batch.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/content_witness_batch.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/CMakeFiles/laplace_core.dir/src/ucd_xml.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/ucd_xml.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/ucd_xml.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/CMakeFiles/laplace_core.dir/src/unicode_seed.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/unicode_seed.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/unicode_seed.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/generated/relation_law.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/generated/relation_law.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/generated/relation_law.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/generated/pos_law.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/generated/pos_law.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/generated/pos_law.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/highway_table.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/highway_table.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/highway_table.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_core_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/build/external/tree-sitter/lib/include -I/build/external/blake3/c -isystem /build/external/eigen -isystem /usr/include/libxml2 -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/core/CMakeFiles/laplace_core.dir/src/attestation_engine.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/attestation_engine.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/attestation_engine.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -Dlaplace_syzygy_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/fathom/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -o engine/core/CMakeFiles/laplace_syzygy.dir/src/syzygy.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/src/syzygy.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/src/syzygy.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-python/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_python.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_python.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_python.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-c/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_c.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_c.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_c.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-cpp/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_cpp.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_cpp.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_cpp.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-javascript/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_javascript.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_javascript.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_javascript.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-rust/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_rust.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_rust.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_rust.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-go/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_go.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_go.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_go.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-c-sharp/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_c_sharp.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_c_sharp.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_c_sharp.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-bash/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_bash.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_bash.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_bash.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-json/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_json.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_json.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_json.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-markdown/tree-sitter-markdown/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_markdown.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_markdown.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_markdown.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-csv/csv/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_csv.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_csv.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_csv.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-csv/tsv/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_tsv.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_tsv.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_tsv.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-turtle/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_turtle.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_turtle.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_turtle.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-xml/xml/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_xml.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_xml.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_xml.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-typescript/typescript/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_typescript.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_typescript.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_typescript.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-java/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_java.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_java.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_java.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-ruby/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_ruby.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_ruby.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_ruby.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-julia/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_julia.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_julia.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_julia.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-kotlin/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_kotlin.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_kotlin.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_kotlin.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-php/php/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_php.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_php.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_php.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/core/grammars/generated/sql -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_sql.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_sql.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_sql.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/core/grammars/generated/swift -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_swift.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_swift.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_swift.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/core/grammars/generated/pgn -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_pgn.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_pgn.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_pgn.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-cuda/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_cuda.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_cuda.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_cuda.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-glsl/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_glsl.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_glsl.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_glsl.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-hlsl/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_hlsl.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_hlsl.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_hlsl.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-wgsl/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_wgsl.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_wgsl.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_wgsl.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-fortran/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_fortran.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_fortran.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_fortran.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-asm/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_asm.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_asm.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_asm.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-nasm/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_nasm.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_nasm.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_nasm.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-llvm/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_llvm.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_llvm.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_llvm.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-mlir/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_mlir.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_mlir.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_mlir.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-cmake/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_cmake.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_cmake.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_cmake.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-ispc/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_ispc.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_ispc.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_ispc.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DLAPLACE_MKL_CBWR_AVX2=1 -I/build/external/tree-sitter-grammars/tree-sitter-zig/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -w -o engine/core/grammars/CMakeFiles/ts_grammar_zig.dir/Unity/unity_0_c.c.o -c /home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_zig.dir/Unity/unity_0_c.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/grammars/CMakeFiles/ts_grammar_zig.dir/Unity/unity_0_c.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/core/tools/chess_position_tables_emit/../../include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o engine/core/tools/chess_position_tables_emit/CMakeFiles/laplace_chess_position_tables_emit.dir/main.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tools/chess_position_tables_emit/main.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tools/chess_position_tables_emit/main.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/core/tools/modality_number_tables_emit/../../include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o engine/core/tools/modality_number_tables_emit/CMakeFiles/laplace_modality_number_tables_emit.dir/main.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tools/modality_number_tables_emit/main.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tools/modality_number_tables_emit/main.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/perfcache_env.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/perfcache_env.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/perfcache_env.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_version.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_version.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_version.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_math4d.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_math4d.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_math4d.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_hash128.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_hash128.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_hash128.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_hilbert4d.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_hilbert4d.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_hilbert4d.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_mantissa.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_mantissa.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_mantissa.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_super_fibonacci.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_super_fibonacci.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_super_fibonacci.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_image_decomposer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_image_decomposer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_image_decomposer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_audio_decomposer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_audio_decomposer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_audio_decomposer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_media_decode.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_media_decode.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_media_decode.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_glicko2.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_glicko2.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_glicko2.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_glicko2_extreme.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_glicko2_extreme.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_glicko2_extreme.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_score.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_score.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_score.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_codepoint_table.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_codepoint_table.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_codepoint_table.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_modality_number_table.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_modality_number_table.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_modality_number_table.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_astar.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_astar.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_astar.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_trajectory.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_trajectory.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_trajectory.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_tier_tree.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_tier_tree.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_tier_tree.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_intent_stage.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_intent_stage.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_intent_stage.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_ordered_composition.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_ordered_composition.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_ordered_composition.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_absence_filter.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_absence_filter.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_absence_filter.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_merkle_dedup.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_merkle_dedup.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_merkle_dedup.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_hash_composer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_hash_composer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_hash_composer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_physicality_id.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_physicality_id.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_physicality_id.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_grapheme_break.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grapheme_break.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grapheme_break.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_word_break.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_word_break.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_word_break.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_sentence_break.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_sentence_break.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_sentence_break.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_normalize_nfc.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_normalize_nfc.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_normalize_nfc.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_identity_key.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_identity_key.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_identity_key.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_text_decomposer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_text_decomposer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_text_decomposer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_text_roundtrip_gate.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_text_roundtrip_gate.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_text_roundtrip_gate.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_xml_stream.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_xml_stream.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_xml_stream.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_grammar_decomposer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grammar_decomposer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grammar_decomposer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_grammar_compose.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grammar_compose.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grammar_compose.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_grammar_tags.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grammar_tags.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_grammar_tags.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/core/tests/CMakeFiles/laplace_core_tests.dir/test_relation_law.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_relation_law.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_relation_law.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DLAPLACE_MKL_CBWR_AVX2=1 -DLAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_modality_number_perfcache.bin\\\" -DLAPLACE_PERFCACHE_PATH_FOR_TESTS=\\\"/home/ahart/Projects/Laplace-Legacy/recovery/native-build/engine/core/perfcache/laplace_t0_perfcache.bin\\\" -DLAPLACE_SYZYGY_FIXTURE_DIR=\\\"/home/ahart/Projects/Laplace-Legacy/engine/core/tests/../../../test-data/syzygy\\\" -DLAPLACE_UCD_PATH_FOR_TESTS=\\\"/vault/Data/UCD/Public/UCD/latest/ucd\\\" -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o engine/core/tests/CMakeFiles/laplace_syzygy_tests.dir/test_syzygy.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_syzygy.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tests/test_syzygy.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/init.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/init.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/init.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/tbb_parallel.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/tbb_parallel.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/tbb_parallel.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/procrustes.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/procrustes.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/procrustes.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/eigenmaps.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/eigenmaps.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/eigenmaps.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/gram_schmidt.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/gram_schmidt.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/gram_schmidt.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/bilinear_edges.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/bilinear_edges.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/bilinear_edges.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/ffn_edges.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/ffn_edges.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/ffn_edges.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACKE -DEIGEN_USE_MKL_ALL -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_dynamics_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/CMakeFiles/laplace_dynamics.dir/src/model_math.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/model_math.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/src/model_math.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/tests/CMakeFiles/laplace_dynamics_tests.dir/test_init.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_init.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_init.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/tests/CMakeFiles/laplace_dynamics_tests.dir/test_toolchain.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_toolchain.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_toolchain.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/tests/CMakeFiles/laplace_dynamics_tests.dir/test_procrustes.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_procrustes.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_procrustes.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/tests/CMakeFiles/laplace_dynamics_tests.dir/test_eigenmaps.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_eigenmaps.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_eigenmaps.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/tests/CMakeFiles/laplace_dynamics_tests.dir/test_gram_schmidt.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_gram_schmidt.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_gram_schmidt.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/tests/CMakeFiles/laplace_dynamics_tests.dir/test_bilinear_edges.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_bilinear_edges.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_bilinear_edges.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/dynamics/tests/CMakeFiles/laplace_dynamics_tests.dir/test_model_math.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_model_math.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/dynamics/tests/test_model_math.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/init.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/init.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/init.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/version.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/version.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/version.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/recipe.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/recipe.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/recipe.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/arch_template.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/arch_template.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/arch_template.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/feature_extractor.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/feature_extractor.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/feature_extractor.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/gguf_writer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/gguf_writer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/gguf_writer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -mavx2 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/bf16_decoder.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/bf16_decoder.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/bf16_decoder.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -mavx2 -mf16c -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/tensor_dtype_codec.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/tensor_dtype_codec.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/tensor_dtype_codec.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/safetensors_parser.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/safetensors_parser.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/safetensors_parser.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/sentencepiece_parser.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/sentencepiece_parser.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/sentencepiece_parser.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/tensor_decompose.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/tensor_decompose.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/tensor_decompose.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/qk_pairs_threshold.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/qk_pairs_threshold.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/qk_pairs_threshold.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/qk_pairs_threshold_pruned.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/qk_pairs_threshold_pruned.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/qk_pairs_threshold_pruned.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/qk_project_cached.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/qk_project_cached.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/qk_project_cached.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/format_writer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/format_writer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/format_writer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_HAS_MKL=1 -DLAPLACE_MKL_CBWR_AVX2=1 -DMKL_LP64 -DMKL_THREADING_TBB -Dlaplace_synthesis_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /opt/intel/oneapi/mkl/latest/include -isystem /opt/intel/oneapi/tbb/2023.1/include -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -o engine/synthesis/CMakeFiles/laplace_synthesis.dir/src/f32_gather.c.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/f32_gather.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/src/f32_gather.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_version.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_version.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_version.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_toolchain.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_toolchain.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_toolchain.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_recipe.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_recipe.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_recipe.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_arch_template.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_arch_template.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_arch_template.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_feature_extractor.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_feature_extractor.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_feature_extractor.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_gguf_writer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_gguf_writer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_gguf_writer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_format_writer.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_format_writer.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_format_writer.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_bf16_decoder.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_bf16_decoder.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_bf16_decoder.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_tensor_dtype_codec.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_tensor_dtype_codec.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_tensor_dtype_codec.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_safetensors_parser.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_safetensors_parser.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_safetensors_parser.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_sentencepiece_parser.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_sentencepiece_parser.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_sentencepiece_parser.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_tensor_decompose.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_tensor_decompose.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_tensor_decompose.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_qk_pairs_threshold.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_qk_pairs_threshold.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_qk_pairs_threshold.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_qk_pairs_threshold_pruned.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_qk_pairs_threshold_pruned.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_qk_pairs_threshold_pruned.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/synthesis/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /build/external/eigen -isystem /build/external/spectra/include -isystem /build/external/googletest/googletest/include -isystem /build/external/googletest/googletest -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option -std=c++20 -o engine/synthesis/tests/CMakeFiles/laplace_synthesis_tests.dir/test_qk_project_cached.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_qk_project_cached.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/synthesis/tests/test_qk_project_cached.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icpx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -DLAPLACE_GENERATOR_FINGERPRINT=\\\"fe895c102b90d066\\\" -DLAPLACE_MKL_CBWR_AVX2=1 -I/home/ahart/Projects/Laplace-Legacy/engine/core/tools/ucd_tables_emit/../../include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /build/external/eigen -O3 -DNDEBUG -fPIE -Wall -Wextra -Wpedantic -march=haswell -std=c++20 -o engine/core/tools/ucd_tables_emit/CMakeFiles/laplace_ucd_tables_emit.dir/main.cpp.o -c /home/ahart/Projects/Laplace-Legacy/engine/core/tools/ucd_tables_emit/main.cpp",
+  "file": "/home/ahart/Projects/Laplace-Legacy/engine/core/tools/ucd_tables_emit/main.cpp"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_geom_EXPORTS -I/opt/laplace/pgsql-18/include -I/opt/laplace/proj/include -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -O3 -DNDEBUG -fPIC -o extension/laplace_geom/CMakeFiles/laplace_geom.dir/src/laplace_geom.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_geom/src/laplace_geom.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_geom/src/laplace_geom.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/laplace_substrate.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/laplace_substrate.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/laplace_substrate.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/prompt_coherence.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/prompt_coherence.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/prompt_coherence.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/prompt_language.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/prompt_language.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/prompt_language.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/consensus_fold_step.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/consensus_fold_step.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/consensus_fold_step.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/generate_walk.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/generate_walk.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/generate_walk.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/chess_learned_moves.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/chess_learned_moves.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/chess_learned_moves.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/chess_syzygy.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/chess_syzygy.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/chess_syzygy.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/variant_synth.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/variant_synth.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/variant_synth.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/astar_path.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/astar_path.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/astar_path.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/graph_taxonomy.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/graph_taxonomy.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/graph_taxonomy.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/graph_contrast.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/graph_contrast.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/graph_contrast.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/graph_cascade.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/graph_cascade.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/graph_cascade.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/foundry_crawl.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/foundry_crawl.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/foundry_crawl.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/recall.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/recall.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/recall.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/recall_route.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/recall_route.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/recall_route.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/perfcache.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/perfcache.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/perfcache.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/grammar_source.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/grammar_source.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/grammar_source.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/descent_probe.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/descent_probe.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/descent_probe.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/fold_route.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/fold_route.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/fold_route.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/containers_of.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/containers_of.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/containers_of.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/constituents_closure.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/constituents_closure.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/constituents_closure.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/geometry_successors.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/geometry_successors.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/geometry_successors.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/highway_mask.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/highway_mask.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/highway_mask.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/model_factor.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/model_factor.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/model_factor.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/lexical_case.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/lexical_case.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/lexical_case.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/steered_walk.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/steered_walk.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/steered_walk.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_substrate_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_substrate.dir/src/realize_batch.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/realize_batch.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/realize_batch.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/execution_module.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/execution_module.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/execution_module.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/content_resolve.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/content_resolve.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/content_resolve.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/consensus_scan.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/consensus_scan.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/consensus_scan.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/consensus_neighbors.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/consensus_neighbors.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/consensus_neighbors.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/steer_candidates.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/steer_candidates.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/steer_candidates.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/explore_web.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/explore_web.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/explore_web.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/trajectory_continuations.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/trajectory_continuations.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/trajectory_continuations.c"
+},
+{
+  "directory": "/home/ahart/Projects/Laplace-Legacy/recovery/native-build",
+  "command": "/opt/intel/oneapi/compiler/latest/bin/icx -DEIGEN_DONT_PARALLELIZE -DEIGEN_NO_DEBUG -Dlaplace_execution_EXPORTS -I/home/ahart/Projects/Laplace-Legacy/engine/core/include -I/home/ahart/Projects/Laplace-Legacy/engine/dynamics/include -isystem /opt/laplace/pgsql-18/include/server -isystem /build/external/eigen -isystem /build/external/spectra/include -O3 -DNDEBUG -fPIC -o extension/laplace_substrate/CMakeFiles/laplace_execution.dir/src/trajectory_generate.c.o -c /home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/trajectory_generate.c",
+  "file": "/home/ahart/Projects/Laplace-Legacy/extension/laplace_substrate/src/trajectory_generate.c"
+}
+]

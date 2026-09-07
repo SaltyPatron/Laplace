@@ -15,6 +15,40 @@ public class NativeAttestationParityTests
 
     private static Hash128 H(string s) => Hash128.OfCanonical(s);
 
+    [Fact]
+    public void Corroboration_AdmitsAgreementInBothDirectionsWithoutDraws()
+    {
+        var outcomes = Enum.GetValues<AttestationOutcome>();
+        short[] left = outcomes.SelectMany(a => outcomes.Select(_ => (short)a)).ToArray();
+        short[] right = outcomes.SelectMany(_ => outcomes.Select(b => (short)b)).ToArray();
+        var admitted = NativeAttestation.CorroboratedIndexes(left, right);
+        Assert.Equal(2, admitted.Count);
+        Assert.Contains(admitted, i => left[i] == (short)AttestationOutcome.Confirm
+            && right[i] == (short)AttestationOutcome.Confirm);
+        Assert.Contains(admitted, i => left[i] == (short)AttestationOutcome.Refute
+            && right[i] == (short)AttestationOutcome.Refute);
+        Assert.Empty(NativeAttestation.CorroboratedIndexes([], []));
+        Assert.Throws<ArgumentException>(() => NativeAttestation.CorroboratedIndexes([0], []));
+        Assert.Throws<InvalidOperationException>(() => NativeAttestation.CorroboratedIndexes([-1], [-1]));
+    }
+
+    [Theory]
+    [InlineData("HAS_ROLE")]
+    [InlineData("SIMILAR_TO")]
+    [InlineData("ATTENDS")]
+    public void WitnessParameters_MatchTheCanonicalCategoricalBuilder(string relation)
+    {
+        var type = RelationTypeRegistry.RelationTypeId(relation);
+        var parameters = NativeAttestation.WitnessParameters(type, SourceTrust.UserPrompt);
+        foreach (bool confirm in new[] { false, true })
+        {
+            var witness = NativeAttestation.Categorical(H("subject"), relation, H("object"),
+                H("source"), SourceTrust.UserPrompt, confirm: confirm);
+            Assert.Equal(witness.OpponentRatingFp1e9, parameters.Rating);
+            Assert.Equal(witness.OpponentRdFp1e9, parameters.Rd);
+        }
+    }
+
 
 
     [Fact]
@@ -385,4 +419,3 @@ public class NativeAttestationParityTests
     }
 
 }
-

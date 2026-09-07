@@ -93,6 +93,9 @@ public static class MonolithSegmenter
             yield break;
         }
 
+        CancellationToken consumerToken = ct;
+        await using var producers = new IngestProducerGroup(ct);
+        ct = producers.Token;
         var sourceConfig = configFactory(0);
         int chunkRecords = ResolveChunkRecords(sourceConfig, segments);
         // Account the queued source payload as well as record count. Whole code
@@ -116,7 +119,7 @@ public static class MonolithSegmenter
         long dispatched = 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var dispatcher = Task.Run(async () =>
+        producers.Run(async () =>
         {
             int rr = 0;
             long lastReportMs = 0;
@@ -154,42 +157,27 @@ public static class MonolithSegmenter
                 await inputs[rr].Writer.WriteAsync(buf, ct).ConfigureAwait(false);
             }
             for (int s = 0; s < segments; s++) inputs[s].Writer.Complete();
-        }, ct);
+        });
 
-        var workerTasks = new Task[segments];
         for (int s = 0; s < segments; s++)
         {
             int seg = s;
-            workerTasks[s] = Task.Run(async () =>
+            producers.Run(async () =>
             {
                 var recStream = new ChannelChunkRecordStream<TRecord>(inputs[seg].Reader);
                 var handler = handlerFactory(seg);
                 var config = configFactory(seg).WithWorkingSetConcurrency(segments);
                 await foreach (var change in IngestBatchPipeline.RunAsync(recStream, handler, config, ct))
-                    await outCh.Writer.WriteAsync(change, ct).ConfigureAwait(false);
+                    await IngestProducerGroup.WriteAsync(outCh.Writer, change, ct).ConfigureAwait(false);
                 // Segments are NOT files. Emitting period-boundary/ here inflated
                 // files_done above files_total (CONSOLIDATION Q5: 66/0, 44/10) and let
                 // status=ok pretend a partial FrameNet run finished. File completion is
                 // signaled only by RunMultiFileAsync's one boundary (or file-failed/) per
                 // real file — after every segment of that file has drained.
-            }, ct);
+            });
         }
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await dispatcher.ConfigureAwait(false);
-                await Task.WhenAll(workerTasks).ConfigureAwait(false);
-                outCh.Writer.Complete();
-            }
-            catch (Exception ex)
-            {
-                outCh.Writer.Complete(ex);
-            }
-        }, ct);
-
-        await foreach (var change in outCh.Reader.ReadAllAsync(ct))
+        await foreach (var change in producers.ConsumeAsync(outCh, consumerToken))
             yield return change;
     }
 

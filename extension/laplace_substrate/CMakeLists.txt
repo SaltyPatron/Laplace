@@ -7,6 +7,7 @@ set(EXT_MODULE_PATHNAME "${EXT_NAME}")
 set(EXT_EXECUTION_SOURCES
     src/execution_module.c
     src/content_resolve.c
+    src/conversation_session.c
     src/consensus_scan.c
     src/consensus_neighbors.c
     src/steer_candidates.c

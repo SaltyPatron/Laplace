@@ -15,8 +15,7 @@
  *
  * S7 STEER    generation.steer_candidates($cands, $frontier): re-rank by rated consensus
  *             mass reaching the LIVE frontier — the prompt's routed token/sense
- *             web PLUS the last
- *             max_order emitted constituents, so the frontier is where the walk has
+ *             web PLUS every selected identity, so the frontier is where the walk has
  *             ARRIVED and not where it started (docs/specs/36 §3; GH #921 acceptance
  *             "each emitted unit updates the active frontier before the next election").
  *             steer_candidates.c's own header rejects "a weight fixed BEFORE the walk
@@ -50,10 +49,6 @@
  *             Making RD the SOLE temperature is a candidate follow-up, not
  *             smuggled in here.)
  *
- * FLOOR       walk_completes_floor (consensus COMPLETES_TO) when the sequence
- *             well is dry — unchanged from the corpus era; it was always a
- *             substrate read.
- *
  * All ids stay bytea end to end. The vocab intern table died with the corpus:
  * interning existed to map ids into the suffix array's int32 space, and there
  * is no suffix array.
@@ -81,6 +76,7 @@
 #include "relation_symmetry.h"
 #include "steer_candidates.h"
 #include "consensus_neighbors.h"
+#include "trajectory_continuations.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 
@@ -101,8 +97,6 @@ typedef struct CandIndex
     int  index;
 } CandIndex;
 
-static SPIPlanPtr propose_plan = NULL;
-static SPIPlanPtr floor_plan   = NULL;
 static SPIPlanPtr semantic_plan = NULL;
 /* PostgreSQL performs one typed content-presence query over the native
  * proposal set. Graph access and reduction are owned by consensus_neighbors. */
@@ -148,7 +142,7 @@ proposal_neighborhood(HTAB *cache, Datum *frontier, int n_frontier,
         ArrayType *ids = construct_array(missing, n_missing, BYTEAOID, -1, false, TYPALIGN_INT);
         int n_edges;
         LaplaceNeighbor *edges = laplace_consensus_neighbors(
-            ids, types, limit, false, types != NULL, &n_edges, NULL);
+            ids, types, limit, false, true, &n_edges, NULL);
         MemoryContextSwitchTo(owner);
         for (int i = 0; i < n_missing; ++i)
         {
@@ -190,7 +184,7 @@ proposal_neighborhood(HTAB *cache, Datum *frontier, int n_frontier,
         for (int j = 0; j < entry->count; ++j)
         {
             const LaplaceNeighbor *edge = entry->edges + j;
-            if (types != NULL && !edge->outbound)
+            if (!edge->outbound)
             {
                 const laplace_relation_def_t *def = NULL;
                 if (laplace_relation_lookup(&edge->type, &def) != 0 || def == NULL ||
@@ -243,21 +237,6 @@ validate_relation_types(ArrayType *types)
 static void
 ensure_plans(void)
 {
-    if (propose_plan == NULL)
-    {
-        Oid        argtypes[2] = { BYTEAARRAYOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare_cursor(
-            "SELECT object_id, sep_id, weight "
-            "FROM generation.trajectory_continuations($1, $2)",
-            2, argtypes, CURSOR_OPT_PARALLEL_OK);
-
-        if (plan == NULL)
-            elog(ERROR, "walk_continuations: SPI_prepare(propose) failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "walk_continuations: SPI_keepplan(propose) failed");
-        propose_plan = plan;
-    }
     if (semantic_plan == NULL)
     {
         Oid argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
@@ -266,21 +245,6 @@ ensure_plans(void)
         if (plan == NULL || SPI_keepplan(plan) != 0)
             elog(ERROR, "walk_continuations: semantic proposal plan failed");
         semantic_plan = plan;
-    }
-    if (floor_plan == NULL)
-    {
-        Oid        argtypes[2] = { BYTEAOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare_cursor(
-            "SELECT object_id, weight "
-            "FROM generation.walk_completes_floor($1, $2)",
-            2, argtypes, CURSOR_OPT_PARALLEL_OK);
-
-        if (plan == NULL)
-            elog(ERROR, "walk_continuations: SPI_prepare(floor) failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "walk_continuations: SPI_keepplan(floor) failed");
-        floor_plan = plan;
     }
 }
 
@@ -367,7 +331,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     ArrayType *ctx_arr, *front_arr;
-    int32      steps, max_order, topk;
+    int32      steps, max_order, topk, fanout;
     float8     temp;
     uint64     rng;
     Datum     *elems, *front_elems;
@@ -376,13 +340,14 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     Datum     *ctx;
     int        ctx_len = 0, ctx_cap;
     Datum     *frontier;
-    int        n_frontier = 0, n_prompt = 0;
+    int        n_frontier = 0;
     Cand      *cand = NULL;
     int        cand_capacity = 0;
     ArrayType *relation_types = PG_NARGS() > 7 && !PG_ARGISNULL(7) ?
         PG_GETARG_ARRAYTYPE_P(7) : NULL;
-    MemoryContext walk_cxt, old;
+    MemoryContext walk_cxt, step_cxt, old;
     HTAB *neighborhoods;
+    HTAB *frontier_ids;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("walk_continuations: context must not be NULL")));
@@ -391,6 +356,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     max_order = PG_ARGISNULL(2) ? 5   : PG_GETARG_INT32(2);
     temp      = PG_ARGISNULL(3) ? 0.7 : PG_GETARG_FLOAT8(3);
     topk      = PG_ARGISNULL(4) ? 10  : PG_GETARG_INT32(4);
+    fanout    = PG_NARGS() > 8 && !PG_ARGISNULL(8) ? PG_GETARG_INT32(8) : 8;
     rng       = PG_ARGISNULL(5) ? UINT64CONST(0x5851F42D4C957F2D)
                                 : (uint64) PG_GETARG_INT64(5);
 
@@ -400,6 +366,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("walk_continuations: max_order must not be negative")));
     if (topk < 0)
         ereport(ERROR, (errmsg("walk_continuations: topk must not be negative")));
+    if (fanout < 0)
+        ereport(ERROR, (errmsg("walk_continuations: fanout must not be negative")));
     if (!isfinite(temp) || temp < 0.0)
         ereport(ERROR, (errmsg("walk_continuations: spread must be finite and not negative")));
     if (ARR_NDIM(ctx_arr) != 1 || ARR_ELEMTYPE(ctx_arr) != BYTEAOID)
@@ -417,6 +385,9 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         cache_ctl.hcxt = walk_cxt;
         neighborhoods = hash_create("forward neighborhood cache", 128, &cache_ctl,
                                     HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        cache_ctl.entrysize = sizeof(hash128_t);
+        frontier_ids = hash_create("forward active identities", 128, &cache_ctl,
+                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     }
 
     if (SPI_connect() != SPI_OK_CONNECT)
@@ -446,19 +417,20 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 (errmsg("walk_continuations: requested walk exceeds PostgreSQL allocation capacity")));
     /* An empty/all-NULL routed frontier falls back to the entire prompt. */
     int frontier_base_capacity = n_front_in > n_in ? n_front_in : n_in;
-    if ((uint64) frontier_base_capacity + (uint64) max_order >
+    if ((uint64) frontier_base_capacity + (uint64) steps > INT_MAX ||
+        (uint64) frontier_base_capacity + (uint64) steps >
             (uint64) (MaxAllocSize / sizeof(Datum)))
         ereport(ERROR,
                 (errmsg("walk_continuations: requested frontier exceeds PostgreSQL allocation capacity")));
     ctx_cap = n_in + steps;
     old = MemoryContextSwitchTo(walk_cxt);
     ctx      = (Datum *) palloc(sizeof(Datum) * (ctx_cap > 0 ? ctx_cap : 1));
-    /* prompt content, held for the whole walk, plus a rolling window of the emitted
-     * tail. The window is max_order — the SAME k the S6 context backoff already bounds
-     * itself by — so the frontier introduces no constant of its own. */
+    /* Ordinal matching depth does not bound semantic memory. Retain every
+     * selected identity for this pass; repeated occurrences remain in ctx,
+     * while the evidence frontier contains each identity exactly once. */
     frontier = (Datum *) palloc(sizeof(Datum) *
-                                (frontier_base_capacity + max_order > 0 ?
-                                 frontier_base_capacity + max_order : 1));
+                                (frontier_base_capacity + steps > 0 ?
+                                 frontier_base_capacity + steps : 1));
     for (int i = 0; i < n_in; i++)
     {
         bytea *b;
@@ -479,16 +451,21 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         b = DatumGetByteaPP(front_elems[i]);
         if (VARSIZE_ANY_EXHDR(b) != 16)
             ereport(ERROR, (errmsg("walk_continuations: frontier ids must be 16 bytes")));
-        frontier[n_frontier++] = copy_id_datum(front_elems[i]);
+        bool found;
+        hash_search(frontier_ids, VARDATA_ANY(b), HASH_ENTER, &found);
+        if (!found) frontier[n_frontier++] = copy_id_datum(front_elems[i]);
     }
     /* An explicitly empty route is an abstention, not permission to erase the
      * request. Preserve the resolved prompt as the minimum live frontier. */
     if (n_frontier == 0)
     {
         for (int i = 0; i < ctx_len; i++)
-            frontier[n_frontier++] = ctx[i];
+        {
+            bool found;
+            hash_search(frontier_ids, VARDATA_ANY(DatumGetByteaPP(ctx[i])), HASH_ENTER, &found);
+            if (!found) frontier[n_frontier++] = ctx[i];
+        }
     }
-    n_prompt = n_frontier;
     MemoryContextSwitchTo(old);
 
     if (ctx_len == 0 || steps == 0 || topk == 0)
@@ -497,104 +474,45 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         return (Datum) 0;
     }
 
-    for (int32 step = 1; step <= steps; step++)
+    step_cxt = AllocSetContextCreate(walk_cxt, "forward step operands",
+                                     ALLOCSET_DEFAULT_SIZES);
+    MemoryContextSwitchTo(step_cxt);
+    for (int64 step = 1; step <= steps; step++)
     {
         int  n_cand = 0;
         int  pick = -1;
 
+        /* Evidence state and the ordered trajectory live in walk_cxt. Query
+         * operands, pair reductions and candidate arrays for the previous
+         * election do not become additional retained conversation memory. */
+        MemoryContextReset(step_cxt);
         CHECK_FOR_INTERRUPTS();
 
-        /* ---- S6 PROPOSE: k-context backoff over the trajectories ---- */
-        for (int k = (ctx_len < max_order ? ctx_len : max_order); k >= 1; k--)
+        /* Resolve every suffix in one indexed native trajectory operation.
+         * Selection receives the complete successor set at the greatest exact
+         * stride; no repeated SQL calls or pre-steering top-K loss. */
+        int depth = Min(ctx_len, max_order);
+        if (depth > 0)
         {
-            ArrayType *tail;
-            Datum      args[2];
-            char       argnulls[2] = { ' ', 'n' };
-            int        rc;
-            bool       found_candidates = false;
-
-            tail = construct_array(ctx + ctx_len - k, k, BYTEAOID, -1, false,
-                                   TYPALIGN_INT);
-            args[0] = PointerGetDatum(tail);
-            args[1] = (Datum) 0;
-            rc = SPI_execute_plan(propose_plan, args, argnulls, true, 0);
-            if (rc != SPI_OK_SELECT)
-                elog(ERROR, "walk_continuations: propose failed: %s",
-                     SPI_result_code_string(rc));
-
-            if (SPI_processed > 0)
+            ArrayType *tail = construct_array(ctx + ctx_len - depth, depth,
+                                              BYTEAOID, -1, false, TYPALIGN_INT);
+            int count;
+            LaplaceContinuation *successors = laplace_trajectory_continuations(tail, true, &count);
+            ensure_candidate_capacity(&cand, &cand_capacity, count, walk_cxt);
+            old = MemoryContextSwitchTo(walk_cxt);
+            for (int i = 0; i < count; ++i)
             {
-                uint64 max = SPI_processed;
-
-                ensure_candidate_capacity(&cand, &cand_capacity, max, walk_cxt);
-
-                for (uint64 r = 0; r < max; r++)
-                {
-                    HeapTuple tup = SPI_tuptable->vals[r];
-                    TupleDesc td  = SPI_tuptable->tupdesc;
-                    bool      obj_null, sep_null, w_null;
-                    Datum     od = SPI_getbinval(tup, td, 1, &obj_null);
-                    Datum     sd = SPI_getbinval(tup, td, 2, &sep_null);
-                    Datum     wd = SPI_getbinval(tup, td, 3, &w_null);
-
-                    if (obj_null || w_null)
-                        continue;
-                    old = MemoryContextSwitchTo(walk_cxt);
-                    cand[n_cand].obj    = copy_id_datum(od);
-                    cand[n_cand].sep    = sep_null ? (Datum) 0 : copy_id_datum(sd);
-                    MemoryContextSwitchTo(old);
-                    cand[n_cand].weight = DatumGetInt64(wd);
-                    cand[n_cand].stride = k;
-                    cand[n_cand].steer  = 0.0;
-                    cand[n_cand].edges  = 0;
-                    n_cand++;
-                }
-                found_candidates = n_cand > 0;
+                cand[n_cand].obj = hash128_to_datum(&successors[i].id);
+                cand[n_cand].sep = (Datum) 0;
+                cand[n_cand].weight = successors[i].occurrences;
+                cand[n_cand].stride = successors[i].stride;
+                cand[n_cand].steer = 0.0;
+                cand[n_cand].edges = 0;
+                ++n_cand;
             }
-            if (SPI_tuptable != NULL)
-                SPI_freetuptable(SPI_tuptable);
+            MemoryContextSwitchTo(old);
+            pfree(successors);
             pfree(tail);
-            if (found_candidates)
-            {
-                break;
-            }
-        }
-
-        /* ---- FLOOR: consensus COMPLETES_TO when sequence is dry ---- */
-        if (n_cand == 0)
-        {
-            Datum args[2];
-            int   rc;
-
-            args[0] = ctx[ctx_len - 1];
-            args[1] = Int32GetDatum(topk);
-            rc = SPI_execute_plan(floor_plan, args, NULL, true, 0);
-            if (rc != SPI_OK_SELECT)
-                elog(ERROR, "walk_continuations: consensus floor probe failed: %s",
-                     SPI_result_code_string(rc));
-            ensure_candidate_capacity(&cand, &cand_capacity, SPI_processed, walk_cxt);
-            for (uint64 r = 0; r < SPI_processed; r++)
-            {
-                HeapTuple tup = SPI_tuptable->vals[r];
-                TupleDesc td  = SPI_tuptable->tupdesc;
-                bool      obj_null, w_null;
-                Datum     od = SPI_getbinval(tup, td, 1, &obj_null);
-                Datum     wd = SPI_getbinval(tup, td, 2, &w_null);
-
-                if (obj_null || w_null)
-                    continue;
-                old = MemoryContextSwitchTo(walk_cxt);
-                cand[n_cand].obj    = copy_id_datum(od);
-                MemoryContextSwitchTo(old);
-                cand[n_cand].sep    = (Datum) 0;
-                cand[n_cand].weight = DatumGetInt64(wd);
-                cand[n_cand].stride = 0;
-                cand[n_cand].steer  = 0.0;
-                cand[n_cand].edges  = 0;
-                n_cand++;
-            }
-            if (SPI_tuptable != NULL)
-                SPI_freetuptable(SPI_tuptable);
         }
         /* ---- S6 semantic proposals from the same live frontier ---- */
         {
@@ -609,7 +527,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             }
             ArrayType *types = construct_array(type_ids, 5, BYTEAOID, -1, false, TYPALIGN_INT);
             ArrayType *front = proposal_neighborhood(neighborhoods, frontier, n_frontier,
-                                                       relation_types, topk, walk_cxt);
+                                                       relation_types, fanout, walk_cxt);
             /* The semantic graph walk is a simple path through content. Prompt
              * seeds and already-emitted nodes do not re-enter solely through the
              * graph. Witnessed sequence proposals can still repeat them. Routed
@@ -788,7 +706,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             Datum  values[4];
             bool   rnulls[4] = { false, false, false, false };
 
-            values[0] = Int32GetDatum(step);
+            values[0] = Int32GetDatum((int32) step);
             values[1] = cand[pick].obj;
             values[2] = Int32GetDatum(cand[pick].stride);
             if (cand[pick].sep != (Datum) 0)
@@ -802,22 +720,18 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         ctx[ctx_len++] = copy_id_datum(cand[pick].obj);
         MemoryContextSwitchTo(old);
 
-        /* ---- advance the frontier S7 steers toward ----
-         * The prompt stays: it is the request, and consensus mass reaching it must keep
-         * counting. What changes is the tail — the emitted constituents, oldest dropped
-         * once the window is full, so |cands| x |frontier| stays bounded exactly as
-         * steer_candidates.c requires for its single round trip per token. */
-        if (max_order > 0 && n_frontier - n_prompt >= max_order)
-        {
-            memmove(&frontier[n_prompt], &frontier[n_prompt + 1],
-                    sizeof(Datum) * (size_t) (n_frontier - n_prompt - 1));
-            n_frontier--;
-        }
-        if (max_order > 0)
-            frontier[n_frontier++] = ctx[ctx_len - 1];
+        /* A selected constituent changes the next graph proposal and steering
+         * state even when ordinal backoff is disabled. Sequence depth must not
+         * silently expire an earlier contribution to the active evidence. */
+        bool already_active;
+        hash_search(frontier_ids, VARDATA_ANY(DatumGetByteaPP(ctx[ctx_len - 1])),
+                    HASH_ENTER, &already_active);
+        if (!already_active) frontier[n_frontier++] = ctx[ctx_len - 1];
         free_candidate_ids(cand, n_cand);
     }
 
+    MemoryContextSwitchTo(walk_cxt);
+    MemoryContextDelete(step_cxt);
     SPI_finish();
     return (Datum) 0;
 }

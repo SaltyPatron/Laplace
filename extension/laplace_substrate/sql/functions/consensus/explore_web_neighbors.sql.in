@@ -3,18 +3,37 @@
 CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
     p_subjects bytea[],
     p_types bytea[],
-    p_limit int)
+    p_limit int,
+    p_include_default boolean)
     RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
                   rd bigint, witness_count bigint, outbound boolean)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_explore_web_neighbors'
     LANGUAGE C STABLE PARALLEL SAFE;
 
--- Shared native set access and standing reduction; input order and duplicates
--- are retained at this SQL surface. Refutations remain inspectable.
+-- Preserve the highway-mask surface: an omitted type array historically reads
+-- DEFAULT only. That compatibility choice is an explicit operand of the one
+-- canonical batch operation, rather than a different native argument contract.
+CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
+    p_subjects bytea[],
+    p_types bytea[],
+    p_limit int)
+    RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
+                  rd bigint, witness_count bigint, outbound boolean)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT * FROM consensus.explore_web_neighbors(
+        p_subjects, COALESCE(p_types, '{}'::bytea[]), p_limit, true);
+END;
+
+-- The unfiltered surface reads all relation families. NULL and the empty set
+-- remain distinct at the canonical operation.
 CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
     p_subjects bytea[],
     p_limit int)
     RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
                   rd bigint, witness_count bigint, outbound boolean)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_explore_web_neighbors'
-    LANGUAGE C STABLE PARALLEL SAFE;
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT * FROM consensus.explore_web_neighbors(
+        p_subjects, NULL::bytea[], p_limit, false);
+END;

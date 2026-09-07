@@ -45,10 +45,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     {
         try
         {
-            // GH #575: bare FEN prompt → composed position hex before lexical recall_session.
-            prompt = ChessPositionRef.RewriteFenToHex(prompt) ?? prompt;
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            return await RecallSessionAsync(conn, prompt, session, options, ct);
+            return await RunConversationAsync(conn, prompt, session, options, ct);
         }
         catch (PostgresException pg)
         {
@@ -86,7 +84,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 scopeCmd.Parameters.AddWithValue("sources", scopeSources);
                 await scopeCmd.ExecuteNonQueryAsync(ct);
             }
-            return await RecallSessionAsync(conn, prompt, session, options, ct);
+            return await RunConversationAsync(conn, prompt, session, options, ct);
         }
         catch (PostgresException pg)
         {
@@ -109,36 +107,29 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         IReadOnlyList<string> userTurns, byte[]? session, CancellationToken ct) =>
         ConverseAsync(userTurns.Count > 0 ? userTurns[^1] : "", session, ct);
 
-    private static async Task<IReadOnlyList<ConverseRow>> RecallSessionAsync(
+    private static async Task<IReadOnlyList<ConverseRow>> RunConversationAsync(
         NpgsqlConnection conn, string prompt, byte[]? session,
         ConverseOptions options, CancellationToken ct)
     {
-        // One turn in, one read out. Conversation state is substrate-resident
-        // (session context + session_topics carry) — clients never resend history,
-        // and a resent history would be ignored here by construction (spec 34).
-        //
-        // converse.chat() is the conversational entry point — orientation over the
-        // prompt's candidate senses, session carry, shape/band lenses, and its own
-        // internal fallbacks — the same lane the MCP chat tool and CLI ride. This
-        // endpoint predated converse.chat() and was still reading recall_session directly,
-        // which treats the prompt as a phrase lookup: measured on the deployed box,
-        // "What is a dog?" answered "I hold \"a dog\" but no gloss or continuation
-        // witnessed yet" on this lane while converse.chat() answered with the dog gloss.
-        // recall_session stays as the fallback when chat yields nothing, so the
-        // no-consensus case still reports truthfully instead of faking prose.
-        // Tenant scoping is unaffected: converse.chat() reads `consensus` unqualified, so
-        // the pg_temp.consensus shadow on THIS connection governs it the same way.
-        var reply = await NpgsqlSubstrateReads.ChatAsync(
+        // The endpoint transports the canonical program's result. An empty pass
+        // remains empty; phrase recall must not manufacture a successful chat reply.
+        bool inspection = !string.IsNullOrWhiteSpace(options.Shape)
+            || options.Bands is { Length: > 0 } || options.Elaborate;
+        var reply = inspection
+            ? await NpgsqlSubstrateReads.ChatAsync(
             conn, prompt, session, ct,
             shape: options.Shape,
             bands: options.Bands,
             elaborate: options.Elaborate,
-            language: options.Language);
-        if (!string.IsNullOrWhiteSpace(reply))
+            language: options.Language)
+            : await NpgsqlSubstrateReads.ForwardTurnAsync(
+                conn, prompt, session, options.MaxTokens ?? 128,
+                options.Window ?? 5, options.Temperature ?? 0.6,
+                options.TopK ?? 10, ct);
+        if (!string.IsNullOrEmpty(reply))
             return [new ConverseRow(reply, null, null)];
 
-        var rows = await NpgsqlSubstrateReads.RecallSessionAsync(conn, prompt, session, ct);
-        return [.. rows.Select(r => new ConverseRow(r.Reply, r.EffMu, r.Witnesses))];
+        return [];
     }
 
 
@@ -148,20 +139,20 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
 
 
-    public async IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
-        string prompt,
-        int steps = 32,
-        int maxOrder = 5,
-        double temperature = 0.7,
-        int topK = 10,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    public IAsyncEnumerable<GenerateToken> WalkTextStreamAsync(
+        string prompt, int steps = 32, int maxOrder = 5,
+        double temperature = 0.7, int topK = 10, CancellationToken ct = default) =>
+        ForwardTurnStreamAsync(prompt, null,
+            new ConverseOptions(MaxTokens: steps, Window: maxOrder, Temperature: temperature, TopK: topK), ct);
+
+    public async IAsyncEnumerable<GenerateToken> ForwardTurnStreamAsync(
+        string prompt, byte[]? session, ConverseOptions options,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        await foreach (var row in NpgsqlSubstrateReads.WalkTextAsync(
-            _dataSource, prompt, steps, maxOrder, temperature, topK, ct))
-        {
-            if (row.Entity.Length == 0) continue;
+        await foreach (var row in NpgsqlSubstrateReads.ForwardTurnStepsAsync(
+            _dataSource, prompt, session, options.MaxTokens ?? 128,
+            options.Window ?? 5, options.Temperature ?? 0.6, options.TopK ?? 10, ct))
             yield return new GenerateToken(row.Step, row.Entity, row.StrideUsed);
-        }
     }
 
     public async Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct)
@@ -686,6 +677,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
 internal sealed class SubstrateUnavailableException : Exception
 {
+    public SubstrateUnavailableException(string message)
+        : base(message)
+    {
+    }
+
     public SubstrateUnavailableException(string message, Exception inner)
         : base(message, inner)
     {

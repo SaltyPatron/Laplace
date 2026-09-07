@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -14,6 +15,36 @@
 
 static const double kPhiTrusted = 30.0;
 static const double kPhiCrank   = 350.0;
+
+int laplace_attestation_corroboration_mask(
+    const int16_t* left, const int16_t* right, size_t count, uint8_t* admitted) {
+    if (count && (!left || !right || !admitted)) return -1;
+    for (size_t i = 0; i < count; ++i) {
+        if (left[i] < LAPLACE_ATTESTATION_OUTCOME_REFUTE ||
+            left[i] > LAPLACE_ATTESTATION_OUTCOME_CONFIRM ||
+            right[i] < LAPLACE_ATTESTATION_OUTCOME_REFUTE ||
+            right[i] > LAPLACE_ATTESTATION_OUTCOME_CONFIRM) return -1;
+    }
+    for (size_t i = 0; i < count; ++i)
+        admitted[i] = left[i] == right[i] && left[i] != LAPLACE_ATTESTATION_OUTCOME_DRAW;
+    return 0;
+}
+
+int laplace_attestation_resolved_witness_parameters(
+    const hash128_t* type_id, double source_trust,
+    int64_t* opponent_rating_fp, int64_t* opponent_rd_fp) {
+    if (!type_id || !opponent_rating_fp || !opponent_rd_fp ||
+        !isfinite(source_trust) || source_trust < 0.0 || source_trust > 1.0) return -1;
+    hash128_t zero = {0};
+    laplace_attestation_staged_t witness;
+    int rc = laplace_attestation_resolved_outcome_build(
+        &zero, type_id, NULL, 1, &zero, NULL, 1, source_trust,
+        LAPLACE_ATTESTATION_OUTCOME_DRAW, 1, 0, &witness);
+    if (rc != 0) return rc;
+    *opponent_rating_fp = witness.opponent_rating_fp1e9;
+    *opponent_rd_fp = witness.opponent_rd_fp1e9;
+    return 0;
+}
 
 /*
  * THE OPPONENT'S RATING, which until now did not exist.
@@ -320,7 +351,7 @@ int laplace_attestation_categorical_build(
 
     hash128_t subj = *subject;
     hash128_t obj;
-    hash128_t ctx;
+    hash128_t ctx = {0};
     uint8_t obj_null = object_is_null;
     uint8_t ctx_null = context_is_null;
     if (!obj_null && object) obj = *object;
@@ -374,7 +405,7 @@ int laplace_attestation_categorical_scored_build(
 
     hash128_t subj = *subject;
     hash128_t obj;
-    hash128_t ctx;
+    hash128_t ctx = {0};
     uint8_t obj_null = object_is_null;
     uint8_t ctx_null = context_is_null;
     if (!obj_null && object) obj = *object;
@@ -443,7 +474,7 @@ int laplace_attestation_resolved_outcome_build(
     if (attestation_orient_resolved(type_id, subject, object, object_is_null, &subj, &obj, &obj_null) != 0)
         return -1;
 
-    hash128_t ctx;
+    hash128_t ctx = {0};
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;
 
@@ -504,7 +535,7 @@ int laplace_attestation_resolved_scored_build(
     if (attestation_orient_resolved(type_id, subject, object, object_is_null, &subj, &obj, &obj_null) != 0)
         return -1;
 
-    hash128_t ctx;
+    hash128_t ctx = {0};
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;
 
@@ -548,7 +579,7 @@ int laplace_attestation_aggregated_build(
     if (attestation_orient_resolved(type_id, subject, object, object_is_null, &subj, &obj, &obj_null) != 0)
         return -1;
 
-    hash128_t ctx;
+    hash128_t ctx = {0};
     hash128_zero(&ctx);
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;
@@ -582,7 +613,7 @@ int laplace_attestation_aggregated_batch_build(
     if (laplace_relation_lookup(type_id, &def) == 0 && def)
         symmetry = def->symmetry;
 
-    hash128_t ctx;
+    hash128_t ctx = {0};
     hash128_zero(&ctx);
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;

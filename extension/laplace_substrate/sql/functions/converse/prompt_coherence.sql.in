@@ -127,14 +127,14 @@ BEGIN
     mass_arms AS MATERIALIZED (
         SELECT c.subject_id AS id,
                sum(COALESCE(consensus.relation_rank(c.type_id), 0.0)
-                   * ((c.rating - 2 * c.rd)::double precision)) AS mass
+                   * (consensus.eff_mu(c.rating, c.rd)::double precision)) AS mass
           FROM probe_ids p
           JOIN laplace.consensus c ON c.subject_id = ANY (p.ids)
          GROUP BY c.subject_id
         UNION ALL
         SELECT c.object_id AS id,
                sum(COALESCE(consensus.relation_rank(c.type_id), 0.0)
-                   * ((c.rating - 2 * c.rd)::double precision)) AS mass
+                   * (consensus.eff_mu(c.rating, c.rd)::double precision)) AS mass
           FROM probe_ids p
           JOIN laplace.consensus c ON c.object_id = ANY (p.ids)
          GROUP BY c.object_id

@@ -1022,6 +1022,9 @@ public static class IngestBatchPipeline
         PerFileResumePlan? resume,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        CancellationToken consumerToken = ct;
+        await using var producers = new IngestProducerGroup(ct);
+        ct = producers.Token;
         // The dispatcher enumerates FILE SOURCES — cheap handles, reading NOTHING — into a bounded
         // channel; N workers each claim one source and run OPEN + read + parse + compose +
         // working-set finalization. The expensive parse is therefore
@@ -1051,7 +1054,7 @@ public static class IngestBatchPipeline
         // width instead of the file count. Otherwise nothing changes.
         var peeked = new List<IFileRecordSource<TRecord>>(workers + 1);
         bool exhaustedInPeek = true;
-        var fileEnumerator = stream.FilesAsync(ct).GetAsyncEnumerator(ct);
+        await using var fileEnumerator = stream.FilesAsync(ct).GetAsyncEnumerator(ct);
         while (peeked.Count <= workers)
         {
             if (!await fileEnumerator.MoveNextAsync())
@@ -1128,7 +1131,7 @@ public static class IngestBatchPipeline
                 chunkTarget = (int)Math.Min(resumeProbeChunkMax, (long)chunkTarget * 2);
         }
 
-        var dispatcher = Task.Run(async () =>
+        producers.Run(async () =>
         {
             try
             {
@@ -1162,16 +1165,14 @@ public static class IngestBatchPipeline
                 // Belt and braces: TryComplete is idempotent, so a path that somehow
                 // reaches here un-completed still releases the consumers.
                 sources.Writer.TryComplete();
-                await fileEnumerator.DisposeAsync();
             }
-        }, ct);
+        });
 
         // Approximate total from the peek when the stream fit in it; else 0 (sample-only).
         int knownFileTotal = exhaustedInPeek ? peeked.Count : 0;
         int fileOrdinal = 0;
         int activeWorkingSets = 0;
 
-        var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
         {
             // Captured OUTSIDE Task.Run. `for` does not give per-iteration capture the way
@@ -1179,7 +1180,7 @@ public static class IngestBatchPipeline
             // loop variable at RUN time — racing the loop thread and usually yielding the exit
             // value for every worker. That silently made per-worker ingest telemetry useless.
             int workerId = w;
-            workerTasks[w] = Task.Run(async () =>
+            producers.Run(async () =>
             {
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
@@ -1215,7 +1216,7 @@ public static class IngestBatchPipeline
                         // unfinished and fails the run. Boundary, not FileCompletion -- the
                         // marker this file already carries is what got us here; re-depositing
                         // it would be a write on a lane whose whole contract is zero rows.
-                        await outCh.Writer.WriteAsync(
+                        await IngestProducerGroup.WriteAsync(outCh.Writer,
                             BuildSkippedBoundary(config.SourceId, source.FileLabel), ct);
                         continue;
                     }
@@ -1256,7 +1257,7 @@ public static class IngestBatchPipeline
                             fileEntities += rowCounts.Entities;
                             filePhysicalities += rowCounts.Physicalities;
                             fileAttestations += rowCounts.Attestations;
-                            await outCh.Writer.WriteAsync(change, ct);
+                            await IngestProducerGroup.WriteAsync(outCh.Writer, change, ct);
                         }
                     }
                     catch (OperationCanceledException) { throw; }
@@ -1280,7 +1281,7 @@ public static class IngestBatchPipeline
                     // apply consumer. The runner terminalizes the file when that boundary is
                     // applied; reversing these two operations lets a fast consumer enqueue
                     // Finished before Composed and exposes a terminal zero-count row in the UI.
-                    await outCh.Writer.WriteAsync(
+                    await IngestProducerGroup.WriteAsync(outCh.Writer,
                         fileFailure
                             ?? (fileRoot is { } fr && resume is { } rp
                                 ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder,
@@ -1301,16 +1302,10 @@ public static class IngestBatchPipeline
                         Interlocked.Add(ref activeWorkingSets, -segments);
                     }
                 }
-            }, ct);
+            });
         }
 
-        _ = Task.Run(async () =>
-        {
-            try { await dispatcher; await Task.WhenAll(workerTasks); outCh.Writer.Complete(); }
-            catch (Exception ex) { outCh.Writer.Complete(ex); }
-        }, ct);
-
-        await foreach (var change in outCh.Reader.ReadAllAsync(ct))
+        await foreach (var change in producers.ConsumeAsync(outCh, consumerToken))
             yield return change;
     }
 

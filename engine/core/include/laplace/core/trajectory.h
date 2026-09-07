@@ -67,6 +67,26 @@ int trajectory_equivalent(const double* left_xyzm,
                           const double* right_xyzm,
                           size_t        right_points);
 
+/* Match all suffix lengths of an ordered context in one pass over a packed
+ * manifest. The callback receives the longest suffix starting at each occurrence
+ * which has a successor. Across manifests, retaining the greatest reported
+ * stride produces exact longest-suffix backoff without repeated index probes.
+ * The visitor also receives stride zero / NULL successor at packed-vertex
+ * boundaries so an embedding can interrupt long scans without a match.
+ * Input vertices may be unaligned (for example a WKB payload). Runs and repeated
+ * identities remain occurrences; workspace is proportional to context length. */
+typedef struct trajectory_suffix_matcher trajectory_suffix_matcher_t;
+typedef int (*trajectory_suffix_visitor_t)(void* context, size_t ordinal,
+                                           size_t stride,
+                                           const hash128_t* successor);
+
+trajectory_suffix_matcher_t* trajectory_suffix_matcher_create(
+    const hash128_t* context, size_t count, size_t minimum_stride);
+void trajectory_suffix_matcher_free(trajectory_suffix_matcher_t* matcher);
+int trajectory_match_suffixes(trajectory_suffix_matcher_t* matcher,
+                              const void* packed_xyzm, size_t n_points,
+                              trajectory_suffix_visitor_t visitor, void* context);
+
 #ifdef __cplusplus
 }
 #endif

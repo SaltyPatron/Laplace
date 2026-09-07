@@ -57,17 +57,11 @@ BEGIN
     -- Natural turns enter forward_text with the canonical prompt root. Explicit
     -- query shapes remain typed inspection requests; they do not interpret chat.
     IF shape IS NULL THEN
-        SELECT array_agg(laplace.word_id(t.prompt) ORDER BY t.ord) INTO ctx_arr
-        FROM converse.session_topics t WHERE t.session_id = p_session;
         SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
-        FROM generation.forward_text(
-            p_prompt, 40, 5, 0.6, 10,
-            laplace.hash128_lo(laplace.word_id(p_prompt)),
-            2, 8, ctx_arr) g;
-        IF p_session IS NOT NULL THEN
-            PERFORM generation.session_record_prompt(
-                p_session, p_prompt, laplace.word_id(p_prompt));
-        END IF;
+        FROM converse.forward_turn(
+            p_prompt, p_session, 128, 5, 0.6, 10,
+            NULL::bigint,
+            2, 8) g;
         RETURN out;
     END IF;
 
@@ -169,17 +163,7 @@ BEGIN
     END IF;
 
     IF topic IS NULL THEN
-        IF shape IS NULL THEN
-            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
-              FROM converse.session_trajectory(p_session, 8) st;
-            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
-              FROM generation.forward_text(
-                    p_prompt, 40, 5, 0.6, 10,
-                    hashtextextended(COALESCE(p_session::text, '') || p_prompt, 0),
-                    2, 8, ctx_arr) g;
-        ELSE
-            out := converse.converse(p_prompt);
-        END IF;
+        out := converse.converse(p_prompt);
     ELSE
         resolved := topic;  xl := realize.realize(topic, lang);
         topic2 := p_topic2;
@@ -386,21 +370,6 @@ BEGIN
             SELECT string_agg(reply, ' ') INTO out
               FROM converse.recall_intent(shape, topic, topic2, p_type_name);
 
-        ELSIF shape IS NULL THEN
-            -- The default speaking path is the canonical dynamic pass. Every
-            -- prompt constituent and its witnessed sense enters a native
-            -- both-direction hop/fan-out route; exact trajectories propose;
-            -- rated consensus steers; each selected constituent advances the
-            -- live frontier before the next proposal. Static recall/templates
-            -- remain explicit named shapes only.
-            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
-              FROM converse.session_trajectory(p_session, 8) st;
-            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
-              FROM generation.forward_text(
-                    p_prompt, 40, 5, 0.6, 10,
-                    hashtextextended(COALESCE(p_session::text, '') || p_prompt, 0),
-                    2, 8, ctx_arr) g;
-
         ELSIF shape = 'walk' THEN
             -- Phase 2 wiring (#751, after PR #884): converse_compose is the
             -- steered lane -- sequence proposes, the turn's semantic frontier
@@ -479,17 +448,6 @@ BEGIN
             out := CASE WHEN xl IS NOT NULL THEN converse.about(topic, lang)
                         ELSE converse.converse(p_prompt) END;
         END IF;
-    END IF;
-
-    -- An empty dynamic pass is an absence of an admissible continuation, not a
-    -- request to resurrect the retired static/template success path. Keep the
-    -- dynamic route authoritative and make its WHY-NOT visible instead of
-    -- returning NULL/empty text. `xl` is the one elected-topic realization
-    -- already computed above. If it is NULL, do not perform a second scalar
-    -- realization, do not leak the canonical hash, and let the scaffold emit the
-    -- explicit topic-neutral abstention for this forward pass.
-    IF (out IS NULL OR btrim(out) = '') AND shape IS NULL THEN
-        out := converse.chat_scaffold(lang, 'no_forward', xl);
     END IF;
 
     -- RECORD session carry; the OODA close (turn witnessing) is the caller's duty.

@@ -121,24 +121,30 @@ internal sealed class ModelCircuitEstate
             if (upRole is null || downRole is null || intermediate <= 0) continue;
             float[] up = Load(upRole.Name, (long)intermediate * d);
             float[] down = Load(downRole.Name, (long)d * intermediate);
-            if (up.Length == 0 || down.Length == 0) continue;
+            if (up.Length == 0 || down.Length == 0)
+                throw new InvalidDataException($"Layer {layer} has unreadable FFN projections.");
+            var profile = ArchitectureProfile.For(_cfg);
+            TensorRole? gateRole = _model.Manifest.Single(layer, TensorRoleKind.MlpGate);
+            if (profile.HasGate && gateRole is null)
+                throw new InvalidDataException($"Layer {layer} is missing its declared FFN gate.");
+            float[]? gate = gateRole is not null ? Load(gateRole.Name, (long)intermediate * d) : null;
+            if (gate is { Length: 0 })
+                throw new InvalidDataException($"Layer {layer} has an unreadable FFN gate.");
             float[]? upBias = LoadOptionalBias(upRole.Name, intermediate);
-            var downTranspose = new float[(long)intermediate * d];
-            int rc;
-            unsafe
-            {
-                fixed (float* downPtr = down)
-                fixed (float* transposePtr = downTranspose)
-                    rc = DynInterop.TransposeColumnBlockF(
-                        downPtr, (nuint)d, (nuint)intermediate,
-                        0, (nuint)intermediate, transposePtr);
-            }
-            if (rc != 0)
-                throw new InvalidOperationException($"native FFN down-projection contraction failed: {rc}");
-            using NativeBilinearContraction circuit = Projected(
-                up, upBias, downTranspose, null, intermediate);
+            float[]? gateBias = gateRole is not null ? LoadOptionalBias(gateRole.Name, intermediate) : null;
+            float[]? downBias = LoadOptionalBias(downRole.Name, d);
+            using NativeBilinearContraction circuit = NativeBilinearContraction.Ffn(
+                _embedding, _cfg.VocabSize, d, _tokenRows, _entityRows, _entityCount,
+                up, upBias, gate, gateBias, down, downBias, intermediate,
+                profile.ResolveFfnActCode(gate is not null));
+            Track(circuit);
+            var tensors = new List<string> { upRole.Name, downRole.Name };
+            if (gateRole is not null) tensors.Add(gateRole.Name);
+            if (upBias is not null) tensors.Add(ArchitectureProfile.BiasOf(upRole.Name));
+            if (gateBias is not null) tensors.Add(ArchitectureProfile.BiasOf(gateRole!.Name));
+            if (downBias is not null) tensors.Add(ArchitectureProfile.BiasOf(downRole.Name));
             yield return Describe(
-                "ffn", layer, -1, [upRole.Name, downRole.Name], circuit);
+                "ffn", layer, -1, tensors, circuit);
         }
     }
 
@@ -261,7 +267,9 @@ internal sealed class ModelCircuitEstate
         if (!_refs.ContainsKey(name)) return null;
         float[] values = WeightTensorETL.LoadTensorF32(
             _refs, name, elements, _model.Snapshot);
-        return values.Length == 0 ? null : values;
+        if (values.Length != elements)
+            throw new InvalidDataException($"Declared bias '{name}' could not be read with its source shape.");
+        return values;
     }
 
     private static float[] SliceRows(float[] matrix, int rowBegin, int rowCount, int rowWidth)

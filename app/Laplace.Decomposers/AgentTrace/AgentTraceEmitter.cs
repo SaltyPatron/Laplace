@@ -20,7 +20,7 @@ namespace Laplace.Decomposers.AgentTrace;
 ///                   Content physicality trajectory is the ordered turn manifest —
 ///                   re-ingesting a grown log upserts the trajectory (versioned order)
 ///
-/// Membership/PRECEDES ride the per-tenant UserPrompt@/Response@ sources so replayed
+/// Membership rides the per-tenant UserPrompt@/Response@ sources so replayed
 /// logs fold onto the SAME consensus cells as live conversation; structure, usage
 /// scalars and retained metadata ride the AgentTrace lane source. Every attestation
 /// and composed physicality carries the LOG's event time, not ingest time.
@@ -128,7 +128,6 @@ public static class AgentTraceEmitter
         var turnIds = new List<Hash128>(session.Turns.Count);
         var turnCoords = new List<double[]>(session.Turns.Count);
         long turnsUsedUs = 0;
-        Hash128? lastUserTextRoot = null;
         var totals = new UsageTotals();
 
         foreach (var turn in session.Turns)
@@ -142,7 +141,7 @@ public static class AgentTraceEmitter
             };
 
             var members = new List<Hash128>(4);
-            Hash128? textRoot = Witness(b, turn.Text, roleSource, coords, members);
+            Witness(b, turn.Text, roleSource, coords, members);
             Witness(b, turn.Thinking, scope.Tenant.ResponseSource, coords, members);
 
             var invocations = new List<(AgentToolCall Call, Hash128? Id, Hash128? Input, Hash128? Result)>();
@@ -173,10 +172,6 @@ public static class AgentTraceEmitter
             if (!witnessTurn)
             {
                 if (turn.Usage is { IsEmpty: false } priorUsage) totals.Add(priorUsage);
-                // Q→A pairing state advances through the prefix: a skipped assistant
-                // turn consumed its prompt (that pair was witnessed by the prior run).
-                if (turn.Role == AgentRoles.User) lastUserTextRoot = textRoot;
-                else if (turn.Role == AgentRoles.Assistant) lastUserTextRoot = null;
                 continue;
             }
 
@@ -188,7 +183,7 @@ public static class AgentTraceEmitter
             // Role identity stays on the evidence row's SOURCE and on HAS_ROLE.
             Attest(b, ts, NativeAttestation.Categorical(
                 tid, Rel(AgentRelation.AppearsIn), sessionId, roleSource, sessionId,
-                TC.AppDerived * scope.Tenant.TenantTrust));
+                TC.AppDerived));
 
             // Role/model/stop-reason/usage: lane-source structure, session as context.
             AttestCanonical(b, ts, tid, Rel(AgentRelation.HasRole),
@@ -237,18 +232,6 @@ public static class AgentTraceEmitter
             foreach (var (k, v) in turn.Meta)
                 AttestMetaAttribute(b, ts, tid, sessionId, k, v, coords);
 
-            // The live lane's corroborating cell: prompt root PRECEDES the reply root that
-            // answered it — cross-session/tenant Q→A consensus (ConversationContent parity).
-            // NOT a per-adjacency chain; order lives in the session trajectory.
-            if (turn.Role == AgentRoles.User) lastUserTextRoot = textRoot;
-            else if (turn.Role == AgentRoles.Assistant && textRoot is { } reply
-                     && lastUserTextRoot is { } promptRoot && promptRoot != reply)
-            {
-                Attest(b, ts, NativeAttestation.Categorical(
-                    promptRoot, Rel(AgentRelation.Precedes), reply, scope.Tenant.ResponseSource, sessionId,
-                    TC.Response * scope.Tenant.TenantTrust));
-                lastUserTextRoot = null;
-            }
         }
 
         long endUs = session.EndedAtUnixUs > 0 ? session.EndedAtUnixUs : turnsUsedUs;
@@ -301,7 +284,7 @@ public static class AgentTraceEmitter
             && Witness(b, user, scope.Tenant.PromptSource, coords, members: null) is { } userRoot)
             Attest(b, endUs, NativeAttestation.Categorical(
                 sessionId, Rel(AgentRelation.HasAttribution), userRoot, scope.Tenant.PromptSource, null,
-                TC.UserPrompt * scope.Tenant.TenantTrust));
+                TC.UserPrompt));
         if (sessionUs > 0)
         {
             string date = DateTimeOffset.FromUnixTimeMilliseconds(sessionUs / 1000)

@@ -1,0 +1,502 @@
+-- converse.chat(prompt, session, lang, shape, bands, topic, topic2, type_name, elaborate)
+-- A conversational turn: a THIN orchestrator over the existing intent machinery.
+--
+--   ORIENT  the topic is the prompt token whose synset carries the most
+--           content-band consensus mass -- a measurement over the graph, not a
+--           parse. An explicit p_topic from the caller wins outright.
+--   SHAPE   the caller names the read (converse.query_shapes()); nothing is
+--           inferred from how the prompt is phrased.
+--   LENS    p_bands selects salience bands. One band-parameterized read now
+--           covers what used to be three hardcoded English branches
+--           (parts / kinds / causes) and covers the other ten bands with it.
+--   CARRY   session is metadata: a turn with no resolvable topic carries the
+--           session's last resolved topic. p_elaborate advances through
+--           non-empty fact layers.
+--   CLOSE   happens at the FRONTEND, not here: every caller (MCP chat tool, HTTP
+--           TurnWitness, CLI chat) deposits the prompt (UserPrompt) and response
+--           (Response) through the writer spine -- full content mint + evidence +
+--           inline fold, proper trust classes. SQL converse.chat() stays read-side; its only
+--           write is session_topics app-state.
+--
+-- The English pattern ladder this function used to run on (parse_ask, plus five
+-- inline regexes over the prompt) is gone from the PARSE side. It answered only
+-- English, in a substrate whose identity law is language-agnostic by construction.
+--
+-- RENDER-SIDE CONNECTIVES (GH #901): every English glue string that used to
+-- live inline here now goes through converse.chat_scaffold(lang, key, …) — a
+-- per-language template table keyed on the resolved lang id. English and
+-- Bulgarian ship; other langs get a typographic form with no English verbs.
+-- Connectives-as-realized-entities through consensus remains the longer path;
+-- the scaffold stops the mixed-language lie the 2026-07-25 Bulgarian-dog
+-- incident exposed one layer down from the language tally below.
+DROP FUNCTION IF EXISTS laplace.chat(text, bytea, bytea, text, int[], bytea, bytea, text, boolean);
+CREATE OR REPLACE FUNCTION converse.chat(p_prompt text,
+                                p_session bytea DEFAULT NULL,
+                                p_lang bytea DEFAULT NULL,
+                                p_shape text DEFAULT NULL,
+                                p_bands int[] DEFAULT NULL,
+                                p_topic bytea DEFAULT NULL,
+                                p_topic2 bytea DEFAULT NULL,
+                                p_type_name text DEFAULT NULL,
+                                p_elaborate boolean DEFAULT false)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    topic bytea; topic2 bytea;
+    ctx_arr bytea[];  -- biography for the walk branch (session_trajectory, recent-first)
+    cands bytea[];   -- topic orientation, ranked, computed ONCE per turn
+    oriented_lang bytea;
+    xl    text;
+    depth int;
+    layers text[]; s text;
+    resolved bytea;
+    shape text := NULLIF(btrim(COALESCE(p_shape, '')), '');
+    lang  bytea := p_lang;
+    out   text := '';
+BEGIN
+    -- Natural turns enter the complete rooted forward program directly. Explicit
+    -- query shapes remain typed inspection requests; they do not interpret chat.
+    IF shape IS NULL THEN
+        SELECT array_agg(laplace.word_id(t.prompt) ORDER BY t.ord) INTO ctx_arr
+        FROM converse.session_topics t WHERE t.session_id = p_session;
+        SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
+        FROM generation.forward_text(
+            p_prompt, 40, 5, 0.6, 10,
+            laplace.hash128_lo(laplace.word_id(p_prompt)),
+            2, 8, ctx_arr) g;
+        IF p_session IS NOT NULL THEN
+            PERFORM generation.session_record_prompt(
+                p_session, p_prompt, laplace.word_id(p_prompt));
+        END IF;
+        RETURN out;
+    END IF;
+
+    -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY
+    -- spanning every language that witnesses it, and realize.realize(id, NULL) is free to
+    -- pick any member -- so with no language pinned, an English prompt can be
+    -- answered from a Bulgarian surface. Observed 2026-07-25: converse.walk('dog')
+    -- returned a fluent Bulgarian description of a dog. The mesh working exactly as
+    -- designed, surfacing at the wrong moment.
+    --
+    -- Language is not concept identity.  It is request orientation: the operator's
+    -- primary language is tried first, prompt evidence may temporarily redirect a
+    -- turn that otherwise resolves nothing, and realization receives the effective
+    -- language only after concept election.  ORIENT_TOPIC below owns that decision
+    -- and exposes whether it widened; this function does not mutate an operator
+    -- profile because one quotation or code-switch is not a durable preference.
+    -- TOPIC = rank-1 of converse.prompt_coherence (native). Keys, in order:
+    -- contextual/structural specificity, relation-directed mass, peer support,
+    -- folded evidence, ord DESC (recency among sense-bearing tokens when those
+    -- keys are silent), synset_id. Each signal is an explicit dimension.
+    -- Entirely in ids — no render/label mid-election. cands kept for topic2.
+    --
+    -- Dead forms (names only; post-mortems in git / GH #902): surface match
+    -- (pre-2026-07-25), denote_mu-first, breadth-first (2026-07-25),
+    -- breadth+denote_mu (2026-07-26), raw coherence, inverse own-mass (2026-08-01).
+    IF p_topic IS NOT NULL THEN
+        topic := p_topic;
+        lang := COALESCE(lang, converse.prompt_language_top(p_prompt));
+    ELSE
+        -- ORIENT_TOPIC owns the language prior, prompt-language fallback and
+        -- election order (coherence * witnessed mass, then total tie-breaks).
+        -- It evaluates prompt_coherence once and returns the
+        -- effective realization language as an execution receipt.  A primary
+        -- language that finds nothing widens this turn; it does not silently
+        -- rewrite the operator's profile.
+        SELECT array_agg(o.synset_id ORDER BY o.rank),
+               (array_agg(o.effective_language ORDER BY o.rank))[1]
+          INTO cands, oriented_lang
+        FROM converse.orient_topic(p_prompt, p_lang) o;
+        lang := COALESCE(oriented_lang, p_lang);
+        topic := cands[1];
+        -- Nothing in this turn resolved: read the session's BIOGRAPHY, not one
+        -- carried id (R7 / GH #759 slice 1). generation.session_last_resolved() answered
+        -- "what did the last turn resolve"; the discourse question is "which of
+        -- the topics this session has witnessed is THIS turn about", and that is
+        -- an attention read — the turn's token senses are the query, the
+        -- session's trajectory topics are the keys, rated consensus mass between
+        -- them is the score. Both directions, written as two correlated indexed
+        -- probes per trajectory row (k <= 8) rather than an OR join; the senses
+        -- are collected ONCE. sum() over zero rows is NULL — an unwired topic is
+        -- unranked evidence, not evidence of zero — and COALESCE enters only in
+        -- the ORDER BY, where ranking needs a total order. With no adjacency
+        -- anywhere the ordering degrades to last_ord DESC, which is exactly
+        -- session_last_resolved's semantics: recency is the fallback, no longer
+        -- the whole read.
+        IF topic IS NULL AND p_session IS NOT NULL THEN
+            -- The query set is TOKEN IDS PLUS THEIR SENSES, not senses alone. In
+            -- the regime where this branch fires (topic NULL), no prompt token
+            -- resolved a sense — a senses-only key set is provably empty exactly
+            -- when this code runs. The token ids themselves still carry edges: the
+            -- measured data-starved case (lexical.senses('животно') = 0) has the word
+            -- wired to its synset by OMW's word->synset IS_SYNONYM_OF, and that
+            -- edge is precisely what links an unsensed surface to a discourse
+            -- topic. Senses stay in the set for the day partial resolution makes
+            -- this branch reachable with them present.
+            -- prompt_words, not prompt_state: this branch only needs the token ids,
+            -- and prompt_state pays a converse.word_language() consensus read per token for
+            -- a column nothing here reads (Copilot, PR #893).
+            WITH ptok AS MATERIALIZED (
+                SELECT p.id FROM converse.prompt_words(p_prompt) p WHERE p.id IS NOT NULL
+            ),
+            psense AS MATERIALIZED (
+                SELECT DISTINCT x.sid FROM (
+                    SELECT t.id AS sid FROM ptok t
+                    UNION ALL
+                    SELECT s.synset_id FROM ptok t
+                    CROSS JOIN LATERAL lexical.senses(t.id) s
+                    WHERE s.synset_id IS NOT NULL
+                ) x
+            ),
+            adj AS (
+                SELECT st.topic_id, st.last_ord,
+                       (SELECT sum(consensus.eff_mu(c.rating, c.rd))
+                        FROM psense ps
+                        JOIN laplace.consensus c ON c.subject_id = st.topic_id
+                                        AND c.object_id = ps.sid) AS m_out,
+                       (SELECT sum(consensus.eff_mu(c.rating, c.rd))
+                        FROM psense ps
+                        JOIN laplace.consensus c ON c.object_id = st.topic_id
+                                        AND c.subject_id = ps.sid) AS m_in
+                FROM converse.session_trajectory(p_session, 8) st
+            )
+            SELECT a.topic_id INTO topic
+            FROM adj a
+            ORDER BY (COALESCE(a.m_out, 0) + COALESCE(a.m_in, 0)) DESC,
+                     a.last_ord DESC
+            LIMIT 1;
+        END IF;
+    END IF;
+
+    IF topic IS NULL THEN
+        IF shape IS NULL THEN
+            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
+              FROM converse.session_trajectory(p_session, 8) st;
+            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
+              FROM generation.forward_text(
+                    p_prompt, 40, 5, 0.6, 10,
+                    hashtextextended(COALESCE(p_session::text, '') || p_prompt, 0),
+                    2, 8, ctx_arr) g;
+        ELSE
+            out := converse.converse(p_prompt);
+        END IF;
+    ELSE
+        resolved := topic;  xl := realize.realize(topic, lang);
+        topic2 := p_topic2;
+
+        -- Second topic for the two-topic shapes: the caller's, else the next
+        -- ranked candidate that is not the first. Reuses the ranking already
+        -- computed above rather than re-segmenting the same input.
+        IF topic2 IS NULL AND shape IN ('reason', 'is_a') AND cands IS NOT NULL THEN
+            SELECT u.syn INTO topic2
+            FROM unnest(cands) WITH ORDINALITY u(syn, ord)
+            WHERE u.syn <> topic
+            ORDER BY u.ord
+            LIMIT 1;
+        END IF;
+
+        IF p_elaborate AND p_session IS NOT NULL THEN
+            -- ELABORATE: advance through NON-EMPTY fact layers by prior mentions.
+            -- Built ON the band-lens pattern below, not beside it. Four defects the
+            -- scalar form carried, all fixed here and none of them a law change:
+            --   * (c.rating-2*c.rd) open-coded three times -- a SECOND definition of
+            --     edge strength inside a function whose other branches call consensus.eff_mu().
+            --     If consensus.eff_mu's definition moves, this branch silently diverges.
+            --   * realize.realize() PER ROW before the cut, in the same file whose band lens
+            --     measures that at ~7 ms/id against ~0.3 ms/id batched.
+            --   * bare band literals 4/2/7 -- converse.relation_band_catalog() rows restated
+            --     as magic numbers.
+            --   * the associative band read RAW, without converse.non_kin_assoc_types(): the
+            --     etymology/usage/register families converse_facts excludes in id
+            --     space were being rendered as things the topic "is related to".
+            -- A dead `LIMIT 3` on a single-row aggregate is dropped with them.
+            WITH bands AS (
+                SELECT b.band,
+                       CASE b.name WHEN 'partitive'   THEN 1
+                                   WHEN 'taxonomic'   THEN 2
+                                   WHEN 'associative' THEN 3 END AS layer
+                FROM converse.relation_band_catalog() b
+                WHERE b.name IN ('partitive', 'taxonomic', 'associative')
+            ),
+            sel AS MATERIALIZED (
+                -- Types resolved ONCE, structural families removed in ID SPACE.
+                -- consensus.relation_highway_band() is a C STABLE call; in the edge predicate
+                -- it runs per EDGE and makes the scan unsargable.
+                SELECT e.id AS type_id, bd.layer
+                FROM laplace.entities e
+                JOIN bands bd ON bd.band = consensus.relation_highway_band(e.id)
+                WHERE e.type_id = laplace.entity_type_id('RelationType')
+                  AND e.id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
+            ),
+            edges AS MATERIALIZED (
+                -- parts and kin read forward (topic -> object); kinds reads backward,
+                -- because the kinds OF a topic are the subjects whose hypernym it is.
+                SELECT s.layer, c.object_id AS nid, consensus.eff_mu(c.rating, c.rd) AS m
+                FROM sel s
+                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.subject_id = topic
+                WHERE s.layer IN (1, 3) AND c.object_id IS NOT NULL
+                UNION ALL
+                SELECT s.layer, c.subject_id, consensus.eff_mu(c.rating, c.rd)
+                FROM sel s
+                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.object_id = topic
+                WHERE s.layer = 2
+            ),
+            ranked AS MATERIALIZED (
+                SELECT layer, nid, m,
+                       row_number() OVER (PARTITION BY layer ORDER BY m DESC, nid) AS rn
+                FROM edges
+            ),
+            -- MATERIALIZED and TOTALLY ORDERED: `ix` indexes the realize_batch array
+            -- and this CTE is read twice, so an unfenced re-evaluation in a different
+            -- physical order would pair every label with the wrong edge.
+            ord AS MATERIALIZED (
+                SELECT layer, nid, m,
+                       row_number() OVER (ORDER BY layer, m DESC, nid) AS ix
+                FROM ranked
+                WHERE rn <= CASE layer WHEN 1 THEN 6 ELSE 8 END  -- caps as before
+            ),
+            lbl AS MATERIALIZED (
+                SELECT realize.batch(array_agg(o.nid ORDER BY o.ix), lang) AS l
+                FROM ord o
+            )
+            SELECT array_agg(q.line ORDER BY q.layer) INTO layers FROM (
+                SELECT o.layer,
+                       converse.chat_scaffold(
+                           lang,
+                           CASE o.layer WHEN 1 THEN 'parts' WHEN 2 THEN 'kinds' ELSE 'related' END,
+                           xl,
+                           string_agg(lbl.l[o.ix],
+                                      CASE WHEN o.layer = 3 THEN ' and ' ELSE ', ' END
+                                      ORDER BY o.m DESC)) AS line
+                FROM ord o
+                CROSS JOIN lbl
+                WHERE lbl.l[o.ix] IS NOT NULL
+                  -- last-resort realize.render guard, kin layer only (as converse_facts keeps it)
+                  AND (o.layer <> 3 OR converse.label_is_content(lbl.l[o.ix]))
+                GROUP BY o.layer
+            ) q;
+            layers := COALESCE(layers, ARRAY[]::text[]);
+            SELECT count(*) INTO depth FROM converse.session_topics t
+              WHERE t.session_id=p_session AND t.resolved_id=topic;
+            out := CASE WHEN depth BETWEEN 1 AND COALESCE(array_length(layers,1),0)
+                        THEN layers[depth]
+                        ELSE converse.chat_scaffold(lang, 'core', xl) END;
+
+        ELSIF p_bands IS NOT NULL AND array_length(p_bands, 1) > 0 THEN
+            -- BAND LENS: every edge of the topic inside the selected bands, both
+            -- directions, ranked by consensus.eff_mu. This one read replaces the former
+            -- parts / kinds / causes English branches and generalizes to all 13.
+            -- HASH SPACE, THEN ONE realize_batch. This used to call realize.realize() PER
+            -- ROW on both arms of the UNION, before any filter or limit, so a
+            -- high-degree topic paid a scalar realize.render for every edge it has.
+            -- Measured 2026-07-28 on the foundation substrate: the scalar ladder
+            -- runs ~7 ms/id, one batched call ~0.3 ms/id -- and the densest
+            -- subject here carries 6,687 edges. Same rows, same order, same
+            -- grouping; the labels are resolved once over the collected ids and
+            -- joined back by ordinal (realize_batch is position-aligned, pinned by
+            -- tests/sql/realize_ladder_parity.sql).
+            WITH sel AS MATERIALIZED (
+                -- The band's relation types, resolved ONCE. consensus.relation_highway_band()
+                -- is a C STABLE call; evaluating it in the edge predicate ran it per
+                -- EDGE and made the scan unsargable. There are ~189 governed types,
+                -- so resolving the set up front turns the filter into an indexed
+                -- (subject_id, type_id) probe — the same move consensus.band_edges
+                -- makes natively.
+                -- Structural families are excluded HERE, in id space, before a
+                -- single edge is read -- not by filtering rendered strings after.
+                -- The associative band carries etymology, usage examples, register
+                -- labels and lexfile categories next to real kin, which is what put
+                -- "06831177-n, noun.communication, 05593148-n" in a band listing.
+                -- converse_facts already resolved this the right way
+                -- (non_kin_assoc_types, whole families via consensus.relation_family_members)
+                -- and kept label_is_content only as a last-resort realize.render guard; the
+                -- lens was still reading the band raw.
+                SELECT e.id AS type_id, consensus.relation_highway_band(e.id) AS band
+                FROM laplace.entities e
+                WHERE e.type_id = laplace.entity_type_id('RelationType')
+                  AND consensus.relation_highway_band(e.id) = ANY(p_bands)
+                  AND e.id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
+            ),
+            edges AS MATERIALIZED (
+                SELECT s.band, c.object_id AS nid, consensus.eff_mu(c.rating, c.rd) AS m
+                FROM sel s
+                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.subject_id = topic
+                WHERE c.object_id IS NOT NULL
+                UNION ALL
+                SELECT s.band, c.subject_id, consensus.eff_mu(c.rating, c.rd)
+                FROM sel s
+                JOIN laplace.consensus c ON c.type_id = s.type_id AND c.object_id = topic
+            ),
+            -- MATERIALIZED and TOTALLY ORDERED, both load-bearing. `ord` indexes the
+            -- realize_batch array, and this CTE is read twice below; an unfenced CTE
+            -- with `row_number() OVER ()` (no ORDER BY) can be re-evaluated in a
+            -- different physical order per scan, which would silently pair every
+            -- label with the wrong edge.
+            -- RANK, CAP, THEN LABEL. Batching made the uncapped lens fast; it did
+            -- not make it sane -- the densest subject here carries 6,687 edges, and
+            -- rendering 6,687 surfaces into one prose line is not an answer. The
+            -- cap is a per-band query LIMIT over an consensus.eff_mu ranking (rn <= 12), the
+            -- only kind of top-k the substrate permits: it truncates the READ, not
+            -- the fold, and nothing about what the sources assert changes.
+            ranked AS MATERIALIZED (
+                SELECT band, nid, m,
+                       row_number() OVER (PARTITION BY band ORDER BY m DESC, nid) AS rn
+                FROM edges
+            ),
+            ord AS MATERIALIZED (
+                SELECT band, nid, m,
+                       row_number() OVER (ORDER BY band, m DESC, nid) AS ix
+                FROM ranked
+                WHERE rn <= 12
+            ),
+            lbl AS MATERIALIZED (
+                SELECT realize.batch(array_agg(o.nid ORDER BY o.ix), lang) AS l
+                FROM ord o
+            )
+            SELECT string_agg(q.line, ' ') INTO out FROM (
+                SELECT converse.chat_scaffold(
+                           lang, 'band', xl,
+                           string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC),
+                           b.name) AS line,
+                       b.band
+                FROM ord o
+                JOIN converse.relation_band_catalog() b ON b.band = o.band
+                CROSS JOIN lbl
+                WHERE lbl.l[o.ix] IS NOT NULL
+                GROUP BY b.band, b.name
+                ORDER BY b.band
+            ) q;
+            IF out IS NULL OR out = '' THEN
+                out := converse.chat_scaffold(lang, 'no_edges', xl);
+            END IF;
+
+        ELSIF shape = 'reason' AND topic2 IS NOT NULL THEN
+            SELECT string_agg(reply, ' ') INTO out
+              FROM converse.recall_relation_summary_response(topic, topic2);
+
+        ELSIF shape IN ('related','related_in') AND p_type_name IS NOT NULL THEN
+            SELECT string_agg(reply, ' ') INTO out
+              FROM converse.recall_intent(shape, topic, NULL, p_type_name);
+            IF out IS NULL OR out = '' THEN
+                out := converse.chat_scaffold(lang, 'no_type', xl, NULL, p_type_name);
+            END IF;
+
+        ELSIF shape IS NOT NULL AND shape NOT IN ('describe','fallback','walk','what_is') THEN
+            -- Any other published shape answers through the shared responder family.
+            SELECT string_agg(reply, ' ') INTO out
+              FROM converse.recall_intent(shape, topic, topic2, p_type_name);
+
+        ELSIF shape IS NULL THEN
+            -- The default speaking path is the canonical dynamic pass. Every
+            -- prompt constituent and its witnessed sense enters a native
+            -- both-direction hop/fan-out route; exact trajectories propose;
+            -- rated consensus steers; each selected constituent advances the
+            -- live frontier before the next proposal. Static recall/templates
+            -- remain explicit named shapes only.
+            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
+              FROM converse.session_trajectory(p_session, 8) st;
+            SELECT string_agg(g.entity, '' ORDER BY g.step) INTO out
+              FROM generation.forward_text(
+                    p_prompt, 40, 5, 0.6, 10,
+                    hashtextextended(COALESCE(p_session::text, '') || p_prompt, 0),
+                    2, 8, ctx_arr) g;
+
+        ELSIF shape = 'walk' THEN
+            -- Phase 2 wiring (#751, after PR #884): converse_compose is the
+            -- steered lane -- sequence proposes, the turn's semantic frontier
+            -- steers, and since #884 the seed picks the entry into the core
+            -- backbone, so it recombines instead of replaying. It realizes
+            -- LAST, honoring p_lang, which converse_walk cannot (no lang on
+            -- its signature -- the measured cross-language splice).
+            --
+            -- SEED: session-derived, never NULL. Session id + prompt hashed
+            -- with the session's topic-turn count as the hash seed: asking
+            -- again in the same session moves the walk; the same first ask in
+            -- a fresh session is reproducible.
+            --
+            -- FALLBACK: compose returns NULL when the topic yields no stream
+            -- (n < 3) or no starts -- the unsteered walker still answers
+            -- there, and empty output falls through to the shared prose
+            -- fallback below either way.
+            --
+            -- NO TIMEOUT GUARD, deliberately. A SET LOCAL budget needs an
+            -- exception handler to degrade, and PostgreSQL reports a
+            -- statement_timeout and a client cancel with the same condition
+            -- (query_canceled / 57014) -- a handler that catches our budget
+            -- also eats the caller's Ctrl-C and makes converse.chat() un-cancellable
+            -- for the duration. A caller naming `walk` is asking for the
+            -- generator and can bound it with their own statement_timeout.
+            -- max(ord) is the turn counter session_record_prompt maintains:
+            -- PK-indexed, no full per-session count, no bigint->int narrowing.
+            SELECT COALESCE(max(t.ord), 0) INTO depth FROM converse.session_topics t
+              WHERE t.session_id = p_session;
+            -- BIOGRAPHY (R7 slice 2): recent session topics ride into the
+            -- compose frontier with recency decay — the turn's own topic is
+            -- already the frontier seed, so it is excluded here. Most-recent
+            -- first: session_trajectory's order IS the decay ordinality.
+            -- No session (or no history) passes NULL, which composes exactly
+            -- as a fresh turn.
+            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
+              FROM converse.session_trajectory(p_session, 4) st
+             WHERE st.topic_id <> topic;
+            out := converse.compose(
+                p_prompt, 40, lang,
+                hashtextextended(COALESCE(p_session::text, '') || p_prompt,
+                                 COALESCE(depth, 0)),
+                ctx_arr);
+            IF out IS NULL OR out = '' THEN
+                out := converse.walk(p_prompt, 40, NULL);
+            END IF;
+
+        ELSE
+            -- describe / what_is / fallback and the no-shape default.
+            -- (`walk` has its own branch above.)
+            --
+            -- SENTENCE-TIER COMPOSITION FIRST. converse_about's template prose
+            -- is the S9 FALLBACK (spec 36) and must never be the success path;
+            -- it also mangles clause-shaped glosses, since "X is " || gloss
+            -- yields "Pawn is it can be promoted to a more powerful piece if it
+            -- reaches the 8th rank." (observed live 2026-07-26).
+            --
+            -- converse.tiered() is NOT called from the hot path. Measured
+            -- 2026-08-05 (GH #878): the 2026-07-27 hangs are FIXED (ceef97d
+            -- landed; dog 3.7s, pawn 1.4s), but content REGRESSED to a
+            -- degenerate topic echo ("dog. dog. dog. dog." — including pawn,
+            -- its one historically verified topic). Its former temp-table
+            -- implementation has since been replaced by PL/pgSQL arrays and is
+            -- read-only-safe; content quality, not transaction mode, is why it
+            -- remains off this hot path.
+            --
+            -- converse_about is the pre-existing path and is fast and correct-ish
+            -- ("Dog is a member of the genus Canis (probably descended from the
+            -- common wolf)..."), so it carries the describe shape until the
+            -- sentence-tier composer is fast enough to sit in front of it.
+            out := CASE WHEN xl IS NOT NULL THEN converse.about(topic, lang)
+                        ELSE converse.converse(p_prompt) END;
+        END IF;
+
+        IF (out IS NULL OR out = '') AND shape IS NOT NULL THEN
+            out := CASE WHEN xl IS NOT NULL THEN converse.about(topic, lang)
+                        ELSE converse.converse(p_prompt) END;
+        END IF;
+    END IF;
+
+    -- An empty dynamic pass is an absence of an admissible continuation, not a
+    -- request to resurrect the retired static/template success path. Keep the
+    -- dynamic route authoritative and make its WHY-NOT visible instead of
+    -- returning NULL/empty text. `xl` is the one elected-topic realization
+    -- already computed above. If it is NULL, do not perform a second scalar
+    -- realization, do not leak the canonical hash, and let the scaffold emit the
+    -- explicit topic-neutral abstention for this forward pass.
+    IF (out IS NULL OR btrim(out) = '') AND shape IS NULL THEN
+        out := converse.chat_scaffold(lang, 'no_forward', xl);
+    END IF;
+
+    -- RECORD session carry; the OODA close (turn witnessing) is the caller's duty.
+    IF p_session IS NOT NULL THEN
+        PERFORM generation.session_record_prompt(p_session, p_prompt, resolved);
+    END IF;
+
+    RETURN btrim(out);
+END;
+$$;

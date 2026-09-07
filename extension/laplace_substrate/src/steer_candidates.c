@@ -21,7 +21,6 @@ typedef struct SteeringState
     HTAB *candidates;
     HTAB *pairs;
     bool reverse;
-    bool typed;
 } SteeringState;
 
 static void
@@ -59,7 +58,7 @@ steer_cell(const LaplaceConsensusRow *row, void *opaque)
     char key[32];
     bool found;
     if (row->object_is_null) return;
-    if (state->reverse && state->typed)
+    if (state->reverse)
     {
         const laplace_relation_def_t *def = NULL;
         if (laplace_relation_lookup(&row->type, &def) != 0 || def == NULL ||
@@ -112,7 +111,6 @@ laplace_steer_candidates(ArrayType *candidates, ArrayType *frontier,
     ctl.entrysize = sizeof(PairEntry);
     state.pairs = hash_create("steering pairs", 256, &ctl,
                              HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-    state.typed = types != NULL;
     deconstruct_array(candidates, BYTEAOID, -1, false, TYPALIGN_INT, &elems, &nulls, &n);
     for (int i = 0; i < n; ++i)
     {
@@ -129,14 +127,14 @@ laplace_steer_candidates(ArrayType *candidates, ArrayType *frontier,
     }
     pfree(elems);
     pfree(nulls);
-    /* Each direction is one native batch. Typed reverse traversal is admitted
-     * by the canonical relation's symmetry; untyped inspection sees both ends. */
+    /* Omitting a family restriction selects all families; it does not make
+     * directed claims symmetric. Only canonical symmetric relations admit
+     * reverse traversal, including the default forward-pass invocation. */
     laplace_consensus_scan(frontier, candidates, types, steer_cell, &state, stats);
     state.reverse = true;
-    ArrayType *reverse_types = state.typed
-        ? laplace_symmetric_relation_types_in(types) : types;
+    ArrayType *reverse_types = laplace_symmetric_relation_types_in(types);
     laplace_consensus_scan(candidates, frontier, reverse_types, steer_cell, &state, stats);
-    if (state.typed) pfree(reverse_types);
+    if (types != NULL) pfree(reverse_types);
     hash_seq_init(&seq, state.pairs);
     while ((pair = hash_seq_search(&seq)) != NULL)
     {

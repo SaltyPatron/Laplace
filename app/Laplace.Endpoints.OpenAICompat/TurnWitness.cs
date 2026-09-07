@@ -26,7 +26,9 @@ internal sealed class TurnWitness : BackgroundService
     /// attribution. A turn without a tenant/session does not exist on this lane.
     /// </summary>
     private readonly record struct TurnItem(
-        string Tenant, string? UserKey, Hash128 SessionId, string Prompt, string? Reply);
+        string Tenant, string? UserKey, Hash128 SessionId, string Prompt, string? Reply,
+        TaskCompletionSource<bool>? Completion = null, string? OccurrenceKey = null,
+        ConversationContent.TurnPhase Phase = ConversationContent.TurnPhase.Complete);
 
     public bool IsOnline { get; private set; }
 
@@ -44,13 +46,43 @@ internal sealed class TurnWitness : BackgroundService
     /// <summary>Record-or-fail: returns false when witness lane is offline (caller → 503).</summary>
     public bool TryEnqueueTurn(string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply)
     {
-        if (!IsOnline || string.IsNullOrWhiteSpace(prompt) || sessionId == Hash128.Zero)
+        if (!IsOnline || string.IsNullOrEmpty(prompt) || sessionId == Hash128.Zero)
             return false;
         if (!ConversationContent.IsValidIdentifier(tenant))
             return false;
-        return _queue.Writer.TryWrite(new TurnItem(tenant, userKey, sessionId, prompt.Trim(),
-            string.IsNullOrWhiteSpace(reply) ? null : reply.Trim()));
+        return _queue.Writer.TryWrite(new TurnItem(tenant, userKey, sessionId, prompt, reply));
     }
+
+    public async Task RecordTurnAsync(
+        string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply,
+        CancellationToken ct, string? occurrenceKey = null,
+        ConversationContent.TurnPhase phase = ConversationContent.TurnPhase.Complete)
+    {
+        if (!IsOnline || string.IsNullOrEmpty(prompt) || sessionId == Hash128.Zero
+            || !ConversationContent.IsValidIdentifier(tenant))
+            throw new SubstrateUnavailableException("The conversation turn could not enter the witness writer.");
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await _queue.Writer.WriteAsync(new TurnItem(
+            tenant, userKey, sessionId, prompt, reply, completion, occurrenceKey, phase), ct).ConfigureAwait(false);
+        if (!await completion.Task.WaitAsync(ct).ConfigureAwait(false))
+            throw new SubstrateUnavailableException("The conversation turn did not commit to the substrate.");
+    }
+
+    public async Task<string> RecordPromptAsync(
+        string tenant, string? userKey, Hash128 sessionId, string prompt, CancellationToken ct)
+    {
+        string occurrence = Guid.NewGuid().ToString("N");
+        await RecordTurnAsync(tenant, userKey, sessionId, prompt, null, ct,
+            occurrence, ConversationContent.TurnPhase.Input).ConfigureAwait(false);
+        return occurrence;
+    }
+
+    public Task RecordResponseAsync(
+        string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply,
+        string occurrenceKey, CancellationToken ct) =>
+        string.IsNullOrEmpty(reply) ? Task.CompletedTask :
+            RecordTurnAsync(tenant, userKey, sessionId, prompt, reply, ct,
+                occurrenceKey, ConversationContent.TurnPhase.Output);
 
     public void EnqueueTurn(string tenant, string? userKey, Hash128 sessionId, string prompt, string? reply)
     {
@@ -80,38 +112,31 @@ internal sealed class TurnWitness : BackgroundService
         // consecutive-failure trip.
         await using var closer = new TurnCloser(
             _substrate.DataSource, w => _log.LogWarning("turn-witness: {Warning}", w));
-        int consecutiveFailures = 0;
         IsOnline = true;
         _log.LogInformation("turn-witness online");
 
+        try
+        {
         await foreach (var item in _queue.Reader.ReadAllAsync(ct))
         {
+            bool deposited = false;
             try
             {
                 // Every turn is a distinct witnessing event: rows dedup by content
                 // address, but the testimony folds again — a repeated utterance IS
                 // another witness (chess parity: every play of a move counts).
-                bool deposited = await closer.CloseAsync(
-                    item.Tenant, item.SessionId, item.Prompt, item.Reply, item.UserKey, ct);
+                deposited = await closer.CloseAsync(
+                    item.Tenant, item.SessionId, item.Prompt, item.Reply, item.UserKey, ct,
+                    item.OccurrenceKey, item.Phase);
 
                 if (!deposited)
                 {
-                    // A broken closer is terminal for this lane: the endpoint's
-                    // contract is record-or-fail, so it must stop advertising itself
-                    // rather than answer turns it silently fails to witness.
-                    if (closer.Broken)
-                    {
-                        IsOnline = false;
-                        _log.LogError("turn-witness disabled: writer spine offline");
-                        return;
-                    }
-                    _log.LogWarning("turn-witness could not deposit turn; dropped");
+                    _log.LogWarning("turn-witness could not commit turn");
                     continue;
                 }
 
                 _log.LogInformation("turn witnessed: tenant={Tenant} session={Session}",
                     item.Tenant, item.SessionId);
-                consecutiveFailures = 0;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -120,14 +145,17 @@ internal sealed class TurnWitness : BackgroundService
             }
             catch (Exception ex)
             {
-                if (++consecutiveFailures >= 8)
-                {
-                    IsOnline = false;
-                    _log.LogError(ex, "turn-witness disabled after {Count} consecutive failures", consecutiveFailures);
-                    return;
-                }
-                _log.LogWarning(ex, "turn-witness deposit failed; turn dropped");
+                _log.LogWarning(ex, "turn-witness deposit failed");
             }
+            finally { item.Completion?.TrySetResult(deposited); }
+        }
+        }
+        finally
+        {
+            IsOnline = false;
+            _queue.Writer.TryComplete();
+            while (_queue.Reader.TryRead(out var abandoned))
+                abandoned.Completion?.TrySetResult(false);
         }
     }
 

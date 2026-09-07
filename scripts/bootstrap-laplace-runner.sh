@@ -747,7 +747,7 @@ EOF
     got="$(awk '/HugePages_Total/{print $2}' /proc/meminfo)"
 
     if [ "${got:-0}" -ge "$need" ]; then
-        green "✓ reserved $got huge pages (need $need) — pg_apply_huge_pages promotes the GUC"
+        green "✓ host pool contains $got huge pages (cluster needs $need); allocation remains opportunistic"
     else
         yellow "  only ${got:-0} of $target pages reserved — memory is fragmented"
         yellow "  /etc/sysctl.d/60-laplace-hugepages.conf persists: REBOOT reserves them"
@@ -1731,12 +1731,9 @@ do_bootstrap() {
 
     bootstrap_host_vm_tuning
     bootstrap_disable_system_postgresql
-    # BEFORE the cluster, deliberately. bootstrap_laplace_pg_cluster runs the
-    # machine tuning, which is where pg_apply_huge_pages decides between 'on' and
-    # 'try' by counting reserved pages — and where the restart that activates the
-    # choice happens. Reserving afterwards meant run 1 always found zero pages,
-    # chose 'try', and only then reserved; run 2 promoted. Two runs to converge,
-    # for no reason but ordering.
+    # Reserve before cluster startup so PostgreSQL can use available huge pages.
+    # Machine tuning keeps allocation opportunistic: another cluster may own
+    # part of the shared host pool when this postmaster starts.
     bootstrap_pg_hugepages
     bootstrap_laplace_pg_cluster
 

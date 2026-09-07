@@ -10,7 +10,11 @@ internal readonly record struct ConverseOptions(
     bool Elaborate = false,
     string? LanguageCode = null,
     byte[]? Language = null,
-    string? LanguageSource = null);
+    string? LanguageSource = null,
+    int? MaxTokens = null,
+    int? Window = null,
+    double? Temperature = null,
+    int? TopK = null);
 
 
 
@@ -92,6 +96,10 @@ internal interface ISubstrateClient
         double temperature = 0.7,
         int topK = 10,
         CancellationToken ct = default);
+
+    IAsyncEnumerable<GenerateToken> ForwardTurnStreamAsync(
+        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
+        throw new NotSupportedException("This adapter does not implement session-aware forward-turn streaming.");
 
     Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct);
 

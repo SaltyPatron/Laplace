@@ -1,0 +1,20 @@
+-- Shared native set access and standing reduction; input order and duplicates
+-- are retained at this SQL surface. Refutations remain inspectable.
+CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
+    p_subjects bytea[],
+    p_types bytea[],
+    p_limit int)
+    RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
+                  rd bigint, witness_count bigint, outbound boolean)
+    AS 'MODULE_PATHNAME', 'pg_laplace_explore_web_neighbors'
+    LANGUAGE C STABLE PARALLEL SAFE;
+
+-- Shared native set access and standing reduction; input order and duplicates
+-- are retained at this SQL surface. Refutations remain inspectable.
+CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
+    p_subjects bytea[],
+    p_limit int)
+    RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
+                  rd bigint, witness_count bigint, outbound boolean)
+    AS 'MODULE_PATHNAME', 'pg_laplace_explore_web_neighbors'
+    LANGUAGE C STABLE PARALLEL SAFE;

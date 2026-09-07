@@ -601,7 +601,6 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
     protected virtual double WitnessWeight => 1.0;
     protected virtual int CommitEpoch => 0;
     protected virtual Hash128? ContextId => null;
-    protected virtual IngestSourceProfile IngestProfile => IngestSourceProfile.Wiktionary;
 
     protected sealed override IIngestRecordHandler<GrammarIngestRecord> CreateHandler() =>
         throw new NotSupportedException("Grammar ingest handlers require the active decomposer options.");
@@ -614,7 +613,7 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.StructuredGrammar(
             SourceId, BatchLabelPrefix, options, context.Reader,
-            WitnessWeight, CommitEpoch, IngestProfile);
+            WitnessWeight, CommitEpoch, PipelineProfile);
 
 }
 

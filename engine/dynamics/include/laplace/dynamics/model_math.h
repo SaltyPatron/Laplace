@@ -25,6 +25,15 @@ int ffn_write_vectors_d(const double* x, size_t n, size_t d,
                         const float* down, size_t d_out,
                         int act, double* out);
 
+/* Complete isolated FFN operator, including optional projection biases.
+ * act: 0 gated SiLU, 1 erf-GELU, 2 tanh-GELU, 3 QuickGELU, 4 ReLU,
+ * 5 SiLU. With a gate, activation applies to gate(x) and multiplies up(x).
+ * No output normalization or magnitude threshold is applied. */
+int ffn_write_vectors_ex_d(const double* x, size_t n, size_t d,
+    const float* up, const float* up_bias, const float* gate, const float* gate_bias,
+    size_t interm, const float* down, const float* down_bias, size_t d_out,
+    int act, double* out);
+
 /* True per-row LayerNorm in place: x = (x-mean)/sqrt(var+eps)*gamma + beta.
  * beta may be NULL (gain-only). Data-dependent per row — never foldable into
  * weight columns. */

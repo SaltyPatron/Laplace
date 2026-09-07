@@ -225,16 +225,14 @@ pg_laplace_explore_web_neighbors(PG_FUNCTION_ARGS)
     bool *input_nulls;
     int n_input, count, limit;
     LaplaceNeighbor *rows;
-    bool typed = PG_NARGS() == 3;
+    bool include_default = !PG_ARGISNULL(3) && PG_GETARG_BOOL(3);
     if (PG_ARGISNULL(0)) PG_RETURN_NULL();
     frontier = PG_GETARG_ARRAYTYPE_P(0);
-    types = typed && !PG_ARGISNULL(1) ? PG_GETARG_ARRAYTYPE_P(1) : NULL;
-    limit = PG_ARGISNULL(typed ? 2 : 1) ? 0 : PG_GETARG_INT32(typed ? 2 : 1);
+    types = PG_ARGISNULL(1) ? NULL : PG_GETARG_ARRAYTYPE_P(1);
+    limit = PG_ARGISNULL(2) ? 0 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
     rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    /* The historical typed NULL means the DEFAULT partition only. */
-    if (typed && types == NULL) types = construct_empty_array(BYTEAOID);
-    rows = laplace_consensus_neighbors(frontier, types, limit, typed, false, &count, NULL);
+    rows = laplace_consensus_neighbors(frontier, types, limit, include_default, false, &count, NULL);
     deconstruct_array(frontier, BYTEAOID, -1, false, TYPALIGN_INT,
                       &input, &input_nulls, &n_input);
     /* Preserve input ordinals and duplicate frontier entries at the SQL edge;

@@ -208,6 +208,31 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyWorkingSetAsync(new[] { change }, ct);
 
+    public Task<ApplyResult> ApplyConversationTurnAsync(
+        SubstrateChange change, Hash128 sessionId, IReadOnlyList<Hash128> turnIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        ArgumentNullException.ThrowIfNull(turnIds);
+        if (sessionId == Hash128.Zero || turnIds.Count == 0)
+            throw new ArgumentException("A conversation append requires a session and ordered turn ids.");
+        var ids = turnIds.Select(id => id.ToBytes()).ToArray();
+        return ApplyCoreAsync(
+            [change], workingSet: true, append: false, default,
+            reconciliation: null, precommitVerifier: null, ct,
+            async (connection, transaction, token) =>
+            {
+                await using var command = new NpgsqlCommand(
+                    "SELECT converse.session_append_turns(@session, @turns, @observed)",
+                    connection, transaction);
+                command.Parameters.AddWithValue("session", NpgsqlDbType.Bytea, sessionId.ToBytes());
+                command.Parameters.AddWithValue("turns", NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
+                command.Parameters.AddWithValue("observed", NpgsqlDbType.TimestampTz,
+                    change.Metadata.BuiltAt.ToUniversalTime());
+                await command.ExecuteScalarAsync(token).ConfigureAwait(false);
+            });
+    }
+
     public async Task<ApplyResult> ApplyWorkingSetAsync(
         IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => await ApplyCoreAsync(
@@ -281,7 +306,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         IReadOnlyList<SubstrateChange> changes, bool workingSet, bool append,
         Hash128 sourceId, WorkingSetReconciliation? reconciliation,
         Func<CancellationToken, ValueTask>? precommitVerifier,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? appendConversation = null)
     {
         ArgumentNullException.ThrowIfNull(changes);
         if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
@@ -308,6 +334,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (precommitVerifier is not null && !atomicWorkingSet)
                 throw new InvalidOperationException(
                     "source integrity verification requires the atomic evidence-and-consensus writer");
+            if (appendConversation is not null && !atomicWorkingSet)
+                throw new InvalidOperationException(
+                    "Conversation history requires the atomic evidence-and-consensus writer.");
             if (hasEphemeralFolds && !atomicWorkingSet)
                 throw new InvalidOperationException(
                     "ephemeral fold inputs require the journaled atomic writer; "
@@ -332,6 +361,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                             }
                             atomicStats = await UpsertDeltaInTransactionAsync(
                                 delta!, connection, transaction, token).ConfigureAwait(false);
+                            if (appendConversation is not null)
+                                await appendConversation(connection, transaction, token).ConfigureAwait(false);
                             if (precommitVerifier is not null)
                                 await precommitVerifier(token).ConfigureAwait(false);
                         },

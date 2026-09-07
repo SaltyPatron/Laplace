@@ -74,9 +74,20 @@ int ffn_write_vectors_d(const double* x, size_t n, size_t d,
                         const float* down, size_t d_out,
                         int act, double* out)
 {
+    return ffn_write_vectors_ex_d(x, n, d, up, up_bias,
+        act == 0 ? gate : nullptr, nullptr, interm, down, nullptr, d_out, act, out);
+}
+
+extern "C"
+int ffn_write_vectors_ex_d(const double* x, size_t n, size_t d,
+    const float* up, const float* up_bias, const float* gate, const float* gate_bias,
+    size_t interm, const float* down, const float* down_bias, size_t d_out,
+    int act, double* out)
+{
     if (!x || !up || !down || !out || n == 0 || d == 0 || interm == 0 || d_out == 0)
         return -1;
     if (act == 0 && !gate) return -1;
+    if (act < 0 || act > 5 || (!gate && gate_bias)) return -1;
     const size_t block = 64;
     const size_t nblocks = (n + block - 1) / block;
     rows_parallel(nblocks, 1, [&](size_t bk) {
@@ -90,19 +101,31 @@ int ffn_write_vectors_d(const double* x, size_t n, size_t d,
                 const float* uk = up + k * d;
                 double s = up_bias ? (double)up_bias[k] : 0.0;
                 for (size_t j = 0; j < d; ++j) s += xi[j] * (double)uk[j];
-                if (act == 1) {
-                    ai[k] = 0.5 * s * (1.0 + std::erf(s * 0.7071067811865476));
-                } else {
+                double z = s;
+                if (gate) {
                     const float* gk = gate + k * d;
-                    double g = 0.0;
-                    for (size_t j = 0; j < d; ++j) g += xi[j] * (double)gk[j];
-                    ai[k] = (g / (1.0 + std::exp(-g))) * s;
+                    z = gate_bias ? (double)gate_bias[k] : 0.0;
+                    for (size_t j = 0; j < d; ++j) z += xi[j] * (double)gk[j];
                 }
+                double activated;
+                if (act == 1)
+                    activated = 0.5 * z * (1.0 + std::erf(z * 0.7071067811865476));
+                else if (act == 2)
+                    activated = 0.5 * z * (1.0 + std::tanh(
+                        0.7978845608028654 * (z + 0.044715 * z * z * z)));
+                else if (act == 4)
+                    activated = std::max(0.0, z);
+                else {
+                    const double argument = act == 3 ? 1.702 * z : z;
+                    const double e = std::exp(-std::abs(argument));
+                    activated = z * (argument >= 0.0 ? 1.0 / (1.0 + e) : e / (1.0 + e));
+                }
+                ai[k] = gate ? activated * s : activated;
             }
             double* oi = out + i * d_out;
             for (size_t m = 0; m < d_out; ++m) {
                 const float* dm = down + m * interm;
-                double s = 0.0;
+                double s = down_bias ? (double)down_bias[m] : 0.0;
                 for (size_t k = 0; k < interm; ++k) s += ai[k] * (double)dm[k];
                 oi[m] = s;
             }

@@ -127,14 +127,8 @@ public sealed class ModelJointCorroborationETL
             ct.ThrowIfCancellationRequested();
             int count = Math.Min(_pageSize, proposals.Count - begin);
             var page = proposals.GetRange(begin, count);
-            var admitted = new List<int>(count);
-            for (int local = 0; local < count; local++)
-            {
-                int i = begin + local;
-                if (leftVote.Outcomes[i] == rightVote.Outcomes[i]
-                    && leftVote.Outcomes[i] != (short)AttestationOutcome.Draw)
-                    admitted.Add(local);
-            }
+            var admitted = NativeAttestation.CorroboratedIndexes(
+                leftVote.Outcomes.AsSpan(begin, count), rightVote.Outcomes.AsSpan(begin, count));
             if (admitted.Count == 0) continue;
 
             Hash128 orchestration = OrchestrationReceipt(
@@ -197,6 +191,7 @@ public sealed class ModelJointCorroborationETL
         var contexts = new List<Hash128>();
         var opponentRatings = new List<long>();
         var opponentRds = new List<long>();
+        var witness = NativeAttestation.WitnessParameters(targetType, sourceTrust);
         short[]? firstCircuitOutcomes = null;
         foreach (ModelCircuitDescriptor circuit in estate.Enumerate(targetType))
         {
@@ -204,11 +199,8 @@ public sealed class ModelJointCorroborationETL
             circuitScores.Add(scores);
             firstCircuitOutcomes ??= outcomes;
             contexts.Add(circuit.ContextId);
-            AttestationRow prototype = NativeAttestation.CategoricalResolvedOutcome(
-                default, targetType, default(Hash128), source, circuit.ContextId,
-                sourceTrust, AttestationOutcome.Draw);
-            opponentRatings.Add(prototype.OpponentRatingFp1e9);
-            opponentRds.Add(prototype.OpponentRdFp1e9);
+            opponentRatings.Add(witness.Rating);
+            opponentRds.Add(witness.Rd);
             PeakTransientScoreBytes = Math.Max(
                 PeakTransientScoreBytes,
                 checked((long)circuitScores.Count * rows.Length * sizeof(long)));

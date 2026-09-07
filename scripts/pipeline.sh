@@ -172,11 +172,19 @@ psql() {
   fi
 }
 
-# Content digest of the libraries the postmaster preloads. Empty string when
-# neither is installed yet (first install — nothing is pinned, nothing to bounce).
+# Content digest of Laplace libraries retained by the postmaster. The preload
+# modules also retain core and dynamics through their ELF dependencies: changing
+# one of those libraries requires the same reload as changing the host module.
 preloaded_so_digest() {
   local d="$LAPLACE_EXT_LIBDIR"
-  cat "$d/laplace_substrate.so" "$d/laplace_geom.so" 2>/dev/null | sha256sum | cut -d' ' -f1
+  local library
+  for library in "$d/laplace_substrate.so" "$d/laplace_geom.so" \
+    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
+    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so"; do
+    if [[ -f "$library" ]]; then
+      sha256sum "$library" || return
+    fi
+  done | sha256sum | cut -d' ' -f1
 }
 
 # Staged extension modules must win before pg_config's compatibility $libdir.
@@ -539,7 +547,9 @@ phase_install() (
   # fp_native (the install gate above) covers the whole engine+extension domain
   # INCLUDING .sql.in, so editing one function body invalidates it, reaches here,
   # and forced a bounce that nothing needed. Digest the preloaded libraries
-  # across the install instead: same bytes, same image, no restart.
+  # and their Laplace dependencies across the install instead: same bytes,
+  # same loaded images, no restart. A new execution module may reference new
+  # core exports even when the preload module itself is byte-identical.
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
     preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")

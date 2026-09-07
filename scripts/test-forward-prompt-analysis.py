@@ -80,15 +80,27 @@ def main() -> int:
     assert walk.index(drop_frontier) < walk.index(drop_trace), \
         "retired route functions are not dropped in dependency order"
 
-    # Performance work must not masquerade as a smaller generation request. Both
-    # dynamic branches in converse.chat still request the established
-    # forty-step S6 -> S7 -> S8 pass.
-    assert count(chat, "p_prompt, 40, 5, 0.6, 10") == 3, \
-        "default converse.chat forward-pass length changed from 40 steps"
+    # Natural chat must carry its session into the same program as HTTP/MCP.
+    # It returns before the explicit inspection shapes elect a topic. Keep the
+    # established minimum output budget and agree with the program's default;
+    # dead legacy branches must not be counted as implemented generation paths.
+    natural = re.search(r"IF shape IS NULL THEN(.*?)END IF;", chat, re.S)
+    assert natural is not None and "RETURN out;" in natural.group(1)
+    call = re.search(r"converse\.forward_turn\(\s*p_prompt,\s*p_session,\s*(\d+),", natural.group(1))
+    assert call is not None, "natural chat must preserve session context"
+    program = function_slice(walk, "converse.forward_turn", "generation.walk_text")
+    default_steps = re.search(r"p_steps int DEFAULT (\d+)", program)
+    assert default_steps is not None
+    steps = int(call.group(1))
+    assert steps >= 40 and steps == int(default_steps.group(1)), \
+        "natural chat must use the shared program's full default output budget"
+    assert count(chat, "converse.forward_turn(") == 1
+    assert "generation.forward_text(" not in chat
+    assert "chat_scaffold" not in natural.group(1)
 
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
-        "forward_text=exact_tree1 route_owner=ids retired_text_wrappers=2 chat_steps=40"
+        f"forward_text=exact_tree1 route_owner=ids retired_text_wrappers=2 chat_steps={steps}"
     )
     return 0
 

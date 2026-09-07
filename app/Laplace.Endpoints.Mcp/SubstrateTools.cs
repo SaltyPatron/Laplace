@@ -95,6 +95,10 @@ internal sealed class SubstrateTools : IMcpTools
             "One conversational turn against the substrate (converse.chat): walk-driven prose composed from rated consensus. Structural steering, no phrasing tricks: shape names the read, bands lenses it (e.g. '4' parts, '2' kinds, '5' causes), elaborate advances fact layers on a carried topic. Closes the loop: prompt and reply deposit as witnessed content (UserPrompt/Response trust classes) and fold, so the turn is visible to the next walk.",
             () => Schema(("prompt", "string", "the message", true),
                          ("session", "string", "session key for continuity", false),
+                         ("max_tokens", "integer", "maximum emitted constituents, default 128", false),
+                         ("window", "integer", "maximum ordered continuation stride, default 5", false),
+                         ("temperature", "number", "selection spread; zero selects deterministically", false),
+                         ("top_k", "integer", "candidate count for selection, default 10", false),
                          ("shape", "string", "optional read shape (see converse.query_shapes())", false),
                          ("bands", "string", "optional comma-separated salience bands to lens the reply", false),
                          ("language", "string", "operator primary language for this turn (ISO code or name)", false),
@@ -711,7 +715,7 @@ internal sealed class SubstrateTools : IMcpTools
 
     private (string, bool) ChatTurn(JsonObject? args)
     {
-        var prompt = ChessPositionRef.RewriteFenToHex(Req(args, "prompt"))!;
+        var prompt = Req(args, "prompt");
         var sessionKey = Opt(args, "session") ?? _processSessionKey;
         var sessionId = ConversationContent.SessionId(McpTenant, sessionKey);
         var shape = Opt(args, "shape");
@@ -734,19 +738,39 @@ internal sealed class SubstrateTools : IMcpTools
             language = LanguageReference.IdForResolvedCode(languageCode).ToBytes();
         }
 
-        var reply = NpgsqlSubstrateReads.ChatAsync(
+        int steps = Int(args, "max_tokens", 128);
+        int stride = Int(args, "window", 5);
+        int topK = Int(args, "top_k", 10);
+        double spread = args?["temperature"]?.GetValue<double>() ?? 0.6;
+        if (steps < 1 || stride < 1 || topK < 1 || !double.IsFinite(spread) || spread < 0)
+            return ("Output length, window, and top_k must be positive; temperature must be finite and nonnegative.", true);
+
+        bool inspection = !string.IsNullOrWhiteSpace(shape) || bands is { Length: > 0 } || elaborate;
+        string occurrenceKey = Guid.NewGuid().ToString("N");
+        if (!TurnCloser.CloseAsync(McpTenant, sessionId, prompt, null,
+                occurrenceKey: occurrenceKey, phase: ConversationContent.TurnPhase.Input)
+            .GetAwaiter().GetResult())
+            return ("The prompt did not commit to the substrate.", true);
+        var reply = inspection ? NpgsqlSubstrateReads.ChatAsync(
             _db, prompt, sessionId.ToBytes(), default,
             shape: shape, bands: bands, elaborate: elaborate,
-            language: language).GetAwaiter().GetResult();
+            language: language).GetAwaiter().GetResult()
+            : NpgsqlSubstrateReads.ForwardTurnAsync(
+                _db, prompt, sessionId.ToBytes(), steps, stride, spread, topK, default)
+                .GetAwaiter().GetResult();
 
-        DepositTurn(prompt, reply, sessionId);
+        bool witnessed = string.IsNullOrEmpty(reply) || TurnCloser.CloseAsync(
+            McpTenant, sessionId, prompt, reply, occurrenceKey: occurrenceKey,
+            phase: ConversationContent.TurnPhase.Output).GetAwaiter().GetResult();
 
         var result = new JsonObject
         {
             ["rows"] = new JsonArray(new JsonObject { ["reply"] = reply }),
-            ["session"] = sessionKey
+            ["session"] = sessionKey,
+            ["witnessed"] = witnessed
         };
-        return (result.ToJsonString(), false);
+        if (!witnessed) result["error"] = "The turn did not commit to the substrate.";
+        return (result.ToJsonString(), !witnessed);
     }
 
     // The agent write lane: mint a note as witnessed content and fold it, so the
@@ -904,7 +928,7 @@ internal sealed class SubstrateTools : IMcpTools
     private TurnCloser TurnCloser => _turnCloser ??= new TurnCloser(
         _db, warn => Console.Error.WriteLine($"laplace-mcp: {warn}"));
 
-    private void DepositTurn(string prompt, string? reply, Hash128 sessionId)
+    private bool DepositTurn(string prompt, string? reply, Hash128 sessionId)
         => TurnCloser.CloseAsync(McpTenant, sessionId, prompt, reply).GetAwaiter().GetResult();
 
     // The outbound lane: this substrate as a CLIENT of other models, symmetric with
