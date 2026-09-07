@@ -80,7 +80,15 @@ typedef struct {
     uint8_t                          source_root_has_atom;
     uint8_t                          source_root_valid;
     size_t                           span_capacity;
+    size_t                           entity_capacity;
+    size_t                           phys_capacity;
+    size_t                           source_tree_capacity;
+    size_t                           precedes_capacity;
 } laplace_compose_result_t;
+
+int laplace_compose_reserve_rows(laplace_compose_result_t* r,
+                                size_t entities, size_t physicalities,
+                                size_t source_trees);
 
 int laplace_grammar_compose(
     const uint8_t*              utf8,

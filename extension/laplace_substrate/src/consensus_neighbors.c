@@ -192,7 +192,10 @@ laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
     if (types != NULL && include_default)
         laplace_consensus_scan_default(frontier, NULL, neighbor_cell, &state, stats);
     state.reverse = true;
-    laplace_consensus_scan(NULL, frontier, types, neighbor_cell, &state, stats);
+    ArrayType *reverse_types = respect_direction
+        ? laplace_symmetric_relation_types_in(types) : types;
+    laplace_consensus_scan(NULL, frontier, reverse_types, neighbor_cell, &state, stats);
+    if (respect_direction && types != NULL) pfree(reverse_types);
     if (types != NULL && include_default)
         laplace_consensus_scan_default(NULL, frontier, neighbor_cell, &state, stats);
     entries = hash_get_num_entries(state.pairs);

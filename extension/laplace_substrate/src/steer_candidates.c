@@ -11,6 +11,7 @@
 #include "utils/memutils.h"
 #include "steer_candidates.h"
 #include "walk_score.h"
+#include "relation_symmetry.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_steer_candidates);
 
@@ -132,7 +133,10 @@ laplace_steer_candidates(ArrayType *candidates, ArrayType *frontier,
      * by the canonical relation's symmetry; untyped inspection sees both ends. */
     laplace_consensus_scan(frontier, candidates, types, steer_cell, &state, stats);
     state.reverse = true;
-    laplace_consensus_scan(candidates, frontier, types, steer_cell, &state, stats);
+    ArrayType *reverse_types = state.typed
+        ? laplace_symmetric_relation_types_in(types) : types;
+    laplace_consensus_scan(candidates, frontier, reverse_types, steer_cell, &state, stats);
+    if (state.typed) pfree(reverse_types);
     hash_seq_init(&seq, state.pairs);
     while ((pair = hash_seq_search(&seq)) != NULL)
     {

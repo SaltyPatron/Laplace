@@ -71,4 +71,36 @@ laplace_symmetric_relation_types(void)
     return laplace_symmetric_types_cache;
 }
 
+/* Restrict reverse storage access before scanning partitions/indexes. Filtering
+ * only in a row callback reads every asymmetric reverse neighborhood first. */
+static inline ArrayType *
+laplace_symmetric_relation_types_in(ArrayType *types)
+{
+    Datum *ids;
+    bool *nulls;
+    int count, kept = 0;
+    ArrayType *result;
+    if (types == NULL) return laplace_symmetric_relation_types();
+    deconstruct_array(types, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &ids, &nulls, &count);
+    for (int i = 0; i < count; ++i)
+    {
+        const laplace_relation_def_t *def = NULL;
+        hash128_t id;
+        bytea *value;
+        if (nulls[i]) continue;
+        value = DatumGetByteaPP(ids[i]);
+        if (VARSIZE_ANY_EXHDR(value) != sizeof(id))
+            ereport(ERROR, (errmsg("relation types require 16-byte identities")));
+        memcpy(&id, VARDATA_ANY(value), sizeof(id));
+        if (laplace_relation_lookup(&id, &def) == 0 && def != NULL &&
+            def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC)
+            ids[kept++] = ids[i];
+    }
+    result = construct_array(ids, kept, BYTEAOID, -1, false, TYPALIGN_INT);
+    pfree(ids);
+    pfree(nulls);
+    return result;
+}
+
 #endif /* LAPLACE_RELATION_SYMMETRY_H */

@@ -169,7 +169,7 @@ SELECT count(*) = 2 AND count(DISTINCT ord) = 2 AS state_keeps_positions
 FROM converse.prompt_state('p p');
 SELECT count(*) = 2 AND count(DISTINCT ord) = 2 AS coherence_keeps_positions
 FROM converse.prompt_coherence('p p');
-SELECT count(*) = 1 AND bool_and(id IS NULL) AS unknown_stays_null
+SELECT count(*) = 1 AND bool_and(id = laplace.word_id('zzzunknownzzz')) AS unknown_has_identity
 FROM converse.prompt_words('zzzunknownzzz');
 ROLLBACK TO SAVEPOINT token_identity;
 
@@ -300,7 +300,7 @@ SELECT reply, witnesses FROM converse.recall_intent('define', laplace.word_id('d
 SELECT reply FROM converse.recall_intent('synonyms', laplace.word_id('dog'));
 SELECT reply FROM converse.recall_intent('translate', laplace.word_id('dog'));
 SELECT reply FROM converse.recall_intent('translate', laplace.word_id('h'));
-SELECT count(*) = 0 AS unknown_topic_has_no_id FROM converse.prompt_state('zzzunknownzzz') WHERE id IS NOT NULL;
+SELECT count(*) = 1 AND bool_and(id = laplace.word_id('zzzunknownzzz')) AS unknown_state_has_identity FROM converse.prompt_state('zzzunknownzzz');
 
 -- Every published shape is dispatchable, and only published shapes are.
 SELECT count(*) AS published_shapes FROM converse.query_shapes();
