@@ -116,6 +116,45 @@ BEGIN
         RAISE EXCEPTION 'FAIL: masked/full fallback parity has % mismatched rows', mismatches;
     END IF;
 
+    -- Compare each bounded native result with a complete SQL reduction over
+    -- the same stored cells. Small bounds exercise heap eviction and duplicate
+    -- neighbor replacement independently of the native unbounded result.
+    WITH limits AS (SELECT generate_series(1, 4) AS bound),
+    raw_edges AS (
+        SELECT c.subject_id AS frontier_id, c.object_id AS nbr,
+               c.type_id, c.rating, c.rd, c.witness_count, true AS outbound
+        FROM laplace.consensus c WHERE c.subject_id = ANY(subjects)
+          AND c.object_id IS NOT NULL AND c.subject_id <> c.object_id
+        UNION ALL
+        SELECT c.object_id, c.subject_id, c.type_id, c.rating, c.rd,
+               c.witness_count, false
+        FROM laplace.consensus c WHERE c.object_id = ANY(subjects)
+          AND c.subject_id <> c.object_id
+    ), pairs AS (
+        SELECT DISTINCT ON (frontier_id, nbr) * FROM raw_edges
+        ORDER BY frontier_id, nbr, (rating::numeric - 2 * rd::numeric) DESC,
+                 type_id, outbound DESC
+    ), ranked AS (
+        SELECT *, row_number() OVER (PARTITION BY frontier_id
+            ORDER BY (rating::numeric - 2 * rd::numeric) DESC,
+                     nbr, type_id, outbound DESC) AS position
+        FROM pairs
+    ), expected AS (
+        SELECT l.bound, r.frontier_id, r.nbr, r.type_id, r.rating, r.rd,
+               r.witness_count, r.outbound
+        FROM limits l JOIN ranked r ON r.position <= l.bound
+    ), actual AS (
+        SELECT l.bound, n.* FROM limits l
+        CROSS JOIN LATERAL consensus.explore_web_neighbors(subjects, l.bound) n
+    ), delta AS (
+        (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+        UNION ALL
+        (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+    ) SELECT count(*) INTO mismatches FROM delta;
+    IF mismatches <> 0 THEN
+        RAISE EXCEPTION 'FAIL: bounded native neighbor reduction differs from stored-cell SQL order';
+    END IF;
+
     -- Now deposit the same governed relation bits the production entity writer
     -- carries. From this point the untyped overload is required to take its
     -- highway-mask fast path. Compare it against the explicit masked overload so

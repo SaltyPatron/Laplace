@@ -93,7 +93,12 @@ public static class MonolithSegmenter
             yield break;
         }
 
-        int chunkRecords = ResolveChunkRecords(configFactory(0), segments);
+        var sourceConfig = configFactory(0);
+        int chunkRecords = ResolveChunkRecords(sourceConfig, segments);
+        // Account the queued source payload as well as record count. Whole code
+        // files can be orders of magnitude wider than the source's average row.
+        long chunkBytes = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+            sourceConfig.WithWorkingSetConcurrency(segments).EffectiveConcurrentWorkingSets);
 
         // One outstanding record chunk and one outstanding composed change per active
         // segment is sufficient to overlap dispatcher, compose, and consumer. Queue memory
@@ -116,10 +121,13 @@ public static class MonolithSegmenter
             int rr = 0;
             long lastReportMs = 0;
             var buf = new List<TRecord>(chunkRecords);
+            long bufferedBytes = 0;
             await foreach (var rec in stream.RecordsAsync(ct))
             {
                 buf.Add(rec);
-                if (buf.Count >= chunkRecords)
+                bufferedBytes = checked(bufferedBytes
+                    + IngestRecordMemory.Measure(rec, sourceConfig.WorkingSetProfile));
+                if (buf.Count >= chunkRecords || bufferedBytes >= chunkBytes)
                 {
                     long n = Interlocked.Add(ref dispatched, buf.Count);
                     await inputs[rr].Writer.WriteAsync(buf, ct).ConfigureAwait(false);
@@ -137,6 +145,7 @@ public static class MonolithSegmenter
                             + $"({n / Math.Max(1e-3, sw.Elapsed.TotalSeconds):N0} rec/s)");
                     }
                     buf = new List<TRecord>(chunkRecords);
+                    bufferedBytes = 0;
                 }
             }
             if (buf.Count > 0)

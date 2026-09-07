@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 call "%~dp0env.cmd"
 set "DEPLOY=%LAPLACE_DEPLOY%"
 set "PSQL=%PGBIN%\psql.exe"
@@ -13,6 +13,16 @@ echo deploy root: %DEPLOY%
 echo.
 
 set "OK=1"
+if not exist "%DEPLOY%\share\extension\laplace_execution_module.txt" (
+  echo MISSING: execution module manifest
+  set "OK=0"
+) else (
+  set /p EXECUTION_MODULE=<"%DEPLOY%\share\extension\laplace_execution_module.txt"
+  if not exist "%DEPLOY%\lib\!EXECUTION_MODULE!.dll" (
+    echo MISSING: !EXECUTION_MODULE!.dll
+    set "OK=0"
+  )
+)
 if not exist "%DEPLOY%\lib\laplace_substrate.dll" (
   echo MISSING: %DEPLOY%\lib\laplace_substrate.dll
   set "OK=0"

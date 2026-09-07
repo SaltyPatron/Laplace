@@ -58,6 +58,7 @@ public sealed class ChessOpeningMatchDecomposer
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => IngestSourceProfile.ChessAnalyze;
 
     private const double MatchWeight = 0.9;
 

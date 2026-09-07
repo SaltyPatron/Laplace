@@ -8,6 +8,7 @@
 #include "postgres.h"
 
 #include "fmgr.h"
+#include "miscadmin.h"
 #include "funcapi.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -163,6 +164,70 @@ word_seg_emit(void *ctx_, uint32_t ordinal,
         cstring_to_text_with_len((const char *) word_utf8, (int) word_len));
     values[2] = hash128_to_datum(id);
     tuplestore_putvalues(ctx->rsinfo->setResult, ctx->rsinfo->setDesc, values, nulls);
+}
+
+/* RESOLVE exposes the canonical observation before any evidence election.
+ * Every node, including whitespace, punctuation and unknown content, survives.
+ * Offsets address the canonical tree text, never a case-folded lookup label. */
+PG_FUNCTION_INFO_V1(pg_laplace_prompt_tree);
+
+Datum
+pg_laplace_prompt_tree(PG_FUNCTION_ARGS)
+{
+    tier_tree_t *tree = NULL;
+    hash128_t root;
+    text *input;
+    int rc;
+    InitMaterializedSRF(fcinfo, 0);
+    if (PG_ARGISNULL(0)) return (Datum) 0;
+    input = PG_GETARG_TEXT_PP(0);
+    if (VARSIZE_ANY_EXHDR(input) == 0) return (Datum) 0;
+    rc = laplace_content_tree_build_public(
+        (const uint8_t *) VARDATA_ANY(input), VARSIZE_ANY_EXHDR(input), &tree);
+    if (rc != 0)
+        ereport(ERROR, (errmsg("prompt_tree: canonical composition failed (%d)", rc)));
+    PG_TRY();
+    {
+        size_t length;
+        const uint8_t *bytes = tier_tree_text(tree, &length);
+        size_t count = tier_tree_node_count(tree);
+        ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+        if (bytes == NULL || count > INT_MAX ||
+            content_witness_tree_root_id(tree, &root) != 0)
+            ereport(ERROR, (errmsg("prompt_tree: invalid canonical composition")));
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            tier_node_view_t node;
+            Datum values[8];
+            bool nulls[8] = {false};
+            if (tier_tree_get_node(tree, i, &node) != 0 ||
+                (uint64) node.text_range_off + node.text_range_len > length)
+                ereport(ERROR, (errmsg("prompt_tree: invalid constituent span")));
+            values[0] = hash128_to_datum(&root);
+            values[1] = Int32GetDatum(i);
+            values[2] = Int32GetDatum(node.parent_idx);
+            nulls[2] = node.parent_idx == TIER_TREE_INVALID;
+            values[3] = Int16GetDatum(node.tier);
+            values[4] = Int32GetDatum(node.text_range_off);
+            values[5] = Int32GetDatum(node.text_range_len);
+            values[6] = hash128_to_datum(&node.id);
+            values[7] = PointerGetDatum(cstring_to_text_with_len(
+                (const char *) bytes + node.text_range_off, node.text_range_len));
+            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+            pfree(DatumGetPointer(values[0]));
+            pfree(DatumGetPointer(values[6]));
+            pfree(DatumGetPointer(values[7]));
+            if ((i & 4095) == 0) CHECK_FOR_INTERRUPTS();
+        }
+    }
+    PG_CATCH();
+    {
+        tier_tree_free(tree);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    tier_tree_free(tree);
+    return (Datum) 0;
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_word_segment);

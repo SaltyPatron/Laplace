@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION consensus.explore_web(
         rating bigint,
         rd bigint,
         witness_count bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_explore_web'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_explore_web'
     LANGUAGE C STABLE;
 
 -- Scalar convenience delegates to the canonical multi-seed crawl. It is not a

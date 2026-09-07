@@ -22,7 +22,10 @@ public readonly record struct ContentIngestRecord(
     FileMetadata? Metadata = null,
     Hash128 ContentRootId = default,
     Hash128 DocumentId = default,
-    Hash128 FileId = default);
+    Hash128 FileId = default) : IIngestResidentRecord
+{
+    public long ResidentInputBytes => CanonicalUtf8?.LongLength ?? 0;
+}
 
 public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {

@@ -7,6 +7,22 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessPgnDecomposerNovelGameTests
 {
+    [Fact]
+    public void ChessSizing_RunnerAndPipelineRetainResidentGameWidth()
+    {
+        IDecomposer source = new ChessPgnDecomposer();
+        Assert.Same(IngestSourceProfile.ChessPgn, source.SizingProfile);
+        var config = IngestPipelineDefaults.Compose(
+            source.SourceId, "chess-sizing", new DecomposerOptions(), null,
+            source.SizingProfile);
+        Assert.Same(source.SizingProfile, config.WorkingSetProfile);
+        const long loggedBudget = 3_374_058_188;
+        var plan = IngestSizing.Resolve(6, 6, 6, profile: source.SizingProfile,
+            workingSetBudgetBytes: loggedBudget, composeWorkers: 6);
+        Assert.True((long)plan.RecordBatchSize * 6 * 65_200 <= loggedBudget);
+        Assert.True((long)plan.CommitRows * 65_200 <= loggedBudget);
+    }
+
     private sealed class FakeReader : ISubstrateReader
     {
         public readonly HashSet<Hash128> Present = new();

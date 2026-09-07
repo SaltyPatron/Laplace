@@ -703,6 +703,7 @@ public static class IngestBatchPipeline
             ? config.EffectiveWorkingSetProbeInterval
             : config.ProbeChunkSize;
         var pending = new List<TRecord>(probeInterval);
+        long pendingResidentBytes = 0;
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
 
         // Working sets yield nothing mid-stream, which starves every
@@ -723,7 +724,7 @@ public static class IngestBatchPipeline
             };
         }
 
-        var state = new BatchState(config.NewBuilder(0));
+        using var state = new BatchState(config.NewBuilder(0));
         long rowsTotal = 0;
         long unitsConsumed = 0;
 
@@ -750,14 +751,19 @@ public static class IngestBatchPipeline
             }
 
             pending.Add(record);
+            pendingResidentBytes = checked(pendingResidentBytes
+                + IngestRecordMemory.Measure(record, config.WorkingSetProfile));
 
-            if (pending.Count >= probeInterval)
+            if (pending.Count >= probeInterval
+                || pendingResidentBytes >= IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+                    config.EffectiveConcurrentWorkingSets))
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                 {
                     yield return change;
                     ResetBatchScope(handler);
                 }
+                pendingResidentBytes = 0;
             }
 
             // Pending records count through the source model before compose. Composed
@@ -775,6 +781,7 @@ public static class IngestBatchPipeline
                         yield return change;
                         ResetBatchScope(handler);
                     }
+                    pendingResidentBytes = 0;
                 }
 
                 if (state.InBatch > 0)
@@ -1382,17 +1389,34 @@ public static class IngestBatchPipeline
 
         if (config.WorkingSet)
         {
-            var deferred = (WorkingSetDeferredBatch<TRecord>)(state.WorkingSetDeferred
-                ??= new WorkingSetDeferredBatch<TRecord>());
-            var composed = await IngestDescentFlush.ComposeBatchAsync(
-                batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
-            deferred.Shortcircuited.AddRange(composed.Shortcircuited);
-            deferred.Pending.AddRange(composed.Pending);
-            deferred.AddResidentBytes(composed.ResidentBytes);
-            foreach (var (_, units) in composed.Shortcircuited)
-                state.AddUnits(units);
-            foreach (var (record, _) in composed.Pending)
-                state.AddUnits(handler.UnitsPerRecord(record));
+            bool rootsAlreadyProbed = false;
+            while (batch.Count > 0)
+            {
+                var deferred = (WorkingSetDeferredBatch<TRecord>)(state.WorkingSetDeferred
+                    ??= new WorkingSetDeferredBatch<TRecord>());
+                long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+                    config.EffectiveConcurrentWorkingSets);
+                long available = Math.Max(1,
+                    envelope - state.Builder.StagedBytesEstimate - deferred.ResidentBytes);
+                var composed = await IngestDescentFlush.ComposeBatchAsync(
+                    batch, handler, reader, state.Builder, config, probedAbsent, ct,
+                    available, rootsAlreadyProbed).ConfigureAwait(false);
+                rootsAlreadyProbed = true;
+                deferred.Shortcircuited.AddRange(composed.Shortcircuited);
+                deferred.Pending.AddRange(composed.Pending);
+                deferred.AddResidentBytes(composed.ResidentBytes);
+                foreach (var (_, units) in composed.Shortcircuited)
+                    state.AddUnits(units);
+                foreach (var (record, _) in composed.Pending)
+                    state.AddUnits(handler.UnitsPerRecord(record));
+
+                if (batch.Count > 0 || ShouldCloseWorkingSet(state, config))
+                {
+                    await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
+                    yield return await state.YieldBatchAsync(ct);
+                    state.ResetBuilder(config.NewBuilder(state.BatchNumber));
+                }
+            }
         }
         else
         {
@@ -1411,13 +1435,19 @@ public static class IngestBatchPipeline
         }
     }
 
-    private sealed class BatchState(SubstrateChangeBuilder builder)
+    private sealed class BatchState(SubstrateChangeBuilder builder) : IDisposable
     {
         public SubstrateChangeBuilder Builder { get; private set; } = builder;
         public int InBatch { get; private set; }
         public int BatchNumber { get; private set; }
         internal object? WorkingSetDeferred { get; set; }
         private long _rowsInBatch;
+
+        public void Dispose()
+        {
+            (WorkingSetDeferred as IWorkingSetDeferredBatch)?.Dispose();
+            WorkingSetDeferred = null;
+        }
 
         public async Task FinalizeWorkingSetAsync<TRecord>(
             IIngestRecordHandler<TRecord> handler,

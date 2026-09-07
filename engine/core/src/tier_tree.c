@@ -25,6 +25,13 @@ struct tier_tree {
     size_t   text_len;
 };
 
+size_t tier_tree_resident_bytes(const tier_tree_t* t) {
+    if (!t) return 0;
+    return sizeof(*t) + t->text_len + t->capacity *
+        (sizeof(uint8_t) + 6 * sizeof(uint32_t) + sizeof(hash128_t)
+         + 4 * sizeof(double) + sizeof(hilbert128_t));
+}
+
 static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
     size_t new_cap = t->capacity > 0 ? t->capacity : 16;
     while (new_cap < min_capacity) {

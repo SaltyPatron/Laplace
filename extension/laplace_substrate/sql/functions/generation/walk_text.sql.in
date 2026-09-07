@@ -7,44 +7,22 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    -- One prompt analysis per forward pass. The old shape called prompt_state
-    -- here, then forward_frontier(text), which called prompt_state +
-    -- prompt_coherence and then forward_route_trace(text), which called both
-    -- again. On the seeded estate that means paying the same decomposition /
-    -- sense election repeatedly before S6 emits one constituent.
-    --
-    -- Keep the operands distinct: ctx is the ordered request trajectory S6
-    -- proposes from; seeds are the deduped prompt ids + witnessed senses used to
-    -- route S7's semantic frontier. No routed neighbor is appended to ctx.
-    WITH prompt_state AS MATERIALIZED (
-        SELECT p.ord, p.id
-        FROM converse.prompt_state(p_prompt) p
-        WHERE p.id IS NOT NULL
-    ), prompt_coherence AS MATERIALIZED (
-        SELECT c.ord, c.tok, c.synset_id, c.rel_type_id
-        FROM converse.prompt_coherence(p_prompt) c
-        WHERE c.synset_id IS NOT NULL
+    -- The observation root and its complete canonical tree precede routing.
+    -- No case-popularity substitution, named-English relation extraction or
+    -- dictionary-membership filter is allowed to change this operand.
+    WITH observation AS MATERIALIZED (
+        SELECT * FROM converse.prompt_tree(p_prompt)
     ), ctx AS MATERIALIZED (
-        SELECT array_agg(p.id ORDER BY p.ord) AS ids
-        FROM prompt_state p
-    ), resolved AS MATERIALIZED (
-        -- A named relation has explicit operands from the existing joint
-        -- election. Function words and relation namers remain ordered context;
-        -- they do not become alternative subjects of that requested operation.
-        SELECT p.ord, p.id AS entity FROM prompt_state p
-        WHERE NOT EXISTS (SELECT 1 FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL)
-        UNION ALL
-        SELECT c.ord, c.synset_id FROM prompt_coherence c
-        WHERE c.rel_type_id IS NOT NULL OR NOT EXISTS (
-            SELECT 1 FROM prompt_coherence named WHERE named.rel_type_id IS NOT NULL)
-        UNION ALL
-        SELECT c.ord, c.tok FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL
-    ), seeds AS MATERIALIZED (
-        SELECT r.entity, min(r.ord) AS ord
-        FROM resolved r
-        GROUP BY r.entity
+        SELECT array_agg(p.id ORDER BY p.byte_offset, p.node_index) AS ids
+        FROM observation p
+        WHERE p.tier = 2
     ), seed_array AS MATERIALIZED (
-        SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
+        SELECT ARRAY(
+            SELECT n.id FROM (
+                SELECT p.root_id AS id FROM observation p
+                UNION
+                SELECT p.id FROM observation p
+            ) n ORDER BY n.id) AS ids
     ), frontier AS MATERIALIZED (
         SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
         FROM (
@@ -67,8 +45,7 @@ BEGIN ATOMIC
                      laplace.hash128_lo(public.laplace_hash128_blake3(
                          convert_to(p_prompt, 'UTF8')))),
                  frontier.ids,
-                 (SELECT array_agg(DISTINCT c.rel_type_id)
-                  FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL)) g
+                 NULL::bytea[]) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,

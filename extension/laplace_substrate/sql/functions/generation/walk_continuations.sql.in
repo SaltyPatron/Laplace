@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
         p_relation_types bytea[])
     RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
-    AS 'MODULE_PATHNAME', 'pg_laplace_walk_continuations'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_continuations'
     LANGUAGE C VOLATILE;
 
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(

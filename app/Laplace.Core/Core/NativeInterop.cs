@@ -453,6 +453,12 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_compose_result_free")]
     public static partial void ComposeResultFree(IntPtr result);
 
+    [LibraryImport(Library, EntryPoint = "laplace_compose_resident_bytes")]
+    public static partial nuint ComposeResidentBytes(IntPtr result);
+
+    [LibraryImport(Library, EntryPoint = "laplace_ast_resident_bytes")]
+    public static partial nuint AstResidentBytes(IntPtr ast);
+
     [LibraryImport(Library, EntryPoint = "laplace_compose_entity_count")]
     public static partial nuint ComposeEntityCount(IntPtr result);
 

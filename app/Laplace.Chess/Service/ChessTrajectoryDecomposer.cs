@@ -76,6 +76,7 @@ public sealed class ChessTrajectoryDecomposer
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => IngestSourceProfile.ChessAnalyze;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;

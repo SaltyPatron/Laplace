@@ -41,6 +41,7 @@ int laplace_grammar_parse_with(TSParser* parser, const uint8_t* utf8, size_t len
                                const TSLanguage* recipe, laplace_ast_t** out_ast);
 
 size_t laplace_ast_node_count(const laplace_ast_t* ast);
+size_t laplace_ast_resident_bytes(const laplace_ast_t* ast);
 int    laplace_ast_get_node(const laplace_ast_t* ast, size_t idx, laplace_ast_node_t* out);
 const char* laplace_ast_type_name(const laplace_ast_t* ast, uint32_t type_id);
 void   laplace_ast_free(laplace_ast_t* ast);

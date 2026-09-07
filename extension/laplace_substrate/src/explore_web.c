@@ -26,6 +26,7 @@
 #include "laplace/core/relation_law.h"
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "consensus_neighbors.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_explore_web);
 
@@ -190,10 +191,6 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	hash128_t  *next_frontier;
 	int			n_front = 0;
 	int			n_seen = 0;
-	SPIPlanPtr	masked_plan;
-	const char *full_query =
-		"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
-		"FROM consensus.explore_web_neighbors($1, $2)";
 	SPIPlanPtr	mask_plan;
 	EdgeCand   *cands;
 	Datum	   *frontier_datums;
@@ -250,16 +247,6 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
 		elog(ERROR, "explore_web: SPI_connect failed");
 
-	{
-		Oid			pargs[3] = {BYTEAARRAYOID, BYTEAARRAYOID, INT4OID};
-
-		masked_plan = SPI_prepare_cursor(
-			"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
-			"FROM consensus.explore_web_neighbors($1, $2, $3)",
-			3, pargs, CURSOR_OPT_PARALLEL_OK);
-		if (masked_plan == NULL)
-			elog(ERROR, "explore_web: masked neighbor SPI_prepare failed");
-	}
 	{
 		Oid			pargs[1] = {BYTEAARRAYOID};
 
@@ -343,30 +330,13 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 									 BYTEAOID, -1, false, 'i');
 		type_array = frontier_relation_types(mask_plan, frontier_array,
 									 n_front, &masked);
-		args[0] = PointerGetDatum(frontier_array);
-		if (masked)
-		{
-			args[1] = PointerGetDatum(type_array);
-			args[2] = Int32GetDatum(probe_limit);
-			rc = SPI_execute_plan(masked_plan, args, NULL, true, 0);
-		}
-		else
-		{
-			Oid argtypes[2] = {BYTEAARRAYOID, INT4OID};
+		int neighbor_count;
+		LaplaceNeighbor *neighbors = laplace_consensus_neighbors(
+			frontier_array, masked ? type_array : NULL, probe_limit,
+			masked, false, &neighbor_count, NULL);
 
-			args[1] = Int32GetDatum(probe_limit);
-			rc = SPI_execute_with_args(full_query, 2, argtypes, args,
-									   NULL, true, 0);
-		}
-		if (rc != SPI_OK_SELECT)
-			elog(ERROR, "explore_web: frontier probe failed: %s",
-				 SPI_result_code_string(rc));
-
-		for (uint64 r = 0; r < SPI_processed; r++)
+		for (int r = 0; r < neighbor_count; r++)
 		{
-			HeapTuple	tup = SPI_tuptable->vals[r];
-			TupleDesc	td = SPI_tuptable->tupdesc;
-			bool		isnull;
 			hash128_t	cur;
 			hash128_t	nbr;
 			hash128_t	type_id;
@@ -378,19 +348,13 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 			bool		ofound;
 			EdgeOut		edge;
 
-			cur = datum_to_hash128(SPI_getbinval(tup, td, 1, &isnull));
-			if (isnull)
-				continue;
-			nbr = datum_to_hash128(SPI_getbinval(tup, td, 2, &isnull));
-			if (isnull)
-				continue;
-			type_id = datum_to_hash128(SPI_getbinval(tup, td, 3, &isnull));
-			if (isnull)
-				continue;
-			rating = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-			rd = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
-			wit = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));
-			outbound = DatumGetBool(SPI_getbinval(tup, td, 7, &isnull));
+			cur = neighbors[r].frontier;
+			nbr = neighbors[r].neighbor;
+			type_id = neighbors[r].type;
+			rating = neighbors[r].rating;
+			rd = neighbors[r].rd;
+			wit = neighbors[r].witnesses;
+			outbound = neighbors[r].outbound;
 
 			edge.source = outbound ? cur : nbr;
 			edge.type_id = type_id;
@@ -422,7 +386,11 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 				n_cands++;
 			}
 		}
-		SPI_freetuptable(SPI_tuptable);
+		pfree(neighbors);
+		pfree(frontier_array);
+		if (type_array != NULL) pfree(type_array);
+		for (int fi = 0; fi < n_front; ++fi)
+			pfree(DatumGetPointer(frontier_datums[fi]));
 
 		if (n_cands == 0)
 			break;
@@ -496,7 +464,6 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	}
 
 	SPI_freeplan(mask_plan);
-	SPI_freeplan(masked_plan);
 	laplace_spi_finish(spi_top);
 	return (Datum) 0;
 }

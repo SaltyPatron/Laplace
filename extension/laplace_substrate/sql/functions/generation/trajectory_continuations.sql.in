@@ -36,5 +36,5 @@ DROP FUNCTION IF EXISTS laplace.trajectory_continuations(bytea[], int);
 CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
         p_ctx bytea[], p_topk int DEFAULT NULL)
     RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_continuations'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_trajectory_continuations'
     LANGUAGE C STABLE;

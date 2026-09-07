@@ -30,6 +30,7 @@ public abstract class RelationTripleDecomposerBase<TSource, TScope> : RelationTr
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     protected virtual ConcurrentDictionary<string, byte>? VocabularyReadback => null;
 

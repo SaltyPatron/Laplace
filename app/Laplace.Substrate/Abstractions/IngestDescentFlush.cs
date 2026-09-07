@@ -4,7 +4,7 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>Compose-only batch accumulated across flush intervals within one working set.</summary>
-internal interface IWorkingSetDeferredBatch
+internal interface IWorkingSetDeferredBatch : IDisposable
 {
     long ResidentBytes { get; }
 }
@@ -19,6 +19,14 @@ internal sealed class WorkingSetDeferredBatch<TRecord> : IWorkingSetDeferredBatc
 
     internal void AddResidentBytes(long bytes) =>
         ResidentBytes = checked(ResidentBytes + Math.Max(0, bytes));
+
+    public void Dispose()
+    {
+        foreach (var (_, unit) in Pending) unit?.Dispose();
+        Pending.Clear();
+        Shortcircuited.Clear();
+        ResidentBytes = 0;
+    }
 }
 
 internal static class IngestDescentFlush
@@ -41,7 +49,7 @@ internal static class IngestDescentFlush
         ISet<Hash128>? probedAbsent,
         CancellationToken ct)
     {
-        var batch = await ComposeBatchAsync(records, handler, reader, builder, config, probedAbsent, ct)
+        using var batch = await ComposeBatchAsync(records, handler, reader, builder, config, probedAbsent, ct)
             .ConfigureAwait(false);
         if (batch.Pending.Count == 0)
             return batch.Shortcircuited.ToArray();
@@ -67,47 +75,70 @@ internal static class IngestDescentFlush
         SubstrateChangeBuilder builder,
         IngestBatchConfig config,
         ISet<Hash128>? probedAbsent,
-        CancellationToken ct)
+        CancellationToken ct,
+        long residentBudgetBytes = long.MaxValue,
+        bool rootsAlreadyProbed = false)
     {
         var batch = new WorkingSetDeferredBatch<TRecord>();
         if (records.Count == 0) return batch;
 
-        var shortcircuited = await IngestExistenceGate.RemovePresentAsync(
-            records, handler, reader, builder, probedAbsent, ct).ConfigureAwait(false);
-        batch.Shortcircuited.AddRange(shortcircuited);
+        if (!rootsAlreadyProbed)
+        {
+            var shortcircuited = await IngestExistenceGate.RemovePresentAsync(
+                records, handler, reader, builder, probedAbsent, ct).ConfigureAwait(false);
+            batch.Shortcircuited.AddRange(shortcircuited);
+        }
         if (records.Count == 0) return batch;
 
-        var units = new IIngestDeferredUnit[records.Count];
         int composeWorkers = ResolveComposeWorkers(records.Count, handler, config);
-        if (composeWorkers <= 1)
+        int consumed = 0;
+        try
         {
-            for (int i = 0; i < records.Count; i++)
-                units[i] = handler.CreateDeferredUnit(records[i]);
-        }
-        else
-        {
-            var snapshot = records;
-            await Parallel.ForAsync(
-                0,
-                snapshot.Count,
-                new ParallelOptions
+            // Measure each concurrent wave before admitting another. Creating the
+            // entire record-count batch first lets native trees exhaust RAM before
+            // the working-set owner can observe their allocation capacities.
+            while (consumed < records.Count)
+            {
+                ct.ThrowIfCancellationRequested();
+                int waveCount = Math.Min(composeWorkers, records.Count - consumed);
+                var units = new IIngestDeferredUnit?[waveCount];
+                try
                 {
-                    MaxDegreeOfParallelism = composeWorkers,
-                    CancellationToken = ct,
-                },
-                (i, _) =>
-                {
-                    units[i] = handler.CreateDeferredUnit(snapshot[i]);
-                    return ValueTask.CompletedTask;
-                }).ConfigureAwait(false);
-        }
+                    if (waveCount == 1)
+                        units[0] = handler.CreateDeferredUnit(records[consumed]);
+                    else
+                        await Parallel.ForAsync(0, waveCount, new ParallelOptions
+                        {
+                            MaxDegreeOfParallelism = composeWorkers,
+                            CancellationToken = ct,
+                        }, (i, _) =>
+                        {
+                            units[i] = handler.CreateDeferredUnit(records[consumed + i]);
+                            return ValueTask.CompletedTask;
+                        }).ConfigureAwait(false);
 
-        for (int i = 0; i < records.Count; i++)
-        {
-            batch.Pending.Add((records[i], units[i]));
-            batch.AddResidentBytes(MeasureResidentBytes(units[i], config.WorkingSetProfile));
+                    for (int i = 0; i < waveCount; i++)
+                    {
+                        var unit = units[i]!;
+                        batch.AddResidentBytes(MeasureResidentBytes(unit, config.WorkingSetProfile));
+                        batch.Pending.Add((records[consumed + i], unit));
+                        units[i] = null; // Ownership transferred to the deferred batch.
+                    }
+                }
+                finally
+                {
+                    foreach (var unit in units) unit?.Dispose();
+                }
+                consumed += waveCount;
+                if (batch.ResidentBytes >= residentBudgetBytes) break;
+            }
         }
-        records.Clear();
+        catch
+        {
+            batch.Dispose();
+            throw;
+        }
+        records.RemoveRange(0, consumed);
         return batch;
     }
 
@@ -120,7 +151,6 @@ internal static class IngestDescentFlush
         IIngestDeferredUnit unit, IngestSourceProfile? sourceProfile)
     {
         var profile = sourceProfile ?? IngestSourceProfile.Default;
-        long explicitBytes = Math.Max(0, unit.ResidentBytes);
         long treeBytes = 0;
 
         if (unit is IMultiTreeIngestDeferredUnit multi)
@@ -139,7 +169,8 @@ internal static class IngestDescentFlush
                 (long)tree.Capacity * MemoryTopology.TierTreeResidentBytesPerCapacity);
         }
 
-        long deferredBytes = Math.Max(explicitBytes, treeBytes);
+        // Tree access may materialize native compose/probe state lazily.
+        long deferredBytes = Math.Max(Math.Max(0, unit.ResidentBytes), treeBytes);
         if (deferredBytes == 0)
             deferredBytes = profile.WorkingSetBytesPerRecord;
         return checked((long)Math.Max(1, profile.EstBytesPerRecord) + deferredBytes);
@@ -169,8 +200,15 @@ internal static class IngestDescentFlush
         CancellationToken ct)
     {
         if (batch.Pending.Count == 0) return;
-        await FinalizePendingAsync(batch.Pending, handler, reader, builder, config, probedAbsent, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await FinalizePendingAsync(batch.Pending, handler, reader, builder, config, probedAbsent, ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            batch.Dispose();
+        }
     }
 
     private static async Task FinalizePendingAsync<TRecord>(
@@ -230,15 +268,9 @@ internal static class IngestDescentFlush
                 if (root != default)
                     reader.MarkProven([root]);
             }
-            catch
-            {
-                // The finally below only covers the current unit.
-                for (int j = i + 1; j < pending.Count; j++)
-                    pending[j].Unit.Dispose();
-                throw;
-            }
             finally
             {
+                pending[i] = default;
                 unit.Dispose();
             }
         }

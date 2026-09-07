@@ -20,8 +20,8 @@
  *
  * SQL owns candidate reduction: one GIN containment probe over the complete
  * context.  C owns the ordinal work PostgreSQL is poorly suited to express:
- * strip separators, compare the rolling content context, count every successor
- * occurrence, carry the separator after the matched context, and rank.
+ * compare exact ordered context, count every successor occurrence and rank.
+ * Separators are content identities and remain in the emitted sequence.
  */
 
 /*
@@ -53,160 +53,57 @@ static const char *UNPACK_QUERY =
     "AND p.trajectory IS NOT NULL "
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1";
 
-static const char *SEPARATOR_QUERY =
-    "SELECT generation.separator_ids()";
-
-static SPIPlanPtr separator_plan = NULL;
-
-typedef struct IdEntry
-{
-    char key[16];
-} IdEntry;
-
-typedef struct SepCountEntry
-{
-    char  key[32];                 /* successor || separator */
-    int64 count;
-} SepCountEntry;
-
 typedef struct SuccEntry
 {
-    char  key[16];
+    char key[16];
     int64 count;
-    bool  has_separator;
-    char  separator[16];
-    int64 separator_count;
 } SuccEntry;
 
-static void
-ensure_plans(void)
-{
-    if (separator_plan == NULL)
-    {
-        SPIPlanPtr plan = SPI_prepare_cursor(SEPARATOR_QUERY, 0, NULL, CURSOR_OPT_PARALLEL_OK);
-
-        if (plan == NULL)
-            elog(ERROR, "trajectory_continuations: SPI_prepare(separators) failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "trajectory_continuations: SPI_keepplan(separators) failed");
-        separator_plan = plan;
-    }
-}
-
-static bool
-is_separator(HTAB *separators, const char *id)
-{
-    return hash_search(separators, id, HASH_FIND, NULL) != NULL;
-}
+static SPIPlanPtr unpack_plan = NULL;
 
 static void
-ensure_raw_capacity(char **raw, int *raw_cap, size_t required)
+record_successor(HTAB *successors, const hash128_t *successor)
 {
-    if (required > INT_MAX || required > MaxAllocSize / 16)
-        ereport(ERROR,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                 errmsg("trajectory_continuations: expanded trajectory exceeds allocation capacity")));
-    if (required <= (size_t) *raw_cap)
-        return;
-
-    size_t cap = *raw_cap > 0 ? (size_t) *raw_cap : 16;
-    while (cap < required) {
-        if (cap > (size_t) INT_MAX / 2) { cap = required; break; }
-        cap *= 2;
-    }
-    *raw = *raw == NULL ? (char *) palloc(cap * 16) : (char *) repalloc(*raw, cap * 16);
-    *raw_cap = (int) cap;
+    bool found;
+    SuccEntry *entry = hash_search(successors, successor, HASH_ENTER, &found);
+    if (!found) entry->count = 0;
+    if (entry->count == PG_INT64_MAX)
+        ereport(ERROR, (errmsg("trajectory_continuations: occurrence count overflow")));
+    ++entry->count;
 }
 
+/* KMP consumes the ordinal stream, including separators and repeated runs.
+ * Overlapping matches count independently. The WKB and prefix table bound
+ * memory; an RLE trajectory is never expanded into a second identity array. */
 static void
-record_successor(HTAB *successors, HTAB *separator_counts,
-                 const char *successor, const char *separator)
+scan_trajectory(bytea *wkb, const char *context, int n_context,
+                const int *prefix, HTAB *successors)
 {
-    SuccEntry *se;
-    bool       found;
-
-    se = (SuccEntry *) hash_search(successors, successor, HASH_ENTER, &found);
-    if (!found)
+    uint32 npoints;
+    const unsigned char *points = laplace_trajectory_wkb_points(wkb, &npoints);
+    int matched = 0;
+    for (uint32 v = 0; v < npoints; ++v)
     {
-        se->count = 0;
-        se->has_separator = false;
-        se->separator_count = 0;
-    }
-    se->count++;
-
-    /* PostgreSQL's ordered-set mode ignores NULL inputs. */
-    if (separator != NULL)
-    {
-        char           key[32];
-        SepCountEntry *sc;
-
-        memcpy(key, successor, 16);
-        memcpy(key + 16, separator, 16);
-        sc = (SepCountEntry *) hash_search(separator_counts, key, HASH_ENTER, &found);
-        if (!found) sc->count = 0;
-        sc->count++;
-
-        if (!se->has_separator || sc->count > se->separator_count ||
-            (sc->count == se->separator_count &&
-             memcmp(separator, se->separator, 16) < 0))
+        double vertex[4];
+        mantissa_payload_t payload;
+        memcpy(vertex, points + (Size) v * 32, sizeof(vertex));
+        mantissa_unpack(vertex, &payload);
+        uint32 run = payload.run_length ? payload.run_length : 1;
+        for (uint32 r = 0; r < run; ++r)
         {
-            se->has_separator = true;
-            memcpy(se->separator, separator, 16);
-            se->separator_count = sc->count;
+            if (matched == n_context)
+            {
+                record_successor(successors, &payload.entity_id);
+                matched = prefix[matched - 1];
+            }
+            while (matched > 0 && memcmp(context + (Size) matched * 16,
+                                        &payload.entity_id, 16) != 0)
+                matched = prefix[matched - 1];
+            if (memcmp(context + (Size) matched * 16, &payload.entity_id, 16) == 0)
+                ++matched;
+            CHECK_FOR_INTERRUPTS();
         }
     }
-}
-
-static void
-scan_trajectory(const char *raw, int n_raw,
-                const char *context, int n_context,
-                HTAB *separators, HTAB *successors, HTAB *separator_counts)
-{
-    char *content;
-    char *sep_after;
-    bool *has_sep;
-    int   n_content = 0;
-
-    if (n_raw <= 0) return;
-
-    content   = (char *) palloc((Size) n_raw * 16);
-    sep_after = (char *) palloc((Size) n_raw * 16);
-    has_sep   = (bool *) palloc0(sizeof(bool) * (Size) n_raw);
-
-    for (int i = 0; i < n_raw; i++)
-    {
-        const char *id = raw + (Size) i * 16;
-
-        if (is_separator(separators, id))
-            continue;
-
-        memcpy(content + (Size) n_content * 16, id, 16);
-        if (i + 1 < n_raw && is_separator(separators, raw + (Size) (i + 1) * 16))
-        {
-            has_sep[n_content] = true;
-            memcpy(sep_after + (Size) n_content * 16,
-                   raw + (Size) (i + 1) * 16, 16);
-        }
-        n_content++;
-    }
-
-    for (int end = n_context - 1; end + 1 < n_content; end++)
-    {
-        int start = end - n_context + 1;
-
-        if (memcmp(content + (Size) start * 16,
-                   context, (Size) n_context * 16) != 0)
-            continue;
-
-        record_successor(successors, separator_counts,
-                         content + (Size) (end + 1) * 16,
-                         has_sep[end] ? sep_after + (Size) end * 16 : NULL);
-    }
-
-    pfree(content);
-    pfree(sep_after);
-    pfree(has_sep);
 }
 
 static int
@@ -234,15 +131,16 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
     int32          topk = 0;
     bool           bounded;
     bool           spi_top = false;
-    HTAB          *separators;
     HTAB          *successors;
-    HTAB          *separator_counts;
+    int           *prefix;
     HASHCTL        ctl;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("trajectory_continuations: context must not be NULL")));
 
     ctx_array = PG_GETARG_ARRAYTYPE_P(0);
+    if (ARR_NDIM(ctx_array) > 1 || ARR_ELEMTYPE(ctx_array) != BYTEAOID)
+        ereport(ERROR, (errmsg("trajectory_continuations: context must be a 1-D bytea array")));
     bounded = !PG_ARGISNULL(1);
     if (bounded)
     {
@@ -277,14 +175,6 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "trajectory_continuations: SPI_connect failed");
-    ensure_plans();
-
-    memset(&ctl, 0, sizeof(ctl));
-    ctl.keysize = 16;
-    ctl.entrysize = sizeof(IdEntry);
-    ctl.hcxt = CurrentMemoryContext;
-    separators = hash_create("trajectory continuation separators", 128, &ctl,
-                             HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
     memset(&ctl, 0, sizeof(ctl));
     ctl.keysize = 16;
@@ -293,111 +183,53 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
     successors = hash_create("trajectory continuation successors", 256, &ctl,
                              HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
-    memset(&ctl, 0, sizeof(ctl));
-    ctl.keysize = 32;
-    ctl.entrysize = sizeof(SepCountEntry);
-    ctl.hcxt = CurrentMemoryContext;
-    separator_counts = hash_create("trajectory continuation separator modes", 256, &ctl,
-                                   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-
-    /* Resolve the separator alphabet once for the whole call. */
+    prefix = palloc0(sizeof(int) * n_context);
+    for (int i = 1, matched = 0; i < n_context; ++i)
     {
-        int rc = SPI_execute_plan(separator_plan, NULL, NULL, true, 1);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "trajectory_continuations: separator query failed: %s",
-                 SPI_result_code_string(rc));
-        if (SPI_processed > 0)
-        {
-            bool isnull;
-            Datum value = SPI_getbinval(SPI_tuptable->vals[0],
-                                        SPI_tuptable->tupdesc, 1, &isnull);
-            if (!isnull)
-            {
-                Datum *ids;
-                bool  *nulls;
-                int    n_ids;
-                deconstruct_array(DatumGetArrayTypeP(value), BYTEAOID, -1, false,
-                                  TYPALIGN_INT, &ids, &nulls, &n_ids);
-                for (int i = 0; i < n_ids; i++)
-                {
-                    bytea *id;
-                    bool   found;
-                    if (nulls[i]) continue;
-                    id = DatumGetByteaPP(ids[i]);
-                    if (VARSIZE_ANY_EXHDR(id) != 16) continue;
-                    (void) hash_search(separators, VARDATA_ANY(id), HASH_ENTER, &found);
-                }
-            }
-        }
-        SPI_freetuptable(SPI_tuptable);
+        while (matched > 0 && memcmp(context + (Size) i * 16,
+                                    context + (Size) matched * 16, 16) != 0)
+            matched = prefix[matched - 1];
+        if (memcmp(context + (Size) i * 16, context + (Size) matched * 16, 16) == 0)
+            ++matched;
+        prefix[i] = matched;
     }
 
-    /* One GIN-served candidate probe; all ordinal work stays in this loop. */
+    /* Stream the complete indexed candidate set in bounded internal pages. */
     {
         Datum args[1] = { PointerGetDatum(ctx_array) };
-        Oid   argtypes[1] = { BYTEAARRAYOID };
-        int   rc = SPI_execute_with_args(UNPACK_QUERY, 1, argtypes, args,
-                                         NULL, true, 0);
-        char *raw = NULL;
-        int   n_raw = 0, raw_cap = 0;
-
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "trajectory_continuations: unpack query failed: %s",
-                 SPI_result_code_string(rc));
-
-        for (uint64 row = 0; row < SPI_processed; row++)
+        if (unpack_plan == NULL)
         {
-            HeapTuple            tuple = SPI_tuptable->vals[row];
-            TupleDesc            desc  = SPI_tuptable->tupdesc;
-            bool                 wkb_null;
-            Datum                wkb_datum = SPI_getbinval(tuple, desc, 1, &wkb_null);
-            bytea               *wkb;
-            const unsigned char *b;
-            uint32               npoints;
-
-            if (wkb_null)
-                continue;
-
-            wkb = DatumGetByteaPP(wkb_datum);
-            b = laplace_trajectory_wkb_points(wkb, &npoints);
-
-            size_t expanded = 0;
-            for (uint32 v = 0; v < npoints; v++)
+            Oid argtypes[1] = { BYTEAARRAYOID };
+            SPIPlanPtr plan = SPI_prepare(UNPACK_QUERY, 1, argtypes);
+            if (plan == NULL || SPI_keepplan(plan) != 0)
+                elog(ERROR, "trajectory_continuations: could not prepare containment query");
+            unpack_plan = plan;
+        }
+        Portal portal = SPI_cursor_open(NULL, unpack_plan, args, NULL, true);
+        if (portal == NULL)
+            elog(ERROR, "trajectory_continuations: could not open containment cursor");
+        for (;;)
+        {
+            SPI_cursor_fetch(portal, true, 1024);
+            uint64 rows = SPI_processed;
+            for (uint64 row = 0; row < rows; ++row)
             {
-                double vertex[4];
-                mantissa_payload_t payload;
-                memcpy(vertex, b + (Size) v * 32, 32);
-                mantissa_unpack(vertex, &payload);
-                size_t run = payload.run_length ? payload.run_length : 1;
-                if (run > SIZE_MAX - expanded)
-                    ereport(ERROR, (errmsg("trajectory_continuations: invalid RLE run total")));
-                expanded += run;
+                bool isnull;
+                Datum datum = SPI_getbinval(SPI_tuptable->vals[row],
+                                            SPI_tuptable->tupdesc, 1, &isnull);
+                if (!isnull)
+                    scan_trajectory(DatumGetByteaPP(datum), context, n_context,
+                                    prefix, successors);
             }
-            ensure_raw_capacity(&raw, &raw_cap, expanded);
-
-            n_raw = 0;
-            for (uint32 v = 0; v < npoints; v++)
+            if (SPI_tuptable != NULL)
             {
-                double             vertex[4];
-                mantissa_payload_t payload;
-
-                memcpy(vertex, b + (Size) v * 32, 32);
-                mantissa_unpack(vertex, &payload);
-                int run = payload.run_length ? payload.run_length : 1;
-                for (int j = 0; j < run; j++)
-                {
-                    memcpy(raw + (Size) n_raw * 16, &payload.entity_id, 16);
-                    n_raw++;
-                }
+                SPI_freetuptable(SPI_tuptable);
+                SPI_tuptable = NULL;
             }
-
-            scan_trajectory(raw, n_raw, context, n_context,
-                            separators, successors, separator_counts);
+            if (rows == 0) break;
             CHECK_FOR_INTERRUPTS();
         }
-
-        if (raw != NULL) pfree(raw);
-        SPI_freetuptable(SPI_tuptable);
+        SPI_cursor_close(portal);
     }
 
     /* Total order: weight descending, successor id ascending. */
@@ -432,24 +264,18 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
             memcpy(VARDATA(object), ordered[i].key, 16);
             values[0] = PointerGetDatum(object);
 
-            if (ordered[i].has_separator)
-            {
-                bytea *separator = (bytea *) palloc(VARHDRSZ + 16);
-                SET_VARSIZE(separator, VARHDRSZ + 16);
-                memcpy(VARDATA(separator), ordered[i].separator, 16);
-                values[1] = PointerGetDatum(separator);
-            }
-            else
-            {
-                values[1] = (Datum) 0;
-                nulls[1] = true;
-            }
+            /* Compatibility column: the exact next constituent itself
+             * carries any separator identity, so no bytes are synthesized. */
+            values[1] = (Datum) 0;
+            nulls[1] = true;
 
             values[2] = Int64GetDatum(ordered[i].count);
             tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+            pfree(object);
         }
     }
 
+    hash_destroy(successors);
     laplace_spi_finish(spi_top);
     return (Datum) 0;
 }

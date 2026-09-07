@@ -223,6 +223,7 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
     span_capacity = count * 3 + 3; /* every AST span plus all lexical gaps/edges */
     r->spans = (laplace_compose_span_t*)calloc(span_capacity, sizeof(*r->spans));
     if (!r->spans) { rc = -3; goto done; }
+    r->span_capacity = span_capacity;
     r->span_index_cap = 64;
     while (r->span_index_cap < span_capacity * 2) r->span_index_cap <<= 1;
     r->span_index = (uint32_t*)malloc(r->span_index_cap * sizeof(*r->span_index));

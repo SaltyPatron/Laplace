@@ -1057,6 +1057,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
             if (!sp) { rc = -3; goto fail_emit; }
             r->spans = sp;
             span_cap = ncap;
+            r->span_capacity = ncap;
         }
         r->spans[r->span_count].start_byte = node.start_byte;
         r->spans[r->span_count].end_byte   = node.end_byte;
@@ -1241,6 +1242,22 @@ int laplace_compose_span_lookup(const laplace_compose_result_t* r,
 
 size_t laplace_compose_entity_count(const laplace_compose_result_t* r) {
     return r ? r->entity_count : 0;
+}
+size_t laplace_compose_resident_bytes(const laplace_compose_result_t* r) {
+    if (!r) return 0;
+    size_t bytes = sizeof(*r)
+        + r->entity_count * sizeof(*r->entities)
+        + r->phys_count * sizeof(*r->physicalities)
+        + r->precedes_count * sizeof(*r->precedes)
+        + r->span_capacity * sizeof(*r->spans)
+        + r->span_index_cap * sizeof(*r->span_index)
+        + r->source_tree_count * sizeof(*r->source_trees)
+        + tier_tree_resident_bytes(r->tree);
+    for (size_t i = 0; i < r->phys_count; ++i)
+        bytes += r->physicalities[i].trajectory_n * 4 * sizeof(double);
+    for (size_t i = 0; i < r->source_tree_count; ++i)
+        bytes += tier_tree_resident_bytes(r->source_trees[i]);
+    return bytes;
 }
 size_t laplace_compose_physicality_count(const laplace_compose_result_t* r) {
     return r ? r->phys_count : 0;

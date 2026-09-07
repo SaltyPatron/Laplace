@@ -15,6 +15,10 @@ struct laplace_ast {
     int                 oom;
 };
 
+size_t laplace_ast_resident_bytes(const laplace_ast_t* ast) {
+    return ast ? sizeof(*ast) + ast->cap * sizeof(*ast->nodes) : 0;
+}
+
 static uint32_t ast_append(laplace_ast_t* ast, uint32_t type_id,
                            uint32_t start_byte, uint32_t end_byte,
                            uint32_t parent, uint8_t is_error) {
