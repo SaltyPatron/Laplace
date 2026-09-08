@@ -21,6 +21,7 @@ DECLARE
     t2flag       bigint := (2::bigint << 1);
     picked       bytea;
     picked_stride integer;
+    gap          bytea := laplace.word_id(' ');
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES
@@ -226,6 +227,45 @@ BEGIN
              array_fill(ctx, ARRAY[64]), 1, 1, 0.0, 8, 7, ARRAY[NULL]::bytea[]) g;
     IF picked IS DISTINCT FROM noise THEN
         RAISE EXCEPTION 'FAIL: missing route lost a long prompt fallback';
+    END IF;
+
+    -- A missed five-ID context must retain a four-ID witnessed suffix even
+    -- when the indexed fallback probes lengths 3, 2, 1. Repeated words and
+    -- separators remain real ordered occurrences, including one-ID fallback.
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('test/steer/suffix-long'),sent_noise,1,
+         public.ST_MakePoint(101,1,1,1),decode(repeat('00',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(ctx,1,1,t2flag),
+             public.laplace_mantissa_pack(gap,2,1,0),
+             public.laplace_mantissa_pack(ctx,3,1,t2flag),
+             public.laplace_mantissa_pack(gap,4,1,0),
+             public.laplace_mantissa_pack(noise,5,1,t2flag)]),5,now()),
+        (public.laplace_hash128_blake3('test/steer/suffix-short'),sent_sem,1,
+         public.ST_MakePoint(102,1,1,1),decode(repeat('00',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(ctx,1,1,t2flag),
+             public.laplace_mantissa_pack(gap,2,1,0),
+             public.laplace_mantissa_pack(semantic,3,1,t2flag)]),3,now());
+    SELECT g.entity,g.stride_used INTO picked,picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[unrelated,ctx,gap,ctx,gap],1,5,0.0,8,7,ARRAY[unrelated]) g;
+    IF picked IS DISTINCT FROM noise OR picked_stride IS DISTINCT FROM 4 THEN
+        RAISE EXCEPTION 'FAIL: indexed suffix fallback skipped the greatest witnessed stride';
+    END IF;
+    SELECT g.stride_used INTO picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[unrelated,frontier,unrelated,ctx,gap],1,5,0.0,8,7,ARRAY[unrelated]) g;
+    IF picked_stride IS DISTINCT FROM 2 THEN
+        RAISE EXCEPTION 'FAIL: indexed suffix fallback lost the word/separator pair';
+    END IF;
+    SELECT g.stride_used INTO picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[unrelated,frontier,unrelated,frontier,gap],1,5,0.0,8,7,ARRAY[unrelated]) g;
+    IF picked_stride IS DISTINCT FROM 1 THEN
+        RAISE EXCEPTION 'FAIL: indexed suffix fallback discarded the separator identity';
     END IF;
 
     RAISE NOTICE '✓ steering precedence: positive witnessed meaning enters without sequence evidence; refutation preserves legitimate fallback';

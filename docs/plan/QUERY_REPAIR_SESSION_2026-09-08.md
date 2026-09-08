@@ -318,3 +318,16 @@ repairs as delivered conversation or substitute three-step timing for answer
 acceptance. All temporary function bindings used for comparisons were rolled
 back. Main d1f2f16d installed/deployed successfully but seeded live product CI
 still fails; database recreation and reseed remain outstanding.
+
+The suffix reader now shortens failed indexed operands geometrically, retaining
+the complete native matcher and accepting only matches at least as long as the
+current probe. Any successful length-k probe contains all possible matches of
+length >= k, so this preserves the greatest exact stride and every occurrence
+count. It no longer jumps directly from a failed long context to its last ID.
+Regressions exercise a five-ID input whose best suffix has length four, then
+length two, then a lone separator; repeated words and separators remain intact.
+This is a native access-path correction, not inferred source/context scope.
+The full question still hits 45 seconds with this correction: longer suffixes
+reduce the observed postings, but globally common word/separator combinations
+still read large corpus sets (`lightning-suffix-forward.sql/.log`). Question
+acceptance therefore remains failed.

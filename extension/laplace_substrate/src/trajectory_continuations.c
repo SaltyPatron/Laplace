@@ -16,9 +16,9 @@
 
 /* GIN supplies containing trajectories, not sequence truth. Native matching
  * reads the mantissa-packed ordered occurrences once, including all runs and
- * separators. Exact reads probe the complete context; suffix proposal probes
- * its final constituent only when the exact probe is empty. Every admissible
- * suffix necessarily contains that identity. */
+ * separators. A suffix proposal narrows through progressively shorter indexed
+ * suffix operands. The native matcher still elects the greatest exact stride;
+ * a full-context miss does not immediately discard all but the final ID. */
 static const char *UNPACK_QUERY =
     "SELECT public.ST_AsBinary(p.trajectory) "
     "FROM laplace.physicalities p "
@@ -133,16 +133,20 @@ laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, 
             elog(ERROR, "trajectory_continuations: preparing containment query failed");
         unpack_plan = plan;
     }
-    /* Preserve the selective full-context GIN probe. Reading every container
-     * of a common final separator on successful exact matches would undo the
-     * index reduction. Only an empty exact result needs a broader read, and
-     * that one read evaluates every remaining suffix together in native code. */
-    for (int phase = 0; phase < (suffix_backoff && n_context > 1 ? 2 : 1); ++phase)
+    /* A successful probe of suffix length k includes EVERY trajectory that
+     * could match any longer suffix. The native matcher evaluates those longer
+     * strides too, so its maximum and occurrence counts are globally complete.
+     * On a miss, halve the operand length (rounding up). This requires at most
+     * ceil(log2(n_context))+1 bulk index probes, preserves exact election, and
+     * avoids reading the corpus-wide SPACE posting when a longer suffix works.
+     * No constituent, separator, repeated occurrence or candidate is dropped. */
+    int probe_length = n_context;
+    for (;;)
     {
-        if (phase > 0 && hash_get_num_entries(state.successors) > 0) break;
-        state.stride = phase == 0 ? (size_t) n_context : 0;
-        ArrayType *probe = phase == 0 ? context_array
-            : construct_array(ids + n_context - 1, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+        state.stride = (size_t) probe_length;
+        ArrayType *probe = probe_length == n_context ? context_array
+            : construct_array(ids + n_context - probe_length, probe_length,
+                              BYTEAOID, -1, false, TYPALIGN_INT);
         Datum args[1] = {PointerGetDatum(probe)};
         Portal portal = SPI_cursor_open(NULL, unpack_plan, args, NULL, true);
         if (!portal) elog(ERROR, "trajectory_continuations: opening containment cursor failed");
@@ -170,6 +174,10 @@ laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, 
             CHECK_FOR_INTERRUPTS();
         }
         SPI_cursor_close(portal);
+        if (probe != context_array) pfree(probe);
+        if (!suffix_backoff || probe_length == 1 ||
+            hash_get_num_entries(state.successors) > 0) break;
+        probe_length = probe_length / 2 + probe_length % 2;
     }
 
     long entries = hash_get_num_entries(state.successors);
