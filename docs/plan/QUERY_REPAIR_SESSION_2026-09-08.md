@@ -784,3 +784,29 @@ source identity. A corpus having loaded, or source identities having deduplicate
 is not proof of generated code repair. Preserve the repository defect → relevant
 witnesses → generated patch → compiler/tests acceptance obligation alongside chess,
 query/forward-pass, ingestion and product repairs.
+
+Fresh installed MCP STDIO execution succeeds (`runtime.VxaDpG`); the already
+connected Codex MCP process still points at the deleted `runtime.yA1pBH` release.
+Use the fresh installed MCP protocol process for current development calls.
+Native MCP coding acceptance on 2026-09-08 asked for a C `add` function and returned
+128 periods after 26,132.9 ms, recorded as witnessed output. This is failed
+forward-pass/coding acceptance, not a generated repair or proof of intelligence.
+Receipt: `/tmp/laplace-native-coding-response.jsonl`. The complete prompt must
+condition admitted evidence; punctuation-only continuation is not that operation.
+
+TinyCodes full prompt/response preservation is implemented through the existing
+native full-source composer and ordered composition operation. The corpus's
+complete prompt and grammar-composed response are separate ordered constituents;
+source-qualified HAS_EXAMPLE testimony carries that observation root as context.
+Different instructions paired with identical code remain different observations.
+The database test reconstructs both texts exactly, including decomposed Unicode,
+and verifies the negation-sensitive observation identity. The CLI also resolves
+existing coding corpora in the sibling model vault when the ingest-root path is
+absent. Full physical TinyCodes ingest and coding acceptance remain required.
+
+The live chess native read now returns `Carlsen, Magnus` from the partial surname
+(752.462 ms for the first measured SQL call). The HTTP read exposed a missing
+`text[]`/`bool` mapping in the shared managed catalog validator before SQL execution.
+Commit `0d125a87` adds scalar/array mapping for every catalog parameter type and a
+real managed/PostgreSQL test of the six-parameter search reader. API delivery and
+readback of that correction remain required.

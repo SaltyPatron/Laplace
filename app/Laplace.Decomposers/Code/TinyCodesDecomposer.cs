@@ -70,16 +70,12 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
             byte[] codeBytes = Encoding.UTF8.GetBytes(response);
             if (codeBytes.Length == 0) continue;
 
-            IReadOnlyList<string>? keywords = string.IsNullOrWhiteSpace(prompt)
-                ? null
-                : ExtractKeywords(prompt).ToList();
-
             yield return new GrammarComposeRecord(
                 codeBytes,
                 modality,
                 ConceptAnchorKey: string.IsNullOrEmpty(conceptKey) ? null : conceptKey,
                 ConceptCategoryTypeId: CodeConceptTypeId,
-                KeywordExamples: keywords);
+                ObservedPromptUtf8: prompt is null ? null : Encoding.UTF8.GetBytes(prompt));
         }
     }
 
@@ -111,32 +107,6 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.ForWitness(SourceName), ct);
         return inv?.TotalInputUnits;
-    }
-
-    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "that", "this", "with", "from", "have", "will", "been", "they", "what",
-        "when", "which", "your", "into", "more", "some", "than", "then", "also",
-        "does", "each", "just", "here", "make", "only", "like", "over", "even",
-        "should", "could", "would", "using", "given", "takes", "returns", "given",
-        "write", "create", "generates", "implement", "function", "method", "code",
-        "program", "script", "snippet", "example", "simple", "basic", "following",
-        "python", "javascript", "typescript", "ruby", "julia", "rust", "bash",
-        "java", "golang", "csharp", "cplusplus", "sql",
-    };
-
-    private static IEnumerable<string> ExtractKeywords(string prompt)
-    {
-        foreach (var raw in prompt.Split(
-            [' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_'],
-            StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (raw.Length < 4) continue;
-            var w = raw.ToLowerInvariant();
-            var stem = w.Length > 5 && w.EndsWith('s') ? w[..^1] : w;
-            if (!StopWords.Contains(w) && !StopWords.Contains(stem))
-                yield return w;
-        }
     }
 
     private static string? ResolveModality(string? lang)

@@ -52,6 +52,17 @@ internal static class IngestDataPaths
         if (!RelativeByCli.TryGetValue(cliSource, out var relative))
             throw new InvalidOperationException($"no manifest path for ingest source '{cliSource}'");
 
-        return LaplaceInstall.ResolvePathUnderIngest(relative);
+        string ingestRoot = LaplaceInstall.ResolveIngestRoot();
+        string primary = Path.GetFullPath(Path.Combine(ingestRoot, relative));
+        // Coding corpora are also distributed in the sibling model vault. An
+        // explicit CLI path and an existing ingest-root corpus retain priority.
+        if ((cliSource.Equals("stack", StringComparison.OrdinalIgnoreCase)
+             || cliSource.Equals("tiny-codes", StringComparison.OrdinalIgnoreCase))
+            && !Directory.Exists(primary) && !File.Exists(primary))
+        {
+            string corpus = Path.GetFullPath(Path.Combine(ingestRoot, "..", "models", relative));
+            if (Directory.Exists(corpus)) return corpus;
+        }
+        return primary;
     }
 }

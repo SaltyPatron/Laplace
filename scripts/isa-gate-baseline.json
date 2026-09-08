@@ -604,7 +604,7 @@
       "app/Laplace.Substrate/Abstractions/FeedbackContent.cs::PRECEDES": 1,
       "app/Laplace.Substrate/Abstractions/GrammarComposeIngest.cs::CONTAINS": 1,
       "app/Laplace.Substrate/Abstractions/GrammarComposeIngest.cs::HAS_DEFINITION": 1,
-      "app/Laplace.Substrate/Abstractions/GrammarComposeIngest.cs::HAS_EXAMPLE": 3,
+      "app/Laplace.Substrate/Abstractions/GrammarComposeIngest.cs::HAS_EXAMPLE": 1,
       "app/Laplace.Substrate/Abstractions/GrammarTagWitness.cs::CALLS": 1,
       "app/Laplace.Substrate/Abstractions/GrammarTagWitness.cs::DEFINES": 1,
       "app/Laplace.Substrate/Abstractions/GrammarRowComposer.cs::PRECEDES": 1,

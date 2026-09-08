@@ -20,9 +20,10 @@ public readonly record struct GrammarComposeRecord(
     Hash128? SourceId = null,
     // Present for physical source-file observations. Synthetic grammar records leave
     // this null and retain their grammar root as the record root.
-    FileMetadata? FileMetadata = null) : IIngestResidentRecord
+    FileMetadata? FileMetadata = null,
+    byte[]? ObservedPromptUtf8 = null) : IIngestResidentRecord
 {
-    public long ResidentInputBytes => Utf8?.LongLength ?? 0;
+    public long ResidentInputBytes => (Utf8?.LongLength ?? 0) + (ObservedPromptUtf8?.LongLength ?? 0);
 }
 
 /// <summary>
@@ -32,6 +33,7 @@ public readonly record struct GrammarComposeRecord(
 /// </summary>
 public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeRecord>
 {
+    private static readonly Hash128 ExampleRelation = RelationTypeRegistry.Resolve("HAS_EXAMPLE").Id;
     private readonly Hash128 _sourceId;
     private readonly double _trust;
     private readonly ISubstrateReader? _reader;
@@ -70,8 +72,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             builder.AddAttestation(NativeAttestation.Categorical(
                 parent, "CONTAINS", conceptId, sourceId, trust));
         }
-        builder.AddAttestation(NativeAttestation.Categorical(
-            conceptId, "HAS_EXAMPLE", rootId, sourceId, trust));
+        builder.AddAttestation(NativeAttestation.CategoricalResolved(
+            conceptId, ExampleRelation, rootId, sourceId, null, trust));
         builder.AddAttestation(NativeAttestation.Categorical(
             rootId, "HAS_DEFINITION", conceptId, sourceId, trust));
     }
@@ -83,6 +85,9 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         private readonly double _trust;
         private GrammarAst? _ast;
         private GrammarRowComposer? _composer;
+        private GrammarAst? _promptAst;
+        private GrammarRowComposer? _promptComposer;
+        private OrderedCompositionRequest? _observation;
         private OrderedCompositionComponent _root;
         private Hash128 _rootId;
         private bool _disposed;
@@ -97,7 +102,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
 
         public TierTree? TreeForBatchProbe => null;
 
-        public long ResidentBytes => _composer?.ResidentBytes ?? 0;
+        public long ResidentBytes => (_composer?.ResidentBytes ?? 0) + (_promptComposer?.ResidentBytes ?? 0);
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
             Task.FromResult<byte[]?>(null);
@@ -108,10 +113,23 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             if (_composer is null || _ast is null)
                 throw new InvalidOperationException("whole-source grammar composition is unavailable");
             Hash128 emitted = _composer.DrainInto(builder, witnessWeight, descentBitmap);
-            if (emitted != _rootId)
+            if (emitted != _root.Id)
                 throw new InvalidOperationException("whole-source identity changed during staging");
             GrammarTagWitness.Emit(builder, _record.Utf8, _ast, _composer,
                 _record.Modality, _sourceId, _trust);
+
+            if (_observation is not null && _promptComposer is not null)
+            {
+                Hash128 prompt = _promptComposer.DrainInto(builder, witnessWeight);
+                Span<OrderedCompositionResult> pair = stackalloc OrderedCompositionResult[1];
+                OrderedComposition.StageBatch(builder.ContentStage, [_observation], pair);
+                if (pair[0].Id != _rootId)
+                    throw new InvalidOperationException("observed prompt/response identity changed during staging");
+                // The corpus witnessed this complete instruction paired with this
+                // response. Preserve that context; a bag of keywords loses it.
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    prompt, ExampleRelation, emitted, _sourceId, _rootId, _trust));
+            }
 
             if (_rootId != default && _record.ExampleSegments is { Count: > 0 })
             {
@@ -121,8 +139,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                     if (ContentTierSpine.TryStageIntoBuilder(
                             builder, System.Text.Encoding.UTF8.GetBytes(seg), _sourceId, out var segRoot))
                     {
-                        builder.AddAttestation(NativeAttestation.Categorical(
-                            segRoot, "HAS_EXAMPLE", _rootId, _sourceId, _trust));
+                        builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                            segRoot, ExampleRelation, _rootId, _sourceId, null, _trust));
                     }
                 }
             }
@@ -142,8 +160,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                     if (ContentTierSpine.TryStageIntoBuilder(
                             builder, System.Text.Encoding.UTF8.GetBytes(kw), _sourceId, out var kwRoot))
                     {
-                        builder.AddAttestation(NativeAttestation.Categorical(
-                            kwRoot, "HAS_EXAMPLE", _rootId, _sourceId, _trust));
+                        builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                            kwRoot, ExampleRelation, _rootId, _sourceId, null, _trust));
                     }
                 }
             }
@@ -172,11 +190,24 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                     _record.Modality, GrammarCompositionMode.FullSource);
                 _root = _composer.RootComponent();
                 _rootId = _root.Id;
+                if (_record.ObservedPromptUtf8 is { Length: > 0 } prompt)
+                {
+                    if (_record.FileMetadata is not null)
+                        throw new InvalidOperationException("a prompt/response record requires its own physical container metadata");
+                    _promptAst = GrammarDecomposer.Parse(prompt, "markdown");
+                    _promptComposer = new GrammarRowComposer(prompt, _promptAst, _sourceId,
+                        "markdown", GrammarCompositionMode.FullSource);
+                    _observation = new OrderedCompositionRequest(
+                        [_promptComposer.RootComponent(), _root], EntityTypeRegistry.Text, _sourceId, 0);
+                    _rootId = OrderedComposition.ComposeBatch([_observation])[0].Id;
+                }
             }
             catch
             {
                 _composer?.Dispose();
                 _ast?.Dispose();
+                _promptComposer?.Dispose();
+                _promptAst?.Dispose();
                 throw;
             }
         }
@@ -187,6 +218,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             _disposed = true;
             _composer?.Dispose();
             _ast?.Dispose();
+            _promptComposer?.Dispose();
+            _promptAst?.Dispose();
         }
     }
 }

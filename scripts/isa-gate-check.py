@@ -126,7 +126,9 @@ CEILINGS = {
     # 464 -> 457 (2026-08-20): ChessGraph no longer spells HAS_CLOCK,
     # HAS_EVAL_TOKEN, HAS_MOTIF or HAS_THINK_CLASS — the per-ply testimony those
     # named is now the line/playing trajectory. Lowered by exactly the 7 cleaned.
-    "g3_csharp_vocabulary_literalism": 449,
+    # Shared grammar examples, including complete prompt/response observations,
+    # resolve the relation once instead of repeating it at each staging site.
+    "g3_csharp_vocabulary_literalism": 447,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3

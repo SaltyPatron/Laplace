@@ -95,4 +95,44 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
         Assert.Throws<InvalidOperationException>(() => handler.CreateDeferredUnit(
             new GrammarComposeRecord("code"u8.ToArray(), "unregistered-test-grammar")));
     }
+
+    [Fact]
+    public async Task ObservedPromptResponse_PreservesCompleteTextsOrderAndDistinctInstructions()
+    {
+        CodepointPerfcache.LoadDefault();
+        const string prompt = "Do not sort x.\nKeep e\u0301 and all spaces.\n";
+        byte[] code = "def keep(x):\n    return x\n"u8.ToArray();
+        Hash128 source = Hash128.OfCanonical("observed-code-pair-test");
+        var handler = new GrammarComposeHandler(source, 1, null);
+        var record = new GrammarComposeRecord(code, "python",
+            ObservedPromptUtf8: Encoding.UTF8.GetBytes(prompt));
+        var builder = new SubstrateChangeBuilder(source, "test/code-pair");
+        using var unit = handler.CreateDeferredUnit(record);
+        Hash128 root = unit.DrainInto(builder, 1, null);
+        var change = builder.Build();
+        var link = Assert.Single(change.Attestations.Where(a =>
+            a.TypeId == RelationTypeRegistry.Resolve("HAS_EXAMPLE").Id));
+        Assert.Equal(root, link.ContextId);
+        Assert.NotEqual(link.SubjectId, link.ObjectId);
+        await new NpgsqlSubstrateWriter(pg.DataSource).ApplyAsync(change);
+
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        var children = await NpgsqlSubstrateReads.PackedTrajectoryVerticesAsync(
+            connection, root.ToBytes(), default);
+        Assert.Equal(
+            [Convert.ToHexStringLower(link.SubjectId.ToBytes()), Convert.ToHexStringLower(link.ObjectId!.Value.ToBytes())],
+            children.OrderBy(c => c.Ordinal).Select(c => c.ChildIdHex));
+        Assert.Equal(record.ObservedPromptUtf8,
+            await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource, link.SubjectId, "markdown"));
+        Assert.Equal(code,
+            await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource, link.ObjectId.Value, "python"));
+
+        using var different = handler.CreateDeferredUnit(record with
+        {
+            ObservedPromptUtf8 = Encoding.UTF8.GetBytes(prompt.Replace("Do not", "Do", StringComparison.Ordinal)),
+        });
+        var otherBuilder = new SubstrateChangeBuilder(source, "test/different-code-pair");
+        Assert.NotEqual(root, different.DrainInto(otherBuilder, 1, null));
+        foreach (var stage in otherBuilder.Build().IntentStages) stage.Dispose();
+    }
 }

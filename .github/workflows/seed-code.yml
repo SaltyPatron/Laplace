@@ -82,6 +82,13 @@ jobs:
             echo "::notice::path given — corpus dropdown ignored for this run."
             echo "path=$user_path" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          # Resolve self-locating sources before validating the unused corpus
+          # dropdown; its default '-' is valid for these sources.
+          case "${{ inputs.source }}" in
+            stack|tiny-codes)
+              echo "::notice::source '${{ inputs.source }}' resolves its own corpus."
+              echo "path=" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
           case "${{ inputs.corpus }}" in
             cpython)    p="$root/code-authority/cpython" ;;
             postgres)   p="$root/code-authority/postgres" ;;
@@ -93,13 +100,6 @@ jobs:
               echo "::error::pick a corpus, or give a path. (source=stack / tiny-codes resolve their own.)"
               exit 1 ;;
             *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
-          esac
-          # stack / tiny-codes resolve their own DATA_ROOT default in
-          # IngestDataPaths, so an empty path is correct for them.
-          case "${{ inputs.source }}" in
-            stack|tiny-codes)
-              echo "::notice::source '${{ inputs.source }}' resolves its own corpus — corpus/path ignored."
-              echo "path=" >> "$GITHUB_OUTPUT"; exit 0 ;;
           esac
           [ -e "$p" ] || { echo "::error::$p does not exist on this runner"; exit 1; }
           echo "resolved corpus '${{ inputs.corpus }}' -> $p"
