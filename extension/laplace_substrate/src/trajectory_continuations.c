@@ -32,7 +32,17 @@ typedef struct ScopedTrajectory
 {
     struct ScopedTrajectory *next;
     bytea *wkb;
+    trajectory_ordinal_index_t *ordinal_index;
+    MemoryContextCallback cleanup;
 } ScopedTrajectory;
+
+typedef struct ScopedPosition
+{
+    ScopedTrajectory *trajectory;
+    size_t ordinal;
+    hash128_t successor;
+    int stride;
+} ScopedPosition;
 
 struct LaplaceTrajectoryScope
 {
@@ -41,6 +51,10 @@ struct LaplaceTrajectoryScope
     HTAB *roots;
     ScopedTrajectory *trajectories;
     Oid as_binary;
+    ScopedPosition *positions;
+    size_t position_count;
+    size_t position_capacity;
+    bool advancing;
 };
 
 LaplaceTrajectoryScope *
@@ -63,14 +77,24 @@ laplace_trajectory_scope_create(void)
 }
 
 static void
+scope_release_index(void *argument)
+{
+    ScopedTrajectory *entry = argument;
+    trajectory_ordinal_index_free(entry->ordinal_index);
+}
+
+static void
 scope_retain_trajectory(Datum geometry, void *context)
 {
     LaplaceTrajectoryScope *scope = context;
     MemoryContext previous = MemoryContextSwitchTo(scope->owner);
-    ScopedTrajectory *entry = palloc(sizeof(*entry));
+    ScopedTrajectory *entry = palloc0(sizeof(*entry));
     entry->wkb = DatumGetByteaP(OidFunctionCall1(scope->as_binary, geometry));
     entry->next = scope->trajectories;
     scope->trajectories = entry;
+    entry->cleanup.func = scope_release_index;
+    entry->cleanup.arg = entry;
+    MemoryContextRegisterResetCallback(scope->owner, &entry->cleanup);
     MemoryContextSwitchTo(previous);
 }
 
@@ -155,8 +179,10 @@ laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operan
     if (!bindings_plan)
     {
         Oid types[1] = {BYTEAARRAYOID};
-        bindings_plan = SPI_prepare(laplace_sql_query_text("generation.observation_bindings"),
-                                    1, types);
+        /* This prepares a parallel-eligible plan; execution below uses a direct
+         * receiver and never opens a portal or fetches a cursor. */
+        bindings_plan = SPI_prepare_cursor(laplace_sql_query_text("generation.observation_bindings"),
+                                            1, types, CURSOR_OPT_PARALLEL_OK);
         if (!bindings_plan || SPI_keepplan(bindings_plan) != 0)
             elog(ERROR, "trajectory scope: preparing observation bindings failed");
     }
@@ -179,7 +205,9 @@ laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operan
         /* Consume executor slots directly. No fetch loop, intermediate SPI
          * tuple tables or result-sized materialization precedes native dedup. */
         int result = SPI_execute_plan_extended(bindings_plan, &options);
-        if (result != SPI_OK_SELECT)
+        /* SPI reports SELECT through a non-SPI destination as SPI_OK_UTILITY.
+         * must_return_tuples and binding_startup still enforce the SELECT shape. */
+        if (result != SPI_OK_SELECT && result != SPI_OK_UTILITY)
             elog(ERROR, "trajectory scope: reading observation bindings failed: %s",
                  SPI_result_code_string(result));
     }
@@ -220,6 +248,8 @@ typedef struct SuccessorState
 {
     HTAB *successors;
     size_t stride;
+    LaplaceTrajectoryScope *scope;
+    ScopedTrajectory *trajectory;
 } SuccessorState;
 
 typedef struct MatcherCleanup
@@ -244,6 +274,29 @@ record_successor(void *context, size_t ordinal, size_t stride,
     (void) ordinal;
     CHECK_FOR_INTERRUPTS();
     if (stride == 0 || stride < state->stride) return 0;
+    if (state->scope && state->trajectory)
+    {
+        LaplaceTrajectoryScope *scope = state->scope;
+        if (stride > state->stride) scope->position_count = 0;
+        if (scope->position_count == scope->position_capacity)
+        {
+            size_t capacity = scope->position_capacity ? scope->position_capacity * 2 : 64;
+            if (capacity > MaxAllocSize / sizeof(ScopedPosition))
+                elog(ERROR, "trajectory scope: occurrence positions exceed allocation capacity");
+            MemoryContext previous = MemoryContextSwitchTo(scope->owner);
+            scope->positions = scope->positions
+                ? repalloc(scope->positions, capacity * sizeof(ScopedPosition))
+                : palloc(capacity * sizeof(ScopedPosition));
+            scope->position_capacity = capacity;
+            MemoryContextSwitchTo(previous);
+        }
+        if (ordinal > SIZE_MAX - stride)
+            elog(ERROR, "trajectory scope: successor ordinal overflow");
+        scope->positions[scope->position_count++] = (ScopedPosition){
+            .trajectory = state->trajectory, .ordinal = ordinal + stride,
+            .successor = *successor, .stride = (int)stride
+        };
+    }
     state->stride = stride;
     LaplaceContinuation *entry = hash_search(state->successors, successor, HASH_ENTER, &found);
     if (!found || entry->stride != (int) stride)
@@ -255,6 +308,29 @@ record_successor(void *context, size_t ordinal, size_t stride,
         ereport(ERROR, (errmsg("trajectory_continuations: occurrence count overflow")));
     ++entry->occurrences;
     return 0;
+}
+
+void
+laplace_trajectory_scope_select(LaplaceTrajectoryScope *scope, Datum selected,
+                                bool ordered)
+{
+    hash128_t id;
+    bytea *value = DatumGetByteaPP(selected);
+    if (VARSIZE_ANY_EXHDR(value) != sizeof(id))
+        elog(ERROR, "trajectory scope: selection must be a 16-byte identity");
+    memcpy(&id, VARDATA_ANY(value), sizeof(id));
+    scope->advancing = ordered;
+    size_t retained = 0;
+    for (size_t i = 0; ordered && i < scope->position_count; ++i)
+    {
+        ScopedPosition position = scope->positions[i];
+        if (!hash128_equals(&position.successor, &id)) continue;
+        if (position.ordinal == SIZE_MAX)
+            elog(ERROR, "trajectory scope: next ordinal overflow");
+        ++position.ordinal;
+        scope->positions[retained++] = position;
+    }
+    scope->position_count = retained;
 }
 
 static int
@@ -341,12 +417,40 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
     ctl.entrysize = sizeof(LaplaceContinuation);
     ctl.hcxt = work;
     SuccessorState state = {
-        hash_create("trajectory successors", 256, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT), 0
+        .successors = hash_create("trajectory successors", 256, &ctl,
+            HASH_ELEM | HASH_BLOBS | HASH_CONTEXT), .scope = scope
     };
-    if (scope)
+    if (scope && scope->advancing)
     {
+        size_t retained = 0;
+        for (size_t i = 0; i < scope->position_count; ++i)
+        {
+            ScopedPosition position = scope->positions[i];
+            ScopedTrajectory *entry = position.trajectory;
+            if (!entry->ordinal_index)
+            {
+                uint32 npoints;
+                const unsigned char *points = laplace_trajectory_wkb_points(entry->wkb, &npoints);
+                entry->ordinal_index = trajectory_ordinal_index_create(points, npoints);
+                if (!entry->ordinal_index)
+                    elog(ERROR, "trajectory scope: ordinal index allocation failed");
+            }
+            int result = trajectory_ordinal_index_read(entry->ordinal_index,
+                position.ordinal, &position.successor, NULL);
+            if (result < 0) elog(ERROR, "trajectory scope: invalid ordinal read");
+            if (result == 1) continue;
+            position.stride = n_context;
+            scope->positions[retained++] = position;
+            record_successor(&state, position.ordinal, n_context, &position.successor);
+        }
+        scope->position_count = retained;
+    }
+    else if (scope)
+    {
+        scope->position_count = 0;
         for (ScopedTrajectory *entry = scope->trajectories; entry; entry = entry->next)
         {
+            state.trajectory = entry;
             uint32 npoints;
             const unsigned char *points = laplace_trajectory_wkb_points(entry->wkb, &npoints);
             if (trajectory_match_suffixes(cleanup->matcher, points, npoints,

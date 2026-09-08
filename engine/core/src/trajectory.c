@@ -312,3 +312,54 @@ int trajectory_match_occurrences(trajectory_suffix_matcher_t* matcher,
                                  trajectory_suffix_visitor_t visitor, void* context) {
     return trajectory_match(matcher, packed_xyzm, n_points, visitor, context, 1);
 }
+
+struct trajectory_ordinal_index {
+    const unsigned char* packed;
+    size_t count;
+    size_t ends[];
+};
+
+trajectory_ordinal_index_t* trajectory_ordinal_index_create(
+    const void* packed_xyzm, size_t n_points) {
+    if ((!packed_xyzm && n_points) || n_points > SIZE_MAX / (4 * sizeof(double)) ||
+        n_points > (SIZE_MAX - sizeof(trajectory_ordinal_index_t)) / sizeof(size_t))
+        return NULL;
+    trajectory_ordinal_index_t* index = malloc(sizeof(*index) + n_points * sizeof(size_t));
+    if (!index) return NULL;
+    index->packed = packed_xyzm;
+    index->count = n_points;
+    size_t total = 0;
+    for (size_t i = 0; i < n_points; ++i) {
+        double vertex[4];
+        mantissa_payload_t payload;
+        memcpy(vertex, index->packed + i * sizeof(vertex), sizeof(vertex));
+        mantissa_unpack(vertex, &payload);
+        size_t run = payload.run_length ? payload.run_length : 1;
+        if (run > SIZE_MAX - total) { free(index); return NULL; }
+        index->ends[i] = total += run;
+    }
+    return index;
+}
+
+void trajectory_ordinal_index_free(trajectory_ordinal_index_t* index) {
+    free(index);
+}
+
+int trajectory_ordinal_index_read(const trajectory_ordinal_index_t* index,
+    size_t ordinal, hash128_t* entity_id, uint64_t* flags) {
+    if (!index || !ordinal || !entity_id) return -1;
+    if (!index->count || ordinal > index->ends[index->count - 1]) return 1;
+    size_t low = 0, high = index->count;
+    while (low < high) {
+        size_t middle = low + (high - low) / 2;
+        if (index->ends[middle] < ordinal) low = middle + 1;
+        else high = middle;
+    }
+    double vertex[4];
+    mantissa_payload_t payload;
+    memcpy(vertex, index->packed + low * sizeof(vertex), sizeof(vertex));
+    mantissa_unpack(vertex, &payload);
+    *entity_id = payload.entity_id;
+    if (flags) *flags = payload.flags;
+    return 0;
+}

@@ -95,6 +95,17 @@ int trajectory_match_occurrences(trajectory_suffix_matcher_t* matcher,
                                  const void* packed_xyzm, size_t n_points,
                                  trajectory_suffix_visitor_t visitor, void* context);
 
+/* Indexed ordinal access without expanding run-length encoded constituents.
+ * The packed input is borrowed and must outlive the index. Construction visits
+ * each stored vertex once; lookup is logarithmic in stored vertex count.
+ * read returns 0 for a constituent, 1 past the end, -1 for invalid arguments. */
+typedef struct trajectory_ordinal_index trajectory_ordinal_index_t;
+trajectory_ordinal_index_t* trajectory_ordinal_index_create(
+    const void* packed_xyzm, size_t n_points);
+void trajectory_ordinal_index_free(trajectory_ordinal_index_t* index);
+int trajectory_ordinal_index_read(const trajectory_ordinal_index_t* index,
+    size_t ordinal, hash128_t* entity_id, uint64_t* flags);
+
 #ifdef __cplusplus
 }
 #endif

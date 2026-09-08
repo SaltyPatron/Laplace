@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstring>
 #include <vector>
 #include <algorithm>
 
@@ -53,6 +54,36 @@ TEST(LaplaceCoreTrajectory, OrderedOccurrencesMatchIndependentExpandedOracle) {
             EXPECT_EQ(expected,actual) << n << "/" << bits << "/" << width << "/" << p;
         }
     }
+}
+
+TEST(LaplaceCoreTrajectory, OrdinalIndexMatchesExpandedRunsAndBoundaries) {
+    const hash128_t ids[] = {{1,11},{2,22},{2,22},{2,22},{3,33},{1,11}};
+    const uint64_t flags[] = {2,4,4,4,6,8};
+    double packed[24];
+    size_t vertices = 0;
+    ASSERT_EQ(0, trajectory_build_flagged_rle(ids, flags, 6, packed, &vertices));
+    ASSERT_EQ(4u, vertices);
+    // WKB coordinates need not satisfy double alignment.
+    std::vector<unsigned char> bytes(1 + vertices * 4 * sizeof(double));
+    std::memcpy(bytes.data() + 1, packed, bytes.size() - 1);
+    auto* index = trajectory_ordinal_index_create(bytes.data() + 1, vertices);
+    ASSERT_NE(nullptr, index);
+    for (size_t ordinal : {6u, 1u, 3u, 2u, 5u, 4u}) {
+        hash128_t id;
+        uint64_t actual_flags;
+        ASSERT_EQ(0, trajectory_ordinal_index_read(index, ordinal, &id, &actual_flags));
+        EXPECT_TRUE(hash128_equals(&ids[ordinal - 1], &id));
+        EXPECT_EQ(flags[ordinal - 1], actual_flags);
+    }
+    hash128_t id;
+    EXPECT_EQ(1, trajectory_ordinal_index_read(index, 7, &id, nullptr));
+    EXPECT_EQ(-1, trajectory_ordinal_index_read(index, 0, &id, nullptr));
+    trajectory_ordinal_index_free(index);
+    index = trajectory_ordinal_index_create(nullptr, 0);
+    ASSERT_NE(nullptr, index);
+    EXPECT_EQ(1, trajectory_ordinal_index_read(index, 1, &id, nullptr));
+    trajectory_ordinal_index_free(index);
+    EXPECT_EQ(nullptr, trajectory_ordinal_index_create(nullptr, 1));
 }
 
 TEST(LaplaceCoreTrajectory, BuildThenConstituentsRoundTrips) {

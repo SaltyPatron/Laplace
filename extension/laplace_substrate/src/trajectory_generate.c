@@ -471,13 +471,6 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
          * election do not become additional retained conversation memory. */
         MemoryContextReset(step_cxt);
         CHECK_FOR_INTERRUPTS();
-        if (trajectory_scope && step > 1)
-        {
-            ArrayType *selected = construct_array(ctx + ctx_len - 1, 1,
-                                                  BYTEAOID, -1, false, TYPALIGN_INT);
-            laplace_trajectory_scope_extend(trajectory_scope, selected);
-            pfree(selected);
-        }
 
         /* Resolve every suffix in one indexed native trajectory operation.
          * Selection receives the complete successor set at the greatest exact
@@ -695,6 +688,22 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         old = MemoryContextSwitchTo(walk_cxt);
         ctx[ctx_len++] = copy_id_datum(cand[pick].obj);
         MemoryContextSwitchTo(old);
+
+        if (trajectory_scope)
+        {
+            bool ordered = cand[pick].stride > 0;
+            laplace_trajectory_scope_select(trajectory_scope, cand[pick].obj, ordered);
+            /* A typed graph result can establish a new observation operand.
+             * An emitted sequence constituent advances retained occurrences;
+             * its other incident relations do not reopen unrelated contexts. */
+            if (!ordered)
+            {
+                ArrayType *selected = construct_array(ctx + ctx_len - 1, 1,
+                    BYTEAOID, -1, false, TYPALIGN_INT);
+                laplace_trajectory_scope_extend(trajectory_scope, selected);
+                pfree(selected);
+            }
+        }
 
         /* A selected constituent changes the next graph proposal and steering
          * state even when ordinal backoff is disabled. Sequence depth must not

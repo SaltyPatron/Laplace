@@ -22,6 +22,10 @@ void laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *o
  * Containment discovers roots; the shared ordered matcher establishes sequence.
  * This needs no semantic attestation for each member. Empty means no roots. */
 void laplace_trajectory_scope_extend_containing(LaplaceTrajectoryScope *scope, ArrayType *members);
+/* Retain only witnessed occurrences supporting the selection, then advance
+ * their ordinals. Exhausted observations end; they do not restart at a suffix. */
+void laplace_trajectory_scope_select(LaplaceTrajectoryScope *scope, Datum selected,
+                                    bool ordered);
 LaplaceContinuation *laplace_trajectory_continuations_scoped(
     ArrayType *context, bool suffix_backoff, LaplaceTrajectoryScope *scope, int *count);
 

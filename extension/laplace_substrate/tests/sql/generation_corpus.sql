@@ -511,8 +511,8 @@ BEGIN
            v.root, 1, public.ST_MakePoint(0,0,0,0), decode(repeat('00',16),'hex'),
            public.ST_MakeLine(ARRAY[
                public.laplace_mantissa_pack(prefix, 1, 1, 4),
-               public.laplace_mantissa_pack(v.successor, 2, 1, 4)]), 2, now()
-    FROM (VALUES (context_root, observed), (object_root, metadata)) v(root, successor);
+               public.laplace_mantissa_pack(v.successor, 2, v.run, 4)]), 1 + v.run, now()
+    FROM (VALUES (context_root, observed, 3), (object_root, metadata, 1)) v(root, successor, run);
 
     INSERT INTO laplace.attestations
         (id, subject_id, type_id, object_id, source_id, context_id, outcome,
@@ -527,6 +527,15 @@ BEGIN
     FROM generation.trajectory_continuations(ARRAY[prefix], NULL, ARRAY[operand]) g;
     IF actual IS DISTINCT FROM ARRAY[observed] OR occurrences <> 1 THEN
         RAISE EXCEPTION 'FAIL: observation scope emitted a relation object or recounted a context';
+    END IF;
+    -- A repeated packed run contains exactly three output occurrences. With a
+    -- one-ID suffix the old walk restarted inside that same run forever.
+    SELECT array_agg(g.entity ORDER BY g.step) INTO actual
+    FROM generation.forward_walk_continuations(
+        ARRAY[prefix], 12, 1, 0.0, 10, 42, ARRAY[prefix],
+        ARRAY[]::bytea[], 0, ARRAY[operand], ARRAY[]::bytea[], ARRAY[]::bytea[]) g;
+    IF actual IS DISTINCT FROM ARRAY[observed, observed, observed] THEN
+        RAISE EXCEPTION 'FAIL: forward walk restarted an exhausted observation or lost a repeated occurrence';
     END IF;
     IF EXISTS (SELECT 1 FROM generation.trajectory_continuations(
         ARRAY[prefix], NULL, ARRAY[]::bytea[])) THEN
