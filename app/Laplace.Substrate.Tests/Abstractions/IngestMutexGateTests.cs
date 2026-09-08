@@ -386,10 +386,18 @@ public sealed class IngestMutexGateTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("LANGUAGE plpgsql", installer,
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("ORDER BY e.id, e.tier", native,
+        Assert.Contains("laplace_entity_masks_apply(deposits, n_deposits)", native,
             StringComparison.Ordinal);
-        Assert.Contains("FOR NO KEY UPDATE OF e", native,
+        var storage = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
+            "src", "entity_mask_write.c"));
+        // Lock ordering and no-key tuple locks now belong to native storage.
+        // The database regressions and concurrency test prove their behavior;
+        // retaining the retired SQL strings would require restoring the defect.
+        Assert.Contains("qsort(targets,n,sizeof(*targets),compare_target)", storage,
             StringComparison.Ordinal);
+        Assert.Contains("LockTupleNoKeyExclusive", storage, StringComparison.Ordinal);
+        Assert.Contains("table_tuple_lock", storage, StringComparison.Ordinal);
+        Assert.Contains("ExecSimpleRelationUpdate", storage, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -102,7 +102,7 @@ int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count
     static SPIPlanPtr read_plan;
     if (!read_plan)
     {
-        read_plan=SPI_prepare(laplace_sql_query_text("entities.mask_targets"),1,types);
+        read_plan=SPI_prepare_cursor(laplace_sql_query_text("entities.mask_targets"),1,types,CURSOR_OPT_PARALLEL_OK);
         if (!read_plan || SPI_keepplan(read_plan)!=0) elog(ERROR,"entity mask write: prepare failed");
     }
     if(SPI_execute_plan(read_plan,args,NULL,true,0)!=SPI_OK_SELECT)
