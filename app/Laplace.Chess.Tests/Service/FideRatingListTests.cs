@@ -5,6 +5,28 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class FideRatingListTests
 {
+    [Fact]
+    public void PublicationIndex_ReusesEquivalentRowsInEveryRatingPlane()
+    {
+        var player = new FideRatingList.Player("5019168", "Sridharan Ramanathan", "IND",
+            "M", "", 1841, 1702, 1782, 1965, "i");
+        var index = new FideRatingIndex([player, player with { }]);
+        Assert.True(index.TryFindById(player.FideId, out var exact));
+        Assert.Equal(player, exact);
+        Assert.Single(index.Names);
+        foreach (var mode in new[] { "standard", "rapid", "blitz" })
+            Assert.Equal(player, Assert.Single(index.Ranked(mode)));
+    }
+
+    [Fact]
+    public void PublicationIndex_RejectsConflictingRowsWithoutChoosingARating()
+    {
+        var player = new FideRatingList.Player("5019168", "Sridharan Ramanathan", "IND",
+            "M", "", 1841, 1702, 1782, 1965, "i");
+        Assert.Throws<InvalidDataException>(() =>
+            new FideRatingIndex([player, player with { Standard = 1900 }]));
+    }
+
     private const string Xml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <playerslist>

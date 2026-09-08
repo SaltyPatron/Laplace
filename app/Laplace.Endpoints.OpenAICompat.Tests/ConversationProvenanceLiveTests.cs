@@ -13,10 +13,9 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// tenants proves — on the real writer spine and the real fold —
 ///   (1) evidence rows carry the per-tenant source AND the session as context,
 ///   (2) the two tenants' testimony is distinct evidence (provenance unmashed),
-///   (3) the prompt→reply PRECEDES cell corroborates across tenants at ONE
-///       consensus cell (isolated AND acting as a whole),
+///   (3) ordered message occurrences remain distinct while exact content is shared,
 ///   (4) scoped_consensus isolates tenant A's world from tenant B's,
-///   (5) recall_session accepts the canonically minted session id.
+///   (5) exact session recall returns both surfaces and roles without writing.
 /// Tenants/content are unique per run (fresh guid) so cells carry no prior
 /// history — same discipline as ConverseLoopLiveTests. Tier=live: this is a
 /// seeded/shared product acceptance probe, not a database-health fixture.
@@ -45,6 +44,7 @@ public sealed class ConversationProvenanceLiveTests
         var sessionB = ConversationContent.SessionId(tenantB, "s1");
 
         Hash128 promptRoot = default, replyRoot = default;
+        Hash128[] turnsA = [], turnsB = [];
         var inner = new NpgsqlSubstrateWriter(ds);
         await using (var acc = new ConsensusAccumulatingWriter(inner, ds))
         {
@@ -57,8 +57,11 @@ public sealed class ConversationProvenanceLiveTests
                     scope, session,
                     Encoding.UTF8.GetBytes(prompt), Encoding.UTF8.GetBytes(reply),
                     userKey: "user-1",
-                    out var turnChange, out promptRoot, out replyRoot));
-                await writer.ApplyAsync(turnChange);
+                    out var turnChange, out promptRoot, out replyRoot, out var turnIds));
+                Assert.Equal(2, turnIds.Length);
+                if (session == sessionA) turnsA = turnIds;
+                else turnsB = turnIds;
+                await acc.ApplyConversationTurnAsync(turnChange, session, turnIds);
             }
         }
 
@@ -70,25 +73,55 @@ public sealed class ConversationProvenanceLiveTests
             ("src", $"UserPrompt@{tenantA}"), ("ctx", sessionA.ToBytes())) >= 1,
             "tenant A's prompt testimony missing its source+session provenance");
 
-        var precedesRows = await CountAsync(ds,
+        Assert.NotEqual(turnsA[0], turnsB[0]);
+        Assert.NotEqual(turnsA[1], turnsB[1]);
+        foreach (var (scope, session, turns) in new[]
+                 { (scopeA, sessionA, turnsA), (scopeB, sessionB, turnsB) })
+        {
+            await using var manifest = ds.CreateCommand(
+                "SELECT turn_id FROM converse.session_turn_ids(@session,NULL) ORDER BY ordinal");
+            manifest.Parameters.AddWithValue("session", session.ToBytes());
+            await using (var reader = await manifest.ExecuteReaderAsync())
+            {
+                foreach (var turn in turns)
+                {
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal(turn.ToBytes(), reader.GetFieldValue<byte[]>(0));
+                }
+                Assert.False(await reader.ReadAsync());
+            }
+            Assert.Equal(1, await CountAsync(ds,
             """
             SELECT count(*) FROM laplace.attestations
-            WHERE subject_id = @s AND type_id = laplace.relation_type_id('PRECEDES')
-              AND object_id = @o
+            WHERE subject_id = @s AND type_id = laplace.relation_type_id('DEPENDS_ON')
+              AND object_id = @o AND source_id = @source AND context_id = @session
             """,
-            ("s", promptRoot.ToBytes()), ("o", replyRoot.ToBytes()));
-        Assert.True(precedesRows >= 2,
-            $"expected distinct evidence rows for two tenants, saw {precedesRows}");
+                ("s", turns[1].ToBytes()), ("o", turns[0].ToBytes()),
+                ("source", scope.ResponseSource.ToBytes()), ("session", session.ToBytes())));
+            Assert.Equal(1, await CountAsync(ds,
+                """
+                SELECT count(*) FROM laplace.consensus
+                WHERE subject_id=@s AND type_id=laplace.relation_type_id('DEPENDS_ON')
+                  AND object_id=@o AND witness_count=1
+                """, ("s", turns[1].ToBytes()), ("o", turns[0].ToBytes())));
+        }
 
-        var witnesses = await CountAsync(ds,
+        // Both tenants' occurrences bind the same exact content roots. Session
+        // order is read from the physicality, never recreated as PRECEDES.
+        Assert.Equal(2, await CountAsync(ds,
             """
-            SELECT COALESCE(max(witness_count), 0) FROM laplace.consensus
-            WHERE subject_id = @s AND type_id = laplace.relation_type_id('PRECEDES')
-              AND object_id = @o
+            SELECT count(*) FROM converse.message_content_ids(@messages)
+            WHERE content_id = @content
             """,
-            ("s", promptRoot.ToBytes()), ("o", replyRoot.ToBytes()));
-        Assert.True(witnesses >= 2,
-            $"PRECEDES cell should hold both tenants' testimony, witness_count={witnesses}");
+            ("messages", new[] { turnsA[0].ToBytes(), turnsB[0].ToBytes() }),
+            ("content", promptRoot.ToBytes())));
+        Assert.Equal(2, await CountAsync(ds,
+            """
+            SELECT count(*) FROM converse.message_content_ids(@messages)
+            WHERE content_id = @content
+            """,
+            ("messages", new[] { turnsA[1].ToBytes(), turnsB[1].ToBytes() }),
+            ("content", replyRoot.ToBytes())));
 
         await using (var conn = await ds.OpenConnectionAsync())
         {
@@ -106,20 +139,29 @@ public sealed class ConversationProvenanceLiveTests
 
             Assert.True(await CountOnAsync(conn,
                 "SELECT count(*) FROM consensus WHERE subject_id = @s AND object_id = @o",
-                ("s", promptRoot.ToBytes()), ("o", sessionA.ToBytes())) >= 1,
+                ("s", turnsA[0].ToBytes()), ("o", sessionA.ToBytes())) >= 1,
                 "tenant A's scoped world is missing A's own session membership");
             Assert.Equal(0, await CountOnAsync(conn,
                 "SELECT count(*) FROM consensus WHERE subject_id = @s AND object_id = @o",
-                ("s", promptRoot.ToBytes()), ("o", sessionB.ToBytes())));
+                ("s", turnsB[0].ToBytes()), ("o", sessionB.ToBytes())));
         }
 
         await using (var conn = await ds.OpenConnectionAsync())
-        await using (var cmd = new NpgsqlCommand(
-            "SELECT count(*) FROM converse.recall_session(@p, @session)", conn))
         {
-            cmd.Parameters.AddWithValue("p", prompt);
+            await using var transaction = await conn.BeginTransactionAsync();
+            await using (var readOnly = new NpgsqlCommand("SET TRANSACTION READ ONLY", conn, transaction))
+                await readOnly.ExecuteNonQueryAsync();
+            await using var cmd = new NpgsqlCommand(
+                "SELECT role,surface FROM converse.session_turns(@session,NULL) ORDER BY ordinal", conn, transaction);
             cmd.Parameters.AddWithValue("session", sessionA.ToBytes());
-            await cmd.ExecuteScalarAsync();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            foreach (var (role, surface) in new[] { ("user", prompt), ("assistant", reply) })
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal(role, reader.GetString(0));
+                Assert.Equal(surface, reader.GetString(1));
+            }
+            Assert.False(await reader.ReadAsync());
         }
     }
 

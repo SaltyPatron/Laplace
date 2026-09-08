@@ -417,3 +417,46 @@ snapshot cache, not completion of the persistent mmap perfcache work. Joint
 attestation comparison, source/context-conditioned scoring and coherent answer
 composition remain implementation obligations; this change does not establish
 that chat works. Live timing and output must be measured after deployment.
+
+### Native physicality routing and current acceptance
+
+The observation-bound deployment (89976800, extension e956e6ca9e7cec30) still
+failed the 128-step lightning read at 45 seconds. Its first three selections were
+Being_employed, Intentionally_act and Locale_by_use. Candidate support alone does
+not implement joint interpretation. The first three steps used 2,261,972 shared
+hits and 4.250 seconds. Receipt: `lightning-observed-forward*`.
+
+A second measured access defect was the unpartitioned operand: a canonical-ID
+SQL array probe sent all 2,901 IDs to every physicality leaf, performing roughly
+2,000 index searches per leaf. All 2,142 matching current-data physicalities had
+the canonical BLAKE3(entity ID || little-endian Content type) identity.
+`content_trajectory_read.c` now uses the existing native physicality-ID function,
+PostgreSQL's actual partition hash/support metadata, and one PK array probe of
+only the IDs belonging to each leaf. It preserves MVCC/SELECT permissions and
+rejects an incompatible storage layout. The scoped reader consumes canonical
+Content physicalities; arbitrary legacy geometry-ID rows are not additional
+canonical Content placements. Corpus-scoped compatibility reads are unchanged.
+
+Transactional live replacement/readback (rolled back) retained the same three
+selected identities, reducing shared hits to 1,724,964 plus 356 reads and elapsed
+time to 3.750 seconds. All 128 steps completed in 35.747 seconds with 22,497,764
+hits and 51,728 reads. This remains failed chat/performance acceptance. Receipt:
+`lightning-native-partition-routing.sql/.log`. The old array-based physicality
+catalog query is removed; 43 fixed catalog entries remain.
+
+The live provenance gate now exercises ApplyConversationTurnAsync and verifies
+ordered occurrences, distinct tenant evidence/dependency cells, common content
+IDs, source-isolated membership, and exact roles/surfaces in a read-only
+transaction. Its obsolete PRECEDES/content-root assumption was incompatible with
+spec 34. The corrected live test passes (2 seconds). An initial local run loaded
+stale app-local September 4 native libraries; explicit LAPLACE_ENGINE_BUILD
+pointed the repeat at this tree's build and resolved that artifact mismatch.
+
+The official FIDE XML repeats ID 5019168; its two records differ in foa_title,
+which is outside the existing player display projection. Equal projected records
+now share one identity in every snapshot index. Conflicting projections still
+fail explicitly rather than choosing a rating. All 13 targeted FIDE tests pass,
+including the current official profile/search/roster read. Source ZIP and exact
+record excerpts are preserved as `fide-current.zip` and
+`fide-duplicate-5019168.txt` in the backup directory. Full source-field fidelity
+remains distinct from this display-index repair.

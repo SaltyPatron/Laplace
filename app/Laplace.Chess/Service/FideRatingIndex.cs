@@ -20,7 +20,18 @@ internal sealed class FideRatingIndex
 
     internal FideRatingIndex(FideRatingList.Player[] players)
     {
-        _byId = players.ToDictionary(static p => p.FideId, StringComparer.Ordinal);
+        _byId = new Dictionary<string, FideRatingList.Player>(players.Length, StringComparer.Ordinal);
+        foreach (var player in players)
+        {
+            if (!_byId.TryAdd(player.FideId, player) && _byId[player.FideId] != player)
+                throw new InvalidDataException(
+                    $"FIDE publication contains conflicting projected records for {player.FideId}.");
+        }
+        // Repeated provider records may project to the same player. Index the
+        // identity once in every view; never select an arbitrary conflicting
+        // rating or manufacture a combined record. The source artifact remains
+        // unchanged, including fields outside this display projection.
+        players = _byId.Values.ToArray();
         Names = players.Select(static p =>
         {
             string canonical = PlayerAlias.Canonical(p.Name);
