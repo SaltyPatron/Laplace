@@ -13,7 +13,7 @@ typedef struct LaplaceContinuation
 } LaplaceContinuation;
 
 /* A request-snapshot projection of observed operands and their witnessed
- * object/context roots. This is candidate support, never a claim that sharing
+ * context roots. This is candidate support, never a claim that sharing
  * a context (which may be a language) proves co-occurrence or agreement. */
 typedef struct LaplaceTrajectoryScope LaplaceTrajectoryScope;
 LaplaceTrajectoryScope *laplace_trajectory_scope_create(void);

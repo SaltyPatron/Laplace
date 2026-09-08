@@ -24,8 +24,9 @@ CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
     LANGUAGE C STABLE;
 
 -- Observation-bound form for query, forward execution and export. NULL is
--- explicit corpus scope; an empty array is empty support. Witnessed object
--- and context identities propose physicality roots, not co-occurrence truth.
+-- explicit corpus scope; an empty array is empty support. Observation operands
+-- and their attested contexts propose physicality roots, not co-occurrence
+-- truth. Relation objects require a separately elected output operation.
 CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
         p_ctx bytea[], p_topk int, p_observation_ids bytea[])
     RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)

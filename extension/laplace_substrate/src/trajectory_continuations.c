@@ -5,6 +5,7 @@
 #include "parser/parse_func.h"
 #include "utils/lsyscache.h"
 #include "executor/spi.h"
+#include "tcop/dest.h"
 #include "funcapi.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -84,10 +85,50 @@ scope_add_id(HTAB *known, ArrayBuildState **batch, Datum value, MemoryContext wo
     if (!found) *batch = accumArrayResult(*batch, value, false, BYTEAOID, work);
 }
 
+typedef struct BindingReceiver
+{
+    DestReceiver receiver;
+    LaplaceTrajectoryScope *scope;
+    ArrayBuildState **roots;
+    MemoryContext work;
+} BindingReceiver;
+
+static bool
+receive_binding(TupleTableSlot *slot, DestReceiver *destination)
+{
+    BindingReceiver *receiver = (BindingReceiver *) destination;
+    MemoryContext previous = MemoryContextSwitchTo(receiver->work);
+    bool isnull;
+    Datum id = slot_getattr(slot, 1, &isnull);
+    if (!isnull)
+        scope_add_id(receiver->scope->roots, receiver->roots, id, receiver->work);
+    MemoryContextSwitchTo(previous);
+    CHECK_FOR_INTERRUPTS();
+    return true;
+}
+
+static void
+binding_startup(DestReceiver *destination, int operation, TupleDesc descriptor)
+{
+    (void) destination;
+    if (operation != CMD_SELECT || descriptor->natts != 1 ||
+        TupleDescAttr(descriptor, 0)->atttypid != BYTEAOID)
+        elog(ERROR, "trajectory scope: invalid observation binding result shape");
+}
+
+static void
+binding_shutdown(DestReceiver *destination)
+{
+    (void) destination;
+}
+
 /* Each distinct observed identity is bound once, each resulting root loaded
  * once, under the caller's snapshot. The ordered physicality is retained as
  * packed WKB; no per-codepoint SQL, flattened corpus or label lookup. A miss
- * remains a miss and cannot silently reopen the whole corpus. */
+ * remains a miss and cannot silently reopen the whole corpus. A relation's
+ * object is not its observation context: routing to a label, category or frame
+ * does not license continuing that object's spelling. Result-bearing objects
+ * are proposed separately through the caller's typed output operation. */
 void
 laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operands)
 {
@@ -114,32 +155,33 @@ laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operan
     if (!bindings_plan)
     {
         Oid types[1] = {BYTEAARRAYOID};
-        bindings_plan = SPI_prepare_cursor(laplace_sql_query_text("generation.observation_bindings"),
-                                            1, types, CURSOR_OPT_PARALLEL_OK);
+        bindings_plan = SPI_prepare(laplace_sql_query_text("generation.observation_bindings"),
+                                    1, types);
         if (!bindings_plan || SPI_keepplan(bindings_plan) != 0)
             elog(ERROR, "trajectory scope: preparing observation bindings failed");
     }
     if (missing)
     {
-        Datum args[1] = {makeArrayResult(missing, work)};
-        Portal portal = SPI_cursor_open(NULL, bindings_plan, args, NULL, true);
-        if (!portal) elog(ERROR, "trajectory scope: opening binding cursor failed");
-        for (;;)
-        {
-            SPI_cursor_fetch(portal, true, 1024);
-            uint64 rows = SPI_processed;
-            for (uint64 row = 0; row < rows; ++row)
-                for (int col = 1; col <= 2; ++col)
-                {
-                    bool isnull;
-                    Datum id = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, col, &isnull);
-                    if (!isnull) scope_add_id(scope->roots, &roots, id, work);
-                }
-            if (SPI_tuptable) { SPI_freetuptable(SPI_tuptable); SPI_tuptable = NULL; }
-            if (!rows) break;
-            CHECK_FOR_INTERRUPTS();
-        }
-        SPI_cursor_close(portal);
+        ParamListInfo params = makeParamList(1);
+        params->params[0].value = makeArrayResult(missing, work);
+        params->params[0].isnull = false;
+        params->params[0].pflags = PARAM_FLAG_CONST;
+        params->params[0].ptype = BYTEAARRAYOID;
+        BindingReceiver receiver = {
+            .receiver = {receive_binding, binding_startup, binding_shutdown,
+                         binding_shutdown, DestNone},
+            .scope = scope, .roots = &roots, .work = work
+        };
+        SPIExecuteOptions options = {
+            .params = params, .read_only = true, .must_return_tuples = true,
+            .dest = &receiver.receiver
+        };
+        /* Consume executor slots directly. No fetch loop, intermediate SPI
+         * tuple tables or result-sized materialization precedes native dedup. */
+        int result = SPI_execute_plan_extended(bindings_plan, &options);
+        if (result != SPI_OK_SELECT)
+            elog(ERROR, "trajectory scope: reading observation bindings failed: %s",
+                 SPI_result_code_string(result));
     }
     if (roots)
         laplace_content_trajectory_read(DatumGetArrayTypeP(makeArrayResult(roots, work)),

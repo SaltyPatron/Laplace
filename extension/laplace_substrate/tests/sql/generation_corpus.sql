@@ -491,6 +491,50 @@ BEGIN
 END
 $membership_bitmap$;
 
+-- Observation contexts are admissible sequence evidence. An arbitrary relation
+-- object is routing state, even when its physicality contains a matching prefix.
+-- More than one former fetch page also checks streaming and root deduplication.
+DO $observation_scope$
+DECLARE
+    operand bytea := public.laplace_hash128_blake3('scope/operand');
+    prefix bytea := public.laplace_hash128_blake3('scope/prefix');
+    observed bytea := public.laplace_hash128_blake3('scope/observed');
+    metadata bytea := public.laplace_hash128_blake3('scope/metadata');
+    context_root bytea := public.laplace_hash128_blake3('scope/context');
+    object_root bytea := public.laplace_hash128_blake3('scope/object');
+    actual bytea[];
+    occurrences bigint;
+BEGIN
+    INSERT INTO laplace.physicalities
+        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
+    SELECT public.laplace_hash128_blake3(v.root || decode('0100','hex')),
+           v.root, 1, public.ST_MakePoint(0,0,0,0), decode(repeat('00',16),'hex'),
+           public.ST_MakeLine(ARRAY[
+               public.laplace_mantissa_pack(prefix, 1, 1, 4),
+               public.laplace_mantissa_pack(v.successor, 2, 1, 4)]), 2, now()
+    FROM (VALUES (context_root, observed), (object_root, metadata)) v(root, successor);
+
+    INSERT INTO laplace.attestations
+        (id, subject_id, type_id, object_id, source_id, context_id, outcome,
+         last_observed_at, observation_count, sum_score_fp1e9, opponent_rd_fp1e9)
+    SELECT public.laplace_hash128_blake3(convert_to('scope/witness/' || n, 'UTF8')), operand,
+           laplace.relation_type_id('RELATED_TO'), object_root,
+           public.laplace_hash128_blake3(convert_to('scope/source/' || n, 'UTF8')), context_root,
+           2, now(), 1, 1000000000, 30000000000
+    FROM generate_series(1, 2050) n;
+
+    SELECT array_agg(g.object_id), sum(g.weight) INTO actual, occurrences
+    FROM generation.trajectory_continuations(ARRAY[prefix], NULL, ARRAY[operand]) g;
+    IF actual IS DISTINCT FROM ARRAY[observed] OR occurrences <> 1 THEN
+        RAISE EXCEPTION 'FAIL: observation scope emitted a relation object or recounted a context';
+    END IF;
+    IF EXISTS (SELECT 1 FROM generation.trajectory_continuations(
+        ARRAY[prefix], NULL, ARRAY[]::bytea[])) THEN
+        RAISE EXCEPTION 'FAIL: empty observation scope reopened the corpus';
+    END IF;
+END
+$observation_scope$;
+
 CREATE ROLE laplace_membership_reader_test;
 GRANT USAGE ON SCHEMA structural TO laplace_membership_reader_test;
 SET LOCAL ROLE laplace_membership_reader_test;

@@ -166,7 +166,8 @@ SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8
     "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
     "observed_at=EXCLUDED.observed_at")
 SQL_QUERY("generation.observation_bindings", "bytea[]",
-    "SELECT object_id,context_id FROM laplace.attestations WHERE subject_id=ANY($1)")
+    "SELECT context_id FROM laplace.attestations "
+    "WHERE subject_id=ANY($1) AND context_id IS NOT NULL")
 SQL_QUERY("evidence.response_support", "bytea[],bytea,bytea[],bytea,bool",
     "SELECT subject_id,object_id,source_id FROM laplace.attestations "
     "WHERE subject_id=ANY($1) AND type_id=$2 AND ((object_id IS NULL)=$5) "
