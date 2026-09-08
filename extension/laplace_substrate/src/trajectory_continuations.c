@@ -1,6 +1,9 @@
 #include "postgres.h"
 #include "miscadmin.h"
 #include "catalog/pg_type.h"
+#include "catalog/namespace.h"
+#include "parser/parse_func.h"
+#include "utils/lsyscache.h"
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "utils/array.h"
@@ -14,6 +17,7 @@
 #include "trajectory_continuations.h"
 #include "laplace/core/trajectory.h"
 #include "laplace/core/sql_catalog.h"
+#include "content_trajectory_read.h"
 
 /* GIN supplies containing trajectories, not sequence truth. Native matching
  * reads the mantissa-packed ordered occurrences once, including all runs and
@@ -27,7 +31,6 @@ static const char *UNPACK_QUERY =
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1";
 static SPIPlanPtr unpack_plan = NULL;
 static SPIPlanPtr bindings_plan = NULL;
-static SPIPlanPtr observed_trajectories_plan = NULL;
 
 typedef struct ScopedTrajectory
 {
@@ -41,6 +44,7 @@ struct LaplaceTrajectoryScope
     HTAB *operands;
     HTAB *roots;
     ScopedTrajectory *trajectories;
+    Oid as_binary;
 };
 
 LaplaceTrajectoryScope *
@@ -49,6 +53,10 @@ laplace_trajectory_scope_create(void)
     LaplaceTrajectoryScope *scope = palloc0(sizeof(*scope));
     HASHCTL ctl = {0};
     scope->owner = CurrentMemoryContext;
+    Oid physicalities = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
+    Oid geometry = get_atttype(physicalities, get_attnum(physicalities, "trajectory"));
+    scope->as_binary = LookupFuncName(list_make2(makeString("public"), makeString("st_asbinary")),
+                                      1, &geometry, false);
     ctl.keysize = ctl.entrysize = sizeof(hash128_t);
     ctl.hcxt = scope->owner;
     scope->operands = hash_create("observed trajectory operands", 128, &ctl,
@@ -56,6 +64,18 @@ laplace_trajectory_scope_create(void)
     scope->roots = hash_create("observed trajectory roots", 256, &ctl,
                               HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     return scope;
+}
+
+static void
+scope_retain_trajectory(Datum geometry, void *context)
+{
+    LaplaceTrajectoryScope *scope = context;
+    MemoryContext previous = MemoryContextSwitchTo(scope->owner);
+    ScopedTrajectory *entry = palloc(sizeof(*entry));
+    entry->wkb = DatumGetByteaP(OidFunctionCall1(scope->as_binary, geometry));
+    entry->next = scope->trajectories;
+    scope->trajectories = entry;
+    MemoryContextSwitchTo(previous);
 }
 
 static void
@@ -103,11 +123,6 @@ laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operan
                                             1, types, CURSOR_OPT_PARALLEL_OK);
         if (!bindings_plan || SPI_keepplan(bindings_plan) != 0)
             elog(ERROR, "trajectory scope: preparing observation bindings failed");
-        observed_trajectories_plan = SPI_prepare_cursor(
-            laplace_sql_query_text("generation.observation_trajectories"), 1, types,
-            CURSOR_OPT_PARALLEL_OK);
-        if (!observed_trajectories_plan || SPI_keepplan(observed_trajectories_plan) != 0)
-            elog(ERROR, "trajectory scope: preparing observed trajectories failed");
     }
     if (missing)
     {
@@ -132,32 +147,8 @@ laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operan
         SPI_cursor_close(portal);
     }
     if (roots)
-    {
-        Datum args[1] = {makeArrayResult(roots, work)};
-        Portal portal = SPI_cursor_open(NULL, observed_trajectories_plan, args, NULL, true);
-        if (!portal) elog(ERROR, "trajectory scope: opening trajectory cursor failed");
-        for (;;)
-        {
-            SPI_cursor_fetch(portal, true, 256);
-            uint64 rows = SPI_processed;
-            for (uint64 row = 0; row < rows; ++row)
-            {
-                bool isnull;
-                Datum wkb = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &isnull);
-                if (isnull) continue;
-                MemoryContextSwitchTo(scope->owner);
-                ScopedTrajectory *entry = palloc(sizeof(*entry));
-                entry->wkb = DatumGetByteaPCopy(wkb);
-                entry->next = scope->trajectories;
-                scope->trajectories = entry;
-                MemoryContextSwitchTo(work);
-            }
-            if (SPI_tuptable) { SPI_freetuptable(SPI_tuptable); SPI_tuptable = NULL; }
-            if (!rows) break;
-            CHECK_FOR_INTERRUPTS();
-        }
-        SPI_cursor_close(portal);
-    }
+        laplace_content_trajectory_read(DatumGetArrayTypeP(makeArrayResult(roots, work)),
+                                        scope_retain_trajectory, scope);
     MemoryContextSwitchTo(previous);
     MemoryContextDelete(work);
     laplace_spi_finish(spi_top);

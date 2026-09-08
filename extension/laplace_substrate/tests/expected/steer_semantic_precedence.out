@@ -275,6 +275,15 @@ BEGIN
     -- The observation operand bounds sequence support before matching. The
     -- thirty-two unrelated ctx -> noise trajectories must not enter through
     -- suffix backoff. Empty scope must also remain empty.
+    -- Canonical Content identity is BLAKE3(entity_id || uint16_le(1)); the
+    -- earlier synthetic corpus rows deliberately model separate observations.
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
+    VALUES (public.laplace_hash128_blake3(sent_sem||decode('0100','hex')),sent_sem,1,
+        public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
+        public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(ctx,1,1,t2flag),
+                                public.laplace_mantissa_pack(gap,2,1,0),
+                                public.laplace_mantissa_pack(semantic,3,1,t2flag)]),3);
     SELECT g.entity,g.stride_used INTO picked,picked_stride
     FROM generation.forward_walk_continuations(
         ARRAY[ctx,gap],1,5,0.0,8,7,ARRAY[unrelated], '{}'::bytea[],8,
@@ -318,7 +327,8 @@ BEGIN
     -- step. This root was not in the initial operand's evidence.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
-    VALUES (next_root,next_root,1,public.ST_MakePoint(103,1,1,1),decode(repeat('00',16),'hex'),
+    VALUES (public.laplace_hash128_blake3(next_root||decode('0100','hex')),next_root,1,
+        public.ST_MakePoint(103,1,1,1),decode(repeat('00',16),'hex'),
         public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(semantic,1,1,t2flag),
                                 public.laplace_mantissa_pack(noise,2,1,t2flag)]),2);
     INSERT INTO laplace.attestations
