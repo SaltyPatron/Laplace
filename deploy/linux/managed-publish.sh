@@ -11,33 +11,40 @@ BACKUP_ROOT=/opt/laplace/app-backups
 source "$ROOT/deploy/linux/payload-sync.sh"
 
 release_in_use() {
-  local candidate="$1" link target proc_ref
+  local candidate="$1" link target
   for link in "$APP_DIR"/laplace-lichess "$APP_DIR"/laplace-mcp "$APP_DIR"/laplace-uci; do
     [[ -L "$link" ]] || continue
     target=$(readlink -f "$link" 2>/dev/null || true)
     [[ "$target" == "$candidate"/* ]] && return 0
   done
-  for proc_ref in /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root; do
-    target=$(readlink "$proc_ref" 2>/dev/null || true)
-    [[ "$target" == "$candidate"/* || "$target" == "$candidate" ]] && return 0
-  done
-  for proc_ref in /proc/[0-9]*/maps; do
-    [[ -r "$proc_ref" ]] || continue
-    grep -Fq " $candidate/" "$proc_ref" 2>/dev/null && return 0
-  done
   return 1
 }
 
 prune_unreferenced_releases() {
-  local releases="$APP_DIR/releases" candidate reclaimed=0
+  local releases="$APP_DIR/releases" candidate reclaimed=0 retained=0
   [[ -d "$releases" && ! -L "$releases" ]] || return 0
   while IFS= read -r -d '' candidate; do
     release_in_use "$candidate" && continue
-    find "$candidate" -depth -delete
-    echo "reclaimed unreferenced application release: $candidate"
-    reclaimed=$((reclaimed + 1))
+    # /proc inspection by the runner cannot establish another user's runtime
+    # ownership. New launchers hold a shared lease before starting the apphost;
+    # collection holds the exclusive lease through deletion. Older releases
+    # cannot prove absence of clients and remain intact during this transition.
+    if [[ ! -f "$candidate/.runtime-lease" || -L "$candidate/.runtime-lease" ]]; then
+      retained=$((retained + 1))
+      continue
+    fi
+    if (
+      exec 9<"$candidate/.runtime-lease" || exit 1
+      flock -n -x 9 || exit 1
+      find "$candidate" -depth -delete
+    ); then
+      echo "reclaimed unreferenced application release: $candidate"
+      reclaimed=$((reclaimed + 1))
+    else
+      retained=$((retained + 1))
+    fi
   done < <(find "$releases" -mindepth 1 -maxdepth 1 -type d -name 'runtime.*' -print0)
-  echo "application release retention: reclaimed=$reclaimed"
+  echo "application release retention: reclaimed=$reclaimed retained=$retained"
 }
 
 installed_policy() {

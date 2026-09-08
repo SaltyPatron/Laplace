@@ -85,6 +85,24 @@ laplace_stage_runtime_payload() {
   fi
 }
 
+# Keep the whole immutable closure reachable for the complete process lifetime,
+# including dependencies that .NET loads lazily. The lock is acquired before
+# the apphost starts and its descriptor survives exec. It works across UIDs
+# without inspecting private process mappings or requiring privileged GC.
+laplace_wrap_runtime_lease() {
+  local executable="$1"
+  mv "$executable" "$executable.native" || return 1
+  cat > "$executable" <<'LAUNCHER' || return 1
+#!/usr/bin/env bash
+set -euo pipefail
+runtime_executable="$(readlink -f "${BASH_SOURCE[0]}")"
+exec 9<"$(dirname "$runtime_executable")/../.runtime-lease"
+flock -s 9
+exec "$runtime_executable.native" "$@"
+LAUNCHER
+  chmod 0755 "$executable"
+}
+
 # Publish each managed runtime into a NEW immutable directory. Return its absolute
 # path; the caller updates stable launch links only after all copies succeed.
 laplace_stage_managed_runtimes() {
@@ -109,6 +127,10 @@ laplace_stage_managed_runtimes() {
   # closure, isolated from the API's differently named runtime/dependency files.
   laplace_stage_runtime_payload "$app_dir" uci "$app_dir/laplace-uci" \
     "$uci_stage" "$release/uci" || return 1
+  install -m 0644 /dev/null "$release/.runtime-lease" || return 1
+  laplace_wrap_runtime_lease "$release/mcp/Laplace.Endpoints.Mcp" || return 1
+  laplace_wrap_runtime_lease "$release/lichess/Laplace.Endpoints.Lichess" || return 1
+  laplace_wrap_runtime_lease "$release/uci/laplace-uci" || return 1
   ln -s ../../../logs "$release/mcp/logs" || return 1
   ln -s ../../../logs "$release/lichess/logs" || return 1
   ln -s ../../../logs "$release/uci/logs" || return 1
