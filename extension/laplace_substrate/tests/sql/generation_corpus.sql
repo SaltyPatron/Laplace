@@ -544,6 +544,39 @@ BEGIN
 END
 $observation_scope$;
 
+-- A selected typed result keeps its semantic identity through selection. Only
+-- the final surface operation descends to its witnessed name. This fixture is
+-- an explicit continuation claim, not evidence of natural-language orientation.
+DO $realization$
+DECLARE
+    prompt_id bytea := laplace.word_id('β');
+    result_id bytea := public.laplace_hash128_blake3('test/forward/semantic-result');
+    relation_id bytea := laplace.relation_type_id('COMPLETES_TO');
+    actual text[];
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(prompt_id,relation_id,result_id),prompt_id,relation_id,result_id,
+         2000000000000,30000000000,60000000,5,now()),
+        (laplace.consensus_id(result_id,laplace.relation_type_id('HAS_NAME'),laplace.word_id('λ')),
+         result_id,laplace.relation_type_id('HAS_NAME'),laplace.word_id('λ'),
+         2000000000000,30000000000,60000000,5,now());
+    IF realize.render_text(result_id) IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: semantic result unexpectedly has a text physicality';
+    END IF;
+    SELECT array_agg(g.entity ORDER BY g.step) INTO actual
+    FROM generation.forward_text('β',1,0,0.0,8,7,0,8) g;
+    IF actual IS DISTINCT FROM ARRAY['λ'] THEN
+        RAISE EXCEPTION 'FAIL: selected semantic result lost its witnessed surface: %',actual;
+    END IF;
+    IF (realize.batch(ARRAY[laplace.word_id(' '),laplace.word_id('.'),laplace.word_id('λ')]))
+        IS DISTINCT FROM ARRAY[' ','.','λ'] THEN
+        RAISE EXCEPTION 'FAIL: final realization changed exact content';
+    END IF;
+END
+$realization$;
+
 CREATE ROLE laplace_membership_reader_test;
 GRANT USAGE ON SCHEMA structural TO laplace_membership_reader_test;
 SET LOCAL ROLE laplace_membership_reader_test;

@@ -418,8 +418,9 @@ BEGIN
         RAISE EXCEPTION 'FAIL: duplicate operands/witness roots inflated physical occurrence count';
     END IF;
 
-    -- Selecting an identity makes its observations available to the next
-    -- step. This root was not in the initial operand's evidence.
+    -- Ordered emission finishes its witnessed trajectory; sharing its last
+    -- identity with another observation does not splice the two sequences.
+    -- An explicit graph result can instead establish a new observation scope.
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
     VALUES (public.laplace_hash128_blake3(next_root||decode('0100','hex')),next_root,1,
@@ -434,8 +435,17 @@ BEGIN
     SELECT array_agg(g.entity ORDER BY g.step) INTO scoped_steps
     FROM generation.forward_walk_continuations(
         ARRAY[ctx,gap],2,5,0.0,8,7,ARRAY[unrelated], '{}'::bytea[],8,ARRAY[unrelated]) g;
+    IF scoped_steps IS DISTINCT FROM ARRAY[semantic] THEN
+        RAISE EXCEPTION 'FAIL: ordered emission spliced an unrelated observation';
+    END IF;
+    UPDATE laplace.consensus SET rating=2000000000000
+    WHERE subject_id=frontier AND type_id=rel AND object_id=semantic;
+    SELECT array_agg(g.entity ORDER BY g.step) INTO scoped_steps
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx,gap],2,5,0.0,8,7,ARRAY[frontier], '{}'::bytea[],8,
+        '{}'::bytea[],'{}'::bytea[],ARRAY[rel]) g;
     IF scoped_steps IS DISTINCT FROM ARRAY[semantic,noise] THEN
-        RAISE EXCEPTION 'FAIL: selected identity did not extend the next observation scope';
+        RAISE EXCEPTION 'FAIL: typed result did not establish its next observation scope';
     END IF;
 
     -- A document's physicality supplies observations without a semantic edge

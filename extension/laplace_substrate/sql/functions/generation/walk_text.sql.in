@@ -67,7 +67,10 @@ BEGIN ATOMIC
                array_agg(sep_entity ORDER BY step) AS separators
         FROM walked
     ), txt AS MATERIALIZED (
-        SELECT realize.render_text_batch(entities) AS entities,
+        -- Selection retains semantic identities. The shared realization ladder
+        -- preserves exact content first and descends to witnessed surfaces for
+        -- typed results that have no text physicality of their own.
+        SELECT realize.batch(entities) AS entities,
                realize.render_text_batch(separators) AS separators
         FROM ids
     )
