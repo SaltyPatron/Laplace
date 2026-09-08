@@ -248,9 +248,10 @@ trajectory_suffix_matcher_t* trajectory_suffix_matcher_create(
     return matcher;
 }
 
-int trajectory_match_suffixes(trajectory_suffix_matcher_t* matcher,
+static int trajectory_match(trajectory_suffix_matcher_t* matcher,
                               const void* packed_xyzm, size_t n_points,
-                              trajectory_suffix_visitor_t visitor, void* context) {
+                              trajectory_suffix_visitor_t visitor, void* context,
+                              int include_terminal) {
     if (!matcher || !visitor || (!packed_xyzm && n_points) ||
         n_points > SIZE_MAX / (4 * sizeof(double))) return -1;
     const unsigned char* bytes = packed_xyzm;
@@ -284,6 +285,9 @@ int trajectory_match_suffixes(trajectory_suffix_matcher_t* matcher,
             if (hash128_equals(&payload.entity_id, &matcher->reversed[matched])) ++matched;
             matcher->ring[consumed % ring_size] = payload.entity_id;
             size_t stride = matched;
+            if (include_terminal && stride > consumed && stride >= matcher->minimum_stride &&
+                visitor(context, total - consumed, stride, NULL) != 0)
+                return -1;
             /* A match ending at the manifest boundary has no successor. Its
              * overlapping shorter match may still have one inside the manifest. */
             if (stride > consumed) stride = matcher->prefix[stride - 1];
@@ -295,4 +299,16 @@ int trajectory_match_suffixes(trajectory_suffix_matcher_t* matcher,
         }
     }
     return 0;
+}
+
+int trajectory_match_suffixes(trajectory_suffix_matcher_t* matcher,
+                              const void* packed_xyzm, size_t n_points,
+                              trajectory_suffix_visitor_t visitor, void* context) {
+    return trajectory_match(matcher, packed_xyzm, n_points, visitor, context, 0);
+}
+
+int trajectory_match_occurrences(trajectory_suffix_matcher_t* matcher,
+                                 const void* packed_xyzm, size_t n_points,
+                                 trajectory_suffix_visitor_t visitor, void* context) {
+    return trajectory_match(matcher, packed_xyzm, n_points, visitor, context, 1);
 }

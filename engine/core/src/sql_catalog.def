@@ -63,6 +63,26 @@ SQL_QUERY("consensus.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[
         "ROW(EXCLUDED.rating,EXCLUDED.rd,EXCLUDED.volatility,EXCLUDED.witness_count,EXCLUDED.last_observed_at)")
 
 SQL_QUERY("chess.roster_types", "", "SELECT laplace.entity_type_id('Chess_Player'),laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),consensus.glicko2_neutral_mu(),consensus.glicko2_initial_rd()")
+SQL_QUERY("chess.search_exact", "text[],bytea,bytea,bytea",
+    "SELECT e.id FROM unnest($1) WITH ORDINALITY q(value,ord) "
+    "JOIN laplace.entities e ON e.id=chess.player_id(q.value) AND e.type_id=$2 "
+    "JOIN laplace.consensus n ON n.subject_id=e.id AND n.witness_count>0 "
+    "WHERE length(q.value)>0 AND ((n.type_id=$3 AND n.object_id=$4) OR "
+    "(n.type_id=ANY(consensus.relation_family_ids('HAS_NAME') || "
+    "consensus.relation_family_ids('HAS_NAME_ALIAS')) AND n.object_id IS NOT NULL)) "
+    "ORDER BY q.ord LIMIT 1")
+SQL_QUERY("chess.search_standings", "bytea[],bytea,bytea,bytea",
+    "SELECT DISTINCT e.id,c.witness_count,c.rating,c.rd FROM laplace.entities e "
+    "LEFT JOIN laplace.consensus c ON c.subject_id=e.id AND c.type_id=$3 AND c.object_id=$4 "
+    "WHERE e.id=ANY($1) AND e.type_id=$2")
+SQL_QUERY("chess.search_named_players", "text[]",
+    "SELECT DISTINCT n.subject_id FROM structural.text_containers($1) t "
+    "JOIN laplace.consensus n ON n.object_id=t.entity_id "
+    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME') || "
+    "consensus.relation_family_ids('HAS_NAME_ALIAS')) AND n.witness_count>0")
+SQL_QUERY("chess.search_page", "text[],int4,int4,text,text,bool",
+    "SELECT encode(player_id,'hex'),name,games,rating,rd,eff_mu "
+    "FROM chess.player_search_candidates($1,$2,$3,$4,$5,$6)")
 SQL_QUERY("chess.roster_unrated", "bytea,bytea,bytea,int8",
     "SELECT DISTINCT e.id FROM laplace.consensus n "
     "JOIN laplace.entities e ON e.id=n.subject_id AND e.type_id=$1 "

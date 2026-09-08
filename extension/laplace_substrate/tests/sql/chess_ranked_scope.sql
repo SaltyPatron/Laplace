@@ -85,6 +85,60 @@ BEGIN
     IF got <> low_id THEN RAISE EXCEPTION 'second page did not retain exact standing order'; END IF;
 END $$;
 
+-- Real compositional name floors: a surname is an operand of each full name,
+-- while its own letters belong to a lower trajectory. Selection must ascend
+-- that boundary and preserve letter order before ranking the complete set.
+DO $$
+DECLARE
+    a bytea := chess.player_id('Carlsen, Magnus');
+    b bytea := chess.player_id('Carlsen, Inga');
+    surname bytea := laplace.word_id('Carlsen');
+    aname bytea := laplace.word_id('Carlsen, Magnus');
+    bname bytea := laplace.word_id('Carlsen, Inga');
+    got bytea;
+    n bigint;
+BEGIN
+    INSERT INTO laplace.entities(id,tier,type_id) VALUES
+        (a,0,laplace.entity_type_id('Chess_Player')),
+        (b,0,laplace.entity_type_id('Chess_Player')),
+        (surname,2,laplace.entity_type_id('Word')),
+        (aname,3,laplace.entity_type_id('Sentence')),
+        (bname,3,laplace.entity_type_id('Sentence'));
+    INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+    SELECT public.laplace_hash128_blake3(e.id || decode('0100','hex')), e.id,1,
+        'SRID=0;POINT ZM(0 0 0 0)'::geometry,decode(repeat('00',16),'hex'),
+        public.laplace_trajectory_build(e.members),cardinality(e.members),now()
+    FROM (VALUES
+        (surname,ARRAY[laplace.word_id('C'),laplace.word_id('a'),laplace.word_id('r'),laplace.word_id('l'),laplace.word_id('s'),laplace.word_id('e'),laplace.word_id('n')]),
+        (aname,ARRAY[surname,laplace.word_id(','),laplace.word_id(' '),laplace.word_id('Magnus')]),
+        (bname,ARRAY[surname,laplace.word_id(','),laplace.word_id(' '),laplace.word_id('Inga')])
+    ) e(id,members);
+    INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    SELECT laplace.consensus_id(v.player,v.kind,v.object),v.player,v.kind,v.object,
+        1500000000000,350000000000,60000000,v.witnesses,now()
+    FROM (VALUES
+        (a,laplace.relation_type_id('HAS_NAME'),aname,1),
+        (b,laplace.relation_type_id('HAS_NAME'),bname,1),
+        (a,laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),80)
+    ) v(player,kind,object,witnesses);
+    SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carlsen'],100);
+    IF n<>2 THEN RAISE EXCEPTION 'surname did not ascend into both witnessed names: %',n; END IF;
+    SELECT player_id INTO got FROM chess.player_search_candidates(ARRAY['Carlsen'],1,0,'games','asc');
+    IF got IS DISTINCT FROM b THEN RAISE EXCEPTION 'first ascending games page lost profile-only name'; END IF;
+    SELECT player_id INTO got FROM chess.player_search_candidates(ARRAY['Carlsen'],1,1,'games','asc');
+    IF got IS DISTINCT FROM a THEN RAISE EXCEPTION 'second page lost witnessed player'; END IF;
+    SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carlsen'],1,2,'games','asc');
+    IF n<>0 THEN RAISE EXCEPTION 'past-end page was not empty'; END IF;
+    SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carls'],100);
+    IF n<>2 THEN RAISE EXCEPTION 'ordered word fragment did not ascend through surname: %',n; END IF;
+    SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Clasren'],100);
+    IF n<>0 THEN RAISE EXCEPTION 'anagram passed ordered containment'; END IF;
+    SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carlsen'],100,0,'games','asc',true);
+    IF n<>0 THEN RAISE EXCEPTION 'exact-only lookup expanded the surname'; END IF;
+    SELECT count(*) INTO n FROM chess.player_search_candidates(ARRAY['Carlsen, Magnus'],100);
+    IF n<>1 THEN RAISE EXCEPTION 'exact lookup did not terminate'; END IF;
+END $$;
+
 SELECT 'chess ranked canonical result scope' AS probe, true AS ok;
 
 ROLLBACK;

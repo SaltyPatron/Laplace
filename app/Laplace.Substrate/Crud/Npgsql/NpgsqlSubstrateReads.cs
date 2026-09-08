@@ -2409,25 +2409,27 @@ public static partial class NpgsqlSubstrateReads
             timeoutSeconds: 60);
 
     /// <summary>
-    /// Bounded partial/fuzzy candidates found through the trajectory constituent GIN.
-    /// Human-name ranking remains in the endpoint client, where punctuation and edit
-    /// distance can be expressed without teaching the substrate a second text identity.
+    /// Ordered content containment and witnessed names, ranked and paged natively.
+    /// The same operation owns exact lookup, the canonical standing and final labels.
     /// </summary>
     public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessPlayerSearchCandidatesAsync(
         NpgsqlDataSource dataSource, IReadOnlyList<string> queries, int limit, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM chess.player_search_candidates(@queries, @limit)
-            """,
+        NpgsqlRead.ErrorTranslator? onError = null, int offset = 0,
+        string sort = "strength", string direction = "desc", bool exactOnly = false) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("chess.search_page"),
             static r => new ChessPlayerStrengthRow(
                 r.GetString(0), r.GetString(1),
                 r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
             p =>
             {
-                p.Add("queries", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = queries
-                    .SelectMany(PlayerCaseForms).Distinct(StringComparer.Ordinal).ToArray();
-                p.AddWithValue("limit", RequestedLimit(limit));
+                p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Text, Value = queries
+                    .SelectMany(PlayerCaseForms).Distinct(StringComparer.Ordinal).ToArray()
+                });
+                p.Add(new NpgsqlParameter<int> { TypedValue = RequestedLimit(limit) });
+                p.Add(new NpgsqlParameter<int> { TypedValue = Math.Max(0, offset) });
+                p.Add(new NpgsqlParameter<string> { TypedValue = sort });
+                p.Add(new NpgsqlParameter<string> { TypedValue = direction });
+                p.Add(new NpgsqlParameter<bool> { TypedValue = exactOnly });
             }, ct: ct, label: "chess_player_search_candidates", onError: onError,
             timeoutSeconds: 30);
 

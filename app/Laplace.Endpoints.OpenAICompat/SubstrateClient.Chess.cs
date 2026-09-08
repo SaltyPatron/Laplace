@@ -102,47 +102,16 @@ internal sealed partial class SubstrateClient
         {
             var query = search.Trim();
 
-            // Exact content-addressed identity is terminal. Candidate/fuzzy expansion is
-            // a miss path, not an additional source of peers to mix into an exact lookup.
-            // Besides preventing identity contamination, this keeps an exact username/name
-            // lookup O(the exact indexed read) instead of paying the 2,000-candidate search.
-            var exact = await ChessFindPlayerAsync(query, ct);
-            if (exact is not null)
-            {
-                IReadOnlyList<ChessPlayerRow> exactPage = offset == 0 && limit > 0
-                    ? [exact with { Rank = 1 }]
-                    : [];
-                return new ChessPlayersResponse("chess.players", 1, offset, exactPage);
-            }
-
             var canonical = PlayerAlias.Canonical(query);
             var candidates = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
                 _dataSource,
                 [query, canonical, canonical.Replace(" ", "", StringComparison.Ordinal)],
-                2000, ct, TranslateReadError);
-            var scored = candidates
-                .Select(static r => new ChessPlayerRow(
-                    0, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu))
-                .DistinctBy(static p => p.IdHex, StringComparer.OrdinalIgnoreCase)
-                .Select(p => (Player: p, Score: PlayerSearchScore(query, p.Name)))
-                .Where(static x => x.Score < int.MaxValue)
+                limit, ct, TranslateReadError, offset, normalizedSort, normalizedDirection);
+            var page = candidates
+                .Select((r, i) => new ChessPlayerRow(
+                    offset + i + 1, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu))
                 .ToList();
-
-            IEnumerable<(ChessPlayerRow Player, int Score)> ordered = normalizedSort switch
-            {
-                "games" => OrderPlayers(scored, normalizedDirection, static x => x.Player.Games),
-                "rating" => OrderPlayers(scored, normalizedDirection, static x => x.Player.Rating),
-                "rd" => OrderPlayers(scored, normalizedDirection, static x => x.Player.Rd),
-                "strength" => OrderPlayers(scored, normalizedDirection, static x => x.Player.EffMu),
-                _ => scored.OrderBy(static x => x.Score)
-                    .ThenByDescending(static x => x.Player.EffMu)
-                    .ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase),
-            };
-
-            var page = ordered.Skip(offset).Take(limit)
-                .Select((x, i) => x.Player with { Rank = offset + i + 1 })
-                .ToList();
-            return new ChessPlayersResponse("chess.players", scored.Count, offset, page);
+            return new ChessPlayersResponse("chess.players", page.Count, offset, page);
         }
 
         var rosterSort = normalizedSort == "relevance" ? "strength" : normalizedSort;
@@ -161,74 +130,6 @@ internal sealed partial class SubstrateClient
             _ => hasSearch ? "relevance" : "strength",
         };
 
-    private static IEnumerable<(ChessPlayerRow Player, int Score)> OrderPlayers(
-        IEnumerable<(ChessPlayerRow Player, int Score)> players,
-        string direction,
-        Func<(ChessPlayerRow Player, int Score), double> selector) =>
-        direction == "asc"
-            ? players.OrderBy(selector).ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase)
-            : players.OrderByDescending(selector).ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase);
-
-    internal static int PlayerSearchScore(string query, string candidate)
-    {
-        var q = NormalizePlayerSearch(query);
-        var name = NormalizePlayerSearch(candidate);
-        if (q.Length == 0 || name.Length == 0) return int.MaxValue;
-        if (name == q) return 0;
-
-        // Provider handles commonly concatenate the same real name that FIDE writes as
-        // "Last, First". Identity search must preserve that equivalence instead of finding
-        // the candidate in SQL and then rejecting it in the endpoint ranker.
-        var compactQuery = q.Replace(" ", "", StringComparison.Ordinal);
-        var compactName = name.Replace(" ", "", StringComparison.Ordinal);
-        if (compactName == compactQuery) return 1;
-
-        var qTokens = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var nameTokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (nameTokens.Contains(q, StringComparer.Ordinal)) return 2;
-        if (name.Contains(q, StringComparison.Ordinal)) return 4;
-        if (qTokens.All(t => nameTokens.Contains(t, StringComparer.Ordinal))) return 6;
-
-        var distance = 0;
-        foreach (var token in qTokens)
-        {
-            var closest = nameTokens.Min(n => Levenshtein(token, n));
-            var allowance = token.Length >= 8 ? 2 : token.Length >= 4 ? 1 : 0;
-            if (closest > allowance) return int.MaxValue;
-            distance += closest;
-        }
-        return 10 + distance;
-    }
-
-    private static string NormalizePlayerSearch(string value)
-    {
-        string canonical = PlayerAlias.Canonical(value);
-        var decomposed = canonical.Normalize(NormalizationForm.FormD);
-        var result = new StringBuilder(decomposed.Length);
-        foreach (char ch in decomposed)
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark)
-                result.Append(ch);
-        return result.ToString();
-    }
-
-    private static int Levenshtein(string left, string right)
-    {
-        if (left.Length == 0) return right.Length;
-        if (right.Length == 0) return left.Length;
-        var previous = Enumerable.Range(0, right.Length + 1).ToArray();
-        var current = new int[right.Length + 1];
-        for (var i = 1; i <= left.Length; i++)
-        {
-            current[0] = i;
-            for (var j = 1; j <= right.Length; j++)
-                current[j] = Math.Min(
-                    Math.Min(current[j - 1] + 1, previous[j] + 1),
-                    previous[j - 1] + (left[i - 1] == right[j - 1] ? 0 : 1));
-            (previous, current) = (current, previous);
-        }
-        return previous[right.Length];
-    }
-
     /// <summary>
     /// Name to player by the decomposer's content address. The same candidate SQL used by
     /// the roster search owns the standing-cell selection, so exact search cannot fall back
@@ -240,7 +141,7 @@ internal sealed partial class SubstrateClient
         var rows = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
             _dataSource,
             [name, canonical, canonical.Replace(" ", "", StringComparison.Ordinal)],
-            2000, ct, TranslateReadError);
+            1, ct, TranslateReadError, exactOnly: true);
         var expectedId = Convert.ToHexString(ChessVocabulary.PlayerId(name).ToBytes());
         foreach (var r in rows)
         {

@@ -98,6 +98,7 @@ jobs:
       # "something is broken". Green is not certified: every gate below refuses to
       # run on it, so nothing reads a bounce-killed seed as a completed one.
       preempted: ${{ steps.run_ingest.outputs.preempted }}
+      journal_verified: ${{ steps.journal_proof.outcome == 'success' }}
     env:
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       PGDATABASE: ${{ inputs.database }}
@@ -291,6 +292,7 @@ jobs:
           fi
 
       - name: Journal proof
+        id: journal_proof
         if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
         run: scripts/verify-ingest-journal.sh --cli-key "${{ inputs.source }}"
 
@@ -311,7 +313,9 @@ jobs:
   idempotency:
     name: "verify — re-ingest ${{ inputs.source }} does not double-count"
     needs: ingest
-    if: ${{ inputs.run_idempotency && needs.ingest.result == 'success' && needs.ingest.outputs.preempted != 'true' }}
+    # A performance failure remains red, but must not suppress correctness proof
+    # for an ingest whose actual completion has already passed journal validation.
+    if: ${{ always() && inputs.run_idempotency && needs.ingest.outputs.journal_verified == 'true' && needs.ingest.outputs.preempted != 'true' }}
     runs-on: [self-hosted, laplace]
     concurrency:
       # PER SOURCE, NOT GLOBAL. Ten different corpora ingesting at once is a capacity
@@ -375,7 +379,7 @@ jobs:
     name: "gate — ${{ inputs.source }} consensus checks"
     needs: [ingest, idempotency]
     # always(): idempotency is skipped when run_idempotency=false; still gate once ingest is green.
-    if: ${{ always() && inputs.run_gate && needs.ingest.result == 'success' && needs.ingest.outputs.preempted != 'true' && needs.idempotency.result != 'failure' }}
+    if: ${{ always() && inputs.run_gate && needs.ingest.outputs.journal_verified == 'true' && needs.ingest.outputs.preempted != 'true' && needs.idempotency.result != 'failure' }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:

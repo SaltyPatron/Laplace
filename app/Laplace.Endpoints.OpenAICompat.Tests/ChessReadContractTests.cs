@@ -93,15 +93,6 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
     }
 
     [Theory]
-    [InlineData("Magnus", "Carlsen, Magnus")]
-    [InlineData("Carlsen", "Carlsen, Magnus")]
-    [InlineData("MagnusCarlsen", "Carlsen, Magnus")]
-    [InlineData("Magnus Carlsen", "Carlsen, Magnus")]
-    [InlineData("Carlsen, Magnus", "Carlsen, Magnus")]
-    public void PlayerSearchScore_AcceptsNameAndHandleForms(string query, string candidate)
-        => Assert.NotEqual(int.MaxValue, SubstrateClient.PlayerSearchScore(query, candidate));
-
-    [Theory]
     [InlineData("Karpov", "Karpov, Anatoly")]
     [InlineData("Fisher", "Fischer, Bobby")]
     public async Task Players_SearchAcceptsSurnameAndNearbySpelling(string query, string expected)

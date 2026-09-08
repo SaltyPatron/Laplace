@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <vector>
+#include <algorithm>
 
 #include "laplace/core/trajectory.h"
 #include "laplace/core/hash128.h"
@@ -20,6 +21,38 @@ int collect_expanded_trajectory(void* context, size_t ordinal,
     output->push_back({ordinal, *id, flags});
     return 0;
 }
+
+int collect_occurrence(void* context, size_t ordinal, size_t stride, const hash128_t*) {
+    if (stride) static_cast<std::vector<size_t>*>(context)->push_back(ordinal);
+    return 0;
+}
+}
+
+TEST(LaplaceCoreTrajectory, OrderedOccurrencesMatchIndependentExpandedOracle) {
+    const hash128_t alphabet[] = {{1,11},{2,22}};
+    for (size_t n=1;n<=7;++n) for (unsigned bits=0;bits<(1u<<n);++bits) {
+        std::vector<hash128_t> ids(n);
+        for (size_t i=0;i<n;++i) ids[i]=alphabet[(bits>>i)&1];
+        std::vector<double> packed(n*4);
+        size_t vertices=0;
+        ASSERT_EQ(0,trajectory_build_rle(ids.data(),n,packed.data(),&vertices));
+        for (size_t width=1;width<=3;++width) for (unsigned p=0;p<(1u<<width);++p) {
+            std::vector<hash128_t> pattern(width);
+            for (size_t i=0;i<width;++i) pattern[i]=alphabet[(p>>i)&1];
+            std::vector<size_t> expected,actual;
+            for (size_t at=0;at+width<=n;++at) {
+                bool equal=true;
+                for(size_t j=0;j<width;++j) equal &= ids[at+j].lo==pattern[j].lo;
+                if(equal) expected.push_back(at+1);
+            }
+            auto* matcher=trajectory_suffix_matcher_create(pattern.data(),width,width);
+            ASSERT_NE(nullptr,matcher);
+            ASSERT_EQ(0,trajectory_match_occurrences(matcher,packed.data(),vertices,collect_occurrence,&actual));
+            trajectory_suffix_matcher_free(matcher);
+            std::sort(actual.begin(),actual.end());
+            EXPECT_EQ(expected,actual) << n << "/" << bits << "/" << width << "/" << p;
+        }
+    }
 }
 
 TEST(LaplaceCoreTrajectory, BuildThenConstituentsRoundTrips) {

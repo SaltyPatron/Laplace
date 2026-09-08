@@ -18,18 +18,17 @@ public sealed class ChessPlayerExactLookupLawTests
         string source = File.ReadAllText(Path.Combine(
             root, "app", "Laplace.Endpoints.OpenAICompat", "SubstrateClient.Chess.cs"));
 
-        const string exactCall = "var exact = await ChessFindPlayerAsync(query, ct);";
-        const string exactBranch = "if (exact is not null)";
-        const string fuzzyCall = "ChessPlayerSearchCandidatesAsync(";
-
-        int exact = source.IndexOf(exactCall, StringComparison.Ordinal);
-        int terminal = source.IndexOf(exactBranch, exact < 0 ? 0 : exact, StringComparison.Ordinal);
-        int fuzzy = source.IndexOf(fuzzyCall, terminal < 0 ? 0 : terminal, StringComparison.Ordinal);
-
-        Assert.True(exact >= 0, "exact player lookup disappeared from the search path");
-        Assert.True(terminal > exact, "exact lookup is not followed by a terminal hit branch");
-        Assert.True(fuzzy > terminal,
-            "fuzzy candidate expansion must occur only after the exact-hit terminal branch");
+        // One native operation owns both paths; the previous managed "exact"
+        // call already expanded candidates on a miss, then searched them again.
+        string native = File.ReadAllText(Path.Combine(root,
+            "extension/laplace_substrate/src/chess_roster.c"));
+        Assert.Contains("if (!SPI_processed && !exact_only)", native);
+        Assert.Contains("chess.search_exact", native);
+        Assert.Contains("chess.search_named_players", native);
+        Assert.Contains("exactOnly: true", source);
+        Assert.DoesNotContain("await ChessFindPlayerAsync(query, ct)", source);
+        Assert.DoesNotContain("PlayerSearchScore", source);
+        Assert.DoesNotContain("2000, ct", source);
         Assert.DoesNotContain(".Concat(exact", source, StringComparison.Ordinal);
 
         // The old exact reader asked generic edges_raw to choose the best OUTCOME edge with

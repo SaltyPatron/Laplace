@@ -87,6 +87,14 @@ int trajectory_match_suffixes(trajectory_suffix_matcher_t* matcher,
                               const void* packed_xyzm, size_t n_points,
                               trajectory_suffix_visitor_t visitor, void* context);
 
+/* Same ordered matcher, including occurrences ending at the manifest boundary.
+ * Such occurrences have a NULL successor. Create with minimum_stride=count
+ * for exact contiguous containment; no set membership or label comparison can
+ * establish this predicate. */
+int trajectory_match_occurrences(trajectory_suffix_matcher_t* matcher,
+                                 const void* packed_xyzm, size_t n_points,
+                                 trajectory_suffix_visitor_t visitor, void* context);
+
 #ifdef __cplusplus
 }
 #endif

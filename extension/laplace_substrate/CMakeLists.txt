@@ -9,6 +9,7 @@ set(EXT_EXECUTION_SOURCES
     src/content_resolve.c
     src/content_trajectory_read.c
     src/content_membership_read.c
+    src/content_text_read.c
     src/display_native.c
     src/attestation_response.c
     src/conversation_session.c
@@ -96,6 +97,7 @@ string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/content_membership_read.c
+    src/content_text_read.c
     src/prompt_coherence.c
     src/prompt_language.c
     src/consensus_fold_step.c

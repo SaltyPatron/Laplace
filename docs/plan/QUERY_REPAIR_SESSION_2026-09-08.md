@@ -754,3 +754,33 @@ program. Required acceptance remains per-move proposal/steering/selection/witnes
 receipts using real substrate evidence, source separation for engine testimony,
 and demonstrated influence of observed outcomes on later decisions. Do not label
 classical search or a fixture with fabricated evidence as that acceptance.
+
+Deployed source replay `9c13b907-1166-4722-a9af-9ac55b1f12c4` on the fixed
+native payload recorded `status=ok`, 2,474 files done and zero failed units.
+It admitted 302,370 novel rows through 30 database round trips in 40,923 ms;
+CLI including maintenance took 79 seconds. This reused the earlier successful
+files and is not a like-for-like speed benchmark. Workflow 34233408139 failed
+only the absent-throughput-baseline check and skipped its requested idempotency
+job. Correctness jobs must depend on successful journal verification independently
+of the performance verdict; performance failures must remain visible/red.
+
+Chess search now uses ordered native containment over the same composed query
+floor as ingestion, collapses identity-preserving singleton wrappers, and ascends
+complete Content frontiers to witnessed names. A character-set match cannot stand
+in for ordering or a higher-tier word operand. One native operation owns exact
+lookup, complete candidate standings, requested sort/page and final batched labels.
+The managed double search, hidden 2,000-candidate ceiling and display-text fuzzy
+ranker are removed. Regression coverage includes surname/full-name floors,
+ordered fragments versus anagrams, profile-only players, exact-only lookup,
+canonical outcome arena and both pages of ascending game counts. The shared RLE
+matcher also has an independent expanded-sequence oracle for terminal matches.
+Required live Carlsen/API readback remains pending deployment.
+
+Coding-corpus continuity: nine TinyCodes Parquet shards and Stack v2 C/C++ shards
+exist under `/vault/models`, while CLI defaults only search the ingest data root.
+TinyCodes extraction currently reduces the prompt to keywords and retains the
+response; repair must retain the complete observed prompt/response pair and its
+source identity. A corpus having loaded, or source identities having deduplicated,
+is not proof of generated code repair. Preserve the repository defect → relevant
+witnesses → generated patch → compiler/tests acceptance obligation alongside chess,
+query/forward-pass, ingestion and product repairs.
