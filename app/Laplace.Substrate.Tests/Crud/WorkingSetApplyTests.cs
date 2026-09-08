@@ -65,7 +65,7 @@ public class WorkingSetApplyTests
     }
 
     [Fact]
-    public async Task RepeatApply_SubtractsEverything_AndFoldsAttestations()
+    public async Task RepeatApply_PreservesContentAndTestimony()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = H("source/repeat");
@@ -89,7 +89,7 @@ public class WorkingSetApplyTests
         Assert.Equal(1, second.PhysicalitiesSkippedAtMerge);
 
         var (games, _) = await AttStateAsync(H("att/repeat"));
-        Assert.Equal(6, games); // merge lane summed the repeat's counts
+        Assert.Equal(3, games); // unchanged five-tuple is the same witness
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public class WorkingSetApplyTests
     }
 
     [Fact]
-    public async Task AttestationsEmbeddingNovelEntities_InsertWithoutProbe_ThenMergeWhenPresent()
+    public async Task AttestationsEmbeddingNovelEntities_InsertThenRemainUnchanged()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = H("source/structural");
@@ -202,7 +202,7 @@ public class WorkingSetApplyTests
         var second = await writer.ApplyWorkingSetAsync(Change("structural-b", 5));
         Assert.Equal(0, second.AttestationsInserted);
         (games, _) = await AttStateAsync(H("att/structural"));
-        Assert.Equal(7, games);
+        Assert.Equal(2, games);
     }
 
     /// <summary>
@@ -306,12 +306,12 @@ public class WorkingSetApplyTests
             .Build();
         Assert.False((await writer.ApplyWorkingSetAsync(enriched)).JournalReplayHit);
         (games, _) = await AttStateAsync(H("att/journal"));
-        Assert.Equal(9, games);
+        Assert.Equal(4, games);
 
-        // The same rows through the un-journaled lane DO merge (control).
+        // The scalar route preserves the same evidence identity.
         await writer.ApplyAsync(change);
         (games, _) = await AttStateAsync(H("att/journal"));
-        Assert.Equal(13, games);
+        Assert.Equal(4, games);
     }
 
     [Theory]
@@ -372,6 +372,6 @@ public class WorkingSetApplyTests
             2, IntentStage.PgEpochUnixUs + 2_000_000))).JournalReplayHit);
 
         var (games, _) = await AttStateAsync(H("att/native-replay"));
-        Assert.Equal(3, games);
+        Assert.Equal(1, games);
     }
 }

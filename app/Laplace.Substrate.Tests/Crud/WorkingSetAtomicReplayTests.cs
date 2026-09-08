@@ -8,8 +8,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
 /// Fault-injection coverage for the working-set acceptance boundary. The failure
-/// is raised after a novel attestation COPY has started and while a present
-/// attestation would be additively merged.
+/// is raised during novel attestation COPY with an existing witness in the same apply.
 /// </summary>
 [Collection("substrate-pg")]
 [Trait("Tier", "db")]
@@ -71,7 +70,7 @@ public sealed class WorkingSetAtomicReplayTests
     }
 
     [Fact]
-    public async Task WorkingSetReplay_PostCopyMergeFailureRollsBackEvidenceAndJournal()
+    public async Task WorkingSetReplay_CopyFailureRollsBackEvidenceAndJournal()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var source = H("source");
@@ -92,13 +91,13 @@ public sealed class WorkingSetAtomicReplayTests
             staged.AddAttestation(Att($"novel/{i}", 5, IntentStage.PgEpochUnixUs + 2_000_000));
         var change = staged.Build();
 
-        await InstallMergeFailureTriggerAsync(existing.Id);
+        await InstallCopyFailureTriggerAsync(H($"att/novel/{novelRows - 1}"));
         try
         {
             await Assert.ThrowsAsync<PostgresException>(
                 () => writer.ApplyWorkingSetAsync(change));
 
-            // The failing merge is after evidence COPY. A failed acceptance may
+            // A failed evidence COPY may
             // leave identity-only entity/physicality rows from detached COPY,
             // but it must leave neither additive testimony nor its replay claim.
             Assert.Equal(2, await ObservationCountAsync(existing.Id));
@@ -108,19 +107,19 @@ public sealed class WorkingSetAtomicReplayTests
         }
         finally
         {
-            await RemoveMergeFailureTriggerAsync();
+            await RemoveCopyFailureTriggerAsync();
         }
 
         var retried = await writer.ApplyWorkingSetAsync(change);
         Assert.False(retried.JournalReplayHit);
-        Assert.Equal(5, await ObservationCountAsync(existing.Id));
+        Assert.Equal(2, await ObservationCountAsync(existing.Id));
         for (int i = 0; i < novelRows; i++)
             Assert.Equal(5, await ObservationCountAsync(H($"att/novel/{i}")));
         Assert.Equal(1, await JournalCountAsync(source));
 
         var replay = await writer.ApplyWorkingSetAsync(change);
         Assert.True(replay.JournalReplayHit);
-        Assert.Equal(5, await ObservationCountAsync(existing.Id));
+        Assert.Equal(2, await ObservationCountAsync(existing.Id));
         for (int i = 0; i < novelRows; i++)
             Assert.Equal(5, await ObservationCountAsync(H($"att/novel/{i}")));
     }
@@ -339,7 +338,7 @@ public sealed class WorkingSetAtomicReplayTests
     }
 
     [Fact]
-    public async Task TransientCalculationReceipt_DistinguishesDirectWorkingSetRetryIdentity()
+    public async Task TransientCalculationReceipt_CannotRecountTheSameWitnessThroughANewCalculationToken()
     {
         var source = H("receipt/source");
         var relation = H("receipt/relation");
@@ -368,16 +367,16 @@ public sealed class WorkingSetAtomicReplayTests
 
         var evidence = await EvidenceAsync(receipt.Id, relation, subject);
         Assert.NotNull(evidence);
-        Assert.Equal(2, evidence.Value.Games);
-        Assert.Equal(2_000_000_000, evidence.Value.Sum);
+        Assert.Equal(1, evidence.Value.Games);
+        Assert.Equal(1_000_000_000, evidence.Value.Sum);
         Assert.False(evidence.Value.FoldReplayable);
         var consensus = await ConsensusRowAsync(subject, relation, obj);
         Assert.NotNull(consensus);
-        Assert.Equal(2, consensus.Value.WitnessCount);
+        Assert.Equal(1, consensus.Value.WitnessCount);
 
         Assert.True((await writer.ApplyWorkingSetAsync(second)).JournalReplayHit);
         Assert.Equal(consensus, await ConsensusRowAsync(subject, relation, obj));
-        Assert.Equal(2, (await EvidenceAsync(receipt.Id, relation, subject))!.Value.Games);
+        Assert.Equal(1, (await EvidenceAsync(receipt.Id, relation, subject))!.Value.Games);
     }
 
     private async Task<(long Rating, long WitnessCount)?> ConsensusRowAsync(
@@ -402,32 +401,32 @@ public sealed class WorkingSetAtomicReplayTests
         return Convert.ToInt64(await cmd.ExecuteScalarAsync());
     }
 
-    private async Task InstallMergeFailureTriggerAsync(Hash128 id)
+    private async Task InstallCopyFailureTriggerAsync(Hash128 id)
     {
         string hex = Convert.ToHexString(id.ToBytes()).ToLowerInvariant();
         await using var cmd = _pg.DataSource.CreateCommand($"""
-            CREATE OR REPLACE FUNCTION public.laplace_test_atomic_merge_failure()
+            CREATE OR REPLACE FUNCTION public.laplace_test_atomic_copy_failure()
             RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
                 IF NEW.id = decode('{hex}', 'hex') THEN
-                    RAISE EXCEPTION 'injected post-copy attestation merge failure';
+                    RAISE EXCEPTION 'injected attestation copy failure';
                 END IF;
                 RETURN NEW;
             END $$;
-            CREATE TRIGGER laplace_test_atomic_merge_failure
-            BEFORE UPDATE ON laplace.attestations
-            FOR EACH ROW EXECUTE FUNCTION public.laplace_test_atomic_merge_failure();
+            CREATE TRIGGER laplace_test_atomic_copy_failure
+            BEFORE INSERT ON laplace.attestations
+            FOR EACH ROW EXECUTE FUNCTION public.laplace_test_atomic_copy_failure();
             ALTER TABLE laplace.attestations
-                ENABLE ALWAYS TRIGGER laplace_test_atomic_merge_failure;
+                ENABLE ALWAYS TRIGGER laplace_test_atomic_copy_failure;
             """);
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private async Task RemoveMergeFailureTriggerAsync()
+    private async Task RemoveCopyFailureTriggerAsync()
     {
         await using var cmd = _pg.DataSource.CreateCommand("""
-            DROP TRIGGER IF EXISTS laplace_test_atomic_merge_failure ON laplace.attestations;
-            DROP FUNCTION IF EXISTS public.laplace_test_atomic_merge_failure();
+            DROP TRIGGER IF EXISTS laplace_test_atomic_copy_failure ON laplace.attestations;
+            DROP FUNCTION IF EXISTS public.laplace_test_atomic_copy_failure();
             """);
         await cmd.ExecuteNonQueryAsync();
     }

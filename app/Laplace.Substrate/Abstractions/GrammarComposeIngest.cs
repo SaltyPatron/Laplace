@@ -118,7 +118,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             if (emitted != _root.Id)
                 throw new InvalidOperationException("whole-source identity changed during staging");
             GrammarTagWitness.Emit(builder, _record.Utf8, _ast, _composer,
-                _record.Modality, _sourceId, _trust);
+                _record.Modality, _sourceId, _trust, _rootId);
 
             if (_observation is not null && _promptComposer is not null)
             {

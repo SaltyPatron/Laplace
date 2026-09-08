@@ -80,24 +80,6 @@ public sealed partial class NpgsqlSubstrateWriter
                  - plan.FoldPoolHeadroomOwners;
         return Math.Max(1, fans / 2);
     }
-    private int _directAttestationMergeRoute = -1;
-
-    private async ValueTask<bool> SupportsDirectAttestationMergeRouteAsync(
-        NpgsqlConnection connection, CancellationToken ct)
-    {
-        int known = Volatile.Read(ref _directAttestationMergeRoute);
-        if (known >= 0) return known == 1;
-
-        await using var probe = connection.CreateCommand();
-        probe.CommandText = "SELECT to_regprocedure("
-            + "'consensus.attestation_merge_type(bytea,bytea[],bytea[],bigint[],bigint[],timestamptz[],boolean[])') "
-            + "IS NOT NULL";
-        bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
-        Interlocked.CompareExchange(
-            ref _directAttestationMergeRoute, supported ? 1 : 0, -1);
-        return Volatile.Read(ref _directAttestationMergeRoute) == 1;
-    }
-
     /// <summary>
     /// Write-epoch telemetry (PR1 of the trusted-novelty series — OBSERVABILITY
     /// ONLY, no probe/skip decision reads any of this yet). Every write-lane
@@ -133,8 +115,7 @@ public sealed partial class NpgsqlSubstrateWriter
     private bool _presenceCacheOverflowed;
 
     /// <summary>
-    /// Once-per-writer to_regclass probe, cached like
-    /// <see cref="SupportsDirectAttestationMergeRouteAsync"/>: an older
+    /// Once-per-writer to_regclass probe: an older
     /// installed extension has no epoch sequence and every bump site must
     /// degrade to the exact pre-epoch behavior instead of failing the apply.
     /// </summary>
@@ -168,9 +149,8 @@ public sealed partial class NpgsqlSubstrateWriter
     /// present and DROP it, so only a no-false-positive membership test may gate the
     /// skip. Bounded by DISTINCT persisted content (tens of millions of entities/
     /// physicalities on a full seed — a few GB, not the 12M×N re-probe volume), and
-    /// cleared at run end. Attestations are deliberately NOT cached: a re-seen present
-    /// attestation must still MERGE its observation count (its round-trip is not saved),
-    /// and its id space is unbounded (billions on a model ingest).
+    /// cleared at run end. Attestations use the indexed presence probe: that
+    /// accepted identity set gates both their COPY and the consensus fold.
     /// </summary>
     // ConcurrentDictionary because presence packing can overlap apply preparation.
     private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _persistedEntityIds;
@@ -438,7 +418,7 @@ public sealed partial class NpgsqlSubstrateWriter
         Hash128? legacySingletonToken,
         Hash128? workingSetSource,
         IReadOnlyList<Hash128> workingSetSources,
-        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? transactionParticipant,
+        Func<NpgsqlConnection, NpgsqlTransaction, IReadOnlySet<Hash128>, CancellationToken, Task>? transactionParticipant,
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct)
     {
@@ -1019,23 +999,15 @@ public sealed partial class NpgsqlSubstrateWriter
                     phys.Rows[i], -1, 0));
             }
 
-            // Attestations: novel groups COPY their representative (count
-            // patched to the group sum when duplicates collapsed); present
-            // groups merge via one UPDATE.
+            // The content-addressed five-tuple owns testimony identity. An
+            // existing attestation is a replay even if dispatch boundaries or
+            // the working-set token changed. Only novel identities may fold.
             var novelRepIdx = new List<int>(attGroups.Count);
-            // Merge rows carry their PARTITION KEYS (type, subject): the
-            // routed attestation_merge prunes per relation type to that
-            // type's hash leaves and seeks the leaf PK — the bare-id UPDATE
-            // it replaces Append-scanned every attestation leaf per chunk
-            // (~10s/chunk flat, the OMW 9-minute merge).
-            var mergeRows = new List<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts, bool FoldReplayable)>();
             foreach (var (id, g) in attGroups)
             {
                 if (presentAtts.Contains(id))
                 {
-                    mergeRows.Add((atts.TypeIds[g.RepIdx], atts.SubjectIds[g.RepIdx], id,
-                        g.Games, g.Sum, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs),
-                        g.FoldReplayable));
+                    continue;
                 }
                 else
                 {
@@ -1134,13 +1106,11 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 eIns = keptEntCount;
                 // A claimed working-set token is the exactly-once boundary for
-                // additive testimony. Entity and physicality copies may commit
+                // evidence and its derived standing. Entity and physicality copies may commit
                 // independently: their content-addressed identities are
                 // re-verified and subtracted on a retry. Attestation COPY and
-                // its additive merge cannot: if either committed before this
-                // control transaction's journal row, a retry would merge the
-                // same observations again. Keep all evidence writes on the
-                // control transaction with the journal.
+                // its consensus fold must commit together, so a retry cannot
+                // mistake an unfolded witness for a completed observation.
                 if (workingSetToken is not null)
                 {
                     rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
@@ -1168,158 +1138,13 @@ public sealed partial class NpgsqlSubstrateWriter
 
             }
 
-            if (mergeRows.Count > 0)
-            {
-                var mergeSw = System.Diagnostics.Stopwatch.StartNew();
-                // Routed merge: sorted by (type, subject, id) so the server
-                // function's per-type loop reads contiguous slices and every
-                // writer acquires row locks in one global order; chunked
-                // because unbounded unnest over large bytea[] arrays AVs
-                // postgres 18.
-                mergeRows.Sort(static (a, b) =>
-                {
-                    int c = a.Type.CompareToBytewise(b.Type);
-                    if (c != 0) return c;
-                    c = a.Subj.CompareToBytewise(b.Subj);
-                    return c != 0 ? c : a.Id.CompareToBytewise(b.Id);
-                });
-                // PARALLEL by relation type (2026-07-21). This was a serial
-                // for-loop on the apply's single connection — the only phase of
-                // the apply that never fanned out, while entities/physicalities/
-                // attestations all COPY across ApplyParallelism connections.
-                // MEASURED on the OMW seed: 3,495,027 present rows = 107 serial
-                // chunks, ~9 minutes, and it is what the run sat on before being
-                // cancelled (the phase log never printed because it never
-                // finished).
-                //
-                // Types partition the work SAFELY: attestations is
-                // LIST(type_id) -> HASH(subject_id), so two groups holding
-                // disjoint type sets touch disjoint leaves and can never
-                // contend on the same row, index page, or partition lock. The
-                // (type, subject, id) sort is preserved inside each group, so
-                // row-lock acquisition stays ordered within a partition and the
-                // cross-applier advisory lock still serializes whole applies.
-                // Same connection-per-group shape as CopyPhaseParallelAsync —
-                // the apply is already multi-transaction there, so this
-                // introduces no new atomicity boundary.
-                int mergeChunk = ApplySizing.MergeChunkRows;
-                // CHUNK-level distribution, not whole-type bins (2026-07-21).
-                // The first version packed whole relation types into bins so a
-                // type could never be split across connections. Relation volume
-                // is heavily skewed — measured mid-OMW, the top consensus types
-                // are 995,176 / 711,861 / 686,409 rows — so the largest type
-                // swallowed a bin and ran ALONE as the tail while every other
-                // connection sat idle. Sampled live: 23 of 25 probes of
-                // pg_stat_activity showed exactly ONE active backend, and it was
-                // always attestation_merge. Type-granular packing cannot
-                // parallelize a skewed batch; it only parallelizes a balanced one.
-                //
-                // Splitting a type across connections is SAFE: mergeRows is
-                // deduplicated by attestation id, so distinct chunks hold
-                // disjoint ROWS and no two connections can contend on the same
-                // tuple. Partition-level locks are RowExclusiveLock, which is
-                // self-compatible, and the cross-applier advisory lock still
-                // serializes whole applies. Cut chunks WITHIN each sorted type
-                // run. A boundary-straddling chunk forced native to reconstruct
-                // all arrays even though this caller already owned the route.
-                var chunks = new List<(Hash128 Type, int Off, int Len)>();
-                for (int typeOff = 0; typeOff < mergeRows.Count;)
-                {
-                    var type = mergeRows[typeOff].Type;
-                    int typeEnd = typeOff + 1;
-                    while (typeEnd < mergeRows.Count && mergeRows[typeEnd].Type.Equals(type))
-                        typeEnd++;
-                    for (int off = typeOff; off < typeEnd; off += mergeChunk)
-                        chunks.Add((type, off, Math.Min(mergeChunk, typeEnd - off)));
-                    typeOff = typeEnd;
-                }
-                long mergeFolded = 0;
-                int mergeRt = 0;
-                if (workingSetToken is not null)
-                {
-                    // The merge is additive evidence. It has to share the
-                    // control transaction with the working-set journal for the
-                    // same reason as attestation COPY above: a later failure
-                    // must roll both back together so the exact V2 retry owns
-                    // one and only one merge.
-                    await using (var guc = conn.CreateCommand())
-                    {
-                        guc.Transaction = tx;
-                        guc.CommandText = "SET LOCAL enable_mergejoin = off; "
-                            + "SET LOCAL enable_hashjoin = off";
-                        await guc.ExecuteNonQueryAsync(ct);
-                    }
-                    bool directRoute = await SupportsDirectAttestationMergeRouteAsync(conn, ct);
-                    var merged = await MergeAttestationChunksAsync(
-                        conn, tx, directRoute, chunks, mergeRows, ct);
-                    mergeFolded = merged.Folded;
-                    mergeRt = merged.RoundTrips;
-                }
-                else
-                {
-                int mergeGroups = (int)Math.Min(ApplyParallelism, Math.Max(1, chunks.Count));
-                var bins = new List<(Hash128 Type, int Off, int Len)>[mergeGroups];
-                for (int g = 0; g < mergeGroups; g++) bins[g] = new();
-                for (int c = 0; c < chunks.Count; c++) bins[c % mergeGroups].Add(chunks[c]);
-
-                await CpuTopology.RunPinnedAsyncParallel(mergeGroups, async (g, token) =>
-                {
-                    if (bins[g].Count == 0) return;
-                    await using var mconn = await _ds.OpenConnectionAsync(token);
-                    bool directRoute = await SupportsDirectAttestationMergeRouteAsync(
-                        mconn, token);
-                    // Merge sub-transactions are write-lane transactions: bump the
-                    // epoch on the GUC batch (no extra round trip; the batch has no
-                    // positional parameters), nextval before the UPDATEs. Route flag
-                    // already resolved on the control connection this apply.
-                    bool epochBump = Volatile.Read(ref _applyWriteEpochRoute) == 1;
-                    await using var mtx = await mconn.BeginTransactionAsync(token);
-                    await using (var guc = mconn.CreateCommand())
-                    {
-                        guc.Transaction = mtx;
-                        // enable_mergejoin/hashjoin off is not a hint, it is the shape of
-                        // this statement. attestation_merge drives a BOUNDED array (<=
-                        // mergeChunk rows) into a PRIMARY KEY — the nested loop is right
-                        // at every size, and a plan that sorts or hashes the target
-                        // relation never is.
-                        //
-                        // The UPDATE pins type_id (the LIST key) as a literal, but
-                        // subject_id — the HASH key — arrives from the join, so hash
-                        // pruning cannot happen at plan time and all 8 children stay in
-                        // the plan. That leaves two plans within 20% of each other
-                        // (Merge Append over the whole relation at 64,489 vs nested-loop
-                        // PK probes at ~77,000), and the planner picks the O(relation)
-                        // one as soon as the relation is big enough. MEASURED on the
-                        // 2026-07-26 OMW seed, consecutive applies: 165,806 rows at
-                        // 71,829 rows/s, then 242,563 rows at 156 rows/s — a 450x cliff
-                        // crossed with no code change, purely from the table growing.
-                        guc.CommandText = "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; "
-                            + "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off"
-                            + (epochBump ? "; SELECT nextval('laplace.apply_write_epoch')" : "");
-                        await guc.ExecuteNonQueryAsync(token);
-                    }
-                    if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
-                    var merged = await MergeAttestationChunksAsync(
-                        mconn, mtx, directRoute, bins[g], mergeRows, token);
-                    Interlocked.Add(ref mergeFolded, merged.Folded);
-                    Interlocked.Add(ref mergeRt, merged.RoundTrips);
-                    await mtx.CommitAsync(token);
-                }, ct);
-                }
-                aFold += mergeFolded;
-                rtMerge += mergeRt;
-                _log.LogInformation(
-                    "WS_APPLY merge: {Rows:N0} present rows merged in {Ms:N0}ms ({Rps:N0} rows/s)",
-                    mergeRows.Count, mergeSw.ElapsedMilliseconds,
-                    mergeRows.Count / Math.Max(1e-3, mergeSw.Elapsed.TotalSeconds));
-            }
-
             // Consensus acceptance is supplied only by the accumulating writer
             // for a freshly claimed V2 working set. It shares this transaction
             // with the evidence and replay token: a failure leaves no accepted
             // journal claim, while a retry that sees the claim cannot refold.
             if (transactionParticipant is not null && workingSetToken is not null)
-                await transactionParticipant(conn, tx, ct);
+                await transactionParticipant(conn, tx,
+                    novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(), ct);
 
             await tx.CommitAsync(ct);
 
@@ -2161,87 +1986,6 @@ public sealed partial class NpgsqlSubstrateWriter
         long sortMs = sw.ElapsedMilliseconds;
         return await CopyPayloadsParallelAsync(
             tableName, table, kept.Count, groups, payloads, sortMs, ct);
-    }
-
-    private static async Task<(long Folded, int RoundTrips)> MergeAttestationChunksAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, bool directRoute,
-        IReadOnlyList<(Hash128 Type, int Off, int Len)> chunks,
-        IReadOnlyList<(Hash128 Type, Hash128 Subj, Hash128 Id, long Games, long Sum, DateTime Ts, bool FoldReplayable)> rows,
-        CancellationToken ct)
-    {
-        await using var merge = connection.CreateCommand();
-        merge.Transaction = transaction;
-        merge.CommandTimeout = 0;
-        merge.CommandText = directRoute
-            ? "SELECT consensus.attestation_merge_type($1, $2, $3, $4, $5, $6, $7)"
-            : "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6, $7)";
-        merge.Parameters.Add(new NpgsqlParameter
-        {
-            Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
-            NpgsqlDbType = directRoute
-                ? NpgsqlDbType.Bytea
-                : NpgsqlDbType.Array | NpgsqlDbType.Bytea
-        });
-        merge.Parameters.Add(new NpgsqlParameter
-        { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-        merge.Parameters.Add(new NpgsqlParameter
-        { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-        merge.Parameters.Add(new NpgsqlParameter
-        { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-        merge.Parameters.Add(new NpgsqlParameter
-        { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-        merge.Parameters.Add(new NpgsqlParameter
-        { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
-        merge.Parameters.Add(new NpgsqlParameter
-        { Value = Array.Empty<bool>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Boolean });
-        await merge.PrepareAsync(ct);
-
-        long folded = 0;
-        int roundTrips = 0;
-        foreach (var (type, off, count) in chunks)
-        {
-            var ids = new byte[count][];
-            var subjects = new byte[count][];
-            var games = new long[count];
-            var sums = new long[count];
-            var timestamps = new DateTime[count];
-            var foldReplayable = new bool[count];
-            for (int i = 0; i < count; i++)
-            {
-                var row = rows[off + i];
-                ids[i] = row.Id.ToBytes();
-                subjects[i] = row.Subj.ToBytes();
-                games[i] = row.Games;
-                sums[i] = row.Sum;
-                timestamps[i] = row.Ts;
-                foldReplayable[i] = row.FoldReplayable;
-            }
-            if (directRoute)
-            {
-                merge.Parameters[0].Value = type.ToBytes();
-                merge.Parameters[1].Value = ids;
-                merge.Parameters[2].Value = subjects;
-                merge.Parameters[3].Value = games;
-                merge.Parameters[4].Value = sums;
-                merge.Parameters[5].Value = timestamps;
-                merge.Parameters[6].Value = foldReplayable;
-            }
-            else
-            {
-                var types = new byte[count][];
-                Array.Fill(types, type.ToBytes());
-                merge.Parameters[0].Value = ids;
-                merge.Parameters[1].Value = types;
-                merge.Parameters[2].Value = subjects;
-                merge.Parameters[3].Value = games;
-                merge.Parameters[4].Value = sums;
-                merge.Parameters[5].Value = timestamps;
-                merge.Parameters[6].Value = foldReplayable;
-            }
-            folded += (long)(await merge.ExecuteScalarAsync(ct) ?? 0L);
-            roundTrips++;
-        }
-        return (folded, roundTrips);
     }
 
     private static async Task CopyFilteredAsync(

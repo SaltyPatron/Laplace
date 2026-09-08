@@ -17,7 +17,8 @@ public static class GrammarTagWitness
         GrammarRowComposer composer,
         string modality,
         Hash128 sourceId,
-        double weight)
+        double weight,
+        Hash128? contextId = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(utf8);
@@ -37,7 +38,7 @@ public static class GrammarTagWitness
         }
 
         foreach (AttestationRow attestation in Build(
-                     utf8, recipe, tags, spanIds, sourceId, weight))
+                     utf8, recipe, tags, spanIds, sourceId, contextId ?? composer.RootComponent().Id, weight))
             builder.AddAttestation(attestation);
     }
 
@@ -47,6 +48,7 @@ public static class GrammarTagWitness
         byte[]? tags,
         IReadOnlyDictionary<(uint Start, uint End), Hash128> spanIds,
         Hash128 sourceId,
+        Hash128 contextId,
         double weight)
     {
         if (recipe == IntPtr.Zero || tags is null)
@@ -88,13 +90,13 @@ public static class GrammarTagWitness
             if (name is not { } nameId) continue;
             if (definition is { } definitionId)
                 rows.Add(NativeAttestation.Categorical(
-                    definitionId, "DEFINES", nameId, sourceId, null, weight));
+                    definitionId, "DEFINES", nameId, sourceId, contextId, weight));
             if (call is { } callId)
                 rows.Add(NativeAttestation.Categorical(
-                    callId, "CALLS", nameId, sourceId, null, weight));
+                    callId, "CALLS", nameId, sourceId, contextId, weight));
             if (reference is { } referenceId)
                 rows.Add(NativeAttestation.Categorical(
-                    referenceId, "REFERENCES", nameId, sourceId, null, weight));
+                    referenceId, "REFERENCES", nameId, sourceId, contextId, weight));
         }
         return rows.ToImmutable();
     }

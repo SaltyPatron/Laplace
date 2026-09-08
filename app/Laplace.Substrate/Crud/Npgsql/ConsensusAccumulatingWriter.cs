@@ -316,7 +316,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         {
             if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
 
-            var delta = BuildDelta(changes);
+            // All durable scalar, batch, append and ingest calls use the same
+            // atomic acceptance boundary. Folding the proposed rows before the
+            // writer's identity probe counted replays as fresh testimony.
+            bool atomicWorkingSet = _persistEvidence && _inner is NpgsqlSubstrateWriter;
+            var delta = atomicWorkingSet ? null : BuildDelta(changes);
             bool hasEphemeralFolds = changes.Any(c => !c.EphemeralFoldInputs.IsDefaultOrEmpty);
 
             // A fold that already failed in the background poisons the run
@@ -327,10 +331,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // retried batch folds exactly once (a throw below leaves consensus
             // untouched for this batch).
             var forwarded = ForwardChanges(changes);
-            bool atomicWorkingSet = workingSet
-                && delta is { Count: > 0 }
-                && _persistEvidence
-                && _inner is NpgsqlSubstrateWriter;
             if (precommitVerifier is not null && !atomicWorkingSet)
                 throw new InvalidOperationException(
                     "source integrity verification requires the atomic evidence-and-consensus writer");
@@ -350,7 +350,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 {
                     result = await ((NpgsqlSubstrateWriter)_inner).ApplyWorkingSetAtomicAsync(
                         forwarded,
-                        async (connection, transaction, token) =>
+                        async (connection, transaction, admittedAttestations, token) =>
                         {
                             if (_bulkRun)
                             {
@@ -359,8 +359,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                                     System.Diagnostics.Stopwatch.GetTimestamp(),
                                     comparand: 0);
                             }
-                            atomicStats = await UpsertDeltaInTransactionAsync(
-                                delta!, connection, transaction, token).ConfigureAwait(false);
+                            var acceptedDelta = BuildDelta(changes, admittedAttestations);
+                            if (acceptedDelta is { Count: > 0 })
+                                atomicStats = await UpsertDeltaInTransactionAsync(
+                                    acceptedDelta, connection, transaction, token).ConfigureAwait(false);
                             if (appendConversation is not null)
                                 await appendConversation(connection, transaction, token).ConfigureAwait(false);
                             if (precommitVerifier is not null)
@@ -419,7 +421,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     }
 
     private Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta>? BuildDelta(
-        IReadOnlyList<SubstrateChange> changes)
+        IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null)
     {
         // Flatten to the attestation arrays that actually carry testimony. The
         // merge below is over a contiguous index space across those arrays, so
@@ -432,6 +434,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (c.EphemeralFoldInputs.IsDefaultOrEmpty) continue;
             foreach (var input in c.EphemeralFoldInputs)
             {
+                if (admittedAttestations is not null && !admittedAttestations.Contains(input.AttestationId))
+                    continue;
                 if (input.ScoreFp1e9 < 0 || input.ScoreFp1e9 > 1_000_000_000
                     || input.CalculationReceiptId == default
                     || !ephemeralByReceipt.TryAdd(input.AttestationId, input))
@@ -450,8 +454,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 || c.Metadata.SourceContentUnitName.StartsWith(PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
                 continue;
             if (c.Attestations.IsEmpty) continue;
-            (blocks ??= new()).Add(c.Attestations);
-            total += c.Attestations.Length;
+            var accepted = admittedAttestations is null ? c.Attestations
+                : c.Attestations.Where(a => admittedAttestations.Contains(a.Id)).ToImmutableArray();
+            if (accepted.IsEmpty) continue;
+            (blocks ??= new()).Add(accepted);
+            total += accepted.Length;
         }
         if (blocks is null || total == 0)
         {

@@ -31,42 +31,42 @@ BEGIN
         (a1, subj, rel_hot, o1, src, NULL, 2, t1, 3, 3000000000, phi1),
         (a2, subj, rel_dyn, o2, src, NULL, 1, t1, 1,  500000000, phi2);
 
-    -- 1) one routed call, two types: counts AND score sums accumulate,
-    --    GREATEST advances a newer ts and keeps a stored ts that is already
-    --    newer.
+    -- 1) one routed call, two types: replay preserves the existing witness,
+    --    including the count, score, calibration and timestamp even for a
+    --    later ingestion.
     affected := consensus.attestation_merge(
         ARRAY[a1, a2], ARRAY[rel_hot, rel_dyn], ARRAY[subj, subj],
         ARRAY[5, 2]::bigint[], ARRAY[5000000000, 1000000000]::bigint[],
         ARRAY[t2, t0], ARRAY[false, true]);
-    IF affected <> 2 THEN
-        RAISE EXCEPTION 'FAIL: merge affected % rows, expected 2', affected;
+    IF affected <> 0 THEN
+        RAISE EXCEPTION 'FAIL: merge affected % rows, expected 0', affected;
     END IF;
 
     SELECT * INTO row1 FROM laplace.attestations
     WHERE type_id = rel_hot AND subject_id = subj AND id = a1;
-    IF row1.observation_count <> 8 THEN
-        RAISE EXCEPTION 'FAIL: observation_count=%, expected 3+5=8', row1.observation_count;
+    IF row1.observation_count <> 3 THEN
+        RAISE EXCEPTION 'FAIL: observation_count=%, expected original 3', row1.observation_count;
     END IF;
-    IF row1.sum_score_fp1e9 <> 8000000000 THEN
-        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=%, expected 3e9+5e9', row1.sum_score_fp1e9;
+    IF row1.sum_score_fp1e9 <> 3000000000 THEN
+        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=%, expected original 3e9', row1.sum_score_fp1e9;
     END IF;
     IF row1.opponent_rd_fp1e9 <> phi1 THEN
         RAISE EXCEPTION 'FAIL: opponent_rd_fp1e9=%, merge must keep the stored per-deposit phi %', row1.opponent_rd_fp1e9, phi1;
     END IF;
-    IF row1.last_observed_at <> t2 THEN
-        RAISE EXCEPTION 'FAIL: last_observed_at=%, expected advanced to %', row1.last_observed_at, t2;
+    IF row1.last_observed_at <> t1 THEN
+        RAISE EXCEPTION 'FAIL: last_observed_at=%, expected original %', row1.last_observed_at, t1;
     END IF;
-    IF row1.fold_replayable THEN
-        RAISE EXCEPTION 'FAIL: a transient deposit must make the merged receipt non-replayable';
+    IF NOT row1.fold_replayable THEN
+        RAISE EXCEPTION 'FAIL: replay must preserve the original calibration receipt';
     END IF;
 
     SELECT * INTO row2 FROM laplace.attestations
     WHERE type_id = rel_dyn AND subject_id = subj AND id = a2;
-    IF row2.observation_count <> 3 THEN
-        RAISE EXCEPTION 'FAIL: observation_count=%, expected 1+2=3', row2.observation_count;
+    IF row2.observation_count <> 1 THEN
+        RAISE EXCEPTION 'FAIL: observation_count=%, expected original 1', row2.observation_count;
     END IF;
-    IF row2.sum_score_fp1e9 <> 1500000000 THEN
-        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=%, expected 5e8+1e9', row2.sum_score_fp1e9;
+    IF row2.sum_score_fp1e9 <> 500000000 THEN
+        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=%, expected original 5e8', row2.sum_score_fp1e9;
     END IF;
     IF row2.opponent_rd_fp1e9 <> phi2 THEN
         RAISE EXCEPTION 'FAIL: opponent_rd_fp1e9=%, merge must keep the stored per-deposit phi %', row2.opponent_rd_fp1e9, phi2;
@@ -94,19 +94,30 @@ BEGIN
         ARRAY[a1, ghost], ARRAY[rel_hot, rel_hot], ARRAY[subj, subj],
         ARRAY[1, 1]::bigint[], ARRAY[500000000, 500000000]::bigint[],
         ARRAY[t2, t2], ARRAY[true, true]);
-    IF affected <> 1 THEN
-        RAISE EXCEPTION 'FAIL: repeat-call merge affected %, expected 1 (ghost id merges nothing)', affected;
+    IF affected <> 0 THEN
+        RAISE EXCEPTION 'FAIL: repeat-call merge affected %, expected 0 (replay cannot mutate evidence)', affected;
     END IF;
     SELECT * INTO row1 FROM laplace.attestations
     WHERE type_id = rel_hot AND subject_id = subj AND id = a1;
-    IF row1.observation_count <> 9 THEN
-        RAISE EXCEPTION 'FAIL: observation_count=% after repeat call, expected 9', row1.observation_count;
+    IF row1.observation_count <> 3 THEN
+        RAISE EXCEPTION 'FAIL: observation_count=% after repeat call, expected 3', row1.observation_count;
     END IF;
-    IF row1.sum_score_fp1e9 <> 8500000000 THEN
-        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=% after repeat call, expected 8.5e9', row1.sum_score_fp1e9;
+    IF row1.sum_score_fp1e9 <> 3000000000 THEN
+        RAISE EXCEPTION 'FAIL: sum_score_fp1e9=% after repeat call, expected 3e9', row1.sum_score_fp1e9;
     END IF;
 
-    RAISE NOTICE '✓ attestation_merge: routed accumulation (games + score sums), per-deposit phi kept, GREATEST ts, hot-leaf routing, repeat calls in one tx, and ghost-id accounting all hold';
+    affected := consensus.attestation_merge_type(
+        rel_hot, ARRAY[a1, ghost], ARRAY[subj, subj],
+        ARRAY[1, 1]::bigint[], ARRAY[500000000, 500000000]::bigint[],
+        ARRAY[t2, t2], ARRAY[false, false]);
+    IF affected <> 0 OR EXISTS (
+        SELECT 1 FROM laplace.attestations
+        WHERE type_id = rel_hot AND subject_id = subj AND id = a1
+          AND (observation_count <> 3 OR sum_score_fp1e9 <> 3000000000
+               OR last_observed_at <> t1 OR NOT fold_replayable)) THEN
+        RAISE EXCEPTION 'FAIL: scalar-type replay changed existing testimony';
+    END IF;
+    RAISE NOTICE '✓ attestation_merge: both typed replay routes preserve counts, score sums, timestamps and calibration without new evidence';
 END $$;
 
 ROLLBACK;

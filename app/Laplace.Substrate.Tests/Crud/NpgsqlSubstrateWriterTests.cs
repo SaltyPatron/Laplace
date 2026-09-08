@@ -300,7 +300,7 @@ public class NpgsqlSubstrateWriterTests
 
 
     [Fact]
-    public async Task ApplyAsync_ReobservedAttestation_AccumulatesGames()
+    public async Task ApplyAsync_ReobservedAttestation_PreservesOriginalTestimony()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = SubstrateCanonicalIds.Of("source", "test", "att-reobserve");
@@ -330,12 +330,12 @@ public class NpgsqlSubstrateWriterTests
             .AddAttestation(Row(5))
             .Build());
         Assert.Equal(0, second.AttestationsInserted);
-        Assert.False(second.TrunkShortcircuitHit);
+        Assert.True(second.TrunkShortcircuitHit);
 
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT observation_count FROM laplace.attestations WHERE id = $1");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, attId.ToBytes());
-        Assert.Equal(8L, (long)(await cmd.ExecuteScalarAsync())!);
+        Assert.Equal(3L, (long)(await cmd.ExecuteScalarAsync())!);
     }
 
     [Fact]

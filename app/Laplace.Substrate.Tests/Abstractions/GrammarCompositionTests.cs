@@ -66,6 +66,24 @@ public sealed class GrammarCompositionTests
     }
 
     [Fact]
+    public void SameCall_InDifferentSources_KeepsEachContextAndReplaysTheSameIdentity()
+    {
+        var first = Compose("int first(void) { return helper(); }", "c");
+        var second = Compose("int second(void) { return helper(); }", "c");
+        var replay = Compose("int first(void) { return helper(); }", "c");
+        Hash128 calls = RelationTypeRegistry.Resolve("CALLS").Id;
+        var a = Assert.Single(first.Atts.Where(a => a.TypeId == calls));
+        var b = Assert.Single(second.Atts.Where(a => a.TypeId == calls));
+        var again = Assert.Single(replay.Atts.Where(a => a.TypeId == calls));
+        Assert.Equal(a.SubjectId, b.SubjectId);
+        Assert.Equal(a.ObjectId, b.ObjectId);
+        Assert.Equal(first.Root, a.ContextId);
+        Assert.Equal(second.Root, b.ContextId);
+        Assert.NotEqual(a.Id, b.Id);
+        Assert.Equal(a.Id, again.Id);
+    }
+
+    [Fact]
     public void Python_DefinitionsAndCalls_UseRegisteredTagQueryAndComposedSpans()
     {
         Assert.Contains(typeof(GrammarTags).Assembly.GetManifestResourceNames(),

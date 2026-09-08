@@ -35,7 +35,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
     internal Task<ApplyResult> ApplyWorkingSetAtomicAsync(
         IReadOnlyList<SubstrateChange> changes,
-        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task> transactionParticipant,
+        Func<NpgsqlConnection, NpgsqlTransaction, IReadOnlySet<Hash128>, CancellationToken, Task> transactionParticipant,
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct = default)
     {
@@ -53,7 +53,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
     private async Task<ApplyResult> ApplyManyInternalAsync(
         IReadOnlyList<SubstrateChange> changes,
         Hash128? legacyWorkingSetToken,
-        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task>? transactionParticipant,
+        Func<NpgsqlConnection, NpgsqlTransaction, IReadOnlySet<Hash128>, CancellationToken, Task>? transactionParticipant,
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct)
     {

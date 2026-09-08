@@ -899,3 +899,36 @@ capture parity passes. Twenty-three combined grammar/scheduling/failure tests
 pass. The first TinyCodes file completed composition in 630.7 seconds; its
 subsequent bulk apply starts with 3,206,250 staged entities, 3,208,380 physicalities
 and 325,732 attestations before native deduplication and presence filtering.
+
+The full TinyCodes shard completed 32,516/32,516 records, one physical file,
+zero failures, 4,770,252 novel rows and 29 database round trips in 817.720 seconds
+(run `2b5d186a-cddf-4e0f-9653-383f0d58614d`). Exact canonical prompt identity
+resolved its recorded response in 114.431 ms; the realized response matched the
+original Parquet bytes. This proves recorded example retrieval, not generated
+code or autonomous repository cleanup.
+
+After dispatch repair, the same shard's composition took 148.3 seconds versus
+630.7 seconds, a measured 4.25x improvement with about five cores active instead
+of one. The forced replay (`21c5ffe2-0a66-4c20-acb7-3b222220afd8`) took 255.601
+seconds overall and inserted no new physicalities or attestations. It nevertheless
+added the observations again: all 32,516 HAS_EXAMPLE rows reached count 2, and
+516,723 observations folded again. Evidence row-count stability was insufficient.
+
+The shared writer used a working-set token as the sole replay boundary and
+additively merged an existing five-tuple whenever batch boundaries changed. That
+contradicts INVENTION.md's evidence identity and idempotent re-ingestion law.
+The correction admits novel attestation identities through the existing indexed
+presence probe, passes that accepted set to the atomic consensus participant,
+and routes scalar/batch/append through the same durable boundary. Existing
+testimony retains its count, timestamp and calibration. The old native merge
+entry points validate input and return zero without SQL, tuple rewrites or WAL.
+
+Grammar tag relations also lacked containing-source context. Definitions, calls
+and references now carry the original source composition, or the full observed
+prompt/response composition for coding examples. The same call in two different
+sources becomes two context-qualified witnesses; replaying either reproduces its
+identity. Ninety-eight targeted managed tests pass, including changed dispatch
+boundaries, call surfaces, novel context, rollback and grammar provenance. Native
+typed replay and consensus-upsert regressions pass. Live duplicated counts and
+legacy context-free code testimony still require measured repair/readback; do
+not call them repaired merely because the code tests pass.

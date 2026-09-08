@@ -74,6 +74,48 @@ public class ConsensusAccumulatingWriterTests
 
     private const long KernelToleranceFp = 1_000;
 
+    [Fact]
+    public async Task Replay_ChangedBatchBoundariesAndCallSurface_PreserveEvidenceAndStanding()
+    {
+        var src = H(9200); var rel = H(9201); var subject = H(9202); var obj = H(9203);
+        var first = Obs(H(9210), subject, rel, obj, src, 1_000_000_000, ctx: H(9220));
+        var second = Obs(H(9211), subject, rel, obj, src, 0, ctx: H(9221));
+        await using var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+        await writer.ApplyWorkingSetAsync(Change(src, "replay-original", first, second));
+        var standing = await ConsensusRowAsync(subject, rel, obj);
+        Assert.NotNull(standing);
+        Assert.Equal(2, standing.Value.wc);
+        long observations = writer.ObservationsAccumulated;
+        long cells = writer.CellsFolded;
+
+        // A different scheduling plan, process, timestamp or API entry point
+        // must not turn existing five-tuples into additional witnesses.
+        var later = first with { LastObservedAtUnixUs = first.LastObservedAtUnixUs + 1_000_000 };
+        await writer.ApplyAsync(Change(src, "replay-scalar", later));
+        await writer.ApplyManyAsync([Change(src, "replay-batch", second)]);
+        await writer.AppendAsync([Change(src, "replay-append", first, second)], src);
+        Assert.Equal(standing, await ConsensusRowAsync(subject, rel, obj));
+        Assert.Equal(observations, writer.ObservationsAccumulated);
+        Assert.Equal(cells, writer.CellsFolded);
+        await using var evidence = _pg.DataSource.CreateCommand(
+            "SELECT observation_count, last_observed_at FROM laplace.attestations WHERE id = $1");
+        evidence.Parameters.AddWithValue(first.Id.ToBytes());
+        await using (var reader = await evidence.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(1, reader.GetInt64(0));
+            Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(first.LastObservedAtUnixUs / 1000).UtcDateTime,
+                reader.GetDateTime(1));
+        }
+
+        // A genuinely different witnessed context still contributes.
+        var third = Obs(H(9212), subject, rel, obj, src, 1_000_000_000, ctx: H(9222));
+        await writer.ApplyWorkingSetAsync(Change(src, "replay-plus-novel", second, third, first));
+        Assert.Equal(3, (await ConsensusRowAsync(subject, rel, obj))!.Value.wc);
+        Assert.Equal(observations + 1, writer.ObservationsAccumulated);
+    }
+
     private static void AssertWithinKernelTolerance(long expected, long actual)
         => Assert.InRange(actual, expected - KernelToleranceFp, expected + KernelToleranceFp);
 
