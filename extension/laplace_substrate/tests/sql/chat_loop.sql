@@ -114,11 +114,15 @@ SELECT converse.tiered(
 SELECT converse.about(public.laplace_hash128_blake3('test/chat_loop/synset1')) AS about;
 
 -- 3. The default no-shape route is the real dynamic forward pass. This tiny
--- fixture does not manufacture sequence evidence merely to force generation;
--- a valid dynamic answer OR an explicit no-forward abstention is acceptable,
--- but empty/NULL output is never an honest product response.
-SELECT COALESCE(length(btrim(converse.chat('what is a dog?'))), 0) > 0
-       AS default_chat_nonempty;
+-- fixture contains routed graph facts but no physical or completion testimony.
+-- Neither renderable graph state nor a text scaffold may fabricate a selection.
+-- The text adapter must return exactly the canonical program's selected surface.
+SELECT converse.chat('what is a dog?') IS NOT DISTINCT FROM (
+    SELECT string_agg(g.entity, '' ORDER BY g.step)
+    FROM converse.forward_turn('what is a dog?') g)
+       AS default_chat_forward_parity;
+SELECT converse.chat('what is a dog?') IS NULL
+       AS unsupported_output_is_not_fabricated;
 
 -- The closed-loop ranking assertion names the description shape it actually
 -- tests. A feedback-induced definition change must affect that same read.

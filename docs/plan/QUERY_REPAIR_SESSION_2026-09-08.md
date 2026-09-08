@@ -557,8 +557,8 @@ Output support does not require a duplicate steering read. The native selection
 returns exact typed IDs without content/type/render probes, removing the obsolete
 `generation.semantic_presence` SQL catalog query. The catalog now has 45 entries;
 469 pre-existing inline runtime literals remain migration debt. Rendering remains
-at the final boundary. The SQL text chat adapter uses its existing `no_forward`
-status for an empty selection; that status is not generated answer evidence.
+at the final boundary. SQL chat returns the canonical pass's selected surface,
+including NULL for no selected output; it cannot manufacture a scaffold response.
 
 Regressions cover unspecified/empty/wrong output purpose, explicit frame output,
 opaque non-content targets, asymmetric and symmetric direction, refutation before
@@ -566,6 +566,12 @@ a one-slot bound, no duplicate steering requirement, ordinal observation scope,
 and physical membership versus ordered proof. No frame-label blacklist or
 question-specific string routing was added. Current native build, catalog,
 manifest generation, ISA and install/upgrade dependency gates pass.
+
+CI caught the SQL chat adapter's attempted reuse of its legacy `no_forward`
+scaffold. The forward source contract prohibits that substitution. The fallback
+is removed; the small graph-only fixture now asserts exact canonical-forward
+parity and no fabricated output when it has neither ordinal nor completion
+testimony. The seeded natural-language hot/cold acceptance remains unchanged.
 
 Transactional current-data proof is retained in
 `output-projection-readback.sql` and `output-projection-readback-final.log`.
@@ -581,3 +587,16 @@ the whole input's witnessed structures and retaining their bindings through
 selection. Independent words' accumulated neighborhoods and a common suffix
 must not substitute for that comparison. The full session checklist above
 remains active, including performance, perfcache, readers and chess restoration.
+
+The subsequent inventor-triggered OMW run 34222144989 finished ingestion in
+825 seconds (`rc=0`) and likewise failed its absent-baseline gate. During this
+run, the stock PostgreSQL GIN statistics reader measured 5,915 pending pages
+(46 MB) across the 64 content indexes. The normal post-ingest drain completed
+in 824 ms; a later statistics read found zero pending pages. The four-root
+hot/opposite containment query earlier used 25,403 shared buffers and 176.867 ms
+execution; after cleanup it used 455 shared buffers and 12.85 ms execution,
+plus 34.296 ms planning. These are concurrent-state observations, not a
+controlled throughput benchmark. They establish that the existing end-of-ingest
+drain does not eliminate the pending-list cost for concurrent readers. Receipts:
+`containment-pending-pages.sql/.log`, `containment-pending-pages-after-omw.log`,
+`joint-observation-membership.sql/.log`, `containment-during-omw-plan.json`.
