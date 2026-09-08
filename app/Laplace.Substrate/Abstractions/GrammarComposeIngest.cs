@@ -87,6 +87,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         private GrammarRowComposer? _composer;
         private GrammarAst? _promptAst;
         private GrammarRowComposer? _promptComposer;
+        private TierTree? _promptTree;
         private OrderedCompositionRequest? _observation;
         private OrderedCompositionComponent _root;
         private Hash128 _rootId;
@@ -102,7 +103,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
 
         public TierTree? TreeForBatchProbe => null;
 
-        public long ResidentBytes => (_composer?.ResidentBytes ?? 0) + (_promptComposer?.ResidentBytes ?? 0);
+        public long ResidentBytes => checked((_composer?.ResidentBytes ?? 0)
+            + (_promptComposer?.ResidentBytes ?? 0) + (_promptTree?.ResidentBytes ?? 0));
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
             Task.FromResult<byte[]?>(null);
@@ -120,13 +122,17 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
 
             if (_observation is not null && _promptComposer is not null)
             {
-                Hash128 prompt = _promptComposer.DrainInto(builder, witnessWeight);
+                _promptComposer.DrainInto(builder, witnessWeight);
+                if (_promptTree is null || !ContentTierSpine.EmitTree(
+                        builder, _promptTree, _sourceId, [], out Hash128 prompt))
+                    throw new InvalidOperationException("observed prompt has no canonical conversation identity");
                 Span<OrderedCompositionResult> pair = stackalloc OrderedCompositionResult[1];
                 OrderedComposition.StageBatch(builder.ContentStage, [_observation], pair);
                 if (pair[0].Id != _rootId)
                     throw new InvalidOperationException("observed prompt/response identity changed during staging");
-                // The corpus witnessed this complete instruction paired with this
-                // response. Preserve that context; a bag of keywords loses it.
+                // Resolve the instruction exactly as conversation admission does.
+                // The context keeps the unnormalized source bytes and their
+                // ordered pairing; a grammar AST is not the query's text root.
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
                     prompt, ExampleRelation, emitted, _sourceId, _rootId, _trust));
             }
@@ -197,6 +203,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                     _promptAst = GrammarDecomposer.Parse(prompt, "markdown");
                     _promptComposer = new GrammarRowComposer(prompt, _promptAst, _sourceId,
                         "markdown", GrammarCompositionMode.FullSource);
+                    _promptTree = ContentTierSpine.BuildTree(prompt)
+                        ?? throw new InvalidOperationException("observed prompt cannot be resolved as conversation content");
                     _observation = new OrderedCompositionRequest(
                         [_promptComposer.RootComponent(), _root], EntityTypeRegistry.Text, _sourceId, 0);
                     _rootId = OrderedComposition.ComposeBatch([_observation])[0].Id;
@@ -208,6 +216,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 _ast?.Dispose();
                 _promptComposer?.Dispose();
                 _promptAst?.Dispose();
+                _promptTree?.Dispose();
                 throw;
             }
         }
@@ -220,6 +229,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             _ast?.Dispose();
             _promptComposer?.Dispose();
             _promptAst?.Dispose();
+            _promptTree?.Dispose();
         }
     }
 }

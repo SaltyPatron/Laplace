@@ -184,6 +184,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "tier_tree_capacity")]
     internal static partial nuint TierTreeCapacity(IntPtr tree);
 
+    [LibraryImport(Library, EntryPoint = "tier_tree_resident_bytes")]
+    internal static partial nuint TierTreeResidentBytes(IntPtr tree);
+
     [LibraryImport(Library, EntryPoint = "tier_tree_add_leaf")]
     internal static partial uint TierTreeAddLeaf(IntPtr tree, byte tier, uint atom,
                                                    uint textRangeOff, uint textRangeLen);

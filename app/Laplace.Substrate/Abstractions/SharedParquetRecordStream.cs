@@ -205,8 +205,6 @@ public static class SharedParquetRecordStream
         DataField? langField = FindField(fields, "programming_language");
         DataField? promptField = FindField(fields, "prompt");
         DataField? respField = FindField(fields, "response");
-        string fileStem = Path.GetFileNameWithoutExtension(path);
-        long rowBase = 0;
         if (promptField is null || respField is null || (taskField is null && langField is null))
             throw new InvalidOperationException(
                 $"Unrecognized TinyCodes parquet schema in '{path}' — "
@@ -234,10 +232,11 @@ public static class SharedParquetRecordStream
             for (int i = 0; i < count; i++)
             {
                 string? lang = langs?[i];
-                string? key = taskIds?[i] ?? $"{fileStem}/{rowBase + i}";
+                // A packaging location is not a witnessed code concept. The
+                // physical file journal owns row progress when task_id is absent.
+                string? key = taskIds?[i];
                 yield return (key, lang, prompts[i], resps[i]);
             }
-            rowBase += count;
         }
     }
 }

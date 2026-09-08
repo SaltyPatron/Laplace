@@ -63,6 +63,16 @@ public sealed class TierTree : SafeHandle
         }
     }
 
+    public long ResidentBytes
+    {
+        get
+        {
+            ThrowIfDisposed();
+            lock (LaplaceCoreGate.Native)
+                return checked((long)NativeInterop.TierTreeResidentBytes(handle));
+        }
+    }
+
     public uint AddLeaf(byte tier, uint atom, uint textRangeOff, uint textRangeLen)
     {
         ThrowIfDisposed();

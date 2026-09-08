@@ -124,11 +124,13 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
         await using var connection = await pg.DataSource.OpenConnectionAsync();
         var children = await NpgsqlSubstrateReads.PackedTrajectoryVerticesAsync(
             connection, root.ToBytes(), default);
-        Assert.Equal(
-            [Convert.ToHexStringLower(link.SubjectId.ToBytes()), Convert.ToHexStringLower(link.ObjectId!.Value.ToBytes())],
-            children.OrderBy(c => c.Ordinal).Select(c => c.ChildIdHex));
+        var ordered = children.OrderBy(c => c.Ordinal).ToArray();
+        Assert.Equal(2, ordered.Length);
+        Assert.Equal(Convert.ToHexStringLower(link.ObjectId!.Value.ToBytes()), ordered[1].ChildIdHex);
+        Hash128 observedPrompt = Hash128.FromBytes(Convert.FromHexString(ordered[0].ChildIdHex));
+        Assert.Equal(ContentTierSpine.ResolveRoot(record.ObservedPromptUtf8), link.SubjectId);
         Assert.Equal(record.ObservedPromptUtf8,
-            await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource, link.SubjectId, "markdown"));
+            await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource, observedPrompt, "markdown"));
         Assert.Equal(code,
             await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource, link.ObjectId.Value, "python"));
 
@@ -161,6 +163,8 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
                 await group.WriteAsync(r, new[] { response });
                 await group.WriteAsync(l, new[] { "Neo4j database and Cypher" });
             }
+            await foreach (var observed in SharedParquetRecordStream.ReadTinyCodesRowsAsync(path, default))
+                Assert.Null(observed.ConceptKey);
             CodepointPerfcache.LoadDefault();
             var runner = new IngestRunner(new NpgsqlSubstrateWriter(pg.DataSource),
                 new NpgsqlSubstrateReader(pg.DataSource), NullLoggerFactory.Instance,
@@ -188,6 +192,22 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
             Assert.Equal(Encoding.UTF8.GetBytes(response),
                 await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource,
                     responseComposer.RootComponent().Id, "markdown"));
+            // Use the installed SQL resolver that chat calls, not the source
+            // grammar composer, to retrieve this exact witnessed response.
+            await using var connection = await pg.DataSource.OpenConnectionAsync();
+            await using var lookup = new global::Npgsql.NpgsqlCommand(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM laplace.attestations
+                    WHERE subject_id = (SELECT root_id FROM converse.prompt_tree(@prompt) LIMIT 1)
+                      AND type_id = @relation AND source_id = @source
+                      AND object_id = @response AND context_id IS NOT NULL)
+                """, connection);
+            lookup.Parameters.AddWithValue("prompt", prompt);
+            lookup.Parameters.AddWithValue("relation", RelationTypeRegistry.Resolve("HAS_EXAMPLE").Id.ToBytes());
+            lookup.Parameters.AddWithValue("source", TinyCodesSource.SourceId.ToBytes());
+            lookup.Parameters.AddWithValue("response", responseComposer.RootComponent().Id.ToBytes());
+            Assert.Equal(true, await lookup.ExecuteScalarAsync());
         }
         finally
         {

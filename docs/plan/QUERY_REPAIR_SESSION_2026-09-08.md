@@ -834,3 +834,21 @@ stream. Four Parquet reader tests pass. Resolving the referenced source payloads
 retaining complete source row metadata and composing embedded code regions remain
 implementation obligations; this inspection is not proof that those code bodies
 have been ingested or that the forward pass can edit and test code.
+
+The corpus/chat cross-path test then exposed distinct Markdown-source and
+canonical-text roots for the same plain-text instruction. The pair now keeps
+its exact observed source trajectory while its HAS_EXAMPLE subject is composed
+and staged by the same ContentTierSpine used for conversation admission. A DB
+regression resolves the original prompt through `converse.prompt_tree` and
+retrieves the witnessed response directly by that ID. NFD bytes remain intact
+in the observation context. Native tree resident bytes include this retained
+canonical tree. Missing task_id no longer fabricates a CodeConcept from the
+Parquet shard filename and row ordinal.
+
+Repository replay and idempotency workflow 34237635006 completed both native
+runs with 2,476/2,476 files and zero failures. The second run took 1.03 seconds
+in the ingest journal, and CodeDecomposer evidence remained exactly 10,638
+before/after. This establishes replay evidence-count stability, not a compile,
+cleanup or generalization result. The workflow is still red because its
+throughput gate has no accepted CodeDecomposer baseline; the correctness job
+now executes and passes independently of that performance-gate failure.
