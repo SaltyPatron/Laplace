@@ -224,7 +224,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     }
 
     [Theory]
-    [InlineData("laplace-converse-001", "max_tokens", 32)]
+    [InlineData("laplace-converse-001", "top_p", 0.5)]
     [InlineData("laplace-completions-001", "top_p", 0.5)]
     public async Task Chat_RejectsControlsItsSelectedLaneDoesNotImplement(
         string model, string control, object value)

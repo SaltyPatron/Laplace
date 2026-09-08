@@ -117,7 +117,8 @@ public sealed class ConversationProvenanceGateTests
     {
         var text = Read("app/Laplace.Substrate/Abstractions/ConversationContent.cs");
         Assert.Contains("\"APPEARS_IN\"", text);
-        Assert.Contains("\"PRECEDES\"", text);
+        Assert.DoesNotContain("\"PRECEDES\"", text);
+        Assert.Contains("session_append_turns", Read("engine/core/src/sql_catalog.def"));
         Assert.Contains("\"HAS_ATTRIBUTION\"", text);
         // Ids mint through the canonical system, never a hand hash.
         Assert.Contains("SubstrateCanonicalIds", text);
@@ -144,22 +145,20 @@ public sealed class ConversationProvenanceGateTests
     }
 
     /// <summary>
-    /// The HTTP converse lane rides converse.chat() — the one conversational entry point —
-    /// with recall_session only as the truthful-absence fallback (PR #892). Before
-    /// this pin the lane read recall_session directly and answered "What is a dog?"
-    /// with a phrase-lookup miss on the deployed box. Also pins the provenance rule:
+    /// Natural chat consumes the forward program. Explicit shapes use the
+    /// inspection operation; an empty pass cannot be replaced by phrase recall.
     /// a chat reply's eff_mu/witnesses are ABSENT, never fabricated as zero.
     /// </summary>
     [Fact]
-    public void HttpConverse_GoesThroughChatBeforeRecallFallback()
+    public void HttpConverse_UsesForwardProgramWithoutRecallFallback()
     {
         var text = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.cs");
         var method = StripComments(ExtractMethod(text,
-            "private static async Task<IReadOnlyList<ConverseRow>> RecallSessionAsync"));
+            "private static async Task<IReadOnlyList<ConverseRow>> RunConversationAsync"));
         var chatIdx = method.IndexOf("NpgsqlSubstrateReads.ChatAsync(", StringComparison.Ordinal);
-        var recallIdx = method.IndexOf("NpgsqlSubstrateReads.RecallSessionAsync(", StringComparison.Ordinal);
-        Assert.True(chatIdx >= 0, "converse lane must consult NpgsqlSubstrateReads.ChatAsync");
-        Assert.True(recallIdx > chatIdx, "recall_session is the fallback, consulted after converse.chat()");
+        Assert.True(chatIdx >= 0, "explicit shapes must retain the inspection operation");
+        Assert.Contains("NpgsqlSubstrateReads.ForwardTurnAsync(", method);
+        Assert.DoesNotContain("RecallSessionAsync", method);
         Assert.Contains("ConverseRow(reply, null, null)", method);
     }
 

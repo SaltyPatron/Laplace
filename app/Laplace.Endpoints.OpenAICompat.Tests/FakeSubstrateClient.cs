@@ -187,16 +187,14 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     private const string IsAIdHex = "0123456789abcdef0123456789abcdef";
     private const string WordNetIdHex = "fedcba9876543210fedcba9876543210";
 
-    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
-        string prompt, byte[]? session, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<ConverseRow>>(
-            prompt.Contains("unknown-topic", StringComparison.OrdinalIgnoreCase)
-                ? []
-                :
-                [
-                    new ConverseRow("A whale is a marine mammal.", 0.91m, 42),
-                    new ConverseRow("whale IS_A cetacean.", 0.84m, 17)
-                ]);
+    public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, CancellationToken ct)
+    {
+        var reply = new System.Text.StringBuilder();
+        await foreach (var token in ForwardTurnStreamAsync(prompt,session,default,ct))
+            reply.Append(token.Token);
+        return reply.Length == 0 ? [] : [new ConverseRow(reply.ToString(),null,null)];
+    }
 
     public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
         string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
@@ -235,6 +233,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         await Task.CompletedTask;
+        if (prompt.Contains("unknown-topic",StringComparison.OrdinalIgnoreCase)) yield break;
         yield return new GenerateToken(1, " the", 5);
 
         if (prompt.Contains("trigger-stream-error", StringComparison.OrdinalIgnoreCase))
