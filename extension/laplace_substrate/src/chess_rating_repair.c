@@ -14,7 +14,7 @@
 typedef struct {
     hash128_t subject, type, object, id;
     bool object_null;
-    int64 games, score, rd, time;
+    int64 games, score, rating, rd, time;
 } RepairEvidence;
 
 typedef struct {
@@ -43,14 +43,12 @@ evidence_compare(const void *x, const void *y)
     return memcmp(&a->id, &b->id, sizeof(hash128_t));
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_repair_player_ratings_batch);
-Datum
-pg_laplace_repair_player_ratings_batch(PG_FUNCTION_ARGS)
+/* Replays retained evidence in observed order, one retained record per period.
+ * This cannot recover original period grouping that was not recorded. */
+static void
+repair_cells(ArrayType *subjects, ArrayType *relations, bool normalize)
 {
     bool spi_top = false;
-    for (int i = 0; i < 4; ++i)
-        if (PG_ARGISNULL(i)) ereport(ERROR, (errmsg("repair_player_ratings_batch: NULL scope")));
-    ArrayType *subjects = PG_GETARG_ARRAYTYPE_P(3);
     Datum *subject_values; bool *subject_nulls; int nsubjects;
     deconstruct_array(subjects, BYTEAOID, -1, false, TYPALIGN_INT,
                       &subject_values, &subject_nulls, &nsubjects);
@@ -59,17 +57,19 @@ pg_laplace_repair_player_ratings_batch(PG_FUNCTION_ARGS)
         if (subject_nulls[i] || VARSIZE_ANY_EXHDR(DatumGetByteaPP(subject_values[i])) != 16)
             ereport(ERROR, (errmsg("repair_player_ratings_batch: invalid subject id")));
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT) elog(ERROR, "chess repair: SPI connect failed");
-    Oid types[] = {BYTEAARRAYOID, BYTEAOID, BYTEAOID};
-    Datum args[] = {PointerGetDatum(subjects), PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)};
-    /* Correct the erroneous calibration field, keeping HAS_RATING, outcomes,
-     * counts, source/context identities and event timestamps intact. Future
-     * canonical source replay must consume the same corrected comparison. */
-    const char *normalize = laplace_sql_query_text("chess.repair_normalize");
-    if (SPI_execute_with_args(normalize, 3, types, args, NULL, false, 0) != SPI_OK_UPDATE)
-        elog(ERROR, "chess repair: calibration correction failed");
-    uint64 corrected = SPI_processed;
-    const char *read = laplace_sql_query_text("chess.repair_evidence");
-    SPIPlanPtr p = SPI_prepare(read, 3, types);
+    Oid types[] = {BYTEAARRAYOID, BYTEAARRAYOID};
+    Datum args[] = {PointerGetDatum(subjects), PointerGetDatum(relations)};
+    uint64 corrected = 0;
+    /* Only the explicit chess-player repair corrects source-Elo calibration.
+     * General cell reconstruction retains the recorded opponent state. */
+    if (normalize) {
+        if (SPI_execute_with_args(laplace_sql_query_text("chess.repair_normalize"),
+            2, types, args, NULL, false, 0) != SPI_OK_UPDATE)
+            elog(ERROR, "chess repair: calibration correction failed");
+        corrected = SPI_processed;
+    }
+    const char *read = laplace_sql_query_text("consensus.repair_evidence");
+    SPIPlanPtr p = SPI_prepare(read, 2, types);
     if (p == NULL) elog(ERROR, "chess repair: cannot prepare evidence read");
     Portal cursor = SPI_cursor_open(NULL, p, args, NULL, false);
     if (cursor == NULL) elog(ERROR, "chess repair: cannot open evidence read");
@@ -96,6 +96,7 @@ pg_laplace_repair_player_ratings_batch(PG_FUNCTION_ARGS)
             e->id = datum_to_hash128(SPI_getbinval(t,d,4,&isnull));
             e->games = DatumGetInt64(SPI_getbinval(t,d,5,&isnull));
             e->score = DatumGetInt64(SPI_getbinval(t,d,6,&isnull));
+            e->rating = DatumGetInt64(SPI_getbinval(t,d,10,&isnull));
             e->rd = DatumGetInt64(SPI_getbinval(t,d,7,&isnull));
             e->time = DatumGetTimestampTz(SPI_getbinval(t,d,8,&isnull));
             if (!DatumGetBool(SPI_getbinval(t,d,9,&isnull)))
@@ -105,7 +106,7 @@ pg_laplace_repair_player_ratings_batch(PG_FUNCTION_ARGS)
         if (fetched == 0) break;
     }
     SPI_cursor_close(cursor); SPI_freeplan(p);
-    if (n == 0) { laplace_spi_finish(spi_top); PG_RETURN_VOID(); }
+    if (n == 0) { laplace_spi_finish(spi_top); return; }
     qsort(evidence, n, sizeof(RepairEvidence), evidence_compare);
     if (n > MaxAllocSize / sizeof(RepairCell)) elog(ERROR, "chess repair: cell batch exceeds allocation capacity");
     RepairCell *cells = palloc(n * sizeof(RepairCell));
@@ -118,7 +119,7 @@ pg_laplace_repair_player_ratings_batch(PG_FUNCTION_ARGS)
             glicko2_init(&cell->state, LAPLACE_GLICKO2_NEUTRAL_MU_FP, 350000000000LL, 60000000LL);
         }
         RepairCell *cell = &cells[ncells-1];
-        if (glicko2_fold_uniform_period(&cell->state, LAPLACE_GLICKO2_NEUTRAL_MU_FP,
+        if (glicko2_fold_uniform_period(&cell->state, e->rating,
             e->rd, e->games, e->score, LAPLACE_GLICKO2_DEFAULT_TAU, 0) != 0)
             ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                 errmsg("chess repair: chronological evidence cannot be represented by the native fold")));
@@ -144,11 +145,34 @@ pg_laplace_repair_player_ratings_batch(PG_FUNCTION_ARGS)
         values[j] = PointerGetDatum(construct_md_array(columns[j], j == 2 ? object_nulls : NULL,
             1, dims, lbs, element, j < 3 ? -1 : 8, j >= 3, j < 3 ? TYPALIGN_INT : TYPALIGN_DOUBLE));
     }
-    const char *write = laplace_sql_query_text("chess.repair_write");
+    const char *write = laplace_sql_query_text("consensus.repair_write");
     if (SPI_execute_with_args(write, 8, argtypes, values, NULL, false, 0) != SPI_OK_INSERT)
         elog(ERROR, "chess repair: bulk standing write failed");
     ereport(NOTICE, (errmsg("chess repair: %d subjects, %zu evidence rows, %zu cells, %llu calibrations corrected, %llu standings updated",
         nsubjects,n,ncells,(unsigned long long)corrected,(unsigned long long)SPI_processed)));
     laplace_spi_finish(spi_top);
+    return;
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_repair_player_ratings_batch);
+Datum
+pg_laplace_repair_player_ratings_batch(PG_FUNCTION_ARGS)
+{
+    for (int i = 0; i < 4; ++i)
+        if (PG_ARGISNULL(i)) ereport(ERROR, (errmsg("repair_player_ratings_batch: NULL scope")));
+    Datum types[] = {PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)};
+    repair_cells(PG_GETARG_ARRAYTYPE_P(3), construct_array(types, 2, BYTEAOID, -1, false, TYPALIGN_INT), true);
+    PG_RETURN_VOID();
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_repair_consensus_cells_batch);
+Datum
+pg_laplace_repair_consensus_cells_batch(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) ereport(ERROR, (errmsg("repair_cells_batch: NULL scope")));
+    ArrayType *types = PG_GETARG_ARRAYTYPE_P(1);
+    if (ArrayGetNItems(ARR_NDIM(types), ARR_DIMS(types)) == 0)
+        ereport(ERROR, (errmsg("repair_cells_batch: empty relation scope")));
+    repair_cells(PG_GETARG_ARRAYTYPE_P(0), types, false);
     PG_RETURN_VOID();
 }

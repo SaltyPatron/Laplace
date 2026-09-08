@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Muted } from '@ui';
-import { queryLeaders } from '../query/api';
+import { queryHomeLeaders } from '../query/api';
 import type { BandLeaders } from '../query/types';
 import styles from './Leaderboards.module.css';
 
@@ -23,7 +23,7 @@ export function Leaderboards() {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    queryLeaders(HOME_BANDS, 5)
+    queryHomeLeaders()
       .then((r) => setBands(r.bands ?? []))
       .catch(() => setFailed(true));
   }, []);

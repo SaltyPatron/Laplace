@@ -534,12 +534,23 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
               new MeshLink(CetaceanIdHex, "orca", "sense", null, 0.8m, 5) }.Take(Math.Max(0, memberLimit))]));
     }
 
-    public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<BandLeaders>>(
+    public int LastLeadersPerBand { get; private set; }
+    public int[] LastLeadersBands { get; private set; } = [];
+    public int LeadersCalls { get; private set; }
+    public Func<int[], int, CancellationToken, Task<IReadOnlyList<BandLeaders>>>? LeadersHandler { get; set; }
+
+    public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
+    {
+        LastLeadersPerBand = perBand;
+        LastLeadersBands = bands;
+        LeadersCalls++;
+        if (LeadersHandler is not null) return LeadersHandler(bands, perBand, ct);
+        return Task.FromResult<IReadOnlyList<BandLeaders>>(
             bands.Select(b => new BandLeaders(b, b == 2 ? "taxonomic" : $"band {b}",
             [
                 new LeaderRow(WhaleIdHex, "whale", "IS_A", CetaceanIdHex, "cetacean", 1325.09m, 42),
             ])).ToList());
+    }
 
     public Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct)
     {

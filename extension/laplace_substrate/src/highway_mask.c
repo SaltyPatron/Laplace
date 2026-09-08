@@ -1,3 +1,4 @@
+#include "laplace/core/sql_catalog.h"
 #include "postgres.h"
 
 #include "catalog/pg_type.h"
@@ -788,17 +789,6 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
  * ONE indexed SPI query does the fetch. consensus_type_btree carries the
  * type_id = ANY($1) filter; the eff_mu expression index carries the ordering.
  */
-static const char *BAND_EDGES_QUERY =
-    "SELECT subject_id, type_id, object_id, rating, rd, witness_count, "
-    "       (rating - 2 * rd) AS eff_mu "
-    "FROM laplace.consensus "
-    "WHERE type_id = ANY($1) "
-    "  AND object_id IS NOT NULL "
-    "  AND NOT consensus.refuted(rating, rd) "
-    "  AND (rating - 2 * rd) >= $2 "
-    "ORDER BY (rating - 2 * rd) DESC "
-    "LIMIT $3";
-
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_band_edges);
 
 Datum
@@ -857,7 +847,7 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
     args[0] = PointerGetDatum(type_arr);
     args[1] = Int64GetDatum(min_eff_mu);
     args[2] = Int64GetDatum(limit_rows);
-    rc = SPI_execute_with_args(BAND_EDGES_QUERY, 3, argtypes, args, NULL, true, 0);
+    rc = SPI_execute_with_args(laplace_sql_query_text("consensus.band_edges"), 3, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "consensus_band_edges: query failed: %s",
              SPI_result_code_string(rc));

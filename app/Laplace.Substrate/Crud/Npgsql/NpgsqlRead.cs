@@ -31,6 +31,16 @@ public static class NpgsqlRead
             ValidateParameters(query, parameters);
         }, timeoutSeconds, ct, label ?? query.Name, onError);
 
+    public static Task<IReadOnlyList<T>> ReadRowsAsync<T>(
+        NpgsqlDataSource source, NativeSqlQuery query, Func<NpgsqlDataReader, T> map,
+        Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0,
+        CancellationToken ct = default, string? label = null, ErrorTranslator? onError = null)
+        => ReadRowsAsync(source, query.Text, map, parameters =>
+        {
+            bind?.Invoke(parameters);
+            ValidateParameters(query, parameters);
+        }, timeoutSeconds, ct, label ?? query.Name, onError);
+
     private static void ValidateParameters(NativeSqlQuery query, NpgsqlParameterCollection parameters)
     {
         if (parameters.Count != query.ParameterTypes.Length)
@@ -42,6 +52,7 @@ public static class NpgsqlRead
                 "bytea" => NpgsqlDbType.Bytea,
                 "bytea[]" => NpgsqlDbType.Array | NpgsqlDbType.Bytea,
                 "int4" => NpgsqlDbType.Integer,
+                "int4[]" => NpgsqlDbType.Array | NpgsqlDbType.Integer,
                 "int8" => NpgsqlDbType.Bigint,
                 "text" => NpgsqlDbType.Text,
                 _ => throw new InvalidOperationException($"Unknown native parameter type {query.ParameterTypes[i]}."),

@@ -39,6 +39,17 @@ internal static class QueryEndpoints
         .Produces<RelationBandsResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        // The home preview has a fixed server-owned shape. Query-string inputs
+        // cannot expand its band set or page size.
+        app.MapGet("/v1/query/leaders/home", async (ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            var leaders = await substrate.LeadersAsync([1, 2, 4, 5], 5, ct);
+            return Results.Json(new LeadersResponse("list", leaders));
+        })
+        .RequireRateLimiting("public-query")
+        .WithTags("query")
+        .Produces<LeadersResponse>();
+
         // The storefront leaderboard: top consensus edges per salience band,
         // fully labeled. Ungated like the catalog — it IS the shop window.
         app.MapGet("/v1/query/leaders", async (string? bands, int? limit, ISubstrateClient substrate, CancellationToken ct) =>

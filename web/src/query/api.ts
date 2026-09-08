@@ -31,6 +31,10 @@ export function runQuery(body: QueryBody, opts?: ApiOptions) {
   return apiPost<QueryResult>('/v1/query', body, opts);
 }
 
+export function queryHomeLeaders(opts?: ApiOptions) {
+  return apiGet<{ bands: import('./types').BandLeaders[] }>('/v1/query/leaders/home', opts);
+}
+
 export function queryLeaders(bands: number[], limit: number, opts?: ApiOptions) {
   return apiGet<{ bands: import('./types').BandLeaders[] }>(
     `/v1/query/leaders?bands=${bands.join(',')}&limit=${limit}`, opts);

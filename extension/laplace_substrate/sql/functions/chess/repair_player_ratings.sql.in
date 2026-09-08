@@ -33,3 +33,10 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- Explicit retained-provenance reconstruction; preserves source calibration.
+-- Recorded order is subject/type/object/observed timestamp/attestation id, with
+-- one retained record per native period. No historical period grouping is invented.
+CREATE OR REPLACE PROCEDURE consensus.repair_cells_batch(p_subjects bytea[], p_relations bytea[])
+    AS 'MODULE_PATHNAME', 'pg_laplace_repair_consensus_cells_batch'
+    LANGUAGE C;

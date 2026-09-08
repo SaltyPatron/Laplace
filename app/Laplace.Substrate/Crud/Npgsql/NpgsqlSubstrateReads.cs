@@ -519,11 +519,7 @@ public static partial class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<BandLeaderRow>> BandLeadersAsync(
         NpgsqlDataSource dataSource, int[] bands, int perBand, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT band, encode(subject_id, 'hex'), subject, relation,
-                   encode(object_id, 'hex'), object, eff_mu, witnesses
-            FROM ops.band_leaders(@bands, @per)
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("leaders.page"),
             static r => new BandLeaderRow(
                 r.GetInt32(0), r.GetString(1), r.IsDBNull(2) ? "" : r.GetString(2), r.GetString(3),
                 r.GetString(4), r.IsDBNull(5) ? "" : r.GetString(5), r.GetDecimal(6), r.GetInt64(7)),

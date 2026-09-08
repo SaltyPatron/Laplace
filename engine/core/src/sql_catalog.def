@@ -46,15 +46,15 @@ SQL_QUERY("display.definition_owners", "bytea[],bytea[]",
 SQL_QUERY("display.heads", "bytea[]",
     "SELECT entity_id,id,public.ST_AsBinary(public.ST_PointN(trajectory,1)) "
     "FROM laplace.physicalities WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL")
-SQL_QUERY("chess.repair_normalize", "bytea[],bytea,bytea",
+SQL_QUERY("chess.repair_normalize", "bytea[],bytea[]",
     "UPDATE laplace.attestations SET opponent_rating_fp1e9 = consensus.glicko2_neutral_mu() "
-        "WHERE subject_id = ANY($1) AND type_id = ANY(ARRAY[$2,$3]) "
+        "WHERE subject_id = ANY($1) AND type_id = ANY($2) "
         "AND opponent_rating_fp1e9 <> consensus.glicko2_neutral_mu()")
-SQL_QUERY("chess.repair_evidence", "bytea[],bytea,bytea",
+SQL_QUERY("consensus.repair_evidence", "bytea[],bytea[]",
     "SELECT subject_id,type_id,object_id,id,observation_count,sum_score_fp1e9,"
-        "opponent_rd_fp1e9,last_observed_at,fold_replayable FROM laplace.attestations "
-        "WHERE subject_id = ANY($1) AND type_id = ANY(ARRAY[$2,$3])")
-SQL_QUERY("chess.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[],int8[],timestamptz[]",
+        "opponent_rd_fp1e9,last_observed_at,fold_replayable,opponent_rating_fp1e9 FROM laplace.attestations "
+        "WHERE subject_id = ANY($1) AND type_id = ANY($2)")
+SQL_QUERY("consensus.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[],int8[],timestamptz[]",
     "INSERT INTO laplace.consensus AS c (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
         "SELECT laplace.consensus_id(b.subject,b.type,b.object),b.* FROM "
         "unnest($1,$2,$3,$4,$5,$6,$7,$8) b(subject,type,object,rating,rd,volatility,witness_count,last_observed_at) "
@@ -108,3 +108,12 @@ SQL_QUERY("chess.roster_rd_desc", "bytea,bytea,bytea,int8",
     "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
     "WHERE c.type_id=$2 AND c.object_id=$3 "
     "ORDER BY c.rd DESC,c.subject_id LIMIT $4")
+
+SQL_QUERY("leaders.page", "int4[],int4",
+    "SELECT band,encode(subject_id,'hex'),subject,relation,encode(object_id,'hex'),object,eff_mu,witnesses "
+    "FROM ops.band_leaders($1,$2)")
+SQL_QUERY("consensus.band_edges", "bytea[],int8,int8",
+    "SELECT subject_id,type_id,object_id,rating,rd,witness_count,(rating - 2*rd) AS eff_mu "
+    "FROM laplace.consensus WHERE type_id=ANY($1) AND object_id IS NOT NULL "
+    "AND NOT consensus.refuted(rating,rd) AND (rating - 2*rd)>=$2 "
+    "ORDER BY (rating - 2*rd) DESC,subject_id,type_id,object_id LIMIT $3")

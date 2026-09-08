@@ -667,7 +667,6 @@
       "extension/laplace_substrate/sql/functions/chess/chess_player_record.sql.in::HAS_RESULT": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_player_record.sql.in::HAS_WHITE": 2,
       "extension/laplace_substrate/sql/functions/chess/chess_players_by_initial.sql.in::OUTCOME": 1,
-      "extension/laplace_substrate/sql/functions/chess/chess_ranked.sql.in::OUTCOME": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_syzygy_line.sql.in::HAS_DTZ": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_syzygy_line.sql.in::HAS_WDL": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_time_pressure_outcome.sql.in::HAS_THINK_CLASS": 1,
