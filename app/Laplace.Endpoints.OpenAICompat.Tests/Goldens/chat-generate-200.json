@@ -8,24 +8,29 @@
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "the whale sings"
+        "content": " the whale sings"
       },
       "finish_reason": "stop"
     }
   ],
   "billing": null,
   "metadata": {
-    "generated_tokens": 3,
+    "reply_rows": 1,
     "session": "<session>",
+    "laplace": {
+      "provenance": [
+        {
+          "reply": " the whale sings"
+        }
+      ]
+    },
     "performance": {
       "substrate_ms": 0,
       "elapsed_ms": 0,
-      "output_utf8_bytes": 15,
-      "output_codepoints": 15,
+      "output_utf8_bytes": 16,
+      "output_codepoints": 16,
       "output_words": 3,
-      "first_result_ms": 0,
-      "generated_tokens": 3,
-      "generated_tokens_per_second": 0
+      "first_result_ms": 0
     }
   }
 }

@@ -8,36 +8,28 @@
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "A whale is a marine mammal.\nwhale IS_A cetacean."
+        "content": " the whale sings"
       },
       "finish_reason": "stop"
     }
   ],
   "billing": null,
   "metadata": {
-    "witnesses": 59,
-    "reply_rows": 2,
+    "reply_rows": 1,
     "session": "<session>",
     "laplace": {
       "provenance": [
         {
-          "reply": "A whale is a marine mammal.",
-          "eff_mu": 0.91,
-          "witnesses": 42
-        },
-        {
-          "reply": "whale IS_A cetacean.",
-          "eff_mu": 0.84,
-          "witnesses": 17
+          "reply": " the whale sings"
         }
       ]
     },
     "performance": {
       "substrate_ms": 0,
       "elapsed_ms": 0,
-      "output_utf8_bytes": 48,
-      "output_codepoints": 48,
-      "output_words": 9,
+      "output_utf8_bytes": 16,
+      "output_codepoints": 16,
+      "output_words": 3,
       "first_result_ms": 0
     }
   }

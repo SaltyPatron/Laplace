@@ -261,6 +261,35 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         GoldenJson.MatchNode("chat-converse-sse", await ReadSseAsync(response));
     }
 
+    [Theory]
+    [InlineData("laplace-converse-001")]
+    [InlineData("laplace-completions-001")]
+    public async Task ForwardAliases_PreserveExactSurfacesAndStepControlAcrossStreaming(string model)
+    {
+        var quote = await ApproveQuoteAsync("chat.completions", "forward-buffered-" + model, "evt_buffered_" + model);
+        using var buffered = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model, max_tokens = 1,
+            messages = new[] { new { role = "user", content = "whale" } }
+        },quote);
+        Assert.Equal(HttpStatusCode.OK,buffered.StatusCode);
+        var body = JsonNode.Parse(await buffered.Content.ReadAsStringAsync())!;
+        var content = (string?)body["choices"]?[0]?["message"]?["content"];
+        Assert.Equal(" the",content);
+
+        var streamQuote = await ApproveQuoteAsync("chat.completions", "forward-stream-" + model, "evt_stream_" + model);
+        using var streamed = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model, max_tokens = 1, stream = true,
+            messages = new[] { new { role = "user", content = "whale" } }
+        },streamQuote);
+        Assert.Equal(HttpStatusCode.OK,streamed.StatusCode);
+        var events = await ReadSseAsync(streamed);
+        var streamText = string.Concat(events.OfType<JsonObject>()
+            .Select(e => (string?)e["choices"]?[0]?["delta"]?["content"]));
+        Assert.Equal(content,streamText);
+    }
+
     [Fact]
     public async Task Golden_Chat_Generate()
     {

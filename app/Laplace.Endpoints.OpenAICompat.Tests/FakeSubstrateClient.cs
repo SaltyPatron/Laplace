@@ -187,11 +187,15 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     private const string IsAIdHex = "0123456789abcdef0123456789abcdef";
     private const string WordNetIdHex = "fedcba9876543210fedcba9876543210";
 
-    public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(
-        string prompt, byte[]? session, CancellationToken ct)
+    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, CancellationToken ct) =>
+        ForwardRowsAsync(prompt,session,default,ct);
+
+    private async Task<IReadOnlyList<ConverseRow>> ForwardRowsAsync(
+        string prompt,byte[]? session,ConverseOptions options,CancellationToken ct)
     {
         var reply = new System.Text.StringBuilder();
-        await foreach (var token in ForwardTurnStreamAsync(prompt,session,default,ct))
+        await foreach (var token in ForwardTurnStreamAsync(prompt,session,options,ct))
             reply.Append(token.Token);
         return reply.Length == 0 ? [] : [new ConverseRow(reply.ToString(),null,null)];
     }
@@ -200,7 +204,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
         options.Shape is null && options.Bands is null && !options.Elaborate
             && !string.Equals(options.LanguageSource, "request", StringComparison.Ordinal)
-            ? ConverseAsync(prompt, session, ct)
+            ? ForwardRowsAsync(prompt, session, options, ct)
             : Task.FromResult<IReadOnlyList<ConverseRow>>(
             [
                 new ConverseRow(
@@ -234,11 +238,14 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     {
         await Task.CompletedTask;
         if (prompt.Contains("unknown-topic",StringComparison.OrdinalIgnoreCase)) yield break;
+        if (steps < 1) yield break;
         yield return new GenerateToken(1, " the", 5);
 
         if (prompt.Contains("trigger-stream-error", StringComparison.OrdinalIgnoreCase))
             throw new SubstrateUnavailableException("substrate went away mid-walk.", new InvalidOperationException());
+        if (steps < 2) yield break;
         yield return new GenerateToken(2, " whale", 4);
+        if (steps < 3) yield break;
         yield return new GenerateToken(3, " sings", 3);
     }
 

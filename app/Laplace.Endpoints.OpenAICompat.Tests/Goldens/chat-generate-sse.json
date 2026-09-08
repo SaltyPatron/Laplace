@@ -76,9 +76,7 @@
     "choices": [
       {
         "index": 0,
-        "delta": {
-          "content": ""
-        },
+        "delta": {},
         "finish_reason": "stop"
       }
     ],
@@ -86,8 +84,8 @@
       "performance": {
         "substrate_ms": 0,
         "elapsed_ms": 0,
-        "output_utf8_bytes": 15,
-        "output_codepoints": 15,
+        "output_utf8_bytes": 16,
+        "output_codepoints": 16,
         "output_words": 3,
         "first_result_ms": 0,
         "generated_tokens": 3,
