@@ -26,7 +26,7 @@ DECLARE
     w_of      bytea := public.laplace_hash128_blake3('test/corpus/word-of');
     w_france  bytea := public.laplace_hash128_blake3('test/corpus/word-france');
     w_end     bytea := public.laplace_hash128_blake3('test/corpus/word-end');
-    w_target  bytea := public.laplace_hash128_blake3('test/corpus/word-target');
+    w_target  bytea := laplace.word_id('β'); -- mapped floor, no database row
     sp        bytea := public.laplace_hash128_blake3('test/corpus/space');
     zs_cat    bytea := public.laplace_hash128_blake3('test/corpus/zs-category');
     sent      bytea := public.laplace_hash128_blake3('test/corpus/sentence');
@@ -46,7 +46,7 @@ BEGIN
         (src, 0, type_t, NULL),
         (w_the, 2, type_word, src), (w_capital, 2, type_word, src),
         (w_of, 2, type_word, src), (w_france, 2, type_word, src),
-        (w_end, 2, type_word, src), (w_target, 2, type_word, src),
+        (w_end, 2, type_word, src),
         (sp, 2, type_word, src), (zs_cat, 0, type_t, src),
         (sent, 3, type_sent, src), (sent2, 3, type_sent, src), (doc, 4, type_doc, src);
 

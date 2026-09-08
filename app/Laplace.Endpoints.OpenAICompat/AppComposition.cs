@@ -76,6 +76,7 @@ internal static class AppComposition
         services.AddSingleton<ExploreDecomposeService>();
         services.AddSingleton<WitnessCatalog>(_ => WitnessCatalog.Load());
         services.AddSingleton<TurnWitness>();
+        services.AddSingleton<IConversationWitness>(sp => sp.GetRequiredService<TurnWitness>());
         services.AddServerHostedService(sp => sp.GetRequiredService<TurnWitness>());
         services.AddServerHostedService<CatalogPrewarmService>();
 

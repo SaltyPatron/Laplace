@@ -128,7 +128,7 @@ laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, 
     if (!unpack_plan)
     {
         Oid types[1] = {BYTEAARRAYOID};
-        SPIPlanPtr plan = SPI_prepare(UNPACK_QUERY, 1, types);
+        SPIPlanPtr plan = SPI_prepare_cursor(UNPACK_QUERY, 1, types, CURSOR_OPT_PARALLEL_OK);
         if (!plan || SPI_keepplan(plan) != 0)
             elog(ERROR, "trajectory_continuations: preparing containment query failed");
         unpack_plan = plan;

@@ -9,7 +9,7 @@ using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
-internal sealed class TurnWitness : BackgroundService
+internal sealed class TurnWitness : BackgroundService, IConversationWitness
 {
     private readonly SubstrateClient _substrate;
     private readonly ILogger<TurnWitness> _log;
@@ -32,10 +32,7 @@ internal sealed class TurnWitness : BackgroundService
 
     public bool IsOnline { get; private set; }
 
-    /// <summary>WebApplicationFactory golden tests: gate open before BackgroundService starts.</summary>
-    internal bool TestForceAvailable { get; set; }
-
-    public bool IsAvailable => TestForceAvailable || IsOnline;
+    public bool IsAvailable => IsOnline;
 
     public TurnWitness(SubstrateClient substrate, ILogger<TurnWitness> log)
     {

@@ -28,7 +28,7 @@ static void
 read_set(int which, int n, Oid *types, Datum *args)
 {
     if (plans[which] == NULL) {
-        plans[which] = SPI_prepare(laplace_sql_query_text(keys[which]), n, types);
+        plans[which] = SPI_prepare_cursor(laplace_sql_query_text(keys[which]), n, types, CURSOR_OPT_PARALLEL_OK);
         if (!plans[which] || SPI_keepplan(plans[which]) != 0)
             elog(ERROR, "chess roster: cannot retain %s", keys[which]);
     }

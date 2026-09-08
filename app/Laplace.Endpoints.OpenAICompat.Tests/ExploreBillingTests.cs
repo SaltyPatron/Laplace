@@ -76,6 +76,7 @@ public sealed class ExploreBillingTests : IClassFixture<ExploreBillingFactory>
         var quoteId = await ApproveQuoteAsync("inspect", "explore-inspect-tenant");
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/v1/explore/entities/{hit!.IdHex}");
         request.Headers.Add("X-Laplace-Quote-Id", quoteId);
+        request.Headers.Add("X-Laplace-Tenant", "explore-inspect-tenant");
         using var response = await _client.SendAsync(request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

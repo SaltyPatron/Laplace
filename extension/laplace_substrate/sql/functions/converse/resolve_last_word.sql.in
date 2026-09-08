@@ -6,6 +6,7 @@ CREATE OR REPLACE FUNCTION converse.resolve_last_word(p_phrase text)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
     SELECT pw.id FROM converse.prompt_words(p_phrase) pw
+    JOIN laplace.entities e ON e.id=pw.id
     WHERE pw.id IS NOT NULL
     ORDER BY pw.ord DESC
     LIMIT 1;

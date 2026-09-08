@@ -78,6 +78,7 @@
 #include "steer_candidates.h"
 #include "consensus_neighbors.h"
 #include "trajectory_continuations.h"
+#include "perfcache_native.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 
@@ -537,13 +538,54 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                                     HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
             for (int i = 0; i < n_cand; ++i)
                 hash_search(seen, VARDATA_ANY(DatumGetByteaPP(cand[i].obj)), HASH_ENTER, NULL);
-            Portal portal = SPI_cursor_open(NULL,
+            /* Mapped floor content is complete without a PostgreSQL entity or
+             * physicality row. Probe it before the persisted-content batch;
+             * visited identities still cannot re-enter through the graph. */
+            Datum *front_ids; bool *front_nulls; int front_count;
+            HASHCTL visited_ctl = {0};
+            visited_ctl.keysize = 16;
+            visited_ctl.entrysize = sizeof(CandIndex);
+            visited_ctl.hcxt = walk_cxt;
+            HTAB *visited_ids = hash_create("semantic visited identities", ctx_len + 1,
+                &visited_ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            for (int i = 0; i < ctx_len; ++i)
+                hash_search(visited_ids, VARDATA_ANY(DatumGetByteaPP(ctx[i])), HASH_ENTER, NULL);
+            deconstruct_array(front, BYTEAOID, -1, false, TYPALIGN_INT,
+                &front_ids, &front_nulls, &front_count);
+            int missing_count = 0;
+            for (int i = 0; i < front_count; ++i)
+            {
+                uint32 cp; bool found;
+                if (front_nulls[i]) continue;
+                const uint8 *id = (const uint8 *)VARDATA_ANY(DatumGetByteaPP(front_ids[i]));
+                if (hash_search(visited_ids, id, HASH_FIND, NULL) != NULL) continue;
+                if (!laplace_perfcache_codepoint_for_id(id, &cp))
+                {
+                    front_ids[missing_count++] = front_ids[i];
+                    continue;
+                }
+                hash_search(seen, id, HASH_ENTER, &found);
+                if (found) continue;
+                ensure_candidate_capacity(&cand, &cand_capacity, (uint64)n_cand + 1, walk_cxt);
+                old = MemoryContextSwitchTo(walk_cxt);
+                cand[n_cand] = (Cand){0};
+                cand[n_cand++].obj = copy_id_datum(front_ids[i]);
+                MemoryContextSwitchTo(old);
+            }
+            hash_destroy(visited_ids);
+            ArrayType *unmapped = missing_count ? construct_array(front_ids, missing_count, BYTEAOID,
+                -1, false, TYPALIGN_INT) : construct_empty_array(BYTEAOID);
+            pfree(front);
+            front = unmapped;
+            args[0] = PointerGetDatum(front);
+            pfree(front_ids); pfree(front_nulls);
+            Portal portal = missing_count ? SPI_cursor_open(NULL,
                                             semantic_plan,
-                                            args, NULL, true);
-            if (portal == NULL)
+                                            args, NULL, true) : NULL;
+            if (missing_count && portal == NULL)
                 elog(ERROR, "walk_continuations: semantic proposal cursor open failed: %s",
                      SPI_result_code_string(SPI_result));
-            for (;;)
+            while (portal != NULL)
             {
                 SPI_cursor_fetch(portal, true, 50000);
                 if (SPI_processed == 0)
@@ -580,7 +622,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 SPI_freetuptable(SPI_tuptable);
                 SPI_tuptable = NULL;
             }
-            SPI_cursor_close(portal);
+            if (portal != NULL) SPI_cursor_close(portal);
             hash_destroy(seen);
             pfree(types); pfree(front); pfree(visited);
             for (int i = 0; i < 5; ++i) pfree(DatumGetPointer(type_ids[i]));

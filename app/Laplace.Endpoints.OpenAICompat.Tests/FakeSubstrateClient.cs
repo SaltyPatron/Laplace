@@ -177,6 +177,11 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
 
 internal sealed class FakeSubstrateClient : ISubstrateClient
 {
+    public IAsyncEnumerable<GenerateToken> ForwardTurnStreamAsync(
+        string prompt,byte[]? session,ConverseOptions options,CancellationToken ct) =>
+        WalkTextStreamAsync(prompt,options.MaxTokens ?? 128,options.Window ?? 5,
+            options.Temperature ?? 0.6,options.TopK ?? 10,ct);
+
     private const string WhaleIdHex = "00112233445566778899aabbccddeeff";
     private const string CetaceanIdHex = "ffeeddccbbaa99887766554433221100";
     private const string IsAIdHex = "0123456789abcdef0123456789abcdef";

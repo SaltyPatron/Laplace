@@ -14,7 +14,7 @@ internal static class InferenceEndpoints
 
     public static void MapOpenAiCompatEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
+        app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, IConversationWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
         {
             var totalClock = Stopwatch.StartNew();
             var payload = await EndpointJson.ReadJsonAsync<ChatCompletionsRequest>(request, ct);
@@ -245,7 +245,7 @@ internal static class InferenceEndpoints
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
+        app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, IConversationWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<CompletionsRequest>(request, ct);
             if (payload is null)
@@ -480,7 +480,7 @@ internal static class InferenceEndpoints
         return list;
     }
 
-    private static IResult? RequireTurnWitness(TurnWitness turnWitness) =>
+    private static IResult? RequireTurnWitness(IConversationWitness turnWitness) =>
         turnWitness.IsAvailable
             ? null
             : EndpointJson.ServiceUnavailable(

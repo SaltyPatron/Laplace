@@ -34,7 +34,7 @@ pg_laplace_band_leaders(PG_FUNCTION_ARGS)
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT) elog(ERROR, "band leaders: SPI connect failed");
     Oid edge_types[] = {INT4OID, INT8OID};
     if (!edges_plan) {
-        edges_plan = SPI_prepare(laplace_sql_query_text("leaders.arena"), 2, edge_types);
+        edges_plan = SPI_prepare_cursor(laplace_sql_query_text("leaders.arena"), 2, edge_types, CURSOR_OPT_PARALLEL_OK);
         if (!edges_plan || SPI_keepplan(edges_plan) != 0) elog(ERROR, "band leaders: cannot retain arena read");
     }
     BandLeader *rows = NULL; Size count = 0;
@@ -69,7 +69,7 @@ pg_laplace_band_leaders(PG_FUNCTION_ARGS)
         }
         Oid label_types[] = {BYTEAARRAYOID};
         if (!labels_plan) {
-            labels_plan = SPI_prepare(laplace_sql_query_text("display.labels"), 1, label_types);
+            labels_plan = SPI_prepare_cursor(laplace_sql_query_text("display.labels"), 1, label_types, CURSOR_OPT_PARALLEL_OK);
             if (!labels_plan || SPI_keepplan(labels_plan) != 0) elog(ERROR, "band leaders: cannot retain display read");
         }
         Datum args[] = {PointerGetDatum(construct_array(ids, 2 * count, BYTEAOID, -1, false, TYPALIGN_INT))};

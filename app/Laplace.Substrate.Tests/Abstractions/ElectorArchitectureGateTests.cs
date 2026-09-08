@@ -51,7 +51,6 @@ public sealed class ElectorArchitectureGateTests
     /// </summary>
     private static readonly string[] PerConstituentCoherenceConsumers =
     [
-        "extension/laplace_substrate/sql/functions/generation/walk_text.sql.in",
     ];
 
     /// <summary>
@@ -184,6 +183,17 @@ public sealed class ElectorArchitectureGateTests
                 $"{relativePath} must preserve the per-constituent frontier, not collapse through converse.elect*.");
             Assert.Empty(ExtractElectorOrders(sql));
         }
+    }
+
+    [Fact]
+    public void ForwardPass_RoutesTheCanonicalPromptTreeWithoutSingleTopicElection()
+    {
+        var sql = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "extension","laplace_substrate","sql","functions","generation","walk_text.sql.in"));
+        Assert.Contains("converse.prompt_tree(p_prompt)", sql);
+        Assert.Contains("array_agg(p.id ORDER BY p.byte_offset, p.node_index)", sql);
+        Assert.Contains("generation.forward_frontier_ids", sql);
+        Assert.DoesNotMatch(ElectCall, StripComments(sql));
     }
 
     [Fact]

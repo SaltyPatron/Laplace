@@ -128,13 +128,13 @@ SELECT converse.chat('what is a dog?', NULL::bytea, NULL::bytea, 'describe') AS 
 --    into consensus (the OODA close lives at the frontends, through the writer
 --    spine, with evidence). 'dog p' are adjacent existing tokens -- the old
 --    in-SQL close would have folded a PRECEDES cell for them.
-SELECT converse.chat('dog p', convert_to('loop1', 'UTF8')) IS NOT NULL AS session_chat_ran;
+SELECT converse.chat('dog p', public.laplace_hash128_blake3('loop1'), NULL::bytea, 'describe') IS NOT NULL AS session_chat_ran;
 SELECT count(*) AS precedes_cells_written
 FROM laplace.consensus c
 WHERE c.type_id = laplace.relation_type_id('PRECEDES')
   AND c.subject_id = laplace.word_id('dog');
 SELECT count(*) AS session_rows
-FROM converse.session_topics WHERE session_id = convert_to('loop1', 'UTF8');
+FROM converse.session_topics WHERE session_id = public.laplace_hash128_blake3('loop1');
 
 -- 5. THE LOOP: refute the leading definition through the same consensus_upsert
 --    lane the feedback frontends (/v1/feedback, laplace attest) use...

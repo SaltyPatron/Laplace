@@ -75,7 +75,6 @@ public sealed record AgentUsage(
 public enum AgentRelation
 {
     AppearsIn,
-    Precedes,
     HasAttribution,
     HasRole,
     AuthoredBy,

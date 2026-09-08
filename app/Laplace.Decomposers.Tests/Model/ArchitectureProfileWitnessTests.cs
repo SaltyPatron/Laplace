@@ -96,16 +96,16 @@ public sealed class ArchitectureProfileWitnessTests
         var profile = ArchitectureProfile.For(cfg);
         Assert.Equal(2.5e-12, profile.NormEps);
         Assert.Equal("gelu_new", profile.HiddenAct);
-        Assert.Equal(1, profile.ResolveFfnActCode(gatePresent: false));
-        Assert.Equal(1, profile.ResolveFfnActCode(gatePresent: true)); // GELU ignores gate
+        Assert.Equal(2, profile.ResolveFfnActCode(gatePresent: false));
+        Assert.Equal(2, profile.ResolveFfnActCode(gatePresent: true)); // tanh-GELU preserves its approximation
     }
 
     [Fact]
-    public void ResolveFfnActCode_silu_requires_gate_tensor()
+    public void ResolveFfnActCode_silu_preserves_gated_and_ungated_functions()
     {
         var p = ArchitectureProfile.Llama with { HiddenAct = "silu", NormEps = 3e-5 };
         Assert.Equal(0, p.ResolveFfnActCode(gatePresent: true));
-        Assert.Equal(1, p.ResolveFfnActCode(gatePresent: false));
+        Assert.Equal(5, p.ResolveFfnActCode(gatePresent: false));
         Assert.Equal(3e-5, p.NormEps);
     }
 
@@ -139,6 +139,6 @@ public sealed class ArchitectureProfileWitnessTests
         };
         var profile = ArchitectureProfile.For(cfg);
         Assert.Equal("gelu_new", profile.HiddenAct);
-        Assert.Equal(1, profile.ResolveFfnActCode(gatePresent: false));
+        Assert.Equal(2, profile.ResolveFfnActCode(gatePresent: false));
     }
 }

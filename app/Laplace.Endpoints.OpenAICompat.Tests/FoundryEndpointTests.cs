@@ -14,6 +14,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 public sealed class FoundryEndpointTests : IClassFixture<FoundryTestFactory>
 {
     private readonly HttpClient _client;
+    private readonly Dictionary<string,string> _quoteTenants = new();
 
     private const string SampleRecipe = """
         {
@@ -122,6 +123,7 @@ public sealed class FoundryEndpointTests : IClassFixture<FoundryTestFactory>
         webhook.Headers.Add("Stripe-Signature", SignedWebhookFactory.Sign(payload));
         using var wh = await _client.SendAsync(webhook);
         Assert.Equal(HttpStatusCode.OK, wh.StatusCode);
+        _quoteTenants.Add(quoteId,tenant);
         return quoteId;
     }
 
@@ -129,6 +131,7 @@ public sealed class FoundryEndpointTests : IClassFixture<FoundryTestFactory>
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(payload) };
         request.Headers.Add("X-Laplace-Quote-Id", quoteId);
+        request.Headers.Add("X-Laplace-Tenant", _quoteTenants[quoteId]);
         return await _client.SendAsync(request);
     }
 }

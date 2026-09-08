@@ -132,7 +132,7 @@ public sealed class ConversationProvenanceGateTests
         // legitimately deposits through the plain UserPrompt/Response sources —
         // only a conversational turn's deposit must carry tenant/session provenance.
         var text = Read("app/Laplace.Endpoints.Mcp/SubstrateTools.cs");
-        var depositTurn = ExtractMethod(text, "private void DepositTurn");
+        var depositTurn = ExtractMethod(text, "private bool DepositTurn");
         // Routes through the shared closer WITH the tenant — the provenance the
         // plain note lane deliberately lacks.
         Assert.Contains("CloseAsync(McpTenant", depositTurn);

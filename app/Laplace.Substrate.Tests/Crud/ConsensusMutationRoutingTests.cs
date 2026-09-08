@@ -79,21 +79,19 @@ public sealed class ConsensusMutationRoutingTests
         // authoritative testimony regardless of the current consensus values.
         Assert.DoesNotContain("IF NOT FOUND THEN\n        RETURN", sql,
             StringComparison.Ordinal);
-        Assert.Contains("SELECT DISTINCT evidence.subject_id, evidence.type_id, evidence.object_id", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("evidence.type_id = p_played", sql, StringComparison.Ordinal);
-        Assert.Contains("evidence.type_id = p_outcome", sql, StringComparison.Ordinal);
-        Assert.Contains("pairing.context_id IS NOT DISTINCT FROM evidence.context_id", sql,
-            StringComparison.Ordinal);
+        Assert.Contains("pg_laplace_repair_player_ratings_batch", sql, StringComparison.Ordinal);
+        Assert.Contains("LANGUAGE C", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("current.witness_count", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("current.last_observed_at", sql, StringComparison.Ordinal);
-        Assert.Contains("ORDER BY evidence.last_observed_at, evidence.id", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("target.witness_count, target.last_observed_at", sql,
-            StringComparison.Ordinal);
-        Assert.Contains("IS DISTINCT FROM", sql, StringComparison.Ordinal);
+        var native = Read("extension", "laplace_substrate", "src", "chess_rating_repair.c");
+        var catalog = Read("engine", "core", "src", "sql_catalog.def");
+        Assert.Contains("PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)", native);
+        Assert.Contains("qsort(evidence, n, sizeof(RepairEvidence), evidence_compare)", native);
+        Assert.Contains("glicko2_fold_uniform_period", native);
+        Assert.Contains("consensus.repair_evidence", native);
+        Assert.Contains("consensus.repair_write", native);
+        Assert.Contains("WHERE subject_id = ANY($1) AND type_id = ANY($2)", catalog);
+        Assert.Contains("WHERE ROW(c.rating,c.rd,c.volatility,c.witness_count,c.last_observed_at) IS DISTINCT FROM", catalog);
     }
 
     [Fact]
@@ -111,16 +109,12 @@ public sealed class ConsensusMutationRoutingTests
             .ToArray();
 
         Assert.Equal([
-            "extension/laplace_substrate/sql/functions/chess/repair_player_ratings.sql.in",
             "extension/laplace_substrate/sql/functions/ops/evict_source.sql.in",
             "extension/laplace_substrate/sql/functions/ops/refold_source.sql.in",
         ], writers);
 
-        var repair = File.ReadAllText(Path.Combine(RepoRoot, writers[0]));
-        var evict = File.ReadAllText(Path.Combine(RepoRoot, writers[1]));
-        var refold = File.ReadAllText(Path.Combine(RepoRoot, writers[2]));
-        Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", repair,
-            StringComparison.Ordinal);
+        var evict = File.ReadAllText(Path.Combine(RepoRoot, writers[0]));
+        var refold = File.ReadAllText(Path.Combine(RepoRoot, writers[1]));
         Assert.DoesNotMatch(@"\b(?:UPDATE|DELETE\s+FROM)\s+laplace\.consensus\b", evict);
         Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", evict,
             StringComparison.Ordinal);

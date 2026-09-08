@@ -17,6 +17,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
 {
     private readonly HttpClient _client;
+    private readonly Dictionary<string,string> _quoteTenants = new();
 
     public GoldenShapeTests(GoldenFactory factory)
     {
@@ -873,7 +874,9 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return json.RootElement.GetProperty("quote_id").GetString()!;
+        var quoteId = json.RootElement.GetProperty("quote_id").GetString()!;
+        _quoteTenants.Add(quoteId,tenant);
+        return quoteId;
     }
 
     private async Task<string> ApproveQuoteAsync(string serviceId, string tenant, string eventId)
@@ -915,6 +918,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     {
         var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Add("X-Laplace-Quote-Id", quoteId);
+        request.Headers.Add("X-Laplace-Tenant", _quoteTenants[quoteId]);
         return await _client.SendAsync(request);
     }
 
@@ -925,6 +929,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
             Content = JsonContent.Create(payload)
         };
         request.Headers.Add("X-Laplace-Quote-Id", quoteId);
+        request.Headers.Add("X-Laplace-Tenant", _quoteTenants[quoteId]);
         return await _client.SendAsync(request);
     }
 

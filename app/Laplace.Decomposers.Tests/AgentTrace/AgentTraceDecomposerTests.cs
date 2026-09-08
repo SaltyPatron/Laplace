@@ -135,11 +135,11 @@ public sealed class AgentTraceDecomposerTests
                 a.TypeId == hasInputTokens && a.SubjectId == orderedTurnIds[1]
                 && a.ObjectId == tokens120!.Value);
 
-            // The corroborating Q→A cell (live-lane parity): prompt root PRECEDES the
-            // reply text root — and no per-adjacency turn chain beyond it.
+            // Live and imported turns retain occurrence order in the physicality
+            // above, without manufacturing a separate PRECEDES consensus cell.
             Hash128? replyRoot = ContentTierSpine.ResolveRoot("Running the gate now.");
             Assert.NotNull(replyRoot);
-            Assert.Contains(attestations, a =>
+            Assert.DoesNotContain(attestations, a =>
                 a.TypeId == precedes && a.SubjectId == promptRoot.Value
                 && a.ObjectId == replyRoot!.Value);
             Assert.DoesNotContain(attestations, a =>

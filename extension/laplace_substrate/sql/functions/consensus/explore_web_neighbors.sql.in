@@ -37,3 +37,13 @@ BEGIN ATOMIC
     SELECT * FROM consensus.explore_web_neighbors(
         p_subjects, NULL::bytea[], p_limit, false);
 END;
+
+-- Single-entity callers use the same batch selection and ordering.
+CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(p_subject bytea, p_limit int)
+    RETURNS TABLE(nbr bytea, type_id bytea, rating bigint, rd bigint,
+                  witness_count bigint, outbound boolean)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT e.nbr,e.type_id,e.rating,e.rd,e.witness_count,e.outbound
+    FROM consensus.explore_web_neighbors(ARRAY[p_subject],p_limit) e;
+END;

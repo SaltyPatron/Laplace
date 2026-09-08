@@ -27,7 +27,7 @@ public sealed class SpiParallelPlanGateTests
     /// Parallelism is not available to them and asking for it would be wrong, not slow.
     /// </summary>
     private static readonly HashSet<string> ReadWritePlanFiles =
-        new(StringComparer.OrdinalIgnoreCase) { "fold_route.c" };
+        new(StringComparer.OrdinalIgnoreCase) { "fold_route.c", "chess_rating_repair.c", "conversation_session.c" };
 
     // Matches a real call, not the "SPI_prepare(unpack) failed" text inside elog messages.
     private static readonly Regex SerialPrepare = new(
@@ -78,7 +78,7 @@ public sealed class SpiParallelPlanGateTests
             var path = Path.Combine(srcRoot, name);
             Assert.True(File.Exists(path), $"exempt file does not exist: {name}");
             Assert.Matches(
-                new Regex(@"SPI_execute_plan\([^)]*,\s*false\s*,", RegexOptions.Singleline),
+                new Regex(@"SPI_(?:execute_plan|execute_with_args|cursor_open)\([^)]*,\s*false\s*[,)]", RegexOptions.Singleline),
                 File.ReadAllText(path));
         }
     }

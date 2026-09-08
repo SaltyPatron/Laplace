@@ -109,7 +109,7 @@ specified numerical latency requirement. Cache state and selected ids matter.
 
 ## Local state at audit
 
-Uncommitted implementations exist for native display/browse/container reads,
+Local commits implement native display/browse/container reads,
 overflow arithmetic, chess calibration/repair, public-query controls, a SQL
 catalog/C# bridge, and UI labeling. These are not delivered. Browse currently
 delegates whole-composition membership to the existing containment API; complete
@@ -122,7 +122,7 @@ native artifacts, both display gates and both new perfcache reader tests pass
 entity existence, tier existence, and content descent avoid opening a connection.
 Core codepoint/whitespace checks pass (17/17), including positional batch bits,
 duplicates, unknowns, output bounds, and stale-Unicode rejection. SQL catalog and
-ISA gates pass; the catalog owns 22 statements with 486 legacy runtime literals
+ISA gates pass; the merged catalog owns 42 statements with 471 legacy runtime literals
 still inventoried. The complete generation corpus fixture passes in the isolated
 `laplace_query_repair_verify` database with the new adjacency binding, including
 repeated separators/words, ordinal gaps and RLE. Bindings were rolled back.
@@ -161,5 +161,41 @@ route, and explicit provenance-preserving general cell replay. Full proof expose
 and corrected a missing ASP.NET rate-limiter import, existing managed witness
 admission outside native C, and stale gate entries after moving SQL ownership.
 Full proof and coordinated main deployment remain implementation obligations.
-The inventor is merging #1514; integrate these changes with that revision. No
+The inventor authorized integration onto main and a fresh database/reseed. PR
+#1514 is now integrated locally in c34e9838, including conversation SQL migrated
+into the shared native catalog without increasing the inline-SQL exceptions. No
 additional feature branches or worktrees are to be created until this work is clean.
+
+## Current-data execution receipt
+
+Direct psql execution against the installed database is preserved in the private
+`query-repair-20260908/forward-demo/current-data.sql` and `.log`, with selected
+evidence and A* in `elected-evidence.sql` and `elected-evidence-corrected.log`.
+These are read-only queries; no model ingestion or prompt recording was required.
+
+- `dog` resolves to `01cdcce152940fce07b431bc4f3bc2d5` in 0.548 ms.
+- Its physicality closure retains three ordered constituents (58.087 ms).
+- A one-hop route returns eight rated edges (71.724 ms).
+- Trajectory successors return twelve candidates with separator IDs (25.419 ms).
+- Three native forward steps select `loyal friend`, `pet`, `animal` (297.930 ms).
+  The first two have retained IS_A evidence with 12 and 10 observations and their
+  original source/context/calibration. This demonstrates a bounded walk, not a
+  completed conversational response.
+- Typed A* finds dog → pet in 10.662 ms.
+- Final display of those three selected identities costs 544.823 ms: display is
+  still a material installed-path offender. Punctuation display also duplicates
+  rows for one input; the pending native replacement addresses that defect.
+- The earlier installed `converse.chat('dog')` call reached its 15-second timeout
+  in `relation_mask_types` under `forward_text`. End-to-end chat remains failed
+  acceptance until the combined deployment passes the same operator request.
+- The attempted DENOTES distribution was empty: this database has no DENOTES
+  family. The actual sense edge is IS_SYNONYM_OF; the demonstrated IS_A
+  distribution is over retained evidence, not an invented relation.
+
+Maintenance scripts used Python to orchestrate historical repairs and capture
+diagnostics. They are not a Laplace inference dependency. The executed substructure
+script is preserved as `substructure/repair-executed.py`; its native replay and
+commit are recorded in `substructure/manifest.json`. The chess transaction is
+preserved as `attempt2/apply.sql`. Subsequent database demonstrations use explicit
+SQL through psql. Existing repository build/CI Python checks remain identified
+as such; their use must not conceal database mutation.

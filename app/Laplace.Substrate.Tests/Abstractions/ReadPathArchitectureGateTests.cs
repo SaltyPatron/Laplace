@@ -370,7 +370,7 @@ public sealed class ReadPathArchitectureGateTests
         Assert.DoesNotContain("containers_of(topic_word, 1, 400)", walk, StringComparison.Ordinal);
         Assert.DoesNotContain("LIMIT 32", compose, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("for (int s = 0; s < n_seen", containers, StringComparison.Ordinal);
-        Assert.Contains("HTAB   *seen", containers, StringComparison.Ordinal);
+        Assert.Matches(@"HTAB\s*\*seen\s*=\s*hash_create", containers);
     }
 
     [Fact]

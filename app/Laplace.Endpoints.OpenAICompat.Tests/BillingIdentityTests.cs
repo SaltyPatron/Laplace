@@ -48,15 +48,8 @@ public sealed class KeyModeFactory : WebApplicationFactory<Program>
             services.RemoveAll<ISubstrateClient>();
             services.AddSingleton<ISubstrateClient, FakeSubstrateClient>();
             services.RemoveAll<IHostedService>();
-            services.RemoveAll<TurnWitness>();
-            services.AddSingleton<TurnWitness>(sp =>
-            {
-                var witness = new TurnWitness(
-                    sp.GetRequiredService<SubstrateClient>(),
-                    sp.GetRequiredService<ILogger<TurnWitness>>());
-                witness.TestForceAvailable = true;
-                return witness;
-            });
+            services.RemoveAll<IConversationWitness>();
+            services.AddSingleton<IConversationWitness,RecordingConversationWitness>();
             services.PostConfigure<StripeBillingOptions>(o =>
             {
                 TestBillingOptions.IsolateFromHostStripe(o);

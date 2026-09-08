@@ -138,9 +138,11 @@ public class TypeIdLawTests
         foreach (var f in Directory.EnumerateFiles(cliDir, "*.cs", SearchOption.AllDirectories))
             sb.Append(File.ReadAllText(f));
         var text = sb.ToString();
-        // CLI walks via the shared catalog reader; the SQL text lives once in NpgsqlSubstrateReads.
+        // CLI and HTTP consume the canonical forward-turn rows via the native catalog.
         Assert.Contains("WalkTextAsync", text, StringComparison.Ordinal);
-        Assert.Contains("generation.walk_text", File.ReadAllText(reads), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SqlCatalog.Get(\"conversation.forward_turn\")", File.ReadAllText(reads), StringComparison.Ordinal);
+        Assert.Contains("converse.forward_turn($1,$2,$3,$4,$5,$6)",
+            File.ReadAllText(Path.Combine(repoRoot,"engine","core","src","sql_catalog.def")), StringComparison.Ordinal);
         Assert.DoesNotContain("generation.generate(", text, StringComparison.Ordinal);
     }
 
