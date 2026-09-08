@@ -61,11 +61,18 @@ def main() -> int:
 
     # Exact observation identity precedes routing. The retired prompt_state and
     # coherence heuristics must not rewrite the native prompt-tree operand.
-    assert count(walk, "converse.prompt_tree(p_prompt)") == 1, \
+    assert count(walk, "converse.prompt_operands(p_prompt)") == 1, \
         "forward_text must resolve the exact prompt tree exactly once"
     assert "converse.prompt_state(" not in walk
     assert "converse.prompt_coherence(" not in walk
-    assert "p.root_id" in walk
+    assert "context_ids AS ids FROM observation" in walk
+    assert "seed_ids AS ids FROM observation" in walk
+    native = (ROOT / "extension/laplace_substrate/src/content_resolve.c").read_text()
+    operands = native.split("pg_laplace_prompt_operands(PG_FUNCTION_ARGS)", 1)[1].split(
+        "pg_laplace_prompt_tree(PG_FUNCTION_ARGS)", 1)[0]
+    assert count(operands, "laplace_content_tree_build_public(") == 1
+    assert "seed_ids[0] = root" in operands
+    assert "content_witness_tree_root_id(tree, &root)" in operands
     assert "generation.forward_frontier_ids(" in walk
     assert "generation.forward_frontier(p_prompt" not in walk
 

@@ -1,10 +1,25 @@
 -- Canonical prompt identity is independent of whether or how often a case
 -- variant has been witnessed. Evidence expansion belongs to typed routing.
-CREATE OR REPLACE FUNCTION converse.prompt_tree(p_text text)
+CREATE OR REPLACE FUNCTION converse.prompt_operands(p_text text)
+    RETURNS TABLE(root_id bytea, context_ids bytea[], context_nodes int[], seed_ids bytea[])
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_prompt_operands'
+    LANGUAGE C STABLE PARALLEL SAFE ROWS 1;
+
+CREATE OR REPLACE FUNCTION converse.prompt_tree(p_text text, p_include_surfaces boolean)
     RETURNS TABLE(root_id bytea, node_index int, parent_index int, tier smallint,
                   byte_offset int, byte_length int, id bytea, surface text)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_prompt_tree'
     LANGUAGE C STABLE PARALLEL SAFE;
+
+-- Inspection includes surfaces. Execution consumes the same canonical tree
+-- without allocating a text copy for every ancestor and descendant.
+CREATE OR REPLACE FUNCTION converse.prompt_tree(p_text text)
+    RETURNS TABLE(root_id bytea, node_index int, parent_index int, tier smallint,
+                  byte_offset int, byte_length int, id bytea, surface text)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT * FROM converse.prompt_tree(p_text, true);
+END;
 
 DROP FUNCTION IF EXISTS laplace.prompt_words(text);
 CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)

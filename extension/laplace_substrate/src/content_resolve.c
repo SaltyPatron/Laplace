@@ -171,6 +171,123 @@ word_seg_emit(void *ctx_, uint32_t ordinal,
  * Offsets address the canonical tree text, never a case-folded lookup label. */
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_tree);
 
+typedef struct PromptOperand
+{
+    hash128_t id;
+    uint32_t node;
+    uint32_t offset;
+} PromptOperand;
+
+static int
+prompt_operand_order(const void *a, const void *b)
+{
+    const PromptOperand *left = a, *right = b;
+    if (left->offset != right->offset)
+        return left->offset < right->offset ? -1 : 1;
+    return left->node < right->node ? -1 : left->node > right->node;
+}
+
+static int
+prompt_seed_order(const void *a, const void *b)
+{
+    return memcmp(a, b, sizeof(hash128_t));
+}
+
+/* The native tree already owns parent links, tiers, positions and identities.
+ * Build execution operands directly from those arrays, without materializing
+ * every ancestor's text or joining the tree back to itself in PostgreSQL.
+ * Repeated lexical occurrences remain repeated ordered operands. Probe seeds
+ * alone are deduplicated; they do not replace the ordered observation. */
+PG_FUNCTION_INFO_V1(pg_laplace_prompt_operands);
+
+Datum
+pg_laplace_prompt_operands(PG_FUNCTION_ARGS)
+{
+    tier_tree_t *tree = NULL;
+    text *input;
+    int rc;
+    InitMaterializedSRF(fcinfo, 0);
+    if (PG_ARGISNULL(0)) return (Datum) 0;
+    input = PG_GETARG_TEXT_PP(0);
+    if (VARSIZE_ANY_EXHDR(input) == 0) return (Datum) 0;
+    rc = laplace_content_tree_build_public(
+        (const uint8_t *) VARDATA_ANY(input), VARSIZE_ANY_EXHDR(input), &tree);
+    if (rc != 0)
+        ereport(ERROR, (errmsg("prompt_operands: canonical composition failed (%d)", rc)));
+    PG_TRY();
+    {
+        size_t count = tier_tree_node_count(tree);
+        const uint8_t *tiers = tier_tree_tier_array(tree);
+        const uint32_t *parents = tier_tree_parent_idx_array(tree);
+        const uint32_t *offsets = tier_tree_text_off_array(tree);
+        const hash128_t *ids = tier_tree_id_array(tree);
+        hash128_t root;
+        PromptOperand *operands;
+        hash128_t *context_ids, *seed_ids;
+        int n_operands = 0, n_seeds = 1;
+        ArrayBuildState *nodes = NULL;
+        HASHCTL ctl = {0};
+        HTAB *seen;
+        ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+        Datum values[4];
+        bool nulls[4] = {false};
+        if (count > INT_MAX || count > MaxAllocSize / sizeof(PromptOperand) ||
+            content_witness_tree_root_id(tree, &root) != 0)
+            ereport(ERROR, (errmsg("prompt_operands: invalid canonical composition")));
+        operands = palloc(sizeof(PromptOperand) * Max(count, 1));
+        context_ids = palloc(sizeof(hash128_t) * Max(count, 1));
+        seed_ids = palloc(sizeof(hash128_t) * (count + 1));
+        ctl.keysize = sizeof(hash128_t);
+        ctl.entrysize = sizeof(hash128_t);
+        seen = hash_create("prompt probe identities", 64, &ctl, HASH_ELEM | HASH_BLOBS);
+        hash_search(seen, &root, HASH_ENTER, NULL);
+        seed_ids[0] = root;
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            bool boundary, found;
+            if (parents[i] != TIER_TREE_INVALID && parents[i] >= count)
+                ereport(ERROR, (errmsg("prompt_operands: invalid parent index")));
+            boundary = tiers[i] <= 2 &&
+                (parents[i] == TIER_TREE_INVALID || tiers[parents[i]] > 2);
+            if (boundary)
+                operands[n_operands++] = (PromptOperand) {ids[i], i, offsets[i]};
+            if (boundary || tiers[i] >= 2)
+            {
+                hash_search(seen, &ids[i], HASH_ENTER, &found);
+                if (!found)
+                    seed_ids[n_seeds++] = ids[i];
+            }
+            if ((i & 4095) == 0) CHECK_FOR_INTERRUPTS();
+        }
+        qsort(operands, n_operands, sizeof(PromptOperand), prompt_operand_order);
+        for (int i = 0; i < n_operands; ++i)
+        {
+            context_ids[i] = operands[i].id;
+            nodes = accumArrayResult(nodes, Int32GetDatum(operands[i].node),
+                                     false, INT4OID, CurrentMemoryContext);
+        }
+        values[0] = hash128_to_datum(&root);
+        values[1] = PointerGetDatum(hash128_array_from_ids(context_ids, n_operands));
+        values[2] = nodes ? makeArrayResult(nodes, CurrentMemoryContext) :
+                           PointerGetDatum(construct_empty_array(INT4OID));
+        qsort(seed_ids, n_seeds, sizeof(hash128_t), prompt_seed_order);
+        values[3] = PointerGetDatum(hash128_array_from_ids(seed_ids, n_seeds));
+        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+        hash_destroy(seen);
+        pfree(operands);
+        pfree(context_ids);
+        pfree(seed_ids);
+    }
+    PG_CATCH();
+    {
+        tier_tree_free(tree);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    tier_tree_free(tree);
+    return (Datum) 0;
+}
+
 Datum
 pg_laplace_prompt_tree(PG_FUNCTION_ARGS)
 {
@@ -178,6 +295,8 @@ pg_laplace_prompt_tree(PG_FUNCTION_ARGS)
     hash128_t root;
     text *input;
     int rc;
+    bool include_surfaces = PG_NARGS() < 2 ||
+        (!PG_ARGISNULL(1) && PG_GETARG_BOOL(1));
     InitMaterializedSRF(fcinfo, 0);
     if (PG_ARGISNULL(0)) return (Datum) 0;
     input = PG_GETARG_TEXT_PP(0);
@@ -211,12 +330,15 @@ pg_laplace_prompt_tree(PG_FUNCTION_ARGS)
             values[4] = Int32GetDatum(node.text_range_off);
             values[5] = Int32GetDatum(node.text_range_len);
             values[6] = hash128_to_datum(&node.id);
-            values[7] = PointerGetDatum(cstring_to_text_with_len(
-                (const char *) bytes + node.text_range_off, node.text_range_len));
+            nulls[7] = !include_surfaces;
+            values[7] = include_surfaces
+                ? PointerGetDatum(cstring_to_text_with_len(
+                    (const char *) bytes + node.text_range_off, node.text_range_len))
+                : (Datum) 0;
             tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
             pfree(DatumGetPointer(values[0]));
             pfree(DatumGetPointer(values[6]));
-            pfree(DatumGetPointer(values[7]));
+            if (include_surfaces) pfree(DatumGetPointer(values[7]));
             if ((i & 4095) == 0) CHECK_FOR_INTERRUPTS();
         }
     }

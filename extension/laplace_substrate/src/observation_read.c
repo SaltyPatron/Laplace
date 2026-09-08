@@ -130,7 +130,8 @@ laplace_observation_read(ArrayType *operands, ArrayType *sources,
     bool *nulls;
     int count;
     bool spi_top = false;
-    ArrayBuildState *unique = NULL;
+    hash128_t *unique;
+    int unique_count = 0;
     ObservationReceiver receiver = {
         .receiver = {receive_observation, observation_startup,
                      observation_shutdown, observation_shutdown, DestNone},
@@ -152,6 +153,7 @@ laplace_observation_read(ArrayType *operands, ArrayType *sources,
     work = AllocSetContextCreate(CurrentMemoryContext, "observation bindings", ALLOCSET_DEFAULT_SIZES);
     previous = MemoryContextSwitchTo(work);
     deconstruct_array(operands, BYTEAOID, -1, false, TYPALIGN_INT, &values, &nulls, &count);
+    unique = palloc(sizeof(hash128_t) * count);
     receiver.next = palloc(sizeof(int) * count);
     ctl.keysize = sizeof(hash128_t);
     ctl.entrysize = sizeof(OperandEntry);
@@ -166,9 +168,9 @@ laplace_observation_read(ArrayType *operands, ArrayType *sources,
         entry = hash_search(receiver.operands, &id, HASH_ENTER, &found);
         receiver.next[i] = found ? entry->first : -1;
         entry->first = i;
-        if (!found) unique = accumArrayResult(unique, values[i], false, BYTEAOID, work);
+        if (!found) unique[unique_count++] = id;
     }
-    if (unique)
+    if (unique_count > 0)
     {
         ParamListInfo params = makeParamList(4);
         SPIExecuteOptions options = {.params = params, .read_only = true,
@@ -183,7 +185,7 @@ laplace_observation_read(ArrayType *operands, ArrayType *sources,
             if (!observation_plan || SPI_keepplan(observation_plan) != 0)
                 elog(ERROR, "observation bindings: preparing static read failed");
         }
-        params->params[0].value = makeArrayResult(unique, work);
+        params->params[0].value = PointerGetDatum(hash128_array_from_ids(unique, unique_count));
         params->params[1].value = sources ? PointerGetDatum(sources) : (Datum) 0;
         params->params[2].value = types ? PointerGetDatum(types) : (Datum) 0;
         for (int i = 0; i < 3; ++i)

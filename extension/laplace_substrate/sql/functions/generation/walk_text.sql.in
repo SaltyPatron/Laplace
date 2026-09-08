@@ -11,29 +11,11 @@ BEGIN ATOMIC
     -- No case-popularity substitution, named-English relation extraction or
     -- dictionary-membership filter is allowed to change this operand.
     WITH observation AS MATERIALIZED (
-        SELECT * FROM converse.prompt_tree(p_prompt)
-    ), input_constituents AS MATERIALIZED (
-        -- Select the complete lexical boundary from the canonical tree. A
-        -- single-codepoint word, punctuation or whitespace can collapse below
-        -- tier 2; it still occupies its exact place in the input trajectory.
-        SELECT p.*
-        FROM observation p
-        LEFT JOIN observation parent ON parent.node_index = p.parent_index
-        WHERE p.tier <= 2 AND (parent.node_index IS NULL OR parent.tier > 2)
+        SELECT * FROM converse.prompt_operands(p_prompt)
     ), ctx AS MATERIALIZED (
-        SELECT array_agg(p.id ORDER BY p.byte_offset, p.node_index) AS ids
-        FROM input_constituents p
+        SELECT context_ids AS ids FROM observation
     ), seed_array AS MATERIALIZED (
-        SELECT ARRAY(
-            SELECT n.id FROM (
-                SELECT p.root_id AS id FROM observation p
-                UNION
-                -- Route compositions at their own floor. Descendants already
-                -- represented by a word do not become independent graph seeds.
-                SELECT p.id FROM observation p WHERE p.tier >= 2
-                UNION
-                SELECT p.id FROM input_constituents p
-            ) n ORDER BY n.id) AS ids
+        SELECT seed_ids AS ids FROM observation
     ), frontier AS MATERIALIZED (
         SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
         FROM (

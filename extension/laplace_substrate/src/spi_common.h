@@ -22,9 +22,11 @@
 
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgrprotos.h"
 #include "utils/numeric.h"
+#include "utils/memutils.h"
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
@@ -76,6 +78,34 @@ hash128_to_datum(const hash128_t *h)
     SET_VARSIZE(b, VARHDRSZ + sizeof(hash128_t));
     memcpy(VARDATA(b), h, sizeof(hash128_t));
     return PointerGetDatum(b);
+}
+
+/* Fixed-size identities need one PostgreSQL allocation for the entire array.
+ * bytea array elements have four-byte alignment and a normal varlena header;
+ * no separate Datum or bytea allocation is needed for each identity. */
+static inline ArrayType *
+hash128_array_from_ids(const hash128_t *ids, int count)
+{
+    const Size item_size = VARHDRSZ + sizeof(hash128_t);
+    const Size header_size = ARR_OVERHEAD_NONULLS(1);
+    ArrayType *array;
+    char *data;
+    if (count < 0 || (Size) count > (MaxAllocSize - header_size) / item_size)
+        ereport(ERROR, (errmsg("laplace_substrate: identity array is too large")));
+    if (count == 0) return construct_empty_array(BYTEAOID);
+    array = palloc0(header_size + (Size) count * item_size);
+    SET_VARSIZE(array, header_size + (Size) count * item_size);
+    ARR_NDIM(array) = 1;
+    ARR_ELEMTYPE(array) = BYTEAOID;
+    ARR_DIMS(array)[0] = count;
+    ARR_LBOUND(array)[0] = 1;
+    data = ARR_DATA_PTR(array);
+    for (int i = 0; i < count; ++i, data += item_size)
+    {
+        SET_VARSIZE(data, item_size);
+        memcpy(data + VARHDRSZ, ids + i, sizeof(hash128_t));
+    }
+    return array;
 }
 
 static inline bool

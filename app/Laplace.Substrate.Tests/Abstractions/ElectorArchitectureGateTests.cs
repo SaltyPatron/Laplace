@@ -190,8 +190,8 @@ public sealed class ElectorArchitectureGateTests
     {
         var sql = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
             "extension","laplace_substrate","sql","functions","generation","walk_text.sql.in"));
-        Assert.Contains("converse.prompt_tree(p_prompt)", sql);
-        Assert.Contains("array_agg(p.id ORDER BY p.byte_offset, p.node_index)", sql);
+        Assert.Contains("converse.prompt_operands(p_prompt)", sql);
+        Assert.Contains("context_ids AS ids FROM observation", sql);
         Assert.Contains("generation.forward_frontier_ids", sql);
         Assert.DoesNotMatch(ElectCall, StripComments(sql));
     }
