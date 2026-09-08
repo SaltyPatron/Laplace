@@ -852,3 +852,24 @@ before/after. This establishes replay evidence-count stability, not a compile,
 cleanup or generalization result. The workflow is still red because its
 throughput gate has no accepted CodeDecomposer baseline; the correctness job
 now executes and passes independently of that performance-gate failure.
+
+## Repository semantic query payload
+
+A live exact-name containment query for `laplace_grammar_source_compose` returned
+96 source structures in 199.6 ms (34,877 shared-buffer hits, 6,557 reads). Its CALLS
+lookup returned zero, although the source contains calls. The stored repository
+has 9,184 CALLS and 1,452 canonical HAS_DEFINITION witnesses; `DEFINES` is an alias
+and must not be used as a raw `relation_type_id` key to count definitions.
+
+The managed grammar resource glob referenced the removed repo-local external
+folder, instead of the configured native dependency tree. Only owned Python/SQL
+query resources were packaged. Managed builds now obtain the query root from
+the linked native build's CMake configuration, with explicit dependency-path and
+repo-local fallbacks, and reject a missing pinned payload. This also covers seed
+workflow CLI rebuilds that do not inherit the build workflow environment.
+The TypeScript/other query reader accepts both nested and root query locations.
+Owned C, C++ and C# supplements record named call sites; these remain references
+to names, not claims that overload/scope resolution has already found declarations.
+All packaged queries compile against their linked parsers, and complete native
+source composition records definitions and calls in C, C++ and C#. Nine focused
+grammar-source tests pass. Replay/readback with this payload is still required.

@@ -78,14 +78,24 @@ public static unsafe class GrammarTags
         string owned = $"Laplace.GrammarTags.owned.{modality}/queries/tags.scm";
         string external = $"Laplace.GrammarTags.external.tree-sitter-{modality}/"
             + (subpath is null ? "" : subpath + "/") + "queries/tags.scm";
+        string externalRoot = $"Laplace.GrammarTags.external.tree-sitter-{modality}/queries/tags.scm";
         var assembly = typeof(GrammarTags).Assembly;
         string[] names = assembly.GetManifestResourceNames();
         string? resource = names.FirstOrDefault(name => name.Replace('\\', '/') == owned)
-            ?? names.FirstOrDefault(name => name.Replace('\\', '/') == external);
+            ?? names.FirstOrDefault(name => name.Replace('\\', '/') == external)
+            ?? names.FirstOrDefault(name => name.Replace('\\', '/') == externalRoot);
         if (resource is null) return null;
         using Stream input = assembly.GetManifestResourceStream(resource)!;
         using var output = new MemoryStream();
         input.CopyTo(output);
+        string supplement = $"Laplace.GrammarTags.owned.{modality}/queries/calls.scm";
+        string? calls = names.FirstOrDefault(name => name.Replace('\\', '/') == supplement);
+        if (calls is not null)
+        {
+            output.WriteByte((byte)'\n');
+            using Stream extra = assembly.GetManifestResourceStream(calls)!;
+            extra.CopyTo(output);
+        }
         return output.ToArray();
     }
 

@@ -16,6 +16,58 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
 {
     [Fact]
+    public void PackagedGrammarQueries_CompileAgainstTheirLinkedParsers()
+    {
+        const string prefix = "Laplace.GrammarTags.external.tree-sitter-";
+        var modalities = typeof(GrammarTags).Assembly.GetManifestResourceNames()
+            .Select(name => name.Replace('\\', '/'))
+            .Where(name => name.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(name => name[prefix.Length..].Split('/')[0])
+            .Distinct(StringComparer.Ordinal);
+        int checkedParsers = 0;
+        foreach (string modality in modalities)
+        {
+            IntPtr recipe = GrammarDecomposer.LookupById(modality);
+            if (recipe == IntPtr.Zero) continue;
+            byte[]? query = GrammarTags.TagsSource(modality);
+            Assert.NotNull(query);
+            var error = Record.Exception(() => GrammarTags.Run(recipe, query, "x"u8));
+            Assert.True(error is null, $"{modality}: {error}");
+            checkedParsers++;
+        }
+        Assert.True(checkedParsers >= 3, "The pinned language queries must be embedded in the managed payload.");
+    }
+
+    [Theory]
+    [InlineData("c", "int callee(int x) { return x; } int caller(void) { return callee(2); }")]
+    [InlineData("cpp", "int callee(int x) { return x; } int caller() { return callee(2); }")]
+    [InlineData("c-sharp", "class Example { int callee(int x) { return x; } int caller() { return callee(2); } }")]
+    public void PackagedGrammarQueries_RecordDefinitionsAndCalls(string modality, string sourceText)
+    {
+        CodepointPerfcache.LoadDefault();
+        Assert.NotNull(GrammarTags.TagsSource(modality));
+        Hash128 source = Hash128.OfCanonical("packaged-grammar-query-proof");
+        var handler = new GrammarComposeHandler(source, 1, null);
+        using var unit = handler.CreateDeferredUnit(new GrammarComposeRecord(
+            Encoding.UTF8.GetBytes(sourceText), modality));
+        var builder = new SubstrateChangeBuilder(source, "test/grammar-queries");
+        unit.DrainInto(builder, 1, null);
+        var change = builder.Build();
+        try
+        {
+            Hash128 callee = ContentTierSpine.ResolveRoot("callee")!.Value;
+            Assert.Contains(change.Attestations, a => a.ObjectId == callee
+                && a.TypeId == RelationTypeRegistry.Resolve("CALLS").Id);
+            Assert.Contains(change.Attestations, a => a.ObjectId == callee
+                && a.TypeId == RelationTypeRegistry.Resolve("HAS_DEFINITION").Id);
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WholeSourceComposition_ClosesAtMeasuredNativeMemoryAndDrainsRemainingFiles()
     {
         string repo = Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic();
