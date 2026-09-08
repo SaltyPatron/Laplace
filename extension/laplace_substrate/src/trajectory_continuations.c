@@ -31,6 +31,7 @@ static const char *UNPACK_QUERY =
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1";
 static SPIPlanPtr unpack_plan = NULL;
 static SPIPlanPtr bindings_plan = NULL;
+static SPIPlanPtr containing_plan = NULL;
 
 typedef struct ScopedTrajectory
 {
@@ -146,6 +147,64 @@ laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operan
         }
         SPI_cursor_close(portal);
     }
+    if (roots)
+        laplace_content_trajectory_read(DatumGetArrayTypeP(makeArrayResult(roots, work)),
+                                        scope_retain_trajectory, scope);
+    MemoryContextSwitchTo(previous);
+    MemoryContextDelete(work);
+    laplace_spi_finish(spi_top);
+}
+
+void
+laplace_trajectory_scope_extend_containing(LaplaceTrajectoryScope *scope, ArrayType *members)
+{
+    bool spi_top = false;
+    if (ARR_NDIM(members) > 1 || ARR_ELEMTYPE(members) != BYTEAOID)
+        ereport(ERROR, (errmsg("trajectory scope: members must be a 1-D bytea array")));
+    if (ArrayGetNItems(ARR_NDIM(members), ARR_DIMS(members)) == 0) return;
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+        elog(ERROR, "trajectory scope: SPI_connect failed");
+    MemoryContext work = AllocSetContextCreate(CurrentMemoryContext,
+        "containing observation roots", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext previous = MemoryContextSwitchTo(work);
+    ArrayBuildState *roots = NULL;
+    Datum *ids;
+    bool *nulls;
+    int count;
+    deconstruct_array(members, BYTEAOID, -1, false, TYPALIGN_INT, &ids, &nulls, &count);
+    for (int i = 0; i < count; ++i)
+        if (!nulls[i] && VARSIZE_ANY_EXHDR(DatumGetByteaPP(ids[i])) != sizeof(hash128_t))
+            ereport(ERROR, (errmsg("trajectory scope: ids must be 16 bytes")));
+    pfree(ids);
+    pfree(nulls);
+    /* The same fixed indexed containment operation used by Browse. No per-word
+     * attestations, corpus-wide suffix fallback, or surrogate text index. */
+    if (!containing_plan)
+    {
+        Oid types[1] = {BYTEAARRAYOID};
+        containing_plan = SPI_prepare_cursor(laplace_sql_query_text("browse.containing"),
+                                              1, types, CURSOR_OPT_PARALLEL_OK);
+        if (!containing_plan || SPI_keepplan(containing_plan) != 0)
+            elog(ERROR, "trajectory scope: preparing containment read failed");
+    }
+    Datum args[1] = {PointerGetDatum(members)};
+    Portal portal = SPI_cursor_open(NULL, containing_plan, args, NULL, true);
+    if (!portal) elog(ERROR, "trajectory scope: opening containment cursor failed");
+    for (;;)
+    {
+        SPI_cursor_fetch(portal, true, 1024);
+        uint64 rows = SPI_processed;
+        for (uint64 row = 0; row < rows; ++row)
+        {
+            bool isnull;
+            Datum id = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &isnull);
+            if (!isnull) scope_add_id(scope->roots, &roots, id, work);
+        }
+        if (SPI_tuptable) { SPI_freetuptable(SPI_tuptable); SPI_tuptable = NULL; }
+        if (!rows) break;
+        CHECK_FOR_INTERRUPTS();
+    }
+    SPI_cursor_close(portal);
     if (roots)
         laplace_content_trajectory_read(DatumGetArrayTypeP(makeArrayResult(roots, work)),
                                         scope_retain_trajectory, scope);

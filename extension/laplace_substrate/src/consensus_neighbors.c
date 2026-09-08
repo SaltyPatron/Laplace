@@ -7,6 +7,7 @@
 #include "utils/memutils.h"
 #include "consensus_neighbors.h"
 #include "relation_symmetry.h"
+#include "walk_score.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_explore_web_neighbors);
 
@@ -31,6 +32,7 @@ typedef struct NeighborState
     int limit;
     bool reverse;
     bool respect_direction;
+    bool require_positive;
 } NeighborState;
 
 static int
@@ -105,6 +107,11 @@ neighbor_cell(const LaplaceConsensusRow *row, void *opaque)
     char key[32];
     bool found;
     if (row->object_is_null || memcmp(&row->subject, &row->object, 16) == 0) return;
+    /* Output admission cannot spend its bound on an edge whose signed
+     * standing does not support the requested operation. Browse retains all
+     * standings; this predicate is an explicit execution operand. */
+    if (state->require_positive &&
+        !(walk_edge_score(row->type, row->rating, row->rd) > 0.0)) return;
     /* Direction is checked before pair election and the bounded heap. */
     if (state->reverse && state->respect_direction)
     {
@@ -180,7 +187,8 @@ neighbor_cutoff(const LaplaceConsensusRow *row, void *opaque)
 
 LaplaceNeighbor *
 laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
-                            bool include_default, bool respect_direction, int *count,
+                            bool include_default, bool respect_direction,
+                            bool require_positive, int *count,
                             LaplaceConsensusScanStats *stats)
 {
     HASHCTL ctl = {0};
@@ -198,6 +206,7 @@ laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
     state.pairs = hash_create("consensus neighbor pairs", 256, &ctl,
                              HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     state.respect_direction = respect_direction;
+    state.require_positive = require_positive;
     state.limit = limit;
     ctl.keysize = sizeof(hash128_t);
     ctl.entrysize = sizeof(NeighborBucket);
@@ -251,7 +260,7 @@ pg_laplace_explore_web_neighbors(PG_FUNCTION_ARGS)
     limit = PG_ARGISNULL(2) ? 0 : PG_GETARG_INT32(2);
     InitMaterializedSRF(fcinfo, 0);
     rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    rows = laplace_consensus_neighbors(frontier, types, limit, include_default, false, &count, NULL);
+    rows = laplace_consensus_neighbors(frontier, types, limit, include_default, false, false, &count, NULL);
     deconstruct_array(frontier, BYTEAOID, -1, false, TYPALIGN_INT,
                       &input, &input_nulls, &n_input);
     /* Preserve input ordinals and duplicate frontier entries at the SQL edge;

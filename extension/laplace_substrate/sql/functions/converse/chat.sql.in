@@ -62,7 +62,10 @@ BEGIN
             p_prompt, p_session, 128, 5, 0.6, 10,
             NULL::bigint,
             2, 8) g;
-        RETURN out;
+        -- This is a product status, not generated content or a witnessed answer.
+        -- Keep the existing explicit empty-forward response at this text adapter;
+        -- the native operation itself correctly returns no selected identities.
+        RETURN COALESCE(NULLIF(out, ''), converse.chat_scaffold(p_lang, 'no_forward'));
     END IF;
 
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY

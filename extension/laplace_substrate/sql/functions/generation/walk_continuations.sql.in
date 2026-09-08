@@ -1,19 +1,56 @@
 DROP FUNCTION IF EXISTS laplace.walk_continuations(bytea[], int, int, float8, int, bigint);
+-- Output projection is separate from routing/steering. NULL/empty output
+-- relations admit physical continuations only. Graph identities remain active
+-- evidence; they become output candidates only through this declared projection.
+CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
+        p_ctx bytea[], p_steps int, p_max_stride int,
+        p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
+        p_relation_types bytea[], p_fanout int, p_observation_ids bytea[],
+        p_containing_ids bytea[], p_output_relation_types bytea[])
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_continuations'
+    LANGUAGE C VOLATILE;
+
+-- Physical co-occurrence is an independent observation route. The complete
+-- declared member set narrows the indexed read once; ordinal matching retains
+-- order and multiplicity. Semantic testimony is not required per constituent.
+CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
+        p_ctx bytea[], p_steps int, p_max_stride int,
+        p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
+        p_relation_types bytea[], p_fanout int, p_observation_ids bytea[],
+        p_containing_ids bytea[])
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT * FROM generation.forward_walk_continuations(
+        p_ctx, p_steps, p_max_stride, p_spread, p_top_k, p_seed,
+        p_frontier, p_relation_types, p_fanout, p_observation_ids, p_containing_ids,
+        COALESCE(p_relation_types, consensus.relation_set_ids('CONTINUATION_OUTPUT')));
+END;
+
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_ctx bytea[], p_steps int, p_max_stride int,
         p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
         p_relation_types bytea[], p_fanout int, p_observation_ids bytea[])
     RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_continuations'
-    LANGUAGE C VOLATILE;
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT * FROM generation.forward_walk_continuations(
+        p_ctx, p_steps, p_max_stride, p_spread, p_top_k, p_seed,
+        p_frontier, p_relation_types, p_fanout, p_observation_ids, NULL::bytea[]);
+END;
 
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_ctx bytea[], p_steps int, p_max_stride int,
         p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
         p_relation_types bytea[], p_fanout int)
     RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
-    AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_continuations'
-    LANGUAGE C VOLATILE;
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT * FROM generation.forward_walk_continuations(
+        p_ctx, p_steps, p_max_stride, p_spread, p_top_k, p_seed,
+        p_frontier, p_relation_types, p_fanout, NULL::bytea[]);
+END;
 
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_ctx bytea[], p_steps int, p_max_stride int,

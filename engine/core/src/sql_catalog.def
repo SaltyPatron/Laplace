@@ -143,10 +143,6 @@ SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8
     "ON CONFLICT(id) DO UPDATE SET trajectory=EXCLUDED.trajectory,coord=EXCLUDED.coord,"
     "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
     "observed_at=EXCLUDED.observed_at")
-SQL_QUERY("generation.semantic_presence", "bytea[],bytea[],bytea[]",
-    "SELECT DISTINCT e.id FROM laplace.entities e "
-    "JOIN laplace.physicalities p ON p.entity_id=e.id AND p.type=1 AND p.trajectory IS NOT NULL "
-    "WHERE e.id=ANY($1) AND e.type_id=ANY($2) AND NOT e.id=ANY($3) ORDER BY e.id")
 SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT object_id,context_id FROM laplace.attestations WHERE subject_id=ANY($1)")
 SQL_QUERY("evidence.response_support", "bytea[],bytea,bytea[],bytea,bool",

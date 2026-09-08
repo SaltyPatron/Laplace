@@ -71,14 +71,12 @@
 #include "common/pg_prng.h"
 
 #include "laplace/core/hash128.h"
-#include "laplace/core/content_witness_batch.h"
-#include "laplace/core/sql_catalog.h"
 #include "spi_common.h"
 #include "relation_symmetry.h"
 #include "steer_candidates.h"
 #include "consensus_neighbors.h"
 #include "trajectory_continuations.h"
-#include "perfcache_native.h"
+#include "walk_score.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 
@@ -90,18 +88,9 @@ typedef struct Cand
     int    stride;     /* measured suffix length; semantic-only = 0 */
     double steer;      /* S7 signed consensus mass       */
     int64  edges;      /* S7 edge count; 0 = unattested  */
+    double projection; /* positive support for the declared output operation */
     double eff;        /* combined sampling weight       */
 } Cand;
-
-typedef struct CandIndex
-{
-    char key[16];
-    int  index;
-} CandIndex;
-
-static SPIPlanPtr semantic_plan = NULL;
-/* PostgreSQL performs one typed content-presence query over the native
- * proposal set. Graph access and reduction are owned by consensus_neighbors. */
 
 static Datum copy_id_datum(Datum d);
 
@@ -112,24 +101,22 @@ typedef struct NeighborhoodEntry
     int count;
 } NeighborhoodEntry;
 
-typedef struct ContentPresence
+typedef struct ProjectionSupport
 {
     hash128_t id;
-    bool admitted;
-} ContentPresence;
+    double score;
+} ProjectionSupport;
 
 /* Cache only a deterministic projection within this forward call's snapshot.
  * Each newly active identity contributes one native batch probe. Retained
  * prompt neighborhoods are not re-read for every emitted constituent. */
-static ArrayType *
+static void
 proposal_neighborhood(HTAB *cache, Datum *frontier, int n_frontier,
-                      ArrayType *types, int limit, MemoryContext owner)
+                      ArrayType *types, int limit, MemoryContext owner,
+                      HTAB *projection)
 {
     Datum *missing = palloc(sizeof(Datum) * Max(n_frontier, 1));
     int n_missing = 0;
-    int64 capacity = n_frontier;
-    Datum *proposals;
-    int count = 0;
     for (int i = 0; i < n_frontier; ++i)
     {
         const char *id = VARDATA_ANY(DatumGetByteaPP(frontier[i]));
@@ -144,7 +131,7 @@ proposal_neighborhood(HTAB *cache, Datum *frontier, int n_frontier,
         ArrayType *ids = construct_array(missing, n_missing, BYTEAOID, -1, false, TYPALIGN_INT);
         int n_edges;
         LaplaceNeighbor *edges = laplace_consensus_neighbors(
-            ids, types, limit, false, true, &n_edges, NULL);
+            ids, types, limit, false, true, true, &n_edges, NULL);
         MemoryContextSwitchTo(owner);
         for (int i = 0; i < n_missing; ++i)
         {
@@ -173,16 +160,8 @@ proposal_neighborhood(HTAB *cache, Datum *frontier, int n_frontier,
     {
         NeighborhoodEntry *entry = hash_search(cache,
             VARDATA_ANY(DatumGetByteaPP(frontier[i])), HASH_FIND, NULL);
-        capacity += entry->count;
-    }
-    if (capacity > INT_MAX || (uint64) capacity > MaxAllocSize / sizeof(Datum))
-        ereport(ERROR, (errmsg("forward neighborhood exceeds allocation capacity")));
-    proposals = palloc(sizeof(Datum) * Max(capacity, 1));
-    for (int i = 0; i < n_frontier; ++i)
-    {
-        NeighborhoodEntry *entry = hash_search(cache,
-            VARDATA_ANY(DatumGetByteaPP(frontier[i])), HASH_FIND, NULL);
-        proposals[count++] = copy_id_datum(frontier[i]);
+        /* A routing identity is state, not an output proposal. Only the
+         * endpoints of the requested output relations enter this projection. */
         for (int j = 0; j < entry->count; ++j)
         {
             const LaplaceNeighbor *edge = entry->edges + j;
@@ -192,14 +171,13 @@ proposal_neighborhood(HTAB *cache, Datum *frontier, int n_frontier,
                 if (laplace_relation_lookup(&edge->type, &def) != 0 || def == NULL ||
                     def->symmetry != LAPLACE_REL_SYMMETRY_SYMMETRIC) continue;
             }
-            proposals[count++] = hash128_to_datum(&edge->neighbor);
+            bool found;
+            ProjectionSupport *support = hash_search(projection, &edge->neighbor,
+                                                     HASH_ENTER, &found);
+            if (!found) support->score = 0.0;
+            support->score += walk_edge_score(edge->type, edge->rating, edge->rd);
         }
     }
-    ArrayType *result = count ? construct_array(proposals, count, BYTEAOID, -1, false, TYPALIGN_INT)
-                              : construct_empty_array(BYTEAOID);
-    for (int i = 0; i < count; ++i) pfree(DatumGetPointer(proposals[i]));
-    pfree(proposals);
-    return result;
 }
 
 static void
@@ -227,26 +205,6 @@ validate_relation_types(ArrayType *types)
     {
         pfree(elems);
         pfree(nulls);
-    }
-}
-
-/*
- * Prepared once per backend and kept: the un-prepared path re-plans on every
- * emitted token of every walk. Exact sequence proposal passes NULL deliberately:
- * truncating trajectory successors before S7 steering changes the answer. The
- * semantic graph source is separately bounded by the declared beam above.
- */
-static void
-ensure_plans(void)
-{
-    if (semantic_plan == NULL)
-    {
-        Oid argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("generation.semantic_presence"), 3, argtypes,
-                                             CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL || SPI_keepplan(plan) != 0)
-            elog(ERROR, "walk_continuations: semantic proposal plan failed");
-        semantic_plan = plan;
     }
 }
 
@@ -347,10 +305,14 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     int        cand_capacity = 0;
     ArrayType *relation_types = PG_NARGS() > 7 && !PG_ARGISNULL(7) ?
         PG_GETARG_ARRAYTYPE_P(7) : NULL;
+    /* Routing/steering and output projection are independent typed operands.
+     * Compatibility adapters bind their declared continuation set before this
+     * native operation. NULL here establishes no graph output purpose. */
+    ArrayType *output_relations = PG_NARGS() > 11 ?
+        (PG_ARGISNULL(11) ? NULL : PG_GETARG_ARRAYTYPE_P(11)) : NULL;
     MemoryContext walk_cxt, step_cxt, old;
     HTAB *neighborhoods;
     HTAB *frontier_ids;
-    HTAB *content_presence;
     LaplaceTrajectoryScope *trajectory_scope = NULL;
 
     if (PG_ARGISNULL(0))
@@ -374,10 +336,12 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("walk_continuations: fanout must not be negative")));
     if (!isfinite(temp) || temp < 0.0)
         ereport(ERROR, (errmsg("walk_continuations: spread must be finite and not negative")));
-    if (ARR_NDIM(ctx_arr) != 1 || ARR_ELEMTYPE(ctx_arr) != BYTEAOID)
+    if (ARR_NDIM(ctx_arr) > 1 || ARR_ELEMTYPE(ctx_arr) != BYTEAOID)
         ereport(ERROR, (errmsg("walk_continuations: context must be a 1-D bytea array")));
     if (relation_types != NULL)
         validate_relation_types(relation_types);
+    if (output_relations != NULL && output_relations != relation_types)
+        validate_relation_types(output_relations);
 
     InitMaterializedSRF(fcinfo, 0);
 
@@ -392,14 +356,10 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         cache_ctl.entrysize = sizeof(hash128_t);
         frontier_ids = hash_create("forward active identities", 128, &cache_ctl,
                                   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-        cache_ctl.entrysize = sizeof(ContentPresence);
-        content_presence = hash_create("forward content presence", 256, &cache_ctl,
-                                       HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     }
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "walk_continuations: SPI_connect failed");
-    ensure_plans();
 
     deconstruct_array(ctx_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &elems, &nulls, &n_in);
@@ -412,7 +372,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         front_arr = PG_GETARG_ARRAYTYPE_P(6);
     else
         front_arr = ctx_arr;
-    if (ARR_NDIM(front_arr) != 1 || ARR_ELEMTYPE(front_arr) != BYTEAOID)
+    if (ARR_NDIM(front_arr) > 1 || ARR_ELEMTYPE(front_arr) != BYTEAOID)
         ereport(ERROR, (errmsg("walk_continuations: frontier must be a 1-D bytea array")));
     deconstruct_array(front_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &front_elems, &front_nulls, &n_front_in);
@@ -493,6 +453,13 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         laplace_trajectory_scope_extend(trajectory_scope, PG_GETARG_ARRAYTYPE_P(9));
         MemoryContextSwitchTo(old);
     }
+    if (PG_NARGS() > 10 && !PG_ARGISNULL(10) && max_order > 0)
+    {
+        old = MemoryContextSwitchTo(walk_cxt);
+        if (!trajectory_scope) trajectory_scope = laplace_trajectory_scope_create();
+        laplace_trajectory_scope_extend_containing(trajectory_scope, PG_GETARG_ARRAYTYPE_P(10));
+        MemoryContextSwitchTo(old);
+    }
     MemoryContextSwitchTo(step_cxt);
     for (int64 step = 1; step <= steps; step++)
     {
@@ -533,143 +500,63 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 cand[n_cand].stride = successors[i].stride;
                 cand[n_cand].steer = 0.0;
                 cand[n_cand].edges = 0;
+                cand[n_cand].projection = 0.0;
                 ++n_cand;
             }
             MemoryContextSwitchTo(old);
             pfree(successors);
             pfree(tail);
         }
-        /* ---- S6 semantic proposals from the same live frontier ---- */
+        /* ---- S6 typed output projection from the live routing frontier ----
+         * Renderability cannot establish output purpose. Without an elected
+         * relation projection, graph nodes remain internal steering state.
+         * No label/type blacklist: even a frame name is legal when it is an
+         * observed successor or the endpoint of the requested operation. */
+        if (output_relations != NULL && ArrayGetNItems(ARR_NDIM(output_relations),
+                                                     ARR_DIMS(output_relations)) > 0)
         {
-            Datum type_ids[5];
-            for (uint8 tier = 0; tier < 5; ++tier)
-            {
-                hash128_t type = laplace_content_tier_type_id(tier);
-                bytea *id = (bytea *) palloc(VARHDRSZ + 16);
-                SET_VARSIZE(id, VARHDRSZ + 16);
-                memcpy(VARDATA(id), &type, 16);
-                type_ids[tier] = PointerGetDatum(id);
-            }
-            ArrayType *types = construct_array(type_ids, 5, BYTEAOID, -1, false, TYPALIGN_INT);
-            ArrayType *front = proposal_neighborhood(neighborhoods, frontier, n_frontier,
-                                                       relation_types, fanout, walk_cxt);
-            /* The semantic graph walk is a simple path through content. Prompt
-             * seeds and already-emitted nodes do not re-enter solely through the
-             * graph. Witnessed sequence proposals can still repeat them. Routed
-             * frontier members are eligible; they are not all prompt seeds. */
-            ArrayType *visited = construct_array(ctx, ctx_len, BYTEAOID, -1, false, TYPALIGN_INT);
-            Datum args[3] = { PointerGetDatum(front), PointerGetDatum(types), PointerGetDatum(visited) };
             HASHCTL ctl = {0};
-            ctl.keysize = 16;
-            ctl.entrysize = sizeof(CandIndex);
-            ctl.hcxt = walk_cxt;
-            HTAB *seen = hash_create("semantic proposal union", n_cand + 32, &ctl,
-                                    HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            ctl.keysize = sizeof(hash128_t);
+            ctl.entrysize = sizeof(ProjectionSupport);
+            HTAB *projection = hash_create("forward output support", 128, &ctl,
+                                           HASH_ELEM | HASH_BLOBS);
+            proposal_neighborhood(neighborhoods, frontier, n_frontier,
+                                  output_relations, fanout, walk_cxt, projection);
+            ctl.entrysize = sizeof(hash128_t);
+            HTAB *seen = hash_create("forward output identities", 128,
+                                     &ctl, HASH_ELEM | HASH_BLOBS);
+            /* Typed endpoints need no content/type/label query. Output purpose
+             * established their eligibility; REALIZE owns the requested surface.
+             * Retain existing ordinal support when both paths nominate one ID. */
             for (int i = 0; i < n_cand; ++i)
-                hash_search(seen, VARDATA_ANY(DatumGetByteaPP(cand[i].obj)), HASH_ENTER, NULL);
-            /* Mapped floor content is complete without a PostgreSQL entity or
-             * physicality row. Probe it before the persisted-content batch;
-             * visited identities still cannot re-enter through the graph. */
-            Datum *front_ids; bool *front_nulls; int front_count;
-            HASHCTL visited_ctl = {0};
-            visited_ctl.keysize = 16;
-            visited_ctl.entrysize = sizeof(CandIndex);
-            visited_ctl.hcxt = walk_cxt;
-            HTAB *visited_ids = hash_create("semantic visited identities", ctx_len + 1,
-                &visited_ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-            for (int i = 0; i < ctx_len; ++i)
-                hash_search(visited_ids, VARDATA_ANY(DatumGetByteaPP(ctx[i])), HASH_ENTER, NULL);
-            deconstruct_array(front, BYTEAOID, -1, false, TYPALIGN_INT,
-                &front_ids, &front_nulls, &front_count);
-            int missing_count = 0;
-            for (int i = 0; i < front_count; ++i)
             {
-                uint32 cp; bool found;
-                if (front_nulls[i]) continue;
-                const uint8 *id = (const uint8 *)VARDATA_ANY(DatumGetByteaPP(front_ids[i]));
-                if (hash_search(visited_ids, id, HASH_FIND, NULL) != NULL) continue;
-                if (!laplace_perfcache_codepoint_for_id(id, &cp))
-                {
-                    /* Content admission is fixed within this read snapshot.
-                     * Cache both outcomes and batch only new identities; an
-                     * expanding frontier must not re-probe old compositions
-                     * and physicalities on every emitted constituent. */
-                    ContentPresence *entry = hash_search(content_presence, id, HASH_ENTER, &found);
-                    if (!found)
-                    {
-                        entry->admitted = false;
-                        front_ids[missing_count++] = front_ids[i];
-                        continue;
-                    }
-                    if (!entry->admitted) continue;
-                }
-                hash_search(seen, id, HASH_ENTER, &found);
+                const char *id = VARDATA_ANY(DatumGetByteaPP(cand[i].obj));
+                ProjectionSupport *support = hash_search(projection, id, HASH_FIND, NULL);
+                if (support) cand[i].projection = support->score;
+                hash_search(seen, id, HASH_ENTER, NULL);
+            }
+            /* Graph-only emission is a simple path. Ordered observations can
+             * independently license repetition of a prompt/emitted identity. */
+            for (int i = 0; i < ctx_len; ++i)
+                hash_search(seen, VARDATA_ANY(DatumGetByteaPP(ctx[i])), HASH_ENTER, NULL);
+            HASH_SEQ_STATUS seq;
+            ProjectionSupport *support;
+            hash_seq_init(&seq, projection);
+            while ((support = hash_seq_search(&seq)) != NULL)
+            {
+                bool found;
+                CHECK_FOR_INTERRUPTS();
+                hash_search(seen, &support->id, HASH_ENTER, &found);
                 if (found) continue;
                 ensure_candidate_capacity(&cand, &cand_capacity, (uint64)n_cand + 1, walk_cxt);
                 old = MemoryContextSwitchTo(walk_cxt);
                 cand[n_cand] = (Cand){0};
-                cand[n_cand++].obj = copy_id_datum(front_ids[i]);
+                cand[n_cand].obj = hash128_to_datum(&support->id);
+                cand[n_cand++].projection = support->score;
                 MemoryContextSwitchTo(old);
             }
-            hash_destroy(visited_ids);
-            ArrayType *unmapped = missing_count ? construct_array(front_ids, missing_count, BYTEAOID,
-                -1, false, TYPALIGN_INT) : construct_empty_array(BYTEAOID);
-            pfree(front);
-            front = unmapped;
-            args[0] = PointerGetDatum(front);
-            pfree(front_ids); pfree(front_nulls);
-            Portal portal = missing_count ? SPI_cursor_open(NULL,
-                                            semantic_plan,
-                                            args, NULL, true) : NULL;
-            if (missing_count && portal == NULL)
-                elog(ERROR, "walk_continuations: semantic proposal cursor open failed: %s",
-                     SPI_result_code_string(SPI_result));
-            while (portal != NULL)
-            {
-                SPI_cursor_fetch(portal, true, 50000);
-                if (SPI_processed == 0)
-                    break;
-                ensure_candidate_capacity(&cand, &cand_capacity,
-                                          (uint64)n_cand + SPI_processed, walk_cxt);
-                for (uint64 r = 0; r < SPI_processed; ++r)
-                {
-                    bool isnull, found;
-                    Datum id = SPI_getbinval(SPI_tuptable->vals[r],
-                                             SPI_tuptable->tupdesc, 1, &isnull);
-                    if (isnull) continue;
-                    bytea *bytes = DatumGetByteaPP(id);
-                    if (VARSIZE_ANY_EXHDR(bytes) != 16)
-                        elog(ERROR, "walk_continuations: semantic candidate id must be 16 bytes");
-                    ContentPresence *entry = hash_search(content_presence,
-                        VARDATA_ANY(bytes), HASH_FIND, NULL);
-                    if (entry == NULL)
-                        elog(ERROR, "walk_continuations: content result is outside the requested batch");
-                    entry->admitted = true;
-                    hash_search(seen, VARDATA_ANY(bytes), HASH_ENTER, &found);
-                    if (found) continue;
-                    old = MemoryContextSwitchTo(walk_cxt);
-                    cand[n_cand].obj = copy_id_datum(id);
-                    MemoryContextSwitchTo(old);
-                    cand[n_cand].sep = (Datum)0;
-                    cand[n_cand].weight = 0;
-                    cand[n_cand].stride = 0;
-                    cand[n_cand].steer = 0.0;
-                    cand[n_cand].edges = 0;
-                    ++n_cand;
-                }
-                SPI_freetuptable(SPI_tuptable);
-                SPI_tuptable = NULL;
-                CHECK_FOR_INTERRUPTS();
-            }
-            if (SPI_tuptable != NULL)
-            {
-                SPI_freetuptable(SPI_tuptable);
-                SPI_tuptable = NULL;
-            }
-            if (portal != NULL) SPI_cursor_close(portal);
             hash_destroy(seen);
-            pfree(types); pfree(front); pfree(visited);
-            for (int i = 0; i < 5; ++i) pfree(DatumGetPointer(type_ids[i]));
+            hash_destroy(projection);
         }
         if (n_cand == 0)
             break;
@@ -715,6 +602,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
          * one proposal, unattested sequence-only proposals wait behind that
          * witnessed pool instead of competing with raw ×1 frequency. If S7 has
          * no positive signal at all, unattested proposals remain the fallback.
+         * The observation-scoped path has independent witnessed ordinal support:
+         * missing graph evidence does not disqualify those continuations.
          *
          * This keeps "no opinion" distinct from refutation without letting a
          * high-frequency unigram erase meaning when meaning is actually present.
@@ -737,8 +626,13 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             {
                 if ((cand[i].edges > 0
                      && (cand[i].steer <= 0.0 || !isfinite(cand[i].steer)))
-                    || (has_positive_steer && cand[i].edges == 0)
-                    || (cand[i].weight == 0 && cand[i].edges == 0))
+                    /* A continuation in the retained observation scope has
+                     * witnessed ordinal support even without a direct semantic
+                     * edge. A positive graph proposal cannot erase that evidence.
+                     * Keep the corpus-wide compatibility fallback separate. */
+                    || (has_positive_steer && cand[i].edges == 0 && !trajectory_scope
+                        && !(cand[i].projection > 0.0))
+                    || (cand[i].weight == 0 && !(cand[i].projection > 0.0)))
                 {
                     pfree(DatumGetPointer(cand[i].obj));
                     if (cand[i].sep != (Datum) 0)
@@ -749,7 +643,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 /* Neutral sequence prior for a semantic-only proposal; its
                  * recorded sequence count remains zero. */
                 cand[m].eff = (cand[m].weight > 0 ? (double)cand[m].weight : 1.0) *
-                              (cand[m].edges > 0 ? cand[m].steer : 1.0);
+                              (cand[m].edges > 0 ? cand[m].steer :
+                               cand[m].projection > 0.0 ? cand[m].projection : 1.0);
                 if (cand[m].eff <= 0.0 || !isfinite(cand[m].eff))
                 {
                     pfree(DatumGetPointer(cand[m].obj));

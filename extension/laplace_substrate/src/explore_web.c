@@ -337,7 +337,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		int neighbor_count;
 		LaplaceNeighbor *neighbors = laplace_consensus_neighbors(
 			frontier_array, masked ? type_array : NULL, probe_limit,
-			masked, respect_direction, &neighbor_count, NULL);
+			masked, respect_direction, false, &neighbor_count, NULL);
 
 		for (int r = 0; r < neighbor_count; r++)
 		{

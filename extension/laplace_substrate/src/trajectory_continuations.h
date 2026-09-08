@@ -18,6 +18,10 @@ typedef struct LaplaceContinuation
 typedef struct LaplaceTrajectoryScope LaplaceTrajectoryScope;
 LaplaceTrajectoryScope *laplace_trajectory_scope_create(void);
 void laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operands);
+/* Admit physical observations containing the complete declared member set.
+ * Containment discovers roots; the shared ordered matcher establishes sequence.
+ * This needs no semantic attestation for each member. Empty means no roots. */
+void laplace_trajectory_scope_extend_containing(LaplaceTrajectoryScope *scope, ArrayType *members);
 LaplaceContinuation *laplace_trajectory_continuations_scoped(
     ArrayType *context, bool suffix_backoff, LaplaceTrajectoryScope *scope, int *count);
 

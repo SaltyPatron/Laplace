@@ -510,3 +510,74 @@ and contexts, unsupported consensus cells, unary/binary separation, per-subject
 limits, duplicate operands, empty source scope and scalar/batch parity. Native
 and managed builds, catalog gate (46 queries), and install/upgrade dependency
 and drop-order gates pass. Deployment/readback remains required for this change.
+
+### Seeded readback and document observations
+
+Main 37d7563f installed the direction/source-count repairs (extension
+b5f7b12d0bab2186). Workflow 34217550742 passed build, native/managed tests,
+installation, application delivery and database QA. Its product proof failed:
+`DefaultForwardPass_ReachesWitnessedAnswerThroughDirectAndConversationPaths`
+does not obtain `cold` for `The opposite of hot is`. Preserve that acceptance.
+Independent distinct-source SQL agrees with the deployed native source counts;
+receipts are `deployed-evidence-route.sql/.log` in the session backup.
+
+Atomic ingest 34218183196 recorded 1,246,582 attestations across 3/3 files in
+4m33.788s. The inventor's document ingest 34218945047 recorded 4,656,933 entities
+and 760 attestations across 195/195 files in 8m50.393s. Both journals finished
+`ok`; both workflows failed the subsequent throughput gate because no accepted
+baseline exists for those sources. The pre-recreation backup has only the ten
+foundation baselines: recreation did not remove Atomic/Documents baselines.
+Neither current result has been accepted merely to turn its gate green.
+
+The native trajectory scope now admits document observations through the existing
+`browse.containing` catalog operation, with the complete supplied AND-member set.
+One indexed set read discovers roots; the canonical partition reader retains each
+packed trajectory once. Order, repeated IDs and SPACE remain native ordinal facts.
+No per-word semantic attestation is required. Scoped ordinal support survives
+missing direct graph testimony; explicit negative steering remains distinct.
+
+### Inventor correction: establish output purpose before selection
+
+`trajectory_generate.c` previously promoted every routed node with renderable
+content into the output pool. Frame category names share canonical content IDs,
+so testing Word/tier/content presence could not establish answer eligibility.
+It also discarded legitimate opaque typed results that lacked text physicalities.
+
+The full native operation now accepts `p_output_relation_types` independently of
+its routing/steering operand. Only supported endpoints of that declared projection
+enter as graph outputs. NULL/empty projection leaves graph state internal; exact
+physical continuations remain independently admissible. The compatibility
+continuation operation binds the manifest's `CONTINUATION_OUTPUT` set, preserving
+completion/continuation testimony. Other operations still require election from
+the joint input evidence; the default text adapter has not implemented that step.
+
+Direction and positive output support are applied before the fanout bound. A
+refuted requested claim cannot be resurrected by a different positive relation.
+Output support does not require a duplicate steering read. The native selection
+returns exact typed IDs without content/type/render probes, removing the obsolete
+`generation.semantic_presence` SQL catalog query. The catalog now has 45 entries;
+469 pre-existing inline runtime literals remain migration debt. Rendering remains
+at the final boundary. The SQL text chat adapter uses its existing `no_forward`
+status for an empty selection; that status is not generated answer evidence.
+
+Regressions cover unspecified/empty/wrong output purpose, explicit frame output,
+opaque non-content targets, asymmetric and symmetric direction, refutation before
+a one-slot bound, no duplicate steering requirement, ordinal observation scope,
+and physical membership versus ordered proof. No frame-label blacklist or
+question-specific string routing was added. Current native build, catalog,
+manifest generation, ISA and install/upgrade dependency gates pass.
+
+Transactional current-data proof is retained in
+`output-projection-readback.sql` and `output-projection-readback-final.log`.
+Unrequested graph-only output is empty; explicitly requesting EVOKES_FRAME still
+selects the `Animals` frame. Explicit IS_ANTONYM_OF selects a `cold` identity and
+only then resolves its display label. This demonstrates the typed operation,
+not inference of that operation from a natural-language prompt.
+
+Conversational acceptance remains failed: default `dog` follows an observed
+Atomic sentence, the hot/opposite prompt follows irrelevant prose, and the
+lightning question produces no continuation. Complete ORIENT/ROUTE by comparing
+the whole input's witnessed structures and retaining their bindings through
+selection. Independent words' accumulated neighborhoods and a common suffix
+must not substitute for that comparison. The full session checklist above
+remains active, including performance, perfcache, readers and chess restoration.

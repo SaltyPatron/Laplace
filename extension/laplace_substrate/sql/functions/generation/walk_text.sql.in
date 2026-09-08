@@ -57,7 +57,10 @@ BEGIN ATOMIC
                          convert_to(p_prompt, 'UTF8')))),
                  frontier.ids,
                  NULL::bytea[], p_fanout,
-                 seed_array.ids || COALESCE(p_prior_frontier, '{}'::bytea[])) g
+                 seed_array.ids || COALESCE(p_prior_frontier, '{}'::bytea[]),
+                 -- Continuation testimony is an output operation. Other routed
+                 -- nodes remain evidence until ORIENT elects their projection.
+                 ctx.ids, consensus.relation_set_ids('CONTINUATION_OUTPUT')) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,

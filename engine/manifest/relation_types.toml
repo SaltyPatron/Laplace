@@ -2186,6 +2186,12 @@ lowercase_input = false
 # the CASE, and `type_id = ANY (NULL)` matches nothing, so a typo would turn a traversal
 # into a silent empty result instead of an error.
 
+# Default continuation output contract. Traversal may use other relations as
+# evidence; reaching their endpoints does not license emitting their names.
+[[set]]
+name = "CONTINUATION_OUTPUT"
+members = ["COMPLETES_TO", "CONTINUES_TO"]
+
 [[set]]
 name = "PATH_LATERAL"
 members = [

@@ -116,31 +116,39 @@ BEGIN
         RAISE EXCEPTION 'FAIL: unattested sequence frequency outranked positive S7 meaning';
     END IF;
 
-    -- Remove every ctx -> semantic sequence observation. S6 sequence now knows
-    -- only noise, yet the independently witnessed semantic neighbor must enter
-    -- the union before S7 and be selected with no fabricated suffix evidence.
+    -- Remove every ctx -> semantic sequence observation. A routed renderable
+    -- identity now has no output license merely because its standing is high.
     DELETE FROM laplace.physicalities WHERE entity_id = sent_sem;
     IF EXISTS (SELECT 1 FROM generation.trajectory_continuations(ARRAY[ctx], NULL)
                WHERE object_id = semantic) THEN
         RAISE EXCEPTION 'FAIL: semantic candidate still exists in sequence proposals';
     END IF;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier, semantic]) g;
+    IF picked IS DISTINCT FROM noise THEN
+        RAISE EXCEPTION 'FAIL: renderable routing state became an unsolicited output';
+    END IF;
+
+    -- The explicitly requested typed result admits that same identity without
+    -- inventing sequence evidence. Eligibility belongs to the operation.
     SELECT g.entity, g.stride_used INTO picked, picked_stride
     FROM generation.forward_walk_continuations(
-             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier]) g;
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier], ARRAY[rel]) g;
     IF picked IS DISTINCT FROM semantic OR picked_stride IS DISTINCT FROM 0 THEN
         RAISE EXCEPTION 'FAIL: witnessed semantic-only proposal missing or attributed a sequence stride';
     END IF;
 
-    -- Routed semantic content is eligible even when COMPOSE already put it in
-    -- the frontier. It is not a prompt seed or fabricated sequence constituent.
+    -- Being in the frontier does not disqualify an explicitly requested result,
+    -- but that membership cannot replace the directed result-bearing edge.
     SELECT g.entity INTO picked
     FROM generation.forward_walk_continuations(
-             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier, semantic]) g;
+             ARRAY[ctx], 1, 1, 0.0, 8, 7, ARRAY[frontier, semantic], ARRAY[rel]) g;
     IF picked IS DISTINCT FROM semantic THEN
         RAISE EXCEPTION 'FAIL: routed output content was mistaken for a prompt seed';
     END IF;
     IF (SELECT count(*) FROM generation.forward_walk_continuations(
-            ARRAY[ctx], 3, 1, 0.0, 8, 7, ARRAY[frontier, semantic])) <> 1 THEN
+            ARRAY[ctx], 3, 1, 0.0, 8, 7, ARRAY[frontier, semantic], ARRAY[rel])) <> 1 THEN
         RAISE EXCEPTION 'FAIL: semantic-only graph cycle repeated content without sequence testimony';
     END IF;
 
@@ -184,6 +192,94 @@ BEGIN
     END IF;
     DELETE FROM laplace.consensus WHERE subject_id = frontier
         AND (object_id = noise OR type_id = laplace.relation_type_id('HAS_PART'));
+
+    -- Broad routing/steering and typed output projection are separate operands.
+    -- A frame endpoint is internal unless EVOKES_FRAME is the requested result.
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES (laplace.consensus_id(frontier,laplace.relation_type_id('EVOKES_FRAME'),semantic),
+        frontier,laplace.relation_type_id('EVOKES_FRAME'),semantic,
+        2000000000000,30000000000,60000000,5,now());
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier,semantic],NULL,1,
+        '{}'::bytea[],'{}'::bytea[],NULL::bytea[]) g;
+    IF picked IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: a routed frame name escaped an unspecified output contract';
+    END IF;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier,semantic],NULL,1,
+        '{}'::bytea[],'{}'::bytea[],ARRAY[laplace.relation_type_id('EVOKES_FRAME')]) g;
+    IF picked IS DISTINCT FROM semantic THEN
+        RAISE EXCEPTION 'FAIL: explicitly requested frame endpoint was hidden';
+    END IF;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier,semantic],'{}'::bytea[],1,
+        '{}'::bytea[],'{}'::bytea[],ARRAY[laplace.relation_type_id('EVOKES_FRAME')]) g;
+    IF picked IS DISTINCT FROM semantic THEN
+        RAISE EXCEPTION 'FAIL: output testimony depended on a duplicate steering read';
+    END IF;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier,semantic],ARRAY[rel],1,
+        '{}'::bytea[],'{}'::bytea[],'{}'::bytea[]) g;
+    IF picked IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: steering relation replaced an explicitly empty output projection';
+    END IF;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier,semantic],NULL,1,
+        '{}'::bytea[],'{}'::bytea[],ARRAY[laplace.relation_type_id('HAS_PART')]) g;
+    IF picked IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: frontier membership replaced the requested result-bearing edge';
+    END IF;
+    UPDATE laplace.consensus SET rating=1490000000000,rd=1000000000
+    WHERE subject_id=frontier AND type_id=laplace.relation_type_id('EVOKES_FRAME');
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier,semantic],NULL,1,
+        '{}'::bytea[],'{}'::bytea[],ARRAY[laplace.relation_type_id('EVOKES_FRAME')]) g;
+    IF picked IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: another relation resurrected a refuted output claim';
+    END IF;
+    -- The unsupported sharp edge ranks above this uncertain positive edge by
+    -- conservative standing. Admission must precede the one-slot fanout bound.
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES (laplace.consensus_id(frontier,laplace.relation_type_id('EVOKES_FRAME'),gap),
+        frontier,laplace.relation_type_id('EVOKES_FRAME'),gap,
+        1600000000000,350000000000,60000000,5,now());
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier,semantic],NULL,1,
+        '{}'::bytea[],'{}'::bytea[],ARRAY[laplace.relation_type_id('EVOKES_FRAME')]) g;
+    IF picked IS DISTINCT FROM gap THEN
+        RAISE EXCEPTION 'FAIL: refuted projection spent the bound before output admission';
+    END IF;
+    DELETE FROM laplace.consensus WHERE subject_id=frontier
+        AND type_id=laplace.relation_type_id('EVOKES_FRAME');
+
+    -- A typed output can be a lexeme, frame, action, or other opaque identity.
+    -- Content physicalities/renderable words are not a second admission rule.
+    IF realize.render_text(unrelated) IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: opaque output fixture unexpectedly has content';
+    END IF;
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES (laplace.consensus_id(frontier,laplace.relation_type_id('HAS_PART'),unrelated),
+        frontier,laplace.relation_type_id('HAS_PART'),unrelated,
+        2000000000000,30000000000,60000000,5,now());
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,0,0.0,1,7,ARRAY[frontier],NULL,1,
+        '{}'::bytea[],'{}'::bytea[],ARRAY[laplace.relation_type_id('HAS_PART')]) g;
+    IF picked IS DISTINCT FROM unrelated THEN
+        RAISE EXCEPTION 'FAIL: typed output identity required an early render/content classification';
+    END IF;
+    DELETE FROM laplace.consensus WHERE subject_id=frontier
+        AND type_id=laplace.relation_type_id('HAS_PART');
 
     -- The canonical relation manifest owns symmetry: the same typed operation
     -- may traverse reverse-stored evidence when its relation is symmetric.
@@ -340,6 +436,61 @@ BEGIN
         ARRAY[ctx,gap],2,5,0.0,8,7,ARRAY[unrelated], '{}'::bytea[],8,ARRAY[unrelated]) g;
     IF scoped_steps IS DISTINCT FROM ARRAY[semantic,noise] THEN
         RAISE EXCEPTION 'FAIL: selected identity did not extend the next observation scope';
+    END IF;
+
+    -- A document's physicality supplies observations without a semantic edge
+    -- from each word to the document. Use the existing containing-all index;
+    -- sequence truth still belongs to the native ordinal matcher.
+    SELECT g.entity,g.stride_used INTO picked,picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx,gap],1,2,0.0,8,7,'{}'::bytea[],'{}'::bytea[],8,
+        '{}'::bytea[],ARRAY[ctx,gap]) g;
+    IF picked IS DISTINCT FROM semantic OR picked_stride IS DISTINCT FROM 2 THEN
+        RAISE EXCEPTION 'FAIL: physical observations required per-word semantic testimony';
+    END IF;
+    SELECT g.entity,g.stride_used INTO picked,picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[gap,ctx],1,2,0.0,8,7,ARRAY[unrelated],'{}'::bytea[],8,
+        '{}'::bytea[],ARRAY[gap,ctx]) g;
+    IF picked_stride >= 2 THEN
+        RAISE EXCEPTION 'FAIL: containing-all membership became ordered sequence proof';
+    END IF;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx,gap],1,2,0.0,8,7,ARRAY[unrelated],'{}'::bytea[],8,
+        '{}'::bytea[],ARRAY[ctx,gap,next_root]) g;
+    IF picked IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: containing observation read dropped a required identity';
+    END IF;
+
+    -- Scoped ordinal observations are evidence, not a corpus-wide prior. An
+    -- unrelated positive graph edge cannot suppress them for lacking a direct
+    -- edge of their own. Repetition lives in one canonical ordered manifest.
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
+    VALUES (public.laplace_hash128_blake3(sent_noise||decode('0100','hex')),sent_noise,1,
+        public.ST_MakePoint(104,1,1,1),decode(repeat('00',16),'hex'),
+        public.ST_MakeLine(ARRAY(
+            SELECT public.laplace_mantissa_pack(
+                CASE WHEN i%2=1 THEN ctx ELSE noise END,i,1,t2flag)
+            FROM generate_series(1,64) i)),64);
+    UPDATE laplace.consensus SET rating=2000000000000
+    WHERE subject_id=frontier AND type_id=rel AND object_id=semantic;
+    SELECT g.entity,g.stride_used INTO picked,picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,1,0.0,8,7,ARRAY[frontier],ARRAY[rel],8,ARRAY[sent_noise]) g;
+    IF picked IS DISTINCT FROM noise OR picked_stride IS DISTINCT FROM 1 THEN
+        RAISE EXCEPTION 'FAIL: positive graph edge erased scoped ordinal evidence';
+    END IF;
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES (laplace.consensus_id(frontier,rel,noise),frontier,rel,noise,
+        1000000000000,30000000000,60000000,5,now());
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,1,0.0,8,7,ARRAY[frontier],ARRAY[rel],8,ARRAY[sent_noise]) g;
+    IF picked IS DISTINCT FROM semantic THEN
+        RAISE EXCEPTION 'FAIL: scoped ordinal support erased explicit refutation';
     END IF;
 
     RAISE NOTICE '✓ steering precedence: positive witnessed meaning enters without sequence evidence; refutation preserves legitimate fallback';

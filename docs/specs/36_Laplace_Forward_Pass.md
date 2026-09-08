@@ -42,6 +42,14 @@ Produce legal/grammatical/typed next constituents or actions. Proposal may combi
 corpus continuity, graph traversal, model-circuit testimony, code grammar, tool results,
 or domain operators without committing to an answer.
 
+Routing state and output eligibility are separate. Reaching a frame, sense, category,
+or other identity does not license emitting its name merely because it has renderable
+content. Such identities remain available to interpretation and traversal. An output
+operation must establish the result-bearing relation or ordered observation before
+selection; the same identity can be an output when that is what the operation requests.
+Conversely, an explicitly selected typed result does not require a text physicality:
+realization supplies its requested surface afterward without replacing its identity.
+
 ### STEER
 
 Apply task, discourse, source scope, A*/hop/fan-out constraints, ordinal continuity,
