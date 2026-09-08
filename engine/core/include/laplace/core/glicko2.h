@@ -88,6 +88,10 @@ int64_t laplace_glicko2_neutral_mu_fp(void);
 
 
 int64_t laplace_effective_mu_fp(int64_t rating, int64_t rd);
+static inline int laplace_glicko2_refuted(int64_t rating, int64_t rd)
+{
+    return (__int128)rating + 2 * (__int128)rd < LAPLACE_GLICKO2_NEUTRAL_MU_FP;
+}
 
 int64_t glicko2_effective_mu(const glicko2_state_t* st);
 

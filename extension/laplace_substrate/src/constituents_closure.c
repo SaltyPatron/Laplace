@@ -12,6 +12,7 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "trajectory_wkb.h"
+#include "perfcache_native.h"
 
 /*
  * realize.constituents_closure(roots, max_depth)
@@ -133,6 +134,12 @@ static void
 frontier_add_if_new(HTAB *visited, IdVec *frontier, const hash128_t *id,
                     MemoryContext owner)
 {
+    uint32_t codepoint;
+    /* The immutable floor already resolves these identities. Codepoints have
+     * no constituent manifests to retrieve from PostgreSQL. The parent edge
+     * remains in the result; only the redundant leaf lookup is omitted. */
+    if (laplace_perfcache_codepoint_for_id((const uint8_t *) id, &codepoint))
+        return;
     bool found;
     (void) hash_search(visited, id, HASH_ENTER, &found);
     if (!found) {

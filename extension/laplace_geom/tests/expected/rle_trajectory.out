@@ -75,3 +75,16 @@ FROM forms;
  t                    | t             | t            | t             | t
 (1 row)
 
+-- Membership is unique in first-occurrence order; it is not the ordered path.
+SELECT laplace_trajectory_constituent_ids(laplace_trajectory_build(ARRAY[
+           laplace_hash128_blake3('member-b'::bytea),
+           laplace_hash128_blake3('member-a'::bytea),
+           laplace_hash128_blake3('member-b'::bytea),
+           laplace_hash128_blake3('member-a'::bytea)])) = ARRAY[
+           laplace_hash128_blake3('member-b'::bytea),
+           laplace_hash128_blake3('member-a'::bytea)] AS membership_preserves_first_occurrence;
+ membership_preserves_first_occurrence 
+---------------------------------------
+ t
+(1 row)
+

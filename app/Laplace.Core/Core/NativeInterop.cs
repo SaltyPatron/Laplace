@@ -168,6 +168,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "codepoint_table_lookup_id")]
     internal static partial int CodepointTableLookupId(Hash128* id, uint* outCp);
 
+    [LibraryImport(Library, EntryPoint = "codepoint_table_presence_bitmap")]
+    internal static partial int CodepointTablePresenceBitmap(
+        Hash128* ids, nuint count, byte* bitmap, nuint bitmapBytes);
+
     [LibraryImport(Library, EntryPoint = "tier_tree_new")]
     internal static partial IntPtr TierTreeNew(nuint capacityHint);
 

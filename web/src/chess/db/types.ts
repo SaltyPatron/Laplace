@@ -19,9 +19,9 @@ export interface ChessRecord {
 }
 
 /**
- * A player as the rated competitor he is. `games` is the fold's own witness count;
+ * A player with Laplace consensus standing over witnessed results. `games` is the fold's own witness count;
  * `eff_mu` (rating − 2·rd) is the conservative estimate everything ranks by. Not a win
- * percentage: Glicko-2 weighs who you beat, and rd says how sure the corpus is.
+ * percentage or source Elo: rd expresses uncertainty in the witnessed standing.
  */
 export interface ChessPlayerRow {
   rank: number;

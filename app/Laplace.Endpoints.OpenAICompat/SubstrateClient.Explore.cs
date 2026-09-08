@@ -508,7 +508,6 @@ internal sealed partial class SubstrateClient
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            if (await ReadLabelAsync(conn, id, ct) is null) return null;
 
             var containerRows = await NpgsqlSubstrateReads.ContainersAsync(conn, id, maxHops, limit, ct);
             var labels = await ReadDisplayLabelsAsync(

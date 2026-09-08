@@ -112,6 +112,31 @@ TEST(LaplaceCoreCodepointTable, RejectsBadPath) {
     EXPECT_NE(codepoint_table_lookup(0x41u), nullptr);
 }
 
+TEST(LaplaceCoreCodepointTable, BatchMembershipPreservesPositionsAndUnknowns) {
+    hash128_t unknown;
+    hash128_blake3(reinterpret_cast<const uint8_t*>("not-a-codepoint-entity"), 22, &unknown);
+    const hash128_t a = codepoint_table_lookup('A')->hash;
+    const hash128_t space = codepoint_table_lookup(' ')->hash;
+    const hash128_t wolf = codepoint_table_lookup(0x72FC)->hash;
+    hash128_t ids[] = {a, unknown, space, wolf, a, unknown, a, space, wolf};
+    uint8_t bitmap[] = {0xff, 0xff, 0x7b};
+    ASSERT_EQ(codepoint_table_presence_bitmap(ids, 9, bitmap, 2), 0);
+    EXPECT_EQ(bitmap[0], 0xddu);
+    EXPECT_EQ(bitmap[1], 1u);
+    EXPECT_EQ(bitmap[2], 0x7bu);
+    EXPECT_EQ(codepoint_table_presence_bitmap(ids, 9, bitmap, 1), -1);
+    EXPECT_EQ(codepoint_table_presence_bitmap(nullptr, 1, bitmap, 2), -1);
+    EXPECT_EQ(codepoint_table_presence_bitmap(ids, 9, nullptr, 2), -1);
+    EXPECT_EQ(codepoint_table_presence_bitmap(nullptr, 0, nullptr, 0), 0);
+}
+
+TEST(LaplaceCoreCodepointTable, ReverseIdentityIncludesNulAndRejectsSurrogates) {
+    uint32_t cp = 42;
+    ASSERT_EQ(codepoint_table_lookup_id(&codepoint_table_lookup(0)->hash, &cp), 0);
+    EXPECT_EQ(cp, 0u);
+    EXPECT_EQ(codepoint_table_lookup_id(&codepoint_table_lookup(0xD800)->hash, &cp), -1);
+}
+
 TEST(LaplaceCoreCodepointTable, RejectsStaleUcdVersionAndKeepsActiveTable) {
     const std::filesystem::path original = LAPLACE_PERFCACHE_PATH_FOR_TESTS;
     const std::filesystem::path mutated =

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Laplace.Engine.Core;
 using global::Npgsql;
 using NpgsqlTypes;
 
@@ -1318,25 +1319,27 @@ public static partial class NpgsqlSubstrateReads
 
     public readonly record struct ContainerRow(string IdHex, short Tier, string Type, int Hops, string Label);
 
-    public static Task<IReadOnlyList<ContainerRow>> ContainersAsync(
+    public static async Task<IReadOnlyList<ContainerRow>> ContainersAsync(
         NpgsqlConnection conn, byte[] id, int hops, int limit, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT encode(c.entity_id, 'hex'), c.tier,
-                   COALESCE(NULLIF(realize.render_text_fast(c.type_id, 4), ''),
-                            converse.label_or_hex(c.type_id)), c.hops,
-                   COALESCE(NULLIF(realize.render_text_fast(c.entity_id, 8), ''),
-                            converse.label_or_hex(c.entity_id))
-            FROM structural.containers_of(@id, @hops, @limit) c
-            """,
-            static r => new ContainerRow(
-                r.GetString(0), r.GetInt16(1), r.GetString(2), r.GetInt32(3), r.GetString(4)),
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("containers.page"),
+            static r => (Id: r.GetFieldValue<byte[]>(0), Tier: r.GetInt16(1),
+                Type: r.GetFieldValue<byte[]>(2), Hops: r.GetInt32(3)),
             p =>
             {
                 p.Add("id", NpgsqlDbType.Bytea).Value = id;
                 p.AddWithValue("hops", hops);
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "containers", onError: onError);
+        if (rows.Count == 0) return [];
+        var types = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("types.labels"),
+            static r => r.GetFieldValue<string[]>(0),
+            p => p.Add("types", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = rows.Select(r => r.Type).ToArray(),
+            ct: ct, label: "container_types", onError: onError);
+        return rows.Select((r, i) => new ContainerRow(
+            Convert.ToHexString(r.Id).ToLowerInvariant(), r.Tier, types[0][i], r.Hops, "")).ToArray();
+    }
 
     public readonly record struct CompletionRow(
         string ObjectIdHex, string TypeIdHex, decimal EffectiveMu, long Witnesses, string ObjectLabel);

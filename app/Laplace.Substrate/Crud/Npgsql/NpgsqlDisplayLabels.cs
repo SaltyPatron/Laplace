@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.Engine.Core;
 using NpgsqlTypes;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
@@ -22,10 +23,7 @@ public static class NpgsqlDisplayLabels
     public static Task<IReadOnlyList<DisplayLabelRow>> ReadAsync(
         NpgsqlConnection conn, byte[][] ids, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT encode(d.id, 'hex'), d.label, d.tier
-            FROM realize.display_label_batch(@ids::bytea[]) d
-            """,
+        NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("display.labels"),
             static r => new DisplayLabelRow(
                 r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetInt16(2)),
             p =>

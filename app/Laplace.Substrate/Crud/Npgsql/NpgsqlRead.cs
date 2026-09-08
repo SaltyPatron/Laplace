@@ -1,4 +1,6 @@
 using global::Npgsql;
+using NpgsqlTypes;
+using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -19,6 +21,71 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlRead
 {
+    public static Task<IReadOnlyList<T>> ReadRowsAsync<T>(
+        NpgsqlConnection conn, NativeSqlQuery query, Func<NpgsqlDataReader, T> map,
+        Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0,
+        CancellationToken ct = default, string? label = null, ErrorTranslator? onError = null)
+        => ReadRowsAsync(conn, query.Text, map, parameters =>
+        {
+            bind?.Invoke(parameters);
+            ValidateParameters(query, parameters);
+        }, timeoutSeconds, ct, label ?? query.Name, onError);
+
+    private static void ValidateParameters(NativeSqlQuery query, NpgsqlParameterCollection parameters)
+    {
+        if (parameters.Count != query.ParameterTypes.Length)
+            throw new ArgumentException($"{query.Name}: expected {query.ParameterTypes.Length} parameters, got {parameters.Count}.");
+        for (var i = 0; i < parameters.Count; i++)
+        {
+            var expected = query.ParameterTypes[i] switch
+            {
+                "bytea" => NpgsqlDbType.Bytea,
+                "bytea[]" => NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                "int4" => NpgsqlDbType.Integer,
+                "int8" => NpgsqlDbType.Bigint,
+                "text" => NpgsqlDbType.Text,
+                _ => throw new InvalidOperationException($"Unknown native parameter type {query.ParameterTypes[i]}."),
+            };
+            if (parameters[i].NpgsqlDbType != expected)
+                throw new ArgumentException($"{query.Name}: parameter {i + 1} must be {query.ParameterTypes[i]}.");
+        }
+    }
+
+    /// <summary>Independent typed reads share one transport batch and keep their own row shapes.</summary>
+    public static async Task<(IReadOnlyList<TFirst> First, IReadOnlyList<TSecond> Second)>
+        ReadBatchRowsAsync<TFirst, TSecond>(
+        NpgsqlConnection conn,
+        NativeSqlQuery first, Action<NpgsqlParameterCollection> bindFirst, Func<NpgsqlDataReader, TFirst> mapFirst,
+        NativeSqlQuery second, Action<NpgsqlParameterCollection> bindSecond, Func<NpgsqlDataReader, TSecond> mapSecond,
+        CancellationToken ct = default, int timeoutSeconds = 30, ErrorTranslator? onError = null)
+    {
+        try
+        {
+            await using var batch = new NpgsqlBatch(conn) { Timeout = timeoutSeconds };
+            var firstCommand = new NpgsqlBatchCommand(first.Text);
+            bindFirst(firstCommand.Parameters);
+            ValidateParameters(first, firstCommand.Parameters);
+            batch.BatchCommands.Add(firstCommand);
+            var secondCommand = new NpgsqlBatchCommand(second.Text);
+            bindSecond(secondCommand.Parameters);
+            ValidateParameters(second, secondCommand.Parameters);
+            batch.BatchCommands.Add(secondCommand);
+            await batch.PrepareAsync(ct).ConfigureAwait(false);
+            await using var reader = await batch.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            var firstRows = new List<TFirst>();
+            while (await reader.ReadAsync(ct).ConfigureAwait(false)) firstRows.Add(mapFirst(reader));
+            if (!await reader.NextResultAsync(ct).ConfigureAwait(false))
+                throw new InvalidOperationException($"{second.Name}: missing batch result.");
+            var secondRows = new List<TSecond>();
+            while (await reader.ReadAsync(ct).ConfigureAwait(false)) secondRows.Add(mapSecond(reader));
+            return (firstRows, secondRows);
+        }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, first.Name + "+" + second.Name);
+        }
+    }
+
     /// <summary>
     /// Maps a failed command into the caller's own exception type. <paramref name="failure"/>
     /// is the original (typically <see cref="PostgresException"/>, <see cref="NpgsqlException"/>

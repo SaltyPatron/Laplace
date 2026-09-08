@@ -105,10 +105,9 @@ static inline int64
 eff_mu_display_fp(int64 rating, int64 rd)
 {
     int64 eff  = laplace_effective_mu_fp(rating, rd);
-    int64 half = INT64CONST(500000);
-
-    return (eff >= 0 ? eff + half : eff - half)
-           / INT64CONST(1000000) * INT64CONST(1000000);
+    __int128 rounded = ((__int128)eff + (eff >= 0 ? 500000 : -500000))
+                       / 1000000 * 1000000;
+    return rounded > INT64_MAX ? INT64_MAX : rounded < INT64_MIN ? INT64_MIN : (int64)rounded;
 }
 
 /* Edge strength is the Glicko-2 expected score against the certain neutral

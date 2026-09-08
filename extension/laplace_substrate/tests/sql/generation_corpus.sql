@@ -82,6 +82,23 @@ BEGIN
                 public.laplace_mantissa_pack(w_france, 7, 1, t2flag)]),
             7, now());
 
+    -- The membership index deduplicates SPACE; an ordered reader must not.
+    IF NOT EXISTS (
+        SELECT 1 FROM generation.word_adjacency(ARRAY[w_capital,w_of], NULL, 1)
+        WHERE subject_id=w_capital AND object_id=w_of AND sep_id=sp AND witness_id=sent)
+       OR EXISTS (
+        SELECT 1 FROM generation.word_adjacency(ARRAY[w_capital,w_of], NULL, 1)
+        WHERE subject_id=w_capital AND object_id=w_of AND sep_id IS NULL AND witness_id=sent)
+    THEN
+        RAISE EXCEPTION 'FAIL: adjacency lost repeated separator positions';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM generation.word_adjacency(ARRAY[w_capital,w_of], NULL, 2)
+        WHERE subject_id=w_capital AND object_id=w_of AND sep_id IS NULL AND witness_id=sent)
+    THEN
+        RAISE EXCEPTION 'FAIL: gap is not the witnessed ordinal offset';
+    END IF;
+
     -- Multi-identity containment is one shared GIN probe.  It returns the
     -- composition carrying both points, not a manufactured capital->of edge.
     IF NOT EXISTS (
@@ -244,6 +261,12 @@ BEGIN
         WHERE t.object_id = w_of AND t.weight = 3) THEN
         RAISE EXCEPTION 'FAIL: repeated matches or new trajectory missing (capital→of should be weight 3)';
     END IF;
+    IF (SELECT count(*) FROM generation.word_adjacency(ARRAY[w_capital,w_of], NULL, 1)
+        WHERE subject_id=w_capital AND object_id=w_of AND witness_id=sent3) <> 2
+    THEN
+        RAISE EXCEPTION 'FAIL: adjacency discarded a repeated word occurrence';
+    END IF;
+
 
     -- Two physical observations may attest the same entity. geometry_successors
     -- must keep their trajectories separate rather than interleaving equal
@@ -345,6 +368,20 @@ BEGIN
        OR EXISTS (SELECT 1 FROM generation.walk_continuations(ARRAY[w_the], 0, 3, 0.7, 4, 42))
        OR EXISTS (SELECT 1 FROM generation.walk_continuations(ARRAY[w_the], 6, 3, 0.7, 0, 42)) THEN
         RAISE EXCEPTION 'FAIL: zero generation capacity was promoted to a hidden default';
+    END IF;
+
+    -- Change only this final fixture to a packed run [capital,capital,of].
+    -- Logical ordinals come from run prefixes, never the deduplicated index.
+    UPDATE laplace.physicalities SET trajectory=public.ST_MakeLine(ARRAY[
+        public.laplace_mantissa_pack(w_capital,1,2,t2flag),
+        public.laplace_mantissa_pack(w_of,3,1,t2flag)]), n_constituents=3
+    WHERE id=public.laplace_hash128_blake3('test/corpus/phys-doc');
+    IF (SELECT count(*) FROM generation.word_adjacency(ARRAY[w_capital,w_of], NULL, 1)
+        WHERE witness_id=doc) <> 2
+       OR (SELECT count(*) FROM generation.word_adjacency(ARRAY[w_capital,w_of], NULL, 2)
+           WHERE witness_id=doc AND subject_id=w_capital AND object_id=w_of) <> 1
+    THEN
+        RAISE EXCEPTION 'FAIL: adjacency lost expanded RLE ordinals';
     END IF;
 
     RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';

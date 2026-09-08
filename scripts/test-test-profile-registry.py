@@ -19,7 +19,7 @@ registry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(registry)
 
 POLICY_IDS = {
-    "policy-source-contract", "policy-registry", "policy-actions-topology",
+    "policy-source-contract", "policy-registry", "policy-sql-catalog", "policy-actions-topology",
     "policy-actions-audit", "policy-shellcheck-gate", "policy-deploy-payload-sync",
     "policy-pipeline-install", "policy-application-runtime", "policy-stockfish-release",
     "policy-managed-services", "policy-managed-host", "policy-managed-tls",

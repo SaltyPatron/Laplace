@@ -1,0 +1,64 @@
+/* Query key, positional PostgreSQL parameter types, statement text.
+ * This is the sole statement owner for migrated native and app query paths. */
+SQL_QUERY("browse.containing", "bytea[]",
+    "SELECT entity_id FROM structural.containers_containing_all($1)")
+SQL_QUERY("browse.names", "bytea[]",
+    "SELECT subject_id, object_id, rating, rd, witness_count FROM laplace.consensus "
+    "WHERE object_id = ANY($1) AND type_id = ANY("
+    "consensus.relation_family_ids('HAS_NAME') || consensus.relation_family_ids('HAS_NAME_ALIAS'))")
+SQL_QUERY("entity.facets", "bytea[]",
+    "SELECT id, tier, type_id FROM laplace.entities WHERE id = ANY($1)")
+SQL_QUERY("browse.page", "bytea[],bytea,int4,int4,int4",
+    "SELECT entity_id, tier, type_id, matched_name_id, match_kind, "
+    "rating, rd, eff_mu, witness_count, candidate_name_count, candidate_truncated, matched_entity_count "
+    "FROM consensus.browse_named_entities($1,$2,$3,$4,$5)")
+SQL_QUERY("display.labels", "bytea[]",
+    "SELECT encode(d.id, 'hex'), d.label, d.tier FROM realize.display_label_batch($1) d")
+SQL_QUERY("containers.page", "bytea,int4,int4",
+    "SELECT entity_id, tier, type_id, hops FROM structural.containers_of($1,$2,$3)")
+SQL_QUERY("containers.parents", "bytea[]",
+    "SELECT entity_id FROM laplace.physicalities WHERE type=1 AND trajectory IS NOT NULL "
+    "AND public.laplace_trajectory_constituent_ids(trajectory) && $1")
+SQL_QUERY("types.labels", "bytea[]",
+    "SELECT lexical.type_label_batch($1)")
+SQL_QUERY("generation.separators", "", "SELECT generation.separator_ids()")
+SQL_QUERY("generation.adjacency_manifests", "bytea[],int4",
+    "SELECT entity_id,public.ST_AsBinary(trajectory) FROM laplace.physicalities "
+    "WHERE type=1 AND trajectory IS NOT NULL "
+    "AND public.laplace_trajectory_constituent_ids(trajectory) && $1 LIMIT $2")
+SQL_QUERY("display.facets", "bytea[]",
+    "SELECT e.id,e.tier,e.type_id,e.first_observed_by,c.name FROM laplace.entities e "
+    "LEFT JOIN laplace.canonical_names c ON c.id=e.id WHERE e.id=ANY($1)")
+SQL_QUERY("display.names", "bytea[]", "SELECT realize.resolve_name_batch($1)")
+SQL_QUERY("display.text", "bytea[]", "SELECT realize.render_text_batch($1)")
+SQL_QUERY("display.metadata_labels", "bytea[]", "SELECT realize.label_batch($1)")
+SQL_QUERY("display.file_metadata", "bytea[]",
+    "SELECT subject_id,object_id,last_observed_at,id FROM laplace.attestations "
+    "WHERE subject_id=ANY($1) AND object_id IS NOT NULL AND type_id=realize.canonical_id("
+    "concat_ws('/','substrate','type','HasFileMetadata','v1'))")
+SQL_QUERY("display.definition_types", "", "SELECT id FROM consensus.relation_family_members('HAS_DEFINITION')")
+SQL_QUERY("display.definitions", "bytea[],bytea[]",
+    "SELECT subject_id,object_id,last_observed_at,id FROM laplace.attestations "
+    "WHERE subject_id=ANY($1) AND type_id=ANY($2) AND object_id IS NOT NULL")
+SQL_QUERY("display.definition_owners", "bytea[],bytea[]",
+    "SELECT object_id,object_id,last_observed_at,id FROM laplace.attestations "
+    "WHERE object_id=ANY($1) AND type_id=ANY($2)")
+SQL_QUERY("display.heads", "bytea[]",
+    "SELECT entity_id,id,public.ST_AsBinary(public.ST_PointN(trajectory,1)) "
+    "FROM laplace.physicalities WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL")
+SQL_QUERY("chess.repair_normalize", "bytea[],bytea,bytea",
+    "UPDATE laplace.attestations SET opponent_rating_fp1e9 = consensus.glicko2_neutral_mu() "
+        "WHERE subject_id = ANY($1) AND type_id = ANY(ARRAY[$2,$3]) "
+        "AND opponent_rating_fp1e9 <> consensus.glicko2_neutral_mu()")
+SQL_QUERY("chess.repair_evidence", "bytea[],bytea,bytea",
+    "SELECT subject_id,type_id,object_id,id,observation_count,sum_score_fp1e9,"
+        "opponent_rd_fp1e9,last_observed_at,fold_replayable FROM laplace.attestations "
+        "WHERE subject_id = ANY($1) AND type_id = ANY(ARRAY[$2,$3])")
+SQL_QUERY("chess.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[],int8[],timestamptz[]",
+    "INSERT INTO laplace.consensus AS c (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
+        "SELECT laplace.consensus_id(b.subject,b.type,b.object),b.* FROM "
+        "unnest($1,$2,$3,$4,$5,$6,$7,$8) b(subject,type,object,rating,rd,volatility,witness_count,last_observed_at) "
+        "ON CONFLICT(id,type_id,subject_id) DO UPDATE SET rating=EXCLUDED.rating,rd=EXCLUDED.rd,"
+        "volatility=EXCLUDED.volatility,witness_count=EXCLUDED.witness_count,last_observed_at=EXCLUDED.last_observed_at "
+        "WHERE ROW(c.rating,c.rd,c.volatility,c.witness_count,c.last_observed_at) IS DISTINCT FROM "
+        "ROW(EXCLUDED.rating,EXCLUDED.rd,EXCLUDED.volatility,EXCLUDED.witness_count,EXCLUDED.last_observed_at)")

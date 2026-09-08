@@ -34,11 +34,16 @@ builder.Services.AddSingleton(sp => new ContentArtifactCloser(
     message => sp.GetRequiredService<ILogger<ContentArtifactCloser>>().LogWarning("{Message}", message)));
 builder.Services.AddOpenApi();
 
-const int perTenantPerMinute = 300;
+const int perClientPerMinute = 300;
 const int webhookPerMinute = 120;
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddConcurrencyLimiter("public-query", limiter =>
+    {
+        limiter.PermitLimit = 16;
+        limiter.QueueLimit = 0;
+    });
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
     {
         var path = ctx.Request.Path.Value ?? string.Empty;
@@ -55,16 +60,13 @@ builder.Services.AddRateLimiter(options =>
                     QueueLimit = 0
                 });
 
-        var partition = Laplace.Endpoints.OpenAICompat.Auth.ApiKeyTenantResolver.PresentedKey(ctx.Request);
-        if (partition is null)
-        {
-            var tenant = ctx.Request.Headers["X-Laplace-Tenant"].ToString();
-            partition = string.IsNullOrWhiteSpace(tenant) ? "local-dev" : tenant;
-        }
-        return RateLimitPartition.GetSlidingWindowLimiter($"tenant:{partition}",
+        // Before authentication, headers and presented keys are untrusted. Rotating
+        // either must not manufacture fresh request budgets.
+        var partition = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetSlidingWindowLimiter($"client:{partition}",
             _ => new SlidingWindowRateLimiterOptions
             {
-                PermitLimit = perTenantPerMinute,
+                PermitLimit = perClientPerMinute,
                 Window = TimeSpan.FromMinutes(1),
                 SegmentsPerWindow = 6,
                 QueueLimit = 0

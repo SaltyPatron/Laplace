@@ -43,6 +43,10 @@ internal static class QueryEndpoints
         // fully labeled. Ungated like the catalog — it IS the shop window.
         app.MapGet("/v1/query/leaders", async (string? bands, int? limit, ISubstrateClient substrate, CancellationToken ct) =>
         {
+            // This anonymous home-page preview has a server-owned work budget.
+            // A client-provided integer must never become an unbounded DB allocation.
+            if (limit is < 1 or > 20)
+                return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'limit' must be between 1 and 20.");
             var bandIds = (bands ?? "1,2,4,5")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(s => int.TryParse(s, out var b) ? b : -1)
@@ -50,10 +54,11 @@ internal static class QueryEndpoints
                 .Distinct().ToArray();
             if (bandIds.Length == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'bands' must name bands 0-12.");
-            var per = Math.Max(0, limit ?? 5);
+            var per = limit ?? 5;
             var leaders = await substrate.LeadersAsync(bandIds, per, ct);
             return Results.Json(new LeadersResponse("list", leaders));
         })
+        .RequireRateLimiting("public-query")
         .WithTags("query")
         .Produces<LeadersResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)

@@ -67,3 +67,12 @@ SELECT laplace_trajectory_equivalent(plain, compressed) AS encoding_independent,
        laplace_trajectory_equivalent(NULL, compressed) IS NULL
          AND laplace_trajectory_equivalent(plain, NULL) IS NULL AS null_propagates
 FROM forms;
+
+-- Membership is unique in first-occurrence order; it is not the ordered path.
+SELECT laplace_trajectory_constituent_ids(laplace_trajectory_build(ARRAY[
+           laplace_hash128_blake3('member-b'::bytea),
+           laplace_hash128_blake3('member-a'::bytea),
+           laplace_hash128_blake3('member-b'::bytea),
+           laplace_hash128_blake3('member-a'::bytea)])) = ARRAY[
+           laplace_hash128_blake3('member-b'::bytea),
+           laplace_hash128_blake3('member-a'::bytea)] AS membership_preserves_first_occurrence;

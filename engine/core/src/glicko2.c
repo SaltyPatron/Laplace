@@ -79,7 +79,10 @@ static int64_t rounded_ratio_i128(__int128 numerator, int64_t denominator)
 
 static int glicko2_state_is_admissible(const glicko2_state_t *st)
 {
-    return st != NULL && st->rd > 0 && st->rd <= LAPLACE_FP_RD_MAX &&
+    return st != NULL &&
+           (__int128)st->rating - 2 * (__int128)st->rd > INT64_MIN &&
+           (__int128)st->rating + 2 * (__int128)st->rd < INT64_MAX &&
+           st->rd > 0 && st->rd <= LAPLACE_FP_RD_MAX &&
            st->volatility > 0 && st->observation_count >= 0;
 }
 
@@ -641,7 +644,7 @@ int64_t laplace_glicko2_neutral_mu_fp(void)
 
 int64_t laplace_effective_mu_fp(int64_t rating, int64_t rd)
 {
-    return sat_sub_i64(rating, sat_scale_i64(rd, 2));
+    return clamp_i128((__int128)rating - 2 * (__int128)rd);
 }
 
 int64_t glicko2_effective_mu(const glicko2_state_t* st)

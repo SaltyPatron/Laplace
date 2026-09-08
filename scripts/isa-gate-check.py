@@ -184,7 +184,7 @@ CEILINGS = {
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
     # 206 -> 205 (2026-08-20): the game_plies string body went with the projection.
-    "g12_string_sql_bodies": 204,
+    "g12_string_sql_bodies": 203,
     # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
     # that introduced it, so it lands enumerated rather than red on merge day.
     # Both survivors are in translate_to's language-reference matcher, where the
@@ -859,6 +859,11 @@ def scan_g4_dead_canonical() -> Counter[str]:
     functions_root = ROOT / "extension" / "laplace_substrate" / "sql" / "functions"
     defined: dict[str, str] = {}
     corpus: list[tuple[str, str]] = []
+
+    # Native-owned statements are also application and extension call sites.
+    catalog = ROOT / "engine" / "core" / "src" / "sql_catalog.def"
+    if catalog.exists():
+        corpus.append((relative(catalog), strip_c_comments(catalog.read_text(encoding="utf-8"))))
 
     for path in production_files(functions_root, (".sql.in",)):
         rel = relative(path)

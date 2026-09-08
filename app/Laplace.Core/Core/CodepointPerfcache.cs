@@ -110,4 +110,19 @@ public static unsafe class CodepointPerfcache
     }
 
     public static bool IsKnownCodepointId(Hash128 id) => TryLookupCodepoint(id, out _);
+
+    /// <summary>One native batch over the mapped floor; zero bits remain unresolved.</summary>
+    public static byte[] KnownIdsBitmap(IReadOnlyList<Hash128> ids)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var bitmap = new byte[ids.Count / 8 + (ids.Count % 8 == 0 ? 0 : 1)];
+        if (!_ready || ids.Count == 0) return bitmap;
+        Hash128[] packed = ids as Hash128[] ?? ids.ToArray();
+        fixed (Hash128* input = packed)
+        fixed (byte* output = bitmap)
+            if (NativeInterop.CodepointTablePresenceBitmap(
+                    input, (nuint)packed.Length, output, (nuint)bitmap.Length) != 0)
+                throw new InvalidOperationException("codepoint floor membership failed");
+        return bitmap;
+    }
 }

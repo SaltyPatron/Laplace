@@ -212,7 +212,7 @@ export function PlayersIndex() {
                   <Th>Player</Th>
                   <SortableHead label="Games" value="games" active={sort} direction={direction} onSort={chooseSort} />
                   <SortableHead label="Conservative" value="strength" active={sort} direction={direction} onSort={chooseSort} />
-                  <SortableHead label="Rating" value="rating" active={sort} direction={direction} onSort={chooseSort} />
+                  <SortableHead label="Laplace Glicko-2" value="rating" active={sort} direction={direction} onSort={chooseSort} />
                   <SortableHead label="±RD" value="rd" active={sort} direction={direction} onSort={chooseSort} />
                 </tr>
               </thead>

@@ -183,4 +183,29 @@ TEST(LaplaceCoreGlicko2Extreme, EffectiveMuCannotOverflowCarrier) {
     const auto hi = std::numeric_limits<int64_t>::max();
     EXPECT_EQ(laplace_effective_mu_fp(hi, lo), hi);
     EXPECT_EQ(laplace_effective_mu_fp(lo, hi), lo);
+    EXPECT_EQ(laplace_effective_mu_fp(hi, hi), -hi);
+    EXPECT_EQ(laplace_effective_mu_fp(lo, lo), hi);
+}
+
+TEST(LaplaceCoreGlicko2Extreme, RefutationUsesWideOptimisticBound) {
+    const auto lo = std::numeric_limits<int64_t>::min();
+    const auto hi = std::numeric_limits<int64_t>::max();
+    EXPECT_FALSE(laplace_glicko2_refuted(hi, to_fp(350)));
+    EXPECT_TRUE(laplace_glicko2_refuted(lo, to_fp(350)));
+    EXPECT_FALSE(laplace_glicko2_refuted(hi, hi));
+    EXPECT_TRUE(laplace_glicko2_refuted(lo, lo));
+    EXPECT_FALSE(laplace_glicko2_refuted(to_fp(800), to_fp(350)));
+    EXPECT_TRUE(laplace_glicko2_refuted(to_fp(799), to_fp(350)));
+}
+
+TEST(LaplaceCoreGlicko2Extreme, SaturatedDatabasePriorCannotBePublishedAgain) {
+    for (const int64_t rating : {std::numeric_limits<int64_t>::max(),
+                                 std::numeric_limits<int64_t>::min()}) {
+        glicko2_state_t state;
+        glicko2_init(&state, rating, to_fp(350), 90682809647104LL);
+        const auto before = state;
+        EXPECT_NE(0, glicko2_fold_uniform_period(&state, to_fp(1500), to_fp(62),
+            1, SCALE, LAPLACE_GLICKO2_DEFAULT_TAU, 1000));
+        ExpectSameState(state, before);
+    }
 }

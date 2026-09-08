@@ -163,42 +163,15 @@ pg_laplace_chess_position_ready(PG_FUNCTION_ARGS)
 
 
 
-static uint32_t *rev_idx = NULL;
-static uint64_t  rev_count = 0;
-static const codepoint_entry_t *rev_records = NULL;
-
-static int
-rev_cmp(const void *pa, const void *pb)
-{
-    uint32_t a = *(const uint32_t *) pa;
-    uint32_t b = *(const uint32_t *) pb;
-    return memcmp(&rev_records[a].hash, &rev_records[b].hash, sizeof(hash128_t));
-}
-
+/* PostgreSQL and managed callers share the core reverse index. Complete its
+ * initialization in the postmaster so backends inherit one read-only index. */
 static void
 rev_index_ensure(void)
 {
-    const codepoint_entry_t *records;
-    uint64_t count;
-
-    if (rev_idx != NULL)
-        return;
-
-    if (codepoint_table_records(&records, &count) != 0)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("laplace_substrate: perfcache records unavailable for reverse index")));
-
-    {
-        uint32_t *idx = (uint32_t *)
-            MemoryContextAlloc(TopMemoryContext, sizeof(uint32_t) * count);
-        for (uint64_t i = 0; i < count; ++i)
-            idx[i] = (uint32_t) i;
-        rev_records = records;
-        qsort(idx, count, sizeof(uint32_t), rev_cmp);
-        rev_count = count;
-        rev_idx = idx;
-    }
+    const codepoint_entry_t *probe = codepoint_table_lookup('A');
+    uint32_t cp;
+    if (probe == NULL || codepoint_table_lookup_id(&probe->hash, &cp) != 0 || cp != 'A')
+        ereport(ERROR, (errmsg("laplace_substrate: codepoint reverse index initialization failed")));
 }
 
 void
@@ -258,34 +231,10 @@ laplace_substrate_perfcache_prewarm(void)
 bool
 laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
 {
-    uint64_t lo, hi;
-
-    if (!laplace_perfcache_ready())
-        return false;
-    rev_index_ensure();
-
-    lo = 0;
-    hi = rev_count;
-    while (lo < hi)
-    {
-        uint64_t mid = lo + ((hi - lo) >> 1);
-        uint32_t cp = rev_idx[mid];
-        int c = memcmp(id, &rev_records[cp].hash, sizeof(hash128_t));
-
-        if (c < 0)
-            hi = mid;
-        else if (c > 0)
-            lo = mid + 1;
-        else
-        {
-            
-            if (cp >= 0xD800 && cp <= 0xDFFF)
-                return false;
-            *out_cp = cp;
-            return true;
-        }
-    }
-    return false;
+    hash128_t key;
+    if (!laplace_perfcache_ready()) return false;
+    memcpy(&key, id, sizeof(key));
+    return codepoint_table_lookup_id(&key, out_cp) == 0;
 }
 
 

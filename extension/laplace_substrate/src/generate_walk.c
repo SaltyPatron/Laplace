@@ -1460,14 +1460,21 @@ render_batch(FunctionCallInfo fcinfo, bool as_bytes)
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "render_text_batch: SPI_connect failed");
-    ensure_render_plans();
 
     for (int i = 0; i < n; i++)
     {
-        if (!nulls[i])
+        if (!nulls[i]) {
+            bytea *id = DatumGetByteaPP(elems[i]);
+            uint32_t codepoint;
+            if (VARSIZE_ANY_EXHDR(id) == 16 &&
+                laplace_perfcache_codepoint_for_id(
+                    (const uint8_t *) VARDATA_ANY(id), &codepoint))
+                continue;
             roots[n_roots++] = elems[i];
+        }
     }
 
+    if (n_roots > 0) ensure_render_plans();
     closure = fetch_constituents_closure(roots, n_roots, max_depth);
 
     memset(&mctl, 0, sizeof(mctl));

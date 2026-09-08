@@ -15,6 +15,19 @@
       "required": true
     },
     {
+      "id": "policy-sql-catalog",
+      "profile": "policy",
+      "owner": "native-query",
+      "runner": "script",
+      "command": ["python3", "scripts/test-sql-catalog-gate.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-registry",
       "profile": "policy",
       "owner": "ci",

@@ -78,11 +78,10 @@ BEGIN
         (public.laplace_hash128_blake3('test/display/definition-edge/nested'),
          concept2, defrel, book, src, NULL, 2, now(), 1, 1000000000, 30000000000);
 
-    SELECT array_agg(d.id ORDER BY u.ord), array_agg(d.label ORDER BY u.ord)
+    SELECT array_agg(d.id ORDER BY d.ord), array_agg(d.label ORDER BY d.ord)
       INTO ids, labels
-    FROM unnest(ARRAY[concept, concept2, doc, sent1, wolf, opaque, missing])
-         WITH ORDINALITY u(id, ord)
-    JOIN LATERAL realize.display_label_batch(ARRAY[u.id]) d ON true;
+    FROM realize.display_label_batch(ARRAY[concept, concept2, doc, sent1, wolf, opaque, missing])
+         WITH ORDINALITY d(id, label, tier, ord);
 
     IF ids IS DISTINCT FROM ARRAY[concept, concept2, doc, sent1, wolf, opaque, missing] THEN
         RAISE EXCEPTION 'FAIL: display label changed/reordered entity identity';
@@ -114,10 +113,10 @@ BEGIN
 
     -- Final-result projection is aligned, including duplicates. A graph batch can contain
     -- the same id at multiple positions; display must not sort/dedup labels out of alignment.
-    SELECT array_agg(d.label ORDER BY u.ord)
+    SELECT array_agg(d.label ORDER BY d.ord)
       INTO labels
-    FROM unnest(ARRAY[concept2, opaque, concept2]) WITH ORDINALITY u(id, ord)
-    JOIN LATERAL realize.display_label_batch(ARRAY[u.id]) d ON true;
+    FROM realize.display_label_batch(ARRAY[concept2, opaque, concept2])
+         WITH ORDINALITY d(id, label, tier, ord);
     IF cardinality(labels) <> 3 OR labels[1] IS DISTINCT FROM labels[3] THEN
         RAISE EXCEPTION 'FAIL: display label batch lost duplicate positional alignment';
     END IF;

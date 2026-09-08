@@ -21,34 +21,18 @@ public sealed class ExploreDisplayLabelGateTests
         var app = File.ReadAllText(appPath);
 
         Assert.Contains("CREATE OR REPLACE FUNCTION realize.display_label_batch", sql, StringComparison.Ordinal);
-        Assert.Contains("realize.resolve_name_batch(p_ids)", sql, StringComparison.Ordinal);
-        Assert.Contains("realize.render_text_batch(b.ids)", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("realize.render_text_batch(b.ids, 3)", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("realize.render_text_batch(b.ids, 4)", sql, StringComparison.Ordinal);
-        Assert.Contains("consensus.relation_family_members('HAS_DEFINITION')", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("consensus.relation_family_ids('HAS_DEFINITION')", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("relation_type_id('HAS_DEFINITION')", sql, StringComparison.Ordinal);
-        Assert.Contains("HasFileMetadata", sql, StringComparison.Ordinal);
-        Assert.Contains("WITH RECURSIVE", sql, StringComparison.Ordinal);
-        Assert.Contains("preview_spine", sql, StringComparison.Ordinal);
-        Assert.Contains("ST_PointN(w.trajectory, 1)", sql, StringComparison.Ordinal);
-        Assert.Contains("laplace_mantissa_unpack", sql, StringComparison.Ordinal);
-        Assert.Contains("s.depth < 32", sql, StringComparison.Ordinal);
-        Assert.Contains("'Unrealized entity'", sql, StringComparison.Ordinal);
-        Assert.Contains("entity.type_id", sql, StringComparison.Ordinal);
-        Assert.Contains("never decides which projection runs", sql, StringComparison.OrdinalIgnoreCase);
-
-        // A preview follows one ordered branch at each tier. It must never unpack siblings or
-        // reconstruct a full book/document merely to put text on a graph node, and the app
-        // must consume the installed projection rather than owning a second copy of the law.
-        // The display function also must not create a pg_depend edge to the generated
-        // relation_family_ids helper: extension upgrades regenerate that helper later in the
-        // manifest and older upgrades still DROP it before recreating it.
-        Assert.DoesNotContain("ST_DumpPoints", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("generation.trajectory_unpacked_points", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("constituents_closure", sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("render_text_batch(p_ids, 0)", sql, StringComparison.Ordinal);
-        Assert.Contains("realize.display_label_batch(@ids::bytea[])", app, StringComparison.Ordinal);
+        var native = File.ReadAllText(Path.Combine(root, "extension", "laplace_substrate", "src", "display_native.c"));
+        var catalog = File.ReadAllText(Path.Combine(root, "engine", "core", "src", "sql_catalog.def"));
+        Assert.Contains("pg_laplace_display_label_batch", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("WITH RECURSIVE", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("display.heads", native, StringComparison.Ordinal);
+        Assert.Contains("ST_PointN(trajectory,1)", catalog, StringComparison.Ordinal);
+        Assert.Contains("realize.resolve_name_batch($1)", catalog, StringComparison.Ordinal);
+        Assert.Contains("realize.render_text_batch($1)", catalog, StringComparison.Ordinal);
+        Assert.Contains("consensus.relation_family_members('HAS_DEFINITION')", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("ST_DumpPoints", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("constituents_closure", native, StringComparison.Ordinal);
+        Assert.Contains("SqlCatalog.Get(\"display.labels\")", app, StringComparison.Ordinal);
         Assert.DoesNotContain("HAS_DEFINITION", app, StringComparison.Ordinal);
     }
 

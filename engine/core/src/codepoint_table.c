@@ -276,7 +276,7 @@ int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp) {
         if (c < 0) hi = mid;
         else if (c > 0) lo = mid + 1;
         else {
-            if (cp == 0 || (cp >= 0xD800u && cp <= 0xDFFFu)) return -1;
+            if (cp >= 0xD800u && cp <= 0xDFFFu) return -1;
             if (out_cp) *out_cp = cp;
             return 0;
         }
@@ -287,6 +287,19 @@ int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp) {
 int laplace_codepoint_is_whitespace(uint32_t cp) {
     const codepoint_entry_t* e = codepoint_table_lookup(cp);
     return e ? (laplace_pc_white_space(e->flags) != 0u) : 0;
+}
+
+int codepoint_table_presence_bitmap(const hash128_t* ids, size_t count,
+                                    uint8_t* bitmap, size_t bitmap_bytes) {
+    size_t required = count / 8 + (count % 8 != 0);
+    if (bitmap_bytes < required || (required && !bitmap) || (count && !ids))
+        return -1;
+    if (required) memset(bitmap, 0, required);
+    if (!codepoint_table_is_loaded()) return -1;
+    for (size_t i = 0; i < count; ++i)
+        if (codepoint_table_lookup_id(&ids[i], NULL) == 0)
+            bitmap[i >> 3] |= (uint8_t)(1u << (i & 7));
+    return 0;
 }
 
 int laplace_text_is_all_whitespace(const uint8_t* utf8, size_t len) {

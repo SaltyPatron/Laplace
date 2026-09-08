@@ -216,31 +216,23 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     {
         if (candidates is null) throw new ArgumentNullException(nameof(candidates));
         int n = candidates.Count;
-        var bm = new byte[(n + 7) / 8];
+        ct.ThrowIfCancellationRequested();
+        var bm = new byte[BitmapBits.ByteLength(n)];
         if (n == 0) return bm;
-
-
-
-        var unknownIdx = new List<int>(n);
+        var unresolved = new List<Hash128>();
+        var positions = new List<int>();
         for (int i = 0; i < n; i++)
         {
             if (_proven.ContainsKey(candidates[i])) BitmapBits.Set(bm, i);
-            else unknownIdx.Add(i);
+            else { unresolved.Add(candidates[i]); positions.Add(i); }
         }
-        if (unknownIdx.Count == 0) return bm;
-
-
-        var dbUnknownIdx = new List<int>(unknownIdx.Count);
-        for (int u = 0; u < unknownIdx.Count; u++)
+        if (unresolved.Count == 0) return bm;
+        var floor = CodepointPerfcache.KnownIdsBitmap(unresolved);
+        var dbUnknownIdx = new List<int>();
+        for (int i = 0; i < positions.Count; i++)
         {
-            int i = unknownIdx[u];
-            if (CodepointPerfcache.IsKnownCodepointId(candidates[i]))
-            {
-                BitmapBits.Set(bm, i);
-                AddProven(candidates[i]);
-            }
-            else
-                dbUnknownIdx.Add(i);
+            if (BitmapBits.IsSet(floor, i)) BitmapBits.Set(bm, positions[i]);
+            else dbUnknownIdx.Add(positions[i]);
         }
         if (dbUnknownIdx.Count == 0) return bm;
 
@@ -317,18 +309,16 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             throw new ArgumentException("ids and parents must be the same length");
         if (ids.Count == 0) return Array.Empty<byte>();
 
+        ct.ThrowIfCancellationRequested();
+        var floor = CodepointPerfcache.KnownIdsBitmap(ids);
         bool allProven = true;
         for (int i = 0; i < ids.Count; i++)
         {
-            if (!_proven.ContainsKey(ids[i])) { allProven = false; break; }
+            if (BitmapBits.IsSet(floor, i)) continue;
+            if (_proven.ContainsKey(ids[i])) BitmapBits.Set(floor, i);
+            else allProven = false;
         }
-        if (allProven)
-        {
-            var allBm = new byte[BitmapBits.ByteLength(ids.Count)];
-            for (int i = 0; i < ids.Count; i++)
-                BitmapBits.Set(allBm, i);
-            return allBm;
-        }
+        if (allProven) return floor;
 
         var byteaArray = new byte[ids.Count][];
         for (int i = 0; i < ids.Count; i++) byteaArray[i] = ids[i].ToBytes();
@@ -354,23 +344,30 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     }
 
     /// <summary>
-    /// One round of the tier-by-tier, trunk-to-leaf batch existence probe.
-    /// Concurrent callers are coalesced by tier before this direct native
-    /// tier_batch_existence_probe() call. There is no C# result cache here:
-    /// the native side already does its own perfcache fast-path internally
-    /// (batch_presence_core() in descent_probe.c), and every bit in the
-    /// result is a real, positive confirmation for exactly the ids passed
-    /// in. The round's tier rides along as the parallel key array so the
-    /// probe prunes entities' LIST(tier) partitions to one index descent
-    /// per id instead of one per leaf. The caller
-    /// (TierTreeDescent.ProbeBatchEmitBitmapsAsync) is responsible for
-    /// filtering which ids to check each round and for only calling
-    /// MarkProven with the subset this round's bitmap actually confirmed
-    /// present.
+    /// Resolve the immutable floor before transport. Only unresolved identities
+    /// enter the shared tier batch; native PostgreSQL probes confirm stored rows.
+    /// The positional map preserves duplicate inputs and their exact bit positions.
     /// </summary>
-    public Task<byte[]> TierBatchExistenceProbeAsync(
-        IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default) =>
-        _tierProbes.ProbeAsync(ids, tier, ct);
+    public async Task<byte[]> TierBatchExistenceProbeAsync(
+        IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        ct.ThrowIfCancellationRequested();
+        var bitmap = CodepointPerfcache.KnownIdsBitmap(ids);
+        var unresolved = new List<Hash128>();
+        var positions = new List<int>();
+        for (int i = 0; i < ids.Count; i++)
+        {
+            if (BitmapBits.IsSet(bitmap, i)) continue;
+            unresolved.Add(ids[i]);
+            positions.Add(i);
+        }
+        if (unresolved.Count == 0) return bitmap;
+        var stored = await _tierProbes.ProbeAsync(unresolved, tier, ct).ConfigureAwait(false);
+        for (int i = 0; i < positions.Count; i++)
+            if (BitmapBits.IsSet(stored, i)) BitmapBits.Set(bitmap, positions[i]);
+        return bitmap;
+    }
 
     private async Task<byte[]> TierBatchExistenceProbeDirectAsync(
         IReadOnlyList<Hash128> ids, short tier, CancellationToken ct)

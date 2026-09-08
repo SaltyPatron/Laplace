@@ -62,6 +62,7 @@ set(LAPLACE_CORE_SOURCES
     src/media_decode_impl.c
     src/media_decode_vorbis.c
     src/glicko2.c
+    src/sql_catalog.c
     src/score.c
     src/codepoint_table.c
     src/chess_position_table.c

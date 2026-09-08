@@ -802,12 +802,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
         if (whitePlayer is { } w2)
             ChessGraph.AppendPlayerResult(
-                b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, playingId,
-                blackElo);
+                b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, playingId);
         if (blackPlayer is { } b2)
             ChessGraph.AppendPlayerResult(
-                b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, playingId,
-                whiteElo);
+                b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, playingId);
 
         Meta(b, lineId, HasEventRelation, PgnGames.TagStr(gameText, "Event"), src, playingId);
         Meta(b, lineId, "ON_DATE", date, src, playingId);

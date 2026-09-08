@@ -50,6 +50,7 @@ internal static class ExploreEndpoints
                 ct);
             return Results.Json(result);
         })
+        .RequireRateLimiting("public-query")
         .WithTags("explore")
         .Produces<ExploreBrowseResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)

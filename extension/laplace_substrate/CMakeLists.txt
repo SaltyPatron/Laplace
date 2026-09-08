@@ -64,6 +64,7 @@ set(EXT_C_SOURCES
     src/steer_candidates.c
     src/trajectory_generate.c
     src/trajectory_continuations.c
+    src/word_adjacency.c
     src/chess_learned_moves.c
     src/chess_syzygy.c
     src/variant_synth.c
@@ -81,6 +82,9 @@ set(EXT_C_SOURCES
     src/descent_probe.c
     src/fold_route.c
     src/containers_of.c
+    src/browse_native.c
+    src/chess_rating_repair.c
+    src/display_native.c
     src/constituents_closure.c
     src/geometry_successors.c
     src/highway_mask.c

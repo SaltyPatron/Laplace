@@ -75,7 +75,7 @@ public sealed class ChessPlayerRatingTests
     }
 
     [Fact]
-    public void ImportedRatingsSetTheActualOpponentForBothPlayers()
+    public void ImportedEloRemainsSourceTestimonyAndDoesNotCalibrateLaplaceStanding()
     {
         var rated = WhiteWins.Replace(
             "[Result \"1-0\"]",
@@ -83,8 +83,8 @@ public sealed class ChessPlayerRatingTests
             StringComparison.Ordinal);
         var change = Compose(rated);
 
-        long aliceOpponent = 1850L * Glicko2.FpScale;
-        long bobOpponent = 1725L * Glicko2.FpScale;
+        long aliceOpponent = Single(Compose(WhiteWins), Alice, Outcome).OpponentRatingFp1e9;
+        long bobOpponent = Single(Compose(WhiteWins), Bob, Outcome).OpponentRatingFp1e9;
         Assert.Equal(aliceOpponent, Single(change, Alice, Outcome).OpponentRatingFp1e9);
         Assert.Equal(bobOpponent, Single(change, Bob, Outcome).OpponentRatingFp1e9);
         Assert.Equal(aliceOpponent, Assert.Single(change.Attestations,

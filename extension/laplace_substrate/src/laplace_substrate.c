@@ -162,6 +162,13 @@ pg_laplace_effective_mu(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_effective_mu_fp(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_refuted);
+Datum
+pg_laplace_refuted(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(laplace_glicko2_refuted(PG_GETARG_INT64(0), PG_GETARG_INT64(1)));
+}
+
 
 
 PG_FUNCTION_INFO_V1(pg_laplace_glicko2_neutral_mu);

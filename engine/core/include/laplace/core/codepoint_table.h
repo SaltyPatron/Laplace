@@ -39,6 +39,12 @@ int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
 
 int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp);
 
+/* Positional floor membership, LSB first. This answers resolvability from the
+ * mapped floor, never whether an entity/attestation row has been persisted.
+ * Returns 0 on success, -1 for invalid buffers or an unloaded floor. */
+int codepoint_table_presence_bitmap(const hash128_t* ids, size_t count,
+                                    uint8_t* bitmap, size_t bitmap_bytes);
+
 
 
 

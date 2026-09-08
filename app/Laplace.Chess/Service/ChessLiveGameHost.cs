@@ -276,13 +276,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 if (session.WhitePlayerId is { } w2)
                     ChessGraph.AppendPlayerResult(
                         b, w2, session.BlackPlayerId, result.ForMover(0), WitnessWeight,
-                        ChessVocabulary.SourceId, playingId,
-                        session.Metadata.BlackRating ?? 0);
+                        ChessVocabulary.SourceId, playingId);
                 if (session.BlackPlayerId is { } b2)
                     ChessGraph.AppendPlayerResult(
                         b, b2, session.WhitePlayerId, result.ForMover(1), WitnessWeight,
-                        ChessVocabulary.SourceId, playingId,
-                        session.Metadata.WhiteRating ?? 0);
+                        ChessVocabulary.SourceId, playingId);
 
                 RecordGameMetadata(b, lineId, playingId, session, result, adjudicated);
                 RecordLivePlyDetails(b, playingId, movePoints, session, nowUs);

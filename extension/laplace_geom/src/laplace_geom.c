@@ -1,10 +1,12 @@
 #include "postgres.h"
+#include "miscadmin.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "nodes/execnodes.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/hsearch.h"
 #include "utils/tuplestore.h"
 #include "catalog/pg_type.h"
 #include "access/htup_details.h"
@@ -843,26 +845,33 @@ pg_laplace_trajectory_constituent_ids(PG_FUNCTION_ARGS)
     double *xyzm = geom_to_xyzm_buffer(l, "laplace_trajectory_constituent_ids", &n);
 
     Datum     *elems = (n > 0) ? (Datum *) palloc(sizeof(Datum) * n) : NULL;
-    hash128_t *seen  = (n > 0) ? (hash128_t *) palloc(sizeof(hash128_t) * n) : NULL;
+    HASHCTL ctl = {0};
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    HTAB *seen = hash_create("trajectory membership ids", 128, &ctl,
+                             HASH_ELEM | HASH_BLOBS);
     int m = 0;
 
     for (size_t i = 0; i < n; ++i)
     {
+        if ((i & 1023) == 0) CHECK_FOR_INTERRUPTS();
         mantissa_payload_t payload;
         mantissa_unpack(&xyzm[i * 4], &payload);
 
-        bool dup = false;
-        for (int j = 0; j < m; ++j)
-            if (memcmp(&seen[j], &payload.entity_id, sizeof(hash128_t)) == 0) { dup = true; break; }
+        /* This is the GIN membership projection, not an ordered manifest.
+         * Keep first-occurrence output byte-for-byte compatible with existing
+         * indexes, but do not linearly rescan all earlier ids per vertex. */
+        bool dup;
+        hash_search(seen, &payload.entity_id, HASH_ENTER, &dup);
         if (dup) continue;
 
-        seen[m] = payload.entity_id;
         bytea *eid_out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
         SET_VARSIZE(eid_out, VARHDRSZ + sizeof(hash128_t));
         memcpy(VARDATA(eid_out), &payload.entity_id, sizeof(hash128_t));
         elems[m++] = PointerGetDatum(eid_out);
     }
 
+    hash_destroy(seen);
     pfree(xyzm);
     lwgeom_free(l);
 
