@@ -369,10 +369,7 @@ public static partial class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<(string ObjectHex, double CombinedEffMu, int SourceCount)>> AttestationResponseTypeAsync(
         NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, int topK, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT encode(object_id, 'hex'), combined_eff_mu, source_count
-            FROM ops.attestation_response_type(@subject, @rel, NULL, NULL, @k)
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("evidence.response_type"),
             static r => (
                 r.IsDBNull(0) ? "" : r.GetString(0),
                 r.IsDBNull(1) ? 0d : r.GetDouble(1),
@@ -388,10 +385,7 @@ public static partial class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<(double CombinedEffMu, int SourceCount)>> AttestationUnaryResponseTypeAsync(
         NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT combined_eff_mu, source_count
-            FROM ops.attestation_unary_response_type(@subject, @rel, NULL, NULL)
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("evidence.unary_response_type"),
             static r => (
                 r.IsDBNull(0) ? 0d : r.GetDouble(0),
                 r.IsDBNull(1) ? 0 : r.GetInt32(1)),

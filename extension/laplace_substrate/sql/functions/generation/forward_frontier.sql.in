@@ -16,7 +16,7 @@ SELECT w.source_id, w.type_id, w.object_id, w.hop,
        w.rating, w.rd, w.witness_count
 FROM consensus.explore_web(
     COALESCE(p_seeds, '{}'::bytea[]),
-    p_hops, p_fanout, p_max_nodes) w
+    p_hops, p_fanout, p_max_nodes, true) w
 ORDER BY w.hop, w.source_id, w.type_id, w.object_id;
 END;
 

@@ -149,3 +149,12 @@ SQL_QUERY("generation.semantic_presence", "bytea[],bytea[],bytea[]",
     "WHERE e.id=ANY($1) AND e.type_id=ANY($2) AND NOT e.id=ANY($3) ORDER BY e.id")
 SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT object_id,context_id FROM laplace.attestations WHERE subject_id=ANY($1)")
+SQL_QUERY("evidence.response_support", "bytea[],bytea,bytea[],bytea,bool",
+    "SELECT subject_id,object_id,source_id FROM laplace.attestations "
+    "WHERE subject_id=ANY($1) AND type_id=$2 AND ((object_id IS NULL)=$5) "
+    "AND ($3 IS NULL OR source_id=ANY($3)) AND ($4 IS NULL OR context_id=$4)")
+SQL_QUERY("evidence.response_type", "bytea,bytea,int4",
+    "SELECT encode(object_id,'hex'),combined_eff_mu,source_count "
+    "FROM ops.attestation_response_type($1,$2,NULL,NULL,$3)")
+SQL_QUERY("evidence.unary_response_type", "bytea,bytea",
+    "SELECT combined_eff_mu,source_count FROM ops.attestation_unary_response_type($1,$2,NULL,NULL)")

@@ -1,41 +1,25 @@
 DROP FUNCTION IF EXISTS laplace.attestation_response(bytea, bytea, bytea[], bytea, integer);
-DROP FUNCTION IF EXISTS ops.attestation_response(bytea, bytea, bytea[], bytea, integer);
+-- Source/context filters bind witnessed support. Standing remains the declared
+-- pooled prior; it is not a source-only refold. Counts are distinct sources in
+-- that support, independent of repeated observations or consensus witness mass.
+CREATE OR REPLACE FUNCTION ops.attestation_response_batch(
+    p_subject_ids bytea[], p_relation_type_id bytea,
+    p_source_scope bytea[] DEFAULT NULL, p_context_id bytea DEFAULT NULL,
+    p_top_k integer DEFAULT NULL, p_unary boolean DEFAULT false)
+RETURNS TABLE(subject_id bytea, object_id bytea, combined_eff_mu double precision,
+    source_count integer, rating_fp1e9 bigint, rd_fp1e9 bigint, standing_scope text)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_attestation_response_batch'
+LANGUAGE C STABLE;
+
 CREATE OR REPLACE FUNCTION ops.attestation_response(
-    p_subject_id        bytea,
-    p_relation_type_id  bytea,
-    p_source_scope      bytea[]    DEFAULT NULL,
-    p_context_id        bytea      DEFAULT NULL,
-    p_top_k             integer    DEFAULT 32
-)
-RETURNS TABLE(
-    object_id        bytea,
-    combined_eff_mu  double precision,
-    source_count     integer,
-    rating_fp1e9     bigint,
-    rd_fp1e9         bigint
-)
+    p_subject_id bytea, p_relation_type_id bytea,
+    p_source_scope bytea[] DEFAULT NULL, p_context_id bytea DEFAULT NULL,
+    p_top_k integer DEFAULT 32)
+RETURNS TABLE(object_id bytea, combined_eff_mu double precision,
+    source_count integer, rating_fp1e9 bigint, rd_fp1e9 bigint)
 LANGUAGE sql STABLE
-    AS $$
-    SELECT c.object_id,
-           (consensus.eff_mu(c.rating, c.rd) / 1e9)::double precision,
-           c.witness_count::integer,
-           c.rating,
-           c.rd
-    FROM laplace.consensus c
-    WHERE c.subject_id = p_subject_id
-      AND c.type_id    = p_relation_type_id
-      AND c.object_id IS NOT NULL
-      AND (
-            (p_source_scope IS NULL AND p_context_id IS NULL)
-         OR EXISTS (
-                SELECT 1 FROM laplace.attestations a
-                WHERE a.subject_id = c.subject_id
-                  AND a.type_id    = c.type_id
-                  AND a.object_id IS NOT DISTINCT FROM c.object_id
-                  AND (p_source_scope IS NULL OR a.source_id = ANY(p_source_scope))
-                  AND (p_context_id   IS NULL OR a.context_id IS NOT DISTINCT FROM p_context_id)
-            )
-          )
-    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
-    LIMIT GREATEST(p_top_k, 0)
-$$;
+BEGIN ATOMIC
+    SELECT r.object_id,r.combined_eff_mu,r.source_count,r.rating_fp1e9,r.rd_fp1e9
+    FROM ops.attestation_response_batch(ARRAY[p_subject_id],p_relation_type_id,
+        p_source_scope,p_context_id,GREATEST(p_top_k,0)) r;
+END;

@@ -460,3 +460,53 @@ including the current official profile/search/roster read. Source ZIP and exact
 record excerpts are preserved as `fide-current.zip` and
 `fide-duplicate-5019168.txt` in the backup directory. Full source-field fidelity
 remains distinct from this display-index repair.
+
+### Clean database and foundation readback
+
+Main d5e5c9ab was installed before the authorized database recreation. Workflow
+34214197912 completed recreation; 34214512043 completed all ten foundation
+sources in 18m14.448s, recording 9,235,610 attestations. Knowledge, documents and
+chess restoration remain outstanding. The workflow passed, but five source
+throughput comparisons remain slow (Unicode, ISO639, CILI, WordNet, PropBank);
+a successful ingest is not a throughput acceptance claim. Original source/file
+inventories, final run journals and statement statistics remain in the private
+session backup. The main product proof ran against the empty database during
+this transition and must be repeated against seeded data.
+
+Fresh foundation readback still fails conversational acceptance. Twelve `dog`
+steps take 825.509 ms and emit frame names; three lightning steps take 691.862 ms
+and select Being_employed, Intentionally_act and Locale_by_use. Receipts:
+`fresh-foundation-forward.sql/.log` and `fresh-dog-route.sql/.log`.
+
+The route trace identifies an independent scope defect: the initial forward
+frontier uses Browse's bidirectional crawl, reaching unrelated words backward
+through HAS_LANGUAGE and HAS_POS. The crawl now exposes an explicit direction
+operand using the existing native neighbor implementation. Forward routing sets
+it true; canonical symmetric reverse evidence remains eligible. Filtering occurs
+before pair election and fanout, so invalid reverse edges consume no slots.
+Browse retains its bidirectional behavior. A regression verifies both behaviors
+and a lower-ranked symmetric edge surviving a stronger invalid reverse edge.
+
+Transactional current-data readback of this change (rolled back after measuring)
+returns 45 dog route edges and 12 forward steps in 329.974 ms (368.506 ms under
+EXPLAIN, 255,694 shared hits). It reaches the witnessed WordNet definition but
+still mixes senses and frame labels. Lightning remains incorrect. These are
+routing/access gains, not joint interpretation or answer composition acceptance.
+Receipt: `fresh-directed-route.sql/.log`.
+
+### Exact scoped source counts
+
+`ops.attestation_response` and its unary variant returned consensus witness_count
+as an int32 source count. That conflated repeated observations with independent
+sources and overflowed for large witness totals. One native batch now reads exact
+subject/relation evidence from the SQL catalog, applies source/context scope,
+deduplicates (subject, object, source), and joins witnessed cells to native pooled
+consensus standing. Unary and binary evidence remain separate. Standing scope is
+explicitly `pooled`: source eligibility must not pretend to be a source-only
+Glicko refold. Scalar SQL wrappers delegate to that batch; C# uses catalog entries.
+
+Regression fixtures exercise five billion repeated witnesses, multiple sources
+and contexts, unsupported consensus cells, unary/binary separation, per-subject
+limits, duplicate operands, empty source scope and scalar/batch parity. Native
+and managed builds, catalog gate (46 queries), and install/upgrade dependency
+and drop-order gates pass. Deployment/readback remains required for this change.

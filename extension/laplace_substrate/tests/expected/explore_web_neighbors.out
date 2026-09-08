@@ -418,4 +418,45 @@ BEGIN
         RAISE EXCEPTION 'FAIL: ordered scan changed exact boundary-tie election';
     END IF;
 END $$;
+-- A shared metadata target is not a semantic path to its other members.
+-- Reverse symmetric evidence remains reachable, including at a bounded cutoff.
+DO $$
+DECLARE
+    seed bytea := public.laplace_hash128_blake3('test/directed/seed');
+    language bytea := public.laplace_hash128_blake3('test/directed/language');
+    unrelated bytea := public.laplace_hash128_blake3('test/directed/unrelated');
+    synonym bytea := public.laplace_hash128_blake3('test/directed/synonym');
+    directed bytea := laplace.relation_type_id('HAS_LANGUAGE');
+    sym_type bytea := laplace.relation_type_id('IS_SYNONYM_OF');
+    hits bigint;
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(seed,directed,language),seed,directed,language,
+         1800000000000,30000000000,60000000,1,now()),
+        (laplace.consensus_id(unrelated,directed,language),unrelated,directed,language,
+         9900000000000,30000000000,60000000,1,now()),
+        (laplace.consensus_id(synonym,sym_type,language),synonym,sym_type,language,
+         1600000000000,30000000000,60000000,1,now());
+
+    SELECT count(*) INTO hits
+    FROM consensus.explore_web(ARRAY[seed],2,1,NULL) w
+    WHERE w.source_id=unrelated AND w.object_id=language;
+    IF hits <> 1 THEN
+        RAISE EXCEPTION 'FAIL: browse no longer traverses its inbound metadata edge';
+    END IF;
+    SELECT count(*) INTO hits
+    FROM generation.forward_route_trace_ids(ARRAY[seed],2,1,NULL) w
+    WHERE w.source_id=unrelated;
+    IF hits <> 0 THEN
+        RAISE EXCEPTION 'FAIL: forward route inverted a directed metadata relation';
+    END IF;
+    SELECT count(*) INTO hits
+    FROM generation.forward_route_trace_ids(ARRAY[seed],2,1,NULL) w
+    WHERE w.source_id=synonym AND w.object_id=language AND w.hop=2;
+    IF hits <> 1 THEN
+        RAISE EXCEPTION 'FAIL: reverse symmetric evidence lost its fanout slot';
+    END IF;
+END $$;
 ROLLBACK;

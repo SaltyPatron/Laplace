@@ -124,6 +124,77 @@ FROM ops.evidence_receipt(laplace.word_id('roster-content'), 0);
 SELECT count(*) = 0 AS index_usage_zero_is_empty
 FROM ops.index_usage_detail(NULL, 0);
 
+DO $$
+DECLARE
+    s1 bytea := public.laplace_hash128_blake3('test/evidence-response/s1');
+    s2 bytea := public.laplace_hash128_blake3('test/evidence-response/s2');
+    a bytea := public.laplace_hash128_blake3('test/evidence-response/a');
+    b bytea := public.laplace_hash128_blake3('test/evidence-response/b');
+    src1 bytea := public.laplace_hash128_blake3('test/evidence-response/source1');
+    src2 bytea := public.laplace_hash128_blake3('test/evidence-response/source2');
+    ctx1 bytea := public.laplace_hash128_blake3('test/evidence-response/context1');
+    ctx2 bytea := public.laplace_hash128_blake3('test/evidence-response/context2');
+    rel bytea := laplace.relation_type_id('IS_A');
+    rows_seen bigint;
+    sources_seen bigint;
+    prior bigint;
+BEGIN
+    INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(s1,rel,a),s1,rel,a,1700000000000,50000000000,60000000,5000000000,now()),
+        (laplace.consensus_id(s1,rel,b),s1,rel,b,2000000000000,50000000000,60000000,1,now()),
+        (laplace.consensus_id(s2,rel,a),s2,rel,a,1500000000000,50000000000,60000000,1,now()),
+        (laplace.consensus_id(s2,rel,b),s2,rel,b,9000000000000,50000000000,60000000,1,now()),
+        (laplace.consensus_id(s1,rel,NULL),s1,rel,NULL,1700000000000,50000000000,60000000,5000000000,now());
+    INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,
+        outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+    SELECT public.laplace_hash128_blake3(convert_to('test/evidence-response/witness/'||v.i,'UTF8')),
+        v.s,rel,v.o,v.source,v.context,1,now(),1,1000000000,350000000000
+    FROM (VALUES (1,s1,a,src1,ctx1),(2,s1,a,src1,ctx2),(3,s1,a,src2,ctx1),
+                 (4,s1,b,src2,ctx2),(5,s2,a,src1,ctx1),
+                 (6,s1,NULL,src1,ctx1),(7,s1,NULL,src1,ctx2),(8,s1,NULL,src2,ctx1)) v(i,s,o,source,context);
+
+    SELECT count(*),sum(source_count) INTO rows_seen,sources_seen
+    FROM ops.attestation_response_batch(ARRAY[s1,s1,s2],rel,NULL,NULL,NULL);
+    IF rows_seen<>3 OR sources_seen<>4 THEN
+        RAISE EXCEPTION 'FAIL: batch duplicated operands, counted observations as sources, or admitted unsupported standing';
+    END IF;
+    SELECT count(*),sum(source_count),max(rating_fp1e9) INTO rows_seen,sources_seen,prior
+    FROM ops.attestation_response_batch(ARRAY[s1],rel,ARRAY[src1,src1],ctx1,NULL)
+    WHERE standing_scope='pooled' AND object_id=a AND combined_eff_mu=1600;
+    IF rows_seen<>1 OR sources_seen<>1 OR prior<>1700000000000 THEN
+        RAISE EXCEPTION 'FAIL: source/context support did not preserve the declared pooled prior';
+    END IF;
+    SELECT count(*) INTO rows_seen
+    FROM ops.attestation_response_batch(ARRAY[s1,s2],rel,NULL,NULL,1);
+    IF rows_seen<>2 THEN RAISE EXCEPTION 'FAIL: top-k did not apply independently to each subject'; END IF;
+    SELECT count(*) INTO rows_seen
+    FROM ops.attestation_response_batch(ARRAY[s1],rel,'{}'::bytea[],NULL,NULL);
+    IF rows_seen<>0 THEN RAISE EXCEPTION 'FAIL: empty source scope admitted evidence'; END IF;
+    SELECT count(*),sum(source_count) INTO rows_seen,sources_seen
+    FROM ops.attestation_unary_response_type(s1,rel,NULL,NULL);
+    IF rows_seen<>1 OR sources_seen<>2 THEN
+        RAISE EXCEPTION 'FAIL: unary evidence did not share exact distinct-source counting';
+    END IF;
+    SELECT count(*),sum(source_count) INTO rows_seen,sources_seen
+    FROM ops.attestation_response_batch(ARRAY[s1,s2],rel,ARRAY[src1],ctx1,NULL,true)
+    WHERE object_id IS NULL AND standing_scope='pooled';
+    IF rows_seen<>1 OR sources_seen<>1 THEN
+        RAISE EXCEPTION 'FAIL: unary batch admitted binary cells or escaped source/context support';
+    END IF;
+    IF EXISTS (
+        (SELECT object_id,combined_eff_mu,source_count,rating_fp1e9,rd_fp1e9
+         FROM ops.attestation_response_batch(ARRAY[s1],rel,NULL,NULL,32)
+         EXCEPT SELECT * FROM ops.attestation_response_type(s1,rel,NULL,NULL,32))
+        UNION ALL
+        (SELECT * FROM ops.attestation_response_type(s1,rel,NULL,NULL,32)
+         EXCEPT SELECT object_id,combined_eff_mu,source_count,rating_fp1e9,rd_fp1e9
+         FROM ops.attestation_response_batch(ARRAY[s1],rel,NULL,NULL,32))) THEN
+        RAISE EXCEPTION 'FAIL: scalar and batch attestation responses disagree';
+    END IF;
+    RAISE NOTICE 'evidence response: exact source counts, scoped support, pooled prior and scalar/batch parity';
+END $$;
+
 -- mesh_position always yields the self row, even for an unwitnessed id
 SELECT count(*) >= 1 AS mesh_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS mesh_one_self

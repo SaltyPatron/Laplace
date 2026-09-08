@@ -1,5 +1,16 @@
 DROP FUNCTION IF EXISTS laplace.explore_web(bytea, int, int, int);
 DROP FUNCTION IF EXISTS consensus.explore_web(bytea, int, int, int);
+-- Explicit execution policy shares the native crawl and filters reverse
+-- directed relations before neighbor election, so they consume no fanout slots.
+CREATE OR REPLACE FUNCTION consensus.explore_web(
+    p_seeds bytea[], p_hops int, p_fanout int, p_max_nodes int,
+    p_respect_direction boolean)
+    RETURNS TABLE(
+        source_id bytea, type_id bytea, object_id bytea, hop smallint,
+        rating bigint, rd bigint, witness_count bigint)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_explore_web'
+    LANGUAGE C STABLE;
+
 CREATE OR REPLACE FUNCTION consensus.explore_web(
     p_seeds bytea[],
     p_hops int DEFAULT 2,

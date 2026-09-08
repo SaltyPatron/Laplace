@@ -196,6 +196,10 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	Datum	   *frontier_datums;
 	int			cand_cap;
 	bool		spi_top = false;
+	/* Browse admits inbound edges. Forward routing opts into the same native
+	 * reader's canonical relation direction before bounded pair election. */
+	bool		respect_direction = PG_NARGS() > 4 && !PG_ARGISNULL(4)
+		&& PG_GETARG_BOOL(4);
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR, (errmsg("explore_web: seeds must not be NULL")));
@@ -333,7 +337,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		int neighbor_count;
 		LaplaceNeighbor *neighbors = laplace_consensus_neighbors(
 			frontier_array, masked ? type_array : NULL, probe_limit,
-			masked, false, &neighbor_count, NULL);
+			masked, respect_direction, &neighbor_count, NULL);
 
 		for (int r = 0; r < neighbor_count; r++)
 		{

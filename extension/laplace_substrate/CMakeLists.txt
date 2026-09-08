@@ -8,6 +8,7 @@ set(EXT_EXECUTION_SOURCES
     src/execution_module.c
     src/content_resolve.c
     src/content_trajectory_read.c
+    src/attestation_response.c
     src/conversation_session.c
     src/consensus_scan.c
     src/consensus_neighbors.c
