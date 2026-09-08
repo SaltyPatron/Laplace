@@ -2,8 +2,9 @@
 # Failure-only receipt for the seeded live product profile.
 #
 # The live suite used one &&-chained curl command, so HTTP 503 named neither the
-# endpoint nor the readiness/op/chat body that explained it. This script changes
-# no product state and does not turn any failure green. It is invoked only after
+# endpoint nor the readiness/op/chat body that explained it. The chat POST records
+# its conversation witness; other probes read state. No probe turns a failure green.
+# This script is invoked only after
 # the authoritative live profile has already failed and records each public
 # product check independently.
 set -u

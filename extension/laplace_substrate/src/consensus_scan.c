@@ -184,11 +184,13 @@ scan_index_predicate(Relation index, AttrNumber object, bool object_required)
 
 static Relation
 scan_index(Relation relation, AttrNumber endpoint,
-           AttrNumber object, bool object_required)
+           AttrNumber object, bool object_required,
+           AttrNumber type, bool type_required)
 {
     List *indexes = RelationGetIndexList(relation);
     ListCell *cell;
     Relation selected = NULL;
+    int selected_prefix = 0;
     foreach(cell, indexes)
     {
         Relation index = index_open(lfirst_oid(cell), AccessShareLock);
@@ -198,8 +200,26 @@ scan_index(Relation relation, AttrNumber endpoint,
             index->rd_index->indkey.values[0] == endpoint &&
             scan_index_predicate(index, object, object_required))
         {
-            selected = index;
-            break;
+            int prefix = 1;
+            /* Push the complete constrained prefix into the B-tree. Steering
+             * binds both endpoints; neighborhood reads may bind a relation
+             * family. Neither should fetch the excluded heap rows first. */
+            while (prefix < index->rd_index->indnkeyatts)
+            {
+                AttrNumber attr = index->rd_index->indkey.values[prefix];
+                if ((attr == object && object_required) ||
+                    (attr == type && type_required))
+                    prefix++;
+                else
+                    break;
+            }
+            if (prefix > selected_prefix)
+            {
+                if (selected != NULL) index_close(selected, AccessShareLock);
+                selected = index;
+                selected_prefix = prefix;
+                continue;
+            }
         }
         index_close(index, AccessShareLock);
     }
@@ -223,15 +243,26 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     AttrNumber witnesses = scan_attribute(relation, "witness_count", INT8OID);
     const ScanSet *probe = subjects->array != NULL ? subjects : objects;
     Relation index = scan_index(relation, subjects->array != NULL ? subject : object,
-                               object, objects->array != NULL);
+                               object, objects->array != NULL,
+                               type, types->array != NULL);
     TupleTableSlot *slot = table_slot_create(relation, NULL);
     IndexScanDesc scan;
-    ScanKeyData key;
+    ScanKeyData keys[INDEX_MAX_KEYS];
+    int nkeys = 1;
 
-    ScanKeyEntryInitialize(&key, SK_SEARCHARRAY, 1, BTEqualStrategyNumber,
+    ScanKeyEntryInitialize(&keys[0], SK_SEARCHARRAY, 1, BTEqualStrategyNumber,
         BYTEAOID, InvalidOid, F_BYTEAEQ, PointerGetDatum(probe->array));
-    scan = index_beginscan(relation, index, GetActiveSnapshot(), NULL, 1, 0);
-    index_rescan(scan, &key, 1, NULL, 0);
+    while (nkeys < index->rd_index->indnkeyatts)
+    {
+        AttrNumber attr = index->rd_index->indkey.values[nkeys];
+        const ScanSet *set = attr == object ? objects : attr == type ? types : NULL;
+        if (set == NULL || set->array == NULL) break;
+        ScanKeyEntryInitialize(&keys[nkeys], SK_SEARCHARRAY, nkeys + 1, BTEqualStrategyNumber,
+            BYTEAOID, InvalidOid, F_BYTEAEQ, PointerGetDatum(set->array));
+        nkeys++;
+    }
+    scan = index_beginscan(relation, index, GetActiveSnapshot(), NULL, nkeys, 0);
+    index_rescan(scan, keys, nkeys, NULL, 0);
     stats->index_scans++;
     while (index_getnext_slot(scan, ForwardScanDirection, slot))
     {

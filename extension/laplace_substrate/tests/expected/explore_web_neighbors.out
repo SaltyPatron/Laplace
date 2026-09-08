@@ -343,4 +343,53 @@ BEGIN
     RAISE NOTICE '✓ explore_web_neighbors: fallback + highway-mask parity, per-parent expansion, self/revisit suppression, and total tie order all hold';
 END $$;
 NOTICE:  ✓ explore_web_neighbors: fallback + highway-mask parity, per-parent expansion, self/revisit suppression, and total tie order all hold
+-- Composite array scans retain pair election and duplicate input positions,
+-- with unrelated families sharing both endpoint indexes in DEFAULT.
+DO $$
+DECLARE
+    s bytea := public.laplace_hash128_blake3('test/composite-scan/subject');
+    o bytea := public.laplace_hash128_blake3('test/composite-scan/object');
+    a bytea := public.laplace_hash128_blake3('test/composite-scan/type-a');
+    b bytea := public.laplace_hash128_blake3('test/composite-scan/type-b');
+    noise bytea := public.laplace_hash128_blake3('test/composite-scan/noise-type');
+    hits bigint;
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    SELECT laplace.consensus_id(s,t,o),s,t,o,1800000000000,30000000000,60000000,1,now()
+    FROM unnest(ARRAY[a,b]) t;
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    SELECT laplace.consensus_id(src,noise,dst),src,noise,dst,
+           1900000000000,30000000000,60000000,1,now()
+    FROM (
+        SELECT CASE WHEN i%2=0 THEN s ELSE n END AS src,
+               CASE WHEN i%2=0 THEN n ELSE s END AS dst
+        FROM generate_series(1,1000) i
+        CROSS JOIN LATERAL (
+            SELECT public.laplace_hash128_blake3(convert_to('test/composite-scan/noise/' || i, 'UTF8')) AS n
+        ) x
+    ) cells;
+
+    SELECT count(*) INTO hits
+    FROM consensus.explore_web_neighbors(ARRAY[s,s,o],ARRAY[a,b,a],8,false);
+    IF hits <> 3 THEN
+        RAISE EXCEPTION 'FAIL: composite array scan lost pair election or duplicate frontier positions: %', hits;
+    END IF;
+
+    -- Steering intersects both endpoint sets. Exercise the two-key prefix
+    -- without a family restriction and the complete three-key prefix with one.
+    SELECT count(*) INTO hits
+    FROM generation.steer_candidates(ARRAY[o,o],ARRAY[s,s]) q
+    WHERE q.candidate=o AND q.edges=2 AND q.covered=1;
+    IF hits <> 1 THEN
+        RAISE EXCEPTION 'FAIL: untyped endpoint intersection admitted unrelated cells';
+    END IF;
+    SELECT count(*) INTO hits
+    FROM generation.steer_candidates(ARRAY[o,o],ARRAY[s,s],ARRAY[a,b,a]) q
+    WHERE q.candidate=o AND q.edges=2 AND q.covered=1;
+    IF hits <> 1 THEN
+        RAISE EXCEPTION 'FAIL: typed endpoint intersection lost selected cells';
+    END IF;
+END $$;
 ROLLBACK;

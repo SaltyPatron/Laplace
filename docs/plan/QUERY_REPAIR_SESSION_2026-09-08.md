@@ -223,3 +223,54 @@ Preserved all 1,116 accumulated live `pg_stat_statements` entries before recreat
 in the private repair evidence directory. `pg_stat_statements` 1.12 is installed
 and preloaded; `track_io_timing` was off, so historical block timing cannot be
 claimed as measured I/O latency. Block counts and execution time remain available.
+
+## Deployed query costs and observation scope
+
+Main `bca541eb` deployed the positional binding correction. Browser readback
+returned 200 for homepage leaders and the 50-row chess list, with the explicit
+Laplace Glicko-2 label. Browse returned 200 for transformer (772 ms), Captain Ahab
+(342 ms), and Carlsen (78 ms). Captain Ahab still admits reversed word order;
+ordered composition matching remains an implementation obligation. Live chat
+acceptance failed on the first cold request; the diagnostic retry completed in
+29 seconds with an incoherent concatenation of 128 substrate selections. This
+does not meet conversational acceptance. Database recreation has not run.
+
+Direct psql measurements, including their executable SQL, are preserved in the
+private repair evidence directory:
+
+- `observation-query-audit.sql/.log`: pg_stat_statements 1.12, tracking `all`,
+  reset timestamp 2026-08-18; 5,755 entries deallocated. These retained cumulative
+  aggregates span revisions and include nested statements: do not add parent and
+  child totals or treat their means as current endpoint timings. The completed
+  128-step forward turn accounts for 28.82 seconds and 28,013,980 buffer hits.
+- `leaders-deployed-plan.sql/.log`: nested plans show a band query discarding
+  901,396 entries from score-ordered indexes before returning five results.
+  Final display of 40 IDs accounts for another 995.6 ms. Both selected-family
+  access and final label resolution remain measured performance obligations.
+- `observation-scope-plan.sql/.log`: a direct indexed attestation lookup for the
+  dog ID grouped by source/context/type executes in 28.854 ms, with 19.043 ms
+  planning and 523 hits/1,318 reads. There are 250 source/context groups. Retained
+  ConceptNet English evidence contains 1,081 rows and 1,528 observations. This
+  proves evidence availability, not that frequency alone determines scope.
+
+The inventor's observation-based filtering requirement belongs before expansion
+and steering. Preserve every ordered prompt constituent and intervening entity;
+resolve witnessed occurrences, then constrain source/context/relation operands
+using those observations and session context. Carry that same scope through
+admission, scoring and receipts. `ops.attestation_response` currently gates on
+scoped attestation existence but returns global consensus scores and witness
+counts; this is not a scoped fold. `consensus.scoped_consensus` replays selected
+sources but uses a whole-source SQL aggregate and has no context operand. Neither
+is the completed native, batched, observation-scoped forward operation.
+
+The native consensus reader also previously bound only the first index column,
+fetching heap rows before rejecting other endpoint/family constraints. The repair
+binds the complete available constrained prefix and adds a subject/object/type
+index for S7's endpoint intersection. On an isolated copy of 3,100 retained live
+dog/pet/animal cells, old and new readers produce exactly equal scores, edge
+counts and coverage. Repeated warm measurements fall from 1,440 to 87 buffer
+hits and 0.861–0.879 ms to 0.326–0.367 ms (`steering-endpoint-compare.sql/.log`).
+This is an isolated steering measurement, not an end-to-end chat speedup. The
+additional index must still be deployed and its live storage/ingestion cost
+measured. Fresh-install regression covers duplicate inputs, family filtering,
+endpoint intersections and unrelated-cell exclusion.
