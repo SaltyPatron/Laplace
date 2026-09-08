@@ -6,11 +6,12 @@
 #include "spi_common.h"
 #include "laplace/core/sql_catalog.h"
 #include "spi_nested.h"
+#include "content_membership_read.h"
 
 /* Browse owns composition, deduplication, ranking, paging and receipts in C.
  * PostgreSQL executes retained, typed set reads. No generated SQL, SQL ranking,
  * recursive query or per-entity probe. Cursor fetches bound transfer memory. */
-static SPIPlanPtr containment_plan, names_plan, facets_plan;
+static SPIPlanPtr names_plan, facets_plan;
 
 static SPIPlanPtr
 plan(SPIPlanPtr *slot, const char *sql, int n, Oid *types)
@@ -57,39 +58,14 @@ id_array(HTAB *ids)
 /* Reuse the installed composition operation. Members are the decomposer's
  * whole content identities. No floor expansion, rendered search, or private
  * graph walk: the trajectory containment index elects the matching manifests.
- * Capacity controls cursor transfer size; pagination cannot hide candidates. */
+ * The compatibility capacity cannot hide candidates. */
 static hash128_t *
 candidate_names(ArrayType *members, int capacity, int *count, bool *truncated)
 {
-    Oid types[] = {BYTEAARRAYOID};
-    Datum args[] = {PointerGetDatum(members)};
+    (void)capacity;
     *count = 0; *truncated = false;
     if (ArrayGetNItems(ARR_NDIM(members), ARR_DIMS(members)) == 0) return NULL;
-    Portal cursor = SPI_cursor_open(NULL, plan(&containment_plan,
-        laplace_sql_query_text("browse.containing"),1,types), args,NULL,true);
-    if (cursor == NULL) elog(ERROR,"browse: cannot open composition read");
-    Size allocated = 0; hash128_t *ids = NULL;
-    for (;;) {
-        CHECK_FOR_INTERRUPTS();
-        SPI_cursor_fetch(cursor,true,Min(Max(capacity,1),4096));
-        uint64 fetched = SPI_processed;
-        Size required = (Size)*count + fetched;
-        if (required > MaxAllocSize / sizeof(hash128_t))
-            elog(ERROR,"browse: composition results exceed allocation capacity");
-        if (required > allocated) {
-            allocated = Min(Max(required,allocated ? allocated * 2 : 64),MaxAllocSize / sizeof(hash128_t));
-            ids = ids ? repalloc(ids,allocated*sizeof(hash128_t)) : palloc(allocated*sizeof(hash128_t));
-        }
-        for (uint64 i = 0; i < fetched; ++i) {
-            bool isnull;
-            ids[(*count)++] = datum_to_hash128(SPI_getbinval(
-                SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&isnull));
-        }
-        SPI_freetuptable(SPI_tuptable);
-        if (fetched == 0) break;
-    }
-    SPI_cursor_close(cursor);
-    return ids;
+    return laplace_content_membership_entities(members, true, count);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_word_containers_containing_all);
@@ -99,9 +75,8 @@ pg_laplace_word_containers_containing_all(PG_FUNCTION_ARGS)
     InitMaterializedSRF(fcinfo, 0);
     ReturnSetInfo *r = (ReturnSetInfo *)fcinfo->resultinfo;
     if (PG_ARGISNULL(0)) return (Datum)0;
-    bool spi_top = false, truncated;
+    bool truncated;
     int count;
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT) elog(ERROR, "browse: SPI connect failed");
     hash128_t *ids = candidate_names(PG_GETARG_ARRAYTYPE_P(0),
         PG_ARGISNULL(1) ? 0 : Max(PG_GETARG_INT32(1), 0), &count, &truncated);
     for (int i = 0; i < count; ++i) {
@@ -109,7 +84,6 @@ pg_laplace_word_containers_containing_all(PG_FUNCTION_ARGS)
         bool nulls[] = {false, false, false};
         tuplestore_putvalues(r->setResult, r->setDesc, values, nulls);
     }
-    laplace_spi_finish(spi_top);
     return (Datum)0;
 }
 

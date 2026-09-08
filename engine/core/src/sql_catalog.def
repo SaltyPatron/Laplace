@@ -1,7 +1,5 @@
 /* Query key, positional PostgreSQL parameter types, statement text.
  * This is the sole statement owner for migrated native and app query paths. */
-SQL_QUERY("browse.containing", "bytea[]",
-    "SELECT entity_id FROM structural.containers_containing_all($1)")
 SQL_QUERY("browse.names", "bytea[]",
     "SELECT subject_id, object_id, rating, rd, witness_count FROM laplace.consensus "
     "WHERE object_id = ANY($1) AND type_id = ANY("
@@ -16,9 +14,6 @@ SQL_QUERY("display.labels", "bytea[]",
     "SELECT encode(d.id, 'hex'), d.label, d.tier FROM realize.display_label_batch($1) d")
 SQL_QUERY("containers.page", "bytea,int4,int4",
     "SELECT entity_id, tier, type_id, hops FROM structural.containers_of($1,$2,$3)")
-SQL_QUERY("containers.parents", "bytea[]",
-    "SELECT entity_id FROM laplace.physicalities WHERE type=1 AND trajectory IS NOT NULL "
-    "AND public.laplace_trajectory_constituent_ids(trajectory) && $1")
 SQL_QUERY("types.labels", "bytea[]",
     "SELECT lexical.type_label_batch($1)")
 SQL_QUERY("generation.separators", "", "SELECT generation.separator_ids()")

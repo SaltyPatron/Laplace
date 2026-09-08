@@ -6,6 +6,7 @@
 #include "laplace/core/sql_catalog.h"
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "content_membership_read.h"
 
 /* Native breadth-first containment. One indexed set probe per frontier, then
  * one hydration read for the selected ids. Labels are a subsequent operation. */
@@ -19,7 +20,7 @@ typedef struct {
     int16 tier;
     bool exists;
 } ContainerHit;
-static SPIPlanPtr parents_plan, facets_plan;
+static SPIPlanPtr facets_plan;
 
 static SPIPlanPtr
 container_plan(SPIPlanPtr *slot, const char *key)
@@ -56,16 +57,12 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
     for (int hop = 1; hop <= hops && count < (Size)limit; ++hop) {
         CHECK_FOR_INTERRUPTS();
         Size start = count;
-        Datum args[] = {PointerGetDatum(frontier)};
-        Portal cursor = SPI_cursor_open(NULL, container_plan(&parents_plan,"containers.parents"), args, NULL, true);
-        if (cursor == NULL) elog(ERROR, "containers_of: cannot open frontier read");
-        for (;;) {
+        int parent_count;
+        hash128_t *parents = laplace_content_membership_entities(frontier, false, &parent_count);
+        for (int i = 0; i < parent_count && count < (Size)limit; ++i) {
             CHECK_FOR_INTERRUPTS();
-            SPI_cursor_fetch(cursor, true, 1024);
-            uint64 fetched = SPI_processed;
-            for (uint64 i = 0; i < fetched && count < (Size)limit; ++i) {
-                bool isnull, found;
-                hash128_t id = datum_to_hash128(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &isnull));
+                bool found;
+                hash128_t id = parents[i];
                 entry = hash_search(seen, &id, HASH_ENTER, &found);
                 if (found) continue;
                 if (count == capacity) {
@@ -76,11 +73,8 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
                 }
                 entry->ordinal = (int)count;
                 hits[count] = (ContainerHit){.id = id, .hop = hop}; ++count;
-            }
-            SPI_freetuptable(SPI_tuptable);
-            if (fetched == 0 || count == (Size)limit) break;
         }
-        SPI_cursor_close(cursor);
+        pfree(parents);
         if (count == start) break;
         Datum *next = palloc((count - start) * sizeof(Datum));
         for (Size i = start; i < count; ++i) next[i-start] = hash128_to_datum(&hits[i].id);

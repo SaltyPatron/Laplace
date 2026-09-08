@@ -47,11 +47,11 @@ $$;
 --
 -- GH #804: form is caller/containment-owned, not inferred from entity.type_id. Exact
 -- self-rendering stops at sentence grain. Higher-tier text is previewed only when a
--- witnessed role proves textual containment (the governed HAS_DEFINITION family or
--- HasFileMetadata); opaque or non-text content falls through to a name, relation,
+-- witnessed role or the entity's own Content physicality proves containment.
+-- Provenance operands obey the same preview boundary; opaque content falls through to a name, relation,
 -- type/source description, or explicit "Unrealized entity" rather than being silently
 -- projected through a text lens.
 CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, label text, tier smallint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_display_label_batch'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_display_label_batch'
     LANGUAGE C STABLE STRICT;

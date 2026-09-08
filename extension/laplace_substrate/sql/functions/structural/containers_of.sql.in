@@ -4,9 +4,9 @@
 -- e.g. structural.containers_of(laplace.word_id('chess'), 2) returns the sentences containing
 -- "chess" (hop 1) and the documents containing those sentences (hop 2).
 --
--- Native C owns frontier expansion and deduplication. Each hop uses one fixed
--- typed overlap query over the complete frontier. The caller's result bound is
--- passed into that query. Its retained plan avoids repeated partition planning.
+-- Native C owns frontier expansion and deduplication. Each hop reads the GIN
+-- membership index with the complete frontier, sorts distinct parent identities,
+-- then applies the caller's result bound. Labels are a subsequent operation.
 DROP FUNCTION IF EXISTS laplace.containers_of(bytea, int, int);
 CREATE OR REPLACE FUNCTION structural.containers_of(
     p_entity   bytea,
@@ -24,21 +24,13 @@ CREATE OR REPLACE FUNCTION structural.containers_of(
 DROP FUNCTION IF EXISTS laplace.containers_containing_all(bytea[]);
 CREATE OR REPLACE FUNCTION structural.containers_containing_all(p_members bytea[])
     RETURNS TABLE(entity_id bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    SELECT DISTINCT ON (p.entity_id) p.entity_id
-    FROM laplace.physicalities p
-    WHERE cardinality(p_members) > 0
-      AND p.type = 1
-      AND p.trajectory IS NOT NULL
-      AND public.laplace_trajectory_constituent_ids(p.trajectory) @> p_members
-    ORDER BY p.entity_id, p.id;
-END;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_containers_containing_all'
+    LANGUAGE C STABLE PARALLEL SAFE;
 
 -- Browser/name discovery reuses the exact same indexed trajectory law over the
 -- word-point surface, but accepts the decomposer's word identities as input.
--- It delegates to containers_containing_all with those identities intact.
--- Capacity bounds transfers, never the discoverable set.
+-- It delegates to the same native reader with those identities intact.
+-- The compatibility capacity never limits the discoverable set.
 DROP FUNCTION IF EXISTS structural.word_containers_containing_all(bytea[], int);
 CREATE OR REPLACE FUNCTION structural.word_containers_containing_all(
     p_members bytea[],

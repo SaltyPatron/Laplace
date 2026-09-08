@@ -18,20 +18,14 @@
 #include "laplace/core/trajectory.h"
 #include "laplace/core/sql_catalog.h"
 #include "content_trajectory_read.h"
+#include "content_membership_read.h"
 
 /* GIN supplies containing trajectories, not sequence truth. Native matching
  * reads the mantissa-packed ordered occurrences once, including all runs and
  * separators. A suffix proposal narrows through progressively shorter indexed
  * suffix operands. The native matcher still elects the greatest exact stride;
  * a full-context miss does not immediately discard all but the final ID. */
-static const char *UNPACK_QUERY =
-    "SELECT public.ST_AsBinary(p.trajectory) "
-    "FROM laplace.physicalities p "
-    "WHERE p.type = 1 AND p.trajectory IS NOT NULL "
-    "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1";
-static SPIPlanPtr unpack_plan = NULL;
 static SPIPlanPtr bindings_plan = NULL;
-static SPIPlanPtr containing_plan = NULL;
 
 typedef struct ScopedTrajectory
 {
@@ -158,59 +152,26 @@ laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operan
 void
 laplace_trajectory_scope_extend_containing(LaplaceTrajectoryScope *scope, ArrayType *members)
 {
-    bool spi_top = false;
     if (ARR_NDIM(members) > 1 || ARR_ELEMTYPE(members) != BYTEAOID)
         ereport(ERROR, (errmsg("trajectory scope: members must be a 1-D bytea array")));
     if (ArrayGetNItems(ARR_NDIM(members), ARR_DIMS(members)) == 0) return;
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "trajectory scope: SPI_connect failed");
     MemoryContext work = AllocSetContextCreate(CurrentMemoryContext,
         "containing observation roots", ALLOCSET_DEFAULT_SIZES);
     MemoryContext previous = MemoryContextSwitchTo(work);
     ArrayBuildState *roots = NULL;
-    Datum *ids;
-    bool *nulls;
     int count;
-    deconstruct_array(members, BYTEAOID, -1, false, TYPALIGN_INT, &ids, &nulls, &count);
+    hash128_t *ids = laplace_content_membership_entities(members, true, &count);
     for (int i = 0; i < count; ++i)
-        if (!nulls[i] && VARSIZE_ANY_EXHDR(DatumGetByteaPP(ids[i])) != sizeof(hash128_t))
-            ereport(ERROR, (errmsg("trajectory scope: ids must be 16 bytes")));
-    pfree(ids);
-    pfree(nulls);
-    /* The same fixed indexed containment operation used by Browse. No per-word
-     * attestations, corpus-wide suffix fallback, or surrogate text index. */
-    if (!containing_plan)
     {
-        Oid types[1] = {BYTEAARRAYOID};
-        containing_plan = SPI_prepare_cursor(laplace_sql_query_text("browse.containing"),
-                                              1, types, CURSOR_OPT_PARALLEL_OK);
-        if (!containing_plan || SPI_keepplan(containing_plan) != 0)
-            elog(ERROR, "trajectory scope: preparing containment read failed");
+        Datum id = hash128_to_datum(&ids[i]);
+        scope_add_id(scope->roots, &roots, id, work);
+        pfree(DatumGetPointer(id));
     }
-    Datum args[1] = {PointerGetDatum(members)};
-    Portal portal = SPI_cursor_open(NULL, containing_plan, args, NULL, true);
-    if (!portal) elog(ERROR, "trajectory scope: opening containment cursor failed");
-    for (;;)
-    {
-        SPI_cursor_fetch(portal, true, 1024);
-        uint64 rows = SPI_processed;
-        for (uint64 row = 0; row < rows; ++row)
-        {
-            bool isnull;
-            Datum id = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &isnull);
-            if (!isnull) scope_add_id(scope->roots, &roots, id, work);
-        }
-        if (SPI_tuptable) { SPI_freetuptable(SPI_tuptable); SPI_tuptable = NULL; }
-        if (!rows) break;
-        CHECK_FOR_INTERRUPTS();
-    }
-    SPI_cursor_close(portal);
     if (roots)
         laplace_content_trajectory_read(DatumGetArrayTypeP(makeArrayResult(roots, work)),
                                         scope_retain_trajectory, scope);
     MemoryContextSwitchTo(previous);
     MemoryContextDelete(work);
-    laplace_spi_finish(spi_top);
 }
 
 typedef struct SuccessorState
@@ -263,6 +224,30 @@ successor_cmp(const void *a, const void *b)
     return memcmp(&x->id, &y->id, sizeof(hash128_t));
 }
 
+typedef struct MembershipMatcher
+{
+    trajectory_suffix_matcher_t *matcher;
+    SuccessorState *state;
+    Oid as_binary;
+    MemoryContext row;
+} MembershipMatcher;
+
+static void
+match_member_trajectory(Datum physicality, Datum entity, Datum geometry, void *context)
+{
+    MembershipMatcher *match = context;
+    (void)physicality; (void)entity;
+    MemoryContext previous = MemoryContextSwitchTo(match->row);
+    bytea *wkb = DatumGetByteaP(OidFunctionCall1(match->as_binary, geometry));
+    uint32 npoints;
+    const unsigned char *points = laplace_trajectory_wkb_points(wkb, &npoints);
+    if (trajectory_match_suffixes(match->matcher, points, npoints,
+                                  record_successor, match->state) != 0)
+        elog(ERROR, "trajectory_continuations: invalid packed trajectory");
+    MemoryContextSwitchTo(previous);
+    MemoryContextReset(match->row);
+}
+
 LaplaceContinuation *
 laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, int *count)
 {
@@ -276,7 +261,6 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
     MemoryContext owner = CurrentMemoryContext;
     MemoryContext work = AllocSetContextCreate(owner, "trajectory suffix operands",
                                                ALLOCSET_DEFAULT_SIZES);
-    bool spi_top = false;
     Datum *ids;
     bool *nulls;
     int n_context;
@@ -284,9 +268,7 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
     *count = 0;
     if (ARR_NDIM(context_array) > 1 || ARR_ELEMTYPE(context_array) != BYTEAOID)
         ereport(ERROR, (errmsg("trajectory_continuations: context must be a 1-D bytea array")));
-    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-        elog(ERROR, "trajectory_continuations: SPI_connect failed");
-    MemoryContext spi_context = MemoryContextSwitchTo(work);
+    MemoryContextSwitchTo(work);
     deconstruct_array(context_array, BYTEAOID, -1, false, TYPALIGN_INT,
                       &ids, &nulls, &n_context);
     if (n_context < 1)
@@ -331,13 +313,14 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
             CHECK_FOR_INTERRUPTS();
         }
     }
-    if (!scope && !unpack_plan)
+    MembershipMatcher match = {.matcher = cleanup->matcher, .state = &state};
+    if (!scope)
     {
-        Oid types[1] = {BYTEAARRAYOID};
-        SPIPlanPtr plan = SPI_prepare_cursor(UNPACK_QUERY, 1, types, CURSOR_OPT_PARALLEL_OK);
-        if (!plan || SPI_keepplan(plan) != 0)
-            elog(ERROR, "trajectory_continuations: preparing containment query failed");
-        unpack_plan = plan;
+        Oid physicalities = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
+        Oid geometry = get_atttype(physicalities, get_attnum(physicalities, "trajectory"));
+        match.as_binary = LookupFuncName(list_make2(makeString("public"), makeString("st_asbinary")),
+                                         1, &geometry, false);
+        match.row = AllocSetContextCreate(work, "trajectory membership match", ALLOCSET_SMALL_SIZES);
     }
     /* A successful probe of suffix length k includes EVERY trajectory that
      * could match any longer suffix. The native matcher evaluates those longer
@@ -353,33 +336,7 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
         ArrayType *probe = probe_length == n_context ? context_array
             : construct_array(ids + n_context - probe_length, probe_length,
                               BYTEAOID, -1, false, TYPALIGN_INT);
-        Datum args[1] = {PointerGetDatum(probe)};
-        Portal portal = SPI_cursor_open(NULL, unpack_plan, args, NULL, true);
-        if (!portal) elog(ERROR, "trajectory_continuations: opening containment cursor failed");
-        for (;;)
-        {
-            SPI_cursor_fetch(portal, true, 1024);
-            uint64 rows = SPI_processed;
-            for (uint64 row = 0; row < rows; ++row)
-            {
-                bool isnull;
-                Datum datum = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &isnull);
-                if (isnull) continue;
-                uint32 npoints;
-                const unsigned char *points = laplace_trajectory_wkb_points(DatumGetByteaPP(datum), &npoints);
-                if (trajectory_match_suffixes(cleanup->matcher, points, npoints,
-                                               record_successor, &state) != 0)
-                    elog(ERROR, "trajectory_continuations: invalid packed trajectory");
-            }
-            if (SPI_tuptable)
-            {
-                SPI_freetuptable(SPI_tuptable);
-                SPI_tuptable = NULL;
-            }
-            if (!rows) break;
-            CHECK_FOR_INTERRUPTS();
-        }
-        SPI_cursor_close(portal);
+        laplace_content_membership_read(probe, true, match_member_trajectory, &match);
         if (probe != context_array) pfree(probe);
         if (!suffix_backoff || probe_length == 1 ||
             hash_get_num_entries(state.successors) > 0) break;
@@ -397,9 +354,7 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
     while ((entry = hash_seq_search(&sequence)) != NULL)
         if (entry->stride == (int) state.stride) ordered[(*count)++] = *entry;
     qsort(ordered, *count, sizeof(*ordered), successor_cmp);
-    MemoryContextSwitchTo(spi_context);
     MemoryContextDelete(work);
-    laplace_spi_finish(spi_top);
     return ordered;
 }
 

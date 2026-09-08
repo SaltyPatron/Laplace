@@ -111,6 +111,38 @@ BEGIN
         SELECT 1 FROM structural.containers_containing_all(ARRAY[]::bytea[])) THEN
         RAISE EXCEPTION 'FAIL: empty shared-container set scanned physicalities';
     END IF;
+    IF EXISTS (SELECT 1 FROM structural.containers_containing_all(NULL::bytea[]))
+       OR EXISTS (SELECT 1 FROM structural.containers_containing_all(ARRAY[w_capital,NULL]))
+       OR EXISTS (SELECT 1 FROM structural.containers_containing_all(ARRAY[w_capital,w_end])) THEN
+        RAISE EXCEPTION 'FAIL: containment admitted absent or NULL member';
+    END IF;
+    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[w_capital,w_capital,w_of])) <> 1
+       OR (SELECT structural.containers_containing_all(ARRAY[w_capital,w_of])) <> sent THEN
+        RAISE EXCEPTION 'FAIL: duplicate operand or scalar SRF changed containment';
+    END IF;
+    IF (SELECT candidate_count FROM structural.word_containers_containing_all(ARRAY[w_capital,w_of],0)) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: Browse capacity hid containing identities';
+    END IF;
+    BEGIN
+        PERFORM structural.containers_containing_all(ARRAY[decode('01','hex')]);
+        RAISE EXCEPTION 'FAIL: containment accepted a malformed identity';
+    EXCEPTION WHEN internal_error THEN
+        IF SQLERRM <> 'content membership requires 16-byte identities' THEN RAISE; END IF;
+    END;
+    -- Distinct entity output survives duplicate physicalities, while ordinal
+    -- consumers still count each witnessed physicality. Updates remain MVCC reads.
+    INSERT INTO laplace.physicalities
+        (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
+        SELECT public.laplace_hash128_blake3('test/corpus/duplicate-physicality'),
+               entity_id, type, coord, hilbert_index, trajectory, n_constituents,
+               observed_at
+        FROM laplace.physicalities
+        WHERE id=public.laplace_hash128_blake3('test/corpus/phys-sentence');
+    IF (SELECT count(*) FROM structural.containers_containing_all(ARRAY[w_capital,w_of])) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: duplicate physicalities duplicated containing entity';
+    END IF;
+    DELETE FROM laplace.physicalities
+        WHERE id=public.laplace_hash128_blake3('test/corpus/duplicate-physicality');
 
     -- doc wraps sent: contributes no pairs of its own and never double-counts.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
@@ -407,4 +439,75 @@ BEGIN
     RAISE NOTICE '✓ generation_corpus: trajectories are the single source — exact separator ordinals, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
 
+-- A lossy bitmap contains nonmatching tuples from matching heap pages. Exercise
+-- recheck against an independent SQL oracle, including mixed physicality types.
+DO $membership_bitmap$
+DECLARE
+    needle bytea := public.laplace_hash128_blake3('test/membership/needle');
+    noise bytea := public.laplace_hash128_blake3('test/membership/noise');
+    matched bytea := public.laplace_hash128_blake3('test/corpus/document');
+    rejected bytea := public.laplace_hash128_blake3('test/corpus/sentence');
+    point geometry := public.ST_SetSRID(public.ST_MakePoint(1,1,1,1),0);
+    yes_curve geometry;
+    no_curve geometry;
+    plan json;
+    actual bytea[];
+BEGIN
+    SELECT public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(needle,i,1,4) ORDER BY i)),
+           public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(noise,i,1,4) ORDER BY i))
+      INTO yes_curve,no_curve FROM generate_series(1,40) i;
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+    SELECT id, CASE WHEN i%2=0 THEN matched ELSE rejected END,
+           CASE WHEN i%3=0 THEN 3 ELSE 1 END, point,decode(repeat('00',16),'hex'),
+           CASE WHEN i%2=0 THEN yes_curve ELSE no_curve END,40,now()
+    FROM (
+        SELECT i,public.laplace_hash128_blake3(convert_to('test/membership/bitmap/'||i::text,'UTF8')) id
+        FROM generate_series(1,800000) i
+    ) inputs
+    WHERE pg_catalog.satisfies_hash_partition('laplace.physicalities'::regclass,64,0,id)
+    LIMIT 10000;
+    PERFORM set_config('work_mem','64kB',true);
+    PERFORM set_config('enable_seqscan','off',true);
+    EXECUTE 'EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) SELECT entity_id
+        FROM laplace.physicalities WHERE type=1 AND trajectory IS NOT NULL
+        AND public.laplace_trajectory_constituent_ids(trajectory) @> $1'
+        INTO plan USING ARRAY[needle];
+    IF NOT EXISTS (SELECT 1 FROM jsonb_path_query(plan::jsonb,'$.**."Lossy Heap Blocks"') v
+                   WHERE v::text::bigint > 0) THEN
+        RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap';
+    END IF;
+    SELECT array_agg(entity_id) INTO actual
+      FROM structural.containers_containing_all(ARRAY[needle,needle]);
+    IF actual IS DISTINCT FROM ARRAY[matched] THEN
+        RAISE EXCEPTION 'FAIL: lossy AND membership admitted a wrong entity/type';
+    END IF;
+    SELECT array_agg(entity_id) INTO actual FROM structural.containers_of(needle,1,NULL);
+    IF actual IS DISTINCT FROM ARRAY[matched] THEN
+        RAISE EXCEPTION 'FAIL: lossy OR membership admitted a wrong entity/type';
+    END IF;
+    PERFORM set_config('work_mem','4MB',true);
+    PERFORM set_config('enable_seqscan','on',true);
+END
+$membership_bitmap$;
+
+CREATE ROLE laplace_membership_reader_test;
+GRANT USAGE ON SCHEMA structural TO laplace_membership_reader_test;
+SET LOCAL ROLE laplace_membership_reader_test;
+DO $$ BEGIN
+    PERFORM structural.containers_containing_all(ARRAY[decode(repeat('00',16),'hex')]);
+    RAISE EXCEPTION 'FAIL: native membership bypassed SELECT privilege';
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+RESET ROLE;
+GRANT SELECT ON laplace.physicalities TO laplace_membership_reader_test;
+ALTER TABLE laplace.physicalities ENABLE ROW LEVEL SECURITY;
+SET LOCAL ROLE laplace_membership_reader_test;
+DO $$ BEGIN
+    PERFORM structural.containers_containing_all(ARRAY[decode(repeat('00',16),'hex')]);
+    RAISE EXCEPTION 'FAIL: native membership bypassed row security';
+EXCEPTION WHEN internal_error THEN
+    IF SQLERRM <> 'native content membership read cannot bypass row security' THEN RAISE; END IF;
+END $$;
+RESET ROLE;
 ROLLBACK;

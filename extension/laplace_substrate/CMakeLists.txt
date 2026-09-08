@@ -8,6 +8,8 @@ set(EXT_EXECUTION_SOURCES
     src/execution_module.c
     src/content_resolve.c
     src/content_trajectory_read.c
+    src/content_membership_read.c
+    src/display_native.c
     src/attestation_response.c
     src/conversation_session.c
     src/consensus_scan.c
@@ -93,6 +95,7 @@ string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 # `undefined symbol` when the extension is first loaded — never at build time.
 set(EXT_C_SOURCES
     src/laplace_substrate.c
+    src/content_membership_read.c
     src/prompt_coherence.c
     src/prompt_language.c
     src/consensus_fold_step.c

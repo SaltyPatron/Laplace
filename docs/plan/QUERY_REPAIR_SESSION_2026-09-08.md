@@ -600,3 +600,63 @@ controlled throughput benchmark. They establish that the existing end-of-ingest
 drain does not eliminate the pending-list cost for concurrent readers. Receipts:
 `containment-pending-pages.sql/.log`, `containment-pending-pages-after-omw.log`,
 `joint-observation-membership.sql/.log`, `containment-during-omw-plan.json`.
+
+### Native membership, display and preserved-context corrections
+
+The common Content membership reader now uses PostgreSQL's GIN bitmap/table
+access methods directly under the active snapshot. SQL containing-all, Browse,
+Explore parent expansion and unscoped/scoped trajectory containment delegate to
+that implementation. No SPI cursor or nested SQL planning remains in those
+membership reads. The reader validates expression/predicate/index coverage,
+checks SELECT/RLS, rechecks lossy bitmap rows, and preserves complete distinct
+entity sets separately from per-physicality ordinal observations. Two unused
+catalog statements and the retired trajectory inline SQL exemptions are removed.
+The catalog contains 43 statements and 468 legacy runtime literals remain.
+
+Native regressions pass (34 substrate, 3 geometry), including forced lossy bitmap
+AND/OR parity, NULL/empty/duplicate operands, duplicate physicalities, scalar SRF,
+write visibility, SELECT permissions and RLS rejection. All 26 policy checks pass.
+Live transactional comparison of native membership against the SQL predicate
+returned zero differences over 4,852 dog-containing entities. Initial and later
+measurements span another concurrent ingest; do not present those as a controlled
+throughput gain. Receipts: native-membership-readback.sql/.log and JSON plans.
+
+Entity 1578bd5f78a60229e09b58f86f0002c7 is a sentence inside document
+fbaf6a1386f2712429cd598ead2cdb20 and file 3be71f60f90e0f4d7be45a08b85c1ac4.
+The two-container API response was 440,651 bytes: the document's label alone was
+421,807 characters. Its first_observed_by is itself; the metadata label fallback
+reconstructed the complete book. The display reader now applies its existing
+first-unit preview to unnamed compositions and high-tier provenance operands.
+Live transactional readback gives a 61-character book title for document/file,
+while the sentence retains its 69-character content. This does not yet implement
+source-file metadata navigation or retaining every occurrence/path to a selected
+passage. Those remain required generic container behavior, not book exceptions.
+
+The volt/joule matchup exposed premature context election: volt's word identity
+870de6c70babd677ccd97163710956f5 is shared across languages. Automatic language
+selection chose Catalan (20cc979df43b76b61335520cfb99733a); lexical.senses then
+returned shared WordNet synsets for stroll/environs/turn. The English electrical
+sense aa450bdb44f3b5c5a59d571cee27b789, linked to bbd6910ea13edacec9cb0b12ef693e71,
+is present but filtered out. The displayed English glosses are stored definition
+entities reached through those shared synsets: this proves cross-language meaning
+retrieval, not generation of translated prose. No ILI/frame hop was established
+in this particular readback. Preserve source-qualified referential bindings and
+input/output language separately; compare both inputs before electing context.
+
+The inventor's later Carlsen request returned zero rows despite 10,056 committed
+Chess_Player entities. Tested current canonical Carlsen identities were absent;
+FIDE completion/name evidence still requires reconciliation. Current search also
+runs its candidate query twice on an exact miss, caps candidates before requested
+sorting, discards ordering in its character-membership SQL, and reimplements
+selection in C#. Repair through the shared substrate operations, preserving the
+whole forward-pass obligation rather than substituting a private name search.
+
+The active ChessPgn writer demonstrated a separate write bottleneck: backend
+532266 waited on the advisory lock held by 532006 during highway_mask_deposit in
+a transaction already six minutes old. pg_stat_statements.track=all identifies
+mask UPDATE ... FROM unnest as the temporary-file writer (2,117,586 temp blocks
+in one accumulated entry). Completed ChessSyzygy reported 98,517 ms in four mask
+calls over 3,887,804 pairs. The current atomic writer includes evidence, folds and
+mask chunks (configured 1,098,326 cells) in one transaction. Do not split away
+atomic evidence/consensus correctness or merely delete the mutex. Replace the
+expensive shared write operation and measure complete apply/commit latency.

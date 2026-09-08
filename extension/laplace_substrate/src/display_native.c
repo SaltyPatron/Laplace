@@ -188,6 +188,42 @@ preview(DisplayItem **items,int n)
     }
 }
 
+/* Provenance is an identity, not permission to reconstruct its entire content
+ * as a label. Apply the same bounded preview law to metadata operands. */
+static char **
+metadata_labels(DisplayItem **items, int n)
+{
+    char **labels = palloc0(Max(n, 1) * sizeof(char *));
+    if (n == 0) return labels;
+    HASHCTL ctl = {0}; ctl.keysize = sizeof(hash128_t); ctl.entrysize = sizeof(SpineHead);
+    HTAB *tiers = hash_create("display metadata tiers", n, &ctl, HASH_ELEM | HASH_BLOBS);
+    run_query(NODE_TIERS, item_ids(items,n,false), NULL);
+    for (uint64 i=0; i<SPI_processed; ++i) {
+        bool isnull; HeapTuple t=SPI_tuptable->vals[i]; TupleDesc d=SPI_tuptable->tupdesc;
+        hash128_t id=datum_to_hash128(SPI_getbinval(t,d,1,&isnull));
+        SpineHead *node=hash_search(tiers,&id,HASH_ENTER,NULL);
+        node->tier=DatumGetInt16(SPI_getbinval(t,d,2,&isnull));
+    }
+    SPI_freetuptable(SPI_tuptable);
+    DisplayItem **short_items=palloc(n*sizeof(DisplayItem*)); int *positions=palloc(n*sizeof(int));
+    DisplayItem **compositions=palloc(n*sizeof(DisplayItem*)); int short_count=0, composition_count=0;
+    for (int i=0; i<n; ++i) {
+        SpineHead *node=hash_search(tiers,&items[i]->id,HASH_FIND,NULL);
+        if (node && node->tier>3) {
+            items[i]->target=items[i]->id; items[i]->has_target=true;
+            compositions[composition_count++]=items[i];
+        } else {
+            short_items[short_count]=items[i]; positions[short_count++]=i;
+        }
+    }
+    char **short_labels=batch_text(METADATA,short_items,short_count,false);
+    for (int i=0; i<short_count; ++i) labels[positions[i]]=short_labels[i];
+    preview(compositions,composition_count);
+    for (int i=0; i<n; ++i) if (items[i]->label) labels[i]=items[i]->label;
+    hash_destroy(tiers);
+    return labels;
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_display_label_batch);
 Datum
 pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
@@ -245,6 +281,14 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         selected=0;for(int i=0;i<unique;++i)if(!all[i]->label&&all[i]->has_target)work[selected++]=all[i];
         preview(work,selected);
     }
+    /* Any still-unnamed composition can supply its own first witnessed unit.
+     * This also handles self-observed documents without following provenance
+     * back into an unbounded render of the same document. */
+    selected=0;
+    for(int i=0;i<unique;++i) if(!all[i]->label && all[i]->exists && all[i]->tier>3) {
+        all[i]->target=all[i]->id; all[i]->has_target=true; work[selected++]=all[i];
+    }
+    preview(work,selected);
     count=pending(all,unique,work,0);
     for(int i=0;i<count;++i) {
         const laplace_relation_def_t *def=NULL;
@@ -258,7 +302,7 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         if(work[i]->has_type){type_slot[i]=nmeta;meta[nmeta].id=work[i]->type;meta_ptr[nmeta]=&meta[nmeta];++nmeta;}
         if(work[i]->has_source){source_slot[i]=nmeta;meta[nmeta].id=work[i]->source;meta_ptr[nmeta]=&meta[nmeta];++nmeta;}
     }
-    labels=batch_text(METADATA,meta_ptr,nmeta,false);
+    labels=metadata_labels(meta_ptr,nmeta);
     for(int i=0;i<count;++i) {
         char *type=type_slot[i]>=0?labels[type_slot[i]]:NULL,*source=source_slot[i]>=0?labels[source_slot[i]]:NULL;
         if(opaque_name(type,false))type=NULL;if(opaque_name(source,false))source=NULL;

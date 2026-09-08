@@ -121,6 +121,18 @@ BEGIN
         RAISE EXCEPTION 'FAIL: display label batch lost duplicate positional alignment';
     END IF;
 
+    -- Content roots can observe themselves. A provenance fallback must not
+    -- render the entire source, either directly or for an unrelated entity.
+    DELETE FROM laplace.attestations WHERE subject_id IN (concept,concept2);
+    UPDATE laplace.entities SET first_observed_by=doc WHERE id IN (doc,opaque);
+    SELECT array_agg(d.label ORDER BY d.ord) INTO labels
+      FROM realize.display_label_batch(ARRAY[doc,book,opaque])
+           WITH ORDINALITY d(id,label,tier,ord);
+    IF labels[1] IS DISTINCT FROM '狼。' OR labels[2] IS DISTINCT FROM '狼。'
+       OR strpos(labels[3],'終') > 0 THEN
+        RAISE EXCEPTION 'FAIL: label fallback reconstructed an entire source: %',labels;
+    END IF;
+
     RAISE NOTICE 'display labels: id separate, Unicode exact, bounded containment preview, no hash fallback';
 END
 $display_label$;
