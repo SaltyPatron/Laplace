@@ -99,6 +99,7 @@ int64_t glicko2_effective_mu(const glicko2_state_t* st);
  * reference. The state's RD is the uncertainty term: increasing RD pulls the
  * answer toward 0.5, while an RD of zero leaves the rating's full signal. */
 int64_t laplace_glicko2_expected_score_fp(int64_t rating, int64_t rd);
+double laplace_glicko2_expected_score(int64_t rating, int64_t rd);
 
 /* Fixed-point scale shared by rating/rd/eff_mu (matches LAPLACE_FP_ONE in
  * glicko2.c and the int64 LAPLACE_GLICKO2_FP_SCALE in attestation_engine.h --

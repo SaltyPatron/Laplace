@@ -662,9 +662,13 @@ int64_t laplace_glicko2_expected_score_fp(int64_t rating, int64_t rd)
     return laplace_glicko2_E(mu, neutral_mu, confidence);
 }
 
+double laplace_glicko2_expected_score(int64_t rating, int64_t rd)
+{
+    return (double)laplace_glicko2_expected_score_fp(rating, rd)
+           / LAPLACE_GLICKO2_FP_SCALE_D;
+}
+
 double laplace_walk_edge_weight(int64_t rating, int64_t rd)
 {
-    double expected = (double)laplace_glicko2_expected_score_fp(rating, rd)
-                      / LAPLACE_GLICKO2_FP_SCALE_D;
-    return 2.0 * expected - 1.0;
+    return 2.0 * laplace_glicko2_expected_score(rating, rd) - 1.0;
 }

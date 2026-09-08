@@ -192,8 +192,8 @@ pg_laplace_walk_edge_weight(PG_FUNCTION_ARGS)
 }
 
 /*
- * Edge strength in [0.05, 1.0] -- the logistic on eff_mu relative to neutral
- * that the foundry crawl and the web-explore path both walk on.
+ * Edge strength in [0, 1]: the canonical native Glicko expectation against
+ * neutral, shared by foundry, export and web exploration.
  *
  * Same reason walk_edge_weight got a SQL entry: the body lived only in
  * spi_common.h, reachable from C callers alone, so any SQL surface wanting the

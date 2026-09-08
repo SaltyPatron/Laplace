@@ -1,4 +1,5 @@
 using System.Net;
+using Laplace.Api.Contracts;
 using Xunit;
 using Microsoft.Extensions.DependencyInjection;
 

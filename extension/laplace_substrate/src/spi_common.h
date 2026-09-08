@@ -117,8 +117,7 @@ eff_mu_display_fp(int64 rating, int64 rd)
 static inline double
 laplace_edge_strength(int64 rating, int64 rd)
 {
-    return (double) laplace_glicko2_expected_score_fp(rating, rd)
-           / LAPLACE_GLICKO2_FP_SCALE_D;
+    return laplace_glicko2_expected_score(rating, rd);
 }
 
 /* Convert an int64 fp value (multiple of 1e6 from eff_mu_display_fp sums)

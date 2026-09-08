@@ -49,6 +49,7 @@ CALL chess.repair_player_ratings_batch(
     laplace.relation_type_id('PLAYED_BY'),
     laplace.relation_type_id('HAS_RATING'),
     ARRAY[public.laplace_hash128_blake3('test/chess-fold-debt/player')]::bytea[]);
+NOTICE:  chess repair: 1 subjects, 2 evidence rows, 2 cells, 2 calibrations corrected, 2 standings updated
 DO $$
 DECLARE
     r record;
@@ -112,6 +113,7 @@ CALL chess.repair_player_ratings_batch(
     laplace.relation_type_id('PLAYED_BY'),
     laplace.relation_type_id('HAS_RATING'),
     ARRAY[public.laplace_hash128_blake3('test/chess-fold-debt/player')]::bytea[]);
+NOTICE:  chess repair: 1 subjects, 2 evidence rows, 2 cells, 0 calibrations corrected, 0 standings updated
 DO $$
 BEGIN
     IF EXISTS (
