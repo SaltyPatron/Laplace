@@ -392,6 +392,32 @@ BEGIN
     IF hits <> 1 THEN
         RAISE EXCEPTION 'FAIL: typed endpoint intersection lost selected cells';
     END IF;
+
+    -- Independent exhaustive reference: hundreds of equal-score neighbors
+    -- cross the cutoff. The ordered reader must consume all boundary ties and
+    -- elect exact identities across both directions and relation families.
+    WITH directed AS (
+        SELECT object_id AS nbr,type_id,rating,rd,witness_count,true AS outbound
+        FROM laplace.consensus WHERE subject_id=s AND object_id IS NOT NULL AND object_id<>s
+        UNION ALL
+        SELECT subject_id,type_id,rating,rd,witness_count,false
+        FROM laplace.consensus WHERE object_id=s AND subject_id<>s
+    ), pairs AS (
+        SELECT DISTINCT ON (nbr) * FROM directed
+        ORDER BY nbr,(rating-2*rd) DESC,type_id,outbound DESC
+    ), expected AS (
+        SELECT * FROM pairs ORDER BY (rating-2*rd) DESC,nbr,type_id,outbound DESC LIMIT 8
+    ), actual AS (
+        SELECT nbr,type_id,rating,rd,witness_count,outbound
+        FROM consensus.explore_web_neighbors(ARRAY[s],NULL,8,false)
+    )
+    SELECT count(*) INTO hits FROM (
+        (TABLE expected EXCEPT ALL TABLE actual)
+        UNION ALL (TABLE actual EXCEPT ALL TABLE expected)
+    ) differences;
+    IF hits <> 0 THEN
+        RAISE EXCEPTION 'FAIL: ordered scan changed exact boundary-tie election';
+    END IF;
 END $$;
 
 ROLLBACK;

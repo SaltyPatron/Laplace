@@ -274,3 +274,47 @@ This is an isolated steering measurement, not an end-to-end chat speedup. The
 additional index must still be deployed and its live storage/ingestion cost
 measured. Fresh-install regression covers duplicate inputs, family filtering,
 endpoint intersections and unrelated-cell exclusion.
+
+## Question acceptance and repeated corpus work
+
+The inventor's question `How does lightning work?` fails the deployed forward
+pass at a 45-second statement timeout (`lightning-forward-acceptance.sql/.log`).
+This is the acceptance case; a successful `dog` HTTP envelope is only a transport
+smoke check. No coherent explanatory answer has been demonstrated.
+
+Nested execution plans identify an unscoped suffix fallback in
+`trajectory_continuations.c`: after a full-context miss it queries trajectories
+containing the final identity alone. When that identity is SPACE
+(`00263ca9f57f7177f495e3711f8cdd59`), individual partitions return about 145,000
+trajectories and one query takes 6.36 seconds. The walk repeats this corpus-wide
+read. Preserve SPACE, multiplicity and ordering; repair evidence scope and
+ordered trajectory access instead of removing separators or accepting an
+arbitrary truncated result. The current forward route also passes NULL relation
+constraints and has no source/context operand. This is a semantic execution
+obligation as well as a performance obligation.
+
+Two further native scan/reuse repairs are independently measured:
+
+- Neighborhood selection can stop a descending endpoint/effective-mu index
+  range only once its score is strictly below the full selected heap's bound.
+  Equal-score entries remain eligible for exact identity/type/direction election;
+  each frontier identity has its own range. An exhaustive regression checks the
+  boundary among hundreds of tied neighbors. Without a verified canonical index
+  expression/operator family the reader retains the complete scan.
+- Candidate content/physicality admission is cached, including absent IDs, for
+  one forward-call snapshot. Only previously unexamined IDs enter the existing
+  typed batch query. The question trace previously repeated roughly 175 ms
+  content-presence queries at each step.
+
+The real question's four word neighborhoods retain exactly the same 32 edges
+while buffer accesses fall from 57,169 hits to 6,313 hits + 1,094 reads
+(`lightning-neighbor-compare.sql/.log`). Three forward selections remain exactly
+equal with content reuse, taking 3.778 seconds versus 4.291 seconds before
+(`lightning-three-step-compare.sql/.log`). They are `Intentionally_act`,
+`Being_employed`, `Cause_to_end`: still wrong for this explanatory question.
+The complete question still times out with the ordered neighborhood repair
+alone (`lightning-ranked-forward.sql/.log`). Do not describe these access-path
+repairs as delivered conversation or substitute three-step timing for answer
+acceptance. All temporary function bindings used for comparisons were rolled
+back. Main d1f2f16d installed/deployed successfully but seeded live product CI
+still fails; database recreation and reseed remain outstanding.

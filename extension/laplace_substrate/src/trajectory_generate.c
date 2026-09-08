@@ -112,6 +112,12 @@ typedef struct NeighborhoodEntry
     int count;
 } NeighborhoodEntry;
 
+typedef struct ContentPresence
+{
+    hash128_t id;
+    bool admitted;
+} ContentPresence;
+
 /* Cache only a deterministic projection within this forward call's snapshot.
  * Each newly active identity contributes one native batch probe. Retained
  * prompt neighborhoods are not re-read for every emitted constituent. */
@@ -344,6 +350,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     MemoryContext walk_cxt, step_cxt, old;
     HTAB *neighborhoods;
     HTAB *frontier_ids;
+    HTAB *content_presence;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("walk_continuations: context must not be NULL")));
@@ -384,6 +391,9 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         cache_ctl.entrysize = sizeof(hash128_t);
         frontier_ids = hash_create("forward active identities", 128, &cache_ctl,
                                   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        cache_ctl.entrysize = sizeof(ContentPresence);
+        content_presence = hash_create("forward content presence", 256, &cache_ctl,
+                                       HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     }
 
     if (SPI_connect() != SPI_OK_CONNECT)
@@ -561,8 +571,18 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 if (hash_search(visited_ids, id, HASH_FIND, NULL) != NULL) continue;
                 if (!laplace_perfcache_codepoint_for_id(id, &cp))
                 {
-                    front_ids[missing_count++] = front_ids[i];
-                    continue;
+                    /* Content admission is fixed within this read snapshot.
+                     * Cache both outcomes and batch only new identities; an
+                     * expanding frontier must not re-probe old compositions
+                     * and physicalities on every emitted constituent. */
+                    ContentPresence *entry = hash_search(content_presence, id, HASH_ENTER, &found);
+                    if (!found)
+                    {
+                        entry->admitted = false;
+                        front_ids[missing_count++] = front_ids[i];
+                        continue;
+                    }
+                    if (!entry->admitted) continue;
                 }
                 hash_search(seen, id, HASH_ENTER, &found);
                 if (found) continue;
@@ -601,6 +621,11 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                     bytea *bytes = DatumGetByteaPP(id);
                     if (VARSIZE_ANY_EXHDR(bytes) != 16)
                         elog(ERROR, "walk_continuations: semantic candidate id must be 16 bytes");
+                    ContentPresence *entry = hash_search(content_presence,
+                        VARDATA_ANY(bytes), HASH_FIND, NULL);
+                    if (entry == NULL)
+                        elog(ERROR, "walk_continuations: content result is outside the requested batch");
+                    entry->admitted = true;
                     hash_search(seen, VARDATA_ANY(bytes), HASH_ENTER, &found);
                     if (found) continue;
                     old = MemoryContextSwitchTo(walk_cxt);

@@ -24,6 +24,9 @@ typedef struct LaplaceConsensusScanStats
 } LaplaceConsensusScanStats;
 
 typedef void (*LaplaceConsensusConsumer)(const LaplaceConsensusRow *, void *);
+/* Called only inside one endpoint's descending effective-mu range. Return true
+ * only when this row and every lower score cannot change the selected result. */
+typedef bool (*LaplaceConsensusCutoff)(const LaplaceConsensusRow *, void *);
 
 /* NULL means unconstrained; an empty array means the empty set. At least one
  * endpoint set is required. Every matching stored cell is visited once, under
@@ -38,6 +41,14 @@ extern void laplace_consensus_scan(
 extern void laplace_consensus_scan_default(
     ArrayType *subjects, ArrayType *objects,
     LaplaceConsensusConsumer consume, void *context,
+    LaplaceConsensusScanStats *stats);
+
+/* Binary-neighbor projection: the consumer must discard unary cells. This
+ * permits using a canonical object-IS-NOT-NULL partial index. Without an exact
+ * endpoint/effective-mu index, storage falls back to the complete batch scan. */
+extern void laplace_consensus_scan_ranked(
+    ArrayType *subjects, ArrayType *objects, ArrayType *types, bool default_only,
+    LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff, void *context,
     LaplaceConsensusScanStats *stats);
 
 #endif

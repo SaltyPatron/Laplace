@@ -8,6 +8,7 @@
 #include "access/tableam.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_am_d.h"
+#include "catalog/pg_opfamily_d.h"
 #include "catalog/pg_type.h"
 #include "executor/tuptable.h"
 #include "miscadmin.h"
@@ -230,10 +231,74 @@ scan_index(Relation relation, AttrNumber endpoint,
     return selected;
 }
 
+/* Match the expression rather than an index name: fresh installs and upgraded
+ * partition children can name the same ordered access path differently. */
+static bool
+scan_eff_mu_expression(Node *node, AttrNumber rating, AttrNumber rd)
+{
+    OpExpr *minus, *times;
+    Var *rating_var, *rd_var;
+    Const *two;
+    Oid multiply;
+    if (!IsA(node, OpExpr)) return false;
+    minus = (OpExpr *) node;
+    if (list_length(minus->args) != 2 || !IsA(linitial(minus->args), Var) ||
+        !IsA(lsecond(minus->args), OpExpr)) return false;
+    if (get_opcode(minus->opno) != F_INT8MI) return false;
+    rating_var = linitial_node(Var, minus->args);
+    times = lsecond_node(OpExpr, minus->args);
+    if (list_length(times->args) != 2 || !IsA(linitial(times->args), Const) ||
+        !IsA(lsecond(times->args), Var)) return false;
+    multiply = get_opcode(times->opno);
+    if (multiply != F_INT48MUL && multiply != F_INT8MUL) return false;
+    two = linitial_node(Const, times->args);
+    rd_var = lsecond_node(Var, times->args);
+    return !two->constisnull &&
+        ((two->consttype == INT4OID && DatumGetInt32(two->constvalue) == 2) ||
+         (two->consttype == INT8OID && DatumGetInt64(two->constvalue) == 2)) &&
+        rating_var->varattno == rating && rating_var->vartype == INT8OID &&
+        rating_var->varlevelsup == 0 && rd_var->varattno == rd &&
+        rd_var->vartype == INT8OID && rd_var->varlevelsup == 0;
+}
+
+static Relation
+scan_rank_index(Relation relation, AttrNumber endpoint, AttrNumber object,
+                AttrNumber rating, AttrNumber rd)
+{
+    List *indexes = RelationGetIndexList(relation);
+    ListCell *cell;
+    Relation selected = NULL;
+    foreach(cell, indexes)
+    {
+        Relation index = index_open(lfirst_oid(cell), AccessShareLock);
+        List *expressions;
+        if (index->rd_rel->relam == BTREE_AM_OID &&
+            index->rd_index->indisvalid && index->rd_index->indisready &&
+            index->rd_index->indnkeyatts >= 2 &&
+            index->rd_index->indkey.values[0] == endpoint &&
+            index->rd_index->indkey.values[1] == 0 &&
+            index->rd_opfamily[0] == BYTEA_BTREE_FAM_OID &&
+            index->rd_opfamily[1] == INTEGER_BTREE_FAM_OID &&
+            (index->rd_indoption[1] & INDOPTION_DESC) != 0 &&
+            scan_index_predicate(index, object, true))
+        {
+            expressions = RelationGetIndexExpressions(index);
+            if (expressions != NIL && scan_eff_mu_expression(linitial(expressions), rating, rd))
+            {
+                selected = index;
+                break;
+            }
+        }
+        index_close(index, AccessShareLock);
+    }
+    list_free(indexes);
+    return selected;
+}
+
 static void
 scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
           const ScanSet *types, LaplaceConsensusConsumer consume, void *context,
-          LaplaceConsensusScanStats *stats)
+          LaplaceConsensusScanStats *stats, LaplaceConsensusCutoff cutoff)
 {
     AttrNumber subject = scan_attribute(relation, "subject_id", BYTEAOID);
     AttrNumber object = scan_attribute(relation, "object_id", BYTEAOID);
@@ -242,7 +307,10 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     AttrNumber rd = scan_attribute(relation, "rd", INT8OID);
     AttrNumber witnesses = scan_attribute(relation, "witness_count", INT8OID);
     const ScanSet *probe = subjects->array != NULL ? subjects : objects;
-    Relation index = scan_index(relation, subjects->array != NULL ? subject : object,
+    AttrNumber endpoint = subjects->array != NULL ? subject : object;
+    Relation index = cutoff != NULL ? scan_rank_index(relation, endpoint, object, rating, rd) : NULL;
+    bool ranked = index != NULL;
+    if (index == NULL) index = scan_index(relation, endpoint,
                                object, objects->array != NULL,
                                type, types->array != NULL);
     TupleTableSlot *slot = table_slot_create(relation, NULL);
@@ -252,7 +320,7 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
 
     ScanKeyEntryInitialize(&keys[0], SK_SEARCHARRAY, 1, BTEqualStrategyNumber,
         BYTEAOID, InvalidOid, F_BYTEAEQ, PointerGetDatum(probe->array));
-    while (nkeys < index->rd_index->indnkeyatts)
+    while (!ranked && nkeys < index->rd_index->indnkeyatts)
     {
         AttrNumber attr = index->rd_index->indkey.values[nkeys];
         const ScanSet *set = attr == object ? objects : attr == type ? types : NULL;
@@ -262,41 +330,54 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
         nkeys++;
     }
     scan = index_beginscan(relation, index, GetActiveSnapshot(), NULL, nkeys, 0);
-    index_rescan(scan, keys, nkeys, NULL, 0);
-    stats->index_scans++;
-    while (index_getnext_slot(scan, ForwardScanDirection, slot))
+    /* Reuse the open leaf/index. Each endpoint has an independent ordered
+     * range: reaching its cutoff cannot skip any other prompt seed. */
+    for (int probe_index = 0; probe_index < (ranked ? probe->count : 1); ++probe_index)
     {
-        bool snull, onull, tnull, rnull, dnull, wnull;
-        Datum s = slot_getattr(slot, subject, &snull);
-        Datum o = slot_getattr(slot, object, &onull);
-        Datum t = slot_getattr(slot, type, &tnull);
-        LaplaceConsensusRow row;
-        stats->rows_read++;
-        if ((stats->rows_read & 4095) == 0) CHECK_FOR_INTERRUPTS();
-        if (snull || tnull || !scan_set_contains(subjects, s, snull) ||
-            !scan_set_contains(objects, o, onull) ||
-            !scan_set_contains(types, t, tnull))
+        if (ranked)
+            ScanKeyEntryInitialize(&keys[0], 0, 1, BTEqualStrategyNumber,
+                BYTEAOID, InvalidOid, F_BYTEAEQ, probe->values[probe_index]);
+        index_rescan(scan, keys, nkeys, NULL, 0);
+        stats->index_scans++;
+        while (index_getnext_slot(scan, ForwardScanDirection, slot))
         {
+            bool snull, onull, tnull, rnull, dnull, wnull;
+            Datum s = slot_getattr(slot, subject, &snull);
+            Datum o = slot_getattr(slot, object, &onull);
+            Datum t = slot_getattr(slot, type, &tnull);
+            LaplaceConsensusRow row;
+            stats->rows_read++;
+            if ((stats->rows_read & 4095) == 0) CHECK_FOR_INTERRUPTS();
+            if (snull || tnull || !scan_set_contains(subjects, s, snull) ||
+                !scan_set_contains(objects, o, onull) ||
+                !scan_set_contains(types, t, tnull))
+            {
+                ExecClearTuple(slot);
+                continue;
+            }
+            if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(s)) != 16 ||
+                VARSIZE_ANY_EXHDR(DatumGetByteaPP(t)) != 16 ||
+                (!onull && VARSIZE_ANY_EXHDR(DatumGetByteaPP(o)) != 16))
+                ereport(ERROR, (errmsg("consensus scan encountered a malformed stored identity")));
+            memcpy(&row.subject, VARDATA_ANY(DatumGetByteaPP(s)), 16);
+            memcpy(&row.type, VARDATA_ANY(DatumGetByteaPP(t)), 16);
+            memset(&row.object, 0, sizeof(row.object));
+            row.object_is_null = onull;
+            if (!onull) memcpy(&row.object, VARDATA_ANY(DatumGetByteaPP(o)), 16);
+            row.rating = DatumGetInt64(slot_getattr(slot, rating, &rnull));
+            row.rd = DatumGetInt64(slot_getattr(slot, rd, &dnull));
+            row.witnesses = DatumGetInt64(slot_getattr(slot, witnesses, &wnull));
+            if (rnull || dnull || wnull)
+                ereport(ERROR, (errmsg("consensus scan encountered incomplete standing")));
+            if (ranked && cutoff(&row, context))
+            {
+                ExecClearTuple(slot);
+                break;
+            }
+            stats->rows_matched++;
+            consume(&row, context);
             ExecClearTuple(slot);
-            continue;
         }
-        if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(s)) != 16 ||
-            VARSIZE_ANY_EXHDR(DatumGetByteaPP(t)) != 16 ||
-            (!onull && VARSIZE_ANY_EXHDR(DatumGetByteaPP(o)) != 16))
-            ereport(ERROR, (errmsg("consensus scan encountered a malformed stored identity")));
-        memcpy(&row.subject, VARDATA_ANY(DatumGetByteaPP(s)), 16);
-        memcpy(&row.type, VARDATA_ANY(DatumGetByteaPP(t)), 16);
-        memset(&row.object, 0, sizeof(row.object));
-        row.object_is_null = onull;
-        if (!onull) memcpy(&row.object, VARDATA_ANY(DatumGetByteaPP(o)), 16);
-        row.rating = DatumGetInt64(slot_getattr(slot, rating, &rnull));
-        row.rd = DatumGetInt64(slot_getattr(slot, rd, &dnull));
-        row.witnesses = DatumGetInt64(slot_getattr(slot, witnesses, &wnull));
-        if (rnull || dnull || wnull)
-            ereport(ERROR, (errmsg("consensus scan encountered incomplete standing")));
-        stats->rows_matched++;
-        consume(&row, context);
-        ExecClearTuple(slot);
     }
     index_endscan(scan);
     ExecDropSingleTupleTableSlot(slot);
@@ -307,7 +388,8 @@ static void
 consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
                     ArrayType *type_ids, bool default_only,
                     LaplaceConsensusConsumer consume,
-                    void *context, LaplaceConsensusScanStats *stats)
+                    void *context, LaplaceConsensusScanStats *stats,
+                    LaplaceConsensusCutoff cutoff)
 {
     ScanSet subjects, objects, types;
     LaplaceConsensusScanStats local_stats = {0};
@@ -361,7 +443,7 @@ consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
         if (relation->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
             pending = list_concat(pending, scan_children(relation, &subjects, &types));
         else
-            scan_leaf(relation, &subjects, &objects, &types, consume, context, stats);
+            scan_leaf(relation, &subjects, &objects, &types, consume, context, stats, cutoff);
         /* Retain relation locks through the transaction, as an ordinary SELECT
          * does, so partition topology cannot change beneath this snapshot. */
         table_close(relation, NoLock);
@@ -377,7 +459,7 @@ laplace_consensus_scan(ArrayType *subjects, ArrayType *objects, ArrayType *types
                        LaplaceConsensusConsumer consume, void *context,
                        LaplaceConsensusScanStats *stats)
 {
-    consensus_scan_impl(subjects, objects, types, false, consume, context, stats);
+    consensus_scan_impl(subjects, objects, types, false, consume, context, stats, NULL);
 }
 
 void
@@ -385,5 +467,13 @@ laplace_consensus_scan_default(ArrayType *subjects, ArrayType *objects,
                                LaplaceConsensusConsumer consume, void *context,
                                LaplaceConsensusScanStats *stats)
 {
-    consensus_scan_impl(subjects, objects, NULL, true, consume, context, stats);
+    consensus_scan_impl(subjects, objects, NULL, true, consume, context, stats, NULL);
+}
+
+void
+laplace_consensus_scan_ranked(ArrayType *subjects, ArrayType *objects, ArrayType *types,
+    bool default_only, LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff,
+    void *context, LaplaceConsensusScanStats *stats)
+{
+    consensus_scan_impl(subjects, objects, types, default_only, consume, context, stats, cutoff);
 }

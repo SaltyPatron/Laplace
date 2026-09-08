@@ -163,6 +163,21 @@ neighbor_cell(const LaplaceConsensusRow *row, void *opaque)
     heap_store(state, bucket, at, &edge);
 }
 
+static bool
+neighbor_cutoff(const LaplaceConsensusRow *row, void *opaque)
+{
+    NeighborState *state = opaque;
+    const hash128_t *id = state->reverse ? &row->object : &row->subject;
+    NeighborBucket *bucket;
+    if (state->reverse && row->object_is_null) return false;
+    bucket = hash_search(state->frontiers, id, HASH_FIND, NULL);
+    if (bucket == NULL || bucket->count < state->limit) return false;
+    /* Strict inequality retains every tied score for identity/type/direction
+     * election. The heap bound improves monotonically across partitions. */
+    return (__int128) row->rating - 2 * (__int128) row->rd <
+        (__int128) bucket->heap[0].rating - 2 * (__int128) bucket->heap[0].rd;
+}
+
 LaplaceNeighbor *
 laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
                             bool include_default, bool respect_direction, int *count,
@@ -188,16 +203,20 @@ laplace_consensus_neighbors(ArrayType *frontier, ArrayType *types, int limit,
     ctl.entrysize = sizeof(NeighborBucket);
     state.frontiers = hash_create("consensus neighbor frontiers", 64, &ctl,
                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-    laplace_consensus_scan(frontier, NULL, types, neighbor_cell, &state, stats);
+    laplace_consensus_scan_ranked(frontier, NULL, types, false,
+        neighbor_cell, neighbor_cutoff, &state, stats);
     if (types != NULL && include_default)
-        laplace_consensus_scan_default(frontier, NULL, neighbor_cell, &state, stats);
+        laplace_consensus_scan_ranked(frontier, NULL, NULL, true,
+            neighbor_cell, neighbor_cutoff, &state, stats);
     state.reverse = true;
     ArrayType *reverse_types = respect_direction
         ? laplace_symmetric_relation_types_in(types) : types;
-    laplace_consensus_scan(NULL, frontier, reverse_types, neighbor_cell, &state, stats);
+    laplace_consensus_scan_ranked(NULL, frontier, reverse_types, false,
+        neighbor_cell, neighbor_cutoff, &state, stats);
     if (respect_direction && types != NULL) pfree(reverse_types);
     if (types != NULL && include_default)
-        laplace_consensus_scan_default(NULL, frontier, neighbor_cell, &state, stats);
+        laplace_consensus_scan_ranked(NULL, frontier, NULL, true,
+            neighbor_cell, neighbor_cutoff, &state, stats);
     entries = hash_get_num_entries(state.pairs);
     if (entries > INT_MAX || (Size) entries > MaxAllocSize / sizeof(*rows))
         ereport(ERROR, (errmsg("consensus neighbors exceed PostgreSQL allocation capacity")));
