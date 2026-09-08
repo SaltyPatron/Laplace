@@ -27,6 +27,7 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "consensus_neighbors.h"
+#include "explore_web.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_explore_web);
 
@@ -46,15 +47,7 @@ typedef struct {
 	double		strength;
 } EdgeCand;
 
-typedef struct {
-	hash128_t	source;
-	hash128_t	type_id;
-	hash128_t	object;
-	int16		hop;
-	int64		rating;
-	int64		rd;
-	int64		witnesses;
-} EdgeOut;
+typedef LaplaceWebEdge EdgeOut;
 
 static int
 cand_cmp_desc(const void *a, const void *b)
@@ -84,8 +77,9 @@ cand_cmp_desc(const void *a, const void *b)
 }
 
 static void
-emit_edge(ReturnSetInfo *rsinfo, const EdgeOut *e)
+emit_edge(const EdgeOut *e, void *context)
 {
+	ReturnSetInfo *rsinfo = context;
 	Datum	values[7];
 	bool	nulls[7] = {false, false, false, false, false, false, false};
 
@@ -174,17 +168,13 @@ frontier_relation_types(SPIPlanPtr mask_plan, ArrayType *frontier_array,
 	return construct_array(type_datums, n_types, BYTEAOID, -1, false, 'i');
 }
 
-Datum
-pg_laplace_explore_web(PG_FUNCTION_ARGS)
+void
+laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
+                   bool respect_direction, LaplaceWebVisitor visit, void *context)
 {
-	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-	ArrayType  *seeds_a;
 	Datum	   *seed_datums;
 	bool	   *seed_nulls;
 	int			n_seed_datums;
-	int32		hops;
-	int32		fanout;
-	int32		max_nodes;
 	HTAB	   *seen;
 	HASHCTL		ctl;
 	hash128_t  *frontier;
@@ -196,14 +186,8 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	Datum	   *frontier_datums;
 	int			cand_cap;
 	bool		spi_top = false;
-	/* Browse admits inbound edges. Forward routing opts into the same native
-	 * reader's canonical relation direction before bounded pair election. */
-	bool		respect_direction = PG_NARGS() > 4 && !PG_ARGISNULL(4)
-		&& PG_GETARG_BOOL(4);
-
-	if (PG_ARGISNULL(0))
+	if (seeds_a == NULL || visit == NULL)
 		ereport(ERROR, (errmsg("explore_web: seeds must not be NULL")));
-	seeds_a = PG_GETARG_ARRAYTYPE_P(0);
 	/* PostgreSQL represents a canonical empty typed array with ARR_NDIM == 0.
 	 * That is a valid empty seed set, not a malformed multidimensional operand.
 	 * Keep NULL and dimensions >1 rejected, but let the existing zero-seed
@@ -214,13 +198,11 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	deconstruct_array(seeds_a, BYTEAOID, -1, false, TYPALIGN_INT,
 					  &seed_datums, &seed_nulls, &n_seed_datums);
 
-	hops = PG_ARGISNULL(1) ? 2 : PG_GETARG_INT32(1);
-	fanout = PG_ARGISNULL(2) ? 10 : PG_GETARG_INT32(2);
 	if (hops < 0 || fanout < 0)
 		ereport(ERROR, (errmsg("explore_web: hops and fanout must be >= 0")));
 	if (hops > PG_INT16_MAX)
 		ereport(ERROR, (errmsg("explore_web: hops exceeds the smallint result coordinate")));
-	if (PG_ARGISNULL(3))
+	if (max_nodes == -1)
 	{
 		int64 derived = n_seed_datums;
 		int64 width = n_seed_datums;
@@ -235,14 +217,11 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		}
 		max_nodes = (int32) derived;
 	}
-	else
-		max_nodes = PG_GETARG_INT32(3);
 	if (max_nodes < 0)
 		ereport(ERROR, (errmsg("explore_web: max_nodes must be >= 0")));
 
-	InitMaterializedSRF(fcinfo, 0);
 	if (n_seed_datums == 0 || hops == 0 || fanout == 0 || max_nodes == 0)
-		return (Datum) 0;
+		return;
 	if ((Size) max_nodes > MaxAllocSize / sizeof(hash128_t)
 		|| (Size) max_nodes > MaxAllocSize / sizeof(Datum)
 		|| (Size) max_nodes > MaxAllocSize / sizeof(SeenNode))
@@ -451,7 +430,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 				edge.rating = cands[i].rating;
 				edge.rd = cands[i].rd;
 				edge.witnesses = cands[i].witnesses;
-				emit_edge(rsinfo, &edge);
+				visit(&edge, context);
 			}
 			hash_destroy(per_root);
 			hash_destroy(picked);
@@ -469,5 +448,20 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 
 	SPI_freeplan(mask_plan);
 	laplace_spi_finish(spi_top);
+	return;
+}
+
+Datum
+pg_laplace_explore_web(PG_FUNCTION_ARGS)
+{
+	InitMaterializedSRF(fcinfo, 0);
+	if (!PG_ARGISNULL(3) && PG_GETARG_INT32(3) < 0)
+		ereport(ERROR, (errmsg("explore_web: max_nodes must be >= 0")));
+	laplace_explore_web(PG_ARGISNULL(0) ? NULL : PG_GETARG_ARRAYTYPE_P(0),
+		PG_ARGISNULL(1) ? 2 : PG_GETARG_INT32(1),
+		PG_ARGISNULL(2) ? 10 : PG_GETARG_INT32(2),
+		PG_ARGISNULL(3) ? -1 : PG_GETARG_INT32(3),
+		PG_NARGS() > 4 && !PG_ARGISNULL(4) && PG_GETARG_BOOL(4),
+		emit_edge, fcinfo->resultinfo);
 	return (Datum) 0;
 }

@@ -32,9 +32,10 @@ read_leaf(Oid oid, ArrayType *ids, LaplaceContentTrajectoryConsumer consume, voi
     Relation relation = table_open(oid, AccessShareLock);
     Oid index_oid = RelationGetPrimaryKeyIndex(relation, false);
     AttrNumber id = get_attnum(oid, "id");
+    AttrNumber entity = get_attnum(oid, "entity_id");
     AttrNumber type = get_attnum(oid, "type");
     AttrNumber trajectory = get_attnum(oid, "trajectory");
-    if (!OidIsValid(index_oid) || id <= 0 || type <= 0 || trajectory <= 0)
+    if (!OidIsValid(index_oid) || id <= 0 || entity <= 0 || type <= 0 || trajectory <= 0)
         elog(ERROR, "content trajectory read requires canonical physicality storage");
     Relation index = index_open(index_oid, AccessShareLock);
     if (index->rd_rel->relam != BTREE_AM_OID || !index->rd_index->indisvalid ||
@@ -55,7 +56,15 @@ read_leaf(Oid oid, ArrayType *ids, LaplaceContentTrajectoryConsumer consume, voi
         if (!isnull && DatumGetInt16(kind) == 1)
         {
             Datum geometry = slot_getattr(slot, trajectory, &isnull);
-            if (!isnull) consume(geometry, context);
+            if (!isnull)
+            {
+                bool physicality_null, entity_null;
+                Datum physicality_id = slot_getattr(slot, id, &physicality_null);
+                Datum entity_id = slot_getattr(slot, entity, &entity_null);
+                if (physicality_null || entity_null)
+                    elog(ERROR, "content trajectory read requires physicality and entity identities");
+                consume(physicality_id, entity_id, geometry, context);
+            }
         }
         ExecClearTuple(slot);
         CHECK_FOR_INTERRUPTS();

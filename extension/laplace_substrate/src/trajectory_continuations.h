@@ -4,6 +4,7 @@
 #include "postgres.h"
 #include "utils/array.h"
 #include "laplace/core/hash128.h"
+#include "prompt_input.h"
 
 typedef struct LaplaceContinuation
 {
@@ -22,6 +23,10 @@ void laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *o
  * Containment discovers roots; the shared ordered matcher establishes sequence.
  * This needs no semantic attestation for each member. Empty means no roots. */
 void laplace_trajectory_scope_extend_containing(LaplaceTrajectoryScope *scope, ArrayType *members);
+/* Establish full-input occurrences at every canonical tree altitude before
+ * the first election. Membership nominates; exact native ordinals bind. */
+void laplace_trajectory_scope_bind_input(LaplaceTrajectoryScope *scope,
+    const LaplacePromptInput *input);
 /* Retain only witnessed occurrences supporting the selection, then advance
  * their ordinals. Exhausted observations end; they do not restart at a suffix. */
 void laplace_trajectory_scope_select(LaplaceTrajectoryScope *scope, Datum selected,

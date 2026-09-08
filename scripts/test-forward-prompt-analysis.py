@@ -61,19 +61,24 @@ def main() -> int:
 
     # Exact observation identity precedes routing. The retired prompt_state and
     # coherence heuristics must not rewrite the native prompt-tree operand.
-    assert count(walk, "converse.prompt_operands(p_prompt)") == 1, \
-        "forward_text must resolve the exact prompt tree exactly once"
+    assert count(walk, "generation.forward_prompt(") == 1, \
+        "forward_text must invoke the shared native whole-prompt program once"
     assert "converse.prompt_state(" not in walk
     assert "converse.prompt_coherence(" not in walk
-    assert "context_ids AS ids FROM observation" in walk
-    assert "seed_ids AS ids FROM observation" in walk
+    assert "converse.prompt_operands(" not in walk
     native = (ROOT / "extension/laplace_substrate/src/content_resolve.c").read_text()
-    operands = native.split("pg_laplace_prompt_operands(PG_FUNCTION_ARGS)", 1)[1].split(
-        "pg_laplace_prompt_tree(PG_FUNCTION_ARGS)", 1)[0]
+    operands = native.split("laplace_prompt_input(text *input)", 1)[1].split(
+        "pg_laplace_prompt_operands(PG_FUNCTION_ARGS)", 1)[0]
     assert count(operands, "laplace_content_tree_build_public(") == 1
     assert "seed_ids[0] = root" in operands
     assert "content_witness_tree_root_id(tree, &root)" in operands
-    assert "generation.forward_frontier_ids(" in walk
+    program = (ROOT / "extension/laplace_substrate/src/trajectory_generate.c").read_text()
+    entry = program.split("pg_laplace_forward_prompt(PG_FUNCTION_ARGS)", 1)[1]
+    assert count(entry, "laplace_prompt_input(") == 1
+    assert count(entry, "laplace_explore_web(") == 1
+    assert "walk_continuations(walk_call, input)" in entry
+    assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
+    assert "generation.forward_frontier_ids(" not in walk
     assert "generation.forward_frontier(p_prompt" not in walk
 
     # The old zero-caller text routing functions are not allowed to survive an

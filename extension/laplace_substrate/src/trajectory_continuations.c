@@ -29,6 +29,8 @@
 typedef struct ScopedTrajectory
 {
     struct ScopedTrajectory *next;
+    hash128_t physicality;
+    hash128_t entity;
     bytea *wkb;
     trajectory_ordinal_index_t *ordinal_index;
     MemoryContextCallback cleanup;
@@ -42,11 +44,18 @@ typedef struct ScopedPosition
     int stride;
 } ScopedPosition;
 
+typedef struct ScopedPhysicality
+{
+    hash128_t id;
+    ScopedTrajectory *trajectory;
+} ScopedPhysicality;
+
 struct LaplaceTrajectoryScope
 {
     MemoryContext owner;
     HTAB *operands;
     HTAB *roots;
+    HTAB *physicalities;
     ScopedTrajectory *trajectories;
     Oid as_binary;
     ScopedPosition *positions;
@@ -71,6 +80,9 @@ laplace_trajectory_scope_create(void)
                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     scope->roots = hash_create("observed trajectory roots", 256, &ctl,
                               HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    ctl.entrysize = sizeof(ScopedPhysicality);
+    scope->physicalities = hash_create("observed physicality identities", 256, &ctl,
+                                      HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     return scope;
 }
 
@@ -81,12 +93,23 @@ scope_release_index(void *argument)
     trajectory_ordinal_index_free(entry->ordinal_index);
 }
 
-static void
-scope_retain_trajectory(Datum geometry, void *context)
+static ScopedTrajectory *
+scope_keep_trajectory(Datum physicality, Datum entity, Datum geometry, LaplaceTrajectoryScope *scope)
 {
-    LaplaceTrajectoryScope *scope = context;
+    bytea *physicality_id = DatumGetByteaPP(physicality);
+    bytea *entity_id = DatumGetByteaPP(entity);
+    bool found;
+    if (VARSIZE_ANY_EXHDR(physicality_id) != sizeof(hash128_t) ||
+        VARSIZE_ANY_EXHDR(entity_id) != sizeof(hash128_t))
+        elog(ERROR, "trajectory scope: malformed stored physicality identity");
+    ScopedPhysicality *known = hash_search(scope->physicalities,
+        VARDATA_ANY(physicality_id), HASH_ENTER, &found);
+    if (found) return known->trajectory;
     MemoryContext previous = MemoryContextSwitchTo(scope->owner);
     ScopedTrajectory *entry = palloc0(sizeof(*entry));
+    known->trajectory = entry;
+    memcpy(&entry->physicality, VARDATA_ANY(physicality_id), sizeof(hash128_t));
+    memcpy(&entry->entity, VARDATA_ANY(entity_id), sizeof(hash128_t));
     entry->wkb = DatumGetByteaP(OidFunctionCall1(scope->as_binary, geometry));
     entry->next = scope->trajectories;
     scope->trajectories = entry;
@@ -94,6 +117,13 @@ scope_retain_trajectory(Datum geometry, void *context)
     entry->cleanup.arg = entry;
     MemoryContextRegisterResetCallback(scope->owner, &entry->cleanup);
     MemoryContextSwitchTo(previous);
+    return entry;
+}
+
+static void
+scope_retain_trajectory(Datum physicality, Datum entity, Datum geometry, void *context)
+{
+    scope_keep_trajectory(physicality, entity, geometry, context);
 }
 
 static void
@@ -209,6 +239,8 @@ typedef struct SuccessorState
     size_t stride;
     LaplaceTrajectoryScope *scope;
     ScopedTrajectory *trajectory;
+    size_t input_stride;
+    HTAB *input_positions;
 } SuccessorState;
 
 typedef struct MatcherCleanup
@@ -230,12 +262,24 @@ record_successor(void *context, size_t ordinal, size_t stride,
 {
     SuccessorState *state = context;
     bool found;
-    (void) ordinal;
+    size_t matched_stride = stride;
     CHECK_FOR_INTERRUPTS();
+    if (state->input_stride) stride = state->input_stride;
     if (stride == 0 || stride < state->stride) return 0;
     if (state->scope && state->trajectory)
     {
         LaplaceTrajectoryScope *scope = state->scope;
+        if (ordinal > SIZE_MAX - matched_stride)
+            elog(ERROR, "trajectory scope: successor ordinal overflow");
+        if (state->input_positions)
+        {
+            char key[sizeof(hash128_t) + sizeof(size_t)];
+            size_t successor_ordinal = ordinal + matched_stride;
+            memcpy(key, &state->trajectory->physicality, sizeof(hash128_t));
+            memcpy(key + sizeof(hash128_t), &successor_ordinal, sizeof(size_t));
+            hash_search(state->input_positions, key, HASH_ENTER, &found);
+            if (found) return 0;
+        }
         if (stride > state->stride) scope->position_count = 0;
         if (scope->position_count == scope->position_capacity)
         {
@@ -249,10 +293,8 @@ record_successor(void *context, size_t ordinal, size_t stride,
             scope->position_capacity = capacity;
             MemoryContextSwitchTo(previous);
         }
-        if (ordinal > SIZE_MAX - stride)
-            elog(ERROR, "trajectory scope: successor ordinal overflow");
         scope->positions[scope->position_count++] = (ScopedPosition){
-            .trajectory = state->trajectory, .ordinal = ordinal + stride,
+            .trajectory = state->trajectory, .ordinal = ordinal + matched_stride,
             .successor = *successor, .stride = (int)stride
         };
     }
@@ -323,6 +365,88 @@ match_member_trajectory(Datum physicality, Datum entity, Datum geometry, void *c
         elog(ERROR, "trajectory_continuations: invalid packed trajectory");
     MemoryContextSwitchTo(previous);
     MemoryContextReset(match->row);
+}
+
+static void
+bind_input_trajectory(Datum physicality, Datum entity, Datum geometry, void *context)
+{
+    MembershipMatcher *match = context;
+    ScopedTrajectory *entry = scope_keep_trajectory(physicality, entity, geometry,
+                                                   match->state->scope);
+    match->state->trajectory = entry;
+    uint32 npoints;
+    const unsigned char *points = laplace_trajectory_wkb_points(entry->wkb, &npoints);
+    if (trajectory_match_suffixes(match->matcher, points, npoints,
+                                  record_successor, match->state) != 0)
+        elog(ERROR, "trajectory input: invalid packed trajectory");
+}
+
+void
+laplace_trajectory_scope_bind_input(LaplaceTrajectoryScope *scope,
+                                    const LaplacePromptInput *input)
+{
+    MemoryContext work = AllocSetContextCreate(CurrentMemoryContext,
+        "whole input occurrence binding", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext previous = MemoryContextSwitchTo(work);
+    HASHCTL ctl = {0};
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(LaplaceContinuation);
+    SuccessorState state = {.scope = scope,
+        .input_stride = ArrayGetNItems(ARR_NDIM(input->context), ARR_DIMS(input->context)),
+        .successors = hash_create("input successors", 128, &ctl, HASH_ELEM | HASH_BLOBS)};
+    ctl.keysize = ctl.entrysize = sizeof(hash128_t) + sizeof(size_t);
+    state.input_positions = hash_create("input occurrence identities", 128,
+                                        &ctl, HASH_ELEM | HASH_BLOBS);
+    uint8 max_tier = 0;
+    const uint8_t *tiers = tier_tree_tier_array(input->tree);
+    for (size_t i = 0; i < tier_tree_node_count(input->tree); ++i)
+        if (tiers[i] > max_tier) max_tier = tiers[i];
+    ArrayType *previous_cut = NULL;
+    scope->position_count = 0;
+    for (int tier = max_tier; tier >= 0; --tier)
+    {
+        ArrayType *cut = laplace_prompt_input_cut(input, (uint8) tier);
+        if (previous_cut && VARSIZE(cut) == VARSIZE(previous_cut) &&
+            memcmp(cut, previous_cut, VARSIZE(cut)) == 0)
+        {
+            pfree(cut);
+            continue;
+        }
+        if (previous_cut) pfree(previous_cut);
+        previous_cut = cut;
+        Datum *values;
+        bool *nulls;
+        int n_ids;
+        deconstruct_array(cut, BYTEAOID, -1, false, TYPALIGN_INT,
+                          &values, &nulls, &n_ids);
+        hash128_t *ids = palloc(sizeof(*ids) * Max(n_ids, 1));
+        for (int i = 0; i < n_ids; ++i)
+        {
+            if (nulls[i]) elog(ERROR, "trajectory input: null canonical tree identity");
+            ids[i] = datum_to_hash128(values[i]);
+        }
+        pfree(values);
+        pfree(nulls);
+        if (n_ids == 0) continue;
+        MatcherCleanup *cleanup = palloc0(sizeof(*cleanup));
+        cleanup->matcher = trajectory_suffix_matcher_create(ids, n_ids, n_ids);
+        if (!cleanup->matcher)
+            elog(ERROR, "trajectory input: allocating exact matcher failed");
+        cleanup->callback.func = free_matcher;
+        cleanup->callback.arg = cleanup;
+        MemoryContextRegisterResetCallback(work, &cleanup->callback);
+        MembershipMatcher match = {.matcher = cleanup->matcher, .state = &state};
+        laplace_content_membership_read(cut, true, bind_input_trajectory, &match);
+        trajectory_suffix_matcher_free(cleanup->matcher);
+        cleanup->matcher = NULL;
+        pfree(ids);
+        CHECK_FOR_INTERRUPTS();
+    }
+    /* An empty binding is an empty conditional distribution. It cannot fall
+     * back to a common suffix or to a context discovered by an isolated word. */
+    scope->advancing = true;
+    MemoryContextSwitchTo(previous);
+    MemoryContextDelete(work);
 }
 
 LaplaceContinuation *

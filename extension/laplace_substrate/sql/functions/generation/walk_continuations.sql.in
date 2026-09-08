@@ -11,6 +11,17 @@ CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
     AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_continuations'
     LANGUAGE C VOLATILE;
 
+-- Native whole-prompt entry. The canonical tree remains resident through
+-- admission and every selection; the caller declares the output relation set.
+CREATE OR REPLACE FUNCTION generation.forward_prompt(
+        p_prompt text, p_steps int, p_max_stride int,
+        p_spread float8, p_top_k int, p_seed bigint,
+        p_hops int, p_fanout int, p_prior_frontier bytea[],
+        p_output_relation_types bytea[])
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_forward_prompt'
+    LANGUAGE C VOLATILE;
+
 -- Physical co-occurrence is an independent observation route. The complete
 -- declared member set narrows the indexed read once; ordinal matching retains
 -- order and multiplicity. Semantic testimony is not required per constituent.

@@ -13,6 +13,7 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
+#include "utils/memutils.h"
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
@@ -22,6 +23,7 @@
 #include "perfcache_native.h"
 #include "spi_common.h"
 #include "spi_nested.h"
+#include "prompt_input.h"
 
 typedef struct
 {
@@ -200,21 +202,56 @@ prompt_seed_order(const void *a, const void *b)
  * alone are deduplicated; they do not replace the ordered observation. */
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_operands);
 
-Datum
-pg_laplace_prompt_operands(PG_FUNCTION_ARGS)
+static void
+prompt_input_release(void *argument)
 {
-    tier_tree_t *tree = NULL;
-    text *input;
+    LaplacePromptInput *input = argument;
+    tier_tree_free(input->tree);
+    input->tree = NULL;
+}
+
+ArrayType *
+laplace_prompt_input_cut(const LaplacePromptInput *input, uint8 tier)
+{
+    size_t count = tier_tree_node_count(input->tree);
+    const uint8_t *tiers = tier_tree_tier_array(input->tree);
+    const uint32_t *parents = tier_tree_parent_idx_array(input->tree);
+    const uint32_t *offsets = tier_tree_text_off_array(input->tree);
+    const hash128_t *ids = tier_tree_id_array(input->tree);
+    PromptOperand *cut = palloc(sizeof(*cut) * Max(count, 1));
+    hash128_t *ordered = palloc(sizeof(*ordered) * Max(count, 1));
+    int length = 0;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        if (tiers[i] <= tier &&
+            (parents[i] == TIER_TREE_INVALID || tiers[parents[i]] > tier))
+            cut[length++] = (PromptOperand){ids[i], i, offsets[i]};
+        if ((i & 4095) == 0) CHECK_FOR_INTERRUPTS();
+    }
+    qsort(cut, length, sizeof(*cut), prompt_operand_order);
+    for (int i = 0; i < length; ++i) ordered[i] = cut[i].id;
+    ArrayType *result = hash128_array_from_ids(ordered, length);
+    pfree(ordered);
+    pfree(cut);
+    return result;
+}
+
+LaplacePromptInput *
+laplace_prompt_input(text *input)
+{
+    LaplacePromptInput *prepared;
+    tier_tree_t *tree;
     int rc;
-    InitMaterializedSRF(fcinfo, 0);
-    if (PG_ARGISNULL(0)) return (Datum) 0;
-    input = PG_GETARG_TEXT_PP(0);
-    if (VARSIZE_ANY_EXHDR(input) == 0) return (Datum) 0;
+    if (VARSIZE_ANY_EXHDR(input) == 0) return NULL;
+    prepared = palloc0(sizeof(*prepared));
+    prepared->cleanup.func = prompt_input_release;
+    prepared->cleanup.arg = prepared;
+    MemoryContextRegisterResetCallback(CurrentMemoryContext, &prepared->cleanup);
     rc = laplace_content_tree_build_public(
-        (const uint8_t *) VARDATA_ANY(input), VARSIZE_ANY_EXHDR(input), &tree);
+        (const uint8_t *) VARDATA_ANY(input), VARSIZE_ANY_EXHDR(input), &prepared->tree);
     if (rc != 0)
         ereport(ERROR, (errmsg("prompt_operands: canonical composition failed (%d)", rc)));
-    PG_TRY();
+    tree = prepared->tree;
     {
         size_t count = tier_tree_node_count(tree);
         const uint8_t *tiers = tier_tree_tier_array(tree);
@@ -228,9 +265,6 @@ pg_laplace_prompt_operands(PG_FUNCTION_ARGS)
         ArrayBuildState *nodes = NULL;
         HASHCTL ctl = {0};
         HTAB *seen;
-        ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-        Datum values[4];
-        bool nulls[4] = {false};
         if (count > INT_MAX || count > MaxAllocSize / sizeof(PromptOperand) ||
             content_witness_tree_root_id(tree, &root) != 0)
             ereport(ERROR, (errmsg("prompt_operands: invalid canonical composition")));
@@ -266,25 +300,33 @@ pg_laplace_prompt_operands(PG_FUNCTION_ARGS)
             nodes = accumArrayResult(nodes, Int32GetDatum(operands[i].node),
                                      false, INT4OID, CurrentMemoryContext);
         }
-        values[0] = hash128_to_datum(&root);
-        values[1] = PointerGetDatum(hash128_array_from_ids(context_ids, n_operands));
-        values[2] = nodes ? makeArrayResult(nodes, CurrentMemoryContext) :
-                           PointerGetDatum(construct_empty_array(INT4OID));
+        prepared->root = root;
+        prepared->context = hash128_array_from_ids(context_ids, n_operands);
+        prepared->nodes = nodes ? DatumGetArrayTypeP(makeArrayResult(nodes, CurrentMemoryContext)) :
+                                 construct_empty_array(INT4OID);
         qsort(seed_ids, n_seeds, sizeof(hash128_t), prompt_seed_order);
-        values[3] = PointerGetDatum(hash128_array_from_ids(seed_ids, n_seeds));
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+        prepared->seeds = hash128_array_from_ids(seed_ids, n_seeds);
         hash_destroy(seen);
         pfree(operands);
         pfree(context_ids);
         pfree(seed_ids);
     }
-    PG_CATCH();
-    {
-        tier_tree_free(tree);
-        PG_RE_THROW();
-    }
-    PG_END_TRY();
-    tier_tree_free(tree);
+    return prepared;
+}
+
+Datum
+pg_laplace_prompt_operands(PG_FUNCTION_ARGS)
+{
+    InitMaterializedSRF(fcinfo, 0);
+    if (PG_ARGISNULL(0)) return (Datum) 0;
+    LaplacePromptInput *input = laplace_prompt_input(PG_GETARG_TEXT_PP(0));
+    if (!input) return (Datum) 0;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    Datum values[4] = {hash128_to_datum(&input->root),
+        PointerGetDatum(input->context), PointerGetDatum(input->nodes),
+        PointerGetDatum(input->seeds)};
+    bool nulls[4] = {false};
+    tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
     return (Datum) 0;
 }
 

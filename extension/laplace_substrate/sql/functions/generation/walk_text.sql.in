@@ -7,43 +7,18 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    -- The observation root and its complete canonical tree precede routing.
-    -- No case-popularity substitution, named-English relation extraction or
-    -- dictionary-membership filter is allowed to change this operand.
-    WITH observation AS MATERIALIZED (
-        SELECT * FROM converse.prompt_operands(p_prompt)
-    ), ctx AS MATERIALIZED (
-        SELECT context_ids AS ids FROM observation
-    ), seed_array AS MATERIALIZED (
-        SELECT seed_ids AS ids FROM observation
-    ), frontier AS MATERIALIZED (
-        SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
-        FROM (
-            SELECT f.entity, f.hop
-            FROM seed_array s
-            CROSS JOIN LATERAL generation.forward_frontier_ids(
-                s.ids, p_hops, p_fanout, NULL) f
-            UNION
-            SELECT p.entity, 0::smallint
-            FROM unnest(COALESCE(p_prior_frontier, '{}'::bytea[])) p(entity)
-            WHERE p.entity IS NOT NULL
-        ) x
-    ), walked AS MATERIALIZED (
+    -- Native execution retains the complete query tree. This typed SQL surface
+    -- binds execution controls and realizes the selected identities in a batch.
+    WITH walked AS MATERIALIZED (
         SELECT g.*
-        FROM ctx CROSS JOIN frontier CROSS JOIN seed_array,
-             generation.forward_walk_continuations(
-                 ctx.ids, p_steps, p_max_stride, p_spread, p_top_k,
+        FROM generation.forward_prompt(
+                 p_prompt, p_steps, p_max_stride, p_spread, p_top_k,
                  COALESCE(
                      p_seed,
                      laplace.hash128_lo(public.laplace_hash128_blake3(
                          convert_to(p_prompt, 'UTF8')))),
-                 frontier.ids,
-                 NULL::bytea[], p_fanout,
-                 seed_array.ids || COALESCE(p_prior_frontier, '{}'::bytea[]),
-                 -- Continuation testimony is an output operation. Other routed
-                 -- nodes remain evidence until ORIENT elects their projection.
-                 ctx.ids, consensus.relation_set_ids('CONTINUATION_OUTPUT')) g
-        WHERE ctx.ids IS NOT NULL
+                 p_hops, p_fanout, p_prior_frontier,
+                 consensus.relation_set_ids('CONTINUATION_OUTPUT')) g
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,
                array_agg(sep_entity ORDER BY step) AS separators

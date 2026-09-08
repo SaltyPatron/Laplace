@@ -77,8 +77,11 @@
 #include "consensus_neighbors.h"
 #include "trajectory_continuations.h"
 #include "walk_score.h"
+#include "prompt_input.h"
+#include "explore_web.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
+PG_FUNCTION_INFO_V1(pg_laplace_forward_prompt);
 
 typedef struct Cand
 {
@@ -286,8 +289,8 @@ candidate_cmp(const void *a, const void *b)
     return memcmp(VARDATA_ANY(xo), VARDATA_ANY(yo), 16);
 }
 
-Datum
-pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
+static Datum
+walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     ArrayType *ctx_arr, *front_arr;
@@ -460,6 +463,13 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         laplace_trajectory_scope_extend_containing(trajectory_scope, PG_GETARG_ARRAYTYPE_P(10));
         MemoryContextSwitchTo(old);
     }
+    if (input && max_order > 0)
+    {
+        old = MemoryContextSwitchTo(walk_cxt);
+        if (!trajectory_scope) trajectory_scope = laplace_trajectory_scope_create();
+        laplace_trajectory_scope_bind_input(trajectory_scope, input);
+        MemoryContextSwitchTo(old);
+    }
     MemoryContextSwitchTo(step_cxt);
     for (int64 step = 1; step <= steps; step++)
     {
@@ -475,7 +485,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         /* Resolve every suffix in one indexed native trajectory operation.
          * Selection receives the complete successor set at the greatest exact
          * stride; no repeated SQL calls or pre-steering top-K loss. */
-        int depth = Min(ctx_len, max_order);
+        int depth = input && step == 1 && max_order > 0
+            ? ctx_len : Min(ctx_len, max_order);
         if (depth > 0)
         {
             ArrayType *tail = construct_array(ctx + ctx_len - depth, depth,
@@ -513,8 +524,26 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             ctl.entrysize = sizeof(ProjectionSupport);
             HTAB *projection = hash_create("forward output support", 128, &ctl,
                                            HASH_ELEM | HASH_BLOBS);
-            proposal_neighborhood(neighborhoods, frontier, n_frontier,
+            /* A routed constituent does not inherit the whole request's
+             * output purpose. Direct completion testimony must bind the input
+             * root; subsequent selections become additional output operands. */
+            Datum *output_frontier = frontier;
+            int n_output_frontier = n_frontier;
+            if (input)
+            {
+                n_output_frontier = 1 + ctx_len - n_in;
+                output_frontier = palloc(sizeof(Datum) * n_output_frontier);
+                output_frontier[0] = hash128_to_datum(&input->root);
+                for (int i = 1; i < n_output_frontier; ++i)
+                    output_frontier[i] = ctx[n_in + i - 1];
+            }
+            proposal_neighborhood(neighborhoods, output_frontier, n_output_frontier,
                                   output_relations, fanout, walk_cxt, projection);
+            if (input)
+            {
+                pfree(DatumGetPointer(output_frontier[0]));
+                pfree(output_frontier);
+            }
             ctl.entrysize = sizeof(hash128_t);
             HTAB *seen = hash_create("forward output identities", 128,
                                      &ctl, HASH_ELEM | HASH_BLOBS);
@@ -719,4 +748,94 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     MemoryContextDelete(step_cxt);
     SPI_finish();
     return (Datum) 0;
+}
+
+Datum
+pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
+{
+    return walk_continuations(fcinfo, NULL);
+}
+
+typedef struct PromptFrontier
+{
+    HTAB *seen;
+    ArrayBuildState *ids;
+    MemoryContext owner;
+} PromptFrontier;
+
+static void
+prompt_frontier_add(PromptFrontier *frontier, const hash128_t *id)
+{
+    bool found;
+    hash_search(frontier->seen, id, HASH_ENTER, &found);
+    if (!found)
+        frontier->ids = accumArrayResult(frontier->ids, hash128_to_datum(id),
+                                         false, BYTEAOID, frontier->owner);
+}
+
+static void
+prompt_frontier_edge(const LaplaceWebEdge *edge, void *context)
+{
+    PromptFrontier *frontier = context;
+    MemoryContext previous = MemoryContextSwitchTo(frontier->owner);
+    prompt_frontier_add(frontier, &edge->source);
+    prompt_frontier_add(frontier, &edge->object);
+    MemoryContextSwitchTo(previous);
+}
+
+Datum
+pg_laplace_forward_prompt(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0) || VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_PP(0)) == 0)
+    {
+        InitMaterializedSRF(fcinfo, 0);
+        return (Datum) 0;
+    }
+    /* One retained native tree is shared by preparation, indexed admission,
+     * ordered binding and the dynamic walk. SQL binds options and realizes
+     * selected identities; it does not flatten/reconstruct the query program. */
+    LaplacePromptInput *input = laplace_prompt_input(PG_GETARG_TEXT_PP(0));
+    HASHCTL ctl = {0};
+    ctl.keysize = ctl.entrysize = sizeof(hash128_t);
+    PromptFrontier frontier = {.owner = CurrentMemoryContext,
+        .seen = hash_create("prompt routed identities", 128, &ctl, HASH_ELEM | HASH_BLOBS)};
+    ArrayIterator iterator = array_create_iterator(input->seeds, 0, NULL);
+    Datum value;
+    bool isnull;
+    while (array_iterate(iterator, &value, &isnull))
+    {
+        hash128_t id = datum_to_hash128(value);
+        prompt_frontier_add(&frontier, &id);
+    }
+    array_free_iterator(iterator);
+    laplace_explore_web(input->seeds,
+        PG_ARGISNULL(6) ? 2 : PG_GETARG_INT32(6),
+        PG_ARGISNULL(7) ? 8 : PG_GETARG_INT32(7), -1, true,
+        prompt_frontier_edge, &frontier);
+    if (!PG_ARGISNULL(8))
+    {
+        ArrayType *prior = PG_GETARG_ARRAYTYPE_P(8);
+        if (ARR_NDIM(prior) > 1 || ARR_ELEMTYPE(prior) != BYTEAOID)
+            elog(ERROR, "forward prompt: history must be a 1-D bytea array");
+        iterator = array_create_iterator(prior, 0, NULL);
+        while (array_iterate(iterator, &value, &isnull))
+        {
+            if (isnull) continue;
+            if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(value)) != sizeof(hash128_t))
+                elog(ERROR, "forward prompt: history identities must be 16 bytes");
+            hash128_t id = datum_to_hash128(value);
+            prompt_frontier_add(&frontier, &id);
+        }
+        array_free_iterator(iterator);
+    }
+    LOCAL_FCINFO(walk_call, 12);
+    InitFunctionCallInfoData(*walk_call, fcinfo->flinfo, 12, fcinfo->fncollation,
+                            fcinfo->context, fcinfo->resultinfo);
+    for (int i = 0; i < 12; ++i) walk_call->args[i].isnull = true;
+    walk_call->args[0] = (NullableDatum){PointerGetDatum(input->context), false};
+    for (int i = 1; i <= 5; ++i) walk_call->args[i] = fcinfo->args[i];
+    walk_call->args[6] = (NullableDatum){makeArrayResult(frontier.ids, frontier.owner), false};
+    walk_call->args[8] = fcinfo->args[7];
+    walk_call->args[11] = fcinfo->args[9];
+    return walk_continuations(walk_call, input);
 }

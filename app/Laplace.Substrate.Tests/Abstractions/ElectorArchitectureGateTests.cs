@@ -190,9 +190,13 @@ public sealed class ElectorArchitectureGateTests
     {
         var sql = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
             "extension","laplace_substrate","sql","functions","generation","walk_text.sql.in"));
-        Assert.Contains("converse.prompt_operands(p_prompt)", sql);
-        Assert.Contains("context_ids AS ids FROM observation", sql);
-        Assert.Contains("generation.forward_frontier_ids", sql);
+        Assert.Contains("generation.forward_prompt(", sql);
+        var native = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "extension", "laplace_substrate", "src", "trajectory_generate.c"));
+        Assert.Contains("laplace_prompt_input(PG_GETARG_TEXT_PP(0))", native);
+        Assert.Contains("laplace_explore_web(input->seeds", native);
+        Assert.Contains("walk_continuations(walk_call, input)", native);
+        Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);
         Assert.DoesNotMatch(ElectCall, StripComments(sql));
     }
 

@@ -3,7 +3,8 @@
 #include "postgres.h"
 #include "utils/array.h"
 
-typedef void (*LaplaceContentTrajectoryConsumer)(Datum geometry, void *context);
+typedef void (*LaplaceContentTrajectoryConsumer)(Datum physicality, Datum entity,
+    Datum geometry, void *context);
 /* Read canonical Content physicalities for a batch of entity IDs under MVCC.
  * The geometry datum is valid only during the callback. */
 void laplace_content_trajectory_read(ArrayType *entities,
