@@ -159,7 +159,13 @@ public static class SharedParquetRecordStream
         DataField? vendorField = FindField(fields, "is_vendor");
         DataField? generatedField = FindField(fields, "is_generated");
 
-        if (contentField is null || languageField is null) yield break;
+        if (contentField is null || languageField is null)
+            throw new InvalidDataException(
+                $"Stack code ingestion requires content and language columns in '{path}'; found: "
+                + string.Join(", ", fields.Select(f => f.Name))
+                + (contentField is null && FindField(fields, "blob_id") is not null
+                    ? ". This is a blob-reference inventory; source payloads must be resolved before code ingestion."
+                    : "."));
 
         for (int rg = 0; rg < reader.RowGroupCount; rg++)
         {

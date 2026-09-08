@@ -64,8 +64,10 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
             ct.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(response)) continue;
 
-            string? modality = ResolveModality(lang);
-            if (modality is null) continue;
+            // A missing language grammar does not erase an observed response.
+            // Keep its complete text through the native document grammar; this
+            // does not claim a code AST for an unsupported programming language.
+            string modality = ResolveModality(lang) ?? "markdown";
 
             byte[] codeBytes = Encoding.UTF8.GetBytes(response);
             if (codeBytes.Length == 0) continue;

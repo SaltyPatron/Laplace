@@ -1,7 +1,12 @@
 using System.Text;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Code;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.SubstrateCRUD.Npgsql;
+using Microsoft.Extensions.Logging.Abstractions;
+using Parquet;
+using Parquet.Schema;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -134,5 +139,59 @@ public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
         var otherBuilder = new SubstrateChangeBuilder(source, "test/different-code-pair");
         Assert.NotEqual(root, different.DrainInto(otherBuilder, 1, null));
         foreach (var stage in otherBuilder.Build().IntentStages) stage.Dispose();
+    }
+
+    [Fact]
+    public async Task TinyCodesPhysicalShard_PreservesResponsesWithoutALanguageGrammar()
+    {
+        var dir = Directory.CreateTempSubdirectory("tiny-codes-coverage");
+        const string prompt = "Find nodes in Neo4j, keeping x and not y.\n";
+        const string response = "Use this query:\n```cypher\nMATCH (x) RETURN x\n```\n";
+        try
+        {
+            string path = Path.Combine(dir.FullName, "observations.parquet");
+            var p = new DataField<string>("prompt");
+            var r = new DataField<string>("response");
+            var l = new DataField<string>("programming_language");
+            await using (var fs = File.Create(path))
+            await using (var writer = await ParquetWriter.CreateAsync(new ParquetSchema(p, r, l), fs))
+            {
+                using var group = writer.CreateRowGroup();
+                await group.WriteAsync(p, new[] { prompt });
+                await group.WriteAsync(r, new[] { response });
+                await group.WriteAsync(l, new[] { "Neo4j database and Cypher" });
+            }
+            CodepointPerfcache.LoadDefault();
+            var runner = new IngestRunner(new NpgsqlSubstrateWriter(pg.DataSource),
+                new NpgsqlSubstrateReader(pg.DataSource), NullLoggerFactory.Instance,
+                new NpgsqlIngestObservability(pg.DataSource));
+            var result = await runner.RunAsync(new TinyCodesDecomposer(), IngestRunOptions.Default with
+            {
+                EcosystemPath = path,
+                SkipLayerOrderingCheck = true,
+                SkipSourceCompletion = true,
+            });
+            Assert.Equal(1, result.InputUnitsDone);
+            Assert.Equal(1, result.FilesDone);
+            Assert.Equal(0, result.UnitsFailed);
+            Assert.Empty(result.Failures);
+
+            using var promptAst = GrammarDecomposer.Parse(Encoding.UTF8.GetBytes(prompt), "markdown");
+            using var promptComposer = new GrammarRowComposer(Encoding.UTF8.GetBytes(prompt),
+                promptAst, TinyCodesSource.SourceId, "markdown", GrammarCompositionMode.FullSource);
+            using var responseAst = GrammarDecomposer.Parse(Encoding.UTF8.GetBytes(response), "markdown");
+            using var responseComposer = new GrammarRowComposer(Encoding.UTF8.GetBytes(response),
+                responseAst, TinyCodesSource.SourceId, "markdown", GrammarCompositionMode.FullSource);
+            Assert.Equal(Encoding.UTF8.GetBytes(prompt),
+                await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource,
+                    promptComposer.RootComponent().Id, "markdown"));
+            Assert.Equal(Encoding.UTF8.GetBytes(response),
+                await NpgsqlContentReconstructor.ReconstructUtf8Async(pg.DataSource,
+                    responseComposer.RootComponent().Id, "markdown"));
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 }

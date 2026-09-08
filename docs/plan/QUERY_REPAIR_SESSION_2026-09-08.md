@@ -810,3 +810,27 @@ The live chess native read now returns `Carlsen, Magnus` from the partial surnam
 Commit `0d125a87` adds scalar/array mapping for every catalog parameter type and a
 real managed/PostgreSQL test of the six-parameter search reader. API delivery and
 readback of that correction remain required.
+
+## Physical coding-corpus inspection and reader acceptance
+
+The installed managed catalog binding fix returns the live Carlsen search with HTTP
+200, one Magnus profile, in 479 ms (one observation). The current CI product proof
+still fails the natural forward-pass hot/cold acceptance; do not call CI green.
+
+A read through the repository's C# Parquet reader inspected the full selected
+`/vault/models/tiny-codes/part_9_1632520.parquet`: 19,574,261 bytes, **32,516** rows,
+no empty prompts or responses, 13 language values. Its 2,327 Cypher rows were
+silently skipped because no Cypher grammar is installed. Responses without a
+language grammar now retain their complete observed text through native Markdown
+composition. This preserves text; it does not assert a Cypher AST. The generic
+physical-worker regression ingests a Cypher record and reconstructs its prompt
+and response byte for byte. All five grammar-source database tests pass.
+
+Footer inspection of `/vault/models/stack-v2/data/C++/train-00000-of-00007.parquet`
+found 9,048,860 rows in 2,887,418,190 bytes, with blob/repository/revision identities,
+paths, languages and other metadata, **no content column**. The Stack reader now
+reports the missing payload explicitly instead of returning a successful empty
+stream. Four Parquet reader tests pass. Resolving the referenced source payloads,
+retaining complete source row metadata and composing embedded code regions remain
+implementation obligations; this inspection is not proof that those code bodies
+have been ingested or that the forward pass can edit and test code.

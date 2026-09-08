@@ -91,6 +91,36 @@ public sealed class ParquetDecomposerTests
     }
 
     [Fact]
+    public async Task StackBlobReferences_AreReportedAsMissingPayloadsInsteadOfEmptySuccess()
+    {
+        var dir = Directory.CreateTempSubdirectory("stack-reference-test");
+        try
+        {
+            string path = Path.Combine(dir.FullName, "references.parquet");
+            var blob = new DataField<string>("blob_id");
+            var language = new DataField<string>("language");
+            await using (var fs = File.Create(path))
+            await using (var writer = await ParquetWriter.CreateAsync(new ParquetSchema(blob, language), fs))
+            {
+                using var group = writer.CreateRowGroup();
+                await group.WriteAsync(blob, new[] { "observed-source-blob" });
+                await group.WriteAsync(language, new[] { "C++" });
+            }
+            var error = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            {
+                await foreach (var row in SharedParquetRecordStream.ReadStackRowsAsync(path, default))
+                    Assert.Fail("A blob reference must not be reported as source text.");
+            });
+            Assert.Contains(path, error.Message);
+            Assert.Contains("source payloads must be resolved", error.Message);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void FormatCell_NormalizesEachLogicalTypeCultureInvariantly()
     {
         Assert.Null(ParquetDecomposer.FormatCell(null));
