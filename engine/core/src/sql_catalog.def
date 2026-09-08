@@ -165,9 +165,15 @@ SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8
     "ON CONFLICT(id) DO UPDATE SET trajectory=EXCLUDED.trajectory,coord=EXCLUDED.coord,"
     "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
     "observed_at=EXCLUDED.observed_at")
+/* Retained for already mapped versioned execution modules during live upgrade. */
 SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT context_id FROM laplace.attestations "
     "WHERE subject_id=ANY($1) AND context_id IS NOT NULL")
+SQL_QUERY("evidence.observation_bindings", "bytea[],bytea[],bytea[],int4",
+    "SELECT id,subject_id,type_id,object_id,source_id,context_id,outcome,observation_count "
+    "FROM laplace.attestations WHERE "
+    "((($4 & 1)<>0 AND subject_id=ANY($1)) OR (($4 & 2)<>0 AND object_id=ANY($1))) "
+    "AND ($2 IS NULL OR source_id=ANY($2)) AND ($3 IS NULL OR type_id=ANY($3))")
 SQL_QUERY("evidence.response_support", "bytea[],bytea,bytea[],bytea,bool",
     "SELECT subject_id,object_id,source_id FROM laplace.attestations "
     "WHERE subject_id=ANY($1) AND type_id=$2 AND ((object_id IS NULL)=$5) "

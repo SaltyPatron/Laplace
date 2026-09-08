@@ -12,6 +12,7 @@ set(EXT_EXECUTION_SOURCES
     src/content_text_read.c
     src/display_native.c
     src/attestation_response.c
+    src/observation_read.c
     src/conversation_session.c
     src/consensus_scan.c
     src/consensus_neighbors.c

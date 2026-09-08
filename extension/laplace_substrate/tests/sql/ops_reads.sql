@@ -193,6 +193,32 @@ BEGIN
         RAISE EXCEPTION 'FAIL: scalar and batch attestation responses disagree';
     END IF;
     RAISE NOTICE 'evidence response: exact source counts, scoped support, pooled prior and scalar/batch parity';
+
+    -- The profile receipt consumes the same native witness reader with subject
+    -- roles only. Source labels are final display; repeated contexts still count
+    -- as observations, and an incoming assertion must not reverse its meaning.
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    VALUES (rel,2,laplace.entity_type_id('RelationType'),src1)
+    ON CONFLICT DO NOTHING;
+    INSERT INTO laplace.canonical_names(id,name) VALUES
+        (src1,'substrate/source/receipt-source1/v1'),
+        (src2,'substrate/source/receipt-source2/v1'),
+        (a,'substrate/test/receipt-a/v1'),
+        (b,'substrate/test/receipt-b/v1');
+    INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,
+        outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+    VALUES (public.laplace_hash128_blake3('test/evidence-response/inbound'),
+        b,rel,s1,src2,ctx1,1,now(),100,100000000000,350000000000);
+    SELECT count(*),sum(witness_count) INTO rows_seen,sources_seen
+    FROM ops.evidence_receipt(s1,25);
+    IF rows_seen<>2 OR sources_seen<>4 THEN
+        RAISE EXCEPTION 'FAIL: profile receipt lost observations or admitted inbound/unary claims';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.evidence_receipt(s1,25)
+        WHERE object_id=a AND witness_count=3
+          AND source_labels='receipt-source1, receipt-source2') THEN
+        RAISE EXCEPTION 'FAIL: profile receipt lost distinct source labels or context multiplicity';
+    END IF;
 END $$;
 
 -- mesh_position always yields the self row, even for an unwitnessed id

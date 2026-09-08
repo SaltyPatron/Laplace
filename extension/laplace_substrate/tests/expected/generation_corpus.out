@@ -574,13 +574,103 @@ BEGIN
     END IF;
 END
 $realization$;
+-- Query-side occurrences and recorded witness tuples survive the shared native
+-- reader. Source scope, refutation and missing context are not pooled away.
+DO $bindings$
+DECLARE
+    operand bytea := public.laplace_hash128_blake3('bindings/operand');
+    target bytea := public.laplace_hash128_blake3('bindings/target');
+    source_a bytea := public.laplace_hash128_blake3('bindings/source-a');
+    source_b bytea := public.laplace_hash128_blake3('bindings/source-b');
+    context_id bytea := public.laplace_hash128_blake3('bindings/context');
+    rel bytea := laplace.relation_type_id('RELATED_TO');
+    ids bytea[];
+BEGIN
+    ids := ARRAY[operand,NULL::bytea,operand,public.laplace_hash128_blake3('bindings/unknown'),target];
+    INSERT INTO laplace.attestations
+        (id,subject_id,type_id,object_id,source_id,context_id,outcome,
+         last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+    VALUES
+        (public.laplace_hash128_blake3('bindings/confirm'),operand,rel,target,
+         source_a,context_id,2,now(),3,3000000000,350000000000),
+        (public.laplace_hash128_blake3('bindings/refute'),operand,rel,target,
+         source_b,context_id,0,now(),2,0,350000000000),
+        (public.laplace_hash128_blake3('bindings/no-context'),operand,
+         laplace.relation_type_id('IS_A'),NULL,source_a,NULL,1,now(),1,500000000,350000000000);
+    IF (SELECT count(*) FROM generation.observation_bindings(ids)) <> 8 THEN
+        RAISE EXCEPTION 'FAIL: observation bindings lost repeated input occurrences or null context';
+    END IF;
+    IF EXISTS (
+        (SELECT * FROM generation.observation_bindings(ids)
+         EXCEPT ALL
+         SELECT u.ordinal::integer,r.role::smallint,a.id,a.subject_id,a.type_id,a.object_id,a.source_id,
+                a.context_id,a.outcome,a.observation_count
+         FROM unnest(ids) WITH ORDINALITY u(id,ordinal)
+         CROSS JOIN (VALUES (1),(2)) r(role)
+         JOIN laplace.attestations a ON (r.role=1 AND a.subject_id=u.id)
+                                    OR (r.role=2 AND a.object_id=u.id))
+        UNION ALL
+        (SELECT u.ordinal::integer,r.role::smallint,a.id,a.subject_id,a.type_id,a.object_id,a.source_id,
+                a.context_id,a.outcome,a.observation_count
+         FROM unnest(ids) WITH ORDINALITY u(id,ordinal)
+         CROSS JOIN (VALUES (1),(2)) r(role)
+         JOIN laplace.attestations a ON (r.role=1 AND a.subject_id=u.id)
+                                    OR (r.role=2 AND a.object_id=u.id)
+         EXCEPT ALL
+         SELECT * FROM generation.observation_bindings(ids))) THEN
+        RAISE EXCEPTION 'FAIL: native bindings changed a witnessed tuple or input ordinal';
+    END IF;
+    IF (SELECT count(*) FROM generation.observation_bindings(ids,ARRAY[source_b],ARRAY[rel])
+        WHERE outcome=0 AND observation_count=2) <> 3 THEN
+        RAISE EXCEPTION 'FAIL: source-scoped refutation was lost or pooled';
+    END IF;
+    IF EXISTS (SELECT 1 FROM generation.observation_bindings(ids,'{}'::bytea[]))
+       OR EXISTS (SELECT 1 FROM generation.observation_bindings(ids,NULL,'{}'::bytea[]))
+       OR EXISTS (SELECT 1 FROM generation.observation_bindings('{}'::bytea[]))
+       OR EXISTS (SELECT 1 FROM generation.observation_bindings(NULL::bytea[])) THEN
+        RAISE EXCEPTION 'FAIL: empty observation operand or scope became unrestricted';
+    END IF;
+    IF (SELECT count(*) FROM generation.observation_bindings(ids,NULL,NULL,1)) <> 6
+       OR (SELECT count(*) FROM generation.observation_bindings(ids,NULL,NULL,2)) <> 2
+       OR EXISTS (SELECT 1 FROM generation.observation_bindings(ids,NULL,NULL,0)) THEN
+        RAISE EXCEPTION 'FAIL: declared operand roles changed or ignored their scope';
+    END IF;
+    INSERT INTO laplace.attestations
+        (id,subject_id,type_id,object_id,source_id,context_id,outcome,
+         last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+    VALUES (public.laplace_hash128_blake3('bindings/self'),operand,
+        laplace.relation_type_id('HAS_PART'),operand,source_a,context_id,2,
+        now(),1,1000000000,350000000000);
+    IF (SELECT count(DISTINCT operand_role) FROM generation.observation_bindings(
+        ARRAY[operand],NULL,ARRAY[laplace.relation_type_id('HAS_PART')])) <> 2 THEN
+        RAISE EXCEPTION 'FAIL: a self-reference lost one of its stored operand roles';
+    END IF;
+END
+$bindings$;
 CREATE ROLE laplace_membership_reader_test;
 GRANT USAGE ON SCHEMA structural TO laplace_membership_reader_test;
+GRANT USAGE ON SCHEMA generation TO laplace_membership_reader_test;
+GRANT USAGE ON SCHEMA laplace TO laplace_membership_reader_test;
 SET LOCAL ROLE laplace_membership_reader_test;
+DO $$ BEGIN
+    PERFORM generation.observation_bindings(ARRAY[decode(repeat('00',16),'hex')]);
+    RAISE EXCEPTION 'FAIL: native observation read bypassed SELECT privilege';
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
 DO $$ BEGIN
     PERFORM structural.containers_containing_all(ARRAY[decode(repeat('00',16),'hex')]);
     RAISE EXCEPTION 'FAIL: native membership bypassed SELECT privilege';
 EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+RESET ROLE;
+GRANT SELECT ON laplace.attestations TO laplace_membership_reader_test;
+ALTER TABLE laplace.attestations ENABLE ROW LEVEL SECURITY;
+SET LOCAL ROLE laplace_membership_reader_test;
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM generation.observation_bindings(
+        ARRAY[public.laplace_hash128_blake3('bindings/operand')])) THEN
+        RAISE EXCEPTION 'FAIL: cached observation read bypassed row security';
+    END IF;
 END $$;
 RESET ROLE;
 GRANT SELECT ON laplace.physicalities TO laplace_membership_reader_test;

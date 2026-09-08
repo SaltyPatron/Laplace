@@ -1,3 +1,15 @@
+-- Exact witnessed bindings for a DAG operand's ordered constituent occurrences.
+-- No realization, pooled-score substitution, or context-as-cooccurrence claim.
+-- Source and relation filters constrain the indexed read before emission.
+CREATE OR REPLACE FUNCTION generation.observation_bindings(
+    p_ids bytea[], p_sources bytea[] DEFAULT NULL, p_types bytea[] DEFAULT NULL,
+    p_roles integer DEFAULT 3)
+RETURNS TABLE(input_ordinal integer, operand_role smallint, attestation_id bytea, subject_id bytea,
+    type_id bytea, object_id bytea, source_id bytea, context_id bytea,
+    outcome smallint, observation_count bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_observation_bindings'
+LANGUAGE C STABLE;
+
 -- generation.trajectory_continuations(ctx, topk) -> what followed this exact context, counted.
 -- NULL topk returns the complete successor set; zero returns no rows.  Callers that
 -- need a bounded presentation choose that bound explicitly after any downstream

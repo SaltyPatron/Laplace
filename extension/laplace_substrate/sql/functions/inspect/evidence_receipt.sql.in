@@ -36,9 +36,9 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
         -- >180s for the "run" hub vs 991ms for this same CTE planned standalone).
         SELECT a.type_id, a.object_id, a.source_id,
                sum(a.observation_count) AS obs
-        FROM laplace.attestations a
-        WHERE a.subject_id IN (SELECT id FROM subj)
-          AND a.object_id IS NOT NULL
+        FROM (SELECT array_agg(id) AS ids FROM subj) operands,
+             generation.observation_bindings(operands.ids, NULL, NULL, 1) a
+        WHERE a.object_id IS NOT NULL
           AND EXISTS (
               SELECT 1 FROM laplace.entities et
               WHERE et.id = a.type_id AND et.type_id = laplace.entity_type_id('RelationType'))
