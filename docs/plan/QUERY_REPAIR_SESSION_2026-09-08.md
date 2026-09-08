@@ -142,3 +142,24 @@ workspace build encountered runner-owned generated artifacts; an isolated checko
 provides independent build output. Reseeding is authorized if needed after clean
 SQL and deployment are verified. Fresh installation must also be tested without
 old database contents masking missing extension dependencies.
+
+
+## Home readback and delivery checkpoint
+
+The installed home request returned HTTP 200 in 3.635631 s after native retained-
+evidence repair of Chess_Substructure OUTCOME cells: 923 selected typed subjects,
+772 evidence rows/cells, 752,419,529 observations preserved, 26 saturated cells
+reconstructed. All evidence bytes and calibration remained identical; repeated
+reconstruction was byte-identical. Backup/recipe/readback live in the private
+`query-repair-20260908/substructure` directory. Home subjects in bands 4 and 5
+still have blank labels in the installed display path. This is failed acceptance,
+not completion of the home leaderboard work.
+
+Local commits 207fefe6 / 41db49af / 8eb4c550 include the original repairs, bounded
+native chess roster selection with exact int64 ordering, the fixed home preview
+route, and explicit provenance-preserving general cell replay. Full proof exposed
+and corrected a missing ASP.NET rate-limiter import, existing managed witness
+admission outside native C, and stale gate entries after moving SQL ownership.
+Full proof and coordinated main deployment remain implementation obligations.
+The inventor is merging #1514; integrate these changes with that revision. No
+additional feature branches or worktrees are to be created until this work is clean.

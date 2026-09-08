@@ -237,7 +237,6 @@
       "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::UD_XPOS": 1
     },
     "g1_weight_literalism": {
-      "extension/laplace_substrate/src/highway_mask.c::rating-2*rd": 3,
       "extension/laplace_substrate/src/prompt_coherence.c::rating-2*rd": 2,
       "scripts/sql/model-planes-audit.sql::c.rating-2*c.rd": 6
     },

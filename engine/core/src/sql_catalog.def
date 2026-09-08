@@ -117,3 +117,6 @@ SQL_QUERY("consensus.band_edges", "bytea[],int8,int8",
     "FROM laplace.consensus WHERE type_id=ANY($1) AND object_id IS NOT NULL "
     "AND NOT consensus.refuted(rating,rd) AND (rating - 2*rd)>=$2 "
     "ORDER BY (rating - 2*rd) DESC,subject_id,type_id,object_id LIMIT $3")
+
+SQL_QUERY("leaders.arena", "int4,int8",
+    "SELECT subject_id,type_id,object_id,rating,rd,witness_count FROM consensus.band_edges($1,NULL,$2)")

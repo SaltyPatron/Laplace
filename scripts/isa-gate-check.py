@@ -105,11 +105,11 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # `<> ALL` for `NOT IN` is exact here, not merely equivalent-looking: type_id is NOT NULL
 # on both laplace.consensus and laplace.attestations, verified in the catalog.
 CEILINGS = {
-    "g1_weight_literalism": 11,
+    "g1_weight_literalism": 8,
     # 191 -> 180 (2026-08-20): #1258 retired the SQL per-ply projection. The
     # chess_game_plies body is now two DROP statements, so its 11 relation-name
     # literals are gone rather than allowlisted. Shrink-only, as the law requires.
-    "g3_sql_vocabulary_literalism": 178,
+    "g3_sql_vocabulary_literalism": 176,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
