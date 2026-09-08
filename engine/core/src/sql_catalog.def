@@ -62,3 +62,49 @@ SQL_QUERY("chess.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[],in
         "volatility=EXCLUDED.volatility,witness_count=EXCLUDED.witness_count,last_observed_at=EXCLUDED.last_observed_at "
         "WHERE ROW(c.rating,c.rd,c.volatility,c.witness_count,c.last_observed_at) IS DISTINCT FROM "
         "ROW(EXCLUDED.rating,EXCLUDED.rd,EXCLUDED.volatility,EXCLUDED.witness_count,EXCLUDED.last_observed_at)")
+
+SQL_QUERY("chess.roster_types", "", "SELECT laplace.entity_type_id('Chess_Player'),laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),consensus.glicko2_neutral_mu(),consensus.glicko2_initial_rd()")
+SQL_QUERY("chess.roster_unrated", "bytea,bytea,bytea,int8",
+    "SELECT e.id FROM laplace.entities e LEFT JOIN laplace.consensus c "
+    "ON c.subject_id=e.id AND c.type_id=$2 AND c.object_id=$3 "
+    "WHERE e.type_id=$1 AND c.id IS NULL ORDER BY e.id LIMIT $4")
+SQL_QUERY("chess.roster_strength_asc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY (c.rating - 2*c.rd) ASC,c.subject_id LIMIT $4")
+SQL_QUERY("chess.roster_strength_desc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY (c.rating - 2*c.rd) DESC,c.subject_id LIMIT $4")
+SQL_QUERY("chess.roster_games_asc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY c.witness_count ASC,c.subject_id LIMIT $4")
+SQL_QUERY("chess.roster_games_desc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY c.witness_count DESC,c.subject_id LIMIT $4")
+SQL_QUERY("chess.roster_rating_asc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY c.rating ASC,c.subject_id LIMIT $4")
+SQL_QUERY("chess.roster_rating_desc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY c.rating DESC,c.subject_id LIMIT $4")
+SQL_QUERY("chess.roster_rd_asc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY c.rd ASC,c.subject_id LIMIT $4")
+SQL_QUERY("chess.roster_rd_desc", "bytea,bytea,bytea,int8",
+    "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
+    "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
+    "WHERE c.type_id=$2 AND c.object_id=$3 "
+    "ORDER BY c.rd DESC,c.subject_id LIMIT $4")

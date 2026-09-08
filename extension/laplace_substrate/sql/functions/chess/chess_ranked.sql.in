@@ -8,80 +8,8 @@ CREATE FUNCTION chess.ranked(
         p_limit integer, p_offset integer, p_sort text, p_direction text)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    WITH rated AS MATERIALIZED (
-        SELECT e.id AS player,
-               COALESCE(c.witness_count, 0) AS games,
-               COALESCE(c.rating, consensus.glicko2_neutral_mu()) AS rating,
-               COALESCE(c.rd, consensus.glicko2_initial_rd()) AS rd,
-               CASE COALESCE(p_sort, 'strength')
-                   WHEN 'games'  THEN COALESCE(c.witness_count, 0)::double precision
-                   WHEN 'rating' THEN COALESCE(c.rating, consensus.glicko2_neutral_mu())::double precision
-                   WHEN 'rd'     THEN COALESCE(c.rd, consensus.glicko2_initial_rd())::double precision
-                   ELSE consensus.eff_mu(
-                       COALESCE(c.rating, consensus.glicko2_neutral_mu()),
-                       COALESCE(c.rd, consensus.glicko2_initial_rd()))::double precision
-               END AS sort_value
-        FROM laplace.entities e
-        LEFT JOIN laplace.consensus c
-          ON c.subject_id = e.id
-         AND c.type_id = laplace.relation_type_id('OUTCOME')
-         -- Player standing has exactly one canonical result cell. Joining only
-         -- by subject+relation admitted unrelated/legacy result objects into the
-         -- roster and could duplicate one player with a different fold state.
-         AND c.object_id = laplace.entity_type_id('Chess_Result')
-        WHERE e.type_id = laplace.entity_type_id('Chess_Player')
-    ),
-    page AS MATERIALIZED (
-        -- Apply the bound before numbering. PostgreSQL can use a top-N sort here;
-        -- numbering the entire roster first made page one pay for every rank.
-        SELECT r.*
-        FROM rated r
-        ORDER BY
-            CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
-                 THEN r.sort_value END ASC,
-            CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
-                 THEN r.sort_value END DESC,
-            r.player
-        LIMIT p_limit
-        OFFSET p_offset
-    ),
-    batch AS MATERIALIZED (
-        SELECT COALESCE(array_agg(page.player ORDER BY page.player), '{}'::bytea[]) AS ids
-        FROM page
-    ),
-    named AS (
-        -- Name the bounded page once. Resolving one player at a time made the
-        -- otherwise-indexed roster spend nearly all of its time in rendering.
-        SELECT p.id, p.txt
-        FROM batch b,
-             LATERAL ROWS FROM (
-                 unnest(b.ids), unnest(realize.batch(b.ids))
-             ) AS p(id, txt)
-    )
-    SELECT (p_offset + row_number() OVER (
-               ORDER BY
-                   CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
-                        THEN page.sort_value END ASC,
-                   CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
-                        THEN page.sort_value END DESC,
-                   page.player))::bigint,
-           page.player,
-           COALESCE(NULLIF(n.txt, ''), 'Unrealized player'),
-           page.games,
-           round((page.rating / 1e9)::numeric, 3)::double precision,
-           round((page.rd / 1e9)::numeric, 3)::double precision,
-           consensus.eff_mu_display(page.rating, page.rd)::double precision
-    FROM page
-    LEFT JOIN named n ON n.id = page.player
-    ORDER BY
-        CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
-             THEN page.sort_value END ASC,
-        CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
-             THEN page.sort_value END DESC,
-        page.player;
-END;
+    AS 'MODULE_PATHNAME', 'pg_laplace_chess_ranked'
+    LANGUAGE C STABLE PARALLEL RESTRICTED;
 
 CREATE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,

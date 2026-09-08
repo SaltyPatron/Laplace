@@ -127,14 +127,8 @@ public sealed class ModelJointCorroborationETL
             ct.ThrowIfCancellationRequested();
             int count = Math.Min(_pageSize, proposals.Count - begin);
             var page = proposals.GetRange(begin, count);
-            var admitted = new List<int>(count);
-            for (int local = 0; local < count; local++)
-            {
-                int i = begin + local;
-                if (leftVote.Outcomes[i] == rightVote.Outcomes[i]
-                    && leftVote.Outcomes[i] != (short)AttestationOutcome.Draw)
-                    admitted.Add(local);
-            }
+            var admitted = NativeAttestation.AgreementIndices(
+                leftVote.Outcomes.AsSpan(begin, count), rightVote.Outcomes.AsSpan(begin, count));
             if (admitted.Count == 0) continue;
 
             Hash128 orchestration = OrchestrationReceipt(
@@ -206,7 +200,7 @@ public sealed class ModelJointCorroborationETL
             contexts.Add(circuit.ContextId);
             AttestationRow prototype = NativeAttestation.CategoricalResolvedOutcome(
                 default, targetType, default(Hash128), source, circuit.ContextId,
-                sourceTrust, AttestationOutcome.Draw);
+                sourceTrust, (AttestationOutcome)outcomes[0]);
             opponentRatings.Add(prototype.OpponentRatingFp1e9);
             opponentRds.Add(prototype.OpponentRdFp1e9);
             PeakTransientScoreBytes = Math.Max(

@@ -85,6 +85,10 @@ public static unsafe partial class NativeInterop
     internal static partial int LaplaceAttestationOutcomeFromTotalsFp(
         long games, long sumScoreFp, short* outOutcome);
 
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_agreement_indices")]
+    internal static unsafe partial int AttestationAgreementIndices(
+        short* left, short* right, nuint count, int* indices, nuint capacity, nuint* written);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_score_draw_fp")]
     [System.Runtime.InteropServices.SuppressGCTransition]
     internal static partial long LaplaceAttestationScoreDrawFp();

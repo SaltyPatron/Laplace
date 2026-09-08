@@ -51,26 +51,18 @@ public static class NpgsqlDisplayLabels
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null)
     {
-        var rows = await NpgsqlRead.ReadRowsAsync(conn, """
-            WITH e AS MATERIALIZED (
-                SELECT tier, type_id
-                FROM laplace.entities
-                WHERE id = @id
-            ), labels AS MATERIALIZED (
-                SELECT realize.label_batch(ARRAY[e.type_id]) AS type_labels
-                FROM e
-            )
-            SELECT e.tier,
-                   COALESCE(NULLIF(labels.type_labels[1], ''), 'Entity') AS type_label,
-                   consensus.entity_exists(@id)
-            FROM e
-            CROSS JOIN labels
-            """,
-            static r => new DisplayFacetRow(
-                r.GetInt16(0), r.GetString(1), r.GetBoolean(2)),
-            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            timeoutSeconds: 10, ct: ct, label: "display_facet", onError: onError)
-            .ConfigureAwait(false);
-        return rows.Count == 0 ? null : rows[0];
+        var rows = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("entity.facets"),
+            static r => (Tier: r.GetInt16(1), Type: r.GetFieldValue<byte[]>(2)),
+            p => p.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, new[] { id }),
+            timeoutSeconds: 10, ct: ct, onError: onError).ConfigureAwait(false);
+        if (rows.Count == 0) return null;
+        var labels = await NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("types.labels"),
+            static r => r.GetFieldValue<string[]>(0),
+            p => p.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, rows.Select(r => r.Type).ToArray()),
+            timeoutSeconds: 10, ct: ct, onError: onError).ConfigureAwait(false);
+        var types = labels.Single();
+        if (types.Length != rows.Count)
+            throw new InvalidOperationException("Facet type labels lost input positions.");
+        return new DisplayFacetRow(rows[0].Tier, string.IsNullOrEmpty(types[0]) ? "Entity" : types[0], true);
     }
 }

@@ -83,6 +83,7 @@ set(EXT_C_SOURCES
     src/fold_route.c
     src/containers_of.c
     src/browse_native.c
+    src/chess_roster.c
     src/chess_rating_repair.c
     src/display_native.c
     src/constituents_closure.c

@@ -16,23 +16,29 @@ import styles from './PlayerCard.module.css';
  */
 export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse }) {
   const [record, setRecord] = useState<EntityRecord | null>(null);
+  const [loading, setLoading] = useState(true);
   const [career, setCareer] = useState<ChessPlayerResponse | null>(null);
 
   useEffect(() => {
     let stale = false;
+    setLoading(true);
     setRecord(null);
     setCareer(null);
-    entityRecord(preview.id_hex)
-      .then((r) => { if (!stale) setRecord(r); })
-      .catch(() => { /* the card stands without the record line */ });
     if (preview.type === 'Chess_Player') {
       chessPlayer(preview.id_hex, 0)
         .then((r) => { if (!stale) setCareer(r); })
-        .catch(() => { /* retain the chess measures with unavailable values */ });
+        .catch(() => { /* show unavailable values after a failed read */ })
+        .finally(() => { if (!stale) setLoading(false); });
+    } else {
+      entityRecord(preview.id_hex)
+        .then((r) => { if (!stale) setRecord(r); })
+        .catch(() => { /* show unavailable values after a failed read */ })
+        .finally(() => { if (!stale) setLoading(false); });
     }
     return () => { stale = true; };
   }, [preview.id_hex, preview.type]);
 
+  const pending = loading ? '…' : '—';
   if (preview.type === 'Chess_Player') {
     return (
       <div className={styles.card}>
@@ -42,11 +48,11 @@ export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse 
           hint="highest Elo explicitly tagged by an imported game or official/provider profile"
           accent
         />
-        <Stat value={career?.overall.games.toLocaleString() ?? '…'} label="games" hint="witnessed games attributed to this player" />
-        <Stat value={career?.overall.wins.toLocaleString() ?? '…'} label="wins" hint="witnessed scored wins" />
-        <Stat value={career?.overall.draws.toLocaleString() ?? '…'} label="draws" hint="witnessed scored draws" />
-        <Stat value={career?.overall.losses.toLocaleString() ?? '…'} label="losses" hint="witnessed scored losses" />
-        <Stat value={career?.overall.unscored.toLocaleString() ?? '…'} label="unscored" hint="games whose source asserted no result" />
+        <Stat value={career?.overall.games.toLocaleString() ?? pending} label="games" hint="witnessed games attributed to this player" />
+        <Stat value={career?.overall.wins.toLocaleString() ?? pending} label="wins" hint="witnessed scored wins" />
+        <Stat value={career?.overall.draws.toLocaleString() ?? pending} label="draws" hint="witnessed scored draws" />
+        <Stat value={career?.overall.losses.toLocaleString() ?? pending} label="losses" hint="witnessed scored losses" />
+        <Stat value={career?.overall.unscored.toLocaleString() ?? pending} label="unscored" hint="games whose source asserted no result" />
       </div>
     );
   }
@@ -59,22 +65,22 @@ export function PlayerCard({ preview }: { preview: ExploreEntityPreviewResponse 
         hint="every witnessed assertion involving this entity, with provenance preserved"
       />
       <Stat
-        value={record ? String(record.confirmed) : '…'}
+        value={record ? String(record.confirmed) : pending}
         label="confirmed"
         hint="edges the fold rates as settled consensus"
       />
       <Stat
-        value={record ? String(record.contested) : '…'}
+        value={record ? String(record.contested) : pending}
         label="contested"
         hint="edges with high volatility — the witnesses disagree"
       />
       <Stat
-        value={record ? String(record.refuted) : '…'}
+        value={record ? String(record.refuted) : pending}
         label="refuted"
         hint="edges rated negative — the consensus says no"
       />
       <Stat
-        value={record ? String(record.thin) : '…'}
+        value={record ? String(record.thin) : pending}
         label="thin"
         hint="edges with too few witnesses to settle — wide RD, rookie sample"
       />

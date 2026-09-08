@@ -18,6 +18,16 @@ public class NativeAttestationParityTests
 
 
     [Fact]
+    public void NativeAgreementPreservesPositionsAndRejectsInvalidOutcomes()
+    {
+        Assert.Equal(new[] { 0, 3, 5 }, NativeAttestation.AgreementIndices(
+            new short[] { 2, 1, 0, 0, 2, 2 }, new short[] { 2, 1, 2, 0, 0, 2 }));
+        Assert.Empty(NativeAttestation.AgreementIndices([], []));
+        Assert.Throws<ArgumentException>(() => NativeAttestation.AgreementIndices(new short[] { 2 }, []));
+        Assert.Throws<ArgumentException>(() => NativeAttestation.AgreementIndices(new short[] { 2, 3 }, new short[] { 2, 3 }));
+    }
+
+    [Fact]
     public void RelationResolve_HasUposAliasMatchesHasPos()
     {
         var upos = RelationTypeRegistry.Resolve("HAS_UPOS");

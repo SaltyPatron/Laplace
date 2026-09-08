@@ -63,6 +63,27 @@ BEGIN
         RAISE EXCEPTION 'exact player search read rating from the wrong outcome object: %', r;
     END IF;
 END $$;
+-- Rankings compare complete fixed-point values before display rounding. Above
+-- 2^53 adjacent int64 values collapse to one double, so reversing the id tie
+-- direction makes a premature conversion observable on either page order.
+DO $$
+DECLARE
+    low_id bytea := decode(repeat('01',16),'hex');
+    high_id bytea := decode(repeat('fe',16),'hex');
+    got bytea;
+BEGIN
+    INSERT INTO laplace.entities(id,tier,type_id) VALUES
+        (low_id,0,laplace.entity_type_id('Chess_Player')),
+        (high_id,0,laplace.entity_type_id('Chess_Player'));
+    INSERT INTO laplace.consensus(id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (decode(repeat('d1',16),'hex'),low_id,laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),9007199254740992,1,60000000,1,now()),
+        (decode(repeat('d2',16),'hex'),high_id,laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),9007199254740993,1,60000000,1,now());
+    SELECT player_id INTO got FROM chess.ranked(1,0,'rating','desc');
+    IF got <> high_id THEN RAISE EXCEPTION 'fixed-point rank lost precision before display'; END IF;
+    SELECT player_id INTO got FROM chess.ranked(1,1,'rating','desc');
+    IF got <> low_id THEN RAISE EXCEPTION 'second page did not retain exact standing order'; END IF;
+END $$;
 SELECT 'chess ranked canonical result scope' AS probe, true AS ok;
                 probe                | ok 
 -------------------------------------+----

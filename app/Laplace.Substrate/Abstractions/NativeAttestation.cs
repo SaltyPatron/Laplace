@@ -5,6 +5,20 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class NativeAttestation
 {
+    public static unsafe List<int> AgreementIndices(ReadOnlySpan<short> left, ReadOnlySpan<short> right)
+    {
+        if (left.Length != right.Length) throw new ArgumentException("Witness arrays must have equal lengths.");
+        var indices = new int[left.Length];
+        nuint written = 0;
+        int rc;
+        fixed (short* l = left)
+        fixed (short* r = right)
+        fixed (int* output = indices)
+            rc = NativeInterop.AttestationAgreementIndices(l, r, (nuint)left.Length, output, (nuint)indices.Length, &written);
+        if (rc != 0) throw new ArgumentException("Native witness agreement rejected the input.");
+        return new List<int>(indices.AsSpan(0, checked((int)written)).ToArray());
+    }
+
     public static AttestationRow Categorical(
         Hash128 subject,
         string surfaceRelation,
@@ -113,8 +127,6 @@ public static class NativeAttestation
         AttestationOutcome outcome,
         long observationCount = 1)
     {
-        if (outcome is < AttestationOutcome.Refute or > AttestationOutcome.Confirm)
-            throw new ArgumentOutOfRangeException(nameof(outcome));
         unsafe
         {
             var staged = default(AttestationStagedNative);

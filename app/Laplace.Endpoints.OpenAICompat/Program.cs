@@ -4,6 +4,7 @@ using Laplace.Chess.Service;
 using Laplace.Engine.Core;
 using Laplace.Ingestion;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Laplace.Endpoints.OpenAICompat;
 using Laplace.Ops;
 using Npgsql;

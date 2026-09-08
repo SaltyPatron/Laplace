@@ -789,3 +789,18 @@ int laplace_attestation_pos_xpos(
         stage, "HAS_XPOS", subject, xpos_entity, 0, source, context, context_is_null,
         trust_weight, 1, observation_count);
 }
+
+int laplace_attestation_agreement_indices(const int16_t *left, const int16_t *right,
+    size_t count, int32_t *indices, size_t capacity, size_t *written)
+{
+    if (!written) return -1;
+    *written = 0;
+    if (count > INT32_MAX || capacity < count || (count && (!left || !right || !indices))) return -1;
+    for (size_t i = 0; i < count; ++i)
+        if (left[i] < LAPLACE_ATTESTATION_OUTCOME_REFUTE || left[i] > LAPLACE_ATTESTATION_OUTCOME_CONFIRM ||
+            right[i] < LAPLACE_ATTESTATION_OUTCOME_REFUTE || right[i] > LAPLACE_ATTESTATION_OUTCOME_CONFIRM) return -1;
+    for (size_t i = 0; i < count; ++i)
+        if (left[i] == right[i] && left[i] != LAPLACE_ATTESTATION_OUTCOME_DRAW)
+            indices[(*written)++] = (int32_t)i;
+    return 0;
+}
