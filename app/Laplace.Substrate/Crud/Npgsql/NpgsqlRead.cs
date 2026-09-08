@@ -59,6 +59,10 @@ public static class NpgsqlRead
             };
             if (parameters[i].NpgsqlDbType != expected)
                 throw new ArgumentException($"{query.Name}: parameter {i + 1} must be {query.ParameterTypes[i]}.");
+            // The native catalog uses PostgreSQL $1..$n positions. Legacy callers
+            // may label their binds; retaining those names makes Npgsql select
+            // named-placeholder rewriting and omit the positional bind values.
+            parameters[i].ParameterName = string.Empty;
         }
     }
 

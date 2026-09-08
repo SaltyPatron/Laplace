@@ -225,9 +225,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 await using var command = new NpgsqlCommand(
                     SqlCatalog.Get("conversation.append_turns").Text,
                     connection, transaction);
-                command.Parameters.AddWithValue("session", NpgsqlDbType.Bytea, sessionId.ToBytes());
-                command.Parameters.AddWithValue("turns", NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
-                command.Parameters.AddWithValue("observed", NpgsqlDbType.TimestampTz,
+                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, sessionId.ToBytes());
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
+                command.Parameters.AddWithValue(NpgsqlDbType.TimestampTz,
                     change.Metadata.BuiltAt.ToUniversalTime());
                 await command.ExecuteScalarAsync(token).ConfigureAwait(false);
             });

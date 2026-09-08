@@ -199,3 +199,27 @@ commit are recorded in `substructure/manifest.json`. The chess transaction is
 preserved as `attempt2/apply.sql`. Subsequent database demonstrations use explicit
 SQL through psql. Existing repository build/CI Python checks remain identified
 as such; their use must not conceal database mutation.
+
+## Main deployment readback
+
+PR #1514 merged and main reached `16a6fa65`. Exact-revision local proof passed
+2,950 executed checks (five skips); fresh PostgreSQL regression passed all 34
+substrate and three geometry cases. Main CI also passed build, DEV/BAT, installation,
+database lifecycle and database QA. The first application publish exhausted the
+16 GiB `/opt/laplace` volume. PostgreSQL package inputs were checksum-verified and
+relocated to `/build/laplace/work/package-inputs-20260908/postgresql`, preserving
+the original path through a symlink and freeing 1.6 GiB. The application retry
+published successfully; no live database recreation has occurred.
+
+Live product acceptance then exposed `08P01`: native catalog SQL uses positional
+parameters, while migrated callers retained named Npgsql bindings. Browse, leaders,
+labels/containers and conversation calls require the corrected positional adapter.
+The database regression now exercises named caller bindings, repeated result
+positions, direct forward-turn transport and atomic conversation append. The
+original batch test used positional bindings and therefore missed the defect.
+This runtime failure keeps deployment acceptance open despite successful build/QA.
+
+Preserved all 1,116 accumulated live `pg_stat_statements` entries before recreation
+in the private repair evidence directory. `pg_stat_statements` 1.12 is installed
+and preloaded; `track_io_timing` was off, so historical block timing cannot be
+claimed as measured I/O latency. Block counts and execution time remain available.

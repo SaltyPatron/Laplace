@@ -1407,12 +1407,12 @@ public static partial class NpgsqlSubstrateReads
         [EnumeratorCancellation] CancellationToken ct)
     {
         await using var command = new NpgsqlCommand(SqlCatalog.Get("conversation.forward_turn").Text, connection);
-        command.Parameters.AddWithValue("prompt", prompt);
-        command.Parameters.Add("session", NpgsqlDbType.Bytea).Value = (object?)session ?? DBNull.Value;
-        command.Parameters.AddWithValue("steps", steps);
-        command.Parameters.AddWithValue("stride", maxStride);
-        command.Parameters.AddWithValue("spread", spread);
-        command.Parameters.AddWithValue("topk", topK);
+        command.Parameters.AddWithValue(NpgsqlDbType.Text, prompt);
+        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, (object?)session ?? DBNull.Value);
+        command.Parameters.AddWithValue(NpgsqlDbType.Integer, steps);
+        command.Parameters.AddWithValue(NpgsqlDbType.Integer, maxStride);
+        command.Parameters.AddWithValue(NpgsqlDbType.Double, spread);
+        command.Parameters.AddWithValue(NpgsqlDbType.Integer, topK);
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
             yield return new WalkTextStepRow(reader.GetInt32(0),
