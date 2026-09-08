@@ -47,16 +47,21 @@ public static class NpgsqlRead
             throw new ArgumentException($"{query.Name}: expected {query.ParameterTypes.Length} parameters, got {parameters.Count}.");
         for (var i = 0; i < parameters.Count; i++)
         {
-            var expected = query.ParameterTypes[i] switch
+            string declared = query.ParameterTypes[i];
+            bool array = declared.EndsWith("[]", StringComparison.Ordinal);
+            string scalar = array ? declared[..^2] : declared;
+            var expected = scalar switch
             {
                 "bytea" => NpgsqlDbType.Bytea,
-                "bytea[]" => NpgsqlDbType.Array | NpgsqlDbType.Bytea,
                 "int4" => NpgsqlDbType.Integer,
-                "int4[]" => NpgsqlDbType.Array | NpgsqlDbType.Integer,
                 "int8" => NpgsqlDbType.Bigint,
                 "text" => NpgsqlDbType.Text,
+                "bool" => NpgsqlDbType.Boolean,
+                "float8" => NpgsqlDbType.Double,
+                "timestamptz" => NpgsqlDbType.TimestampTz,
                 _ => throw new InvalidOperationException($"Unknown native parameter type {query.ParameterTypes[i]}."),
             };
+            if (array) expected |= NpgsqlDbType.Array;
             if (parameters[i].NpgsqlDbType != expected)
                 throw new ArgumentException($"{query.Name}: parameter {i + 1} must be {query.ParameterTypes[i]}.");
             // The native catalog uses PostgreSQL $1..$n positions. Legacy callers

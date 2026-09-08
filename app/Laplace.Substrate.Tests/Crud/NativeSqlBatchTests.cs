@@ -10,6 +10,15 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class NativeSqlBatchTests(LocalPgFixture pg)
 {
     [Fact]
+    public async Task ChessSearchBindsTextArrayAndBooleanThroughTheNativeCatalog()
+    {
+        var rows = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
+            pg.DataSource, ["catalog-no-such-player"], 1, CancellationToken.None,
+            offset: 0, sort: "games", direction: "asc", exactOnly: true);
+        Assert.Empty(rows);
+    }
+
+    [Fact]
     public async Task ConversationWriterCommitsTheOrderedSessionManifest()
     {
         var source = Hash128.OfCanonical("catalog-conversation/source");
