@@ -660,3 +660,26 @@ calls over 3,887,804 pairs. The current atomic writer includes evidence, folds a
 mask chunks (configured 1,098,326 cells) in one transaction. Do not split away
 atomic evidence/consensus correctness or merely delete the mutex. Replace the
 expensive shared write operation and measure complete apply/commit latency.
+
+### Chess roster/profile consistency
+
+The profile adapter compared the rendered type label `chess player` with the
+literal `Chess_Player`, rejecting valid roster identities including Alekhine
+96c1a24736d8d6e47afab1387c6b3826. It now retains the raw type ID through the
+facet read and checks the canonical Chess_Player ID before career reads. The
+real SubstrateClient roster-to-profile live test passes against committed game
+evidence, alongside 28 chess contract tests. Website delivery still requires
+the queued application deployment; this is not a live-site completion claim.
+
+The unrated roster branch admitted typed placeholders with no name or game
+evidence, including 000b4e7e9af60880fe78ea142f464897. It now requires a witnessed
+name relation for profile-only rows. The native regression preserves valid
+zero-game profiles and excludes a type-only placeholder; all database
+regressions and all 26 policy checks pass. Align exact/profile admission with
+this evidence requirement as the shared chess reader is completed.
+
+FIDE's 100 profiles have since committed. Carlsen, Magnus is present as
+1d4e192691072dfcc07f259ba97b18b1, but the search still returns zero. His name's
+tier-3 Content trajectory contains word_id('Carlsen'), not the seven character
+IDs used by the current query. Repair the native tier traversal and remove the
+duplicate candidate call; absence of this player is no longer the explanation.

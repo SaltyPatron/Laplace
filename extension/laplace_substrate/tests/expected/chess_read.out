@@ -596,6 +596,14 @@ BEGIN
         RAISE EXCEPTION 'FAIL: profile-only player was hidden from master list or assigned invented standing: %/%/%/%',
             n, ra, rdv, mu;
     END IF;
+    -- A declared type alone does not witness a player or a profile. Such
+    -- identities can be staged before their evidence commits during ingestion.
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    VALUES(chess.player_id('Unwitnessed, Placeholder'),2,laplace.entity_type_id('Chess_Player'),src);
+    IF EXISTS(SELECT 1 FROM chess.ranked(100,0,'games','asc')
+              WHERE player_id=chess.player_id('Unwitnessed, Placeholder')) THEN
+        RAISE EXCEPTION 'FAIL: player type without evidence became a standing';
+    END IF;
 
     IF to_regprocedure('chess.game_plies(bytea)') IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: retired per-ply SQL board projection is still installed';

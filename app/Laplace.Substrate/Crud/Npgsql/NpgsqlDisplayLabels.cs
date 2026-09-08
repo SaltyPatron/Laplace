@@ -18,7 +18,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public static class NpgsqlDisplayLabels
 {
     public readonly record struct DisplayLabelRow(string IdHex, string Label, short? Tier);
-    public readonly record struct DisplayFacetRow(short Tier, string Type, bool Exists);
+    public readonly record struct DisplayFacetRow(short Tier, string Type, bool Exists, byte[] TypeId);
 
     public static Task<IReadOnlyList<DisplayLabelRow>> ReadAsync(
         NpgsqlConnection conn, byte[][] ids, CancellationToken ct,
@@ -63,6 +63,6 @@ public static class NpgsqlDisplayLabels
         var types = labels.Single();
         if (types.Length != rows.Count)
             throw new InvalidOperationException("Facet type labels lost input positions.");
-        return new DisplayFacetRow(rows[0].Tier, string.IsNullOrEmpty(types[0]) ? "Entity" : types[0], true);
+        return new DisplayFacetRow(rows[0].Tier, string.IsNullOrEmpty(types[0]) ? "Entity" : types[0], true, rows[0].Type);
     }
 }

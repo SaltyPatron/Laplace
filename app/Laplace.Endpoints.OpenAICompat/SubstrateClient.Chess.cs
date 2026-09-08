@@ -255,6 +255,12 @@ internal sealed partial class SubstrateClient
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var facet = await NpgsqlDisplayLabels.FacetAsync(conn, id, ct);
+        if (facet is not { Exists: true } playerFacet
+            || !playerFacet.TypeId.AsSpan().SequenceEqual(ChessVocabulary.PlayerType.ToBytes()))
+            return null;
+
         var record = await NpgsqlSubstrateReads.ChessPlayerRecordAsync(
             _dataSource, id, ct, TranslateReadError);
         var overall = MapRecord(record.FirstOrDefault(x => x.AsWhite is null));
@@ -268,10 +274,8 @@ internal sealed partial class SubstrateClient
         var opponentRows = opponents.Select(static r => new ChessOpponentRow(
             r.OpponentIdHex, r.Opponent, r.Games, r.Rating, r.Rd, r.EffMu)).ToList();
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var (name, _, type, exists) = await ReadEntityFacetsAsync(conn, id, ct);
-        if (!exists || !string.Equals(type, "Chess_Player", StringComparison.Ordinal))
-            return null;
+        var display = await NpgsqlDisplayLabels.ReadOneAsync(conn, id, ct);
+        var name = display?.Label;
         var profileEdges = await NpgsqlSubstrateReads.ChessPlayerProfileEdgesAsync(
             conn, id, ct, TranslateReadError);
         var profiles = MapChessProfiles(profileEdges);

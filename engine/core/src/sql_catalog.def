@@ -60,9 +60,12 @@ SQL_QUERY("consensus.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[
 
 SQL_QUERY("chess.roster_types", "", "SELECT laplace.entity_type_id('Chess_Player'),laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),consensus.glicko2_neutral_mu(),consensus.glicko2_initial_rd()")
 SQL_QUERY("chess.roster_unrated", "bytea,bytea,bytea,int8",
-    "SELECT e.id FROM laplace.entities e LEFT JOIN laplace.consensus c "
-    "ON c.subject_id=e.id AND c.type_id=$2 AND c.object_id=$3 "
-    "WHERE e.type_id=$1 AND c.id IS NULL ORDER BY e.id LIMIT $4")
+    "SELECT DISTINCT e.id FROM laplace.consensus n "
+    "JOIN laplace.entities e ON e.id=n.subject_id AND e.type_id=$1 "
+    "LEFT JOIN laplace.consensus c ON c.subject_id=e.id AND c.type_id=$2 AND c.object_id=$3 "
+    "WHERE n.type_id=ANY(consensus.relation_family_ids('HAS_NAME') || "
+    "consensus.relation_family_ids('HAS_NAME_ALIAS')) AND n.object_id IS NOT NULL "
+    "AND n.witness_count>0 AND c.id IS NULL ORDER BY e.id LIMIT $4")
 SQL_QUERY("chess.roster_strength_asc", "bytea,bytea,bytea,int8",
     "SELECT c.subject_id,c.witness_count,c.rating,c.rd FROM laplace.consensus c "
     "JOIN laplace.entities e ON e.id=c.subject_id AND e.type_id=$1 "
