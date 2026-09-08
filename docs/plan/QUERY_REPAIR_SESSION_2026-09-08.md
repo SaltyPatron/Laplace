@@ -331,3 +331,57 @@ The full question still hits 45 seconds with this correction: longer suffixes
 reduce the observed postings, but globally common word/separator combinations
 still read large corpus sets (`lightning-suffix-forward.sql/.log`). Question
 acceptance therefore remains failed.
+
+## Inventor correction: generic DAG operands, not question scenarios
+
+The next execution change must follow the inventor's correction: the operand is
+a Merkle DAG root/subtree, including a prompt already represented in the DAG.
+Scenario-specific question recognition is not a prerequisite and extending the
+four-row WHAT_IS frame-route table is not this work. Text is an ingress/realization
+surface. The same operation must accept other compositions and modalities.
+
+The generic data flow to implement and verify is:
+
+1. Resolve the root and its ordered constituent occurrences. Keep identity,
+   ordinal, multiplicity, separators, parentage and original root together.
+   Deduplicate storage probes only; remap their results to all input occurrences.
+2. Read observations addressed by those identities, then their attestation
+   bindings. Keep subject/relation/object, source, context and occurrence/root
+   identity. Context classes remain typed: common language is not proof of
+   common sentence occurrence. Case/sense/frame alternatives are witnessed
+   candidate relations, not replacement prompt identities.
+3. Compare the resulting evidence structures jointly. Input occurrences address
+   query-side bindings; candidate occurrences address key-side bindings. Native
+   comparisons operate on declared compatible relation/role/source/context
+   dimensions and preserve disagreement and missing evidence. They must not rank
+   one word's global degree as interpretation of the complete operand.
+4. Retrieve the target bindings and ordered physicality continuations belonging
+   to those admitted comparisons. Keep evidence/root scope on this value-side
+   read. A common final constituent does not independently authorize expansion
+   over all corpus trajectories.
+5. Apply the declared native weighting/reduction/composition operator to these
+   operands. Preserve score domains and source receipts; the output projection
+   produces a typed state/composition, not a concatenation of independently
+   rendered high-ranking labels. A conditional comparison can use a declared
+   pooled standing as a prior. An explicitly source-only standing cannot silently
+   be replaced by the pooled score. Do not add per-word re-ingestion/refolding as
+   an inferred prerequisite for ordinary pooled inference.
+6. Update the active state and ordered trajectory with the selected constituent
+   or composition. Reuse unchanged indexed/mapped operands; resolve only newly
+   required observations. Realize the selected structure at the output boundary
+   and witness actual outcomes through the existing writer.
+
+These are target-neutral operations; Q/K/V/O materialization is a consumer of
+their typed comparisons and transformations. Full numerical equivalence to any
+particular dense checkpoint has not been demonstrated by the graph traces.
+
+Direct current-data receipts are `lightning-observation-logic.sql/.log` and
+`lightning-role-evidence.sql/.log`. The root resolves to 58 tree nodes and eight
+lexical-boundary occurrences, preserving all three SPACE occurrences and `?`.
+Fourteen witnessed case variants address 4,788 distinct attestation rows in a
+514 ms batch. Lightning has 353 rows across five sources, including electrical
+discharge, clouds and thunder. Witnessed frame candidates include How → Means
+and work → Being_operational / Being_employed, among others. This establishes
+available operands; it does not establish that the current program performs
+their joint comparison or produces a supported answer. No data reset is needed
+to expose that missing operation. A clean reseed remains authorized and pending.
