@@ -48,7 +48,7 @@ BEGIN ATOMIC
         ) x
     ), walked AS MATERIALIZED (
         SELECT g.*
-        FROM ctx CROSS JOIN frontier,
+        FROM ctx CROSS JOIN frontier CROSS JOIN seed_array,
              generation.forward_walk_continuations(
                  ctx.ids, p_steps, p_max_stride, p_spread, p_top_k,
                  COALESCE(
@@ -56,7 +56,8 @@ BEGIN ATOMIC
                      laplace.hash128_lo(public.laplace_hash128_blake3(
                          convert_to(p_prompt, 'UTF8')))),
                  frontier.ids,
-                 NULL::bytea[], p_fanout) g
+                 NULL::bytea[], p_fanout,
+                 seed_array.ids || COALESCE(p_prior_frontier, '{}'::bytea[])) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,

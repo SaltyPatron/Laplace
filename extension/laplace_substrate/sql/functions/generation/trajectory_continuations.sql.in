@@ -3,18 +3,11 @@
 -- need a bounded presentation choose that bound explicitly after any downstream
 -- steering, rather than losing candidates to a guessed pre-steering cutoff.
 --
--- The substrate-native replacement for GenCorpus and its RAM suffix array. Same
--- operation continuations_collect performed -- find every position where the last
--- k content realize.constituents match, take what came next, count it -- scoped by an
--- index probe on the context's LAST token instead of a binary search over a
--- 97,111,658-row flattened copy of the corpus.
---
--- WHY THE CACHE WAS NEVER NEEDED: the trajectory already IS the ordered sequence
--- (§9 -- stored trajectories carry constituent identity). GenCorpus rebuilt that
--- ordering into a flat int32 stream, per backend, from a full-corpus scan --
--- measured 46 minutes for one generation.generate() call, and the same timeout at steps=1,
--- so the cost was never the walk. §7 requires cost bounded by the path, not by
--- corpus size; a per-backend whole-corpus build cannot satisfy that at any size.
+-- The native matcher reads packed ordered trajectories. Corpus-scoped calls
+-- use a constituent GIN operand; observation-scoped calls read witnessed roots
+-- through the entity index. The forward pass retains those packed trajectories
+-- within its snapshot, including misses, and loads only newly observed roots.
+-- This request cache does not replace the persistent mmap perfcache contract.
 --
 -- Every constituent participates in exact ordinal matching, including spaces,
 -- punctuation and single-child collapsed identities. The native matcher expands
@@ -22,11 +15,19 @@
 -- sep_id remains nullable for SQL compatibility; the next constituent is emitted
 -- in object_id with its original identity.
 --
--- The frame offset is a parameter, so one body serves every backoff order rather
--- than five hand-written arms.
+-- Exact queries and suffix-backoff generation share one native matcher.
 DROP FUNCTION IF EXISTS laplace.trajectory_continuations(bytea[], int);
 CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
         p_ctx bytea[], p_topk int DEFAULT NULL)
+    RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_trajectory_continuations'
+    LANGUAGE C STABLE;
+
+-- Observation-bound form for query, forward execution and export. NULL is
+-- explicit corpus scope; an empty array is empty support. Witnessed object
+-- and context identities propose physicality roots, not co-occurrence truth.
+CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
+        p_ctx bytea[], p_topk int, p_observation_ids bytea[])
     RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_trajectory_continuations'
     LANGUAGE C STABLE;

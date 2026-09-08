@@ -209,7 +209,7 @@ validate_relation_types(ArrayType *types)
     bool  *nulls;
     int    count;
 
-    if (ARR_NDIM(types) != 1 || ARR_ELEMTYPE(types) != BYTEAOID)
+    if (ARR_NDIM(types) > 1 || ARR_ELEMTYPE(types) != BYTEAOID)
         ereport(ERROR,
                 (errmsg("walk_continuations: relation types must be a 1-D bytea array")));
     deconstruct_array(types, BYTEAOID, -1, false, TYPALIGN_INT,
@@ -351,6 +351,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     HTAB *neighborhoods;
     HTAB *frontier_ids;
     HTAB *content_presence;
+    LaplaceTrajectoryScope *trajectory_scope = NULL;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("walk_continuations: context must not be NULL")));
@@ -482,6 +483,16 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 
     step_cxt = AllocSetContextCreate(walk_cxt, "forward step operands",
                                      ALLOCSET_DEFAULT_SIZES);
+    /* The product forward pass supplies its resolved observation operand.
+     * Legacy explicit corpus-continuation callers retain their unscoped form.
+     * An explicitly empty observation scope is empty, never corpus-wide. */
+    if (PG_NARGS() > 9 && !PG_ARGISNULL(9) && max_order > 0)
+    {
+        old = MemoryContextSwitchTo(walk_cxt);
+        trajectory_scope = laplace_trajectory_scope_create();
+        laplace_trajectory_scope_extend(trajectory_scope, PG_GETARG_ARRAYTYPE_P(9));
+        MemoryContextSwitchTo(old);
+    }
     MemoryContextSwitchTo(step_cxt);
     for (int64 step = 1; step <= steps; step++)
     {
@@ -493,6 +504,13 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
          * election do not become additional retained conversation memory. */
         MemoryContextReset(step_cxt);
         CHECK_FOR_INTERRUPTS();
+        if (trajectory_scope && step > 1)
+        {
+            ArrayType *selected = construct_array(ctx + ctx_len - 1, 1,
+                                                  BYTEAOID, -1, false, TYPALIGN_INT);
+            laplace_trajectory_scope_extend(trajectory_scope, selected);
+            pfree(selected);
+        }
 
         /* Resolve every suffix in one indexed native trajectory operation.
          * Selection receives the complete successor set at the greatest exact
@@ -503,7 +521,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             ArrayType *tail = construct_array(ctx + ctx_len - depth, depth,
                                               BYTEAOID, -1, false, TYPALIGN_INT);
             int count;
-            LaplaceContinuation *successors = laplace_trajectory_continuations(tail, true, &count);
+            LaplaceContinuation *successors = laplace_trajectory_continuations_scoped(
+                tail, true, trajectory_scope, &count);
             ensure_candidate_capacity(&cand, &cand_capacity, count, walk_cxt);
             old = MemoryContextSwitchTo(walk_cxt);
             for (int i = 0; i < count; ++i)

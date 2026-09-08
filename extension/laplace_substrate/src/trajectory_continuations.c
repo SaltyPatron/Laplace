@@ -13,6 +13,7 @@
 #include "trajectory_wkb.h"
 #include "trajectory_continuations.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/core/sql_catalog.h"
 
 /* GIN supplies containing trajectories, not sequence truth. Native matching
  * reads the mantissa-packed ordered occurrences once, including all runs and
@@ -25,6 +26,142 @@ static const char *UNPACK_QUERY =
     "WHERE p.type = 1 AND p.trajectory IS NOT NULL "
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1";
 static SPIPlanPtr unpack_plan = NULL;
+static SPIPlanPtr bindings_plan = NULL;
+static SPIPlanPtr observed_trajectories_plan = NULL;
+
+typedef struct ScopedTrajectory
+{
+    struct ScopedTrajectory *next;
+    bytea *wkb;
+} ScopedTrajectory;
+
+struct LaplaceTrajectoryScope
+{
+    MemoryContext owner;
+    HTAB *operands;
+    HTAB *roots;
+    ScopedTrajectory *trajectories;
+};
+
+LaplaceTrajectoryScope *
+laplace_trajectory_scope_create(void)
+{
+    LaplaceTrajectoryScope *scope = palloc0(sizeof(*scope));
+    HASHCTL ctl = {0};
+    scope->owner = CurrentMemoryContext;
+    ctl.keysize = ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = scope->owner;
+    scope->operands = hash_create("observed trajectory operands", 128, &ctl,
+                                 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    scope->roots = hash_create("observed trajectory roots", 256, &ctl,
+                              HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    return scope;
+}
+
+static void
+scope_add_id(HTAB *known, ArrayBuildState **batch, Datum value, MemoryContext work)
+{
+    bytea *id = DatumGetByteaPP(value);
+    bool found;
+    if (VARSIZE_ANY_EXHDR(id) != sizeof(hash128_t))
+        ereport(ERROR, (errmsg("trajectory scope: ids must be 16 bytes")));
+    hash_search(known, VARDATA_ANY(id), HASH_ENTER, &found);
+    if (!found) *batch = accumArrayResult(*batch, value, false, BYTEAOID, work);
+}
+
+/* Each distinct observed identity is bound once, each resulting root loaded
+ * once, under the caller's snapshot. The ordered physicality is retained as
+ * packed WKB; no per-codepoint SQL, flattened corpus or label lookup. A miss
+ * remains a miss and cannot silently reopen the whole corpus. */
+void
+laplace_trajectory_scope_extend(LaplaceTrajectoryScope *scope, ArrayType *operands)
+{
+    MemoryContext work, previous;
+    ArrayBuildState *missing = NULL, *roots = NULL;
+    Datum *ids;
+    bool *nulls;
+    int count;
+    bool spi_top = false;
+    if (ARR_NDIM(operands) > 1 || ARR_ELEMTYPE(operands) != BYTEAOID)
+        ereport(ERROR, (errmsg("trajectory scope: operands must be a 1-D bytea array")));
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+        elog(ERROR, "trajectory scope: SPI_connect failed");
+    work = AllocSetContextCreate(CurrentMemoryContext, "trajectory scope batch",
+                                 ALLOCSET_DEFAULT_SIZES);
+    previous = MemoryContextSwitchTo(work);
+    deconstruct_array(operands, BYTEAOID, -1, false, TYPALIGN_INT, &ids, &nulls, &count);
+    for (int i = 0; i < count; ++i)
+    {
+        if (nulls[i]) continue;
+        scope_add_id(scope->operands, &missing, ids[i], work);
+        scope_add_id(scope->roots, &roots, ids[i], work);
+    }
+    if (!bindings_plan)
+    {
+        Oid types[1] = {BYTEAARRAYOID};
+        bindings_plan = SPI_prepare_cursor(laplace_sql_query_text("generation.observation_bindings"),
+                                            1, types, CURSOR_OPT_PARALLEL_OK);
+        if (!bindings_plan || SPI_keepplan(bindings_plan) != 0)
+            elog(ERROR, "trajectory scope: preparing observation bindings failed");
+        observed_trajectories_plan = SPI_prepare_cursor(
+            laplace_sql_query_text("generation.observation_trajectories"), 1, types,
+            CURSOR_OPT_PARALLEL_OK);
+        if (!observed_trajectories_plan || SPI_keepplan(observed_trajectories_plan) != 0)
+            elog(ERROR, "trajectory scope: preparing observed trajectories failed");
+    }
+    if (missing)
+    {
+        Datum args[1] = {makeArrayResult(missing, work)};
+        Portal portal = SPI_cursor_open(NULL, bindings_plan, args, NULL, true);
+        if (!portal) elog(ERROR, "trajectory scope: opening binding cursor failed");
+        for (;;)
+        {
+            SPI_cursor_fetch(portal, true, 1024);
+            uint64 rows = SPI_processed;
+            for (uint64 row = 0; row < rows; ++row)
+                for (int col = 1; col <= 2; ++col)
+                {
+                    bool isnull;
+                    Datum id = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, col, &isnull);
+                    if (!isnull) scope_add_id(scope->roots, &roots, id, work);
+                }
+            if (SPI_tuptable) { SPI_freetuptable(SPI_tuptable); SPI_tuptable = NULL; }
+            if (!rows) break;
+            CHECK_FOR_INTERRUPTS();
+        }
+        SPI_cursor_close(portal);
+    }
+    if (roots)
+    {
+        Datum args[1] = {makeArrayResult(roots, work)};
+        Portal portal = SPI_cursor_open(NULL, observed_trajectories_plan, args, NULL, true);
+        if (!portal) elog(ERROR, "trajectory scope: opening trajectory cursor failed");
+        for (;;)
+        {
+            SPI_cursor_fetch(portal, true, 256);
+            uint64 rows = SPI_processed;
+            for (uint64 row = 0; row < rows; ++row)
+            {
+                bool isnull;
+                Datum wkb = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &isnull);
+                if (isnull) continue;
+                MemoryContextSwitchTo(scope->owner);
+                ScopedTrajectory *entry = palloc(sizeof(*entry));
+                entry->wkb = DatumGetByteaPCopy(wkb);
+                entry->next = scope->trajectories;
+                scope->trajectories = entry;
+                MemoryContextSwitchTo(work);
+            }
+            if (SPI_tuptable) { SPI_freetuptable(SPI_tuptable); SPI_tuptable = NULL; }
+            if (!rows) break;
+            CHECK_FOR_INTERRUPTS();
+        }
+        SPI_cursor_close(portal);
+    }
+    MemoryContextSwitchTo(previous);
+    MemoryContextDelete(work);
+    laplace_spi_finish(spi_top);
+}
 
 typedef struct SuccessorState
 {
@@ -79,6 +216,13 @@ successor_cmp(const void *a, const void *b)
 LaplaceContinuation *
 laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, int *count)
 {
+    return laplace_trajectory_continuations_scoped(context_array, suffix_backoff, NULL, count);
+}
+
+LaplaceContinuation *
+laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_backoff,
+                                       LaplaceTrajectoryScope *scope, int *count)
+{
     MemoryContext owner = CurrentMemoryContext;
     MemoryContext work = AllocSetContextCreate(owner, "trajectory suffix operands",
                                                ALLOCSET_DEFAULT_SIZES);
@@ -125,7 +269,19 @@ laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, 
     SuccessorState state = {
         hash_create("trajectory successors", 256, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT), 0
     };
-    if (!unpack_plan)
+    if (scope)
+    {
+        for (ScopedTrajectory *entry = scope->trajectories; entry; entry = entry->next)
+        {
+            uint32 npoints;
+            const unsigned char *points = laplace_trajectory_wkb_points(entry->wkb, &npoints);
+            if (trajectory_match_suffixes(cleanup->matcher, points, npoints,
+                                           record_successor, &state) != 0)
+                elog(ERROR, "trajectory_continuations: invalid packed trajectory");
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+    if (!scope && !unpack_plan)
     {
         Oid types[1] = {BYTEAARRAYOID};
         SPIPlanPtr plan = SPI_prepare_cursor(UNPACK_QUERY, 1, types, CURSOR_OPT_PARALLEL_OK);
@@ -141,7 +297,7 @@ laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, 
      * avoids reading the corpus-wide SPACE posting when a longer suffix works.
      * No constituent, separator, repeated occurrence or candidate is dropped. */
     int probe_length = n_context;
-    for (;;)
+    while (!scope)
     {
         state.stride = (size_t) probe_length;
         ArrayType *probe = probe_length == n_context ? context_array
@@ -210,8 +366,14 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
     InitMaterializedSRF(fcinfo, 0);
     ReturnSetInfo *result = (ReturnSetInfo *) fcinfo->resultinfo;
     int count;
-    LaplaceContinuation *successors = laplace_trajectory_continuations(
-        PG_GETARG_ARRAYTYPE_P(0), false, &count);
+    LaplaceTrajectoryScope *scope = NULL;
+    if (PG_NARGS() > 2 && !PG_ARGISNULL(2))
+    {
+        scope = laplace_trajectory_scope_create();
+        laplace_trajectory_scope_extend(scope, PG_GETARG_ARRAYTYPE_P(2));
+    }
+    LaplaceContinuation *successors = laplace_trajectory_continuations_scoped(
+        PG_GETARG_ARRAYTYPE_P(0), false, scope, &count);
     if (bounded && count > topk) count = topk;
     for (int i = 0; i < count; ++i)
     {

@@ -385,3 +385,35 @@ and work → Being_operational / Being_employed, among others. This establishes
 available operands; it does not establish that the current program performs
 their joint comparison or produces a supported answer. No data reset is needed
 to expose that missing operation. A clean reseed remains authorized and pending.
+
+### Observation-bound continuation execution
+
+The installed joint sense read was measured directly before reusing it:
+`converse.prompt_coherence('How does lightning work?')` took 5.784 seconds,
+299,855 shared hits and 99,866 reads. It returns four senses after accumulating
+all incident mass; it is not yet a suitable default ORIENT implementation.
+Receipt: `lightning-joint-comparison.sql/.log` in the session backup directory.
+
+The direct observation-root projection for the same prompt found 4,108
+attestations, 811 contexts, 2,901 candidate root IDs and 2,142 physicalities.
+Fetching those physicalities through the entity indexes took 1.462 seconds cold.
+Receipt: `lightning-trajectory-scope.sql/.log`. These counts describe a candidate
+support superset, not joint semantic agreement or sentence co-occurrence.
+
+The product forward path now binds its resolved prompt/session IDs to the native
+continuation operation. Native code batches witnessed object/context roots,
+deduplicates storage reads while retaining physical occurrences, and retains
+packed trajectories within the request snapshot. Each selected identity extends
+the next step's observed support. A suffix miss stays within that support;
+it cannot fall back to the global SPACE posting. All suffix lengths use the
+existing native ordered matcher. Explicit standalone corpus queries retain their
+unscoped overload; exact observation-scoped queries use the same implementation.
+The two new typed reads live in the native SQL catalog.
+
+Validation: 34 substrate and 3 geometry regressions pass, including empty scope,
+SPACE, duplicate witness paths, and scope extension after selection. SQL catalog
+and install/upgrade dependency gates pass (44 catalog entries). This is a request
+snapshot cache, not completion of the persistent mmap perfcache work. Joint
+attestation comparison, source/context-conditioned scoring and coherent answer
+composition remain implementation obligations; this change does not establish
+that chat works. Live timing and output must be measured after deployment.

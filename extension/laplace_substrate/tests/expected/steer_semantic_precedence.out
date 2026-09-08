@@ -23,6 +23,9 @@ DECLARE
     picked       bytea;
     picked_stride integer;
     gap          bytea := laplace.word_id(' ');
+    scoped_weight bigint;
+    scoped_steps bytea[];
+    next_root bytea := public.laplace_hash128_blake3('test/steer/next-observation');
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES
@@ -267,6 +270,67 @@ BEGIN
         ARRAY[unrelated,frontier,unrelated,frontier,gap],1,5,0.0,8,7,ARRAY[unrelated]) g;
     IF picked_stride IS DISTINCT FROM 1 THEN
         RAISE EXCEPTION 'FAIL: indexed suffix fallback discarded the separator identity';
+    END IF;
+
+    -- The observation operand bounds sequence support before matching. The
+    -- thirty-two unrelated ctx -> noise trajectories must not enter through
+    -- suffix backoff. Empty scope must also remain empty.
+    SELECT g.entity,g.stride_used INTO picked,picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx,gap],1,5,0.0,8,7,ARRAY[unrelated], '{}'::bytea[],8,
+        ARRAY[sent_sem,sent_sem]) g;
+    IF picked IS DISTINCT FROM semantic OR picked_stride IS DISTINCT FROM 2 THEN
+        RAISE EXCEPTION 'FAIL: scoped continuation escaped its observed root or lost SPACE';
+    END IF;
+    SELECT g.entity INTO picked
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx],1,5,0.0,8,7,ARRAY[unrelated], '{}'::bytea[],8,'{}'::bytea[]) g;
+    IF picked IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: empty observation scope reopened the corpus';
+    END IF;
+
+    -- A witnessed context binds a trajectory without pretending that the
+    -- context itself is a sequence position. A shared root is read once even
+    -- when several attestations reach it.
+    INSERT INTO laplace.attestations
+        (id,subject_id,type_id,object_id,source_id,context_id,outcome,
+         last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+    VALUES
+        (public.laplace_hash128_blake3('test/steer/scoped-witness'),
+         unrelated,rel,semantic,src,sent_sem,1,now(),1,1000000000,350000000000),
+        (public.laplace_hash128_blake3('test/steer/scoped-witness-2'),
+         unrelated,rel,ctx,src,sent_sem,1,now(),1,1000000000,350000000000);
+    SELECT g.entity,g.stride_used INTO picked,picked_stride
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx,gap],1,5,0.0,8,7,ARRAY[unrelated], '{}'::bytea[],8,
+        ARRAY[unrelated,unrelated]) g;
+    IF picked IS DISTINCT FROM semantic OR picked_stride IS DISTINCT FROM 2 THEN
+        RAISE EXCEPTION 'FAIL: witnessed context did not bind its ordered physicality';
+    END IF;
+    SELECT g.weight INTO scoped_weight
+    FROM generation.trajectory_continuations(ARRAY[ctx,gap],NULL,
+        ARRAY[unrelated,unrelated,sent_sem]) g WHERE g.object_id=semantic;
+    IF scoped_weight IS DISTINCT FROM 1::bigint THEN
+        RAISE EXCEPTION 'FAIL: duplicate operands/witness roots inflated physical occurrence count';
+    END IF;
+
+    -- Selecting an identity makes its observations available to the next
+    -- step. This root was not in the initial operand's evidence.
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
+    VALUES (next_root,next_root,1,public.ST_MakePoint(103,1,1,1),decode(repeat('00',16),'hex'),
+        public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(semantic,1,1,t2flag),
+                                public.laplace_mantissa_pack(noise,2,1,t2flag)]),2);
+    INSERT INTO laplace.attestations
+        (id,subject_id,type_id,object_id,source_id,context_id,outcome,
+         last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+    VALUES (public.laplace_hash128_blake3('test/steer/selected-witness'),
+        semantic,rel,noise,src,next_root,1,now(),1,1000000000,350000000000);
+    SELECT array_agg(g.entity ORDER BY g.step) INTO scoped_steps
+    FROM generation.forward_walk_continuations(
+        ARRAY[ctx,gap],2,5,0.0,8,7,ARRAY[unrelated], '{}'::bytea[],8,ARRAY[unrelated]) g;
+    IF scoped_steps IS DISTINCT FROM ARRAY[semantic,noise] THEN
+        RAISE EXCEPTION 'FAIL: selected identity did not extend the next observation scope';
     END IF;
 
     RAISE NOTICE '✓ steering precedence: positive witnessed meaning enters without sequence evidence; refutation preserves legitimate fallback';

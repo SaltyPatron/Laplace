@@ -2,6 +2,14 @@ DROP FUNCTION IF EXISTS laplace.walk_continuations(bytea[], int, int, float8, in
 CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
         p_ctx bytea[], p_steps int, p_max_stride int,
         p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
+        p_relation_types bytea[], p_fanout int, p_observation_ids bytea[])
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_continuations'
+    LANGUAGE C VOLATILE;
+
+CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
+        p_ctx bytea[], p_steps int, p_max_stride int,
+        p_spread float8, p_top_k int, p_seed bigint, p_frontier bytea[],
         p_relation_types bytea[], p_fanout int)
     RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_walk_continuations'
