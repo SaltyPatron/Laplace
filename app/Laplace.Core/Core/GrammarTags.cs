@@ -15,13 +15,12 @@ public static unsafe class GrammarTags
         LaplaceTag* outTags = null;
         nuint n = 0;
         int rc;
-        lock (LaplaceCoreGate.Native)
+        // This native operation owns its parser, query, tree, cursor and result
+        // allocation. Independent source workers share only immutable languages.
+        fixed (byte* t = tagsScm)
+        fixed (byte* u = utf8)
         {
-            fixed (byte* t = tagsScm)
-            fixed (byte* u = utf8)
-            {
-                rc = NativeInterop.GrammarTagsRun(recipe, t, (nuint)tagsScm.Length, u, (nuint)utf8.Length, &outTags, &n);
-            }
+            rc = NativeInterop.GrammarTagsRun(recipe, t, (nuint)tagsScm.Length, u, (nuint)utf8.Length, &outTags, &n);
         }
         if (rc != 0)
             throw new InvalidOperationException($"native grammar tag query failed ({rc})");
@@ -39,8 +38,7 @@ public static unsafe class GrammarTags
         }
         finally
         {
-            lock (LaplaceCoreGate.Native)
-                NativeInterop.GrammarTagsFree(outTags);
+            NativeInterop.GrammarTagsFree(outTags);
         }
     }
 

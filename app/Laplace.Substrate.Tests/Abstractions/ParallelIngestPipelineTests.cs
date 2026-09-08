@@ -12,6 +12,43 @@ public sealed class ParallelIngestPipelineTests
 {
     private static readonly Hash128 Src = SubstrateCanonicalIds.Of("source", "test", "parallel-ingest");
 
+    [Theory]
+    [InlineData(17, 300000)]
+    [InlineData(2, 300000)]
+    [InlineData(10, 30)]
+    [InlineData(20, 30)]
+    [InlineData(103, 30)]
+    public async Task MonolithTail_UsesAvailableSegmentsAndPreservesEveryRecord(int records, int probe)
+    {
+        const int segments = 3;
+        var witnessed = new ConcurrentBag<(int Record, int Segment)>();
+        var config = new IngestBatchConfig
+        {
+            SourceId = Src,
+            BatchLabelPrefix = "monolith-tail",
+            BatchSize = probe,
+            WorkingSetProbeInterval = probe,
+            WorkingSet = true,
+        };
+        await foreach (var change in MonolithSegmenter.RunSegmentedAsync(
+            new ParallelIntRecordStream(records, 1),
+            segment => new DirectComposeHandler<int>((record, builder) =>
+            {
+                witnessed.Add((record, segment));
+                builder.AddEntity(EntityIdFor(record), EntityTier.Word, Src, Src);
+            }), _ => config, segments, "monolith-tail"))
+        {
+            change.ApplyEnvelope?.Dispose();
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+        Assert.Equal(Enumerable.Range(0, records), witnessed.Select(x => x.Record).Order());
+        Assert.Equal(Math.Min(records, segments), witnessed.Select(x => x.Segment).Distinct().Count());
+        int tail = records % MonolithSegmenter.ResolveChunkRecords(config, segments);
+        if (tail > 0)
+            Assert.Equal(Math.Min(tail, segments), witnessed.Where(x => x.Record >= records - tail)
+                .Select(x => x.Segment).Distinct().Count());
+    }
+
     private sealed class ParallelIntRecordStream(int count, int workerCount) : IRecordStream<int>
     {
         public async IAsyncEnumerable<int> RecordsAsync(

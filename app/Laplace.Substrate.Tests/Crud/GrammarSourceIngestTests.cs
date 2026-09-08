@@ -16,6 +16,21 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class GrammarSourceIngestTests(LocalPgFixture pg)
 {
     [Fact]
+    public async Task GrammarTagReaders_KeepIndependentNativeQueryState()
+    {
+        IntPtr recipe = GrammarDecomposer.LookupById("cpp");
+        byte[] query = GrammarTags.TagsSource("cpp")!;
+        byte[] source = "int callee(int x) { return x; } int caller() { return callee(2); }"u8.ToArray();
+        var expected = GrammarTags.Run(recipe, query, source).ToArray();
+        Assert.NotEmpty(expected);
+        await Parallel.ForAsync(0, 24, (i, ct) =>
+        {
+            Assert.Equal(expected, GrammarTags.Run(recipe, query, source).ToArray());
+            return ValueTask.CompletedTask;
+        });
+    }
+
+    [Fact]
     public void PackagedGrammarQueries_CompileAgainstTheirLinkedParsers()
     {
         const string prefix = "Laplace.GrammarTags.external.tree-sitter-";

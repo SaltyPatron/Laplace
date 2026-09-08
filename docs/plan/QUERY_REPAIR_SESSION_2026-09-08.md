@@ -873,3 +873,29 @@ to names, not claims that overload/scope resolution has already found declaratio
 All packaged queries compile against their linked parsers, and complete native
 source composition records definitions and calls in C, C++ and C#. Nine focused
 grammar-source tests pass. Replay/readback with this payload is still required.
+
+## Measured single-file scheduling defect
+
+The first full TinyCodes shard run starts at 14:41:35 UTC with 32,516 selected
+records and reports six segments, but its 91,527-record dispatch chunk is larger
+than the whole file. The final partial chunk is assigned to one segment, whose
+local compose budget is one core because the planner already reserved six
+working sets. `/proc` shows one busy thread (~97.5% CPU), while input composition
+runs at roughly 35–51 records/second. CPU affinity allows all six physical cores;
+this is a dispatch defect, not a database wait or an affinity restriction.
+
+The generic segmenter now distributes each complete or partial dispatch wave
+across available segment workers, preserving every whole record and bounded
+per-segment queues. It does not manufacture additional physical files. Thirteen
+parallel-pipeline/failure tests pass, including files smaller than one chunk,
+fewer records than workers, one or two complete chunks, and a final partial wave.
+Measure the next run at the same physical-file boundary; do not call this a
+measured speedup before live comparison.
+
+Independent grammar-tag reads also no longer take the process-wide native gate:
+the native function creates and frees its own parser, query, tree, cursor and
+capture allocation and shares only immutable grammar definitions. Concurrent
+capture parity passes. Twenty-three combined grammar/scheduling/failure tests
+pass. The first TinyCodes file completed composition in 630.7 seconds; its
+subsequent bulk apply starts with 3,206,250 staged entities, 3,208,380 physicalities
+and 325,732 attestations before native deduplication and presence filtering.

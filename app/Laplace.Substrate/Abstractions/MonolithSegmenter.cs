@@ -59,10 +59,8 @@ public static class MonolithSegmenter
     }
 
     /// <summary>
-    /// Records per dispatch chunk — the round-robin unit handed to a segment. A chunk is a
-    /// list of WHOLE records, so cutting the stream here is record-aligned. Every segment
-    /// receives one fair share of the machine-sized probe interval; there is no independent
-    /// 256/8192 dispatch limiter competing with the central source plan.
+    /// Records per dispatch wave. Each wave is shared across the active segments
+    /// at complete-record boundaries. Its size follows the central source plan.
     /// </summary>
     public static int ResolveChunkRecords(IngestBatchConfig config, int segments)
     {
@@ -125,6 +123,26 @@ public static class MonolithSegmenter
             long lastReportMs = 0;
             var buf = new List<TRecord>(chunkRecords);
             long bufferedBytes = 0;
+            async Task DispatchAsync(List<TRecord> records)
+            {
+                Interlocked.Add(ref dispatched, records.Count);
+                // A file can have fewer full waves than segments, or fit in one
+                // partial wave. Every wave must expose its available parallelism;
+                // assigning a whole wave to one worker strands the others.
+                int offset = 0;
+                int remainingSegments = Math.Min(segments, records.Count);
+                while (remainingSegments > 0)
+                {
+                    int remaining = records.Count - offset;
+                    int take = remaining / remainingSegments
+                        + (remaining % remainingSegments == 0 ? 0 : 1);
+                    await inputs[rr].Writer.WriteAsync(records.GetRange(offset, take), ct)
+                        .ConfigureAwait(false);
+                    offset += take;
+                    rr = rr + 1 == segments ? 0 : rr + 1;
+                    remainingSegments--;
+                }
+            }
             await foreach (var rec in stream.RecordsAsync(ct))
             {
                 buf.Add(rec);
@@ -132,9 +150,8 @@ public static class MonolithSegmenter
                     + IngestRecordMemory.Measure(rec, sourceConfig.WorkingSetProfile));
                 if (buf.Count >= chunkRecords || bufferedBytes >= chunkBytes)
                 {
-                    long n = Interlocked.Add(ref dispatched, buf.Count);
-                    await inputs[rr].Writer.WriteAsync(buf, ct).ConfigureAwait(false);
-                    rr = rr + 1 == segments ? 0 : rr + 1;
+                    await DispatchAsync(buf).ConfigureAwait(false);
+                    long n = Interlocked.Read(ref dispatched);
                     // Live compose telemetry DURING the run (dispatch is backpressured to the
                     // compose rate by the bounded input channels), with the source's name —
                     // not silence until the commit.
@@ -152,10 +169,7 @@ public static class MonolithSegmenter
                 }
             }
             if (buf.Count > 0)
-            {
-                Interlocked.Add(ref dispatched, buf.Count);
-                await inputs[rr].Writer.WriteAsync(buf, ct).ConfigureAwait(false);
-            }
+                await DispatchAsync(buf).ConfigureAwait(false);
             for (int s = 0; s < segments; s++) inputs[s].Writer.Complete();
         });
 
