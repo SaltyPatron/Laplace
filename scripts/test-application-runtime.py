@@ -41,6 +41,12 @@ class RuntimeGuardTests(unittest.TestCase):
             installed_form = "installed-form:" + installed
             self.write(self.staged / installed, installed_form)
             self.write(self.prefix / installed, installed_form)
+        self.execution_name = "laplace_execution_0123456789abcdef"
+        self.execution_artifact = f"lib/postgresql/18/{self.execution_name}.so"
+        self.execution_manifest = "share/postgresql/18/extension/laplace_execution_module.txt"
+        for target in (self.staged, self.prefix):
+            self.write(target / self.execution_artifact, "installed execution module")
+            self.write(target / self.execution_manifest, self.execution_name + "\n")
         for name in ("laplace_geom", "laplace_substrate"):
             for path in (self.root / "build/extension" / name / f"{name}.control",
                          self.prefix / "share/postgresql/18/extension" / f"{name}.control"):
@@ -72,7 +78,7 @@ class RuntimeGuardTests(unittest.TestCase):
             guard.digest(self.prefix / "lib/liblaplace_core.so"),
         )
         state = self.snapshot()
-        self.assertEqual(10, len(state["artifacts"]))
+        self.assertEqual(12, len(state["artifacts"]))
         self.assertEqual(self.fingerprint, state["native_fingerprint"])
 
     def test_each_stale_or_missing_stamp_fails(self):
@@ -103,6 +109,30 @@ class RuntimeGuardTests(unittest.TestCase):
         (self.prefix / "lib/liblaplace_core.so").unlink()
         with self.assertRaisesRegex(ValueError, "artifact missing"):
             self.snapshot()
+
+    def test_execution_module_and_manifest_drift_are_detected(self):
+        for artifact in (self.execution_artifact, self.execution_manifest):
+            with self.subTest(artifact=artifact):
+                path = self.prefix / artifact
+                original = path.read_bytes()
+                path.write_bytes(b"stale execution artifact")
+                with self.assertRaisesRegex(ValueError, "tested installed form"):
+                    self.snapshot()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, "artifact missing"):
+                    self.snapshot()
+                path.write_bytes(original)
+
+    def test_staged_execution_manifest_is_required_and_validated(self):
+        path = self.staged / self.execution_manifest
+        original = path.read_bytes()
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, "one execution module manifest"):
+            self.snapshot()
+        path.write_text("unversioned-module")
+        with self.assertRaisesRegex(ValueError, "invalid native execution module identity"):
+            self.snapshot()
+        path.write_bytes(original)
 
     def test_staged_install_must_contain_every_declared_native_artifact(self):
         (self.staged / "lib/liblaplace_core.so").unlink()

@@ -10,7 +10,11 @@ public readonly record struct GrammarIngestRecord(
     byte[] LineUtf8,
     GrammarAst Ast,
     int RowIndex,
-    long RowsTotal);
+    long RowsTotal) : IIngestResidentRecord
+{
+    public long ResidentInputBytes => checked((LineUtf8?.LongLength ?? 0)
+        + (long)NativeInterop.AstResidentBytes(Ast.Handle));
+}
 
 public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRecord>
 {
@@ -62,6 +66,8 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
         }
 
         public GrammarRowComposer Composer => _composer;
+
+        public long ResidentBytes => _composer.ResidentBytes;
 
         public TierTree? TreeForBatchProbe
         {

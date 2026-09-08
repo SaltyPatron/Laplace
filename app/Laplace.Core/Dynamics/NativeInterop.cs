@@ -75,6 +75,14 @@ public static partial class NativeInterop
         IntPtr context, int* rows, int* cols, nuint pairCount,
         long* outScoresFp1e9, short* outOutcomes);
 
+    [LibraryImport(Library, EntryPoint = "ffn_contraction_create")]
+    public static unsafe partial int FfnContractionCreate(
+        float* embeddingRows, nuint vocabularyRows, nuint dimension,
+        int* tokenRows, int* entityIndexes, nuint tokenCount, nuint entityCount,
+        float* up, float* upBias, float* gate, float* gateBias,
+        float* down, float* downBias, nuint intermediate, int activation,
+        IntPtr* context, double* arenaRms, nuint* residentBytes);
+
     [LibraryImport(Library, EntryPoint = "bilinear_contraction_free")]
     public static partial void BilinearContractionFree(IntPtr context);
 

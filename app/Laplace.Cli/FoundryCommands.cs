@@ -167,8 +167,6 @@ internal static class FoundryCommands
         if (kvHeads <= 0 || heads % kvHeads != 0)
         { Fail($"--heads {heads} not divisible by --kv-heads {kvHeads}"); return null; }
         if (layers <= 0) layers = 12;
-        if (9 * layers + 3 > 300)
-        { Fail($"--layers {layers} exceeds the tensor-slot budget (9·L+3 ≤ 300 → L ≤ 33)"); return null; }
         if (ffn <= 0) ffn = ((8 * dim / 3 + 255) / 256) * 256;
 
         CodepointPerfcache.Load(ResolveBlob());
@@ -529,7 +527,7 @@ internal static class FoundryCommands
 
         byte[] configJson = File.ReadAllBytes(recipePath);
         IntPtr recipeHandle, tmplHandle;
-        var specs = new TensorSpec[300];
+        TensorSpec[] specs;
         int tensorCount;
         unsafe
         {
@@ -537,8 +535,8 @@ internal static class FoundryCommands
             if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse returned null");
             tmplHandle = SynthInterop.ArchTemplateLoad("llama");
             if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
-            fixed (TensorSpec* sp = specs)
-                tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
+            tensorCount = SynthInterop.ArchTemplateRequiredTensorsComplete(
+                tmplHandle, recipeHandle, out specs);
         }
         if (tensorCount <= 0) return Fail($"arch_template_required_tensors returned {tensorCount}");
         Console.WriteLine($"  recipe + arch template: {tensorCount} tensor slots, vocab={vocab}, hidden={dModel}, "
@@ -1391,7 +1389,7 @@ internal static class FoundryCommands
         var recipe = LlamaRecipeExtractor.Parse(bridgePath);
 
         IntPtr recipeHandle, tmplHandle;
-        var specs = new TensorSpec[300];
+        TensorSpec[] specs;
         int tensorCount;
         unsafe
         {
@@ -1399,8 +1397,8 @@ internal static class FoundryCommands
             if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse(bridge) returned null");
             tmplHandle = SynthInterop.ArchTemplateLoad("llama");
             if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
-            fixed (TensorSpec* sp = specs)
-                tensorCount = SynthInterop.ArchTemplateRequiredTensors(tmplHandle, recipeHandle, sp, (nuint)specs.Length);
+            tensorCount = SynthInterop.ArchTemplateRequiredTensorsComplete(
+                tmplHandle, recipeHandle, out specs);
         }
         if (tensorCount <= 0) return Fail($"required_tensors returned {tensorCount}");
         Console.WriteLine($"  dims: vocab={vocab} hidden={dModel} layers={nLayers} heads={nHeads} headDim={headDim} ffn={intermR} | {tensorCount} tensors");

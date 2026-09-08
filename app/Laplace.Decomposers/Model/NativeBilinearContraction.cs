@@ -84,6 +84,39 @@ internal sealed class NativeBilinearContraction : IDisposable
         return new(handle, arena, resident);
     }
 
+    public static unsafe NativeBilinearContraction Ffn(
+        float[] embeddingRows, int vocabularyRows, int dimension,
+        int[] tokenRows, int[] entityIndexes, int entityCount,
+        float[] up, float[]? upBias, float[]? gate, float[]? gateBias,
+        float[] down, float[]? downBias, int intermediate, int activation)
+    {
+        ValidateRows(embeddingRows, vocabularyRows, dimension, nameof(embeddingRows));
+        ValidateMapping(tokenRows, entityIndexes, entityCount);
+        ValidateRows(up, intermediate, dimension, nameof(up));
+        ValidateRows(down, dimension, intermediate, nameof(down));
+        if (gate is not null) ValidateRows(gate, intermediate, dimension, nameof(gate));
+        if (upBias is not null && upBias.Length != intermediate
+            || gateBias is not null && (gate is null || gateBias.Length != intermediate)
+            || downBias is not null && downBias.Length != dimension)
+            throw new ArgumentException("FFN bias shape disagrees with its projection.");
+        IntPtr handle = IntPtr.Zero;
+        double arena = 0;
+        nuint resident = 0;
+        int rc;
+        fixed (float* embedding = embeddingRows)
+        fixed (int* tokens = tokenRows)
+        fixed (int* entities = entityIndexes)
+        fixed (float* u = up, ub = upBias, g = gate, gb = gateBias, dn = down, db = downBias)
+            rc = DynInterop.FfnContractionCreate(
+                embedding, (nuint)vocabularyRows, (nuint)dimension,
+                tokens, entities, (nuint)tokenRows.Length, (nuint)entityCount,
+                u, ub, g, gb, dn, db, (nuint)intermediate, activation,
+                &handle, &arena, &resident);
+        if (rc != 0 || handle == IntPtr.Zero)
+            throw new InvalidOperationException($"native nonlinear FFN contraction creation failed: {rc}");
+        return new(handle, arena, resident);
+    }
+
     public unsafe (long[] Scores, short[] Outcomes) Score(int[] rows, int[] cols)
     {
         ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);

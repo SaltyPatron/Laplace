@@ -75,6 +75,10 @@ copy /y "%SUB_DIR%\laplace_substrate_upgrade.sql" "%DEPLOY%\share\extension\" >n
 
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_substrate\laplace_substrate.dll" || exit /b 1
+if not exist "%SUB_DIR%\laplace_execution_module.txt" exit /b 1
+set /p EXECUTION_MODULE=<"%SUB_DIR%\laplace_execution_module.txt"
+call :swapcopy "%SUB_DIR%\!EXECUTION_MODULE!.dll" || exit /b 1
+copy /y "%SUB_DIR%\laplace_execution_module.txt" "%DEPLOY%\share\extension\" >nul || exit /b 1
 call :swapcopy "%LAPLACE_ENGINE_BUILD%\core\laplace_core.dll" || exit /b 1
 call :swapcopy "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" || exit /b 1
 rem Perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewarm).

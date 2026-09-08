@@ -1,0 +1,6 @@
+Base commit: 4336f709. Source branch: fix/documented-conversation-execution.
+Preserved modified tracked files and new native source files; implementation.patch contains tracked changes.
+Native library compiled. Canonical prompt tree and exact case identity checks passed.
+Full forward pass failed acceptance: first missing partial-index support (corrected), then 45-second execution timeout on retained real-data snapshot.
+No finished transformer or billable product demonstrated. No production database restart or deployment.
+Remaining work: typed stateful cognition beyond flat-ID frontier; complete native proposal/storage path; exact trajectory regression updates; runtime correctness/performance; installation and product acceptance.

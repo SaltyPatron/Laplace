@@ -458,12 +458,37 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
     return 0;
 }
 
+template <typename T>
+static int reserve_compose_array(T*& rows, size_t& capacity, size_t required) {
+    if (required <= capacity) return 0;
+    const size_t maximum = SIZE_MAX / sizeof(T);
+    if (required > maximum) return -3;
+    size_t grown = capacity ? capacity : 16;
+    while (grown < required) {
+        if (grown > maximum / 2) { grown = required; break; }
+        grown *= 2;
+    }
+    T* allocated = (T*)realloc(rows, grown * sizeof(T));
+    if (!allocated) return -3;
+    rows = allocated;
+    capacity = grown;
+    return 0;
+}
+
+int laplace_compose_reserve_rows(laplace_compose_result_t* r,
+                                size_t entities, size_t physicalities,
+                                size_t source_trees) {
+    if (!r) return -1;
+    if (reserve_compose_array(r->entities, r->entity_capacity, entities) != 0 ||
+        reserve_compose_array(r->physicalities, r->phys_capacity, physicalities) != 0 ||
+        reserve_compose_array(r->source_trees, r->source_tree_capacity, source_trees) != 0)
+        return -3;
+    return 0;
+}
+
 static int push_entity(laplace_compose_result_t* r, hash128_t id, uint8_t tier,
                        hash128_t type_id, uint8_t packaging) {
-    laplace_compose_entity_t* n = (laplace_compose_entity_t*)realloc(
-        r->entities, (r->entity_count + 1) * sizeof(*n));
-    if (!n) return -3;
-    r->entities = n;
+    if (laplace_compose_reserve_rows(r, r->entity_count + 1, 0, 0) != 0) return -3;
     laplace_compose_entity_t* e = &r->entities[r->entity_count++];
     e->id = id;
     e->tier = tier;
@@ -508,10 +533,10 @@ static int push_phys(laplace_compose_result_t* r, hash128_t entity_id,
      * above are payload, never part of the id (see laplace_physicality_id_compute). */
     laplace_physicality_id_compute(entity_id, 1, &phys_id);
 
-    laplace_compose_physicality_t* n = (laplace_compose_physicality_t*)realloc(
-        r->physicalities, (r->phys_count + 1) * sizeof(*n));
-    if (!n) { free(traj); return -3; }
-    r->physicalities = n;
+    if (laplace_compose_reserve_rows(r, 0, r->phys_count + 1, 0) != 0) {
+        free(traj);
+        return -3;
+    }
     laplace_compose_physicality_t* p = &r->physicalities[r->phys_count++];
     p->id = phys_id;
     p->entity_id = entity_id;
@@ -1057,6 +1082,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
             if (!sp) { rc = -3; goto fail_emit; }
             r->spans = sp;
             span_cap = ncap;
+            r->span_capacity = ncap;
         }
         r->spans[r->span_count].start_byte = node.start_byte;
         r->spans[r->span_count].end_byte   = node.end_byte;
@@ -1133,6 +1159,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
                 if (!pr) { free(last_child); free(table); rc = -3; goto fail_emit; }
                 r->precedes = pr;
                 prec_cap = ncap;
+                r->precedes_capacity = ncap;
             }
             r->precedes[r->precedes_count].subject_id = a;
             r->precedes[r->precedes_count].object_id = b;
@@ -1241,6 +1268,22 @@ int laplace_compose_span_lookup(const laplace_compose_result_t* r,
 
 size_t laplace_compose_entity_count(const laplace_compose_result_t* r) {
     return r ? r->entity_count : 0;
+}
+size_t laplace_compose_resident_bytes(const laplace_compose_result_t* r) {
+    if (!r) return 0;
+    size_t bytes = sizeof(*r)
+        + r->entity_capacity * sizeof(*r->entities)
+        + r->phys_capacity * sizeof(*r->physicalities)
+        + r->precedes_capacity * sizeof(*r->precedes)
+        + r->span_capacity * sizeof(*r->spans)
+        + r->span_index_cap * sizeof(*r->span_index)
+        + r->source_tree_capacity * sizeof(*r->source_trees)
+        + tier_tree_resident_bytes(r->tree);
+    for (size_t i = 0; i < r->phys_count; ++i)
+        bytes += (size_t)r->physicalities[i].n_constituents * 4 * sizeof(double);
+    for (size_t i = 0; i < r->source_tree_count; ++i)
+        bytes += tier_tree_resident_bytes(r->source_trees[i]);
+    return bytes;
 }
 size_t laplace_compose_physicality_count(const laplace_compose_result_t* r) {
     return r ? r->phys_count : 0;

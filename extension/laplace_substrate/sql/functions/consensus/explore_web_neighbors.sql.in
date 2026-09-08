@@ -1,213 +1,39 @@
--- Undirected consensus probes for the explore_web SPI beam.  The masked overload
--- is the executor primitive used when the frontier's deposited highway masks prove
--- its complete governed relation set.  Defining it first is load-bearing: BEGIN
--- ATOMIC resolves dependencies when the wrapper below is created.
---
--- This lane deliberately includes refuted edges. `outbound` preserves the stored
--- orientation. Firmware decides which retained candidates are relevant.
+-- Shared native set access and standing reduction; input order and duplicates
+-- are retained at this SQL surface. Refutations remain inspectable.
 CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
     p_subjects bytea[],
-    p_types    bytea[],
-    p_limit    int)
-    RETURNS TABLE(
-        frontier_id bytea,
-        nbr bytea,
-        type_id bytea,
-        rating bigint,
-        rd bigint,
-        witness_count bigint,
-        outbound boolean)
-    LANGUAGE sql STABLE PARALLEL SAFE
-BEGIN ATOMIC
-    WITH frontier AS MATERIALIZED (
-        SELECT s.subject_id, s.frontier_ord
-        FROM unnest(p_subjects) WITH ORDINALITY AS s(subject_id, frontier_ord)
-    )
-    SELECT f.subject_id AS frontier_id,
-           e.nbr, e.type_id, e.rating, e.rd, e.witness_count, e.outbound
-    FROM frontier f
-    CROSS JOIN LATERAL (
-        SELECT d.nbr, d.type_id, d.rating, d.rd, d.witness_count, d.outbound
-        FROM (
-          SELECT DISTINCT ON (c.nbr)
-                 c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
-          FROM (
-            SELECT x.object_id AS nbr, x.type_id,
-                   x.rating, x.rd, x.witness_count, true AS outbound
-            FROM laplace.consensus x
-            WHERE x.subject_id = f.subject_id
-              AND x.object_id IS NOT NULL
-              AND x.object_id <> f.subject_id
-              AND x.type_id = ANY (p_types)
+    p_types bytea[],
+    p_limit int,
+    p_include_default boolean)
+    RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
+                  rd bigint, witness_count bigint, outbound boolean)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_explore_web_neighbors'
+    LANGUAGE C STABLE PARALLEL SAFE;
 
-            UNION ALL
-
-            SELECT x.subject_id, x.type_id,
-                   x.rating, x.rd, x.witness_count, false
-            FROM laplace.consensus x
-            WHERE x.object_id = f.subject_id
-              AND x.subject_id <> f.subject_id
-              AND x.type_id = ANY (p_types)
-
-            UNION ALL
-
-            SELECT x.object_id, x.type_id,
-                   x.rating, x.rd, x.witness_count, true
-            FROM laplace.consensus_rdefault x
-            WHERE x.subject_id = f.subject_id
-              AND x.object_id IS NOT NULL
-              AND x.object_id <> f.subject_id
-              AND (p_types IS NULL OR x.type_id <> ALL (p_types))
-
-            UNION ALL
-
-            SELECT x.subject_id, x.type_id,
-                   x.rating, x.rd, x.witness_count, false
-            FROM laplace.consensus_rdefault x
-            WHERE x.object_id = f.subject_id
-              AND x.subject_id <> f.subject_id
-              AND (p_types IS NULL OR x.type_id <> ALL (p_types))
-          ) c
-          ORDER BY c.nbr, consensus.eff_mu(c.rating, c.rd) DESC,
-                   c.type_id, c.outbound DESC
-        ) d
-        ORDER BY consensus.eff_mu(d.rating, d.rd) DESC, d.nbr, d.type_id,
-                 d.outbound DESC
-        LIMIT GREATEST(p_limit, 0)
-    ) e
-    ORDER BY f.frontier_ord, consensus.eff_mu(e.rating, e.rd) DESC,
-             e.nbr, e.type_id, e.outbound DESC;
-END;
-
--- Untyped frontier probe. The old implementation always read the partitioned
--- consensus parent in both directions and ranked the complete adjacency union
--- before applying p_limit. Reverse reads cannot prune the relation partition
--- tree from object_id alone, so a semantic proposal paid every named relation
--- leaf even when the frontier entities already carried exact deposited highway
--- masks describing which relation families can be incident to them.
---
--- Prefer the same governed mask projection used by pg_laplace_explore_web: when
--- every distinct frontier entity has a mask, resolve the UNION of those masks to
--- concrete relation ids once and delegate to the partition-prunable overload
--- above. If any frontier member lacks a mask, retain the old full-parent path as
--- the correctness fallback. The fallback is gated at its frontier CTE so the
--- expensive parent scans are not executed on the complete-mask path.
+-- Preserve the highway-mask surface: an omitted type array historically reads
+-- DEFAULT only. That compatibility choice is an explicit operand of the one
+-- canonical batch operation, rather than a different native argument contract.
 CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
     p_subjects bytea[],
-    p_limit    int)
-    RETURNS TABLE(
-        frontier_id bytea,
-        nbr bytea,
-        type_id bytea,
-        rating bigint,
-        rd bigint,
-        witness_count bigint,
-        outbound boolean)
+    p_types bytea[],
+    p_limit int)
+    RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
+                  rd bigint, witness_count bigint, outbound boolean)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH requested AS MATERIALIZED (
-        SELECT DISTINCT s.subject_id
-        FROM unnest(COALESCE(p_subjects, '{}'::bytea[])) AS s(subject_id)
-        WHERE s.subject_id IS NOT NULL
-    ), mask_state AS MATERIALIZED (
-        SELECT count(*) AS requested_count,
-               count(*) FILTER (WHERE e.highway_mask IS NOT NULL) AS masked_count,
-               count(*) = count(*) FILTER (WHERE e.highway_mask IS NOT NULL) AS complete
-        FROM requested r
-        LEFT JOIN laplace.entities e ON e.id = r.subject_id
-    ), masks AS MATERIALIZED (
-        SELECT DISTINCT e.highway_mask
-        FROM requested r
-        JOIN laplace.entities e ON e.id = r.subject_id
-        WHERE e.highway_mask IS NOT NULL
-    ), governed_types AS MATERIALIZED (
-        SELECT COALESCE(array_agg(DISTINCT u.type_id), '{}'::bytea[]) AS ids
-        FROM masks m
-        CROSS JOIN LATERAL unnest(consensus.relation_mask_types(m.highway_mask)) u(type_id)
-    ), fast AS (
-        SELECT array_position(p_subjects, e.frontier_id)::bigint AS frontier_ord,
-               e.frontier_id, e.nbr, e.type_id,
-               e.rating, e.rd, e.witness_count, e.outbound
-        FROM mask_state ms
-        CROSS JOIN governed_types gt
-        CROSS JOIN LATERAL consensus.explore_web_neighbors(
-            p_subjects, gt.ids, p_limit) e
-        WHERE ms.complete
-          AND ms.requested_count > 0
-          AND cardinality(gt.ids) > 0
-    ), frontier AS MATERIALIZED (
-        SELECT s.subject_id, s.frontier_ord
-        FROM unnest(COALESCE(p_subjects, '{}'::bytea[]))
-             WITH ORDINALITY AS s(subject_id, frontier_ord)
-        CROSS JOIN mask_state ms
-        WHERE NOT ms.complete
-          AND GREATEST(p_limit, 0) > 0
-    ), edges AS MATERIALIZED (
-        SELECT f.frontier_ord, f.subject_id AS frontier_id,
-               x.object_id AS nbr, x.type_id,
-               x.rating, x.rd, x.witness_count, true AS outbound
-        FROM laplace.consensus x
-        JOIN frontier f ON f.subject_id = x.subject_id
-        WHERE x.subject_id = ANY (p_subjects)
-          AND x.object_id IS NOT NULL
-          AND x.object_id <> x.subject_id
-
-        UNION ALL
-
-        SELECT f.frontier_ord, f.subject_id,
-               x.subject_id, x.type_id,
-               x.rating, x.rd, x.witness_count, false
-        FROM laplace.consensus x
-        JOIN frontier f ON f.subject_id = x.object_id
-        WHERE x.object_id = ANY (p_subjects)
-          AND x.subject_id <> x.object_id
-    ), deduped AS MATERIALIZED (
-        SELECT DISTINCT ON (e.frontier_ord, e.nbr)
-               e.frontier_ord, e.frontier_id, e.nbr, e.type_id,
-               e.rating, e.rd, e.witness_count, e.outbound
-        FROM edges e
-        ORDER BY e.frontier_ord, e.nbr,
-                 consensus.eff_mu(e.rating, e.rd) DESC,
-                 e.type_id, e.outbound DESC
-    ), ranked AS (
-        SELECT d.*,
-               row_number() OVER (
-                   PARTITION BY d.frontier_ord
-                   ORDER BY consensus.eff_mu(d.rating, d.rd) DESC,
-                            d.nbr, d.type_id, d.outbound DESC) AS rn
-        FROM deduped d
-    ), fallback AS (
-        SELECT r.frontier_ord, r.frontier_id, r.nbr, r.type_id,
-               r.rating, r.rd, r.witness_count, r.outbound
-        FROM ranked r
-        WHERE r.rn <= GREATEST(p_limit, 0)
-    ), combined AS (
-        SELECT * FROM fast
-        UNION ALL
-        SELECT * FROM fallback
-    )
-    SELECT c.frontier_id, c.nbr, c.type_id, c.rating, c.rd,
-           c.witness_count, c.outbound
-    FROM combined c
-    ORDER BY c.frontier_ord,
-             consensus.eff_mu(c.rating, c.rd) DESC,
-             c.nbr, c.type_id, c.outbound DESC;
+    SELECT * FROM consensus.explore_web_neighbors(
+        p_subjects, COALESCE(p_types, '{}'::bytea[]), p_limit, true);
 END;
 
-DROP FUNCTION IF EXISTS laplace.explore_web_neighbors(bytea, int);
--- Scalar compatibility wrapper delegates to the canonical frontier probe.
+-- The unfiltered surface reads all relation families. NULL and the empty set
+-- remain distinct at the canonical operation.
 CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
-    p_subject bytea,
-    p_limit   int)
-    RETURNS TABLE(
-        nbr bytea,
-        type_id bytea,
-        rating bigint,
-        rd bigint,
-        witness_count bigint,
-        outbound boolean)
+    p_subjects bytea[],
+    p_limit int)
+    RETURNS TABLE(frontier_id bytea, nbr bytea, type_id bytea, rating bigint,
+                  rd bigint, witness_count bigint, outbound boolean)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT e.nbr, e.type_id, e.rating, e.rd, e.witness_count, e.outbound
-    FROM consensus.explore_web_neighbors(ARRAY[p_subject], p_limit) e;
+    SELECT * FROM consensus.explore_web_neighbors(
+        p_subjects, NULL::bytea[], p_limit, false);
 END;

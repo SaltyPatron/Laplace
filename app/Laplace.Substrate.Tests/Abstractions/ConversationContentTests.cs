@@ -7,8 +7,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
 /// Spec 34 pins: tenant → source identity, session → context entity (chess-game
-/// parity), turn-level attestations only, tenant trust as the third witness-weight
-/// factor. Id shapes are asserted against the canonical-key law so a drifted key
+/// parity), occurrence-level testimony, and source-class priors. Id shapes are asserted against the canonical-key law so a drifted key
 /// string fails loudly instead of minting a different entity forever.
 /// </summary>
 public class ConversationContentIdTests
@@ -60,11 +59,9 @@ public class ConversationContentIdTests
         Assert.False(ConversationContent.IsValidIdentifier(new string('a', 129)));
 
     [Fact]
-    public void Resolve_RejectsInvalidTenantAndTrust()
+    public void Resolve_RejectsInvalidTenant()
     {
         Assert.Throws<ArgumentException>(() => ConversationContent.Resolve("bad/tenant"));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ConversationContent.Resolve("acme", 1.5));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ConversationContent.Resolve("acme", -0.1));
     }
 
     [Fact]
@@ -82,7 +79,7 @@ public class ConversationContentIdTests
 
         // The declared-relations law: emitted relation families are registered.
         var relationMeta = EntityTypeRegistry.Id("RelationType");
-        foreach (var rel in new[] { "APPEARS_IN", "PRECEDES", "HAS_ATTRIBUTION" })
+        foreach (var rel in new[] { "APPEARS_IN", "HAS_ATTRIBUTION", "HAS_ROLE", "IS_INSTANCE_OF", "DEPENDS_ON" })
         {
             var relId = RelationTypeRegistry.RelationTypeId(rel);
             Assert.Contains(changes[0].Entities, e => e.Id == relId && e.TypeId == relationMeta);
@@ -102,103 +99,108 @@ public class ConversationContentTurnTests
     private static readonly byte[] Prompt = Encoding.UTF8.GetBytes("what does dog mean");
     private static readonly byte[] Reply = Encoding.UTF8.GetBytes("a dog is a domesticated canine");
 
-    private static SubstrateChange BuildTurn(
-        string tenant, string sessionKey, double tenantTrust = 1.0,
-        byte[]? reply = null, string? userKey = null,
-        bool expectReply = true)
+    private static (SubstrateChange Change, Hash128 Prompt, Hash128 Reply, Hash128[] Messages) BuildTurn(
+        string tenant = "acme", string occurrence = "request-1", string? user = null,
+        ConversationContent.TurnPhase phase = ConversationContent.TurnPhase.Complete)
     {
-        var scope = ConversationContent.Resolve(tenant, tenantTrust);
-        var session = ConversationContent.SessionId(tenant, sessionKey);
+        var scope = ConversationContent.Resolve(tenant);
+        var session = ConversationContent.SessionId(tenant, "s1");
         Assert.True(ConversationContent.TryBuildTurnChange(
-            scope, session, Prompt, reply ?? Reply, userKey,
-            out var change, out var promptRoot, out var replyRoot));
-        Assert.NotEqual(Hash128.Zero, promptRoot);
-        if (expectReply) Assert.NotEqual(Hash128.Zero, replyRoot);
-        return change;
+            scope, session, Prompt, phase == ConversationContent.TurnPhase.Input ? null : Reply, user,
+            out var change, out var promptRoot, out var replyRoot, out var messages,
+            occurrence, user, phase));
+        return (change, promptRoot, replyRoot, messages);
     }
 
     [Fact]
-    public void Turn_EmitsSessionEntityAndTurnLevelAttestationsOnly()
+    public void Turn_OccurrencesPreserveExactContentAndResponseDependency()
     {
-        var change = BuildTurn("acme", "s1");
+        var turn = BuildTurn();
         var session = ConversationContent.SessionId("acme", "s1");
-
-        var sessionRow = Assert.Single(change.Entities, e => e.Id == session);
-        Assert.Equal(ConversationContent.SessionType, sessionRow.TypeId);
-        Assert.Equal((byte)EntityTier.Document, sessionRow.Tier);
-
-        // ≤4 rows per turn — the re-witness grind stays deleted. Here: 2×APPEARS_IN
-        // + 1×PRECEDES, every one context-stamped with the session (chess parity).
-        Assert.Equal(3, change.Attestations.Length);
-        var appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
-        var precedes = RelationTypeRegistry.RelationTypeId("PRECEDES");
-        Assert.Equal(2, change.Attestations.Count(a => a.TypeId == appearsIn));
-        Assert.Equal(1, change.Attestations.Count(a => a.TypeId == precedes));
-        Assert.All(change.Attestations, a => Assert.Equal(session, a.ContextId));
-        Assert.All(change.Attestations, a => Assert.Equal(AttestationOutcome.Confirm, a.Outcome));
-
-        // Provenance split: prompt membership witnessed by the prompt source,
-        // reply membership and the continuation by the response source.
-        var scope = ConversationContent.Resolve("acme");
-        var pre = Assert.Single(change.Attestations, a => a.TypeId == precedes);
-        Assert.Equal(scope.ResponseSource, pre.SourceId);
-        Assert.Contains(change.Attestations, a =>
-            a.TypeId == appearsIn && a.SourceId == scope.PromptSource);
-        Assert.Contains(change.Attestations, a =>
-            a.TypeId == appearsIn && a.SourceId == scope.ResponseSource);
-    }
-
-    [Fact]
-    public void Turn_PromptOnly_NoPrecedesNoReplyMembership()
-    {
-        var scope = ConversationContent.Resolve("acme");
-        var session = ConversationContent.SessionId("acme", "s1");
-        Assert.True(ConversationContent.TryBuildTurnChange(
-            scope, session, Prompt, null, null, out var change, out _, out var replyRoot));
-        Assert.Equal(Hash128.Zero, replyRoot);
-        var row = Assert.Single(change.Attestations);
-        Assert.Equal(RelationTypeRegistry.RelationTypeId("APPEARS_IN"), row.TypeId);
-    }
-
-    [Fact]
-    public void Turn_DistinctTenants_DistinctEvidenceRows_SameTenantStable()
-    {
-        // Provenance is never mashed: the same exchange under two tenants mints
-        // distinct attestation ids (source differs), while the same tenant re-
-        // asserting is the SAME row identity (idempotent row, repeated testimony).
-        var a1 = BuildTurn("acme", "s1").Attestations.Select(x => x.Id).OrderBy(x => x.ToString()).ToArray();
-        var a2 = BuildTurn("acme", "s1").Attestations.Select(x => x.Id).OrderBy(x => x.ToString()).ToArray();
-        var b1 = BuildTurn("rival", "s1").Attestations.Select(x => x.Id).OrderBy(x => x.ToString()).ToArray();
-        Assert.Equal(a1, a2);
-        Assert.Empty(a1.Intersect(b1));
-    }
-
-    [Fact]
-    public void Turn_TenantTrust_LowersWeightRaisesOpponentRd()
-    {
-        // rank × source trust × TENANT trust → witness_phi: less trusted tenant ⇒
-        // higher opponent RD on every emitted row (trust is inside the rating math).
-        var full = BuildTurn("acme", "s1", tenantTrust: 1.0).Attestations;
-        var half = BuildTurn("acme", "s1", tenantTrust: 0.5).Attestations;
-        Assert.Equal(full.Length, half.Length);
-        for (int i = 0; i < full.Length; i++)
+        Assert.Equal(2, turn.Messages.Length);
+        Assert.Contains(turn.Change.Entities, e => e.Id == session && e.TypeId == ConversationContent.SessionType);
+        Hash128[] contents = [turn.Prompt, turn.Reply];
+        for (int i = 0; i < turn.Messages.Length; ++i)
         {
-            Assert.Equal(full[i].Id, half[i].Id); // identity unchanged — trust is not identity
-            Assert.True(half[i].OpponentRdFp1e9 > full[i].OpponentRdFp1e9,
-                $"row {i}: expected φ({half[i].OpponentRdFp1e9}) > φ({full[i].OpponentRdFp1e9})");
+            Hash128 message = turn.Messages[i];
+            Assert.NotEqual(contents[i], message);
+            Assert.Contains(turn.Change.Entities, e => e.Id == message && e.TypeId == EntityTypeRegistry.ConversationMessage);
+            var placement = Assert.Single(turn.Change.Physicalities, p => p.EntityId == message);
+            var members = Trajectory.Constituents(placement.TrajectoryXyzm!);
+            Assert.Equal(2, members.Length);
+            Assert.Equal(contents[i], members[1]);
         }
+        var membership = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
+        Assert.Equal(turn.Messages.OrderBy(id => id.ToString()), turn.Change.Attestations
+            .Where(a => a.TypeId == membership).Select(a => a.SubjectId).OrderBy(id => id.ToString()));
+        var dependency = Assert.Single(turn.Change.Attestations,
+            a => a.TypeId == RelationTypeRegistry.RelationTypeId("DEPENDS_ON"));
+        Assert.Equal(turn.Messages[1], dependency.SubjectId);
+        Assert.Equal(turn.Messages[0], dependency.ObjectId);
+        Assert.Equal(ConversationContent.Resolve("acme").ResponseSource, dependency.SourceId);
+        Assert.All(turn.Change.Attestations, a => Assert.Equal(session, a.ContextId));
+        Assert.DoesNotContain(turn.Change.Attestations,
+            a => a.TypeId == RelationTypeRegistry.RelationTypeId("PRECEDES"));
     }
 
     [Fact]
-    public void Turn_UserKey_AttributesSessionOncePerCall()
+    public void Turn_RetryKeepsOccurrenceIdentity_RepetitionGetsANewOccurrence()
     {
-        var change = BuildTurn("acme", "s1", userKey: "user-7");
+        var first = BuildTurn();
+        var retry = BuildTurn();
+        var repeated = BuildTurn(occurrence: "request-2");
+        Assert.Equal(first.Messages, retry.Messages);
+        Assert.Equal(first.Change.Attestations.Select(a => a.Id), retry.Change.Attestations.Select(a => a.Id));
+        Assert.Empty(first.Messages.Intersect(repeated.Messages));
+        Assert.Equal(first.Prompt, repeated.Prompt);
+        Assert.Equal(first.Reply, repeated.Reply);
+    }
+
+    [Fact]
+    public void Turn_SplitAdmissionDoesNotRewitnessInputAtResponseCommit()
+    {
+        var input = BuildTurn(user: "user-7", phase: ConversationContent.TurnPhase.Input);
+        var intervening = BuildTurn(occurrence: "request-2", user: "user-7");
+        var output = BuildTurn(user: "user-7", phase: ConversationContent.TurnPhase.Output);
+        var complete = BuildTurn(user: "user-7");
+        Hash128 promptMessage = Assert.Single(input.Messages);
+        Hash128 responseMessage = Assert.Single(output.Messages);
+        Assert.Equal(complete.Messages, new[] { promptMessage, responseMessage });
+        Assert.DoesNotContain(promptMessage, intervening.Messages);
+        Assert.DoesNotContain(input.Change.Attestations,
+            a => a.SourceId == ConversationContent.Resolve("acme").ResponseSource);
+        Assert.All(output.Change.Attestations,
+            a => Assert.Equal(ConversationContent.Resolve("acme").ResponseSource, a.SourceId));
+        var dependency = Assert.Single(output.Change.Attestations,
+            a => a.TypeId == RelationTypeRegistry.RelationTypeId("DEPENDS_ON"));
+        Assert.Equal(promptMessage, dependency.ObjectId);
+        Assert.Equal(responseMessage, dependency.SubjectId);
+    }
+
+    [Fact]
+    public void Turn_TenantChangesProvenanceWithoutChangingTheSourcePriorOrContent()
+    {
+        var first = BuildTurn("acme");
+        var other = BuildTurn("rival");
+        Assert.Equal(first.Prompt, other.Prompt);
+        Assert.Equal(first.Reply, other.Reply);
+        Assert.Empty(first.Messages.Intersect(other.Messages));
+        Assert.Empty(first.Change.Attestations.Select(a => a.Id).Intersect(other.Change.Attestations.Select(a => a.Id)));
+        Assert.Equal(first.Change.Attestations.Select(a => a.OpponentRdFp1e9).Order(),
+            other.Change.Attestations.Select(a => a.OpponentRdFp1e9).Order());
+    }
+
+    [Fact]
+    public void Turn_UserAttributionBelongsToSessionAndItsInputOccurrence()
+    {
+        var turn = BuildTurn(user: "user-7");
         var session = ConversationContent.SessionId("acme", "s1");
         var attribution = RelationTypeRegistry.RelationTypeId("HAS_ATTRIBUTION");
-        var row = Assert.Single(change.Attestations, a => a.TypeId == attribution);
-        Assert.Equal(session, row.SubjectId);
-        Assert.Null(row.ContextId);
-        Assert.Equal(4, change.Attestations.Length);
+        var rows = turn.Change.Attestations.Where(a => a.TypeId == attribution).ToArray();
+        Assert.Equal(2, rows.Length);
+        Assert.Contains(rows, a => a.SubjectId == session && a.ContextId is null);
+        Assert.Contains(rows, a => a.SubjectId == turn.Messages[0] && a.ContextId == session);
+        Assert.DoesNotContain(rows, a => a.SubjectId == turn.Messages[1]);
     }
 
     [Fact]

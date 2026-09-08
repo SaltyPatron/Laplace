@@ -24,13 +24,11 @@ public readonly struct AgentTraceSource : ISeedSource
     /// <summary>
     /// Every relation the lane emits under ANY of its sources (the HAS_POS law).
     /// Turn ORDER is deliberately absent: sequence lives in the session physicality
-    /// trajectory (Pillar 3a), not in adjacency attestations. PRECEDES appears only
-    /// as the live lane's corroborating prompt→reply cell.
+    /// trajectory (Pillar 3a), not in adjacency attestations.
     /// </summary>
     public static IReadOnlyList<string> Relations { get; } =
     [
         "APPEARS_IN",
-        "PRECEDES",
         "HAS_ATTRIBUTION",
         "HAS_ROLE",
         "AUTHORED_BY",

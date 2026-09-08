@@ -20,7 +20,10 @@ public readonly record struct GrammarComposeRecord(
     Hash128? SourceId = null,
     // Present for physical source-file observations. Synthetic grammar records leave
     // this null and retain their grammar root as the record root.
-    FileMetadata? FileMetadata = null);
+    FileMetadata? FileMetadata = null) : IIngestResidentRecord
+{
+    public long ResidentInputBytes => Utf8?.LongLength ?? 0;
+}
 
 /// <summary>
 /// Single handler for whole-file grammar compose lanes. CreateDeferredUnit runs
@@ -93,6 +96,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         }
 
         public TierTree? TreeForBatchProbe => null;
+
+        public long ResidentBytes => _composer?.ResidentBytes ?? 0;
 
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
             Task.FromResult<byte[]?>(null);

@@ -5,11 +5,11 @@ NOTICE:  extension "laplace_geom" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 NOTICE:  extension "laplace_substrate" already exists, skipping
 -- The generation SEQUENCE surface, corpus-free (#728): trajectory_continuations
--- reads successors straight off physicalities.trajectory; separator-ness is a UCD
--- attestation fact resolved through generation.separator_ids(); walk_continuations runs
+-- reads exact ordinal successors straight off physicalities.trajectory;
+-- separators occupy their original positions; walk_continuations runs
 -- S6 propose → S7 steer → S8 sample with the consensus COMPLETES_TO floor.
--- Invariants held over from the corpus era: separators never leak into order
--- metrics, run boundaries do not pair across sequences, same (data, prompt, seed)
+-- Exact identity and ordinal continuity include separators. Run boundaries
+-- do not pair across sequences; the same (data, prompt, seed)
 -- is deterministic, and a dead-end context continues through the floor with
 -- stride_used = 0. New-era invariant replacing "probe invalidation": there is no
 -- cache to invalidate — a trajectory written now is visible to the next read.
@@ -134,34 +134,35 @@ BEGIN
                 public.laplace_mantissa_pack(w_end, 3, 1, t2flag)]),
             3, now());
 
-    -- S6: the → capital; separator skipped, carried as sep_id, weight 1.
+    -- S6 preserves each exact constituent, including the intervening space.
     IF NOT EXISTS (
         SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_the], 8) t
-        WHERE t.object_id = w_capital AND t.weight = 1 AND t.sep_id = sp) THEN
-        RAISE EXCEPTION 'FAIL: (the→capital) continuation missing, wrong weight, or separator not carried';
+        WHERE t.object_id = sp AND t.weight = 1 AND t.sep_id IS NULL) THEN
+        RAISE EXCEPTION 'FAIL: exact (the→space) continuation missing';
     END IF;
-    IF EXISTS (
-        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_the], 8) t
-        WHERE t.object_id = sp) THEN
-        RAISE EXCEPTION 'FAIL: separator token leaked into the order metrics';
+    IF NOT EXISTS (
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_the, sp], 8) t
+        WHERE t.object_id = w_capital AND t.weight = 1 AND t.sep_id IS NULL) THEN
+        RAISE EXCEPTION 'FAIL: exact (the,space→capital) continuation missing';
     END IF;
 
-    -- Run boundary: france ends sent and starts sent2 — its successor comes only
-    -- from WITHIN sent2; sequences never pair across roots.
+    -- A trajectory ending at france cannot pair with the next physical root.
     IF NOT EXISTS (
-        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_france], 8) t
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_france, sp], 8) t
         WHERE t.object_id = w_end AND t.weight = 1) THEN
-        RAISE EXCEPTION 'FAIL: (france→end) within-sequence continuation missing';
+        RAISE EXCEPTION 'FAIL: within-sequence continuation missing';
     END IF;
     IF (SELECT count(*) FROM generation.trajectory_continuations(ARRAY[w_france], 8)) <> 1 THEN
         RAISE EXCEPTION 'FAIL: cross-sequence pair leaked through a run boundary';
     END IF;
 
-    -- k=2 context: (capital, of) → france, exactly one matching position.
     IF NOT EXISTS (
-        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital, w_of], 8) t
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital, sp, w_of, sp], 8) t
         WHERE t.object_id = w_france AND t.weight = 1) THEN
-        RAISE EXCEPTION 'FAIL: k=2 context (capital,of)→france missing';
+        RAISE EXCEPTION 'FAIL: exact four-constituent context missing';
+    END IF;
+    IF EXISTS (SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital, w_of], 8)) THEN
+        RAISE EXCEPTION 'FAIL: context crossed an omitted separator';
     END IF;
 
     -- Export plane, computed inline from the trajectories: of→france is P=1.0.
@@ -242,7 +243,7 @@ BEGIN
 
     -- No cache, no invalidation: a trajectory written NOW is visible to the very
     -- next read. sent3 repeats capital of twice (no separator): every matching
-    -- occurrence counts, so capital→of goes 1 → 3.
+    -- occurrence counts, so the new unseparated capital→of has weight 2.
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (sent3, 3, type_sent, src);
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
@@ -258,8 +259,8 @@ BEGIN
             4, now());
     IF NOT EXISTS (
         SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital], 8) t
-        WHERE t.object_id = w_of AND t.weight = 3) THEN
-        RAISE EXCEPTION 'FAIL: repeated matches or new trajectory missing (capital→of should be weight 3)';
+        WHERE t.object_id = w_of AND t.weight = 2) THEN
+        RAISE EXCEPTION 'FAIL: repeated matches or new trajectory missing (capital→of should be weight 2)';
     END IF;
     IF (SELECT count(*) FROM generation.word_adjacency(ARRAY[w_capital,w_of], NULL, 1)
         WHERE subject_id=w_capital AND object_id=w_of AND witness_id=sent3) <> 2
@@ -370,6 +371,25 @@ BEGIN
         RAISE EXCEPTION 'FAIL: zero generation capacity was promoted to a hidden default';
     END IF;
 
+    -- RLE expansion and overlapping contexts preserve every ordinal match.
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
+                                       trajectory, n_constituents, observed_at)
+    VALUES (public.laplace_hash128_blake3('test/corpus/rle-overlap'), sent3, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_capital, 1, 4, t2flag),
+                public.laplace_mantissa_pack(w_of, 5, 1, t2flag)]),
+            5, now());
+    IF NOT EXISTS (
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital, w_capital], NULL)
+        WHERE object_id = w_capital AND weight = 2 AND sep_id IS NULL)
+       OR NOT EXISTS (
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital, w_capital], NULL)
+        WHERE object_id = w_of AND weight = 1 AND sep_id IS NULL) THEN
+        RAISE EXCEPTION 'FAIL: RLE context lost an overlapping ordinal successor';
+    END IF;
+
     -- Change only this final fixture to a packed run [capital,capital,of].
     -- Logical ordinals come from run prefixes, never the deduplicated index.
     UPDATE laplace.physicalities SET trajectory=public.ST_MakeLine(ARRAY[
@@ -384,7 +404,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: adjacency lost expanded RLE ordinals';
     END IF;
 
-    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
+    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — exact separator ordinals, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
-NOTICE:  ✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
+NOTICE:  ✓ generation_corpus: trajectories are the single source — exact separator ordinals, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
 ROLLBACK;

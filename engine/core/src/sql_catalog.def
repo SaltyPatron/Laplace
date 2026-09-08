@@ -120,3 +120,30 @@ SQL_QUERY("consensus.band_edges", "bytea[],int8,int8",
 
 SQL_QUERY("leaders.arena", "int4,int8",
     "SELECT subject_id,type_id,object_id,rating,rd,witness_count FROM consensus.band_edges($1,NULL,$2)")
+
+SQL_QUERY("conversation.forward_turn", "text,bytea,int4,int4,float8,int4",
+    "SELECT step,entity,stride_used FROM converse.forward_turn($1,$2,$3,$4,$5,$6) ORDER BY step")
+SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz",
+    "SELECT converse.session_append_turns($1,$2,$3)")
+SQL_QUERY("conversation.manifest", "bytea",
+    "SELECT public.ST_AsBinary(p.trajectory) FROM laplace.physicalities p "
+    "WHERE p.id=$1 AND p.type=1 AND p.trajectory IS NOT NULL")
+SQL_QUERY("conversation.lock", "bytea",
+    "SELECT id FROM laplace.entities WHERE id=$1 FOR UPDATE")
+SQL_QUERY("conversation.coordinates", "bytea[]",
+    "SELECT DISTINCT ON (t.ordinal) t.ordinal,e.tier,public.ST_X(p.coord),"
+    "public.ST_Y(p.coord),public.ST_Z(p.coord),public.ST_M(p.coord) "
+    "FROM unnest($1::bytea[]) WITH ORDINALITY t(id,ordinal) "
+    "JOIN laplace.entities e ON e.id=t.id "
+    "JOIN laplace.physicalities p ON p.entity_id=t.id AND p.type=1 ORDER BY t.ordinal,p.id")
+SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8,float8,bytea,int4,timestamptz",
+    "INSERT INTO laplace.physicalities "
+    "(id,entity_id,type,trajectory,coord,hilbert_index,n_constituents,observed_at) "
+    "VALUES ($1,$2,1,public.ST_GeomFromWKB($3),public.ST_MakePoint($4,$5,$6,$7),$8,$9,$10) "
+    "ON CONFLICT(id) DO UPDATE SET trajectory=EXCLUDED.trajectory,coord=EXCLUDED.coord,"
+    "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
+    "observed_at=EXCLUDED.observed_at")
+SQL_QUERY("generation.semantic_presence", "bytea[],bytea[],bytea[]",
+    "SELECT DISTINCT e.id FROM laplace.entities e "
+    "JOIN laplace.physicalities p ON p.entity_id=e.id AND p.type=1 AND p.trajectory IS NOT NULL "
+    "WHERE e.id=ANY($1) AND e.type_id=ANY($2) AND NOT e.id=ANY($3) ORDER BY e.id")

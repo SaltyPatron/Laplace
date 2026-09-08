@@ -21,21 +21,65 @@ typedef struct {
     size_t kid_count;
 } source_node_t;
 
+typedef struct {
+    hash128_t hash;
+    const uint8_t* bytes;
+    size_t length;
+    source_node_t node;
+} raw_entry_t;
+
+typedef struct {
+    raw_entry_t* entries;
+    size_t count, capacity;
+} raw_cache_t;
+
+static int raw_cache_grow(raw_cache_t* cache) {
+    size_t capacity = cache->capacity ? cache->capacity * 2 : 16;
+    if (capacity < cache->capacity || capacity > SIZE_MAX / sizeof(raw_entry_t)) return -1;
+    raw_entry_t* entries = (raw_entry_t*)calloc(capacity, sizeof(*entries));
+    if (!entries) return -1;
+    for (size_t i = 0; i < cache->capacity; ++i) {
+        if (!cache->entries[i].bytes) continue;
+        size_t slot = (size_t)(cache->entries[i].hash.lo & (capacity - 1));
+        while (entries[slot].bytes) slot = (slot + 1) & (capacity - 1);
+        entries[slot] = cache->entries[i];
+    }
+    free(cache->entries);
+    cache->entries = entries;
+    cache->capacity = capacity;
+    return 0;
+}
+
 static int append_tree(laplace_compose_result_t* r, tier_tree_t* tree) {
-    tier_tree_t** p = (tier_tree_t**)realloc(
-        r->source_trees, (r->source_tree_count + 1) * sizeof(*p));
-    if (!p) return -1;
-    r->source_trees = p;
+    if (laplace_compose_reserve_rows(r, 0, 0, r->source_tree_count + 1) != 0) return -1;
     r->source_trees[r->source_tree_count++] = tree;
     return 0;
 }
 
 /* The content witness tree remains the sole owner of lexical decomposition.
  * Its root is also the component that a grammar gap or lexical AST leaf uses. */
-static int raw_component(laplace_compose_result_t* r, const uint8_t* p, size_t n,
+static int raw_component(laplace_compose_result_t* r, raw_cache_t* cache,
+                         const uint8_t* p, size_t n,
                          source_node_t* out) {
+    if (!p || n == 0) return -1;
+    if (cache->count >= cache->capacity / 2 && raw_cache_grow(cache) != 0) return -1;
+    hash128_t hash;
+    hash128_blake3(p, n, &hash);
+    size_t slot = (size_t)(hash.lo & (cache->capacity - 1));
+    while (cache->entries[slot].bytes) {
+        const raw_entry_t* entry = &cache->entries[slot];
+        if (entry->length == n && hash128_equals(&entry->hash, &hash) &&
+            memcmp(entry->bytes, p, n) == 0) {
+            *out = entry->node;
+            return 0;
+        }
+        slot = (slot + 1) & (cache->capacity - 1);
+    }
+
+    // Reuse only byte-identical decomposition within this source. Each occurrence
+    // still receives its own span and ordinal in the enclosing composition.
     tier_tree_t* tree = NULL;
-    if (!p || n == 0 || content_witness_source_tree_build(p, n, &tree) != 0 || !tree)
+    if (content_witness_source_tree_build(p, n, &tree) != 0 || !tree)
         return -1;
     const size_t tree_n = tier_tree_node_count(tree);
     if (tree_n == 0 || tree_n > UINT32_MAX) { tier_tree_free(tree); return -1; }
@@ -50,6 +94,11 @@ static int raw_component(laplace_compose_result_t* r, const uint8_t* p, size_t n
     out->atom = root.atom;
     out->has_atom = root.tier == 0;
     memcpy(out->coord, root.coord, sizeof(out->coord));
+    cache->entries[slot].hash = hash;
+    cache->entries[slot].bytes = p;
+    cache->entries[slot].length = n;
+    cache->entries[slot].node = *out;
+    ++cache->count;
     return 0;
 }
 
@@ -57,18 +106,7 @@ static int raw_component(laplace_compose_result_t* r, const uint8_t* p, size_t n
  * reaches this result through distinct AST representations, retain its lowest
  * observed floor instead of letting reverse traversal choose a higher one. */
 static int push_entity(laplace_compose_result_t* r, const source_node_t* n) {
-    for (size_t i = 0; i < r->entity_count; ++i) {
-        if (!hash128_equals(&r->entities[i].id, &n->id)) continue;
-        if (n->tier < r->entities[i].tier) {
-            r->entities[i].tier = n->tier;
-            hash128_blake3_str("Text", &r->entities[i].type_id);
-        }
-        return 0;
-    }
-    laplace_compose_entity_t* p = (laplace_compose_entity_t*)realloc(
-        r->entities, (r->entity_count + 1) * sizeof(*p));
-    if (!p) return -1;
-    r->entities = p;
+    if (laplace_compose_reserve_rows(r, r->entity_count + 1, 0, 0) != 0) return -1;
     laplace_compose_entity_t* e = &r->entities[r->entity_count++];
     e->id = n->id;
     e->tier = n->tier;
@@ -80,14 +118,8 @@ static int push_entity(laplace_compose_result_t* r, const source_node_t* n) {
     return 0;
 }
 
-static int phys_seen(const laplace_compose_result_t* r, const hash128_t* entity_id) {
-    for (size_t i = 0; i < r->phys_count; ++i)
-        if (hash128_equals(&r->physicalities[i].entity_id, entity_id)) return 1;
-    return 0;
-}
-
 static int push_phys(laplace_compose_result_t* r, const source_node_t* n) {
-    if (n->kid_count < 2 || phys_seen(r, &n->id)) return 0;
+    if (n->kid_count < 2) return 0;
     if (n->kid_count > SIZE_MAX / (4 * sizeof(double)) || n->kid_count > UINT32_MAX)
         return -1;
     double* trajectory = (double*)malloc(n->kid_count * 4 * sizeof(double));
@@ -98,12 +130,11 @@ static int push_phys(laplace_compose_result_t* r, const source_node_t* n) {
         free(trajectory);
         return -1;
     }
-    /* Allocate all owned payload before publishing the realloc result. */
-    laplace_compose_physicality_t* p = (laplace_compose_physicality_t*)realloc(
-        r->physicalities, (r->phys_count + 1) * sizeof(*p));
-    if (!p) { free(trajectory); return -1; }
-    r->physicalities = p;
-    p = &r->physicalities[r->phys_count++];
+    if (laplace_compose_reserve_rows(r, 0, r->phys_count + 1, 0) != 0) {
+        free(trajectory);
+        return -1;
+    }
+    laplace_compose_physicality_t* p = &r->physicalities[r->phys_count++];
     laplace_physicality_id_compute(n->id, 1, &p->id);
     p->entity_id = n->id;
     memcpy(p->coord, n->coord, sizeof(p->coord));
@@ -111,6 +142,27 @@ static int push_phys(laplace_compose_result_t* r, const source_node_t* n) {
     p->trajectory_xyzm = trajectory;
     p->trajectory_n = trajectory_vertices * 4;
     p->n_constituents = n->kid_count;
+    return 0;
+}
+
+/* Exact identity deduplication for both emitted row sets. Every composition
+ * used to scan all preceding entities and physicalities separately. The index
+ * keeps insertion order and the same minimum-tier election without O(n²) scans. */
+static int push_composition(laplace_compose_result_t* r, const source_node_t* n,
+                            uint32_t* index, size_t capacity) {
+    size_t slot = (size_t)(n->id.lo & (capacity - 1));
+    while (index[slot] != UINT32_MAX) {
+        laplace_compose_entity_t* prior = &r->entities[index[slot]];
+        if (hash128_equals(&prior->id, &n->id)) {
+            if (n->tier < prior->tier) prior->tier = n->tier;
+            return 0;
+        }
+        slot = (slot + 1) & (capacity - 1);
+    }
+    if (r->entity_count >= UINT32_MAX) return -1;
+    uint32_t entity = (uint32_t)r->entity_count;
+    if (push_entity(r, n) != 0 || push_phys(r, n) != 0) return -1;
+    index[slot] = entity;
     return 0;
 }
 
@@ -124,23 +176,31 @@ static int child_compare(const void* a, const void* b, void* opaque) {
     return ia < ib ? -1 : ia != ib;
 }
 
-/* qsort_r has incompatible platform signatures. Source AST insertion order is
- * normally source order, but use this small non-allocating insertion sort to
- * make that contract explicit without relying on libc-specific qsort_r. */
+static void sift_children(uint32_t* child, size_t root, size_t n,
+                           const laplace_ast_node_t* ast_nodes) {
+    while (root < n / 2) {
+        size_t larger = root * 2 + 1;
+        if (larger + 1 < n && child_compare(&child[larger], &child[larger + 1],
+                                            (void*)ast_nodes) < 0) ++larger;
+        if (child_compare(&child[root], &child[larger], (void*)ast_nodes) >= 0) break;
+        uint32_t swap = child[root]; child[root] = child[larger]; child[larger] = swap;
+        root = larger;
+    }
+}
+
+/* Keep the linear source-order fast path. Unordered children use bounded
+ * O(n log n), allocation-free sorting, including parsers with wide AST roots. */
 static void sort_children(uint32_t* child, size_t n, const laplace_ast_node_t* ast_nodes) {
-    (void)child_compare;
-    for (size_t i = 1; i < n; ++i) {
-        uint32_t v = child[i];
-        size_t j = i;
-        while (j > 0) {
-            uint32_t prior = child[j - 1];
-            if (ast_nodes[prior].start_byte < ast_nodes[v].start_byte ||
-                (ast_nodes[prior].start_byte == ast_nodes[v].start_byte &&
-                 ast_nodes[prior].end_byte <= ast_nodes[v].end_byte)) break;
-            child[j] = prior;
-            --j;
-        }
-        child[j] = v;
+    size_t ordered = 1;
+    while (ordered < n && child_compare(&child[ordered - 1], &child[ordered],
+                                         (void*)ast_nodes) <= 0) ++ordered;
+    if (ordered >= n) return;
+    for (size_t root = n / 2; root-- > 0;)
+        sift_children(child, root, n, ast_nodes);
+    for (size_t end = n; end > 1;) {
+        --end;
+        uint32_t swap = child[0]; child[0] = child[end]; child[end] = swap;
+        sift_children(child, 0, end, ast_nodes);
     }
 }
 
@@ -216,13 +276,26 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
     uint32_t* child_offsets = (uint32_t*)calloc(count + 1, sizeof(*child_offsets));
     uint32_t* child_cursor = NULL;
     uint32_t* children = NULL;
+    uint32_t* entity_index = NULL;
+    size_t entity_index_capacity = 16;
     size_t span_capacity = 0;
+    raw_cache_t raw_cache = {0};
     if (!r || !nodes || !ast_nodes || !child_counts || !child_offsets) { rc = -3; goto done; }
     r->source_mode = 1;
+    if (count > SIZE_MAX / 2 - 1) { rc = -3; goto done; }
+    while (entity_index_capacity < (count + 1) * 2) {
+        if (entity_index_capacity > SIZE_MAX / 2) { rc = -3; goto done; }
+        entity_index_capacity *= 2;
+    }
+    if (entity_index_capacity > SIZE_MAX / sizeof(*entity_index)) { rc = -3; goto done; }
+    entity_index = (uint32_t*)malloc(entity_index_capacity * sizeof(*entity_index));
+    if (!entity_index) { rc = -3; goto done; }
+    memset(entity_index, 0xFF, entity_index_capacity * sizeof(*entity_index));
     if (count > (SIZE_MAX - 3) / 3) { rc = -3; goto done; }
     span_capacity = count * 3 + 3; /* every AST span plus all lexical gaps/edges */
     r->spans = (laplace_compose_span_t*)calloc(span_capacity, sizeof(*r->spans));
     if (!r->spans) { rc = -3; goto done; }
+    r->span_capacity = span_capacity;
     r->span_index_cap = 64;
     while (r->span_index_cap < span_capacity * 2) r->span_index_cap <<= 1;
     r->span_index = (uint32_t*)malloc(r->span_index_cap * sizeof(*r->span_index));
@@ -264,7 +337,7 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
         const laplace_ast_node_t* node = &ast_nodes[idx];
         const size_t child_count = child_counts[idx];
         if (child_count == 0) {
-            if (raw_component(r, utf8 + node->start_byte,
+            if (raw_component(r, &raw_cache, utf8 + node->start_byte,
                               node->end_byte - node->start_byte, &nodes[idx]) != 0) {
                 rc = -3; goto done;
             }
@@ -290,7 +363,7 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
             }
             if (child_ast->start_byte > cursor) {
                 source_node_t gap = {0};
-                if (raw_component(r, utf8 + cursor, child_ast->start_byte - cursor, &gap) != 0 ||
+                if (raw_component(r, &raw_cache, utf8 + cursor, child_ast->start_byte - cursor, &gap) != 0 ||
                     add_span(r, span_capacity, cursor, child_ast->start_byte, &gap) != 0 ||
                     append_component(&gap, ids, coords, flags, cap, &used) != 0) {
                     free(ids); free(coords); free(flags); rc = -3; goto done;
@@ -303,7 +376,7 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
         }
         if (cursor < node->end_byte) {
             source_node_t gap = {0};
-            if (raw_component(r, utf8 + cursor, node->end_byte - cursor, &gap) != 0 ||
+            if (raw_component(r, &raw_cache, utf8 + cursor, node->end_byte - cursor, &gap) != 0 ||
                 add_span(r, span_capacity, cursor, node->end_byte, &gap) != 0 ||
                 append_component(&gap, ids, coords, flags, cap, &used) != 0) {
                 free(ids); free(coords); free(flags); rc = -3; goto done;
@@ -315,7 +388,7 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
         rc = compose_components(&nodes[idx], ids, coords, flags, used);
         free(coords);
         if (rc != 0) goto done;
-        if (used > 1 && (push_entity(r, &nodes[idx]) != 0 || push_phys(r, &nodes[idx]) != 0)) {
+        if (used > 1 && push_composition(r, &nodes[idx], entity_index, entity_index_capacity) != 0) {
             rc = -3; goto done;
         }
         if (add_span(r, span_capacity, node->start_byte, node->end_byte, &nodes[idx]) != 0) { rc = -3; goto done; }
@@ -328,14 +401,14 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
         hash128_t ids[3]; double coords[12]; uint64_t flags[3]; size_t used = 0;
         if (ast_nodes[0].start_byte != 0) {
             source_node_t lead = {0};
-            if (raw_component(r, utf8, ast_nodes[0].start_byte, &lead) != 0 ||
+            if (raw_component(r, &raw_cache, utf8, ast_nodes[0].start_byte, &lead) != 0 ||
                 add_span(r, span_capacity, 0, ast_nodes[0].start_byte, &lead) != 0 ||
                 append_component(&lead, ids, coords, flags, 3, &used) != 0) { rc = -3; goto done; }
         }
         if (append_component(&nodes[0], ids, coords, flags, 3, &used) != 0) { rc = -3; goto done; }
         if (ast_nodes[0].end_byte != len) {
             source_node_t tail = {0};
-            if (raw_component(r, utf8 + ast_nodes[0].end_byte, len - ast_nodes[0].end_byte, &tail) != 0 ||
+            if (raw_component(r, &raw_cache, utf8 + ast_nodes[0].end_byte, len - ast_nodes[0].end_byte, &tail) != 0 ||
                 add_span(r, span_capacity, ast_nodes[0].end_byte, (uint32_t)len, &tail) != 0 ||
                 append_component(&tail, ids, coords, flags, 3, &used) != 0) { rc = -3; goto done; }
         }
@@ -345,7 +418,7 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
         root.flags = flags;
         root.kid_count = used;
         if (compose_components(&root, ids, coords, flags, used) != 0 ||
-            (used > 1 && (push_entity(r, &root) != 0 || push_phys(r, &root) != 0))) { rc = -3; goto done; }
+            (used > 1 && push_composition(r, &root, entity_index, entity_index_capacity) != 0)) { rc = -3; goto done; }
     }
     r->root_id = root.id;
     memcpy(r->source_root_coord, root.coord, sizeof(root.coord));
@@ -365,6 +438,8 @@ done:
     free(child_offsets);
     free(child_cursor);
     free(children);
+    free(entity_index);
+    free(raw_cache.entries);
     if (r) laplace_compose_result_free(r);
     return rc;
 }

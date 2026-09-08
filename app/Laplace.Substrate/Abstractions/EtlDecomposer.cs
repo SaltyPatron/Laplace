@@ -28,6 +28,8 @@ public sealed class EtlDecomposer : DecomposerMultiFile<GrammarIngestRecord>, II
         (_src.Profile ?? IngestSourceProfile.Wiktionary).EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord =>
         (_src.Profile ?? IngestSourceProfile.Wiktionary).EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile =>
+        _src.Profile ?? IngestSourceProfile.Wiktionary;
     public override IReadOnlyList<string> DeclaredRelations =>
         new EtlRuntimeManifest(_src).Relations;
 

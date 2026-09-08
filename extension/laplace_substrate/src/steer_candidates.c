@@ -1,113 +1,37 @@
-/*
- * steer_candidates.c — S7 STEER (docs/specs/36 §3).
- *
- *   generation.steer_candidates(candidates bytea[], frontier bytea[])
- *     -> TABLE(candidate bytea, steer float8, edges bigint)
- *
- * THE STAGE THE SPEC SAYS NOBODY WROTE. S6 proposes continuations from sequence
- * (physicalities.trajectory); S7 re-ranks them by rated consensus mass reaching
- * the LIVE frontier S4 is standing on; S8 samples with RD as temperature.
- * "Sequence proposes, meaning steers" is already in converse_walk's header, but
- * that lane steers by a weight fixed BEFORE the walk begins — every token of a
- * gathered sentence carries its source sentence's constant (50 for the concept's
- * own gloss, 40 for containers of the topic word). A constant per source is not
- * steering; it is a prior. This makes it live: the frontier is passed in per
- * emitted token, so the same candidate scores differently depending on where the
- * walk has arrived.
- *
- * ONE SET-BASED READ, NOT A PROBE PER CANDIDATE. Both directions are needed
- * (consensus is stored once per (subject, type, object), and a candidate may sit
- * on either end), and a both-directions OR join is the shape the read-side law
- * sends to C. It is done here as two indexed arms UNION ALL'd in a single
- * prepared statement. The indexed frontier read is independent of candidate
- * count; the native candidate hash filters its result in linear time. Semantic
- * proposals are not limited to the sequence beam.
- *
- * SCORING IS walk_score.h, SHARED WITH walk_branches. S7 must not invent a second
- * ranking: if steering used a different weight than retrieval, the two halves of
- * the forward pass would disagree about what the graph says, which is the exact
- * condition that lets generate() and converse.chat() answer differently today.
- *
- * ZERO IS NOT ABSENCE. A candidate with no consensus edge to the frontier returns
- * steer 0.0 with edges 0 — unattested, distinct from a candidate whose edges sum
- * to zero (edges > 0). Collapsing those is the EXISTS error the substrate law
- * calls out, and the caller needs the distinction to decide between backing off
- * and dead-ending.
- */
+/* S7: typed standing over the intersection of candidates and the live frontier.
+ * PostgreSQL owns cells and MVCC; consensus_scan owns native batch access;
+ * walk_score.h owns edge scoring. SQL only binds operands and returns rows. */
 #include "postgres.h"
-
+#include <math.h>
 #include "catalog/pg_type.h"
-#include "executor/spi.h"
 #include "funcapi.h"
-#include "miscadmin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
-
-#include "laplace/core/hash128.h"
-#include "spi_common.h"
+#include "steer_candidates.h"
 #include "walk_score.h"
 #include "relation_symmetry.h"
 
-#include <math.h>       /* log1p — the coverage fold below */
-
 PG_FUNCTION_INFO_V1(pg_laplace_steer_candidates);
 
-typedef struct SteerEntry
+typedef struct PairEntry { char key[32]; double score; } PairEntry;
+typedef struct SteeringState
 {
-    char   key[16];      /* candidate id — HASH_BLOBS keysize */
-    double steer;        /* coverage-weighted: sum of log1p over DISTINCT frontier members */
-    int64  edges;        /* raw edge count — 0 still means "no attested path", see header */
-    int64  covered;      /* distinct frontier members reached */
-} SteerEntry;
-
-/*
- * One row per (candidate, frontier member). Edge scores accumulate here FIRST so that
- * many edges into a single frontier member fold into one member-level score before the
- * candidate total is formed. Without this stage `edges` is the only breadth signal, and
- * it counts EDGES not MEMBERS — five edges into `france` alone is indistinguishable from
- * edges spread across the whole frontier, which is the distinction the ranking needs.
- */
-typedef struct PairEntry
-{
-    char   key[32];      /* candidate id ‖ frontier id */
-    double score;
-} PairEntry;
-
-static SPIPlanPtr steer_plan = NULL;
-static SPIPlanPtr typed_steer_plan = NULL;
-static const char *steer_query =
-    "SELECT e.cand, e.front, e.type_id, e.rating, e.rd FROM ("
-    "  SELECT c.subject_id AS cand, c.object_id AS front,"
-    "         c.type_id, c.rating, c.rd"
-    "    FROM laplace.consensus c"
-    "   WHERE c.object_id = ANY($1)"
-    "  UNION ALL"
-    "  SELECT c.object_id, c.subject_id,"
-    "         c.type_id, c.rating, c.rd"
-    "    FROM laplace.consensus c"
-    "   WHERE c.subject_id = ANY($1) AND c.object_id IS NOT NULL"
-    ") e";
-static const char *typed_steer_query =
-    "SELECT c.subject_id, c.object_id, c.type_id, c.rating, c.rd"
-    " FROM laplace.consensus c WHERE c.object_id = ANY($1)"
-    " AND c.type_id = ANY($2) AND c.type_id = ANY($3)"
-    " UNION ALL SELECT c.object_id, c.subject_id, c.type_id, c.rating, c.rd"
-    " FROM laplace.consensus c WHERE c.subject_id = ANY($1)"
-    " AND c.object_id IS NOT NULL AND c.type_id = ANY($2)";
+    HTAB *candidates;
+    HTAB *pairs;
+    bool reverse;
+} SteeringState;
 
 static void
 validate_id_array(ArrayType *array, const char *name, bool allow_nulls)
 {
     Datum *elems;
-    bool  *nulls;
-    int    count;
-
-    if (ARR_NDIM(array) != 1 || ARR_ELEMTYPE(array) != BYTEAOID)
+    bool *nulls;
+    int count;
+    if (ARR_NDIM(array) > 1 || ARR_ELEMTYPE(array) != BYTEAOID)
         ereport(ERROR, (errmsg("steer_candidates: %s must be a 1-D bytea array", name)));
-    deconstruct_array(array, BYTEAOID, -1, false, TYPALIGN_INT,
-                      &elems, &nulls, &count);
+    deconstruct_array(array, BYTEAOID, -1, false, TYPALIGN_INT, &elems, &nulls, &count);
     for (int i = 0; i < count; ++i)
     {
         if (nulls[i])
@@ -123,243 +47,147 @@ validate_id_array(ArrayType *array, const char *name, bool allow_nulls)
     pfree(nulls);
 }
 
+static void
+steer_cell(const LaplaceConsensusRow *row, void *opaque)
+{
+    SteeringState *state = opaque;
+    const hash128_t *candidate = state->reverse ? &row->subject : &row->object;
+    const hash128_t *frontier = state->reverse ? &row->object : &row->subject;
+    LaplaceSteeredCandidate *owner;
+    PairEntry *pair;
+    char key[32];
+    bool found;
+    if (row->object_is_null) return;
+    if (state->reverse)
+    {
+        const laplace_relation_def_t *def = NULL;
+        if (laplace_relation_lookup(&row->type, &def) != 0 || def == NULL ||
+            def->symmetry != LAPLACE_REL_SYMMETRY_SYMMETRIC) return;
+    }
+    owner = hash_search(state->candidates, candidate, HASH_FIND, NULL);
+    if (owner == NULL) return;
+    owner->edges++;
+    memcpy(key, candidate, 16);
+    memcpy(key + 16, frontier, 16);
+    pair = hash_search(state->pairs, key, HASH_ENTER, &found);
+    if (!found)
+    {
+        pair->score = 0.0;
+        owner->covered++;
+    }
+    pair->score += walk_edge_score(row->type, row->rating, row->rd);
+}
+
+static int
+steer_id_compare(const void *left, const void *right)
+{
+    const LaplaceSteeredCandidate *a = left, *b = right;
+    return memcmp(&a->id, &b->id, sizeof(hash128_t));
+}
+
+LaplaceSteeredCandidate *
+laplace_steer_candidates(ArrayType *candidates, ArrayType *frontier,
+                         ArrayType *types, int *count,
+                         LaplaceConsensusScanStats *stats)
+{
+    HASHCTL ctl = {0};
+    SteeringState state = {0};
+    Datum *elems;
+    bool *nulls;
+    int n;
+    HASH_SEQ_STATUS seq;
+    PairEntry *pair;
+    LaplaceSteeredCandidate *owner, *result;
+    long entries;
+    validate_id_array(candidates, "candidates", true);
+    validate_id_array(frontier, "frontier", true);
+    if (types != NULL) validate_id_array(types, "relation types", false);
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(LaplaceSteeredCandidate);
+    ctl.hcxt = CurrentMemoryContext;
+    state.candidates = hash_create("steered candidates", 256, &ctl,
+                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    ctl.keysize = 32;
+    ctl.entrysize = sizeof(PairEntry);
+    state.pairs = hash_create("steering pairs", 256, &ctl,
+                             HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    deconstruct_array(candidates, BYTEAOID, -1, false, TYPALIGN_INT, &elems, &nulls, &n);
+    for (int i = 0; i < n; ++i)
+    {
+        bool found;
+        if (nulls[i]) continue;
+        owner = hash_search(state.candidates,
+            VARDATA_ANY(DatumGetByteaPP(elems[i])), HASH_ENTER, &found);
+        if (!found)
+        {
+            owner->steer = 0.0;
+            owner->edges = 0;
+            owner->covered = 0;
+        }
+    }
+    pfree(elems);
+    pfree(nulls);
+    /* Omitting a family restriction selects all families; it does not make
+     * directed claims symmetric. Only canonical symmetric relations admit
+     * reverse traversal, including the default forward-pass invocation. */
+    laplace_consensus_scan(frontier, candidates, types, steer_cell, &state, stats);
+    state.reverse = true;
+    ArrayType *reverse_types = laplace_symmetric_relation_types_in(types);
+    laplace_consensus_scan(candidates, frontier, reverse_types, steer_cell, &state, stats);
+    if (types != NULL) pfree(reverse_types);
+    hash_seq_init(&seq, state.pairs);
+    while ((pair = hash_seq_search(&seq)) != NULL)
+    {
+        owner = hash_search(state.candidates, pair->key, HASH_FIND, NULL);
+        if (owner != NULL) owner->steer += pair->score;
+    }
+    entries = hash_get_num_entries(state.candidates);
+    if (entries > INT_MAX || (Size) entries > MaxAllocSize / sizeof(*result))
+        ereport(ERROR, (errmsg("steer_candidates: result exceeds PostgreSQL allocation capacity")));
+    *count = (int) entries;
+    result = palloc(sizeof(*result) * Max(*count, 1));
+    n = 0;
+    hash_seq_init(&seq, state.candidates);
+    while ((owner = hash_seq_search(&seq)) != NULL)
+    {
+        /* Preserve the existing S7 score while replacing storage access.
+         * Unattested and refuted candidates stay distinct through edges. */
+        if (owner->covered > 1 && owner->steer > 0.0)
+            owner->steer *= 1.0 + log((double) owner->covered);
+        result[n++] = *owner;
+    }
+    qsort(result, n, sizeof(*result), steer_id_compare);
+    hash_destroy(state.pairs);
+    hash_destroy(state.candidates);
+    return result;
+}
+
 Datum
 pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
 {
-    ArrayType   *cand_arr, *front_arr;
-    HASHCTL      hctl, phctl;
-    HTAB        *acc, *pairs;
-    Datum       *cand_elems;
-    bool        *cand_nulls;
-    int          n_cand;
-    Datum        args[3];
-    bool         typed = PG_NARGS() > 2 && !PG_ARGISNULL(2);
-    ArrayType   *relation_types = typed ? PG_GETARG_ARRAYTYPE_P(2) : NULL;
-
+    ReturnSetInfo *rsinfo;
+    LaplaceSteeredCandidate *rows;
+    int count;
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         ereport(ERROR, (errmsg("steer_candidates: candidates and frontier must not be NULL")));
-
-    cand_arr  = PG_GETARG_ARRAYTYPE_P(0);
-    front_arr = PG_GETARG_ARRAYTYPE_P(1);
-
-    validate_id_array(cand_arr, "candidates", true);
-    validate_id_array(front_arr, "frontier", true);
-    if (relation_types != NULL)
-        validate_id_array(relation_types, "relation types", false);
-
     InitMaterializedSRF(fcinfo, 0);
-
-    if (SPI_connect() != SPI_OK_CONNECT)
-        elog(ERROR, "steer_candidates: SPI_connect failed");
-
-    memset(&hctl, 0, sizeof(hctl));
-    hctl.keysize   = 16;
-    hctl.entrysize = sizeof(SteerEntry);
-    hctl.hcxt      = CurrentMemoryContext;
-    acc = hash_create("steer_candidates acc", 256, &hctl,
-                      HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-
-    memset(&phctl, 0, sizeof(phctl));
-    phctl.keysize   = 32;          /* candidate ‖ frontier member */
-    phctl.entrysize = sizeof(PairEntry);
-    phctl.hcxt      = CurrentMemoryContext;
-    pairs = hash_create("steer_candidates pairs", 1024, &phctl,
-                        HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-
-    /*
-     * Seed every candidate at zero FIRST, so a candidate the frontier never
-     * reaches is reported as steer 0.0 / edges 0 rather than omitted. An omitted
-     * row would make "unreachable" indistinguishable from "not asked about".
-     */
-    deconstruct_array(cand_arr, BYTEAOID, -1, false, TYPALIGN_INT,
-                      &cand_elems, &cand_nulls, &n_cand);
-    for (int i = 0; i < n_cand; i++)
+    rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    rows = laplace_steer_candidates(PG_GETARG_ARRAYTYPE_P(0), PG_GETARG_ARRAYTYPE_P(1),
+        PG_NARGS() > 2 && !PG_ARGISNULL(2) ? PG_GETARG_ARRAYTYPE_P(2) : NULL, &count, NULL);
+    for (int i = 0; i < count; ++i)
     {
-        bytea      *b;
-        SteerEntry *e;
-        bool        found;
-
-        if (cand_nulls[i])
-            continue;
-        b = DatumGetByteaPP(cand_elems[i]);
-        if (VARSIZE_ANY_EXHDR(b) != 16)
-            ereport(ERROR, (errmsg("steer_candidates: candidate ids must be 16 bytes")));
-        e = (SteerEntry *) hash_search(acc, VARDATA_ANY(b), HASH_ENTER, &found);
-        if (!found)
-        {
-            e->steer = 0.0;
-            e->edges = 0;
-            e->covered = 0;
-        }
+        Datum values[4];
+        bool nulls[4] = {false, false, false, false};
+        bytea *id = palloc(VARHDRSZ + 16);
+        SET_VARSIZE(id, VARHDRSZ + 16);
+        memcpy(VARDATA(id), &rows[i].id, 16);
+        values[0] = PointerGetDatum(id);
+        values[1] = Float8GetDatum(rows[i].steer);
+        values[2] = Int64GetDatum(rows[i].edges);
+        values[3] = Int64GetDatum(rows[i].covered);
+        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+        pfree(id);
     }
-
-    args[0] = PointerGetDatum(front_arr);
-    SPIPlanPtr *selected_plan = typed ? &typed_steer_plan : &steer_plan;
-    if (*selected_plan == NULL)
-    {
-        Oid argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(typed ? typed_steer_query : steer_query,
-                                            typed ? 3 : 1, argtypes,
-                                            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL || SPI_keepplan(plan) != 0)
-            elog(ERROR, "steer_candidates: retained frontier plan failed");
-        *selected_plan = plan;
-    }
-    if (typed)
-    {
-        args[1] = PointerGetDatum(relation_types);
-        args[2] = PointerGetDatum(laplace_symmetric_relation_types());
-    }
-    {
-        Portal portal = SPI_cursor_open(NULL, *selected_plan, args, NULL, true);
-        uint64 scanned = 0;
-
-        if (portal == NULL)
-            elog(ERROR, "steer_candidates: edge cursor open failed: %s",
-                 SPI_result_code_string(SPI_result));
-        for (;;)
-        {
-            SPI_cursor_fetch(portal, true, 50000);
-            if (SPI_processed == 0)
-                break;
-            for (uint64 r = 0; r < SPI_processed; r++)
-            {
-                HeapTuple   tup = SPI_tuptable->vals[r];
-                TupleDesc   td  = SPI_tuptable->tupdesc;
-                bool        isnull;
-                Datum       cd = SPI_getbinval(tup, td, 1, &isnull);
-                bytea      *cb;
-                Datum       fd;
-                bytea      *fb;
-                Datum       tdv;
-                bytea      *tb;
-                Datum       rating_d;
-                Datum       rd_d;
-                int64       rating;
-                int64       rd;
-                hash128_t   type_id;
-                SteerEntry *e;
-                PairEntry  *p;
-                char        pairkey[32];
-                bool        found;
-
-                if (isnull) continue;
-                cb = DatumGetByteaPP(cd);
-                fd = SPI_getbinval(tup, td, 2, &isnull);
-                if (isnull) continue;
-                fb = DatumGetByteaPP(fd);
-                tdv = SPI_getbinval(tup, td, 3, &isnull);
-                if (isnull) continue;
-                tb = DatumGetByteaPP(tdv);
-                rating_d = SPI_getbinval(tup, td, 4, &isnull);
-                if (isnull) continue;
-                rating = DatumGetInt64(rating_d);
-                rd_d = SPI_getbinval(tup, td, 5, &isnull);
-                if (isnull) continue;
-                rd = DatumGetInt64(rd_d);
-                if (VARSIZE_ANY_EXHDR(cb) != 16 || VARSIZE_ANY_EXHDR(fb) != 16
-                    || VARSIZE_ANY_EXHDR(tb) != 16)
-                    continue;
-
-                memcpy(&type_id, VARDATA_ANY(tb), 16);
-                e = (SteerEntry *) hash_search(acc, VARDATA_ANY(cb), HASH_FIND, &found);
-                if (!found)
-                    continue;
-                e->edges += 1;
-                memcpy(pairkey, VARDATA_ANY(cb), 16);
-                memcpy(pairkey + 16, VARDATA_ANY(fb), 16);
-                p = (PairEntry *) hash_search(pairs, pairkey, HASH_ENTER, &found);
-                if (!found)
-                {
-                    p->score = 0.0;
-                    e->covered += 1;
-                }
-                p->score += walk_edge_score(type_id, rating, rd);
-                if (((scanned + r) & 0xFFFF) == 0)
-                    CHECK_FOR_INTERRUPTS();
-            }
-            scanned += SPI_processed;
-            SPI_freetuptable(SPI_tuptable);
-            SPI_tuptable = NULL;
-        }
-        if (SPI_tuptable != NULL)
-        {
-            SPI_freetuptable(SPI_tuptable);
-            SPI_tuptable = NULL;
-        }
-        SPI_cursor_close(portal);
-    }
-
-    /*
-     * Fold member scores into candidate totals, then apply the coverage bonus.
-     *
-     * SCALE IS PRESERVED ON PURPOSE. The caller combines as eff = weight * steer
-     * (trajectory_generate.c, S7 combine). Squashing every steer through log1p would have
-     * cut a raw sum of 40 to ~3.7 and quietly handed the ranking to sequence weight — a
-     * global weakening of steering dressed up as a coverage fix. So the SUM carries through
-     * unchanged and coverage rides as a multiplier: (1 + ln(covered)).
-     *
-     * That is the intersection preference, numerically. Lyon with one strong edge to
-     * `france` (sum 10, covered 1) scores 10. Paris with moderate edges to `france` AND
-     * `capital` (sum 8, covered 2) scores 8 * 1.69 = 13.5. Paris wins on breadth without
-     * either candidate's mass being rescaled.
-     *
-     * A NEGATIVE total is never amplified: refuted mass keeps its magnitude so it can still
-     * sink a candidate, and multiplying it by the coverage bonus would make "refuted by
-     * several frontier members" look further from zero than the fold actually attested.
-     *
-     * acc is keyed on 16 bytes and pairkey's first 16 ARE the candidate id, so HASH_BLOBS
-     * compares exactly the candidate half — no separate key buffer needed.
-     */
-    {
-        HASH_SEQ_STATUS pseq;
-        PairEntry      *p;
-        HASH_SEQ_STATUS cseq;
-        SteerEntry     *ce;
-        bool            hit;
-
-        hash_seq_init(&pseq, pairs);
-        while ((p = (PairEntry *) hash_seq_search(&pseq)) != NULL)
-        {
-            SteerEntry *owner = (SteerEntry *) hash_search(acc, p->key, HASH_FIND, &hit);
-
-            if (!hit)
-                continue;
-            owner->steer += p->score;
-        }
-
-        hash_seq_init(&cseq, acc);
-        while ((ce = (SteerEntry *) hash_seq_search(&cseq)) != NULL)
-        {
-            if (ce->covered > 1 && ce->steer > 0.0)
-                ce->steer *= 1.0 + log((double) ce->covered);
-        }
-    }
-
-    {
-        ReturnSetInfo   *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-        HASH_SEQ_STATUS  seq;
-        SteerEntry      *e;
-
-        hash_seq_init(&seq, acc);
-        while ((e = (SteerEntry *) hash_seq_search(&seq)) != NULL)
-        {
-            Datum  values[4];
-            bool   nulls[4] = { false, false, false, false };
-            bytea *idb = (bytea *) palloc(VARHDRSZ + 16);
-
-            SET_VARSIZE(idb, VARHDRSZ + 16);
-            memcpy(VARDATA(idb), e->key, 16);
-            values[0] = PointerGetDatum(idb);
-            values[1] = Float8GetDatum(e->steer);
-            values[2] = Int64GetDatum(e->edges);
-            values[3] = Int64GetDatum(e->covered);
-            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
-        }
-    }
-
-    hash_destroy(pairs);
-    hash_destroy(acc);
-    SPI_finish();
+    pfree(rows);
     return (Datum) 0;
 }

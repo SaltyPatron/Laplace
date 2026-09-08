@@ -8,6 +8,8 @@
 #include <vector>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <map>
 
 #include "laplace/core/grammar_registry.h"
 #include "laplace/core/grammar_decomposer.h"
@@ -498,6 +500,56 @@ TEST(GrammarSourceCompose, SingletonAstRootHasNativePlacementWithoutGrammarWrapp
     EXPECT_TRUE(std::isfinite(coord[0]));
     laplace_compose_result_free(result);
     laplace_ast_free(ast);
+}
+
+TEST(GrammarSourceCompose, RepositoryCSourceSharesLexicalTreesAndPreservesEveryLeafSpan) {
+    const auto path = std::filesystem::path(__FILE__).parent_path().parent_path()
+        / "src" / "tier_tree.c";
+    std::ifstream input(path, std::ios::binary);
+    ASSERT_TRUE(input.is_open()) << path;
+    const std::string source((std::istreambuf_iterator<char>(input)),
+                              std::istreambuf_iterator<char>());
+    ASSERT_FALSE(source.empty());
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("c");
+    ASSERT_NE(recipe, nullptr);
+    laplace_ast_t* ast = nullptr;
+    ASSERT_EQ(laplace_grammar_parse(reinterpret_cast<const uint8_t*>(source.data()),
+                                     source.size(), recipe, &ast), 0);
+    std::unique_ptr<laplace_ast_t, decltype(&laplace_ast_free)> ast_owner(ast, laplace_ast_free);
+    laplace_compose_result_t* result = nullptr;
+    ASSERT_EQ(laplace_grammar_source_compose(reinterpret_cast<const uint8_t*>(source.data()),
+                                             source.size(), ast, "c", &result), 0);
+    std::unique_ptr<laplace_compose_result_t, decltype(&laplace_compose_result_free)>
+        result_owner(result, laplace_compose_result_free);
+
+    const size_t count = laplace_ast_node_count(ast);
+    std::vector<laplace_ast_node_t> nodes(count);
+    std::vector<bool> has_children(count, false);
+    for (size_t i = 0; i < count; ++i) {
+        ASSERT_EQ(laplace_ast_get_node(ast, i, &nodes[i]), 0);
+        if (nodes[i].parent != LAPLACE_AST_ROOT) has_children[nodes[i].parent] = true;
+    }
+    size_t leaves = 0;
+    std::map<std::string, hash128_t> lexical_roots;
+    for (size_t i = 0; i < count; ++i) {
+        hash128_t actual;
+        ASSERT_EQ(laplace_compose_span_lookup(result, nodes[i].start_byte,
+                                                nodes[i].end_byte, &actual), 0);
+        if (has_children[i]) continue;
+        ++leaves;
+        std::string bytes = source.substr(nodes[i].start_byte,
+                                            nodes[i].end_byte - nodes[i].start_byte);
+        auto [entry, added] = lexical_roots.try_emplace(bytes);
+        if (added)
+            ASSERT_EQ(laplace_content_source_root_id(reinterpret_cast<const uint8_t*>(bytes.data()),
+                                                       bytes.size(), &entry->second), 0);
+        EXPECT_TRUE(hash128_equals(&actual, &entry->second)) << "AST leaf " << i;
+    }
+    // The real file contains repeated identifiers and punctuation. Shared lexical
+    // decomposition must reduce retained trees without dropping occurrence spans.
+    ASSERT_GT(leaves, lexical_roots.size());
+    EXPECT_LT(result->source_tree_count, leaves);
+    EXPECT_GE(result->span_count, count);
 }
 
 TEST(GrammarSourceCompose, DeepSourceFloorsRoundTripPastLegacyFiveBitTier) {

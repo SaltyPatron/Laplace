@@ -5,18 +5,29 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class NativeAttestation
 {
-    public static unsafe List<int> AgreementIndices(ReadOnlySpan<short> left, ReadOnlySpan<short> right)
+    public static unsafe List<int> CorroboratedIndexes(ReadOnlySpan<short> left, ReadOnlySpan<short> right)
     {
-        if (left.Length != right.Length) throw new ArgumentException("Witness arrays must have equal lengths.");
-        var indices = new int[left.Length];
-        nuint written = 0;
-        int rc;
+        if (left.Length != right.Length) throw new ArgumentException("Candidate outcome arrays must align.");
+        byte[] admitted = new byte[left.Length];
         fixed (short* l = left)
         fixed (short* r = right)
-        fixed (int* output = indices)
-            rc = NativeInterop.AttestationAgreementIndices(l, r, (nuint)left.Length, output, (nuint)indices.Length, &written);
-        if (rc != 0) throw new ArgumentException("Native witness agreement rejected the input.");
-        return new List<int>(indices.AsSpan(0, checked((int)written)).ToArray());
+        fixed (byte* output = admitted)
+        {
+            int rc = NativeInterop.AttestationCorroborationMask(l, r, (nuint)left.Length, output);
+            if (rc != 0) throw new InvalidOperationException($"native corroboration admission failed: {rc}");
+        }
+        var indexes = new List<int>();
+        for (int i = 0; i < admitted.Length; ++i)
+            if (admitted[i] != 0) indexes.Add(i);
+        return indexes;
+    }
+
+    public static unsafe (long Rating, long Rd) WitnessParameters(Hash128 typeId, double sourceTrust)
+    {
+        long rating, rd;
+        int rc = NativeInterop.AttestationResolvedWitnessParameters(&typeId, sourceTrust, &rating, &rd);
+        if (rc != 0) throw new InvalidOperationException($"native witness parameters failed: {rc}");
+        return (rating, rd);
     }
 
     public static AttestationRow Categorical(
@@ -127,6 +138,8 @@ public static class NativeAttestation
         AttestationOutcome outcome,
         long observationCount = 1)
     {
+        if (!Enum.IsDefined(outcome))
+            throw new ArgumentOutOfRangeException(nameof(outcome));
         unsafe
         {
             var staged = default(AttestationStagedNative);

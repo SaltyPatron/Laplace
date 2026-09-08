@@ -34,6 +34,7 @@ void         tier_tree_free(tier_tree_t* tree);
 
 size_t tier_tree_node_count(const tier_tree_t* tree);
 size_t tier_tree_capacity(const tier_tree_t* tree);
+size_t tier_tree_resident_bytes(const tier_tree_t* tree);
 
 uint32_t tier_tree_add_leaf(
     tier_tree_t* tree,

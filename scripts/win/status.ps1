@@ -70,6 +70,11 @@ $pairs = @(
     @{ src = Join-Path $engineBuild 'core\perfcache\laplace_t0_perfcache.bin'; dst = Join-Path $deployShare 'laplace_t0_perfcache.bin'; label = 'laplace_t0_perfcache.bin' },
     @{ src = Join-Path $engineBuild 'core\perfcache\laplace_highway_perfcache.bin'; dst = Join-Path $deployShare 'laplace_highway_perfcache.bin'; label = 'laplace_highway_perfcache.bin' }
 )
+$executionManifest = Join-Path $extBuild 'laplace_substrate\laplace_execution_module.txt'
+if (Test-Path $executionManifest) {
+    $executionName = (Get-Content $executionManifest -Raw).Trim()
+    $pairs += @{ src = Join-Path $extBuild "laplace_substrate\$executionName.dll"; dst = Join-Path $deployLib "$executionName.dll"; label = "$executionName.dll" }
+} else { Write-Host 'Execution module manifest NOT BUILT' }
 foreach ($pair in $pairs) {
     $s = $pair.src
     $d = $pair.dst

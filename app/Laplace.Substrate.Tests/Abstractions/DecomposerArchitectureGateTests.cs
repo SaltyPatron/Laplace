@@ -13,6 +13,18 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// </summary>
 public sealed class DecomposerArchitectureGateTests
 {
+    [Fact]
+    public void ManifestDecomposer_RetainsCompleteSourceMemoryProfile()
+    {
+        IDecomposer source = new Laplace.Decomposers.UD.UDDecomposer();
+        Assert.Same(IngestSourceProfile.UdSentence, source.SizingProfile);
+        var profile = source.SizingProfile;
+        var config = IngestPipelineDefaults.Compose(
+            source.SourceId, "profile-propagation", DecomposerOptions.Default, null, profile);
+        Assert.Same(profile, config.WorkingSetProfile);
+        Assert.Equal(80_000, config.WorkingSetProfile!.ResidentBytesPerComposeUnit);
+    }
+
     private static readonly Regex InlineSql = new(
         @"\bSELECT\s+",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);

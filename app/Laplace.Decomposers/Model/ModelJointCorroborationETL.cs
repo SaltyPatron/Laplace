@@ -127,7 +127,7 @@ public sealed class ModelJointCorroborationETL
             ct.ThrowIfCancellationRequested();
             int count = Math.Min(_pageSize, proposals.Count - begin);
             var page = proposals.GetRange(begin, count);
-            var admitted = NativeAttestation.AgreementIndices(
+            var admitted = NativeAttestation.CorroboratedIndexes(
                 leftVote.Outcomes.AsSpan(begin, count), rightVote.Outcomes.AsSpan(begin, count));
             if (admitted.Count == 0) continue;
 
@@ -191,6 +191,7 @@ public sealed class ModelJointCorroborationETL
         var contexts = new List<Hash128>();
         var opponentRatings = new List<long>();
         var opponentRds = new List<long>();
+        var witness = NativeAttestation.WitnessParameters(targetType, sourceTrust);
         short[]? firstCircuitOutcomes = null;
         foreach (ModelCircuitDescriptor circuit in estate.Enumerate(targetType))
         {
@@ -198,11 +199,8 @@ public sealed class ModelJointCorroborationETL
             circuitScores.Add(scores);
             firstCircuitOutcomes ??= outcomes;
             contexts.Add(circuit.ContextId);
-            AttestationRow prototype = NativeAttestation.CategoricalResolvedOutcome(
-                default, targetType, default(Hash128), source, circuit.ContextId,
-                sourceTrust, (AttestationOutcome)outcomes[0]);
-            opponentRatings.Add(prototype.OpponentRatingFp1e9);
-            opponentRds.Add(prototype.OpponentRdFp1e9);
+            opponentRatings.Add(witness.Rating);
+            opponentRds.Add(witness.Rd);
             PeakTransientScoreBytes = Math.Max(
                 PeakTransientScoreBytes,
                 checked((long)circuitScores.Count * rows.Length * sizeof(long)));

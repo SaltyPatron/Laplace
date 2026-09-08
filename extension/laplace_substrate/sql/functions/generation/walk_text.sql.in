@@ -7,44 +7,33 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    -- One prompt analysis per forward pass. The old shape called prompt_state
-    -- here, then forward_frontier(text), which called prompt_state +
-    -- prompt_coherence and then forward_route_trace(text), which called both
-    -- again. On the seeded estate that means paying the same decomposition /
-    -- sense election repeatedly before S6 emits one constituent.
-    --
-    -- Keep the operands distinct: ctx is the ordered request trajectory S6
-    -- proposes from; seeds are the deduped prompt ids + witnessed senses used to
-    -- route S7's semantic frontier. No routed neighbor is appended to ctx.
-    WITH prompt_state AS MATERIALIZED (
-        SELECT p.ord, p.id
-        FROM converse.prompt_state(p_prompt) p
-        WHERE p.id IS NOT NULL
-    ), prompt_coherence AS MATERIALIZED (
-        SELECT c.ord, c.tok, c.synset_id, c.rel_type_id
-        FROM converse.prompt_coherence(p_prompt) c
-        WHERE c.synset_id IS NOT NULL
+    -- The observation root and its complete canonical tree precede routing.
+    -- No case-popularity substitution, named-English relation extraction or
+    -- dictionary-membership filter is allowed to change this operand.
+    WITH observation AS MATERIALIZED (
+        SELECT * FROM converse.prompt_tree(p_prompt)
+    ), input_constituents AS MATERIALIZED (
+        -- Select the complete lexical boundary from the canonical tree. A
+        -- single-codepoint word, punctuation or whitespace can collapse below
+        -- tier 2; it still occupies its exact place in the input trajectory.
+        SELECT p.*
+        FROM observation p
+        LEFT JOIN observation parent ON parent.node_index = p.parent_index
+        WHERE p.tier <= 2 AND (parent.node_index IS NULL OR parent.tier > 2)
     ), ctx AS MATERIALIZED (
-        SELECT array_agg(p.id ORDER BY p.ord) AS ids
-        FROM prompt_state p
-    ), resolved AS MATERIALIZED (
-        -- A named relation has explicit operands from the existing joint
-        -- election. Function words and relation namers remain ordered context;
-        -- they do not become alternative subjects of that requested operation.
-        SELECT p.ord, p.id AS entity FROM prompt_state p
-        WHERE NOT EXISTS (SELECT 1 FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL)
-        UNION ALL
-        SELECT c.ord, c.synset_id FROM prompt_coherence c
-        WHERE c.rel_type_id IS NOT NULL OR NOT EXISTS (
-            SELECT 1 FROM prompt_coherence named WHERE named.rel_type_id IS NOT NULL)
-        UNION ALL
-        SELECT c.ord, c.tok FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL
-    ), seeds AS MATERIALIZED (
-        SELECT r.entity, min(r.ord) AS ord
-        FROM resolved r
-        GROUP BY r.entity
+        SELECT array_agg(p.id ORDER BY p.byte_offset, p.node_index) AS ids
+        FROM input_constituents p
     ), seed_array AS MATERIALIZED (
-        SELECT ARRAY(SELECT s.entity FROM seeds s ORDER BY s.ord, s.entity) AS ids
+        SELECT ARRAY(
+            SELECT n.id FROM (
+                SELECT p.root_id AS id FROM observation p
+                UNION
+                -- Route compositions at their own floor. Descendants already
+                -- represented by a word do not become independent graph seeds.
+                SELECT p.id FROM observation p WHERE p.tier >= 2
+                UNION
+                SELECT p.id FROM input_constituents p
+            ) n ORDER BY n.id) AS ids
     ), frontier AS MATERIALIZED (
         SELECT array_agg(x.entity ORDER BY x.hop, x.entity) AS ids
         FROM (
@@ -67,8 +56,7 @@ BEGIN ATOMIC
                      laplace.hash128_lo(public.laplace_hash128_blake3(
                          convert_to(p_prompt, 'UTF8')))),
                  frontier.ids,
-                 (SELECT array_agg(DISTINCT c.rel_type_id)
-                  FROM prompt_coherence c WHERE c.rel_type_id IS NOT NULL)) g
+                 NULL::bytea[], p_fanout) g
         WHERE ctx.ids IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,
@@ -84,6 +72,43 @@ BEGIN ATOMIC
            w.stride_used
     FROM (SELECT w.*, row_number() OVER (ORDER BY step) AS rn FROM walked w) w
     CROSS JOIN txt t;
+END;
+
+CREATE OR REPLACE FUNCTION converse.forward_turn(
+        p_prompt text, p_session bytea DEFAULT NULL,
+        p_steps int DEFAULT 128, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.6, p_top_k int DEFAULT 10,
+        p_seed bigint DEFAULT NULL, p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 8)
+    RETURNS TABLE(step int, entity text, stride_used int)
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    WITH occurrences AS MATERIALIZED (
+        SELECT t.ordinal, t.turn_id
+        FROM converse.session_turn_ids(p_session, NULL) t
+    ), content AS MATERIALIZED (
+        SELECT c.message_id, c.content_id
+        FROM (SELECT array_agg(DISTINCT o.turn_id) AS ids FROM occurrences o) batch,
+             converse.message_content_ids(batch.ids) c
+    ), history AS MATERIALIZED (
+        -- Occurrence identities retain provenance; their exact content roots
+        -- make the prior messages' evidence addressable by the forward pass.
+        -- Do not render and reparse a transcript or substitute metadata text.
+        SELECT array_agg(h.id ORDER BY h.ordinal, h.branch) AS ids
+        FROM (
+            SELECT o.ordinal, 0 AS branch, o.turn_id AS id FROM occurrences o
+            UNION ALL
+            SELECT o.ordinal, 1 AS branch, c.content_id AS id
+            FROM occurrences o
+            JOIN content c ON c.message_id = o.turn_id
+            WHERE c.content_id IS NOT NULL AND c.content_id <> o.turn_id
+        ) h
+    )
+    SELECT g.step, g.entity, g.stride_used
+    FROM history h,
+         generation.forward_text(p_prompt, p_steps, p_max_stride, p_spread,
+             p_top_k, p_seed, p_hops, p_fanout, h.ids) g
+    ORDER BY g.step;
 END;
 
 -- Compatibility surface: preserve the installed `p_breadth` name for named

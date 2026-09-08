@@ -68,17 +68,19 @@ public sealed record ArchitectureProfile
 
     /// <summary>
     /// Native <c>ffn_write_vectors_d</c> act code from the witnessed identity:
-    /// 0 = SiLU-gated (requires a gate tensor), 1 = erf-GELU ungated.
-    /// Unknown strings keep the prior gate-presence heuristic so ingest does not refuse.
+    /// Activation codes preserve the source's declared function. Unknown
+    /// activations cannot be replaced by an unrelated nonlinear operator.
     /// </summary>
     public int ResolveFfnActCode(bool gatePresent)
     {
         string a = HiddenAct.Trim().ToLowerInvariant();
-        if (a is "gelu" or "gelu_new" or "gelu_fast" or "gelu_pytorch_tanh" or "quick_gelu")
-            return 1;
+        if (a == "gelu") return 1;
+        if (a is "gelu_new" or "gelu_fast" or "gelu_pytorch_tanh") return 2;
+        if (a == "quick_gelu") return 3;
+        if (a == "relu") return 4;
         if (a is "silu" or "swish")
-            return gatePresent ? 0 : 1;
-        return gatePresent ? 0 : 1;
+            return gatePresent ? 0 : 5;
+        throw new NotSupportedException($"Unsupported source FFN activation '{HiddenAct}'.");
     }
 
     public static readonly ArchitectureProfile Llama = new()

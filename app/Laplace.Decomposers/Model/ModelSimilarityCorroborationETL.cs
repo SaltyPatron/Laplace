@@ -139,7 +139,7 @@ public sealed class ModelSimilarityCorroborationETL
 
             (long[] leftScores, short[] leftOutcomes) = leftCircuit.Score(rows, cols);
             (long[] rightScores, short[] rightOutcomes) = rightCircuit.Score(rows, cols);
-            var admitted = NativeAttestation.AgreementIndices(leftOutcomes, rightOutcomes);
+            var admitted = NativeAttestation.CorroboratedIndexes(leftOutcomes, rightOutcomes);
 
             if (admitted.Count > 0)
             {

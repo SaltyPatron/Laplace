@@ -79,7 +79,16 @@ typedef struct {
     uint8_t                          source_root_tier;
     uint8_t                          source_root_has_atom;
     uint8_t                          source_root_valid;
+    size_t                           span_capacity;
+    size_t                           entity_capacity;
+    size_t                           phys_capacity;
+    size_t                           source_tree_capacity;
+    size_t                           precedes_capacity;
 } laplace_compose_result_t;
+
+int laplace_compose_reserve_rows(laplace_compose_result_t* r,
+                                size_t entities, size_t physicalities,
+                                size_t source_trees);
 
 int laplace_grammar_compose(
     const uint8_t*              utf8,
@@ -141,6 +150,8 @@ int laplace_compose_span_lookup(
 void laplace_compose_result_free(laplace_compose_result_t* r);
 
 size_t laplace_compose_entity_count(const laplace_compose_result_t* r);
+/* Owned allocation payload, including lexical trees, spans and trajectories. */
+size_t laplace_compose_resident_bytes(const laplace_compose_result_t* r);
 size_t laplace_compose_physicality_count(const laplace_compose_result_t* r);
 size_t laplace_compose_precedes_count(const laplace_compose_result_t* r);
 hash128_t laplace_compose_root_id(const laplace_compose_result_t* r);

@@ -2,6 +2,8 @@
 #include "laplace/core/mantissa.h"
 
 #include <limits.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* VERTEX POSITION IS THE ORDINAL. The packed `ordinal` field duplicates the
  * vertex's index in the LINESTRING, so it cannot disagree with it: measured
@@ -201,4 +203,96 @@ int trajectory_equivalent(const double* left_xyzm,
         right_remaining -= consumed;
     }
     return 1;
+}
+
+struct trajectory_suffix_matcher {
+    hash128_t* reversed;
+    hash128_t* ring;
+    size_t* prefix;
+    size_t count;
+    size_t minimum_stride;
+};
+
+void trajectory_suffix_matcher_free(trajectory_suffix_matcher_t* matcher) {
+    if (!matcher) return;
+    free(matcher->reversed);
+    free(matcher->ring);
+    free(matcher->prefix);
+    free(matcher);
+}
+
+trajectory_suffix_matcher_t* trajectory_suffix_matcher_create(
+    const hash128_t* context, size_t count, size_t minimum_stride) {
+    if (!context || !count || !minimum_stride || minimum_stride > count ||
+        count >= SIZE_MAX / sizeof(hash128_t) || count > SIZE_MAX / sizeof(size_t))
+        return NULL;
+    trajectory_suffix_matcher_t* matcher = calloc(1, sizeof(*matcher));
+    if (!matcher) return NULL;
+    matcher->reversed = malloc(count * sizeof(hash128_t));
+    matcher->ring = malloc((count + 1) * sizeof(hash128_t));
+    matcher->prefix = calloc(count, sizeof(size_t));
+    if (!matcher->reversed || !matcher->ring || !matcher->prefix) {
+        trajectory_suffix_matcher_free(matcher);
+        return NULL;
+    }
+    matcher->count = count;
+    matcher->minimum_stride = minimum_stride;
+    for (size_t i = 0; i < count; ++i)
+        matcher->reversed[i] = context[count - i - 1];
+    for (size_t i = 1, matched = 0; i < count; ++i) {
+        while (matched && !hash128_equals(&matcher->reversed[i], &matcher->reversed[matched]))
+            matched = matcher->prefix[matched - 1];
+        if (hash128_equals(&matcher->reversed[i], &matcher->reversed[matched])) ++matched;
+        matcher->prefix[i] = matched;
+    }
+    return matcher;
+}
+
+int trajectory_match_suffixes(trajectory_suffix_matcher_t* matcher,
+                              const void* packed_xyzm, size_t n_points,
+                              trajectory_suffix_visitor_t visitor, void* context) {
+    if (!matcher || !visitor || (!packed_xyzm && n_points) ||
+        n_points > SIZE_MAX / (4 * sizeof(double))) return -1;
+    const unsigned char* bytes = packed_xyzm;
+    size_t total = 0;
+    for (size_t i = 0; i < n_points; ++i) {
+        double vertex[4];
+        mantissa_payload_t payload;
+        memcpy(vertex, bytes + i * sizeof(vertex), sizeof(vertex));
+        mantissa_unpack(vertex, &payload);
+        size_t run = payload.run_length ? payload.run_length : 1;
+        if (run > SIZE_MAX - total) return -1;
+        total += run;
+    }
+
+    size_t matched = 0, consumed = 0;
+    const size_t ring_size = matcher->count + 1;
+    /* Reversing both streams turns every suffix into a prefix of one pattern.
+     * KMP's failure links handle overlapping occurrences without one matcher
+     * per stride or an expanded copy of the stored trajectory. */
+    for (size_t v = n_points; v-- > 0;) {
+        if (visitor(context, total - consumed, 0, NULL) != 0) return -1;
+        double vertex[4];
+        mantissa_payload_t payload;
+        memcpy(vertex, bytes + v * sizeof(vertex), sizeof(vertex));
+        mantissa_unpack(vertex, &payload);
+        size_t run = payload.run_length ? payload.run_length : 1;
+        for (size_t r = 0; r < run; ++r) {
+            if (matched == matcher->count) matched = matcher->prefix[matched - 1];
+            while (matched && !hash128_equals(&payload.entity_id, &matcher->reversed[matched]))
+                matched = matcher->prefix[matched - 1];
+            if (hash128_equals(&payload.entity_id, &matcher->reversed[matched])) ++matched;
+            matcher->ring[consumed % ring_size] = payload.entity_id;
+            size_t stride = matched;
+            /* A match ending at the manifest boundary has no successor. Its
+             * overlapping shorter match may still have one inside the manifest. */
+            if (stride > consumed) stride = matcher->prefix[stride - 1];
+            if (stride >= matcher->minimum_stride &&
+                visitor(context, total - consumed, stride,
+                        &matcher->ring[(consumed - stride) % ring_size]) != 0)
+                return -1;
+            ++consumed;
+        }
+    }
+    return 0;
 }

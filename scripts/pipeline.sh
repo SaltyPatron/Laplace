@@ -172,11 +172,19 @@ psql() {
   fi
 }
 
-# Content digest of the libraries the postmaster preloads. Empty string when
-# neither is installed yet (first install — nothing is pinned, nothing to bounce).
+# Content digest of Laplace libraries retained by the postmaster. The preload
+# modules also retain core and dynamics through their ELF dependencies: changing
+# one of those libraries requires the same reload as changing the host module.
 preloaded_so_digest() {
   local d="$LAPLACE_EXT_LIBDIR"
-  cat "$d/laplace_substrate.so" "$d/laplace_geom.so" 2>/dev/null | sha256sum | cut -d' ' -f1
+  local library
+  for library in "$d/laplace_substrate.so" "$d/laplace_geom.so" \
+    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
+    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so"; do
+    if [[ -f "$library" ]]; then
+      sha256sum "$library" || return
+    fi
+  done | sha256sum | cut -d' ' -f1
 }
 
 # Staged extension modules must win before pg_config's compatibility $libdir.
@@ -539,7 +547,9 @@ phase_install() (
   # fp_native (the install gate above) covers the whole engine+extension domain
   # INCLUDING .sql.in, so editing one function body invalidates it, reaches here,
   # and forced a bounce that nothing needed. Digest the preloaded libraries
-  # across the install instead: same bytes, same image, no restart.
+  # and their Laplace dependencies across the install instead: same bytes,
+  # same loaded images, no restart. A new execution module may reference new
+  # core exports even when the preload module itself is byte-identical.
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
     preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
@@ -682,47 +692,13 @@ phase_sync_extension() {
     # refreshed; cmake install already ships extension SQL as 0664.
     local bridge="$share/laplace_substrate--${installed}--${avail}.sql"
     install -m 664 "$share/laplace_substrate_upgrade.sql" "$bridge"
-    # Fail fast if on-disk .so is missing any C symbol the upgrade SQL binds.
-    # Usual cause: install wrote a new .so but shared_preload still holds the
-    # old image (or build tree was never reinstalled).
-    local so="$LAPLACE_EXT_LIBDIR/laplace_substrate.so"
-    if [[ -f "$so" ]] && command -v nm >/dev/null 2>&1; then
-      # ONE nm, buffered. The per-symbol `nm | grep -q` form under pipefail
-      # was a coin flip: grep -q exits on first match, nm takes SIGPIPE (141),
-      # and pipefail turns the successful match into a spurious "lacks
-      # <symbol>" — a DIFFERENT phantom symbol each run, observed twice on
-      # 2026-08-01 (consensus_fold_final, then highway_ready; both present in
-      # the image by hand-check). Buffering also spawns 2 processes instead
-      # of 2 per required symbol.
-      local sym nm_out
-      nm_out="$(nm -D "$so" 2>/dev/null || true)"
-      while IFS= read -r sym; do
-        [[ -z "$sym" ]] && continue
-        if ! grep -q "T ${sym}\$" <<< "$nm_out"; then
-          echo "::error::installed $so lacks $sym but $bridge requires it — rebuild+install (preload bounce) before sync-extension" >&2
-          exit 1
-        fi
-      done < <(grep -oE "'pg_laplace_[A-Za-z0-9_]+'" "$bridge" | tr -d "'" | sort -u)
-    fi
-    # BOUNCE ON DEMAND, NOT ON PRINCIPLE.
-    #
-    # This used to restart PostgreSQL unconditionally whenever laplace_substrate
-    # was in shared_preload_libraries — which it always is. So every SQL-only
-    # change (a rewritten function body, a new .sql.in, a regress fixture) paid a
-    # full cluster bounce, and on any host where the postmaster is not signalable
-    # by the invoking user the phase simply could not complete. That is an
-    # arbitrary restriction: a preloaded image only goes stale when the SQL binds
-    # a C symbol the RUNNING image does not export. Adding no symbols needs no
-    # bounce.
-    #
-    # The exact condition is already tested above (the nm -D loop over the
-    # bridge's pg_laplace_* symbols) — but that inspects the ON-DISK .so, which
-    # install may have just replaced under a postmaster still mapping the old
-    # inode. So probe the LIVE image instead: ALTER EXTENSION UPDATE runs in one
-    # transaction and rolls back whole on failure, so attempting it is free. If it
-    # fails specifically because a symbol is unresolvable in the loaded library,
-    # THAT is the bounce signal — restart and retry once. Any other failure is a
-    # real error and must not be masked by a restart.
+    # Bindings belong to the exact library named by SQL. Execution modules
+    # are versioned separately from the preloaded host.
+    python3 "$ROOT/scripts/verify-native-bindings.py" \
+      --libdir "$LAPLACE_EXT_LIBDIR" --sql "$bridge"
+    # Probe the live binding transactionally. A stale preloaded host may need
+    # replacement, but a versioned execution-module error is a load/ABI defect:
+    # restarting PostgreSQL cannot repair that module.
     local upd_log rc=0
     upd_log=$(mktemp)
     if ! PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
@@ -742,7 +718,8 @@ phase_sync_extension() {
            ORDER BY query_start" >&2 || true
         rm -f "$upd_log"
         exit 1
-      elif grep -q 'could not find function\|could not load library\|undefined symbol' "$upd_log"; then
+      elif grep -q 'could not find function\|could not load library\|undefined symbol' "$upd_log" \
+           && ! grep -q 'laplace_execution_[0-9a-f]' "$upd_log"; then
         echo "sync-extension: loaded image lacks a symbol this SQL binds — bounce required"
         cat "$upd_log"
         restart_postgres "sync-extension: preloaded .so is stale for the new SQL"
@@ -786,49 +763,22 @@ phase_sync_extension() {
 # deploy down and blocked publish. Any extension we host in this schema hits the
 # same wall, so the fix belongs here rather than in a per-extension exclusion.
 verify_c_symbols() {
-  local so sym missing=0
-  so="$LAPLACE_EXT_LIBDIR/laplace_substrate.so"
-  [[ -f "$so" ]] || { echo "::error::verify_c_symbols: $so not found"; return 1; }
-  command -v nm >/dev/null 2>&1 || { echo "verify_c_symbols: nm unavailable — skipped"; return 0; }
   echo "===== GATE — C symbol integrity ====="
-
-  # READ THE SYMBOL TABLE ONCE. This used to run `nm -D "$so" | grep` INSIDE the
-  # loop — 74 nm invocations against the same unchanged file — and treated a
-  # non-match as proof the symbol was absent. Those are not the same thing: any
-  # single transient nm failure (fork pressure during a parallel build, a signal,
-  # an interrupted read) produces empty output, the grep fails, and the gate
-  # reports a healthy function as an "orphaned C function" telling the operator to
-  # write a drop_retired_*.sql.in for something that is present.
-  #
-  # Observed exactly that 2026-07-28: two consecutive runs against a byte-identical
-  # .so accused two DIFFERENT symbols (pg_laplace_substrate_version, then
-  # pg_laplace_attestations_exist_bitmap), both verifiably exported. A gate whose
-  # verdict changes run to run on identical inputs is worse than no gate — it
-  # trains you to ignore it.
-  local symtab
-  symtab=$(mktemp)
-  if ! nm -D --defined-only "$so" 2>/dev/null | awk '$2=="T" {print $3}' | sort -u >"$symtab" \
-     || [[ ! -s "$symtab" ]]; then
-    rm -f "$symtab"
-    echo "::error::verify_c_symbols: could not read the symbol table of $so — nm failed or exported nothing" >&2
+  local bindings
+  bindings=$(mktemp)
+  if ! psql -d "$PGDATABASE" -U laplace_admin -tAX -F $'\t' -c \
+      "SELECT p.probin, p.prosrc FROM pg_proc p
+       WHERE p.prolang=(SELECT oid FROM pg_language WHERE lanname='c')
+         AND (p.probin LIKE 'laplace_%' OR p.probin LIKE '\$libdir/laplace_%')" >"$bindings"; then
+    rm -f "$bindings"
     return 1
   fi
-
-  while IFS= read -r sym; do
-    [[ -z "$sym" ]] && continue
-    if ! grep -qxF "$sym" "$symtab"; then
-      echo "::error::orphaned C function: laplace catalog binds '${sym}' but the installed .so does not export it — a manifest removal is missing its drop_retired_*.sql.in" >&2
-      missing=$((missing+1))
-    fi
-  done < <(psql -d "$PGDATABASE" -U laplace_admin -tAX -c \
-      "SELECT p.prosrc FROM pg_proc p \
-       WHERE p.prolang=(SELECT oid FROM pg_language WHERE lanname='c') \
-         AND p.probin IN ('laplace_substrate', '\$libdir/laplace_substrate')")
-  rm -f "$symtab"
-  if [[ "$missing" -gt 0 ]]; then
-    echo "::error::verify_c_symbols: $missing orphaned C function(s) — catalog and .so disagree" >&2
+  if ! python3 "$ROOT/scripts/verify-native-bindings.py" \
+      --libdir "$LAPLACE_EXT_LIBDIR" <"$bindings"; then
+    rm -f "$bindings"
     return 1
   fi
+  rm -f "$bindings"
   local stale_bindings
   stale_bindings=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c \
     "SELECT count(*) FROM pg_proc \
@@ -838,7 +788,7 @@ verify_c_symbols() {
     echo "::error::verify_c_symbols: $stale_bindings C function(s) still bypass staged module resolution through \$libdir" >&2
     return 1
   fi
-  echo "OK all laplace C functions resolve in the loaded image"
+  echo "OK all Laplace C bindings match their installed owning libraries"
 }
 
 phase_tune_pg() {

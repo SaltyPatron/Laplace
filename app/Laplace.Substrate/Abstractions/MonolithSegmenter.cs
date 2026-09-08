@@ -93,7 +93,15 @@ public static class MonolithSegmenter
             yield break;
         }
 
-        int chunkRecords = ResolveChunkRecords(configFactory(0), segments);
+        CancellationToken consumerToken = ct;
+        await using var producers = new IngestProducerGroup(ct);
+        ct = producers.Token;
+        var sourceConfig = configFactory(0);
+        int chunkRecords = ResolveChunkRecords(sourceConfig, segments);
+        // Account the queued source payload as well as record count. Whole code
+        // files can be orders of magnitude wider than the source's average row.
+        long chunkBytes = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+            sourceConfig.WithWorkingSetConcurrency(segments).EffectiveConcurrentWorkingSets);
 
         // One outstanding record chunk and one outstanding composed change per active
         // segment is sufficient to overlap dispatcher, compose, and consumer. Queue memory
@@ -111,15 +119,18 @@ public static class MonolithSegmenter
         long dispatched = 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var dispatcher = Task.Run(async () =>
+        producers.Run(async () =>
         {
             int rr = 0;
             long lastReportMs = 0;
             var buf = new List<TRecord>(chunkRecords);
+            long bufferedBytes = 0;
             await foreach (var rec in stream.RecordsAsync(ct))
             {
                 buf.Add(rec);
-                if (buf.Count >= chunkRecords)
+                bufferedBytes = checked(bufferedBytes
+                    + IngestRecordMemory.Measure(rec, sourceConfig.WorkingSetProfile));
+                if (buf.Count >= chunkRecords || bufferedBytes >= chunkBytes)
                 {
                     long n = Interlocked.Add(ref dispatched, buf.Count);
                     await inputs[rr].Writer.WriteAsync(buf, ct).ConfigureAwait(false);
@@ -137,6 +148,7 @@ public static class MonolithSegmenter
                             + $"({n / Math.Max(1e-3, sw.Elapsed.TotalSeconds):N0} rec/s)");
                     }
                     buf = new List<TRecord>(chunkRecords);
+                    bufferedBytes = 0;
                 }
             }
             if (buf.Count > 0)
@@ -145,42 +157,27 @@ public static class MonolithSegmenter
                 await inputs[rr].Writer.WriteAsync(buf, ct).ConfigureAwait(false);
             }
             for (int s = 0; s < segments; s++) inputs[s].Writer.Complete();
-        }, ct);
+        });
 
-        var workerTasks = new Task[segments];
         for (int s = 0; s < segments; s++)
         {
             int seg = s;
-            workerTasks[s] = Task.Run(async () =>
+            producers.Run(async () =>
             {
                 var recStream = new ChannelChunkRecordStream<TRecord>(inputs[seg].Reader);
                 var handler = handlerFactory(seg);
                 var config = configFactory(seg).WithWorkingSetConcurrency(segments);
                 await foreach (var change in IngestBatchPipeline.RunAsync(recStream, handler, config, ct))
-                    await outCh.Writer.WriteAsync(change, ct).ConfigureAwait(false);
+                    await IngestProducerGroup.WriteAsync(outCh.Writer, change, ct).ConfigureAwait(false);
                 // Segments are NOT files. Emitting period-boundary/ here inflated
                 // files_done above files_total (CONSOLIDATION Q5: 66/0, 44/10) and let
                 // status=ok pretend a partial FrameNet run finished. File completion is
                 // signaled only by RunMultiFileAsync's one boundary (or file-failed/) per
                 // real file — after every segment of that file has drained.
-            }, ct);
+            });
         }
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await dispatcher.ConfigureAwait(false);
-                await Task.WhenAll(workerTasks).ConfigureAwait(false);
-                outCh.Writer.Complete();
-            }
-            catch (Exception ex)
-            {
-                outCh.Writer.Complete(ex);
-            }
-        }, ct);
-
-        await foreach (var change in outCh.Reader.ReadAllAsync(ct))
+        await foreach (var change in producers.ConsumeAsync(outCh, consumerToken))
             yield return change;
     }
 

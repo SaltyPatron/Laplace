@@ -1,0 +1,62 @@
+[
+  {
+    "path": "extension/laplace_substrate/CMakeLists.txt",
+    "sha256": "8d79a36c45337780fb5bc9446101b0b8acc58477caf22e1fd886c26b1dae5f5e"
+  },
+  {
+    "path": "extension/laplace_substrate/sql/functions/consensus/explore_web_neighbors.sql.in",
+    "sha256": "2eed08b47d38bf984872e2a39ee7f33ed8b1825724efc8a08f59f6d1c4b2bb2e"
+  },
+  {
+    "path": "extension/laplace_substrate/sql/functions/converse/chat.sql.in",
+    "sha256": "71cbfb4eeffafd5d9bbcfbfb9486c583db5b84d97b9ac390f8329e11b41dd1af"
+  },
+  {
+    "path": "extension/laplace_substrate/sql/functions/converse/prompt_words.sql.in",
+    "sha256": "aca90b0c27922e83b25825db0199cbd05b4257c294752d708a38d397d7a0c7fa"
+  },
+  {
+    "path": "extension/laplace_substrate/sql/functions/generation/walk_text.sql.in",
+    "sha256": "f4947d6d7f795a2b048289cff313ace0b9abb90a699fd2d3ad4f0cb7c6c47c2a"
+  },
+  {
+    "path": "extension/laplace_substrate/src/consensus_neighbors.c",
+    "sha256": "122be8712167be3e997a76f07e3544667d471a6088b6732b7e2dc00e9b4816e3"
+  },
+  {
+    "path": "extension/laplace_substrate/src/consensus_neighbors.h",
+    "sha256": "a47225a05d32dd31468b4e5605e3e2c95d2332fff93b97be3f92a14fecc40fbe"
+  },
+  {
+    "path": "extension/laplace_substrate/src/consensus_scan.c",
+    "sha256": "2ad3c8b6879d69d1d89cb6da3c9b52e847ef4b1c8b9ea349f836c6f121ef14c7"
+  },
+  {
+    "path": "extension/laplace_substrate/src/consensus_scan.h",
+    "sha256": "74df27021b7432c32c3fab8bc15d856ac72c24b6ea4a0b8300dda7335b701ab7"
+  },
+  {
+    "path": "extension/laplace_substrate/src/content_resolve.c",
+    "sha256": "f9c3006ec1f25872ebfdf67f534c2f3540ea34e1f5d1d99f4cee9c3eafdacad9"
+  },
+  {
+    "path": "extension/laplace_substrate/src/explore_web.c",
+    "sha256": "06bafba23283d0f0f3a7071376d4f79c54abfeb7dbb16d979be27d54f3db338a"
+  },
+  {
+    "path": "extension/laplace_substrate/src/steer_candidates.c",
+    "sha256": "af96b870c0920b1dabf60e53f12513b541aea077d76889e44259f079040b1661"
+  },
+  {
+    "path": "extension/laplace_substrate/src/steer_candidates.h",
+    "sha256": "31ea6fb1f42c04e65b63f1fd53abc722d7de1b8936f9106ab46b1b3d7b71d21d"
+  },
+  {
+    "path": "extension/laplace_substrate/src/trajectory_continuations.c",
+    "sha256": "d3bbfcb825aae083fc75b9306db58bb047f884ffa801274ae4a64843ffd4c734"
+  },
+  {
+    "path": "extension/laplace_substrate/src/trajectory_generate.c",
+    "sha256": "685db9966cfc49c1c146cbaa1f9044edfb3d67ef7666f8e8ae67aff7903e3aa6"
+  }
+]

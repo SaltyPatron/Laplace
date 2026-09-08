@@ -208,6 +208,9 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     public virtual int EstimatedComposeUnitsPerRecord => 1;
 
+    public virtual IngestSourceProfile SizingProfile =>
+        new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
+
     /// <summary>See <see cref="IDecomposer.PerFileCompletion"/>.</summary>
     public virtual bool PerFileCompletion => false;
 
@@ -219,8 +222,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     public virtual IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
 
-    protected IngestSourceProfile PipelineProfile =>
-        new(EstimatedBytesPerRecord, EstimatedComposeUnitsPerRecord);
+    protected IngestSourceProfile PipelineProfile => SizingProfile;
 
     protected abstract IIngestRecordHandler<TRecord> CreateHandler();
 
@@ -584,7 +586,7 @@ public abstract class GrammarComposeDecomposer : Decomposer<GrammarComposeRecord
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.GrammarCompose(
-            SourceId, BatchLabelPrefix, options, context.Reader);
+            SourceId, BatchLabelPrefix, options, context.Reader, PipelineProfile);
 
 }
 
@@ -599,7 +601,6 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
     protected virtual double WitnessWeight => 1.0;
     protected virtual int CommitEpoch => 0;
     protected virtual Hash128? ContextId => null;
-    protected virtual IngestSourceProfile IngestProfile => IngestSourceProfile.Wiktionary;
 
     protected sealed override IIngestRecordHandler<GrammarIngestRecord> CreateHandler() =>
         throw new NotSupportedException("Grammar ingest handlers require the active decomposer options.");
@@ -612,7 +613,7 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.StructuredGrammar(
             SourceId, BatchLabelPrefix, options, context.Reader,
-            WitnessWeight, CommitEpoch, IngestProfile);
+            WitnessWeight, CommitEpoch, PipelineProfile);
 
 }
 
@@ -636,6 +637,8 @@ public abstract class CategoryCorrespondenceDecomposer : Decomposer<CategoryCorr
 /// </summary>
 public abstract class DecomposerMultiPhase : IDecomposer
 {
+    public virtual IngestSourceProfile SizingProfile => IngestSourceProfile.Default;
+
     private long _runUnitsConsumed;
     private long _runMaxInputUnits;
     private HashSet<string>? _runSelectedArtifactPaths;
@@ -782,6 +785,7 @@ public abstract class DecomposerMultiPhase<TSource, TScope> : DecomposerMultiPha
 
     public int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     /// <summary>Optional vocabulary readback sink filled during sealed Initialize.</summary>
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
@@ -822,6 +826,7 @@ public abstract class Decomposer<TRecord, TSource, TScope> : Decomposer<TRecord>
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     /// <summary>Optional vocabulary readback sink filled during sealed Initialize.</summary>
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
@@ -859,6 +864,7 @@ public abstract class DecomposerMultiFile<TRecord, TSource, TScope> : Decomposer
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
 
@@ -893,6 +899,7 @@ public abstract class ComposeDecomposer<TRecord, TSource, TScope> : ComposeDecom
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
 
@@ -927,6 +934,7 @@ public abstract class ComposeDecomposerMultiFile<TRecord, TSource, TScope>
     public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
 
@@ -961,6 +969,7 @@ public abstract class GrammarComposeDecomposerMultiFile<TSource, TScope>
     public sealed override IReadOnlyList<string> DeclaredRelations => TSource.Relations;
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
 
@@ -995,6 +1004,7 @@ public abstract class GrammarIngestDecomposer<TSource, TScope> : GrammarIngestDe
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
 
@@ -1029,6 +1039,7 @@ public abstract class GrammarComposeDecomposer<TSource, TScope> : GrammarCompose
 
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => TSource.Profile;
 
     protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
 

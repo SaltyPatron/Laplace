@@ -22,5 +22,5 @@
 -- changes under replace, so CREATE OR REPLACE alone is sufficient and idempotent.
 CREATE OR REPLACE FUNCTION converse.word_segment_resolved(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
-    AS 'MODULE_PATHNAME', 'pg_laplace_word_segment_resolved'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_word_segment_resolved'
     LANGUAGE C STABLE;

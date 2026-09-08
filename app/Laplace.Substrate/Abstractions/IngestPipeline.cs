@@ -703,6 +703,7 @@ public static class IngestBatchPipeline
             ? config.EffectiveWorkingSetProbeInterval
             : config.ProbeChunkSize;
         var pending = new List<TRecord>(probeInterval);
+        long pendingResidentBytes = 0;
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
 
         // Working sets yield nothing mid-stream, which starves every
@@ -723,7 +724,7 @@ public static class IngestBatchPipeline
             };
         }
 
-        var state = new BatchState(config.NewBuilder(0));
+        using var state = new BatchState(config.NewBuilder(0));
         long rowsTotal = 0;
         long unitsConsumed = 0;
 
@@ -750,14 +751,19 @@ public static class IngestBatchPipeline
             }
 
             pending.Add(record);
+            pendingResidentBytes = checked(pendingResidentBytes
+                + IngestRecordMemory.Measure(record, config.WorkingSetProfile));
 
-            if (pending.Count >= probeInterval)
+            if (pending.Count >= probeInterval
+                || pendingResidentBytes >= IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+                    config.EffectiveConcurrentWorkingSets))
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                 {
                     yield return change;
                     ResetBatchScope(handler);
                 }
+                pendingResidentBytes = 0;
             }
 
             // Pending records count through the source model before compose. Composed
@@ -775,6 +781,7 @@ public static class IngestBatchPipeline
                         yield return change;
                         ResetBatchScope(handler);
                     }
+                    pendingResidentBytes = 0;
                 }
 
                 if (state.InBatch > 0)
@@ -1015,6 +1022,9 @@ public static class IngestBatchPipeline
         PerFileResumePlan? resume,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        CancellationToken consumerToken = ct;
+        await using var producers = new IngestProducerGroup(ct);
+        ct = producers.Token;
         // The dispatcher enumerates FILE SOURCES — cheap handles, reading NOTHING — into a bounded
         // channel; N workers each claim one source and run OPEN + read + parse + compose +
         // working-set finalization. The expensive parse is therefore
@@ -1044,7 +1054,7 @@ public static class IngestBatchPipeline
         // width instead of the file count. Otherwise nothing changes.
         var peeked = new List<IFileRecordSource<TRecord>>(workers + 1);
         bool exhaustedInPeek = true;
-        var fileEnumerator = stream.FilesAsync(ct).GetAsyncEnumerator(ct);
+        await using var fileEnumerator = stream.FilesAsync(ct).GetAsyncEnumerator(ct);
         while (peeked.Count <= workers)
         {
             if (!await fileEnumerator.MoveNextAsync())
@@ -1121,7 +1131,7 @@ public static class IngestBatchPipeline
                 chunkTarget = (int)Math.Min(resumeProbeChunkMax, (long)chunkTarget * 2);
         }
 
-        var dispatcher = Task.Run(async () =>
+        producers.Run(async () =>
         {
             try
             {
@@ -1155,16 +1165,14 @@ public static class IngestBatchPipeline
                 // Belt and braces: TryComplete is idempotent, so a path that somehow
                 // reaches here un-completed still releases the consumers.
                 sources.Writer.TryComplete();
-                await fileEnumerator.DisposeAsync();
             }
-        }, ct);
+        });
 
         // Approximate total from the peek when the stream fit in it; else 0 (sample-only).
         int knownFileTotal = exhaustedInPeek ? peeked.Count : 0;
         int fileOrdinal = 0;
         int activeWorkingSets = 0;
 
-        var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
         {
             // Captured OUTSIDE Task.Run. `for` does not give per-iteration capture the way
@@ -1172,7 +1180,7 @@ public static class IngestBatchPipeline
             // loop variable at RUN time — racing the loop thread and usually yielding the exit
             // value for every worker. That silently made per-worker ingest telemetry useless.
             int workerId = w;
-            workerTasks[w] = Task.Run(async () =>
+            producers.Run(async () =>
             {
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
@@ -1208,7 +1216,7 @@ public static class IngestBatchPipeline
                         // unfinished and fails the run. Boundary, not FileCompletion -- the
                         // marker this file already carries is what got us here; re-depositing
                         // it would be a write on a lane whose whole contract is zero rows.
-                        await outCh.Writer.WriteAsync(
+                        await IngestProducerGroup.WriteAsync(outCh.Writer,
                             BuildSkippedBoundary(config.SourceId, source.FileLabel), ct);
                         continue;
                     }
@@ -1249,7 +1257,7 @@ public static class IngestBatchPipeline
                             fileEntities += rowCounts.Entities;
                             filePhysicalities += rowCounts.Physicalities;
                             fileAttestations += rowCounts.Attestations;
-                            await outCh.Writer.WriteAsync(change, ct);
+                            await IngestProducerGroup.WriteAsync(outCh.Writer, change, ct);
                         }
                     }
                     catch (OperationCanceledException) { throw; }
@@ -1273,7 +1281,7 @@ public static class IngestBatchPipeline
                     // apply consumer. The runner terminalizes the file when that boundary is
                     // applied; reversing these two operations lets a fast consumer enqueue
                     // Finished before Composed and exposes a terminal zero-count row in the UI.
-                    await outCh.Writer.WriteAsync(
+                    await IngestProducerGroup.WriteAsync(outCh.Writer,
                         fileFailure
                             ?? (fileRoot is { } fr && resume is { } rp
                                 ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder,
@@ -1294,16 +1302,10 @@ public static class IngestBatchPipeline
                         Interlocked.Add(ref activeWorkingSets, -segments);
                     }
                 }
-            }, ct);
+            });
         }
 
-        _ = Task.Run(async () =>
-        {
-            try { await dispatcher; await Task.WhenAll(workerTasks); outCh.Writer.Complete(); }
-            catch (Exception ex) { outCh.Writer.Complete(ex); }
-        }, ct);
-
-        await foreach (var change in outCh.Reader.ReadAllAsync(ct))
+        await foreach (var change in producers.ConsumeAsync(outCh, consumerToken))
             yield return change;
     }
 
@@ -1382,17 +1384,34 @@ public static class IngestBatchPipeline
 
         if (config.WorkingSet)
         {
-            var deferred = (WorkingSetDeferredBatch<TRecord>)(state.WorkingSetDeferred
-                ??= new WorkingSetDeferredBatch<TRecord>());
-            var composed = await IngestDescentFlush.ComposeBatchAsync(
-                batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
-            deferred.Shortcircuited.AddRange(composed.Shortcircuited);
-            deferred.Pending.AddRange(composed.Pending);
-            deferred.AddResidentBytes(composed.ResidentBytes);
-            foreach (var (_, units) in composed.Shortcircuited)
-                state.AddUnits(units);
-            foreach (var (record, _) in composed.Pending)
-                state.AddUnits(handler.UnitsPerRecord(record));
+            bool rootsAlreadyProbed = false;
+            while (batch.Count > 0)
+            {
+                var deferred = (WorkingSetDeferredBatch<TRecord>)(state.WorkingSetDeferred
+                    ??= new WorkingSetDeferredBatch<TRecord>());
+                long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+                    config.EffectiveConcurrentWorkingSets);
+                long available = Math.Max(1,
+                    envelope - state.Builder.StagedBytesEstimate - deferred.ResidentBytes);
+                var composed = await IngestDescentFlush.ComposeBatchAsync(
+                    batch, handler, reader, state.Builder, config, probedAbsent, ct,
+                    available, rootsAlreadyProbed).ConfigureAwait(false);
+                rootsAlreadyProbed = true;
+                deferred.Shortcircuited.AddRange(composed.Shortcircuited);
+                deferred.Pending.AddRange(composed.Pending);
+                deferred.AddResidentBytes(composed.ResidentBytes);
+                foreach (var (_, units) in composed.Shortcircuited)
+                    state.AddUnits(units);
+                foreach (var (record, _) in composed.Pending)
+                    state.AddUnits(handler.UnitsPerRecord(record));
+
+                if (batch.Count > 0 || ShouldCloseWorkingSet(state, config))
+                {
+                    await state.FinalizeWorkingSetAsync(handler, reader, config, probedAbsent, ct);
+                    yield return await state.YieldBatchAsync(ct);
+                    state.ResetBuilder(config.NewBuilder(state.BatchNumber));
+                }
+            }
         }
         else
         {
@@ -1411,13 +1430,19 @@ public static class IngestBatchPipeline
         }
     }
 
-    private sealed class BatchState(SubstrateChangeBuilder builder)
+    private sealed class BatchState(SubstrateChangeBuilder builder) : IDisposable
     {
         public SubstrateChangeBuilder Builder { get; private set; } = builder;
         public int InBatch { get; private set; }
         public int BatchNumber { get; private set; }
         internal object? WorkingSetDeferred { get; set; }
         private long _rowsInBatch;
+
+        public void Dispose()
+        {
+            (WorkingSetDeferred as IWorkingSetDeferredBatch)?.Dispose();
+            WorkingSetDeferred = null;
+        }
 
         public async Task FinalizeWorkingSetAsync<TRecord>(
             IIngestRecordHandler<TRecord> handler,

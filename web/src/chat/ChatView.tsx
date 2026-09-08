@@ -101,9 +101,9 @@ export function ChatView() {
 
   async function send() {
 
-    const prompt = input.trim();
+    const prompt = input;
 
-    if (!prompt || busy) return;
+    if (!prompt.trim() || busy) return;
 
     setBusy(true);
 
@@ -200,7 +200,7 @@ export function ChatView() {
     } catch (e) {
 
       if (e instanceof DOMException && e.name === 'AbortError') {
-
+        updateLastAssistant((m) => ({ ...m, streaming: false, error: 'Response interrupted.' }));
         return;
 
       }

@@ -301,13 +301,17 @@ outputs:
 | component | relation | contraction |
 |---|---|---|
 | QK | which tokens couple | `(E·Wq)(E·Wk)ᵀ` |
-| FFN | `[token] => [token]` memory | `E·Wupᵀ · Wdownᵀ·Eᵀ` |
+| FFN | `[token] => [token]` memory | `F(E)·Eᵀ`, with the source-declared activation, gate, and projection biases |
 | lm_head | unembed | `[state] => [token]` directly |
 
-All three are bilinear forms; `bilinear_edges_tile`
-(`engine/dynamics/src/bilinear_edges.cpp`) is the compiled contraction and is
-still tested. Verified feasible in this session: TinyLlama layer 0 head 0,
-4,000 tokens, 16M pairs, seconds, in numpy, on a **CPU-only box**.
+The FFN probe is nonlinear in its source embedding row. For a gated layer,
+`F(x) = down(activation(gate(x)) ⊙ up(x))`; an ungated layer applies its
+activation to `up(x)` before the down projection. Each projection includes its
+declared bias. Evaluate each tokenizer row before reducing aliases to canonical
+identities: activation does not commute with averaging. The native
+`ffn_write_vectors_ex_d` operation owns this evaluation; `ffn_contraction_create`
+then supplies the resulting factors to the shared candidate calibration and
+arena reduction. It does not threshold pairs or normalize away FFN magnitude.
 
 Prompting loses on every axis: it samples a vanishing fraction of the pair space,
 measures the decoding stack (temperature, template, RoPE) convolved with the

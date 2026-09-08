@@ -175,10 +175,10 @@ FROM converse.orient_topic('犬', public.laplace_hash128_blake3('test/converse/l
 SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
  word | resolved 
 ------+----------
- what | f
- is   | f
- a    | f
- Dog  | f
+ what | t
+ is   | t
+ a    | t
+ Dog  | t
 (4 rows)
 
 -- A content id may exist at multiple tiers; each input position still occurs
@@ -209,10 +209,10 @@ FROM converse.prompt_coherence('p p');
  t
 (1 row)
 
-SELECT count(*) = 1 AND bool_and(id IS NULL) AS unknown_stays_null
+SELECT count(*) = 1 AND bool_and(id = laplace.word_id('zzzunknownzzz')) AS unknown_has_identity
 FROM converse.prompt_words('zzzunknownzzz');
- unknown_stays_null 
---------------------
+ unknown_has_identity 
+----------------------
  t
 (1 row)
 
@@ -439,9 +439,9 @@ SELECT reply FROM converse.recall_intent('translate', laplace.word_id('h'));
  p [test/lang/en]
 (1 row)
 
-SELECT count(*) = 0 AS unknown_topic_has_no_id FROM converse.prompt_state('zzzunknownzzz') WHERE id IS NOT NULL;
- unknown_topic_has_no_id 
--------------------------
+SELECT count(*) = 1 AND bool_and(id = laplace.word_id('zzzunknownzzz')) AS unknown_state_has_identity FROM converse.prompt_state('zzzunknownzzz');
+ unknown_state_has_identity 
+----------------------------
  t
 (1 row)
 
@@ -468,7 +468,11 @@ END $$;
 SELECT word FROM converse.prompt_state('what is a Dog') ORDER BY ord;
  word 
 ------
-(0 rows)
+ what
+ is
+ a
+ Dog
+(4 rows)
 
 SELECT support,
        object_id = public.laplace_hash128_blake3('test/converse/lang_en') AS is_lang_en

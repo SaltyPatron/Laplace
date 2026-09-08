@@ -45,6 +45,32 @@ class InstallTests(unittest.TestCase):
         path = self.base / "calls"
         return path.read_text() if path.exists() else ""
 
+    def test_preload_digest_tracks_engine_dependencies(self):
+        modules = Path(self.env["LAPLACE_EXT_LIBDIR"])
+        modules.mkdir(parents=True)
+        core = self.base / "install/lib/liblaplace_core.so"
+        dynamics = self.base / "install/lib/liblaplace_dynamics.so"
+        for artifact in (modules / "laplace_substrate.so", modules / "laplace_geom.so", core, dynamics):
+            artifact.write_bytes(b"installed image")
+
+        def digest():
+            result = self.run_shell(function("preloaded_so_digest") + "\npreloaded_so_digest\n")
+            self.assertEqual(0, result.returncode, result.stderr)
+            return result.stdout.strip()
+
+        before = digest()
+        self.assertEqual(before, digest())
+        # An execution module can need new exports even when neither preload
+        # module changed. Each engine dependency independently requires reload.
+        for artifact in (core, dynamics):
+            with self.subTest(library=artifact.name):
+                artifact.write_bytes(b"new engine image")
+                self.assertNotEqual(before, digest())
+                artifact.write_bytes(b"installed image")
+                self.assertEqual(before, digest())
+        (modules / "new-version.sql").write_text("SELECT 1;")
+        self.assertEqual(before, digest())
+
     def library(self, **env):
         return self.run_shell(function("ensure_extension_library_path") + r'''
 psql() {

@@ -21,73 +21,121 @@
 -- (claude-code / codex / antigravity / copilot / cursor / gemini corpora);
 -- regress coverage rides the next extension install (the isolate cannot install a
 -- branch extension over the shared cluster's copy).
+CREATE OR REPLACE FUNCTION converse.session_turn_ids(p_session bytea, p_limit int DEFAULT NULL)
+    RETURNS TABLE(ordinal int, turn_id bytea)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_session_turn_ids'
+    LANGUAGE C STABLE PARALLEL RESTRICTED;
+
+CREATE OR REPLACE FUNCTION converse.session_append_turns(
+    p_session bytea, p_turn_ids bytea[], p_observed_at timestamptz)
+    RETURNS int
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_session_append_turns'
+    LANGUAGE C VOLATILE STRICT PARALLEL UNSAFE;
+
 DROP FUNCTION IF EXISTS converse.session_turns(bytea, int);
+-- The typed message record is [metadata, exact content]. Decode its second
+-- occurrence through the canonical native manifest operation. Older content-only
+-- turns already name their own content. No testimony can change either identity.
+CREATE OR REPLACE FUNCTION converse.message_content_ids(p_ids bytea[])
+    RETURNS TABLE(message_id bytea, content_id bytea)
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
+WITH requested AS MATERIALIZED (
+    SELECT DISTINCT unnest(p_ids) AS id
+), messages AS MATERIALIZED (
+    SELECT r.id
+    FROM requested r
+    JOIN laplace.entities e ON e.id = r.id
+    WHERE e.type_id = realize.canonical_id('Conversation_Message')
+), members AS MATERIALIZED (
+    SELECT c.parent_id, c.child_id
+    FROM (SELECT array_agg(m.id ORDER BY m.id) AS ids FROM messages m) batch,
+         realize.constituents_closure(batch.ids, 1) c
+    WHERE c.ordinal <= 2 AND c.ordinal::bigint + c.run_length > 2
+)
+SELECT r.id,
+       CASE WHEN m.id IS NOT NULL THEN member.child_id ELSE r.id END
+FROM requested r
+LEFT JOIN messages m ON m.id = r.id
+LEFT JOIN members member ON member.parent_id = r.id;
+END;
+
 CREATE OR REPLACE FUNCTION converse.session_turns(p_session bytea, p_limit int DEFAULT NULL)
     RETURNS TABLE(ordinal int, turn_id bytea, role text, model text,
                   observed_at timestamptz, surface text)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
 BEGIN ATOMIC
 WITH traj AS MATERIALIZED (
-    SELECT t.ordinal + rs.i - 1 AS ordinal, t.entity_id AS turn_id
-    FROM laplace.physicalities p
-    CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) t
-    CROSS JOIN LATERAL generate_series(1, GREATEST(t.run_length, 1)) rs(i)
-    WHERE p.entity_id = p_session AND p.type = 1
+    SELECT t.ordinal, t.turn_id
+    FROM converse.session_turn_ids(p_session, p_limit) t
     ORDER BY t.ordinal
-    LIMIT COALESCE(p_limit, 2147483647)
+), turn_ids AS MATERIALIZED (
+    SELECT DISTINCT turn_id FROM traj
+), relation_ids AS MATERIALIZED (
+    SELECT realize.canonical_id('HAS_ROLE') AS role_type,
+           realize.canonical_id('AUTHORED_BY') AS author_type,
+           realize.canonical_id('IS_INSTANCE_OF') AS name_type,
+           realize.canonical_id('APPEARS_IN') AS occurrence_type
+), message_content AS MATERIALIZED (
+    SELECT c.message_id AS turn_id, c.content_id
+    FROM (SELECT array_agg(t.turn_id ORDER BY t.turn_id) AS ids FROM turn_ids t) batch,
+         converse.message_content_ids(batch.ids) c
+), labels AS MATERIALIZED (
+    SELECT r.subject_id AS turn_id, r.type_id, n.object_id AS name_id,
+           row_number() OVER (
+               PARTITION BY r.subject_id, r.type_id
+               ORDER BY consensus.eff_mu(r.rating, r.rd) DESC,
+                        consensus.eff_mu(n.rating, n.rd) DESC,
+                        n.object_id, r.object_id) AS rank
+    FROM turn_ids t
+    CROSS JOIN relation_ids types
+    JOIN laplace.consensus r ON r.subject_id = t.turn_id
+        AND r.type_id IN (types.role_type, types.author_type)
+    JOIN laplace.consensus n ON n.subject_id = r.object_id
+        AND n.type_id = types.name_type
+    WHERE n.object_id IS NOT NULL
+), observed AS MATERIALIZED (
+    SELECT a.subject_id AS turn_id, max(a.last_observed_at) AS observed_at
+    FROM turn_ids t
+    CROSS JOIN relation_ids types
+    JOIN laplace.attestations a ON a.subject_id = t.turn_id
+        AND a.context_id = p_session AND a.type_id = types.occurrence_type
+    GROUP BY a.subject_id
 ), picked AS MATERIALIZED (
-    SELECT tr.ordinal,
-           tr.turn_id,
+    SELECT tr.ordinal, tr.turn_id,
+           content.content_id,
            row_number() OVER (ORDER BY tr.ordinal) AS rn,
-           (SELECT n.object_id
-              FROM laplace.consensus r
-              JOIN laplace.consensus n
-                ON n.subject_id = r.object_id
-               AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
-             WHERE r.subject_id = tr.turn_id
-               AND r.type_id = realize.canonical_id('HAS_ROLE')
-             ORDER BY consensus.eff_mu(r.rating, r.rd) DESC,
-                      consensus.eff_mu(n.rating, n.rd) DESC
-             LIMIT 1) AS role_name_id,
-           (SELECT n.object_id
-              FROM laplace.consensus r
-              JOIN laplace.consensus n
-                ON n.subject_id = r.object_id
-               AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
-             WHERE r.subject_id = tr.turn_id
-               AND r.type_id = realize.canonical_id('AUTHORED_BY')
-             ORDER BY consensus.eff_mu(r.rating, r.rd) DESC,
-                      consensus.eff_mu(n.rating, n.rd) DESC
-             LIMIT 1) AS model_name_id,
-           (SELECT max(a.last_observed_at)
-              FROM laplace.attestations a
-             WHERE a.subject_id = tr.turn_id
-               AND a.context_id = p_session
-               AND a.type_id = realize.canonical_id('APPEARS_IN')) AS observed_at
+           role_label.name_id AS role_name_id,
+           author_label.name_id AS model_name_id,
+           observed.observed_at
     FROM traj tr
+    CROSS JOIN relation_ids types
+    LEFT JOIN labels role_label ON role_label.turn_id = tr.turn_id
+        AND role_label.type_id = types.role_type AND role_label.rank = 1
+    LEFT JOIN labels author_label ON author_label.turn_id = tr.turn_id
+        AND author_label.type_id = types.author_type AND author_label.rank = 1
+    LEFT JOIN observed ON observed.turn_id = tr.turn_id
+    LEFT JOIN message_content content ON content.turn_id = tr.turn_id
 ), surfaces AS MATERIALIZED (
-    SELECT s.pos, s.txt
-    FROM (SELECT array_agg(pk.turn_id ORDER BY pk.rn) AS ids FROM picked pk) a
-    CROSS JOIN LATERAL unnest(realize.render_batch(a.ids))
-        WITH ORDINALITY AS s(txt, pos)
+    SELECT realize.render_batch(array_agg(pk.content_id ORDER BY pk.rn)) AS texts
+    FROM picked pk
 ), names AS MATERIALIZED (
-    SELECT n.id, n.txt
+    SELECT unnest(a.ids) AS id, unnest(realize.render_batch(a.ids)) AS txt
     FROM (
         SELECT array_agg(DISTINCT u.id) AS ids
         FROM (SELECT pk.role_name_id AS id FROM picked pk WHERE pk.role_name_id IS NOT NULL
               UNION
               SELECT pk.model_name_id FROM picked pk WHERE pk.model_name_id IS NOT NULL) u
     ) a
-    CROSS JOIN LATERAL unnest(a.ids, realize.render_batch(a.ids)) AS n(id, txt)
 )
 SELECT pk.ordinal,
        pk.turn_id,
        rn_role.txt,
        rn_model.txt,
        pk.observed_at,
-       sf.txt
+       sf.texts[pk.rn]
 FROM picked pk
-LEFT JOIN surfaces sf ON sf.pos = pk.rn
+CROSS JOIN surfaces sf
 LEFT JOIN names rn_role ON rn_role.id = pk.role_name_id
 LEFT JOIN names rn_model ON rn_model.id = pk.model_name_id
 ORDER BY pk.ordinal;

@@ -29,12 +29,12 @@
 -- Refuted (negative) member mass bypasses log1p and stays linear so it can sink
 -- a candidate instead of being squashed toward zero.
 --
--- NOT PARALLEL SAFE: reads consensus through SPI.
+-- Native batch consensus access uses the active PostgreSQL snapshot.
 DROP FUNCTION IF EXISTS laplace.steer_candidates(bytea[], bytea[], float8);
 CREATE OR REPLACE FUNCTION generation.steer_candidates(
         p_candidates bytea[], p_frontier bytea[], p_relation_types bytea[])
     RETURNS TABLE(candidate bytea, steer float8, edges bigint, covered bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_steer_candidates'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_steer_candidates'
     LANGUAGE C VOLATILE;
 
 CREATE OR REPLACE FUNCTION generation.steer_candidates(

@@ -35,6 +35,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessPgn.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessPgn.EstComposeUnitsPerRecord;
+    public override IngestSourceProfile SizingProfile => IngestSourceProfile.ChessPgn;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;

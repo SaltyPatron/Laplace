@@ -85,10 +85,6 @@ public static unsafe partial class NativeInterop
     internal static partial int LaplaceAttestationOutcomeFromTotalsFp(
         long games, long sumScoreFp, short* outOutcome);
 
-    [LibraryImport(Library, EntryPoint = "laplace_attestation_agreement_indices")]
-    internal static unsafe partial int AttestationAgreementIndices(
-        short* left, short* right, nuint count, int* indices, nuint capacity, nuint* written);
-
     [LibraryImport(Library, EntryPoint = "laplace_attestation_score_draw_fp")]
     [System.Runtime.InteropServices.SuppressGCTransition]
     internal static partial long LaplaceAttestationScoreDrawFp();
@@ -461,6 +457,12 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_compose_result_free")]
     public static partial void ComposeResultFree(IntPtr result);
 
+    [LibraryImport(Library, EntryPoint = "laplace_compose_resident_bytes")]
+    public static partial nuint ComposeResidentBytes(IntPtr result);
+
+    [LibraryImport(Library, EntryPoint = "laplace_ast_resident_bytes")]
+    public static partial nuint AstResidentBytes(IntPtr ast);
+
     [LibraryImport(Library, EntryPoint = "laplace_compose_entity_count")]
     public static partial nuint ComposeEntityCount(IntPtr result);
 
@@ -812,6 +814,14 @@ public static unsafe partial class NativeInterop
         long observationCount,
         long nowUnixUs,
         AttestationStagedNative* outStaged);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_corroboration_mask")]
+    internal static partial int AttestationCorroborationMask(
+        short* left, short* right, nuint count, byte* admitted);
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_resolved_witness_parameters")]
+    internal static partial int AttestationResolvedWitnessParameters(
+        Hash128* typeId, double sourceTrust, long* opponentRating, long* opponentRd);
 
     [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_scored_build", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int AttestationCategoricalScoredBuild(

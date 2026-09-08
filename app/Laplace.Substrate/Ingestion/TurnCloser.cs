@@ -16,8 +16,7 @@ namespace Laplace.Ingestion;
 /// already shared (<see cref="ConversationContent"/>); the SEQUENCE was not, and
 /// each frontend re-derived it:
 ///
-///   floor check -> writer -> tenant scope -> bootstrap once -> attribute user
-///   once per session -> build turn change -> apply
+///   floor check -> writer -> tenant scope -> bootstrap -> build turn change -> apply
 ///
 /// They had already diverged. Only the HTTP lane checked that the substrate floor
 /// exists before depositing, so an MCP turn against a floorless database wrote
@@ -28,8 +27,8 @@ namespace Laplace.Ingestion;
 ///
 /// Caching is per instance and deliberate: bootstrap rows are idempotent but
 /// TESTIMONY IS NOT (see the re-ingest guard law) — registering a tenant's sources
-/// once per process bounds the refold to restarts, and session attribution is once
-/// per session for the same reason.
+/// once per process bounds the refold to restarts. Each actual occurrence retains
+/// its supplied participant; attribution never depends on a process-local set.
 ///
 /// Not thread-safe by construction: a turn is one change and one apply (the
 /// writer's φ-per-cell invariant assumes a turn is never batched with another
@@ -42,15 +41,12 @@ public sealed class TurnCloser : IAsyncDisposable
     private readonly ISubstrateReader _reader;
     private readonly Action<string>? _warn;
     private readonly Dictionary<string, ConversationContent.TenantScope> _scopes = new(StringComparer.Ordinal);
-    private readonly HashSet<Hash128> _attributed = [];
     private ConsensusAccumulatingWriter? _writer;
     private bool _floorPresent;
 
     /// <summary>
-    /// True once a deposit has failed hard. The reply still flows to the caller —
-    /// a missing deposit is reported, never hidden, and never fails the turn — but
-    /// the lane stops retrying so a broken writer does not cost every subsequent
-    /// turn a connection attempt.
+    /// Whether the most recent deposit failed. A later turn can retry the write
+    /// lane; one transient failure must not permanently disable session learning.
     /// </summary>
     public bool Broken { get; private set; }
 
@@ -72,9 +68,11 @@ public sealed class TurnCloser : IAsyncDisposable
         string prompt,
         string? reply,
         string? userKey = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? occurrenceKey = null,
+        ConversationContent.TurnPhase phase = ConversationContent.TurnPhase.Complete)
     {
-        if (Broken || string.IsNullOrWhiteSpace(prompt) || sessionId == Hash128.Zero)
+        if (string.IsNullOrEmpty(prompt) || sessionId == Hash128.Zero)
             return false;
         if (!ConversationContent.IsValidIdentifier(tenant))
             return false;
@@ -108,19 +106,19 @@ public sealed class TurnCloser : IAsyncDisposable
                 _scopes[tenant] = scope;
             }
 
-            // Attribution is once per session per process: the edge is idempotent by
-            // content address, but re-emitting it refolds the testimony every turn.
-            string? attributeAs = userKey is not null && _attributed.Add(sessionId) ? userKey : null;
-
             if (!ConversationContent.TryBuildTurnChange(
                     scope, sessionId,
-                    System.Text.Encoding.UTF8.GetBytes(prompt.Trim()),
-                    string.IsNullOrWhiteSpace(reply) ? null : System.Text.Encoding.UTF8.GetBytes(reply.Trim()),
-                    attributeAs,
-                    out var turnChange, out _, out _))
+                    System.Text.Encoding.UTF8.GetBytes(prompt),
+                    string.IsNullOrEmpty(reply) ? null : System.Text.Encoding.UTF8.GetBytes(reply),
+                    userKey,
+                    out var turnChange, out _, out _, out var turns, occurrenceKey, userKey, phase))
                 return false;
 
-            await _writer.ApplyAsync(turnChange, ct);
+            // A conversational turn is complete only after its evidence and
+            // consensus fold commit. Buffered ingestion apply can defer the fold
+            // beyond the next prompt and cannot close a live conversation turn.
+            await _writer.ApplyConversationTurnAsync(turnChange, sessionId, turns, ct);
+            Broken = false;
             return true;
         }
         catch (OperationCanceledException)
@@ -130,7 +128,7 @@ public sealed class TurnCloser : IAsyncDisposable
         catch (Exception ex)
         {
             Broken = true;
-            _warn?.Invoke($"turn deposit disabled: {ex.Message}");
+            _warn?.Invoke($"turn deposit failed: {ex.Message}");
             return false;
         }
     }

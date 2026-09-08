@@ -13,6 +13,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <LAPLACE_BUILD_ROOT Condition="'$(LAPLACE_BUILD_ROOT)' == '' AND '$(OS)' == 'Windows_NT'">D:\Data\Laplace</LAPLACE_BUILD_ROOT>
+    <LAPLACE_ENGINE_BUILD Condition="'$(LAPLACE_ENGINE_BUILD)' == ''">$(MSBuildThisFileDirectory)../build/engine</LAPLACE_ENGINE_BUILD>
   </PropertyGroup>
   <PropertyGroup Condition="'$(LAPLACE_BUILD_ROOT)' != ''">
     <BaseOutputPath>$(LAPLACE_BUILD_ROOT)\app\bin\$(MSBuildProjectName)\</BaseOutputPath>
@@ -91,9 +92,9 @@
     published payload coherent until the next complete publish.
   -->
   <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
-    <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/core/*.so*" />
-    <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/dynamics/*.so*" />
-    <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/synthesis/*.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_ENGINE_BUILD)/core/*.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_ENGINE_BUILD)/dynamics/*.so*" />
+    <LaplaceNativeArtifact Include="$(LAPLACE_ENGINE_BUILD)/synthesis/*.so*" />
     <None Include="@(LaplaceNativeArtifact)">
       <Link>%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>

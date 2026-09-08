@@ -1,4 +1,5 @@
 #include "laplace/dynamics/bilinear_edges.h"
+#include "laplace/dynamics/model_math.h"
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/glicko2.h"
 #include "laplace/core/score.h"
@@ -10,6 +11,7 @@
 #include <limits>
 #include <cstring>
 #include <new>
+#include <memory>
 #include <vector>
 
 #ifdef LAPLACE_HAS_MKL
@@ -340,6 +342,89 @@ int bilinear_direct_contraction_create(
     *out_resident_bytes = (context->left.capacity() + context->right.capacity()) * sizeof(double);
     *out_context = context;
     return 0;
+}
+
+extern "C"
+int ffn_contraction_create(const float* embedding_rows,
+    std::size_t vocabulary_rows, std::size_t dimension,
+    const int* token_rows, const int* entity_indexes,
+    std::size_t token_count, std::size_t entity_count,
+    const float* up, const float* up_bias, const float* gate, const float* gate_bias,
+    const float* down, const float* down_bias, std::size_t intermediate, int activation,
+    bilinear_contraction_context_t** out_context,
+    double* out_arena_rms, std::size_t* out_resident_bytes)
+{
+    if (!out_context || !out_arena_rms || !out_resident_bytes) return -1;
+    *out_context = nullptr;
+    *out_arena_rms = 0.0;
+    *out_resident_bytes = 0;
+    if (!embedding_rows || !up || !down || !token_rows || !entity_indexes ||
+        dimension == 0 || intermediate == 0 || token_count == 0 || entity_count == 0 ||
+        dimension > (std::size_t)INT32_MAX || entity_count > (std::size_t)INT32_MAX ||
+        intermediate > SIZE_MAX / dimension || dimension > SIZE_MAX / dimension ||
+        entity_count > SIZE_MAX / dimension ||
+        vocabulary_rows > SIZE_MAX / dimension || activation < 0 || activation > 5 ||
+        (activation == 0 && !gate) || (!gate && gate_bias)) return -1;
+    auto finite = [](const float* values, std::size_t n) {
+        if (values)
+            for (std::size_t i = 0; i < n; ++i)
+                if (!std::isfinite(values[i])) return false;
+        return true;
+    };
+    const std::size_t weights = intermediate * dimension;
+    if (!finite(up, weights) || !finite(gate, weights) || !finite(down, weights) ||
+        !finite(up_bias, intermediate) || !finite(gate_bias, intermediate) ||
+        !finite(down_bias, dimension)) return -2;
+    try {
+        auto context = std::make_unique<bilinear_contraction_context_t>();
+        context->entity_count = entity_count;
+        context->rank = dimension;
+        int rc = aggregate_canonical_rows(embedding_rows, vocabulary_rows, dimension,
+            token_rows, entity_indexes, token_count, entity_count, false, context->right);
+        if (rc != 0) return rc;
+        context->left.assign(entity_count * dimension, 0.0);
+        std::vector<std::size_t> counts(entity_count, 0);
+        const std::size_t tile = std::min(token_count, kProjectionTileRows);
+        std::vector<double> inputs(tile * dimension), outputs(tile * dimension);
+        for (std::size_t begin = 0; begin < token_count; begin += tile) {
+            const std::size_t rows = std::min(tile, token_count - begin);
+            for (std::size_t r = 0; r < rows; ++r) {
+                const float* src = embedding_rows + (std::size_t)token_rows[begin + r] * dimension;
+                for (std::size_t d = 0; d < dimension; ++d) inputs[r * dimension + d] = src[d];
+            }
+            rc = ffn_write_vectors_ex_d(inputs.data(), rows, dimension,
+                up, up_bias, gate, gate_bias, intermediate, down, down_bias,
+                dimension, activation, outputs.data());
+            if (rc != 0) return rc;
+            // Nonlinear activation does not commute with averaging aliases.
+            for (std::size_t r = 0; r < rows; ++r) {
+                const std::size_t entity = (std::size_t)entity_indexes[begin + r];
+                double* dst = context->left.data() + entity * dimension;
+                for (std::size_t d = 0; d < dimension; ++d) {
+                    const double value = outputs[r * dimension + d];
+                    if (!std::isfinite(value)) return -2;
+                    dst[d] += value;
+                }
+                ++counts[entity];
+            }
+        }
+        for (std::size_t entity = 0; entity < entity_count; ++entity) {
+            if (counts[entity] == 0) return -1;
+            for (std::size_t d = 0; d < dimension; ++d)
+                context->left[entity * dimension + d] /= (double)counts[entity];
+        }
+        rc = factor_arena(context->left, context->right, entity_count, dimension, &context->arena);
+        if (rc != 0) return rc;
+        *out_arena_rms = context->arena;
+        *out_resident_bytes = sizeof(*context) +
+            (context->left.capacity() + context->right.capacity()) * sizeof(double);
+        *out_context = context.release();
+        return 0;
+    } catch (const std::bad_alloc&) {
+        return -3;
+    } catch (const std::exception&) {
+        return -1;
+    }
 }
 
 extern "C"

@@ -23,6 +23,8 @@ public static class EntityTypeRegistry
     // Agent-trace lane (spec 34 batch counterpart): a turn is the ordered composition of
     // its part content roots; a tool invocation is the composition of input/result roots.
     public static readonly Hash128 ConversationTurn = Id("Conversation_Turn");
+    // A witnessed message has ordered metadata and exact-content branches.
+    public static readonly Hash128 ConversationMessage = Id("Conversation_Message");
     public static readonly Hash128 AgentTool = Id("Agent_Tool");
     public static readonly Hash128 AgentModel = Id("Agent_Model");
     public static readonly Hash128 ToolInvocation = Id("Tool_Invocation");

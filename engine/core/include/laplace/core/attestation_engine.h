@@ -93,10 +93,17 @@ int laplace_attestation_outcome_from_totals_fp(
 /* The draw threshold itself, so no other layer has to restate the literal. */
 int64_t laplace_attestation_score_draw_fp(void);
 
-/* Positional agreement of categorical witnesses, excluding neutral evidence.
- * Return admitted indices, preserving source order. No derived scores are folded. */
-int laplace_attestation_agreement_indices(const int16_t *left, const int16_t *right,
-    size_t count, int32_t *indices, size_t capacity, size_t *written);
+/* Phase-5b agreement preserves both confirmations and refutations. A draw or
+ * disagreement does not admit the pair. Input arrays are aligned candidate
+ * outcomes; the caller supplies one output byte per candidate. */
+int laplace_attestation_corroboration_mask(
+    const int16_t* left, const int16_t* right, size_t count, uint8_t* admitted);
+
+/* Resolve relation rank and source prior through the canonical witness builder
+ * without manufacturing an evidence row in the caller. */
+int laplace_attestation_resolved_witness_parameters(
+    const hash128_t* type_id, double source_trust,
+    int64_t* opponent_rating_fp, int64_t* opponent_rd_fp);
 
 int laplace_attestation_categorical_build(
     const char*      surface_relation,

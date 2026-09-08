@@ -92,7 +92,8 @@ int eigendecompose_laplacian(const SpMat& W,
     L.makeCompressed();
 
     const int nev = static_cast<int>(target_dim) + 1;
-    const int ncv = std::min(ni - 1, std::max(2 * nev + 1, 20));
+    const int ncv = static_cast<int>(std::min<std::size_t>(n,
+        std::max<std::size_t>(2 * static_cast<std::size_t>(nev) + 1, 20)));
     if (ncv <= nev) return -2;
 
     
@@ -161,26 +162,21 @@ int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
                                           std::size_t   target_dim,
                                           double*       low_dim_out) {
     if (!coo_rows || !coo_cols || !coo_weights || !low_dim_out) return -1;
-    if (n == 0 || target_dim == 0) return -2;
-    if (target_dim + 1 >= n) return -2;
+    if (n < 3 || n > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+        target_dim == 0 || target_dim >= n - 1) return -2;
 
     std::vector<Triplet> w_triplets;
     w_triplets.reserve(nnz);
     for (std::size_t e = 0; e < nnz; ++e) {
-        // A refuted edge is NOT affinity. This used to take fabs(), which turned a
-        // refutation into a claim of similarity of equal strength -- and because the
-        // triplet reducer below SUMS duplicates, +0.7 and -0.7 on the same pair became
-        // 1.4 rather than cancelling. The normalized Laplacian this feeds requires a
-        // nonnegative affinity; enforce that contract HERE, where it is assumed, rather
-        // than trusting every caller to clamp (FoundryCommands' Path A did not).
-        // Dropping also rejects NaN, which fabs() would have propagated into the solve.
+        // The basis uses positive affinity. Signed operator planes retain
+        // refutations separately; they must not become positive affinity here.
+        // Invalid operands are not absent evidence.
         const double w = coo_weights[e];
-        if (!(w > 0.0)) continue;
+        if (!std::isfinite(w)) return -1;
         const int r = coo_rows[e];
         const int c = coo_cols[e];
-        if (r < 0 || c < 0) continue;
-        if ((std::size_t)r >= n || (std::size_t)c >= n) continue;
-        w_triplets.emplace_back(r, c, w);
+        if (r < 0 || c < 0 || (std::size_t)r >= n || (std::size_t)c >= n) return -1;
+        if (w > 0.0) w_triplets.emplace_back(r, c, w);
     }
 
     SpMat W(static_cast<int>(n), static_cast<int>(n));
@@ -189,6 +185,9 @@ int laplacian_eigenmaps_from_sparse_graph(const int*    coo_rows,
 
     SpMat WT = SpMat(W.transpose());
     SpMat Wsym = 0.5 * (W + WT);
+    for (int k = 0; k < Wsym.outerSize(); ++k)
+        for (SpMat::InnerIterator it(Wsym, k); it; ++it)
+            if (!std::isfinite(it.value())) return -1;
     Wsym.makeCompressed();
 
     return eigendecompose_laplacian(Wsym, n, target_dim, low_dim_out);

@@ -62,7 +62,7 @@ int bilinear_direct_contraction_create(
 
 /* left/right weights are rank-by-dimension row-major matrices. Biases are
  * optional rank-vectors. For narrow circuits the implementation projects in
- * bounded row tiles. For a wide circuit (notably FFN) it first contracts the
+ * bounded row tiles. For a wide linear circuit it first contracts the
  * two weights to a dimension-by-dimension kernel, preventing V*rank factors
  * and rank-squared Gram matrices from existing at all. */
 int bilinear_projected_contraction_create(
@@ -80,6 +80,18 @@ int bilinear_contraction_candidates_calibrate(
     const bilinear_contraction_context_t* context,
     const int* rows, const int* cols, size_t pair_count,
     int64_t* out_scores_fp1e9, int16_t* out_outcomes);
+
+/* Per-token nonlinear FFN probe, reduced to canonical identities only AFTER
+ * activation. Retains [mean(FFN(E_alias)), mean(E_alias)] factors of width d;
+ * candidate calibration and arena reduction use the shared context operations. */
+int ffn_contraction_create(const float* embedding_rows,
+    size_t vocabulary_rows, size_t dimension,
+    const int* token_rows, const int* entity_indexes,
+    size_t token_count, size_t entity_count,
+    const float* up, const float* up_bias, const float* gate, const float* gate_bias,
+    const float* down, const float* down_bias, size_t intermediate, int activation,
+    bilinear_contraction_context_t** out_context,
+    double* out_arena_rms, size_t* out_resident_bytes);
 
 void bilinear_contraction_free(bilinear_contraction_context_t* context);
 

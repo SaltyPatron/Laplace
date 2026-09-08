@@ -191,6 +191,18 @@ public sealed unsafe class GrammarRowComposer : IDisposable
 
     private IntPtr ActiveResult => _compose != IntPtr.Zero ? _compose : _probe;
 
+    public long ResidentBytes
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return checked((long)NativeInterop.ComposeResidentBytes(_compose)
+                + (long)NativeInterop.ComposeResidentBytes(_probe)
+                + (long)NativeInterop.AstResidentBytes(_ast.Handle)
+                + _utf8.LongLength);
+        }
+    }
+
 
 
 

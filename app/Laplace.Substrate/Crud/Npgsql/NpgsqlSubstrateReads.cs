@@ -1364,33 +1364,66 @@ public static partial class NpgsqlSubstrateReads
 
     public readonly record struct WalkTextStepRow(int Step, string Entity, int StrideUsed);
 
-    /// <summary>
-    /// <c>generation.walk_text(...)</c> — streams as it reads, so it stays outside
-    /// NpgsqlRead's buffer-then-return shape; the caller's IAsyncEnumerable pass-through
-    /// is the whole point of this endpoint.
-    /// </summary>
-    public static async IAsyncEnumerable<WalkTextStepRow> WalkTextAsync(
-        NpgsqlDataSource dataSource, string prompt, int steps, int maxOrder, double temperature, int topK,
+    public static async Task<string?> ForwardTurnAsync(
+        NpgsqlDataSource dataSource, string prompt, byte[]? session,
+        int steps, int maxStride, double spread, int topK, CancellationToken ct)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await ForwardTurnAsync(connection, prompt, session,
+            steps, maxStride, spread, topK, ct).ConfigureAwait(false);
+    }
+
+    public static async Task<string?> ForwardTurnAsync(
+        NpgsqlConnection connection, string prompt, byte[]? session,
+        int steps, int maxStride, double spread, int topK, CancellationToken ct)
+    {
+        var text = new System.Text.StringBuilder();
+        bool hasRows = false;
+        await foreach (var row in ForwardTurnStepsAsync(connection, prompt, session,
+            steps, maxStride, spread, topK, ct).ConfigureAwait(false))
+        {
+            hasRows = true;
+            text.Append(row.Entity);
+        }
+        return hasRows ? text.ToString() : null;
+    }
+
+    public static async IAsyncEnumerable<WalkTextStepRow> ForwardTurnStepsAsync(
+        NpgsqlDataSource dataSource, string prompt, byte[]? session,
+        int steps, int maxStride, double spread, int topK,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = new NpgsqlCommand(
-            "SELECT step, entity, stride_used FROM generation.walk_text(@p, @steps, @order, @temp, @topk);", conn);
-        cmd.Parameters.AddWithValue("p", prompt);
-        cmd.Parameters.AddWithValue("steps", steps);
-        cmd.Parameters.AddWithValue("order", maxOrder);
-        cmd.Parameters.AddWithValue("temp", temperature);
-        cmd.Parameters.AddWithValue("topk", topK);
+        await using var connection = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await foreach (var row in ForwardTurnStepsAsync(connection, prompt, session,
+            steps, maxStride, spread, topK, ct).ConfigureAwait(false))
+            yield return row;
+    }
 
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+    // Streaming and assembled replies consume the same ordered substrate rows.
+    // The adapter concatenates exact surfaces; it does not select or score them.
+    public static async IAsyncEnumerable<WalkTextStepRow> ForwardTurnStepsAsync(
+        NpgsqlConnection connection, string prompt, byte[]? session,
+        int steps, int maxStride, double spread, int topK,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand(SqlCatalog.Get("conversation.forward_turn").Text, connection);
+        command.Parameters.AddWithValue("prompt", prompt);
+        command.Parameters.Add("session", NpgsqlDbType.Bytea).Value = (object?)session ?? DBNull.Value;
+        command.Parameters.AddWithValue("steps", steps);
+        command.Parameters.AddWithValue("stride", maxStride);
+        command.Parameters.AddWithValue("spread", spread);
+        command.Parameters.AddWithValue("topk", topK);
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            yield return new WalkTextStepRow(
-                reader.GetInt32(0),
+            yield return new WalkTextStepRow(reader.GetInt32(0),
                 reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
                 reader.IsDBNull(2) ? 0 : reader.GetInt32(2));
-        }
     }
+
+    public static IAsyncEnumerable<WalkTextStepRow> WalkTextAsync(
+        NpgsqlDataSource dataSource, string prompt, int steps, int maxOrder, double temperature, int topK,
+        CancellationToken ct) =>
+        ForwardTurnStepsAsync(dataSource, prompt, null, steps, maxOrder, temperature, topK, ct);
 
     public readonly record struct OrdinalCountRow(long Ordinal, long? Count);
 

@@ -250,31 +250,24 @@ pg_apply_toast_compression() {
   fi
 }
 
-# huge_pages, probed for the same reason as the two above: the choice between
-# 'on' and 'try' depends on /proc/meminfo, which the emitter cannot read.
-#
-# 'try' fails SILENTLY -- it is why a ~31 GiB buffer pool ran on 4 KiB pages for
-# months while the setting read as configured. 'on' makes the postmaster refuse
-# to start when the pages are missing, which is the loud behaviour we want, but
-# only once the reservation is PROVEN. Reserving the pages themselves is a host
-# concern and belongs to bootstrap_pg_hugepages (sysctl vm.nr_hugepages, applied
-# at boot because late allocation fails on a fragmented host). This function only
-# decides which GUC that reservation justifies.
+# The host huge-page pool is shared by every cluster and process. Neither its
+# total nor a snapshot of its free count reserves pages for this postmaster's
+# next start. Machine tuning therefore requests huge pages opportunistically;
+# it cannot turn an acceleration resource into a startup prerequisite.
+# Actual usage remains observable through huge_pages_status after startup.
 pg_apply_huge_pages() {
-  local need got hp
-  need=$(pg_tune_psql -tAc "SHOW shared_memory_size_in_huge_pages" 2>/dev/null | tr -dc '0-9')
-  got=$(awk '/HugePages_Total/{print $2}' /proc/meminfo 2>/dev/null)
-  if [[ -z "$need" || -z "$got" ]]; then
-    echo "pg-machine-tuning: huge_pages unprobeable — leaving as-is" >&2
-    return 0
-  fi
-  if (( got >= need )); then hp=on; else hp=try; fi
-  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET huge_pages = $hp"
-  echo "pg-machine-tuning: huge_pages=$hp (reserved $got, need $need)"
-  if [[ "$hp" == "try" ]]; then
-    echo "pg-machine-tuning: NOTE only $got of $need huge pages reserved -- shared memory" >&2
-    echo "  will silently fall back to 4 KiB pages. /etc/sysctl.d/60-laplace-hugepages.conf" >&2
-    echo "  persists the reservation; REBOOT so it lands before memory fragments." >&2
+  local need total free reserved available
+  need=$(pg_tune_psql -tAc "SHOW shared_memory_size_in_huge_pages" 2>/dev/null | tr -dc '0-9' || true)
+  total=$(awk '/^HugePages_Total:/{print $2}' /proc/meminfo 2>/dev/null || true)
+  free=$(awk '/^HugePages_Free:/{print $2}' /proc/meminfo 2>/dev/null || true)
+  reserved=$(awk '/^HugePages_Rsvd:/{print $2}' /proc/meminfo 2>/dev/null || true)
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET huge_pages = try"
+  if [[ "$need" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ &&
+        "$free" =~ ^[0-9]+$ && "$reserved" =~ ^[0-9]+$ ]]; then
+    available=$(( free > reserved ? free - reserved : 0 ))
+    echo "pg-machine-tuning: huge_pages=try (host total $total, currently unreserved $available, current cluster need $need)"
+  else
+    echo "pg-machine-tuning: huge_pages=try (host availability not measurable)"
   fi
 }
 
@@ -471,10 +464,9 @@ WITH want(name, expected, mode) AS (VALUES
   ('max_parallel_maintenance_workers','${PG_TUNE_PDEG}','eq'),
   ('effective_io_concurrency','${PG_TUNE_IO_CONC}','eq'),
   ('max_locks_per_transaction','1024','eq'),
-  -- 'enabled' (<> off), NOT eq 'try': pg_apply_huge_pages promotes this to 'on'
-  -- once the reservation is proven to cover shared_memory_size_in_huge_pages.
-  -- Pinning it to 'try' made a successful promotion read as a validation FAILURE.
-  ('huge_pages','on','enabled'))
+  -- Machine tuning may request huge pages, but cannot require a shared host
+  -- pool to remain available across a restart.
+  ('huge_pages','try','eq'))
 SELECT w.name, current_setting(w.name, true),
        CASE w.mode
          -- PostgreSQL parse_int rounds memory inputs to the GUC's native unit
