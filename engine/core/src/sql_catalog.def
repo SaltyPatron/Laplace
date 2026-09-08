@@ -6,6 +6,10 @@ SQL_QUERY("browse.names", "bytea[]",
     "consensus.relation_family_ids('HAS_NAME') || consensus.relation_family_ids('HAS_NAME_ALIAS'))")
 SQL_QUERY("entity.facets", "bytea[]",
     "SELECT id, tier, type_id FROM laplace.entities WHERE id = ANY($1)")
+SQL_QUERY("entities.mask_targets", "bytea[]",
+    "SELECT id,tier,highway_mask,tableoid,ctid FROM laplace.entities WHERE id=ANY($1)")
+SQL_QUERY("entities.mask_families", "bytea[],bytea",
+    "SELECT subject_id,object_id FROM laplace.consensus WHERE subject_id=ANY($1) AND type_id=$2")
 SQL_QUERY("browse.page", "bytea[],bytea,int4,int4,int4",
     "SELECT entity_id, tier, type_id, matched_name_id, match_kind, "
     "rating, rd, eff_mu, witness_count, candidate_name_count, candidate_truncated, matched_entity_count "

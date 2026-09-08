@@ -124,6 +124,7 @@ set(EXT_C_SOURCES
     src/constituents_closure.c
     src/geometry_successors.c
     src/highway_mask.c
+    src/entity_mask_write.c
     src/model_factor.c
     src/lexical_case.c
     src/steered_walk.c

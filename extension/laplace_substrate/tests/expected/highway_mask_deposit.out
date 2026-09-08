@@ -120,4 +120,78 @@ BEGIN
         NULL;
     END;
 END $$;
+-- Physical tuple routing must retain every stored tier for an identity.
+INSERT INTO laplace.entities(id,tier,type_id)
+SELECT id,3,decode(repeat('dc',16),'hex') FROM deposit_fixtures WHERE name='entity_a';
+DO $$
+DECLARE n bigint;
+BEGIN
+    SELECT consensus.highway_mask_deposit(
+        ARRAY[decode(repeat('a7',16),'hex')],
+        ARRAY[laplace.relation_type_id('IS_ANTONYM_OF')]) INTO n;
+    IF n<>2 THEN RAISE EXCEPTION 'multi-tier identity lost an update: %',n; END IF;
+    SELECT consensus.highway_mask_deposit(
+        ARRAY[decode(repeat('a7',16),'hex')],
+        ARRAY[laplace.relation_type_id('IS_ANTONYM_OF')]) INTO n;
+    IF n<>0 THEN RAISE EXCEPTION 'replay updated % masks',n; END IF;
+END $$;
+-- Native writes still run the table's constraints and roll back on failure.
+ALTER TABLE laplace.entities ADD CONSTRAINT mask_deposit_check
+    CHECK(id<>decode(repeat('a8',16),'hex') OR highway_mask IS NULL) NOT VALID;
+DO $$
+BEGIN
+    BEGIN
+        PERFORM consensus.highway_mask_deposit(
+            ARRAY[decode(repeat('a8',16),'hex')],
+            ARRAY[laplace.relation_type_id('IS_ANTONYM_OF')]);
+        RAISE EXCEPTION 'mask write bypassed a CHECK constraint';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+    IF EXISTS(SELECT 1 FROM laplace.entities WHERE id=decode(repeat('a8',16),'hex')
+        AND consensus.highway_mask_bits(highway_mask) @>
+            ARRAY[consensus.relation_highway_bit(laplace.relation_type_id('IS_ANTONYM_OF'))]) THEN
+        RAISE EXCEPTION 'failed mask update survived rollback';
+    END IF;
+END $$;
+ALTER TABLE laplace.entities DROP CONSTRAINT mask_deposit_check;
+CREATE ROLE mask_deposit_reader;
+GRANT USAGE ON SCHEMA laplace,consensus TO mask_deposit_reader;
+GRANT SELECT ON laplace.entities TO mask_deposit_reader;
+SET LOCAL ROLE mask_deposit_reader;
+DO $$
+BEGIN
+    BEGIN
+        PERFORM consensus.highway_mask_deposit(
+            ARRAY[decode(repeat('a7',16),'hex')],ARRAY[laplace.relation_type_id('IS_A')]);
+        RAISE EXCEPTION 'SELECT privilege authorized a native UPDATE';
+    EXCEPTION WHEN insufficient_privilege THEN NULL;
+    END;
+END $$;
+RESET ROLE;
+GRANT UPDATE ON laplace.entities TO mask_deposit_reader;
+ALTER TABLE laplace.entities ENABLE ROW LEVEL SECURITY;
+SET LOCAL ROLE mask_deposit_reader;
+DO $$
+BEGIN
+    BEGIN
+        PERFORM consensus.highway_mask_deposit(
+            ARRAY[decode(repeat('a7',16),'hex')],ARRAY[laplace.relation_type_id('IS_A')]);
+        RAISE EXCEPTION 'native mask writer bypassed row security';
+    EXCEPTION WHEN internal_error THEN
+        IF SQLERRM NOT LIKE '%cannot bypass row security%' THEN RAISE; END IF;
+    END;
+END $$;
+RESET ROLE;
+ALTER TABLE laplace.entities DISABLE ROW LEVEL SECURITY;
+ROLLBACK;
+BEGIN READ ONLY;
+DO $$
+BEGIN
+    BEGIN
+        PERFORM consensus.highway_mask_deposit(
+            ARRAY[decode(repeat('a7',16),'hex')],ARRAY[laplace.relation_type_id('IS_A')]);
+        RAISE EXCEPTION 'native mask writer accepted a read-only transaction';
+    EXCEPTION WHEN read_only_sql_transaction THEN NULL;
+    END;
+END $$;
 ROLLBACK;

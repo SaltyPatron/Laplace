@@ -13,6 +13,7 @@
 #include "laplace/core/highway_table.h"
 
 #include "perfcache_native.h"
+#include "entity_mask_write.h"
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <intrin.h>
@@ -42,11 +43,7 @@ typedef struct highway_deposit_type
     laplace_mask256_t mask;
 } highway_deposit_type;
 
-typedef struct highway_deposit_entity
-{
-    unsigned char id[HASH128_BYTES];
-    laplace_mask256_t mask;
-} highway_deposit_entity;
+typedef LaplaceEntityMaskDelta highway_deposit_entity;
 
 static int
 deposit_id_cmp(const void *a, const void *b)
@@ -97,16 +94,6 @@ static inline bool
 deposit_mask_empty(const laplace_mask256_t *mask)
 {
     return (mask->w[0] | mask->w[1] | mask->w[2] | mask->w[3]) == 0;
-}
-
-static inline bool
-deposit_mask_contains(const laplace_mask256_t *have,
-                      const laplace_mask256_t *wanted)
-{
-    for (int i = 0; i < 4; i++)
-        if ((have->w[i] & wanted->w[i]) != wanted->w[i])
-            return false;
-    return true;
 }
 
 static inline int
@@ -333,8 +320,9 @@ pg_laplace_highway_ready(PG_FUNCTION_ARGS)
 
 /*
  * Native deposit lane. Pair reduction and all highway-table work stay in C;
- * SPI is used only for dynamic-relation family lookup and the indexed
- * pre-read, bytewise-ordered row lock, and keyed storage update. The caller owns the
+ * SPI is used only for dynamic-relation family lookup and one indexed target
+ * read. The shared native writer locks and updates those physical tuples in
+ * bytewise identity/tier order, rechecking masks after lock waits. The caller owns the
  * apply_write_epoch bump -- this function deliberately does not advance it.
  */
 PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_deposit);
@@ -342,26 +330,6 @@ PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_deposit);
 Datum
 pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
 {
-    static const char *family_query =
-        "SELECT subject_id, object_id "
-        "FROM laplace.consensus "
-        "WHERE subject_id = ANY($1) AND type_id = $2";
-    static const char *read_query =
-        "SELECT e.id, e.tier, e.highway_mask "
-        "FROM laplace.entities e "
-        "WHERE e.id = ANY($1) "
-        "ORDER BY e.id, e.tier";
-    static const char *lock_query =
-        "SELECT e.id, e.tier, e.highway_mask "
-        "FROM laplace.entities e "
-        "WHERE e.id = ANY($1) "
-        "ORDER BY e.id, e.tier "
-        "FOR NO KEY UPDATE OF e";
-    static const char *update_query =
-        "UPDATE laplace.entities e SET highway_mask = u.mask "
-        "FROM unnest($1::bytea[], $2::int2[], $3::bytea[]) "
-        "     AS u(id, tier, mask) "
-        "WHERE e.id = u.id AND e.tier = u.tier";
     ArrayType *entity_arr = NULL;
     ArrayType *type_arr = NULL;
     Datum *entity_values = NULL;
@@ -481,7 +449,7 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
 
             if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
                 elog(ERROR, "highway_mask_deposit: SPI_connect failed");
-            rc = SPI_execute_with_args(family_query, 2, argtypes, args, NULL, true, 0);
+            rc = SPI_execute_with_args(laplace_sql_query_text("entities.mask_families"), 2, argtypes, args, NULL, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "highway_mask_deposit: family lookup failed: %s",
                      SPI_result_code_string(rc));
@@ -563,159 +531,11 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
         n_deposits = out;
     }
 
-    {
-        Datum *ids = (Datum *) palloc(sizeof(Datum) * n_deposits);
-        ArrayType *ids_arr;
-        Oid argtypes[1] = {BYTEAARRAYOID};
-        Datum args[1];
-        Datum *candidate_ids;
-        int n_candidates = 0;
-
-        for (int i = 0; i < n_deposits; i++)
-            ids[i] = PointerGetDatum(deposit_bytea(deposits[i].id, HASH128_BYTES));
-        ids_arr = construct_array(ids, n_deposits, BYTEAOID, -1, false,
-                                  TYPALIGN_INT);
-        args[0] = PointerGetDatum(ids_arr);
-
-        if (!spi_top && laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-            elog(ERROR, "highway_mask_deposit: SPI_connect failed");
-        rc = SPI_execute_with_args(read_query, 1, argtypes, args, NULL, true, 0);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "highway_mask_deposit: target read failed: %s",
-                 SPI_result_code_string(rc));
-
-        /* Avoid minting tuple locks for the overwhelmingly common replay/no-op
-         * case. This is only a hint read: overlapping writers can change a mask
-         * before the lock, so the locked version is checked again below. */
-        candidate_ids = (Datum *) palloc(sizeof(Datum) * SPI_processed);
-        for (uint64 i = 0; i < SPI_processed; i++)
-        {
-            HeapTuple tuple = SPI_tuptable->vals[i];
-            TupleDesc desc = SPI_tuptable->tupdesc;
-            bool id_null;
-            bool old_null;
-            Datum id = SPI_getbinval(tuple, desc, 1, &id_null);
-            Datum old = SPI_getbinval(tuple, desc, 3, &old_null);
-            unsigned char eid[HASH128_BYTES];
-            highway_deposit_entity *delta;
-            laplace_mask256_t old_mask;
-
-            Assert(!id_null);
-            deposit_read_id(id, eid, "stored entity id");
-            delta = (highway_deposit_entity *) bsearch(
-                eid, deposits, n_deposits, sizeof(*deposits), deposit_id_cmp);
-            Assert(delta != NULL);
-            memset(&old_mask, 0, sizeof(old_mask));
-            if (!old_null)
-            {
-                bytea *mask_value = DatumGetByteaPP(old);
-                if (VARSIZE_ANY_EXHDR(mask_value) != HIGHWAY_MASK_BYTES)
-                    elog(ERROR, "highway_mask_deposit: stored highway mask is not 32 bytes");
-                memcpy(&old_mask, VARDATA_ANY(mask_value), HIGHWAY_MASK_BYTES);
-            }
-            if (!deposit_mask_contains(&old_mask, &delta->mask))
-                candidate_ids[n_candidates++] = PointerGetDatum(
-                    deposit_bytea(eid, HASH128_BYTES));
-        }
-
-        if (n_candidates == 0)
-        {
-            laplace_spi_finish(spi_top);
-            PG_RETURN_INT64(0);
-        }
-
-        /* Candidate ids are already in bytewise order from read_query. Duplicate
-         * ids (the schema permits multiple tiers, though construction does not)
-         * are harmless to ANY; keeping them avoids another allocation/sort. */
-        ids_arr = construct_array(candidate_ids, n_candidates, BYTEAOID, -1,
-                                  false, TYPALIGN_INT);
-        args[0] = PointerGetDatum(ids_arr);
-        rc = SPI_execute_with_args(lock_query, 1, argtypes, args, NULL, false, 0);
-        if (rc != SPI_OK_SELECT)
-            elog(ERROR, "highway_mask_deposit: target lock failed: %s",
-                 SPI_result_code_string(rc));
-
-        {
-            uint64 n_locked = SPI_processed;
-            Datum *update_ids = (Datum *) palloc(sizeof(Datum) * n_locked);
-            Datum *update_tiers = (Datum *) palloc(sizeof(Datum) * n_locked);
-            Datum *update_masks = (Datum *) palloc(sizeof(Datum) * n_locked);
-            int n_update = 0;
-            ArrayType *update_id_arr;
-            ArrayType *update_tier_arr;
-            ArrayType *update_mask_arr;
-            Oid update_types[3] = {BYTEAARRAYOID, INT2ARRAYOID, BYTEAARRAYOID};
-            Datum update_args[3];
-
-            for (uint64 i = 0; i < n_locked; i++)
-            {
-                HeapTuple tuple = SPI_tuptable->vals[i];
-                TupleDesc desc = SPI_tuptable->tupdesc;
-                bool id_null;
-                bool tier_null;
-                bool old_null;
-                Datum id = SPI_getbinval(tuple, desc, 1, &id_null);
-                Datum tier = SPI_getbinval(tuple, desc, 2, &tier_null);
-                Datum old = SPI_getbinval(tuple, desc, 3, &old_null);
-                unsigned char eid[HASH128_BYTES];
-                highway_deposit_entity *delta;
-                laplace_mask256_t final_mask;
-                bytea *mask_value;
-
-                Assert(!id_null && !tier_null);
-                deposit_read_id(id, eid, "stored entity id");
-                delta = (highway_deposit_entity *) bsearch(
-                    eid, deposits, n_deposits, sizeof(*deposits), deposit_id_cmp);
-                Assert(delta != NULL);
-                memset(&final_mask, 0, sizeof(final_mask));
-                if (!old_null)
-                {
-                    mask_value = DatumGetByteaPP(old);
-                    if (VARSIZE_ANY_EXHDR(mask_value) != HIGHWAY_MASK_BYTES)
-                        elog(ERROR, "highway_mask_deposit: stored highway mask is not 32 bytes");
-                    memcpy(&final_mask, VARDATA_ANY(mask_value), HIGHWAY_MASK_BYTES);
-                }
-                /* Recheck the tuple version obtained after waiting for its lock.
-                 * If the winner deposited our complete delta, this caller is a
-                 * no-op and must not inflate the bigint updated count. */
-                if (deposit_mask_contains(&final_mask, &delta->mask))
-                    continue;
-                deposit_mask_or(&final_mask, &delta->mask);
-
-                update_ids[n_update] = PointerGetDatum(deposit_bytea(
-                    eid, HASH128_BYTES));
-                update_tiers[n_update] = Int16GetDatum(DatumGetInt16(tier));
-                update_masks[n_update] = PointerGetDatum(deposit_bytea(
-                    &final_mask, HIGHWAY_MASK_BYTES));
-                n_update++;
-            }
-
-            if (n_update == 0)
-            {
-                laplace_spi_finish(spi_top);
-                PG_RETURN_INT64(0);
-            }
-
-            update_id_arr = construct_array(update_ids, n_update,
-                                            BYTEAOID, -1, false, TYPALIGN_INT);
-            update_tier_arr = construct_array(update_tiers, n_update,
-                                              INT2OID, 2, true, TYPALIGN_SHORT);
-            update_mask_arr = construct_array(update_masks, n_update,
-                                              BYTEAOID, -1, false, TYPALIGN_INT);
-            update_args[0] = PointerGetDatum(update_id_arr);
-            update_args[1] = PointerGetDatum(update_tier_arr);
-            update_args[2] = PointerGetDatum(update_mask_arr);
-            rc = SPI_execute_with_args(update_query, 3, update_types, update_args,
-                                       NULL, false, 0);
-            if (rc != SPI_OK_UPDATE)
-                elog(ERROR, "highway_mask_deposit: update failed: %s",
-                     SPI_result_code_string(rc));
-            n_locked = SPI_processed;
-
-            laplace_spi_finish(spi_top);
-            PG_RETURN_INT64((int64) n_locked);
-        }
-    }
+    if (!spi_top && laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+        elog(ERROR, "highway_mask_deposit: SPI_connect failed");
+    int64 updated = laplace_entity_masks_apply(deposits, n_deposits);
+    laplace_spi_finish(spi_top);
+    PG_RETURN_INT64(updated);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_highway_band_mask);

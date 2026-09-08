@@ -683,3 +683,45 @@ FIDE's 100 profiles have since committed. Carlsen, Magnus is present as
 tier-3 Content trajectory contains word_id('Carlsen'), not the seven character
 IDs used by the current query. Repair the native tier traversal and remove the
 duplicate candidate call; absence of this player is no longer the explanation.
+
+### Shared mask persistence and the completed PGN run
+
+ChessPgn run a3f094fe-8d5f-420a-ac0b-7cc8a6dbeb4a completed the writer in
+1,467 seconds and the CLI in 1,511 seconds. Its journal records 248,935 ms in
+eight mask calls over 6,875,705 pairs and 323,303 ms in consensus calls.
+Post-writer ANALYZE took 28,923 ms and GIN maintenance 12,917 ms. Workflow
+34226407498 then failed its missing-baseline gate; subsequent correctness jobs
+were skipped. The completed run's 13,749.9 novel rows/s is now explicitly
+accepted as the pre-change comparison reference, not as a performance target
+or proof that the next run improved.
+
+The mask writer now obtains identity, tier, mask, tableoid and ctid in one
+fixed set read. C removes no-ops, sorts identity/tier lock order, locks the
+actual tuple locations, rechecks the latest mask, and invokes PostgreSQL's
+table/executor update with constraints and index maintenance. This removes the
+second indexed lock query and UPDATE FROM unnest's third identity lookup and
+temporary materialization. Read-only transactions, privileges and row security
+are checked; unsupported triggers/rules/stored generated columns fail explicitly
+instead of being bypassed. Existing transaction and advisory-lock ownership are
+unchanged. The SQL catalog owns both remaining fixed statements.
+
+The comparison uses 100,000 actual tier-2 IDs copied into a private verification
+database, the previous committed C implementation compiled as a benchmark-only
+module, and old/new/new/old order with rollback and vacuum between runs.
+Old: 2,824.052 / 2,227.276 ms; new: 1,815.687 / 1,693.608 ms. Both implementations
+produce every requested bit. Each old run spilled 855 temporary blocks; neither
+new run spilled. Warm comparison: 1,746,099 versus 1,457,490 shared buffer hits,
+with identical 61,003,509 WAL bytes. This is a component measurement, not a
+claimed full-ingest speedup. Receipts are mask-writer-comparison.sql/.log and
+mask-entities-100k.copy under the session's private receipt directory.
+
+Four overlapping workers completed 20 mask calls with 1,993 actual row updates,
+zero failures/deadlocks/serialization failures, and zero mask drift after
+restoration. Database regressions cover accumulated bits, replay, multiple tiers,
+constraint failure/rollback, UPDATE privilege and RLS. Required remaining proof:
+install the writer and compare the next complete physical-artifact ingest,
+including durable counts, mask/consensus time and post-ingest maintenance.
+
+Profile deployment readback now passes: Alekhine's real API profile returns
+HTTP 200 in 409.731 ms. This closes the rendered-type rejection observed on
+that page; Carlsen's tier search and complete chess eligibility remain open.
