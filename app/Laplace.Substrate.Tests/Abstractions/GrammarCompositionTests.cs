@@ -52,6 +52,19 @@ public sealed class GrammarCompositionTests
         Assert.True(ids1.SetEquals(ids2), "entity ids must be deterministic across runs");
     }
 
+    [Theory]
+    [InlineData("sql", "\n")]
+    [InlineData("c", "#ifndef HEADER_H\n#define HEADER_H\nint value;\n")]
+    [InlineData("markdown", "- first line\n  continued line\n\n  another paragraph\n")]
+    [InlineData("typescript", "export const view = <div>{value}</div>;\n")]
+    public void EmptyParserSpans_DoNotRejectPhysicalSource(string modality, string source)
+    {
+        var first = Compose(source, modality);
+        var replay = Compose(source, modality);
+        Assert.NotEqual(default, first.Root);
+        Assert.Equal(first.Root, replay.Root);
+    }
+
     [Fact]
     public void Python_DefinitionsAndCalls_UseRegisteredTagQueryAndComposedSpans()
     {

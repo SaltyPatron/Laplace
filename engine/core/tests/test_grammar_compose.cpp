@@ -502,6 +502,54 @@ TEST(GrammarSourceCompose, SingletonAstRootHasNativePlacementWithoutGrammarWrapp
     laplace_ast_free(ast);
 }
 
+TEST(GrammarSourceCompose, EmptyParserSpansDoNotBecomeContentOrRejectTheSource) {
+    // Empty nodes include both normal grammar bookkeeping and recovery tokens.
+    // Neither represents source bytes. A whitespace-only parser root still has
+    // an entire physical artifact outside its empty syntax span to preserve.
+    const std::pair<const char*, const char*> cases[] = {
+        {"sql", "\n"},
+        {"c", "#ifndef HEADER_H\n#define HEADER_H\nint value;\n"},
+        {"markdown", "- first line\n  continued line\n\n  another paragraph\n"},
+        {"typescript", "export const view = <div>{value}</div>;\n"},
+    };
+    size_t empty_spans = 0;
+    for (const auto& [modality, source] : cases) {
+        SCOPED_TRACE(modality);
+        const size_t len = std::strlen(source);
+        const auto* bytes = reinterpret_cast<const uint8_t*>(source);
+        laplace_ast_t* ast = nullptr;
+        ASSERT_EQ(laplace_grammar_parse(bytes, len,
+                      laplace_grammar_lookup_by_id(modality), &ast), 0);
+        std::unique_ptr<laplace_ast_t, decltype(&laplace_ast_free)> ast_owner(ast, laplace_ast_free);
+        laplace_compose_result_t* result = nullptr;
+        ASSERT_EQ(laplace_grammar_source_compose(bytes, len, ast, modality, &result), 0);
+        std::unique_ptr<laplace_compose_result_t, decltype(&laplace_compose_result_free)>
+            result_owner(result, laplace_compose_result_free);
+        ASSERT_NE(result, nullptr);
+        for (size_t i = 0; i < laplace_ast_node_count(ast); ++i) {
+            laplace_ast_node_t node;
+            ASSERT_EQ(laplace_ast_get_node(ast, i, &node), 0);
+            hash128_t id{};
+            int found = laplace_compose_span_lookup(result, node.start_byte, node.end_byte, &id);
+            if (node.start_byte == node.end_byte) {
+                ++empty_spans;
+                EXPECT_NE(found, 0) << "parser-invented empty token became content";
+            } else {
+                EXPECT_EQ(found, 0) << "source-backed AST span was lost at " << i;
+            }
+        }
+        const hash128_t root = laplace_compose_root_id(result);
+        const hash128_t zero{};
+        EXPECT_FALSE(hash128_equals(&root, &zero));
+        if (len == 1) {
+            hash128_t expected;
+            ASSERT_EQ(laplace_content_source_root_id(bytes, len, &expected), 0);
+            EXPECT_TRUE(hash128_equals(&root, &expected));
+        }
+    }
+    EXPECT_GE(empty_spans, 3u) << "fixtures must exercise empty parser nodes";
+}
+
 TEST(GrammarSourceCompose, RepositoryCSourceSharesLexicalTreesAndPreservesEveryLeafSpan) {
     const auto path = std::filesystem::path(__FILE__).parent_path().parent_path()
         / "src" / "tier_tree.c";

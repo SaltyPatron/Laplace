@@ -304,14 +304,19 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
 
     for (size_t i = 0; i < count; ++i) {
         if (laplace_ast_get_node(ast, i, &ast_nodes[i]) != 0 ||
-            ast_nodes[i].start_byte >= ast_nodes[i].end_byte ||
+            ast_nodes[i].start_byte > ast_nodes[i].end_byte ||
             ast_nodes[i].end_byte > len ||
             (ast_nodes[i].parent != LAPLACE_AST_ROOT &&
              (ast_nodes[i].parent >= count || ast_nodes[i].parent >= i))) {
             rc = -1;
             goto done;
         }
-        if (ast_nodes[i].parent != LAPLACE_AST_ROOT) {
+        /* Parser bookkeeping and recovery tokens can have empty spans. They
+         * describe syntax, but contribute no witnessed bytes or content ID.
+         * Keep the AST intact; exclude only these empty occurrences from the
+         * physical composition, including ordinary Markdown continuations. */
+        if (ast_nodes[i].parent != LAPLACE_AST_ROOT &&
+            ast_nodes[i].start_byte != ast_nodes[i].end_byte) {
             if (child_counts[ast_nodes[i].parent] == UINT32_MAX) { rc = -1; goto done; }
             ++child_counts[ast_nodes[i].parent];
         }
@@ -328,13 +333,18 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
     for (size_t i = 1; i < count; ++i) {
         uint32_t parent = ast_nodes[i].parent;
         if (parent == LAPLACE_AST_ROOT) { rc = -1; goto done; } /* one AST root */
+        if (ast_nodes[i].start_byte < ast_nodes[parent].start_byte ||
+            ast_nodes[i].end_byte > ast_nodes[parent].end_byte) { rc = -1; goto done; }
+        if (ast_nodes[i].start_byte == ast_nodes[i].end_byte) continue;
         children[child_cursor[parent]++] = (uint32_t)i;
     }
     for (size_t i = 0; i < count; ++i)
-        sort_children(children + child_offsets[i], child_counts[i], ast_nodes);
+        if (child_counts[i] > 1)
+            sort_children(children + child_offsets[i], child_counts[i], ast_nodes);
 
     for (size_t idx = count; idx-- > 0;) {
         const laplace_ast_node_t* node = &ast_nodes[idx];
+        if (node->start_byte == node->end_byte) continue;
         const size_t child_count = child_counts[idx];
         if (child_count == 0) {
             if (raw_component(r, &raw_cache, utf8 + node->start_byte,
@@ -405,7 +415,8 @@ int laplace_grammar_source_compose(const uint8_t* utf8, size_t len,
                 add_span(r, span_capacity, 0, ast_nodes[0].start_byte, &lead) != 0 ||
                 append_component(&lead, ids, coords, flags, 3, &used) != 0) { rc = -3; goto done; }
         }
-        if (append_component(&nodes[0], ids, coords, flags, 3, &used) != 0) { rc = -3; goto done; }
+        if (ast_nodes[0].start_byte != ast_nodes[0].end_byte &&
+            append_component(&nodes[0], ids, coords, flags, 3, &used) != 0) { rc = -3; goto done; }
         if (ast_nodes[0].end_byte != len) {
             source_node_t tail = {0};
             if (raw_component(r, &raw_cache, utf8 + ast_nodes[0].end_byte, len - ast_nodes[0].end_byte, &tail) != 0 ||

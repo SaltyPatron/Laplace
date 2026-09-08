@@ -100,7 +100,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                         _sourceId, BootstrapIntentBuilder.TypeMetaTypeId, &result);
                 if (rc != 0 || result == IntPtr.Zero)
                     throw new InvalidOperationException(
-                        $"laplace_grammar_compose_probe returned {rc} ({DescribeContent(_utf8)})");
+                        $"{(_mode == GrammarCompositionMode.FullSource ? "laplace_grammar_source_compose" : "laplace_grammar_compose_probe")} returned {rc} ({DescribeContent(_utf8)})");
             }
             if (_mode == GrammarCompositionMode.FullSource) _compose = result;
             else _probe = result;

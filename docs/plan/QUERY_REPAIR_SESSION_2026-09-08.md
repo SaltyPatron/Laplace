@@ -725,3 +725,32 @@ including durable counts, mask/consensus time and post-ingest maintenance.
 Profile deployment readback now passes: Alekhine's real API profile returns
 HTTP 200 in 409.731 ms. This closes the rendered-type rejection observed on
 that page; Carlsen's tier search and complete chess eligibility remain open.
+
+## Physical source failures and bot decision acceptance (2026-09-08)
+
+CodeDecomposer run `f52a2bd6-503b-40cd-96f6-667a1b51bf12` completed 2,060 of
+2,474 selected files and failed 414. The managed error incorrectly named
+`laplace_grammar_compose_probe`; this lane calls `laplace_grammar_source_compose`.
+The native source composer rejected every zero-width AST span, including ordinary
+Markdown continuation nodes, parser recovery tokens, and an empty SQL syntax root
+for a newline-only physical file. Keep those nodes in the syntax AST, omit their
+nonexistent bytes from physical composition, and compose the actual source-edge
+bytes even when the entire parser root is empty. Nonempty spans still require
+valid bounds, ancestry and nonoverlapping ordered coverage.
+
+Native recheck of all 414 exact files in the runner checkout: 414 successes,
+zero failures (`/tmp/laplace-code-failed-recheck.log`). Native grammar acceptance:
+14 passed. Managed grammar acceptance: 10 passed. Generic worker/database
+acceptance: four passed, including byte-for-byte reconstruction of the failed
+C header, TSX component and newline-only SQL artifact. Full deployed ingest replay
+and its journal reconciliation remain required before delivery.
+
+The inventor also requires proof that bot decisions actually use Laplace.
+`LichessBot` calls `ChessLiveGameHost.BuildSearch` / `Search.Think` and posts that
+move; this inspected path does not call Stockfish. It enables `EvalTerm.All`
+alongside `SubstrateRootBias` and `SubstrateBoardEvaluator`. That conventional
+search with evidence contributions does not prove the complete spec-11 decision
+program. Required acceptance remains per-move proposal/steering/selection/witness
+receipts using real substrate evidence, source separation for engine testimony,
+and demonstrated influence of observed outcomes on later decisions. Do not label
+classical search or a fixture with fabricated evidence as that acceptance.
