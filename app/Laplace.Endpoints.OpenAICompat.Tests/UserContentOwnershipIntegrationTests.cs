@@ -449,11 +449,6 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
             contextId: null,
             RelationTypeRank.Associative * SourceTrust.UserPrompt * scope.TenantTrust);
         Hash128 membershipType = membership.TypeId;
-        await new NpgsqlSubstrateWriter(pg.DataSource).ApplyAsync(
-            new SubstrateChangeBuilder(scope.Source, "test/user-artifact/failure-seed")
-                .AddAttestation(membership)
-                .Build());
-
         await using (var install = pg.DataSource.CreateCommand("""
             CREATE FUNCTION public.reject_user_artifact_apply() RETURNS trigger
             LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''injected user artifact apply failure''; END';
@@ -503,7 +498,7 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
             rollback.Parameters.AddWithValue(NpgsqlDbType.Text, failedPath);
             await using var rows = await rollback.ExecuteReaderAsync();
             Assert.True(await rows.ReadAsync());
-            Assert.Equal(1L, rows.GetInt64(0));
+            Assert.Equal(0L, rows.GetInt64(0));
             Assert.Equal(0L, rows.GetInt64(1));
             Assert.Equal(0L, rows.GetInt64(2));
         }

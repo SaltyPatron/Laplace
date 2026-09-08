@@ -49,6 +49,8 @@ public class FeedbackContentTests
         Assert.Equal(ca.TypeId, ra.TypeId);
         Assert.Equal(ca.ObjectId, ra.ObjectId);
         Assert.Equal(FeedbackContent.Source, ca.SourceId);
+        Assert.NotNull(ca.ContextId);
+        Assert.NotEqual(ca.Id, ra.Id);
     }
 
     [Fact]
@@ -70,6 +72,21 @@ public class FeedbackContentTests
         Assert.Equal(ids[1], change.Attestations[0].ObjectId);
         Assert.Equal(ids[1], change.Attestations[1].SubjectId);
         Assert.Equal(ids[2], change.Attestations[1].ObjectId);
+    }
+
+    [Fact]
+    public void FeedbackRequest_RetryPreservesIdentity_NewOccurrenceRetainsSeparateEvidence()
+    {
+        var s = SubstrateCanonicalIds.Of("test", "feedback", "subject");
+        var o = SubstrateCanonicalIds.Of("test", "feedback", "object");
+        var first = FeedbackContent.BuildTriple(s, "IS_A", o, true, "request-one");
+        var retry = FeedbackContent.BuildTriple(s, "IS_A", o, true, "request-one");
+        var next = FeedbackContent.BuildTriple(s, "IS_A", o, true, "request-two");
+        Assert.Equal(Assert.Single(first.Attestations).Id, Assert.Single(retry.Attestations).Id);
+        Assert.NotEqual(Assert.Single(first.Attestations).Id, Assert.Single(next.Attestations).Id);
+        Assert.NotEmpty(first.IntentStages);
+        foreach (var change in new[] { first, retry, next })
+            foreach (var stage in change.IntentStages) stage.Dispose();
     }
 
     [Fact]

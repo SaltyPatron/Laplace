@@ -932,3 +932,48 @@ boundaries, call surfaces, novel context, rollback and grammar provenance. Nativ
 typed replay and consensus-upsert regressions pass. Live duplicated counts and
 legacy context-free code testimony still require measured repair/readback; do
 not call them repaired merely because the code tests pass.
+
+Live repair/readback completed: the context rebuild admitted 408,117 coding
+relations from all 32,516 rows with zero failures in 251.382 seconds. All 225,455
+legacy context-free code relations had exact subject/type/object replacements
+with source context before their retirement. The accidentally doubled 32,516
+prompt-response receipts and four bootstrap receipts were restored to count 1.
+The first repair transaction was interrupted by the deployment's PostgreSQL
+restart and rolled back; the retry committed after DB lifecycle completed.
+`ops.refold_source` rebuilt derived standings in 103.084 seconds. Its legacy
+SQL also folds operational completion metadata, so the repair removed that one
+nonsemantic cell. Replacing this maintenance path remains a native/static SQL
+obligation.
+
+The subsequent full forced replay completed in 158.3 seconds with zero novel
+rows, zero folded observations and zero changed cells. Binary COPY snapshots of
+all 440,637 evidence rows and all 257,974 affected consensus rows compare exactly
+before/after, including counts, timestamps, rating, RD and volatility. Evidence
+SHA-256: `b9b825be32f206b3d6cc5b4010b723158e4c1474b16fee828b0e264d146edf5e`;
+standing SHA-256:
+`ee8238cfb9cc489579a80c3c8453b3bc9793ab84441a4a2cbe22911b329b60f9`.
+Recovery snapshots and guarded repair/readback SQL are retained under
+`/home/ahart/.cache/laplace-repair-receipts/20260908-tiny-replay/`.
+
+Repository semantic rebuild `2681e72c-04bb-4e00-80fe-ddd259eae64b` completed all
+2,524 selected files, zero failures, in 158.400 seconds with 41 round trips.
+It retains 129,758 context-qualified code relations. All 10,636 previous unscoped
+relations had replacements before retirement; the scoped refold took 22.833
+seconds. A native-ID query for `laplace_grammar_source_compose` now finds eight
+actual C call sites in two source contexts in 1.264 ms. Rendering two selected
+call sites afterwards took 169.262 ms. Source ingestion and native-ID retrieval
+are demonstrated; generated code, validated autonomous edits and the natural
+forward-pass product test are still separate failed/unimplemented acceptance.
+
+The writer change exposed two additional caller contracts in CI. Legacy-bootstrap
+fixtures must actually model pre-journal evidence now that scalar writes are
+atomic. User-file rollback injection must target novel evidence rather than
+expecting a repeated membership witness to UPDATE. Feedback also used a null
+context for every request, conflating a correction with replay. Feedback now
+records the request occurrence through native content composition; request_id or
+Idempotency-Key preserves identity on HTTP retry, while distinct requests retain
+distinct evidence. The managed cell reader applies native relation orientation
+before lookup so symmetric endpoint order cannot manufacture a false absence.
+The isolated test confirms 20 requests, refutes with 60 different requests,
+checks that the walk changes, and verifies that replay leaves the 80-witness
+standing unchanged.

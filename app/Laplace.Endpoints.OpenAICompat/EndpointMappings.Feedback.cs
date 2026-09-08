@@ -24,6 +24,11 @@ internal static class FeedbackEndpoints
             if (verdict is not ("confirm" or "refute"))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'verdict' must be 'confirm' or 'refute'.");
             bool confirm = verdict == "confirm";
+            string occurrenceKey = payload.RequestId
+                ?? request.Headers["Idempotency-Key"].FirstOrDefault()
+                ?? Guid.NewGuid().ToString("N");
+            if (!ConversationContent.IsValidIdentifier(occurrenceKey))
+                return EndpointJson.BadRequest("invalid_request_error", "Invalid feedback request_id.");
 
             bool tripleMode = !string.IsNullOrWhiteSpace(payload.Subject)
                 || !string.IsNullOrWhiteSpace(payload.Relation)
@@ -41,13 +46,13 @@ internal static class FeedbackEndpoints
                         return EndpointJson.BadRequest("invalid_request_error",
                             "Triple feedback requires 'subject', 'relation', and 'object'.");
                     return await TripleAsync(substrate, payload.Subject.Trim(),
-                        payload.Relation.Trim(), payload.Object.Trim(), verdict, confirm, ct);
+                        payload.Relation.Trim(), payload.Object.Trim(), verdict, confirm, occurrenceKey, ct);
                 }
 
                 if (payload.Tokens is null || payload.Tokens.Count < 2)
                     return EndpointJson.BadRequest("invalid_request_error",
                         "Chain feedback requires 'tokens' with at least 2 entries (or use subject/relation/object).");
-                return await ChainAsync(substrate, payload.Tokens, verdict, confirm, ct);
+                return await ChainAsync(substrate, payload.Tokens, verdict, confirm, occurrenceKey, ct);
             }
             catch (Npgsql.NpgsqlException ex)
             {
@@ -64,7 +69,7 @@ internal static class FeedbackEndpoints
 
     private static async Task<IResult> ChainAsync(
         SubstrateClient substrate, IReadOnlyList<string> tokens, string verdict, bool confirm,
-        CancellationToken ct)
+        string occurrenceKey, CancellationToken ct)
     {
         var cleaned = tokens.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToList();
         var resolved = await FeedbackContent.ResolveTokensAsync(substrate.DataSource, cleaned, ct);
@@ -87,7 +92,7 @@ internal static class FeedbackEndpoints
                 $"Need at least 2 tokens with substrate entities for a PRECEDES pair (got {ids.Count}).");
 
         var result = await FeedbackContent.ApplyAsync(
-            substrate.DataSource, FeedbackContent.BuildPrecedesChain(ids, confirm), ct);
+            substrate.DataSource, FeedbackContent.BuildPrecedesChain(ids, confirm, occurrenceKey), ct);
 
         return Results.Json(new FeedbackResponse(
             Object: "laplace.feedback",
@@ -101,7 +106,7 @@ internal static class FeedbackEndpoints
 
     private static async Task<IResult> TripleAsync(
         SubstrateClient substrate, string subject, string relation, string obj,
-        string verdict, bool confirm, CancellationToken ct)
+        string verdict, bool confirm, string occurrenceKey, CancellationToken ct)
     {
         if (!FeedbackContent.TryResolveRelation(relation, out var rel))
             return EndpointJson.BadRequest("invalid_request_error",
@@ -120,7 +125,7 @@ internal static class FeedbackEndpoints
             substrate.DataSource, subjectId, rel.Id, objectId, ct);
 
         var result = await FeedbackContent.ApplyAsync(
-            substrate.DataSource, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm), ct);
+            substrate.DataSource, FeedbackContent.BuildTriple(subjectId, rel.Canonical, objectId, confirm, occurrenceKey), ct);
 
         var after = await FeedbackContent.ConsensusStateAsync(
             substrate.DataSource, subjectId, rel.Id, objectId, ct);

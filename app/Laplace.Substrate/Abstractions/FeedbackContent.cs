@@ -16,6 +16,7 @@ public static class FeedbackContent
 {
     public static readonly Hash128 Source =
         SubstrateCanonicalIds.Source("UserFeedback");
+    private static readonly Hash128 ChainRelation = RelationTypeRegistry.RelationTypeId("PRECEDES");
 
     public readonly record struct ResolvedToken(string Token, Hash128? Id, bool Present)
     {
@@ -88,17 +89,20 @@ public static class FeedbackContent
     /// PRECEDES-chain feedback: one confirm/refute witness per consecutive pair
     /// of the token sequence (the n-gram walk's own edge vocabulary).
     /// </summary>
-    public static SubstrateChange BuildPrecedesChain(IReadOnlyList<Hash128> ids, bool confirm)
+    public static SubstrateChange BuildPrecedesChain(IReadOnlyList<Hash128> ids, bool confirm,
+        string? occurrenceKey = null)
     {
         if (ids.Count < 2)
             throw new ArgumentException("need ≥2 resolved ids for a PRECEDES chain", nameof(ids));
 
         var b = new SubstrateChangeBuilder(Source, "attest/0", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: ids.Count - 1);
+        Hash128 context = StageOccurrence(b, ids, ChainRelation,
+            confirm, occurrenceKey);
         for (int i = 0; i + 1 < ids.Count; i++)
-            b.AddAttestation(NativeAttestation.Categorical(
-                ids[i], "PRECEDES", ids[i + 1],
-                Source, null, SourceTrust.UserPrompt, confirm: confirm));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                ids[i], ChainRelation, ids[i + 1],
+                Source, context, SourceTrust.UserPrompt, confirm: confirm));
         return b.Build();
     }
 
@@ -107,14 +111,38 @@ public static class FeedbackContent
     /// the same consensus row the walk reads (doc 15 invariant I2).
     /// </summary>
     public static SubstrateChange BuildTriple(
-        Hash128 subject, string canonicalRelation, Hash128 obj, bool confirm)
+        Hash128 subject, string canonicalRelation, Hash128 obj, bool confirm,
+        string? occurrenceKey = null)
     {
         var b = new SubstrateChangeBuilder(Source, "attest/0", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1);
-        b.AddAttestation(NativeAttestation.Categorical(
-            subject, canonicalRelation, obj,
-            Source, null, SourceTrust.UserPrompt, confirm: confirm));
+        Hash128 relation = RelationTypeRegistry.RelationTypeId(canonicalRelation);
+        Hash128 context = StageOccurrence(b, [subject, obj], relation, confirm, occurrenceKey);
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            subject, relation, obj,
+            Source, context, SourceTrust.UserPrompt, confirm: confirm));
         return b.Build();
+    }
+
+    // A new feedback request is a witnessed occurrence, whereas retrying that
+    // request must reproduce its five-tuple. Retain the actual request record
+    // through native content composition instead of a context-free counter.
+    private static Hash128 StageOccurrence(SubstrateChangeBuilder builder,
+        IReadOnlyList<Hash128> ids, Hash128 relation, bool confirm, string? occurrenceKey)
+    {
+        occurrenceKey ??= Guid.NewGuid().ToString("N");
+        if (!ConversationContent.IsValidIdentifier(occurrenceKey))
+            throw new ArgumentException("Invalid feedback occurrence key.", nameof(occurrenceKey));
+        byte[] request = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            kind = "feedback-request-v1", occurrence = occurrenceKey,
+            source = Source.ToString(), relation = relation.ToString(),
+            operands = ids.Select(id => id.ToString()).ToArray(), confirm
+        });
+        CodepointPerfcache.LoadDefault();
+        if (!ContentTierSpine.TryStageIntoBuilder(builder, request, Source, out Hash128 context))
+            throw new InvalidOperationException("Feedback request could not be composed.");
+        return context;
     }
 
     /// <summary>

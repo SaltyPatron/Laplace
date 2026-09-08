@@ -38,6 +38,7 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
         await using (var legacy = NewWriter())
             await legacy.ApplyManyAsync(bootstrap);
 
+        await RemoveModernReceiptsAsync(scope.Source);
         string before = await DurableStateAsync(scope.Source);
         Assert.Equal(0, await ReceiptCountAsync(scope.Source));
 
@@ -69,6 +70,7 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
         await using (var legacy = NewWriter())
             await legacy.ApplyManyAsync(new[] { bootstrap[1] });
 
+        await RemoveModernReceiptsAsync(scope.Source);
         string before = await DurableStateAsync(scope.Source);
         bootstrap = UserArtifactContent.BuildTenantBootstrapChanges(scope);
         marker = Marker(bootstrap, scope);
@@ -93,6 +95,7 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
         await using (var legacy = NewWriter())
             await legacy.ApplyManyAsync(bootstrap.Append(historicalArtifact).ToArray());
 
+        await RemoveModernReceiptsAsync(scope.Source);
         string before = await DurableStateAsync(scope.Source);
         bootstrap = UserArtifactContent.BuildTenantBootstrapChanges(scope);
         marker = Marker(bootstrap, scope);
@@ -133,6 +136,7 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
             await legacy.ApplyManyAsync(
                 bootstrap.Append(disjointArtifact).Append(overlapChange).ToArray());
 
+        await RemoveModernReceiptsAsync(scope.Source);
         string before = await DurableStateAsync(scope.Source);
         bootstrap = UserArtifactContent.BuildTenantBootstrapChanges(scope);
         marker = Marker(bootstrap, scope);
@@ -160,6 +164,7 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
         await using (var legacy = NewWriter())
             await legacy.ApplyManyAsync(bootstrap);
 
+        await RemoveModernReceiptsAsync(scope.Source);
         string before = await DurableStateAsync(scope.Source);
         bootstrap = UserArtifactContent.BuildTenantBootstrapChanges(scope);
         marker = Marker(bootstrap, scope);
@@ -168,6 +173,17 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
             () => upgraded.ApplyLegacyBootstrapWorkingSetAsync(bootstrap, marker));
         Assert.Equal(before, await DurableStateAsync(scope.Source));
         Assert.Equal(0, await ReceiptCountAsync(scope.Source));
+    }
+
+    // Historical evidence predates working-set receipts. Scalar calls now use
+    // the canonical atomic writer, so remove only the fixture's journal state
+    // to represent the old installation faithfully.
+    private async Task RemoveModernReceiptsAsync(Hash128 source)
+    {
+        await using var command = _pg.DataSource.CreateCommand(
+            "DELETE FROM laplace.ingest_flush_journal WHERE source_id = $1");
+        command.Parameters.AddWithValue(source.ToBytes());
+        await command.ExecuteNonQueryAsync();
     }
 
     private ConsensusAccumulatingWriter NewWriter() => new(

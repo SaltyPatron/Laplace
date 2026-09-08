@@ -12,7 +12,8 @@ public sealed record FeedbackRequest(
     [property: JsonPropertyName("tokens")] IReadOnlyList<string>? Tokens = null,
     [property: JsonPropertyName("subject")] string? Subject = null,
     [property: JsonPropertyName("relation")] string? Relation = null,
-    [property: JsonPropertyName("object")] string? Object = null);
+    [property: JsonPropertyName("object")] string? Object = null,
+    [property: JsonPropertyName("request_id")] string? RequestId = null);
 
 public sealed record FeedbackTokenStatus(
     [property: JsonPropertyName("token")] string Token,
