@@ -37,27 +37,15 @@ def main() -> int:
     walk = strip_sql_comments(WALK_PATH.read_text())
     chat = strip_sql_comments(CHAT_PATH.read_text())
 
-    route_ids = function_slice(
-        frontier,
-        "generation.forward_route_trace_ids",
-        "generation.forward_frontier_ids",
-    )
-    frontier_ids = function_slice(
-        frontier,
-        "generation.forward_frontier_ids",
-        None,
-    )
-
-    # The native crawl has one owner. ID-facing helpers consume resolved operands;
-    # they must never re-enter text analysis.
-    assert count(frontier, "consensus.explore_web(") == 1, \
-        "forward route/frontier must own exactly one explore_web crawl body"
-    assert "converse.prompt_" not in frontier, \
-        "ID-facing routing module must not analyze prompt text"
-    assert "generation.forward_route_trace_ids(" in frontier_ids
-    assert "generation.forward_route_trace(" not in frontier
-    assert "generation.forward_frontier(" not in frontier
-    assert count(route_ids, "consensus.explore_web(") == 1
+    # Native execution owns the crawl; obsolete SQL wrappers must not remain
+    # installed as disconnected alternatives.
+    assert "CREATE OR REPLACE FUNCTION" not in frontier
+    for retired in (
+        "generation.forward_frontier_ids(bytea[], integer, integer, integer)",
+        "generation.forward_route_trace_ids(bytea[], integer, integer, integer)",
+        "converse.prompt_operands(text)",
+    ):
+        assert f"DROP FUNCTION IF EXISTS {retired};" in walk
 
     # Exact observation identity precedes routing. The retired prompt_state and
     # coherence heuristics must not rewrite the native prompt-tree operand.
@@ -65,10 +53,10 @@ def main() -> int:
         "forward_text must invoke the shared native whole-prompt program once"
     assert "converse.prompt_state(" not in walk
     assert "converse.prompt_coherence(" not in walk
-    assert "converse.prompt_operands(" not in walk
+    assert "converse.prompt_operands(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
     native = (ROOT / "extension/laplace_substrate/src/content_resolve.c").read_text()
     operands = native.split("laplace_prompt_input(text *input)", 1)[1].split(
-        "pg_laplace_prompt_operands(PG_FUNCTION_ARGS)", 1)[0]
+        "pg_laplace_prompt_tree(PG_FUNCTION_ARGS)", 1)[0]
     assert count(operands, "laplace_content_tree_build_public(") == 1
     assert "seed_ids[0] = root" in operands
     assert "content_witness_tree_root_id(tree, &root)" in operands
@@ -78,7 +66,7 @@ def main() -> int:
     assert count(entry, "laplace_explore_web(") == 1
     assert "walk_continuations(walk_call, input)" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
-    assert "generation.forward_frontier_ids(" not in walk
+    assert "generation.forward_frontier_ids(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
     assert "generation.forward_frontier(p_prompt" not in walk
 
     # The old zero-caller text routing functions are not allowed to survive an
@@ -112,7 +100,7 @@ def main() -> int:
 
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
-        f"forward_text=exact_tree1 route_owner=ids retired_text_wrappers=2 chat_steps={steps}"
+        f"forward_text=exact_tree1 route_owner=native retired_wrappers=5 chat_steps={steps}"
     )
     return 0
 

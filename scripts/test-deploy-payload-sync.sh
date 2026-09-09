@@ -101,6 +101,7 @@ ln -s "releases/$(basename "$old_release")/lichess/Laplace.Endpoints.Lichess" "$
 ln -s "releases/$(basename "$old_release")/uci/laplace-uci" "$APP_DIR/laplace-uci"
 old_shared_inode="$(stat -c '%d:%i' "$old_release/lichess/shared-runtime.dll")"
 old_mcp_host_inode="$(stat -c '%d:%i' "$old_release/mcp/Laplace.Endpoints.Mcp")"
+old_mcp_native_inode="$(stat -c '%d:%i' "$old_release/mcp/Laplace.Endpoints.Mcp.native")"
 
 printf 'second-version\n' > "$MCP_STAGE/Laplace.Endpoints.Mcp.dll"
 printf 'second-uci\n' > "$UCI_STAGE/laplace-uci.dll"
@@ -116,6 +117,7 @@ new_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_
 [[ -s "$new_release/uci/laplace-uci.deps.json" && -s "$new_release/uci/laplace-uci.runtimeconfig.json" ]]
 [[ "$(stat -c '%d:%i' "$new_release/lichess/shared-runtime.dll")" == "$old_shared_inode" ]]
 [[ "$(stat -c '%d:%i' "$new_release/mcp/Laplace.Endpoints.Mcp")" == "$old_mcp_host_inode" ]]
+[[ "$(stat -c '%d:%i' "$new_release/mcp/Laplace.Endpoints.Mcp.native")" == "$old_mcp_native_inode" ]]
 [[ "$(stat -c '%d:%i' "$new_release/mcp/Laplace.Endpoints.Mcp.dll")" != \
    "$(stat -c '%d:%i' "$old_release/mcp/Laplace.Endpoints.Mcp.dll")" ]]
 [[ -x "$APP_DIR/laplace-uci" ]]

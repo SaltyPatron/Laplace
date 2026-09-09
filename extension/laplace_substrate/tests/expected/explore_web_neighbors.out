@@ -447,13 +447,13 @@ BEGIN
         RAISE EXCEPTION 'FAIL: browse no longer traverses its inbound metadata edge';
     END IF;
     SELECT count(*) INTO hits
-    FROM generation.forward_route_trace_ids(ARRAY[seed],2,1,NULL) w
+    FROM consensus.explore_web(ARRAY[seed],2,1,NULL,true) w
     WHERE w.source_id=unrelated;
     IF hits <> 0 THEN
         RAISE EXCEPTION 'FAIL: forward route inverted a directed metadata relation';
     END IF;
     SELECT count(*) INTO hits
-    FROM generation.forward_route_trace_ids(ARRAY[seed],2,1,NULL) w
+    FROM consensus.explore_web(ARRAY[seed],2,1,NULL,true) w
     WHERE w.source_id=synonym AND w.object_id=language AND w.hop=2;
     IF hits <> 1 THEN
         RAISE EXCEPTION 'FAIL: reverse symmetric evidence lost its fanout slot';

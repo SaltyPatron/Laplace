@@ -89,8 +89,21 @@ laplace_stage_runtime_payload() {
 # including dependencies that .NET loads lazily. The lock is acquired before
 # the apphost starts and its descriptor survives exec. It works across UIDs
 # without inspecting private process mappings or requiring privileged GC.
+laplace_reuse_runtime_file() {
+  local reference="$1" destination="$2"
+  [[ -f "$reference" && ! -L "$reference" && -f "$destination" && ! -L "$destination" ]] || return 0
+  [[ "$(stat -c '%a' "$reference")" == "$(stat -c '%a' "$destination")" ]] || return 0
+  cmp -s "$reference" "$destination" || return 0
+  # A cross-device reference is still valid content, but cannot share an inode.
+  # Keep the staged file until a replacement link has actually been created.
+  if ln "$reference" "$destination.reuse" 2>/dev/null; then
+    mv -f "$destination.reuse" "$destination" || return 1
+  fi
+}
+
 laplace_wrap_runtime_lease() {
-  local executable="$1"
+  local executable="$1" reference_dir="${2:-}" name
+  name="${executable##*/}"
   mv "$executable" "$executable.native" || return 1
   cat > "$executable" <<'LAUNCHER' || return 1
 #!/usr/bin/env bash
@@ -100,7 +113,11 @@ exec 9<"$(dirname "$runtime_executable")/../.runtime-lease"
 flock -s 9
 exec "$runtime_executable.native" "$@"
 LAUNCHER
-  chmod 0755 "$executable"
+  chmod 0755 "$executable" || return 1
+  if [[ -n "$reference_dir" ]]; then
+    laplace_reuse_runtime_file "$reference_dir/$name.native" "$executable.native" || return 1
+    laplace_reuse_runtime_file "$reference_dir/$name" "$executable" || return 1
+  fi
 }
 
 # Publish each managed runtime into a NEW immutable directory. Return its absolute
@@ -128,9 +145,12 @@ laplace_stage_managed_runtimes() {
   laplace_stage_runtime_payload "$app_dir" uci "$app_dir/laplace-uci" \
     "$uci_stage" "$release/uci" || return 1
   install -m 0644 /dev/null "$release/.runtime-lease" || return 1
-  laplace_wrap_runtime_lease "$release/mcp/Laplace.Endpoints.Mcp" || return 1
-  laplace_wrap_runtime_lease "$release/lichess/Laplace.Endpoints.Lichess" || return 1
-  laplace_wrap_runtime_lease "$release/uci/laplace-uci" || return 1
+  laplace_wrap_runtime_lease "$release/mcp/Laplace.Endpoints.Mcp" \
+    "$(laplace_current_runtime_dir "$app_dir" mcp "$app_dir/laplace-mcp" || true)" || return 1
+  laplace_wrap_runtime_lease "$release/lichess/Laplace.Endpoints.Lichess" \
+    "$(laplace_current_runtime_dir "$app_dir" lichess "$app_dir/laplace-lichess" || true)" || return 1
+  laplace_wrap_runtime_lease "$release/uci/laplace-uci" \
+    "$(laplace_current_runtime_dir "$app_dir" uci "$app_dir/laplace-uci" || true)" || return 1
   ln -s ../../../logs "$release/mcp/logs" || return 1
   ln -s ../../../logs "$release/lichess/logs" || return 1
   ln -s ../../../logs "$release/uci/logs" || return 1

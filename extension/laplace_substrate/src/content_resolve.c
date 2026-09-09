@@ -200,7 +200,6 @@ prompt_seed_order(const void *a, const void *b)
  * every ancestor's text or joining the tree back to itself in PostgreSQL.
  * Repeated lexical occurrences remain repeated ordered operands. Probe seeds
  * alone are deduplicated; they do not replace the ordered observation. */
-PG_FUNCTION_INFO_V1(pg_laplace_prompt_operands);
 
 static void
 prompt_input_release(void *argument)
@@ -312,22 +311,6 @@ laplace_prompt_input(text *input)
         pfree(seed_ids);
     }
     return prepared;
-}
-
-Datum
-pg_laplace_prompt_operands(PG_FUNCTION_ARGS)
-{
-    InitMaterializedSRF(fcinfo, 0);
-    if (PG_ARGISNULL(0)) return (Datum) 0;
-    LaplacePromptInput *input = laplace_prompt_input(PG_GETARG_TEXT_PP(0));
-    if (!input) return (Datum) 0;
-    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-    Datum values[4] = {hash128_to_datum(&input->root),
-        PointerGetDatum(input->context), PointerGetDatum(input->nodes),
-        PointerGetDatum(input->seeds)};
-    bool nulls[4] = {false};
-    tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
-    return (Datum) 0;
 }
 
 Datum
