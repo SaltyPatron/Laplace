@@ -71,7 +71,7 @@ extern LaplaceQueryChannel *laplace_query_evidence_channels(
  * Retain the query-side evidence field across one cognition pass.  Initial
  * prompt occurrences are admitted in one batch.  A selected value may then be
  * appended as a new working-state occurrence without rescanning unchanged
- * query operands; only the newly active identity is probed.
+ * query operands; only the newly active identity is probed for proposal state.
  */
 extern LaplaceQueryState *laplace_query_state_create(
     ArrayType *operands,
@@ -88,8 +88,26 @@ extern const LaplaceQueryChannel *laplace_query_state_channels(
     const LaplaceQueryState *state,
     int *count);
 
+/*
+ * Adjudicate a bounded candidate set against every active ordered query
+ * occurrence.  Unlike proposal generation, this reads every exact stored cell
+ * between the active operands and candidates, including negative/refuted
+ * standing, then binds the raw witness/source/context topology for those exact
+ * typed cells.  This is the K->V/evidence binding stage after a bounded Q->K
+ * proposal; it must not be replaced by a second top-K adjacency scan.
+ *
+ * candidates is a 1-D bytea[] of addressed identities.  NULL means invalid;
+ * empty means no candidate evidence.  Returned channels belong to the caller's
+ * CurrentMemoryContext.
+ */
+extern LaplaceQueryChannel *laplace_query_state_candidate_evidence(
+    const LaplaceQueryState *state,
+    ArrayType *candidates,
+    int *count,
+    LaplaceQueryEvidenceStats *stats);
+
 /* Distinct candidate endpoints / relation ids represented by retained typed
- * channels.  Returned arrays are allocated in the caller's current context. */
+ * proposal channels. Returned arrays are allocated in the caller's context. */
 extern ArrayType *laplace_query_state_candidates(const LaplaceQueryState *state);
 extern ArrayType *laplace_query_state_relation_types(const LaplaceQueryState *state);
 
