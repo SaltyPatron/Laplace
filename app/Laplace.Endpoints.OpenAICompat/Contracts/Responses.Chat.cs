@@ -156,5 +156,9 @@ public sealed record ExplainReportResponse(
     [property: JsonPropertyName("depth")] int Depth,
     [property: JsonPropertyName("beam")] int Beam,
     [property: JsonPropertyName("academic")] bool Academic,
-    [property: JsonPropertyName("trace")] IReadOnlyList<ExplainTraceStep> Trace,
+    [property: JsonPropertyName("steps")] int Steps,
+    [property: JsonPropertyName("max_stride")] int MaxStride,
+    [property: JsonPropertyName("spread")] double Spread,
+    [property: JsonPropertyName("top_k")] int TopK,
+    [property: JsonPropertyName("trace")] IReadOnlyList<ForwardTraceStep> Trace,
     [property: JsonPropertyName("billing")] BillingReceipt? Billing);
