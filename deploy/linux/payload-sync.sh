@@ -68,6 +68,72 @@ laplace_current_runtime_dir() {
   esac
 }
 
+laplace_release_in_use() {
+  local app_dir="$1" candidate="$2" link target
+  for link in "$app_dir"/laplace-lichess "$app_dir"/laplace-mcp "$app_dir"/laplace-uci; do
+    [[ -L "$link" ]] || continue
+    target="$(readlink -f "$link" 2>/dev/null || true)"
+    [[ "$target" == "$candidate"/* ]] && return 0
+  done
+  return 1
+}
+
+# A pre-lease release can only be called complete if all three managed apphosts and
+# the UCI closure exist. This is deliberately stricter than "directory exists": a
+# failed rsync that filled the filesystem during the first service copy is provably
+# not a usable legacy release and must not become immortal just because it predates
+# the runtime-lease marker.
+laplace_legacy_release_complete() {
+  local candidate="$1" suffix
+  [[ -x "$candidate/mcp/Laplace.Endpoints.Mcp" ]] || return 1
+  [[ -x "$candidate/lichess/Laplace.Endpoints.Lichess" ]] || return 1
+  [[ -x "$candidate/uci/laplace-uci" ]] || return 1
+  for suffix in dll deps.json runtimeconfig.json; do
+    [[ -s "$candidate/uci/laplace-uci.$suffix" ]] || return 1
+  done
+}
+
+# Reclaim only release directories whose liveness is mechanically decidable.
+# Current stable pointers always win. Lease-aware releases are collected under an
+# exclusive lock, so another user's running process keeps its closure alive. Complete
+# pre-lease releases are retained because their process ownership cannot be proved by
+# an unprivileged runner. Incomplete pre-lease directories, however, cannot be valid
+# runtimes and are safe to remove; this also recovers ENOSPC debris from a failed
+# staging transaction before the next publish allocates anything.
+laplace_prune_unreferenced_releases() {
+  local app_dir="$1" releases="$1/releases" candidate reclaimed=0 retained=0
+  [[ -d "$releases" && ! -L "$releases" ]] || return 0
+  while IFS= read -r -d '' candidate; do
+    laplace_release_in_use "$app_dir" "$candidate" && {
+      retained=$((retained + 1))
+      continue
+    }
+
+    if [[ -f "$candidate/.runtime-lease" && ! -L "$candidate/.runtime-lease" ]]; then
+      if (
+        exec 9<"$candidate/.runtime-lease" || exit 1
+        flock -n -x 9 || exit 1
+        find "$candidate" -xdev -depth -delete
+      ); then
+        echo "reclaimed unreferenced application release: $candidate"
+        reclaimed=$((reclaimed + 1))
+      else
+        retained=$((retained + 1))
+      fi
+      continue
+    fi
+
+    if ! laplace_legacy_release_complete "$candidate"; then
+      find "$candidate" -xdev -depth -delete || return 1
+      echo "reclaimed incomplete application release: $candidate"
+      reclaimed=$((reclaimed + 1))
+    else
+      retained=$((retained + 1))
+    fi
+  done < <(find "$releases" -mindepth 1 -maxdepth 1 -xdev -type d -name 'runtime.*' -print0)
+  echo "application release retention: reclaimed=$reclaimed retained=$retained"
+}
+
 # Stage one immutable service closure. A release is never mutated after publication,
 # so unchanged files may safely be hardlinked from the currently selected release.
 # Build timestamps are not identity: deterministic rebuilds can produce byte-identical
@@ -121,11 +187,11 @@ LAUNCHER
 }
 
 # Publish each managed runtime into a NEW immutable directory. Return its absolute
-# path; the caller updates stable launch links only after all copies succeed.
+# path; the caller updates stable launch links only after all copies succeed. A failed
+# stage is deleted before returning failure, so ENOSPC cannot strand another partial
+# runtime that makes the next retry even less likely to fit.
 laplace_stage_managed_runtimes() {
   local app_dir="$1" mcp_stage="$2" lichess_stage="$3" uci_stage="$4" release suffix
-  # Explicit propagation matters inside command substitution, where Bash may
-  # clear errexit; a failed rsync must never be masked by the final printf.
   test -x "$mcp_stage/Laplace.Endpoints.Mcp" || return 1
   test -x "$lichess_stage/Laplace.Endpoints.Lichess" || return 1
   test -x "$uci_stage/laplace-uci" || return 1
@@ -134,25 +200,30 @@ laplace_stage_managed_runtimes() {
   done
   install -d -m 2775 "$app_dir/releases" || return 1
   release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
-  chmod 0755 "$release" || return 1
-  mkdir -m 0755 "$release/mcp" "$release/lichess" "$release/uci" || return 1
-  laplace_stage_runtime_payload "$app_dir" mcp "$app_dir/laplace-mcp" \
-    "$mcp_stage" "$release/mcp" || return 1
-  laplace_stage_runtime_payload "$app_dir" lichess "$app_dir/laplace-lichess" \
-    "$lichess_stage" "$release/lichess" || return 1
-  # A .NET apphost is not a standalone executable: preserve its entire publish
-  # closure, isolated from the API's differently named runtime/dependency files.
-  laplace_stage_runtime_payload "$app_dir" uci "$app_dir/laplace-uci" \
-    "$uci_stage" "$release/uci" || return 1
-  install -m 0644 /dev/null "$release/.runtime-lease" || return 1
-  laplace_wrap_runtime_lease "$release/mcp/Laplace.Endpoints.Mcp" \
-    "$(laplace_current_runtime_dir "$app_dir" mcp "$app_dir/laplace-mcp" || true)" || return 1
-  laplace_wrap_runtime_lease "$release/lichess/Laplace.Endpoints.Lichess" \
-    "$(laplace_current_runtime_dir "$app_dir" lichess "$app_dir/laplace-lichess" || true)" || return 1
-  laplace_wrap_runtime_lease "$release/uci/laplace-uci" \
-    "$(laplace_current_runtime_dir "$app_dir" uci "$app_dir/laplace-uci" || true)" || return 1
-  ln -s ../../../logs "$release/mcp/logs" || return 1
-  ln -s ../../../logs "$release/lichess/logs" || return 1
-  ln -s ../../../logs "$release/uci/logs" || return 1
+
+  if ! (
+    chmod 0755 "$release" || exit $?
+    mkdir -m 0755 "$release/mcp" "$release/lichess" "$release/uci" || exit $?
+    laplace_stage_runtime_payload "$app_dir" mcp "$app_dir/laplace-mcp" \
+      "$mcp_stage" "$release/mcp" || exit $?
+    laplace_stage_runtime_payload "$app_dir" lichess "$app_dir/laplace-lichess" \
+      "$lichess_stage" "$release/lichess" || exit $?
+    laplace_stage_runtime_payload "$app_dir" uci "$app_dir/laplace-uci" \
+      "$uci_stage" "$release/uci" || exit $?
+    install -m 0644 /dev/null "$release/.runtime-lease" || exit $?
+    laplace_wrap_runtime_lease "$release/mcp/Laplace.Endpoints.Mcp" \
+      "$(laplace_current_runtime_dir "$app_dir" mcp "$app_dir/laplace-mcp" || true)" || exit $?
+    laplace_wrap_runtime_lease "$release/lichess/Laplace.Endpoints.Lichess" \
+      "$(laplace_current_runtime_dir "$app_dir" lichess "$app_dir/laplace-lichess" || true)" || exit $?
+    laplace_wrap_runtime_lease "$release/uci/laplace-uci" \
+      "$(laplace_current_runtime_dir "$app_dir" uci "$app_dir/laplace-uci" || true)" || exit $?
+    ln -s ../../../logs "$release/mcp/logs" || exit $?
+    ln -s ../../../logs "$release/lichess/logs" || exit $?
+    ln -s ../../../logs "$release/uci/logs" || exit $?
+  ); then
+    find "$release" -xdev -depth -delete || true
+    return 1
+  fi
+
   printf '%s\n' "$release"
 }

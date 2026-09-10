@@ -10,43 +10,6 @@ RECEIPT="$ROOT/build/.managed-publish-backup"
 BACKUP_ROOT=/opt/laplace/app-backups
 source "$ROOT/deploy/linux/payload-sync.sh"
 
-release_in_use() {
-  local candidate="$1" link target
-  for link in "$APP_DIR"/laplace-lichess "$APP_DIR"/laplace-mcp "$APP_DIR"/laplace-uci; do
-    [[ -L "$link" ]] || continue
-    target=$(readlink -f "$link" 2>/dev/null || true)
-    [[ "$target" == "$candidate"/* ]] && return 0
-  done
-  return 1
-}
-
-prune_unreferenced_releases() {
-  local releases="$APP_DIR/releases" candidate reclaimed=0 retained=0
-  [[ -d "$releases" && ! -L "$releases" ]] || return 0
-  while IFS= read -r -d '' candidate; do
-    release_in_use "$candidate" && continue
-    # /proc inspection by the runner cannot establish another user's runtime
-    # ownership. New launchers hold a shared lease before starting the apphost;
-    # collection holds the exclusive lease through deletion. Older releases
-    # cannot prove absence of clients and remain intact during this transition.
-    if [[ ! -f "$candidate/.runtime-lease" || -L "$candidate/.runtime-lease" ]]; then
-      retained=$((retained + 1))
-      continue
-    fi
-    if (
-      exec 9<"$candidate/.runtime-lease" || exit 1
-      flock -n -x 9 || exit 1
-      find "$candidate" -depth -delete
-    ); then
-      echo "reclaimed unreferenced application release: $candidate"
-      reclaimed=$((reclaimed + 1))
-    else
-      retained=$((retained + 1))
-    fi
-  done < <(find "$releases" -mindepth 1 -maxdepth 1 -type d -name 'runtime.*' -print0)
-  echo "application release retention: reclaimed=$reclaimed retained=$retained"
-}
-
 installed_policy() {
   [[ -x "$HELPER" ]] || {
     echo "::error::managed host policy missing; provision through sudo bash scripts/setup-host.sh managed-services after CI safety checks" >&2
@@ -117,12 +80,12 @@ case "${1:-}" in
   begin)
     ensure_host
     [[ ! -f "$RECEIPT" ]] || { echo "unresolved publish receipt" >&2; exit 1; }
-    # A completed transaction has no rollback owner. Old managed.* backups are
-    # therefore dead rollback state, not archives. This host accumulated 8.6 GiB
-    # of 275-276 MiB completed backups on a 16 GiB LV and eventually could not
-    # stage a release. Reclaim them before allocating the next transaction.
+    # Reclaim transaction backups and only mechanically-dead immutable releases
+    # before allocating the next rollback snapshot. Release liveness/legacy
+    # completeness has one owner in payload-sync.sh; deploy must not carry a
+    # second, drifting garbage-collection implementation.
     laplace_prune_managed_backups "$BACKUP_ROOT"
-    prune_unreferenced_releases
+    laplace_prune_unreferenced_releases "$APP_DIR"
     mkdir -p "$ROOT/build" "$BACKUP_ROOT"
     backup="$(mktemp -d "$BACKUP_ROOT/managed.XXXXXX")"
     chmod 0700 "$backup"
@@ -149,7 +112,7 @@ case "${1:-}" in
       mv "$RECEIPT" "$ROOT/build/.managed-publish-committed"
     fi
     # Commit is the point at which rollback ownership ends. Keep the receipt,
-    # not another 275 MiB payload clone.
+    # not another payload clone.
     laplace_prune_managed_backups "$BACKUP_ROOT"
     ;;
   rollback)
@@ -158,15 +121,7 @@ case "${1:-}" in
     # installed extension + standing substrate as well as the API. Restoring an
     # older API payload cannot revert either of those layers, so an eval-only
     # failure used to throw away a smoke-verified application while leaving the
-    # state that actually failed the eval untouched. That is exactly how a fixed
-    # ChessLiveGameHost on main kept being replaced by the stale runtime that
-    # still emitted transition-only '?' plies.
-    #
-    # The restore job passes these three results as environment variables. Keep
-    # rollback strict for publish/smoke failures and cancellations; only the one
-    # impossible-to-repair-here case commits the already verified payload. The
-    # workflow itself remains red on the eval failure, so this does not turn a
-    # semantic regression into a green deployment.
+    # state that actually failed the eval untouched.
     if [[ "${PUBLISH_RESULT:-}" == "success" \
        && "${SMOKE_RESULT:-}" == "success" \
        && "${EVAL_RESULT:-}" == "failure" ]]; then
