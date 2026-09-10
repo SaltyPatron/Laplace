@@ -13,9 +13,10 @@ CREATE OR REPLACE FUNCTION generation.forward_walk_continuations(
 
 -- Canonical native whole-prompt execution. The trace columns are receipts from
 -- the SAME invocation that performs admission, query-relative routing, exact
--- candidate adjudication, selection and working-state extension. A caller that
--- only needs selected identities projects the first four columns through
--- generation.forward_prompt below; there is no second prompt execution path.
+-- candidate adjudication, obligation closure, selection and working-state
+-- extension. A caller that only needs selected identities projects EMIT rows
+-- through generation.forward_prompt below; completion is still calculated by
+-- this invocation and never reconstructed by a second graph walk.
 CREATE OR REPLACE FUNCTION generation.forward_trace(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_top_k int DEFAULT 10,
@@ -30,13 +31,15 @@ CREATE OR REPLACE FUNCTION generation.forward_trace(
         support_anchor bytea, support_relation bytea, support_outbound boolean,
         support_rating bigint, support_rd bigint, support_witnesses bigint,
         support_sources int, support_contexts int, declared_result boolean,
-        event text, routing_round int)
+        event text, routing_round int,
+        program_id bytea, required_obligations int, satisfied_obligations int,
+        remaining_required int, completion boolean, disposition text,
+        output_fingerprint bytea, semantic_act_id bytea, output_count int)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_forward_trace'
     LANGUAGE C VOLATILE;
 
 -- Normal generation is a projection of the traceable canonical native pass,
--- not another implementation. Route rows are execution receipts only; normal
--- generation projects EMIT events so diagnostics never become output content.
+-- not another implementation. Route/terminal rows are execution receipts only.
 CREATE OR REPLACE FUNCTION generation.forward_prompt(
         p_prompt text, p_steps int, p_max_stride int,
         p_spread float8, p_top_k int, p_seed bigint,

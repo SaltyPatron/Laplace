@@ -22,6 +22,7 @@
 
 #include "laplace/core/hash128.h"
 
+#include "cognition_program.h"
 #include "prompt_input.h"
 #include "query_evidence.h"
 #include "relation_symmetry.h"
@@ -254,6 +255,67 @@ query_operands(ArrayType *ordered, ArrayType *frontier, MemoryContext owner)
         pfree(frontier_nulls);
     }
     return result;
+}
+
+static OriginEntry *
+origin_get(HTAB *origins, const hash128_t *id, bool create)
+{
+    bool found;
+    OriginEntry *entry = hash_search(origins, id, create ? HASH_ENTER : HASH_FIND,
+                                     create ? &found : NULL);
+    if (create && entry && !found)
+        entry->occurrences = NULL;
+    return entry;
+}
+
+static void
+origin_merge(HTAB *origins, const hash128_t *target, const hash128_t *source,
+             MemoryContext owner)
+{
+    OriginEntry *from = origin_get(origins, source, false);
+    if (!from || !from->occurrences)
+        return;
+    MemoryContext previous = MemoryContextSwitchTo(owner);
+    OriginEntry *to = origin_get(origins, target, true);
+    to->occurrences = bms_add_members(to->occurrences, from->occurrences);
+    MemoryContextSwitchTo(previous);
+}
+
+/* Structural continuity has exact ancestry too. A successor supported by a
+ * matched suffix inherits the occurrence roots of that exact suffix; it is not
+ * a provenance-free token merely because its provider is physicality rather
+ * than testimony. */
+static void
+origin_inherit_sequence(HTAB *origins, const hash128_t *target,
+                        Datum *context, int context_length, int stride,
+                        MemoryContext owner)
+{
+    int begin;
+    if (stride <= 0 || context_length <= 0)
+        return;
+    begin = Max(0, context_length - stride);
+    for (int i = begin; i < context_length; ++i)
+    {
+        hash128_t source = datum_to_hash128(context[i]);
+        origin_merge(origins, target, &source, owner);
+    }
+}
+
+static void
+propagate_candidate_origins(HTAB *origins, HTAB *candidate_index,
+                            const LaplaceQueryChannel *channels, int count,
+                            MemoryContext owner)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        const LaplaceQueryChannel *channel = &channels[i];
+        if (!hash_search(candidate_index, &channel->candidate, HASH_FIND, NULL))
+            continue;
+        if ((!channel->outbound && !relation_can_traverse_reverse(&channel->relation)) ||
+            !(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0))
+            continue;
+        origin_merge(origins, &channel->candidate, &channel->anchor, owner);
+    }
 }
 
 static int
@@ -611,13 +673,47 @@ candidate_compare(const void *left, const void *right)
 }
 
 static void
+put_cognition_receipt(Datum *values, bool *nulls, int base,
+                      const LaplaceCognitionProgram *program)
+{
+    LaplaceCognitionProgramReceipt receipt;
+    laplace_cognition_program_receipt(program, &receipt);
+    values[base + 0] = hash128_to_datum(&receipt.program_id);
+    values[base + 1] = Int32GetDatum(receipt.required_obligations);
+    values[base + 2] = Int32GetDatum(receipt.satisfied_obligations);
+    values[base + 3] = Int32GetDatum(receipt.remaining_required);
+    values[base + 4] = BoolGetDatum(receipt.complete);
+    values[base + 5] = CStringGetTextDatum(
+        laplace_cognition_disposition_name(receipt.disposition));
+    if (receipt.output_present)
+        values[base + 6] = hash128_to_datum(&receipt.output_fingerprint);
+    else
+        nulls[base + 6] = true;
+    if (receipt.semantic_act_present)
+        values[base + 7] = hash128_to_datum(&receipt.semantic_act_id);
+    else
+        nulls[base + 7] = true;
+    values[base + 8] = Int32GetDatum(receipt.output_count);
+}
+
+static void
+free_cognition_receipt(Datum *values, bool *nulls, int base)
+{
+    pfree(DatumGetPointer(values[base + 0]));
+    pfree(DatumGetPointer(values[base + 5]));
+    if (!nulls[base + 6]) pfree(DatumGetPointer(values[base + 6]));
+    if (!nulls[base + 7]) pfree(DatumGetPointer(values[base + 7]));
+}
+
+static void
 emit_result(ReturnSetInfo *result, int32 step, const Candidate *candidate,
             bool trace, const LaplacePromptInput *input, int candidate_count,
             int operand_count, int query_channels, int exact_channels,
-            bool routing, int routing_round)
+            bool routing, int routing_round,
+            const LaplaceCognitionProgram *program)
 {
-    Datum values[24] = {0};
-    bool nulls[24] = {false, false, false, true};
+    Datum values[33] = {0};
+    bool nulls[33] = {false, false, false, true};
     Datum id = hash128_to_datum(&candidate->id);
     values[0] = Int32GetDatum(step);
     values[1] = id;
@@ -654,6 +750,7 @@ emit_result(ReturnSetInfo *result, int32 step, const Candidate *candidate,
         values[21] = BoolGetDatum(candidate->projection.has_positive);
         values[22] = CStringGetTextDatum(routing ? "route" : "emit");
         values[23] = Int32GetDatum(routing_round);
+        put_cognition_receipt(values, nulls, 24, program);
     }
     tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
     pfree(DatumGetPointer(id));
@@ -663,7 +760,43 @@ emit_result(ReturnSetInfo *result, int32 step, const Candidate *candidate,
         if (!nulls[13]) pfree(DatumGetPointer(values[13]));
         if (!nulls[14]) pfree(DatumGetPointer(values[14]));
         pfree(DatumGetPointer(values[22]));
+        free_cognition_receipt(values, nulls, 24);
     }
+}
+
+static void
+emit_terminal(ReturnSetInfo *result, int32 step, const LaplacePromptInput *input,
+              int operand_count, int routing_round,
+              const LaplaceCognitionProgram *program)
+{
+    Datum values[33] = {0};
+    bool nulls[33] = {false};
+    LaplaceCognitionProgramReceipt receipt;
+
+    for (int i = 0; i < 33; ++i) nulls[i] = true;
+    laplace_cognition_program_receipt(program, &receipt);
+    values[0] = Int32GetDatum(step); nulls[0] = false;
+    values[4] = hash128_to_datum(&input->root); nulls[4] = false;
+    values[5] = Int32GetDatum(0); nulls[5] = false;
+    values[6] = Int32GetDatum(operand_count); nulls[6] = false;
+    values[7] = Int32GetDatum(0); nulls[7] = false;
+    values[8] = Int32GetDatum(0); nulls[8] = false;
+    values[9] = Int64GetDatum(0); nulls[9] = false;
+    values[10] = Int32GetDatum(0); nulls[10] = false;
+    values[11] = Int32GetDatum(0); nulls[11] = false;
+    values[12] = Int32GetDatum(0); nulls[12] = false;
+    values[19] = Int32GetDatum(0); nulls[19] = false;
+    values[20] = Int32GetDatum(0); nulls[20] = false;
+    values[21] = BoolGetDatum(false); nulls[21] = false;
+    values[22] = CStringGetTextDatum(receipt.complete ? "complete" : "unresolved");
+    nulls[22] = false;
+    values[23] = Int32GetDatum(routing_round); nulls[23] = false;
+    for (int i = 24; i < 33; ++i) nulls[i] = false;
+    put_cognition_receipt(values, nulls, 24, program);
+    tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
+    pfree(DatumGetPointer(values[4]));
+    pfree(DatumGetPointer(values[22]));
+    free_cognition_receipt(values, nulls, 24);
 }
 
 static Datum
@@ -688,10 +821,12 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     LaplaceTrajectoryScope *trajectory_scope = NULL;
     LaplaceQueryState *query_state = NULL;
     LaplaceQueryState *output_state = NULL;
+    LaplaceCognitionProgram *cognition = NULL;
     HTAB *route_seen;
     HTAB *origins;
     int next_origin = 0;
     int semantic_hops = 0;
+    bool exhausted = false;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("forward execution: context must not be NULL")));
@@ -768,12 +903,27 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         if (route_null) continue;
         hash128_t id = datum_to_hash128(route_value);
         hash_search(route_seen, &id, HASH_ENTER, NULL);
-        bool found;
-        OriginEntry *origin = hash_search(origins, &id, HASH_ENTER, &found);
-        if (!found) origin->occurrences = NULL;
+        OriginEntry *origin = origin_get(origins, &id, true);
         origin->occurrences = bms_add_member(origin->occurrences, next_origin++);
     }
     array_free_iterator(route_iterator);
+
+    if (input)
+    {
+        /* The Merkle root denotes this complete exact observation. Its
+         * provenance is therefore the union of the admitted prompt occurrence
+         * coordinates, not a synthetic unrelated seed. This lets a declared
+         * root-result relation close obligations from the whole prompt. */
+        OriginEntry *root_origin = origin_get(origins, &input->root, true);
+        for (int i = 0; i < context_length; ++i)
+            root_origin->occurrences = bms_add_member(root_origin->occurrences, i);
+        int initial_channel_count = 0;
+        const LaplaceQueryChannel *initial_channels =
+            laplace_query_state_channels(query_state, &initial_channel_count);
+        cognition = laplace_cognition_program_create(input, context_length,
+                                                      initial_channels,
+                                                      initial_channel_count);
+    }
 
     if (output_relations &&
         ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) > 0)
@@ -830,6 +980,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         HTAB *query_evidence_table;
         HTAB *query_traversal_table;
         HTAB *projection_table = NULL;
+        LaplaceQueryChannel *projection_channels = NULL;
+        int projection_channel_count = 0;
         int pick = -1;
 
         MemoryContextReset(step_context);
@@ -850,10 +1002,15 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                     laplace_trajectory_continuations_scoped(tail, true,
                                                             trajectory_scope, &count);
                 for (int i = 0; i < count; ++i)
+                {
                     candidate_add(&candidates, &candidate_count, &candidate_capacity,
                                   candidate_index, &continuations[i].id,
                                   continuations[i].occurrences,
                                   continuations[i].stride);
+                    origin_inherit_sequence(origins, &continuations[i].id,
+                                            context, context_length,
+                                            continuations[i].stride, walk_context);
+                }
                 if (continuations)
                     pfree(continuations);
                 pfree(tail);
@@ -905,7 +1062,10 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         (void) query_proposals;
         (void) projection_proposals;
         if (candidate_count == 0)
+        {
+            exhausted = true;
             break;
+        }
 
         /* K->V/evidence binding: after all bounded providers nominate the
          * candidate set, read EVERY exact stored typed cell between those
@@ -923,14 +1083,24 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
         if (output_state)
         {
-            int projection_channel_count = 0;
-            LaplaceQueryChannel *projection_channels =
-                laplace_query_state_candidate_evidence(output_state, candidate_ids,
-                                                       &projection_channel_count, NULL);
+            projection_channels = laplace_query_state_candidate_evidence(
+                output_state, candidate_ids, &projection_channel_count, NULL);
             projection_table = evidence_summaries_from_channels(
                 projection_channels, projection_channel_count, true, origins, step_context);
         }
         pfree(candidate_ids);
+
+        /* Bind candidate ancestry once, before either ROUTE or SELECT. Typed
+         * relations and exact structural continuations therefore feed the same
+         * completion state without being flattened into the same evidence law. */
+        propagate_candidate_origins(origins, candidate_index,
+                                    query_channels, query_channel_count,
+                                    walk_context);
+        if (projection_channels)
+            propagate_candidate_origins(origins, candidate_index,
+                                        projection_channels,
+                                        projection_channel_count,
+                                        walk_context);
 
         int kept = 0;
         for (int i = 0; i < candidate_count; ++i)
@@ -962,7 +1132,10 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         }
         candidate_count = kept;
         if (candidate_count == 0)
+        {
+            exhausted = true;
             break;
+        }
 
         qsort(candidates, (size_t) candidate_count, sizeof(Candidate), candidate_compare);
         int retained_channel_count = 0;
@@ -981,37 +1154,22 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         if (output_count == 0)
         {
             if (!input || semantic_hops >= semantic_hop_limit)
+            {
+                exhausted = true;
                 break;
+            }
             ++semantic_hops;
+            if (cognition)
+                laplace_cognition_program_note_route(cognition);
             ArrayType *routed = candidate_id_array(candidates, candidate_count);
             if (trace)
                 for (int i = 0; i < candidate_count; ++i)
                     emit_result(result, step, &candidates[i], true, input,
                                 candidate_count, context_length, retained_channel_count,
-                                query_channel_count, true, semantic_hops);
+                                query_channel_count, true, semantic_hops, cognition);
             MemoryContextSwitchTo(walk_context);
             for (int i = 0; i < candidate_count; ++i)
-            {
                 hash_search(route_seen, &candidates[i].id, HASH_ENTER, NULL);
-                OriginEntry *origin = hash_search(origins, &candidates[i].id, HASH_ENTER, NULL);
-                origin->occurrences = NULL;
-            }
-            /* A route carries its supporting query occurrences. Multiple
-             * paths from one occurrence do not create independent evidence. */
-            for (int i = 0; i < query_channel_count; ++i)
-            {
-                const LaplaceQueryChannel *channel = &query_channels[i];
-                if ((!channel->outbound && !relation_can_traverse_reverse(&channel->relation)) ||
-                    !(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0))
-                    continue;
-                CandidateIndex *admitted = hash_search(candidate_index, &channel->candidate, HASH_FIND, NULL);
-                if (!admitted) continue;
-                OriginEntry *origin = hash_search(origins, &channel->candidate, HASH_FIND, NULL);
-                OriginEntry *anchor = hash_search(origins, &channel->anchor, HASH_FIND, NULL);
-                if (!origin || !anchor)
-                    elog(ERROR, "forward execution: routed evidence lost its ancestry");
-                origin->occurrences = bms_add_members(origin->occurrences, anchor->occurrences);
-            }
             laplace_query_state_extend_batch(query_state, routed, NULL);
             if (output_state)
                 laplace_query_state_extend_batch(output_state, routed, NULL);
@@ -1045,22 +1203,23 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             }
         }
         if (pick < 0)
+        {
+            exhausted = true;
             break;
+        }
 
-        emit_result(result, step, &candidates[pick], trace, input,
-                    candidate_count, context_length, retained_channel_count,
-                    query_channel_count, false, semantic_hops);
-
+        /* State transition precedes publication of the selected constituent.
+         * The trace therefore reports the post-transition completion state and
+         * the exact semantic-act id on the constituent that closes the program. */
         MemoryContextSwitchTo(walk_context);
         Datum selected = hash128_to_datum(&candidates[pick].id);
         context[context_length++] = selected;
         hash_search(route_seen, &candidates[pick].id, HASH_ENTER, NULL);
-        bool origin_found;
-        OriginEntry *selected_origin = hash_search(origins, &candidates[pick].id, HASH_ENTER, &origin_found);
-        if (!origin_found) selected_origin->occurrences = NULL;
+        OriginEntry *selected_origin = origin_get(origins, &candidates[pick].id, true);
         if (next_origin == INT_MAX)
             elog(ERROR, "forward execution: emitted occurrence ordinal overflow");
-        selected_origin->occurrences = bms_add_member(selected_origin->occurrences, next_origin++);
+        selected_origin->occurrences = bms_add_member(selected_origin->occurrences,
+                                                      next_origin++);
         laplace_query_state_extend(query_state, selected, NULL);
         if (output_state)
             laplace_query_state_extend(output_state, selected, NULL);
@@ -1077,14 +1236,53 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 pfree(selection);
             }
         }
-        ++step;
+        if (cognition)
+            laplace_cognition_program_note_emit(
+                cognition, &candidates[pick].id, selected_origin->occurrences,
+                candidates[pick].projection.has_positive ||
+                candidates[pick].query_traversal.has_positive ||
+                candidates[pick].query.has_positive);
+
         MemoryContextSwitchTo(step_context);
+        emit_result(result, step, &candidates[pick], trace, input,
+                    candidate_count, context_length, retained_channel_count,
+                    query_channel_count, false, semantic_hops, cognition);
+        ++step;
+
+        if (cognition)
+        {
+            LaplaceCognitionProgramReceipt receipt;
+            laplace_cognition_program_receipt(cognition, &receipt);
+            if (receipt.complete)
+                break;
+        }
     }
 
     MemoryContextSwitchTo(walk_context);
+    if (cognition)
+    {
+        LaplaceCognitionProgramReceipt receipt;
+        laplace_cognition_program_receipt(cognition, &receipt);
+        if (!receipt.complete)
+            laplace_cognition_program_finalize(
+                cognition,
+                !exhausted && receipt.output_count >= steps
+                    ? LAPLACE_COGNITION_BUDGET_EXHAUSTED
+                    : LAPLACE_COGNITION_EXHAUSTED);
+        if (trace)
+        {
+            MemoryContextSwitchTo(step_context);
+            laplace_cognition_program_receipt(cognition, &receipt);
+            emit_terminal(result, receipt.output_count + 1, input,
+                          context_length, semantic_hops, cognition);
+            MemoryContextSwitchTo(walk_context);
+        }
+    }
+
     MemoryContextDelete(step_context);
     laplace_query_state_destroy(&output_state);
     laplace_query_state_destroy(&query_state);
+    laplace_cognition_program_destroy(&cognition);
     hash_destroy(route_seen);
     HASH_SEQ_STATUS origin_sequence;
     OriginEntry *origin;
