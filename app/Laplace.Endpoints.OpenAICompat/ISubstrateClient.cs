@@ -109,6 +109,14 @@ internal interface ISubstrateClient
     Task<SubstrateVisualizationGraph> VisualizationGraphAsync(
         int limit, bool includeGeometry, bool includeEvidence, CancellationToken ct);
 
+    /// <summary>
+    /// Execute the same traceable native forward pass used by normal generation and
+    /// return its receipts. The controls are the forward operator controls, not graph-walk aliases.
+    /// </summary>
+    Task<IReadOnlyList<ForwardTraceStep>> ForwardTraceAsync(
+        string prompt, int steps, int maxStride, double spread, int topK,
+        int hops, int fanout, CancellationToken ct);
+
     Task<IReadOnlyList<ExplainTraceStep>> ExplainTraceAsync(
         string prompt, int depth, int beam, bool includeEvidence, CancellationToken ct);
 
