@@ -10,11 +10,12 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 /// generation.forward_text() path used by converse.chat(). A green infer probe could
 /// therefore coexist with a broken or disconnected dynamic forward pass.
 ///
-/// This test executes the canonical traceable native forward program, its normal text
-/// projection, and the public SubstrateClient conversation path against the same
-/// witnessed prompt. The receipt assertions ensure a non-empty answer cannot hide a
-/// disconnected query/evidence path. Tier=live is intentional: correctness depends on
-/// the standing seeded substrate rather than a miniature fixture.
+/// This test executes the canonical traceable native forward program, the production
+/// forward-receipt client used by /v1/explain/report, its normal text projection, and
+/// the public SubstrateClient conversation path against the same witnessed prompt.
+/// The receipt assertions ensure a non-empty answer cannot hide a disconnected
+/// query/evidence path. Tier=live is intentional: correctness depends on the standing
+/// seeded substrate rather than a miniature fixture.
 /// </summary>
 [Trait("Tier", "live")]
 public sealed class ForwardPassLiveTests
@@ -98,6 +99,25 @@ public sealed class ForwardPassLiveTests
             string.Equals(row.Entity, Expected, StringComparison.OrdinalIgnoreCase)
             && row.AntonymSupport);
 
+        // The production client behind /v1/explain/report must observe the same
+        // canonical forward execution, not the retired consensus.walk_branches replay.
+        await using var client = new SubstrateClient();
+        var productTrace = await client.ForwardTraceAsync(
+            Prompt,
+            steps: 24,
+            maxStride: 5,
+            spread: 0.0,
+            topK: 10,
+            hops: 8,
+            fanout: 10,
+            ct: CancellationToken.None);
+        Assert.NotEmpty(productTrace);
+        Assert.Contains(productTrace, row => row.ExactChannelCount > 0);
+        Assert.Contains(productTrace, row =>
+            row.Event == "emit"
+            && string.Equals(row.Entity.Trim(), Expected, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(row.SupportRelation, "IS_ANTONYM_OF", StringComparison.OrdinalIgnoreCase));
+
         var emitted = new List<string>();
         await using (var cmd = new NpgsqlCommand(
             """
@@ -120,7 +140,6 @@ public sealed class ForwardPassLiveTests
             string.Equals(value, Expected, StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(emitted, LooksLikeInternalIdentity);
 
-        await using var client = new SubstrateClient();
         var rows = await client.ConverseAsync(
             Prompt,
             session: null,
