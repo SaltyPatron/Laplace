@@ -198,7 +198,10 @@ public sealed class ElectorArchitectureGateTests
         Assert.DoesNotContain("laplace_steer_candidates(", native);
         Assert.Contains("laplace_query_state_create(", native);
         Assert.Contains("laplace_query_state_extend(query_state, selected", native);
-        Assert.Contains("walk_continuations(walk_call, input, hops)", native);
+        Assert.Contains("forward_prompt(FunctionCallInfo fcinfo, bool trace)", native);
+        Assert.Contains("walk_continuations(walk_call, input, hops, trace)", native);
+        Assert.Contains("return forward_prompt(fcinfo, false);", native);
+        Assert.Contains("return forward_prompt(fcinfo, true);", native);
         Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);
         Assert.DoesNotMatch(ElectCall, StripComments(sql));
     }
