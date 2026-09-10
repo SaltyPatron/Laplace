@@ -71,9 +71,22 @@ typedef struct QueryEvidenceState
     LaplaceQueryEvidenceStats *stats;
 } QueryEvidenceState;
 
+typedef struct QueryExactState
+{
+    HTAB *operands;
+    int *next;
+    LaplaceQueryChannel *channels;
+    int count;
+    int capacity;
+    HTAB *channel_index;
+    bool reverse;
+    MemoryContext owner;
+} QueryExactState;
+
 struct LaplaceQueryState
 {
     MemoryContext owner;
+    ArrayType *operands;
     ArrayType *types;
     LaplaceQueryChannel *channels;
     int channel_count;
@@ -402,6 +415,77 @@ query_observation(int ordinal, int16 role,
         state->stats->observation_bindings++;
 }
 
+static void
+bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
+                          int channel_count, LaplaceQueryEvidenceStats *stats,
+                          MemoryContext work)
+{
+    HASHCTL ctl;
+    HTAB *relations;
+    hash128_t *relation_ids;
+    int relation_count = 0;
+    QueryEvidenceState evidence;
+
+    if (channel_count <= 0)
+        return;
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(QueryChannelKey);
+    ctl.entrysize = sizeof(QueryChannelIndex);
+    ctl.hcxt = work;
+    evidence.channel_index = hash_create("query evidence result index",
+                                         channel_count, &ctl,
+                                         HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    for (int i = 0; i < channel_count; ++i)
+    {
+        QueryChannelKey key = channel_key(&channels[i]);
+        QueryChannelIndex *entry = (QueryChannelIndex *)
+            hash_search(evidence.channel_index, &key, HASH_ENTER, NULL);
+        entry->heap_index = i;
+    }
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = work;
+    relations = hash_create("query evidence relation filter", channel_count,
+                            &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    for (int i = 0; i < channel_count; ++i)
+    {
+        bool found;
+        (void) hash_search(relations, &channels[i].relation, HASH_ENTER, &found);
+        if (!found)
+            relation_count++;
+    }
+    relation_ids = (hash128_t *) palloc(sizeof(hash128_t) * Max(relation_count, 1));
+    {
+        HASH_SEQ_STATUS sequence;
+        hash128_t *id;
+        int at = 0;
+        hash_seq_init(&sequence, relations);
+        while ((id = (hash128_t *) hash_seq_search(&sequence)) != NULL)
+            relation_ids[at++] = *id;
+    }
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(QueryEvidenceKey);
+    ctl.entrysize = sizeof(QueryEvidenceKey);
+    ctl.hcxt = work;
+    evidence.sources = hash_create("query evidence sources",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.contexts = hash_create("query evidence contexts",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.channels = channels;
+    evidence.stats = stats;
+
+    {
+        ArrayType *types = hash128_array_from_ids(relation_ids, relation_count);
+        laplace_observation_read(operands, NULL, types, 3,
+                                 query_observation, &evidence);
+        pfree(types);
+    }
+}
+
 LaplaceQueryChannel *
 laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
                                 int fanout, int *count,
@@ -542,68 +626,7 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         }
     }
 
-    /* Index the retained typed channels by exact query occurrence. The raw
-     * witness read is one set operation over all retained relation families and
-     * observation_read remaps storage deduplication back to every ordinal. */
-    {
-        HTAB *relations;
-        hash128_t *relation_ids;
-        int relation_count = 0;
-        QueryEvidenceState evidence;
-
-        MemSet(&ctl, 0, sizeof(ctl));
-        ctl.keysize = sizeof(QueryChannelKey);
-        ctl.entrysize = sizeof(QueryChannelIndex);
-        ctl.hcxt = work;
-        evidence.channel_index = hash_create("query evidence result index",
-                                             result_count, &ctl,
-                                             HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-        for (int i = 0; i < result_count; ++i)
-        {
-            QueryChannelKey key = channel_key(&result[i]);
-            QueryChannelIndex *entry = (QueryChannelIndex *)
-                hash_search(evidence.channel_index, &key, HASH_ENTER, NULL);
-            entry->heap_index = i;
-        }
-
-        MemSet(&ctl, 0, sizeof(ctl));
-        ctl.keysize = sizeof(hash128_t);
-        ctl.entrysize = sizeof(hash128_t);
-        ctl.hcxt = work;
-        relations = hash_create("query evidence relation filter", result_count,
-                                &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-        for (int i = 0; i < result_count; ++i)
-        {
-            bool found;
-            (void) hash_search(relations, &result[i].relation, HASH_ENTER, &found);
-            if (!found)
-                relation_count++;
-        }
-        relation_ids = (hash128_t *) palloc(sizeof(hash128_t) * relation_count);
-        {
-            HASH_SEQ_STATUS sequence;
-            hash128_t *id;
-            int at = 0;
-            hash_seq_init(&sequence, relations);
-            while ((id = (hash128_t *) hash_seq_search(&sequence)) != NULL)
-                relation_ids[at++] = *id;
-        }
-
-        MemSet(&ctl, 0, sizeof(ctl));
-        ctl.keysize = sizeof(QueryEvidenceKey);
-        ctl.entrysize = sizeof(QueryEvidenceKey);
-        ctl.hcxt = work;
-        evidence.sources = hash_create("query evidence sources",
-            Max(result_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-        evidence.contexts = hash_create("query evidence contexts",
-            Max(result_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-        evidence.channels = result;
-        evidence.stats = stats;
-
-        laplace_observation_read(operands, NULL,
-            hash128_array_from_ids(relation_ids, relation_count),
-            3, query_observation, &evidence);
-    }
+    bind_channel_observations(operands, result, result_count, stats, work);
 
     MemoryContextSwitchTo(owner);
     qsort(result, (size_t) result_count, sizeof(LaplaceQueryChannel), query_channel_order);
@@ -612,6 +635,79 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         stats->channels = (uint64) result_count;
     MemoryContextDelete(work);
     return result;
+}
+
+static void
+query_exact_reserve(QueryExactState *state, int additional)
+{
+    int64 needed = (int64) state->count + additional;
+    int capacity;
+
+    if (additional < 0 || needed > INT_MAX ||
+        (uint64) needed > MaxAllocSize / sizeof(LaplaceQueryChannel))
+        ereport(ERROR, (errmsg("query evidence: exact candidate channel set exceeds allocation capacity")));
+    if (needed <= state->capacity)
+        return;
+    capacity = state->capacity ? state->capacity : 32;
+    while (capacity < needed)
+    {
+        int64 grown = (int64) capacity * 2;
+        capacity = grown > INT_MAX ? (int) needed : (int) Min(grown, (int64) INT_MAX);
+    }
+    state->channels = state->channels
+        ? (LaplaceQueryChannel *) repalloc(state->channels,
+                                           sizeof(LaplaceQueryChannel) * capacity)
+        : (LaplaceQueryChannel *) palloc(sizeof(LaplaceQueryChannel) * capacity);
+    state->capacity = capacity;
+}
+
+static void
+query_exact_cell(const LaplaceConsensusRow *row, void *opaque)
+{
+    QueryExactState *state = (QueryExactState *) opaque;
+    const hash128_t *anchor;
+    const hash128_t *candidate;
+    QueryOperandEntry *operand;
+
+    if (row->object_is_null)
+        return;
+    anchor = state->reverse ? &row->object : &row->subject;
+    candidate = state->reverse ? &row->subject : &row->object;
+    operand = (QueryOperandEntry *) hash_search(state->operands, anchor, HASH_FIND, NULL);
+    if (!operand)
+        return;
+
+    for (int index = operand->first; index >= 0; index = state->next[index])
+    {
+        LaplaceQueryChannel channel;
+        QueryChannelKey key;
+        QueryChannelIndex *entry;
+        bool found;
+
+        MemSet(&channel, 0, sizeof(channel));
+        channel.ordinal = index + 1;
+        channel.anchor = *anchor;
+        channel.candidate = *candidate;
+        channel.relation = row->type;
+        channel.outbound = !state->reverse;
+        channel.rating = row->rating;
+        channel.rd = row->rd;
+        channel.witnesses = row->witnesses;
+        key = channel_key(&channel);
+        entry = (QueryChannelIndex *)
+            hash_search(state->channel_index, &key, HASH_ENTER, &found);
+        if (found)
+        {
+            LaplaceQueryChannel *prior = &state->channels[entry->heap_index];
+            if (query_channel_rank(&channel, prior) < 0)
+                *prior = channel;
+            continue;
+        }
+
+        query_exact_reserve(state, 1);
+        entry->heap_index = state->count;
+        state->channels[state->count++] = channel;
+    }
 }
 
 static void
@@ -664,6 +760,7 @@ laplace_query_state_create(ArrayType *operands, ArrayType *types, int fanout,
     state->owner = owner;
     state->fanout = fanout;
     state->operand_count = ArrayGetNItems(ARR_NDIM(operands), ARR_DIMS(operands));
+    state->operands = DatumGetArrayTypePCopy(PointerGetDatum(operands));
     state->types = types ? DatumGetArrayTypePCopy(PointerGetDatum(types)) : NULL;
     initial = laplace_query_evidence_channels(operands, state->types, fanout, &count, stats);
     query_state_reserve(state, count);
@@ -675,6 +772,24 @@ laplace_query_state_create(ArrayType *operands, ArrayType *types, int fanout,
     }
     MemoryContextSwitchTo(previous);
     return state;
+}
+
+static void
+query_state_append_operand(LaplaceQueryState *state, Datum selected)
+{
+    ArrayBuildState *build = NULL;
+    ArrayIterator iterator;
+    Datum value;
+    bool isnull;
+    ArrayType *previous = state->operands;
+
+    iterator = array_create_iterator(previous, 0, NULL);
+    while (array_iterate(iterator, &value, &isnull))
+        build = accumArrayResult(build, value, isnull, BYTEAOID, state->owner);
+    array_free_iterator(iterator);
+    build = accumArrayResult(build, selected, false, BYTEAOID, state->owner);
+    state->operands = DatumGetArrayTypeP(makeArrayResult(build, state->owner));
+    pfree(previous);
 }
 
 void
@@ -708,6 +823,7 @@ laplace_query_state_extend(LaplaceQueryState *state, Datum selected,
     }
     if (added)
         pfree(added);
+    query_state_append_operand(state, selected);
     MemoryContextSwitchTo(previous);
 }
 
@@ -718,6 +834,142 @@ laplace_query_state_channels(const LaplaceQueryState *state, int *count)
         ereport(ERROR, (errmsg("query evidence: channel count output is required")));
     *count = state ? state->channel_count : 0;
     return state ? state->channels : NULL;
+}
+
+LaplaceQueryChannel *
+laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
+                                       ArrayType *candidates, int *count,
+                                       LaplaceQueryEvidenceStats *stats)
+{
+    MemoryContext owner = CurrentMemoryContext;
+    MemoryContext work;
+    Datum *operand_values, *candidate_values;
+    bool *operand_nulls, *candidate_nulls;
+    int operand_count, candidate_count;
+    hash128_t *unique_operands, *unique_candidates;
+    int unique_operand_count = 0, unique_candidate_count = 0;
+    HASHCTL ctl;
+    HTAB *operand_seen, *candidate_seen;
+    QueryExactState exact;
+    ArrayType *operand_ids, *candidate_ids;
+    LaplaceQueryChannel *result = NULL;
+
+    if (!count)
+        ereport(ERROR, (errmsg("query evidence: candidate evidence count output is required")));
+    *count = 0;
+    if (stats)
+        MemSet(stats, 0, sizeof(*stats));
+    if (!state)
+        ereport(ERROR, (errmsg("query evidence: persistent query state is required")));
+    if (!candidates)
+        ereport(ERROR, (errmsg("query evidence: candidate identities are required")));
+    validate_id_array(candidates, "candidates");
+    if (ArrayGetNItems(ARR_NDIM(candidates), ARR_DIMS(candidates)) == 0 ||
+        state->operand_count == 0 ||
+        (state->types && ArrayGetNItems(ARR_NDIM(state->types), ARR_DIMS(state->types)) == 0))
+        return NULL;
+
+    work = AllocSetContextCreate(owner, "query candidate evidence", ALLOCSET_DEFAULT_SIZES);
+    MemoryContextSwitchTo(work);
+    deconstruct_array(state->operands, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &operand_values, &operand_nulls, &operand_count);
+    deconstruct_array(candidates, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &candidate_values, &candidate_nulls, &candidate_count);
+    if ((Size) operand_count > MaxAllocSize / sizeof(hash128_t) ||
+        (Size) operand_count > MaxAllocSize / sizeof(int) ||
+        (Size) candidate_count > MaxAllocSize / sizeof(hash128_t))
+        ereport(ERROR, (errmsg("query evidence: exact candidate operand set exceeds allocation capacity")));
+
+    unique_operands = (hash128_t *) palloc(sizeof(hash128_t) * Max(operand_count, 1));
+    unique_candidates = (hash128_t *) palloc(sizeof(hash128_t) * Max(candidate_count, 1));
+    exact.next = (int *) palloc(sizeof(int) * Max(operand_count, 1));
+    exact.channels = NULL;
+    exact.count = exact.capacity = 0;
+    exact.reverse = false;
+    exact.owner = work;
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(QueryOperandEntry);
+    ctl.hcxt = work;
+    exact.operands = hash_create("query exact operands", Max(operand_count, 16),
+                                 &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    ctl.entrysize = sizeof(hash128_t);
+    operand_seen = hash_create("query exact operand ids", Max(operand_count, 16),
+                               &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    candidate_seen = hash_create("query exact candidate ids", Max(candidate_count, 16),
+                                 &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(QueryChannelKey);
+    ctl.entrysize = sizeof(QueryChannelIndex);
+    ctl.hcxt = work;
+    exact.channel_index = hash_create("query exact channel index", 128, &ctl,
+                                      HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    for (int i = operand_count - 1; i >= 0; --i)
+    {
+        QueryOperandEntry *entry;
+        hash128_t id;
+        bool found;
+        exact.next[i] = -1;
+        if (operand_nulls[i])
+            continue;
+        id = datum_to_hash128(operand_values[i]);
+        entry = (QueryOperandEntry *) hash_search(exact.operands, &id, HASH_ENTER, &found);
+        exact.next[i] = found ? entry->first : -1;
+        entry->first = i;
+        (void) hash_search(operand_seen, &id, HASH_ENTER, &found);
+        if (!found)
+            unique_operands[unique_operand_count++] = id;
+    }
+    for (int i = 0; i < candidate_count; ++i)
+    {
+        hash128_t id;
+        bool found;
+        if (candidate_nulls[i])
+            ereport(ERROR, (errmsg("query evidence: candidate identities must not contain NULL")));
+        id = datum_to_hash128(candidate_values[i]);
+        (void) hash_search(candidate_seen, &id, HASH_ENTER, &found);
+        if (!found)
+            unique_candidates[unique_candidate_count++] = id;
+    }
+    if (unique_operand_count == 0 || unique_candidate_count == 0)
+    {
+        MemoryContextSwitchTo(owner);
+        MemoryContextDelete(work);
+        return NULL;
+    }
+
+    operand_ids = hash128_array_from_ids(unique_operands, unique_operand_count);
+    candidate_ids = hash128_array_from_ids(unique_candidates, unique_candidate_count);
+    exact.reverse = false;
+    laplace_consensus_scan(operand_ids, candidate_ids, state->types,
+                           query_exact_cell, &exact,
+                           stats ? &stats->forward : NULL);
+    exact.reverse = true;
+    laplace_consensus_scan(candidate_ids, operand_ids, state->types,
+                           query_exact_cell, &exact,
+                           stats ? &stats->reverse : NULL);
+
+    if (exact.count > 0)
+    {
+        MemoryContextSwitchTo(owner);
+        result = (LaplaceQueryChannel *) palloc(sizeof(*result) * exact.count);
+        memcpy(result, exact.channels, sizeof(*result) * exact.count);
+        MemoryContextSwitchTo(work);
+        bind_channel_observations(state->operands, result, exact.count, stats, work);
+        MemoryContextSwitchTo(owner);
+        qsort(result, (size_t) exact.count, sizeof(*result), query_channel_order);
+        *count = exact.count;
+        if (stats)
+            stats->channels = (uint64) exact.count;
+    }
+    else
+        MemoryContextSwitchTo(owner);
+
+    MemoryContextDelete(work);
+    return result;
 }
 
 static ArrayType *
