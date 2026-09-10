@@ -8,6 +8,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 FRONTIER_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/forward_frontier.sql.in"
 WALK_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_text.sql.in"
+WALK_CONTINUATIONS_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in"
 CHAT_PATH = ROOT / "extension/laplace_substrate/sql/functions/converse/chat.sql.in"
 
 
@@ -35,6 +36,7 @@ def count(haystack: str, needle: str) -> int:
 def main() -> int:
     frontier = strip_sql_comments(FRONTIER_PATH.read_text())
     walk = strip_sql_comments(WALK_PATH.read_text())
+    walk_continuations = strip_sql_comments(WALK_CONTINUATIONS_PATH.read_text())
     chat = strip_sql_comments(CHAT_PATH.read_text())
 
     # Native execution owns the crawl; obsolete SQL wrappers must not remain
@@ -67,6 +69,20 @@ def main() -> int:
     forward_text = function_slice(walk, "generation.forward_text", "converse.forward_turn")
     assert "CONTINUATION_OUTPUT" not in forward_text
     assert "NULL::bytea[]" in forward_text
+
+    # There is one native whole-prompt execution. forward_trace owns that C call
+    # and forward_prompt is only its four-column product projection. This makes
+    # receipts and normal conversation observe the same election, not two runs.
+    trace_sql = function_slice(
+        walk_continuations, "generation.forward_trace", "generation.forward_prompt")
+    prompt_sql = function_slice(
+        walk_continuations, "generation.forward_prompt", "generation.forward_walk_continuations")
+    assert "'pg_laplace_forward_trace'" in trace_sql
+    assert "LANGUAGE C VOLATILE" in trace_sql
+    assert "generation.forward_trace(" in prompt_sql
+    assert "LANGUAGE sql VOLATILE" in prompt_sql
+    assert "'pg_laplace_forward_prompt'" not in prompt_sql
+    assert count(prompt_sql, "generation.forward_trace(") == 1
 
     # The whole prompt and persistent typed query state are now the forward
     # authority. The old explore-web pre-expansion and independent steer scan
@@ -123,7 +139,7 @@ def main() -> int:
     drop_frontier = "DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);"
     drop_trace = "DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);"
     assert drop_frontier in walk, "retired text forward_frontier is not dropped"
-    assert drop_trace in walk, "retired text forward_route_trace is not dropped"
+    assert drop_trace in walk, "retired route functions are not dropped"
     assert walk.index(drop_frontier) < walk.index(drop_trace), \
         "retired route functions are not dropped in dependency order"
 
@@ -145,8 +161,8 @@ def main() -> int:
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
         f"forward_text=exact_tree1 query_state=persistent candidate_evidence=exact "
-        f"evidence=typed-separate output=query-relative route_owner=native "
-        f"retired_wrappers=5 chat_steps={steps}"
+        f"evidence=typed-separate output=query-relative execution=traceable-single-pass "
+        f"route_owner=native retired_wrappers=5 chat_steps={steps}"
     )
     return 0
 
