@@ -242,6 +242,13 @@ laplace_prompt_input(text *input)
     tier_tree_t *tree;
     int rc;
     if (VARSIZE_ANY_EXHDR(input) == 0) return NULL;
+    /* The native entry is callable directly in a fresh backend. Composition
+     * must initialize its own shared Unicode floor, rather than depending on
+     * a preceding word_id/inspection call to have loaded it. */
+    if (!laplace_perfcache_ready())
+        ereport(ERROR,
+                (errmsg("prompt composition requires the T0 perfcache"),
+                 errhint("Configure laplace_substrate.perfcache_path with the installed Unicode cache.")));
     prepared = palloc0(sizeof(*prepared));
     prepared->cleanup.func = prompt_input_release;
     prepared->cleanup.arg = prepared;

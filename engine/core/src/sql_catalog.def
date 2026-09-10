@@ -178,6 +178,13 @@ SQL_QUERY("evidence.response_support", "bytea[],bytea,bytea[],bytea,bool",
     "SELECT subject_id,object_id,source_id FROM laplace.attestations "
     "WHERE subject_id=ANY($1) AND type_id=$2 AND ((object_id IS NULL)=$5) "
     "AND ($3 IS NULL OR source_id=ANY($3)) AND ($4 IS NULL OR context_id=$4)")
+SQL_QUERY("evidence.observation_cells", "bytea[],bytea[],bytea[],bytea[]",
+    "SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,"
+    "a.outcome,a.observation_count "
+    "FROM unnest($1,$2,$3) AS c(subject_id,type_id,object_id) "
+    "JOIN laplace.attestations a ON a.subject_id=c.subject_id "
+    "AND a.type_id=c.type_id AND a.object_id=c.object_id "
+    "WHERE ($4 IS NULL OR a.source_id=ANY($4))")
 SQL_QUERY("evidence.response_type", "bytea,bytea,int4",
     "SELECT encode(object_id,'hex'),combined_eff_mu,source_count "
     "FROM ops.attestation_response_type($1,$2,NULL,NULL,$3)")

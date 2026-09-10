@@ -84,6 +84,13 @@ extern void laplace_query_state_extend(
     Datum selected,
     LaplaceQueryEvidenceStats *stats);
 
+/* One indexed read for a complete admitted frontier. Scalar extension delegates
+ * here; ordered duplicates and their occurrence ordinals are preserved. */
+extern void laplace_query_state_extend_batch(
+    LaplaceQueryState *state,
+    ArrayType *selected,
+    LaplaceQueryEvidenceStats *stats);
+
 extern const LaplaceQueryChannel *laplace_query_state_channels(
     const LaplaceQueryState *state,
     int *count);

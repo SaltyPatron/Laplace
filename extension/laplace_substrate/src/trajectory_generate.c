@@ -14,6 +14,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "nodes/bitmapset.h"
 #include "utils/array.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -30,6 +31,7 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 PG_FUNCTION_INFO_V1(pg_laplace_forward_prompt);
+PG_FUNCTION_INFO_V1(pg_laplace_forward_trace);
 
 typedef struct EvidenceSummary
 {
@@ -64,6 +66,12 @@ typedef struct EvidenceEntry
     hash128_t id;
     EvidenceSummary summary;
 } EvidenceEntry;
+
+typedef struct OriginEntry
+{
+    hash128_t id;
+    Bitmapset *occurrences;
+} OriginEntry;
 
 typedef struct EvidenceCoverageKey
 {
@@ -326,9 +334,34 @@ negative_channel_compare(const LaplaceQueryChannel *a,
  * occurrences, source diversity, and standing into one scalar. The channel set
  * may be a bounded proposal field or the exact bounded-candidate adjudication
  * field; the election tuple itself is identical. */
+static void
+cover_origins(HTAB *coverage, HTAB *origins, const LaplaceQueryChannel *channel,
+              uint8 polarity, int32 *covered)
+{
+    OriginEntry *origin = hash_search(origins, &channel->anchor, HASH_FIND, NULL);
+    EvidenceCoverageKey key = {0};
+    int member = -1;
+    if (!origin)
+        elog(ERROR, "forward execution: evidence anchor lost its query provenance");
+    key.id = channel->candidate;
+    key.polarity = polarity;
+    while ((member = bms_next_member(origin->occurrences, member)) >= 0)
+    {
+        bool found;
+        key.ordinal = member;
+        hash_search(coverage, &key, HASH_ENTER, &found);
+        if (!found)
+        {
+            if (*covered == PG_INT32_MAX)
+                elog(ERROR, "forward execution: occurrence coverage overflow");
+            ++*covered;
+        }
+    }
+}
+
 static HTAB *
 evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
-                                 bool projection_only, MemoryContext owner)
+                                 bool projection_only, HTAB *origins, MemoryContext owner)
 {
     HTAB *summaries = new_id_index(projection_only ? "forward projection evidence" :
                                    "forward query evidence", count, owner,
@@ -354,10 +387,9 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
     {
         const LaplaceQueryChannel *channel = &channels[i];
         EvidenceEntry *entry;
-        EvidenceCoverageKey occurrence_key;
         EvidenceRelationKey relation_key;
         double sign;
-        bool found, occurrence_found, relation_found;
+        bool found, relation_found;
 
         /* Incoming asymmetric testimony is valid retained evidence, but an
          * output projection may not silently invert its traversal law. */
@@ -372,18 +404,8 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
         sign = walk_edge_score(channel->relation, channel->rating, channel->rd);
         if (sign > 0.0 && isfinite(sign))
         {
-            MemSet(&occurrence_key, 0, sizeof(occurrence_key));
-            occurrence_key.id = channel->candidate;
-            occurrence_key.ordinal = channel->ordinal;
-            occurrence_key.polarity = 1;
-            hash_search(coverage, &occurrence_key, HASH_ENTER, &occurrence_found);
-            if (!occurrence_found)
-            {
-                if (entry->summary.positive_covered_occurrences == PG_INT32_MAX)
-                    ereport(ERROR,
-                            (errmsg("forward execution: positive occurrence coverage overflow")));
-                entry->summary.positive_covered_occurrences++;
-            }
+            cover_origins(coverage, origins, channel, 1,
+                          &entry->summary.positive_covered_occurrences);
 
             MemSet(&relation_key, 0, sizeof(relation_key));
             relation_key.id = channel->candidate;
@@ -407,18 +429,8 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
         }
         else if (sign < 0.0 && isfinite(sign))
         {
-            MemSet(&occurrence_key, 0, sizeof(occurrence_key));
-            occurrence_key.id = channel->candidate;
-            occurrence_key.ordinal = channel->ordinal;
-            occurrence_key.polarity = 2;
-            hash_search(coverage, &occurrence_key, HASH_ENTER, &occurrence_found);
-            if (!occurrence_found)
-            {
-                if (entry->summary.negative_covered_occurrences == PG_INT32_MAX)
-                    ereport(ERROR,
-                            (errmsg("forward execution: negative occurrence coverage overflow")));
-                entry->summary.negative_covered_occurrences++;
-            }
+            cover_origins(coverage, origins, channel, 2,
+                          &entry->summary.negative_covered_occurrences);
 
             MemSet(&relation_key, 0, sizeof(relation_key));
             relation_key.id = channel->candidate;
@@ -449,11 +461,11 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
 
 static HTAB *
 evidence_summaries(const LaplaceQueryState *state, bool projection_only,
-                   MemoryContext owner)
+                   HTAB *origins, MemoryContext owner)
 {
     int count = 0;
     const LaplaceQueryChannel *channels = laplace_query_state_channels(state, &count);
-    return evidence_summaries_from_channels(channels, count, projection_only, owner);
+    return evidence_summaries_from_channels(channels, count, projection_only, origins, owner);
 }
 
 static int
@@ -464,14 +476,16 @@ positive_summary_compare(const EvidenceSummary *a, const EvidenceSummary *b)
         return a->has_positive ? 1 : -1;
     if (!a->has_positive)
         return 0;
-    cmp = positive_channel_compare(&a->positive, &b->positive);
-    if (cmp != 0)
-        return cmp;
+    /* Elect against the joint query before comparing one supporting cell.
+     * Previously the cell's endpoint hash could settle the comparison before
+     * coverage was even inspected, so one strong isolated edge defeated a
+     * candidate supported by the complete declared operand set. */
     if (a->positive_covered_occurrences != b->positive_covered_occurrences)
         return a->positive_covered_occurrences > b->positive_covered_occurrences ? 1 : -1;
     if (a->positive_relation_families != b->positive_relation_families)
         return a->positive_relation_families > b->positive_relation_families ? 1 : -1;
-    return 0;
+    cmp = positive_channel_compare(&a->positive, &b->positive);
+    return cmp;
 }
 
 /* For opposition, absence is preferable. When both candidates are opposed,
@@ -597,22 +611,64 @@ candidate_compare(const void *left, const void *right)
 }
 
 static void
-emit_result(ReturnSetInfo *result, int32 step, const Candidate *candidate)
+emit_result(ReturnSetInfo *result, int32 step, const Candidate *candidate,
+            bool trace, const LaplacePromptInput *input, int candidate_count,
+            int operand_count, int query_channels, int exact_channels,
+            bool routing, int routing_round)
 {
-    Datum values[4];
-    bool nulls[4] = {false, false, false, true};
+    Datum values[24] = {0};
+    bool nulls[24] = {false, false, false, true};
     Datum id = hash128_to_datum(&candidate->id);
     values[0] = Int32GetDatum(step);
     values[1] = id;
     values[2] = Int32GetDatum(candidate->stride);
     values[3] = (Datum) 0;
+    if (trace)
+    {
+        const EvidenceSummary *support = candidate->projection.has_positive
+            ? &candidate->projection : candidate->query_traversal.has_positive
+            ? &candidate->query_traversal : &candidate->query;
+        const LaplaceQueryChannel *channel = &support->positive;
+        values[4] = hash128_to_datum(&input->root);
+        values[5] = Int32GetDatum(candidate_count);
+        values[6] = Int32GetDatum(operand_count);
+        values[7] = Int32GetDatum(query_channels);
+        values[8] = Int32GetDatum(exact_channels);
+        values[9] = Int64GetDatum(candidate->sequence_occurrences);
+        values[10] = Int32GetDatum(support->positive_covered_occurrences);
+        values[11] = Int32GetDatum(support->positive_relation_families);
+        values[12] = Int32GetDatum(candidate->query.negative_covered_occurrences);
+        if (support->has_positive)
+        {
+            values[13] = hash128_to_datum(&channel->anchor);
+            values[14] = hash128_to_datum(&channel->relation);
+            values[15] = BoolGetDatum(channel->outbound);
+            values[16] = Int64GetDatum(channel->rating);
+            values[17] = Int64GetDatum(channel->rd);
+            values[18] = Int64GetDatum(channel->witnesses);
+            values[19] = Int32GetDatum(channel->distinct_sources);
+            values[20] = Int32GetDatum(channel->distinct_contexts);
+        }
+        else
+            for (int i = 13; i <= 20; ++i) nulls[i] = true;
+        values[21] = BoolGetDatum(candidate->projection.has_positive);
+        values[22] = CStringGetTextDatum(routing ? "route" : "emit");
+        values[23] = Int32GetDatum(routing_round);
+    }
     tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
     pfree(DatumGetPointer(id));
+    if (trace)
+    {
+        pfree(DatumGetPointer(values[4]));
+        if (!nulls[13]) pfree(DatumGetPointer(values[13]));
+        if (!nulls[14]) pfree(DatumGetPointer(values[14]));
+        pfree(DatumGetPointer(values[22]));
+    }
 }
 
 static Datum
 walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
-                   int semantic_hop_limit)
+                   int semantic_hop_limit, bool trace)
 {
     ReturnSetInfo *result = (ReturnSetInfo *) fcinfo->resultinfo;
     ArrayType *context_array;
@@ -632,6 +688,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     LaplaceTrajectoryScope *trajectory_scope = NULL;
     LaplaceQueryState *query_state = NULL;
     LaplaceQueryState *output_state = NULL;
+    HTAB *route_seen;
+    HTAB *origins;
+    int next_origin = 0;
     int semantic_hops = 0;
 
     if (PG_ARGISNULL(0))
@@ -698,6 +757,23 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     old = MemoryContextSwitchTo(walk_context);
     ArrayType *operands = query_operands(context_array, frontier_array, walk_context);
     query_state = laplace_query_state_create(operands, relation_types, fanout, NULL);
+    origins = new_id_index("forward occurrence provenance", 128, walk_context, sizeof(OriginEntry));
+    route_seen = new_id_index("forward admitted routing identities", 128,
+                              walk_context, sizeof(hash128_t));
+    ArrayIterator route_iterator = array_create_iterator(operands, 0, NULL);
+    Datum route_value;
+    bool route_null;
+    while (array_iterate(route_iterator, &route_value, &route_null))
+    {
+        if (route_null) continue;
+        hash128_t id = datum_to_hash128(route_value);
+        hash_search(route_seen, &id, HASH_ENTER, NULL);
+        bool found;
+        OriginEntry *origin = hash_search(origins, &id, HASH_ENTER, &found);
+        if (!found) origin->occurrences = NULL;
+        origin->occurrences = bms_add_member(origin->occurrences, next_origin++);
+    }
+    array_free_iterator(route_iterator);
 
     if (output_relations &&
         ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) > 0)
@@ -743,7 +819,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     step_context = AllocSetContextCreate(walk_context, "forward query election",
                                          ALLOCSET_DEFAULT_SIZES);
 
-    for (int32 step = 1; step <= steps; ++step)
+    for (int32 step = 1; step <= steps;)
     {
         Candidate *candidates = NULL;
         int candidate_count = 0, candidate_capacity = 0;
@@ -786,28 +862,30 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
         /* Q->K proposal is bounded per active occurrence. It may nominate a
          * candidate, but it is not the final evidence field used to elect it. */
-        query_proposals = evidence_summaries(query_state, false, step_context);
+        query_proposals = evidence_summaries(query_state, false, origins, step_context);
 
         if (input && (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
         {
-            query_traversal_proposals = evidence_summaries(query_state, true, step_context);
+            query_traversal_proposals = evidence_summaries(query_state, true, origins, step_context);
             HASH_SEQ_STATUS sequence;
             EvidenceEntry *nomination;
             hash_seq_init(&sequence, query_traversal_proposals);
             while ((nomination = hash_seq_search(&sequence)) != NULL)
             {
                 if (!nomination->summary.has_positive ||
-                    context_contains_id(context, context_length, &nomination->id))
+                    hash_search(route_seen, &nomination->id, HASH_FIND, NULL))
                     continue;
                 candidate_add(&candidates, &candidate_count, &candidate_capacity,
                               candidate_index, &nomination->id, 0, 0);
             }
         }
 
-        if (output_state &&
-            (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
+        /* A caller-declared result relation is already an established output
+         * contract. Reading that result is not an interpretation hop: a zero
+         * routing budget must still execute the explicitly bound operation. */
+        if (output_state)
         {
-            projection_proposals = evidence_summaries(output_state, true, step_context);
+            projection_proposals = evidence_summaries(output_state, true, origins, step_context);
             HASH_SEQ_STATUS sequence;
             EvidenceEntry *projection;
             hash_seq_init(&sequence, projection_proposals);
@@ -839,9 +917,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             laplace_query_state_candidate_evidence(query_state, candidate_ids,
                                                    &query_channel_count, NULL);
         query_evidence_table = evidence_summaries_from_channels(
-            query_channels, query_channel_count, false, step_context);
+            query_channels, query_channel_count, false, origins, step_context);
         query_traversal_table = evidence_summaries_from_channels(
-            query_channels, query_channel_count, true, step_context);
+            query_channels, query_channel_count, true, origins, step_context);
 
         if (output_state)
         {
@@ -850,7 +928,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 laplace_query_state_candidate_evidence(output_state, candidate_ids,
                                                        &projection_channel_count, NULL);
             projection_table = evidence_summaries_from_channels(
-                projection_channels, projection_channel_count, true, step_context);
+                projection_channels, projection_channel_count, true, origins, step_context);
         }
         pfree(candidate_ids);
 
@@ -887,6 +965,66 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             break;
 
         qsort(candidates, (size_t) candidate_count, sizeof(Candidate), candidate_compare);
+        int retained_channel_count = 0;
+        (void) laplace_query_state_channels(query_state, &retained_channel_count);
+
+        /* ROUTE and SELECT have different result types. A relation endpoint
+         * can enter the working frontier without consuming an output ordinal
+         * or inventing an observed continuation. Preserve every hypothesis in
+         * this bounded provider frontier, rather than turn the best label into
+         * an answer. All hypotheses extend each provider in one native batch. */
+        int output_count = 0;
+        for (int i = 0; i < candidate_count; ++i)
+            if (candidates[i].sequence_occurrences > 0 ||
+                candidates[i].projection.has_positive)
+                output_count++;
+        if (output_count == 0)
+        {
+            if (!input || semantic_hops >= semantic_hop_limit)
+                break;
+            ++semantic_hops;
+            ArrayType *routed = candidate_id_array(candidates, candidate_count);
+            if (trace)
+                for (int i = 0; i < candidate_count; ++i)
+                    emit_result(result, step, &candidates[i], true, input,
+                                candidate_count, context_length, retained_channel_count,
+                                query_channel_count, true, semantic_hops);
+            MemoryContextSwitchTo(walk_context);
+            for (int i = 0; i < candidate_count; ++i)
+            {
+                hash_search(route_seen, &candidates[i].id, HASH_ENTER, NULL);
+                OriginEntry *origin = hash_search(origins, &candidates[i].id, HASH_ENTER, NULL);
+                origin->occurrences = NULL;
+            }
+            /* A route carries its supporting query occurrences. Multiple
+             * paths from one occurrence do not create independent evidence. */
+            for (int i = 0; i < query_channel_count; ++i)
+            {
+                const LaplaceQueryChannel *channel = &query_channels[i];
+                if ((!channel->outbound && !relation_can_traverse_reverse(&channel->relation)) ||
+                    !(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0))
+                    continue;
+                CandidateIndex *admitted = hash_search(candidate_index, &channel->candidate, HASH_FIND, NULL);
+                if (!admitted) continue;
+                OriginEntry *origin = hash_search(origins, &channel->candidate, HASH_FIND, NULL);
+                OriginEntry *anchor = hash_search(origins, &channel->anchor, HASH_FIND, NULL);
+                if (!origin || !anchor)
+                    elog(ERROR, "forward execution: routed evidence lost its ancestry");
+                origin->occurrences = bms_add_members(origin->occurrences, anchor->occurrences);
+            }
+            laplace_query_state_extend_batch(query_state, routed, NULL);
+            if (output_state)
+                laplace_query_state_extend_batch(output_state, routed, NULL);
+            MemoryContextSwitchTo(step_context);
+            pfree(routed);
+            continue;
+        }
+        kept = 0;
+        for (int i = 0; i < candidate_count; ++i)
+            if (candidates[i].sequence_occurrences > 0 ||
+                candidates[i].projection.has_positive)
+                candidates[kept++] = candidates[i];
+        candidate_count = kept;
         int limit = Min(candidate_count, top_k);
         if (spread == 0.0)
             pick = 0;
@@ -909,11 +1047,20 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         if (pick < 0)
             break;
 
-        emit_result(result, step, &candidates[pick]);
+        emit_result(result, step, &candidates[pick], trace, input,
+                    candidate_count, context_length, retained_channel_count,
+                    query_channel_count, false, semantic_hops);
 
         MemoryContextSwitchTo(walk_context);
         Datum selected = hash128_to_datum(&candidates[pick].id);
         context[context_length++] = selected;
+        hash_search(route_seen, &candidates[pick].id, HASH_ENTER, NULL);
+        bool origin_found;
+        OriginEntry *selected_origin = hash_search(origins, &candidates[pick].id, HASH_ENTER, &origin_found);
+        if (!origin_found) selected_origin->occurrences = NULL;
+        if (next_origin == INT_MAX)
+            elog(ERROR, "forward execution: emitted occurrence ordinal overflow");
+        selected_origin->occurrences = bms_add_member(selected_origin->occurrences, next_origin++);
         laplace_query_state_extend(query_state, selected, NULL);
         if (output_state)
             laplace_query_state_extend(output_state, selected, NULL);
@@ -930,8 +1077,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 pfree(selection);
             }
         }
-        if (candidates[pick].stride == 0)
-            semantic_hops++;
+        ++step;
         MemoryContextSwitchTo(step_context);
     }
 
@@ -939,6 +1085,13 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     MemoryContextDelete(step_context);
     laplace_query_state_destroy(&output_state);
     laplace_query_state_destroy(&query_state);
+    hash_destroy(route_seen);
+    HASH_SEQ_STATUS origin_sequence;
+    OriginEntry *origin;
+    hash_seq_init(&origin_sequence, origins);
+    while ((origin = hash_seq_search(&origin_sequence)) != NULL)
+        bms_free(origin->occurrences);
+    hash_destroy(origins);
     for (int i = 0; i < context_length; ++i)
         pfree(DatumGetPointer(context[i]));
     pfree(context);
@@ -949,11 +1102,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
-    return walk_continuations(fcinfo, NULL, -1);
+    return walk_continuations(fcinfo, NULL, -1, false);
 }
 
-Datum
-pg_laplace_forward_prompt(PG_FUNCTION_ARGS)
+static Datum
+forward_prompt(FunctionCallInfo fcinfo, bool trace)
 {
     int hops;
     int fanout;
@@ -1020,5 +1173,17 @@ pg_laplace_forward_prompt(PG_FUNCTION_ARGS)
     walk_call->args[8] = (NullableDatum) {Int32GetDatum(fanout), false};
     walk_call->args[11] = fcinfo->args[9];
 
-    return walk_continuations(walk_call, input, hops);
+    return walk_continuations(walk_call, input, hops, trace);
+}
+
+Datum
+pg_laplace_forward_prompt(PG_FUNCTION_ARGS)
+{
+    return forward_prompt(fcinfo, false);
+}
+
+Datum
+pg_laplace_forward_trace(PG_FUNCTION_ARGS)
+{
+    return forward_prompt(fcinfo, true);
 }

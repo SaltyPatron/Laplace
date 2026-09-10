@@ -6,6 +6,7 @@ set(EXT_MODULE_PATHNAME "${EXT_NAME}")
 # without replacing a library mapped by the postmaster or restarting PostgreSQL.
 set(EXT_EXECUTION_SOURCES
     src/execution_module.c
+    ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/content_trajectory_read.c
     src/content_membership_read.c
@@ -25,7 +26,8 @@ set(EXT_EXECUTION_SOURCES
 file(GLOB _execution_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
     "${PROJECT_SOURCE_DIR}/engine/core/include/laplace/core/*.h")
-set(_execution_inputs CMakeLists.txt ${EXT_EXECUTION_SOURCES} ${_execution_headers})
+set(_execution_inputs CMakeLists.txt ${EXT_EXECUTION_SOURCES} ${_execution_headers}
+    ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.def)
 list(SORT _execution_inputs)
 set(_execution_hashes "${LAPLACE_PG_MAJOR};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};${LAPLACE_TARGET_ISA}")
 foreach(_input IN LISTS _execution_inputs)

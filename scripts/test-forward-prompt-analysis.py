@@ -72,14 +72,14 @@ def main() -> int:
     # authority. The old explore-web pre-expansion and independent steer scan
     # must not regrow beside it.
     program = (ROOT / "extension/laplace_substrate/src/trajectory_generate.c").read_text()
-    entry = program.split("pg_laplace_forward_prompt(PG_FUNCTION_ARGS)", 1)[1]
+    entry = program.split("forward_prompt(FunctionCallInfo fcinfo, bool trace)", 1)[1]
     assert count(entry, "laplace_prompt_input(") == 1
     assert "laplace_explore_web(" not in program
     assert "laplace_steer_candidates(" not in program
     assert "laplace_query_state_create(" in program
     assert "laplace_query_state_extend(query_state, selected" in program
     assert "laplace_query_state_extend(output_state, selected" in program
-    assert "walk_continuations(walk_call, input, hops)" in entry
+    assert "walk_continuations(walk_call, input, hops, trace)" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
 
     # Candidate proposal and candidate adjudication are distinct operations.
@@ -91,7 +91,7 @@ def main() -> int:
     assert "laplace_consensus_scan(operand_ids, candidate_ids" in evidence_native
     assert "laplace_consensus_scan(candidate_ids, operand_ids" in evidence_native
     assert "state->operands = DatumGetArrayTypePCopy" in evidence_native
-    assert "query_state_append_operand(state, selected)" in evidence_native
+    assert "query_state_append_operands(state, selected)" in evidence_native
     assert count(program, "laplace_query_state_candidate_evidence(") == 2
     assert "proposal top-K cannot hide them" in program
 

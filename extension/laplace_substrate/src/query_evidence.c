@@ -421,13 +421,12 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
                           MemoryContext work)
 {
     HASHCTL ctl;
-    HTAB *relations;
-    hash128_t *relation_ids;
-    int relation_count = 0;
+    LaplaceObservationCell *cells;
     QueryEvidenceState evidence;
 
     if (channel_count <= 0)
         return;
+    cells = palloc(sizeof(*cells) * channel_count);
 
     MemSet(&ctl, 0, sizeof(ctl));
     ctl.keysize = sizeof(QueryChannelKey);
@@ -442,29 +441,9 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
         QueryChannelIndex *entry = (QueryChannelIndex *)
             hash_search(evidence.channel_index, &key, HASH_ENTER, NULL);
         entry->heap_index = i;
-    }
-
-    MemSet(&ctl, 0, sizeof(ctl));
-    ctl.keysize = sizeof(hash128_t);
-    ctl.entrysize = sizeof(hash128_t);
-    ctl.hcxt = work;
-    relations = hash_create("query evidence relation filter", channel_count,
-                            &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-    for (int i = 0; i < channel_count; ++i)
-    {
-        bool found;
-        (void) hash_search(relations, &channels[i].relation, HASH_ENTER, &found);
-        if (!found)
-            relation_count++;
-    }
-    relation_ids = (hash128_t *) palloc(sizeof(hash128_t) * Max(relation_count, 1));
-    {
-        HASH_SEQ_STATUS sequence;
-        hash128_t *id;
-        int at = 0;
-        hash_seq_init(&sequence, relations);
-        while ((id = (hash128_t *) hash_seq_search(&sequence)) != NULL)
-            relation_ids[at++] = *id;
+        cells[i].subject = channels[i].outbound ? channels[i].anchor : channels[i].candidate;
+        cells[i].type = channels[i].relation;
+        cells[i].object = channels[i].outbound ? channels[i].candidate : channels[i].anchor;
     }
 
     MemSet(&ctl, 0, sizeof(ctl));
@@ -478,12 +457,9 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
     evidence.channels = channels;
     evidence.stats = stats;
 
-    {
-        ArrayType *types = hash128_array_from_ids(relation_ids, relation_count);
-        laplace_observation_read(operands, NULL, types, 3,
-                                 query_observation, &evidence);
-        pfree(types);
-    }
+    laplace_observation_read_cells(operands, NULL, cells, channel_count,
+                                   query_observation, &evidence);
+    pfree(cells);
 }
 
 LaplaceQueryChannel *
@@ -775,7 +751,7 @@ laplace_query_state_create(ArrayType *operands, ArrayType *types, int fanout,
 }
 
 static void
-query_state_append_operand(LaplaceQueryState *state, Datum selected)
+query_state_append_operands(LaplaceQueryState *state, ArrayType *selected)
 {
     ArrayBuildState *build = NULL;
     ArrayIterator iterator;
@@ -787,44 +763,56 @@ query_state_append_operand(LaplaceQueryState *state, Datum selected)
     while (array_iterate(iterator, &value, &isnull))
         build = accumArrayResult(build, value, isnull, BYTEAOID, state->owner);
     array_free_iterator(iterator);
-    build = accumArrayResult(build, selected, false, BYTEAOID, state->owner);
+    iterator = array_create_iterator(selected, 0, NULL);
+    while (array_iterate(iterator, &value, &isnull))
+        build = accumArrayResult(build, value, isnull, BYTEAOID, state->owner);
+    array_free_iterator(iterator);
     state->operands = DatumGetArrayTypeP(makeArrayResult(build, state->owner));
     pfree(previous);
+}
+
+void
+laplace_query_state_extend_batch(LaplaceQueryState *state, ArrayType *selected,
+                                 LaplaceQueryEvidenceStats *stats)
+{
+    MemoryContext previous;
+    LaplaceQueryChannel *added;
+    int count = 0;
+    int selected_count;
+
+    if (!state)
+        return;
+    if (stats) MemSet(stats, 0, sizeof(*stats));
+    validate_id_array(selected, "selected frontier");
+    if (!selected) return;
+    selected_count = ArrayGetNItems(ARR_NDIM(selected), ARR_DIMS(selected));
+    if (selected_count == 0) return;
+    if (selected_count > INT_MAX - state->operand_count)
+        ereport(ERROR, (errmsg("query evidence: working-state ordinal exceeds int capacity")));
+
+    previous = MemoryContextSwitchTo(state->owner);
+    added = laplace_query_evidence_channels(selected, state->types,
+                                            state->fanout, &count, stats);
+    query_state_reserve(state, count);
+    for (int i = 0; i < count; ++i)
+    {
+        added[i].ordinal += state->operand_count;
+        state->channels[state->channel_count++] = added[i];
+    }
+    if (added)
+        pfree(added);
+    state->operand_count += selected_count;
+    query_state_append_operands(state, selected);
+    MemoryContextSwitchTo(previous);
 }
 
 void
 laplace_query_state_extend(LaplaceQueryState *state, Datum selected,
                            LaplaceQueryEvidenceStats *stats)
 {
-    MemoryContext previous;
-    ArrayType *operand;
-    LaplaceQueryChannel *added;
-    int count = 0;
-    int ordinal;
-
-    if (!state)
-        return;
-    if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(selected)) != sizeof(hash128_t))
-        ereport(ERROR, (errmsg("query evidence: selected identity must be 16 bytes")));
-    if (state->operand_count == INT_MAX)
-        ereport(ERROR, (errmsg("query evidence: working-state ordinal exceeds int capacity")));
-
-    previous = MemoryContextSwitchTo(state->owner);
-    operand = construct_array(&selected, 1, BYTEAOID, -1, false, TYPALIGN_INT);
-    added = laplace_query_evidence_channels(operand, state->types,
-                                            state->fanout, &count, stats);
+    ArrayType *operand = construct_array(&selected, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+    laplace_query_state_extend_batch(state, operand, stats);
     pfree(operand);
-    ordinal = ++state->operand_count;
-    query_state_reserve(state, count);
-    for (int i = 0; i < count; ++i)
-    {
-        added[i].ordinal = ordinal;
-        state->channels[state->channel_count++] = added[i];
-    }
-    if (added)
-        pfree(added);
-    query_state_append_operand(state, selected);
-    MemoryContextSwitchTo(previous);
 }
 
 const LaplaceQueryChannel *
