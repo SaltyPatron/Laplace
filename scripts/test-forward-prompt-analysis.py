@@ -82,6 +82,19 @@ def main() -> int:
     assert "walk_continuations(walk_call, input, hops)" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
 
+    # Candidate proposal and candidate adjudication are distinct operations.
+    # The bounded Q->K proposal may nominate endpoints, but the final election
+    # must read every exact typed cell for the bounded candidate set so negative
+    # standing cannot disappear behind the proposal fanout.
+    evidence_native = (ROOT / "extension/laplace_substrate/src/query_evidence.c").read_text()
+    assert "laplace_query_state_candidate_evidence(" in evidence_native
+    assert "laplace_consensus_scan(operand_ids, candidate_ids" in evidence_native
+    assert "laplace_consensus_scan(candidate_ids, operand_ids" in evidence_native
+    assert "state->operands = DatumGetArrayTypePCopy" in evidence_native
+    assert "query_state_append_operand(state, selected)" in evidence_native
+    assert count(program, "laplace_query_state_candidate_evidence(") == 2
+    assert "proposal top-K cannot hide them" in program
+
     # Typed testimony and physical observation are separate planes. A forward
     # implementation that restores a query_score/effective product has silently
     # flattened relation identity, standing topology and structural recurrence
@@ -93,11 +106,12 @@ def main() -> int:
     assert "negative_relation_families" in program
     assert "positive_channel_compare(" in program
     assert "opposition_summary_compare(" in program
+    assert "evidence_summaries_from_channels(" in program
     assert "query_score" not in program
     assert "projection_score" not in program
     assert ".effective" not in program
     assert "candidate.effective" not in program
-    assert "query_nomination->summary.has_positive" in program
+    assert "nomination->summary.has_positive" in program
 
     assert "generation.forward_frontier_ids(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
     assert "generation.forward_frontier(p_prompt" not in walk
@@ -130,8 +144,9 @@ def main() -> int:
 
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
-        f"forward_text=exact_tree1 query_state=persistent evidence=typed-separate "
-        f"output=query-relative route_owner=native retired_wrappers=5 chat_steps={steps}"
+        f"forward_text=exact_tree1 query_state=persistent candidate_evidence=exact "
+        f"evidence=typed-separate output=query-relative route_owner=native "
+        f"retired_wrappers=5 chat_steps={steps}"
     )
     return 0
 
