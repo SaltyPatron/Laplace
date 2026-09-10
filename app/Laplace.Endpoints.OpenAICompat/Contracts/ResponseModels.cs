@@ -2,11 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace Laplace.Api.Contracts;
 
-
-
-
-
-
 public sealed record SubstrateCount(string Metric, long Value);
 
 public sealed record ConsensusHealth(long EvidenceRows, long ConsensusRows, decimal? DedupRatio, decimal? AvgWitnesses, long? MaxWitnesses);
@@ -37,6 +32,10 @@ public sealed record VisualizationEdge(
     string Object,
     decimal EffectiveMu,
     long Witnesses);
+
+public sealed record SubstrateVisualizationGraph(
+    IReadOnlyList<VisualizationNode> Nodes,
+    IReadOnlyList<VisualizationEdge> Edges);
 
 public sealed record EvidenceSample(
     string TypeIdHex,
