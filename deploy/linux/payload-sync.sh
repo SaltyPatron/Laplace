@@ -75,14 +75,12 @@ laplace_current_runtime_dir() {
 # second copy of framework/native dependencies before the stable pointer can move.
 #
 # Priority is the currently selected immutable runtime, then the exact bootstrap-owned
-# legacy MCP runtime, the exact installed native engine on the same filesystem, then
-# newest retained immutable/partial releases. Rsync accepts at most 20 --link-dest
-# directories; duplicates are removed before that bound is applied.
+# legacy MCP runtime, then newest retained immutable/partial releases. Rsync accepts at
+# most 20 --link-dest directories; duplicates are removed before that bound is applied.
 laplace_runtime_reference_dirs() {
   local app_dir="$1" service="$2" stable_link="$3"
   local target="" runtime="" candidate="" resolved="" stamp="" count=0
   local releases="$app_dir/releases"
-  local installed_native="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/lib"
   declare -A seen=()
 
   runtime="$(laplace_current_runtime_dir "$app_dir" "$service" "$stable_link" 2>/dev/null || true)"
@@ -110,22 +108,6 @@ laplace_runtime_reference_dirs() {
   fi
 
   [[ -d "$releases" && ! -L "$releases" ]] || return 0
-
-  # pipeline.sh install runs before application publication and materializes the
-  # exact candidate engine under the install prefix. On the managed host the app
-  # directory is inside that same install-prefix filesystem. Reusing those exact
-  # bytes avoids allocating another native image merely to give the managed
-  # runtime its private pathname. A later install replaces the installed pathname;
-  # this release keeps the shared inode it was published with.
-  if [[ "$count" -lt 20 && -d "$installed_native" && ! -L "$installed_native" \
-     && "$(stat -c '%d' "$installed_native" 2>/dev/null || true)" == \
-        "$(stat -c '%d' "$releases" 2>/dev/null || true)" \
-     && -z "${seen[$installed_native]+x}" ]]; then
-    seen["$installed_native"]=1
-    printf '%s\n' "$installed_native"
-    count=$((count + 1))
-  fi
-
   while IFS=$'\t' read -r -d '' stamp candidate; do
     ((${#stamp} > 0)) || continue
     [[ "$count" -lt 20 ]] || break
@@ -238,26 +220,70 @@ laplace_prune_unreferenced_releases() {
   echo "application release retention: reclaimed=$reclaimed retained=$retained"
 }
 
-# Stage one immutable service closure. A release is never mutated after publication,
-# so unchanged files may safely be hardlinked from any retained runtime content donor.
-# Build timestamps are not identity: deterministic rebuilds can produce byte-identical
-# dependencies with fresh mtimes. --checksum --no-times makes content, not timestamp,
-# decide whether --link-dest can reuse the inode. Changed bytes are copied.
+# Seed a new release service directory from an older runtime using filesystem
+# copy-on-write. Unlike a hardlink, the new file has its own inode: rsync --inplace
+# can therefore rewrite changed build-form ELF blocks without mutating the running
+# donor. On XFS this shares unchanged extents and allocates only changed blocks,
+# avoiding the full-second-copy requirement that deadlocks a nearly-full app LV.
+# A filesystem without reflink support simply returns false and uses normal rsync.
+laplace_reflink_seed_runtime() {
+  local app_dir="$1" service="$2" reference="$3" destination="$4"
+  local reference_device destination_device resolved_destination
+  [[ -d "$reference" && ! -L "$reference" && -d "$destination" && ! -L "$destination" ]] || return 1
+  [[ "$reference" != "$destination" ]] || return 1
+  resolved_destination="$(readlink -f "$destination" 2>/dev/null || true)"
+  case "$resolved_destination" in
+    "$app_dir"/releases/runtime.*/"$service") ;;
+    *) echo "::error::refusing reflink seed outside managed release: $destination" >&2; return 1 ;;
+  esac
+  reference_device="$(stat -c '%d' "$reference" 2>/dev/null || true)"
+  destination_device="$(stat -c '%d' "$destination" 2>/dev/null || true)"
+  [[ -n "$reference_device" && "$reference_device" == "$destination_device" ]] || return 1
+
+  if cp -R --reflink=always --preserve=mode,timestamps,links --no-preserve=ownership \
+      "$reference/." "$destination/" 2>/dev/null; then
+    echo "copy-on-write seeded $service runtime from $reference" >&2
+    return 0
+  fi
+
+  # cp may have cloned a prefix before encountering an unsupported inode. This is
+  # the unpublished destination owned by the current transaction; empty it before
+  # another donor or ordinary rsync is attempted.
+  find "$destination" -mindepth 1 -xdev -depth -delete || return 1
+  return 1
+}
+
+# Stage one immutable service closure. Exact files can still be hardlinked from any
+# retained content donor. When the target filesystem supports reflink, first clone an
+# older build-form runtime and update that private COW inode in place. This matters for
+# changed native ELFs: their installed form has a different RPATH, so /opt/laplace/lib
+# is not byte identity and cannot be a --link-dest donor for the app-local build form.
 laplace_stage_runtime_payload() {
   local app_dir="$1" service="$2" stable_link="$3" source_dir="$4" destination_dir="$5"
-  local reference
-  local -a link_dest=()
+  local reference seeded=0
+  local -a references=() link_dest=() transfer_options=(--checksum --no-times)
 
   while IFS= read -r reference; do
-    [[ -n "$reference" ]] || continue
+    [[ -n "$reference" && "$reference" != "$destination_dir" ]] || continue
+    references+=("$reference")
     link_dest+=("--link-dest=$reference")
   done < <(laplace_runtime_reference_dirs "$app_dir" "$service" "$stable_link")
 
+  for reference in "${references[@]}"; do
+    if laplace_reflink_seed_runtime "$app_dir" "$service" "$reference" "$destination_dir"; then
+      seeded=1
+      break
+    fi
+  done
+  if ((seeded)); then
+    transfer_options+=(--inplace)
+  fi
+
   if ((${#link_dest[@]} > 0)); then
     laplace_sync_payload "$source_dir" "$destination_dir" \
-      --checksum --no-times "${link_dest[@]}"
+      "${transfer_options[@]}" "${link_dest[@]}"
   else
-    laplace_sync_payload "$source_dir" "$destination_dir"
+    laplace_sync_payload "$source_dir" "$destination_dir" "${transfer_options[@]}"
   fi
 }
 
