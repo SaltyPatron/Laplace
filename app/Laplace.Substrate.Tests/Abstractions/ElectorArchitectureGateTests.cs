@@ -194,8 +194,11 @@ public sealed class ElectorArchitectureGateTests
         var native = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
             "extension", "laplace_substrate", "src", "trajectory_generate.c"));
         Assert.Contains("laplace_prompt_input(PG_GETARG_TEXT_PP(0))", native);
-        Assert.Contains("laplace_explore_web(input->seeds", native);
-        Assert.Contains("walk_continuations(walk_call, input)", native);
+        Assert.DoesNotContain("laplace_explore_web(", native);
+        Assert.DoesNotContain("laplace_steer_candidates(", native);
+        Assert.Contains("laplace_query_state_create(", native);
+        Assert.Contains("laplace_query_state_extend(query_state, selected", native);
+        Assert.Contains("walk_continuations(walk_call, input, hops)", native);
         Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);
         Assert.DoesNotMatch(ElectCall, StripComments(sql));
     }
