@@ -68,6 +68,64 @@ laplace_current_runtime_dir() {
   esac
 }
 
+# Enumerate content references for a new immutable runtime. --link-dest verifies
+# identical bytes before sharing an inode, so an incomplete old release is still a
+# valid content donor even though it is not a valid execution donor. This distinction
+# is what lets a nearly-full application filesystem migrate without requiring a full
+# second copy of framework/native dependencies before the stable pointer can move.
+#
+# Priority is the currently selected immutable runtime, then the exact bootstrap-owned
+# legacy MCP runtime, then newest retained immutable/partial releases. Rsync accepts at
+# most 20 --link-dest directories; duplicates are removed before that bound is applied.
+laplace_runtime_reference_dirs() {
+  local app_dir="$1" service="$2" stable_link="$3"
+  local target="" runtime="" candidate="" resolved="" stamp="" count=0
+  local releases="$app_dir/releases"
+  declare -A seen=()
+
+  runtime="$(laplace_current_runtime_dir "$app_dir" "$service" "$stable_link" 2>/dev/null || true)"
+  if [[ -n "$runtime" && -d "$runtime" && ! -L "$runtime" ]]; then
+    seen["$runtime"]=1
+    printf '%s\n' "$runtime"
+    count=$((count + 1))
+  fi
+
+  # The pre-managed MCP deployment is itself a complete runtime closure in the
+  # bootstrap-owned mcp-runtime directory. Current deploy never mutates that
+  # directory. Accept it only when the stable link resolves to its exact apphost;
+  # a similarly named directory or arbitrary symlink is not a migration source.
+  if [[ "$service" == "mcp" && "$count" -lt 20 && -L "$stable_link" \
+     && -d "$app_dir/mcp-runtime" && ! -L "$app_dir/mcp-runtime" ]]; then
+    target="$(readlink -f "$stable_link" 2>/dev/null || true)"
+    resolved="$(readlink -f "$app_dir/mcp-runtime/Laplace.Endpoints.Mcp" 2>/dev/null || true)"
+    if [[ -n "$target" && "$target" == "$resolved" \
+       && "$target" == "$app_dir/mcp-runtime/Laplace.Endpoints.Mcp" \
+       && -z "${seen[$app_dir/mcp-runtime]+x}" ]]; then
+      seen["$app_dir/mcp-runtime"]=1
+      printf '%s\n' "$app_dir/mcp-runtime"
+      count=$((count + 1))
+    fi
+  fi
+
+  [[ -d "$releases" && ! -L "$releases" ]] || return 0
+  while IFS=$'\t' read -r -d '' stamp candidate; do
+    ((${#stamp} > 0)) || continue
+    [[ "$count" -lt 20 ]] || break
+    runtime="$candidate/$service"
+    [[ -d "$runtime" && ! -L "$runtime" ]] || continue
+    resolved="$(readlink -f "$runtime" 2>/dev/null || true)"
+    case "$resolved" in
+      "$app_dir"/releases/runtime.*/"$service") ;;
+      *) continue ;;
+    esac
+    [[ -z "${seen[$resolved]+x}" ]] || continue
+    seen["$resolved"]=1
+    printf '%s\n' "$resolved"
+    count=$((count + 1))
+  done < <(find "$releases" -mindepth 1 -maxdepth 1 -xdev -type d \
+             -name 'runtime.*' -printf '%T@\t%p\0' | sort -z -nr)
+}
+
 laplace_release_in_use() {
   local app_dir="$1" candidate="$2" link target
   for link in "$app_dir"/laplace-lichess "$app_dir"/laplace-mcp "$app_dir"/laplace-uci; do
@@ -163,17 +221,23 @@ laplace_prune_unreferenced_releases() {
 }
 
 # Stage one immutable service closure. A release is never mutated after publication,
-# so unchanged files may safely be hardlinked from the currently selected release.
+# so unchanged files may safely be hardlinked from any retained runtime content donor.
 # Build timestamps are not identity: deterministic rebuilds can produce byte-identical
 # dependencies with fresh mtimes. --checksum --no-times makes content, not timestamp,
-# decide whether --link-dest can reuse the immutable inode. Changed bytes are copied.
+# decide whether --link-dest can reuse the inode. Changed bytes are copied.
 laplace_stage_runtime_payload() {
   local app_dir="$1" service="$2" stable_link="$3" source_dir="$4" destination_dir="$5"
-  local reference=""
-  reference="$(laplace_current_runtime_dir "$app_dir" "$service" "$stable_link" 2>/dev/null || true)"
-  if [[ -n "$reference" ]]; then
+  local reference
+  local -a link_dest=()
+
+  while IFS= read -r reference; do
+    [[ -n "$reference" ]] || continue
+    link_dest+=("--link-dest=$reference")
+  done < <(laplace_runtime_reference_dirs "$app_dir" "$service" "$stable_link")
+
+  if ((${#link_dest[@]} > 0)); then
     laplace_sync_payload "$source_dir" "$destination_dir" \
-      --checksum --no-times --link-dest="$reference"
+      --checksum --no-times "${link_dest[@]}"
   else
     laplace_sync_payload "$source_dir" "$destination_dir"
   fi

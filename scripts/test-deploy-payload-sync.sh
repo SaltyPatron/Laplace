@@ -90,7 +90,26 @@ for suffix in dll deps.json runtimeconfig.json; do
   printf 'first-uci\n' > "$UCI_STAGE/laplace-uci.$suffix"
 done
 printf 'dependency\n' > "$UCI_STAGE/chess-dependency.dll"
+
+# First migration from the old bootstrap-owned mcp-runtime must be incremental,
+# not a second full runtime copy. The exact legacy stable link licenses that
+# directory as a content donor. A retained partial immutable release is also a
+# legal content donor: rsync checks bytes before linking and does not execute it.
+printf 'legacy-shared\n' > "$MCP_STAGE/legacy-shared.dll"
+printf 'legacy-shared\n' > "$MCP_DIR/legacy-shared.dll"
+printf 'partial-shared\n' > "$MCP_STAGE/partial-shared.dll"
+mkdir -p "$APP_DIR/releases/runtime.partial/mcp"
+printf 'partial-shared\n' > "$APP_DIR/releases/runtime.partial/mcp/partial-shared.dll"
+rm -f "$APP_DIR/laplace-mcp"
+ln -s "mcp-runtime/Laplace.Endpoints.Mcp" "$APP_DIR/laplace-mcp"
+legacy_apphost_inode="$(stat -c '%d:%i' "$MCP_DIR/Laplace.Endpoints.Mcp")"
+legacy_shared_inode="$(stat -c '%d:%i' "$MCP_DIR/legacy-shared.dll")"
+partial_shared_inode="$(stat -c '%d:%i' "$APP_DIR/releases/runtime.partial/mcp/partial-shared.dll")"
 old_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE" "$UCI_STAGE")"
+[[ "$(stat -c '%d:%i' "$old_release/mcp/Laplace.Endpoints.Mcp.native")" == "$legacy_apphost_inode" ]]
+[[ "$(stat -c '%d:%i' "$old_release/mcp/legacy-shared.dll")" == "$legacy_shared_inode" ]]
+[[ "$(stat -c '%d:%i' "$old_release/mcp/partial-shared.dll")" == "$partial_shared_inode" ]]
+echo "OK first managed publish hardlinks unchanged legacy/retained runtime bytes instead of duplicating them"
 
 # Select the first immutable release exactly as production does. The second staging
 # operation must retain the old release for existing processes while hardlinking every
