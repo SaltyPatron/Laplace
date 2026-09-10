@@ -47,6 +47,8 @@ typedef struct LaplaceQueryEvidenceStats
     uint64 channels;
 } LaplaceQueryEvidenceStats;
 
+typedef struct LaplaceQueryState LaplaceQueryState;
+
 /*
  * Build a bounded typed Q->K/evidence field over every ordered occurrence in
  * operands.  Candidate generation is bounded per occurrence after exact
@@ -64,5 +66,33 @@ extern LaplaceQueryChannel *laplace_query_evidence_channels(
     int fanout,
     int *count,
     LaplaceQueryEvidenceStats *stats);
+
+/*
+ * Retain the query-side evidence field across one cognition pass.  Initial
+ * prompt occurrences are admitted in one batch.  A selected value may then be
+ * appended as a new working-state occurrence without rescanning unchanged
+ * query operands; only the newly active identity is probed.
+ */
+extern LaplaceQueryState *laplace_query_state_create(
+    ArrayType *operands,
+    ArrayType *types,
+    int fanout,
+    LaplaceQueryEvidenceStats *stats);
+
+extern void laplace_query_state_extend(
+    LaplaceQueryState *state,
+    Datum selected,
+    LaplaceQueryEvidenceStats *stats);
+
+extern const LaplaceQueryChannel *laplace_query_state_channels(
+    const LaplaceQueryState *state,
+    int *count);
+
+/* Distinct candidate endpoints / relation ids represented by retained typed
+ * channels.  Returned arrays are allocated in the caller's current context. */
+extern ArrayType *laplace_query_state_candidates(const LaplaceQueryState *state);
+extern ArrayType *laplace_query_state_relation_types(const LaplaceQueryState *state);
+
+extern void laplace_query_state_destroy(LaplaceQueryState **state);
 
 #endif
