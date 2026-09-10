@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -53,48 +54,7 @@ public static partial class NpgsqlSubstrateReads
         int fanout,
         CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT
-                t.step,
-                encode(t.entity, 'hex'),
-                converse.label_or_hex(t.entity),
-                t.stride_used,
-                encode(t.root_id, 'hex'),
-                t.candidate_count,
-                t.ordered_context_count,
-                t.proposal_channel_count,
-                t.exact_channel_count,
-                t.sequence_occurrences,
-                t.covered_occurrences,
-                t.relation_families,
-                t.opposed_occurrences,
-                CASE WHEN t.support_anchor IS NULL THEN NULL ELSE encode(t.support_anchor, 'hex') END,
-                CASE WHEN t.support_anchor IS NULL THEN NULL ELSE converse.label_or_hex(t.support_anchor) END,
-                CASE WHEN t.support_relation IS NULL THEN NULL ELSE encode(t.support_relation, 'hex') END,
-                CASE WHEN t.support_relation IS NULL THEN NULL ELSE converse.label_or_hex(t.support_relation) END,
-                t.support_outbound,
-                t.support_rating,
-                t.support_rd,
-                t.support_witnesses,
-                t.support_sources,
-                t.support_contexts,
-                t.declared_result,
-                t.event,
-                t.routing_round
-            FROM generation.forward_trace(
-                @prompt,
-                @steps,
-                @max_stride,
-                @spread,
-                @top_k,
-                NULL::bigint,
-                @hops,
-                @fanout,
-                NULL::bytea[],
-                NULL::bytea[]) AS t
-            ORDER BY t.step, t.routing_round,
-                     CASE t.event WHEN 'route' THEN 0 ELSE 1 END
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("conversation.forward_trace"),
             static r => new ForwardTraceRow(
                 Step: r.GetInt32(0),
                 EntityIdHex: r.GetString(1),
