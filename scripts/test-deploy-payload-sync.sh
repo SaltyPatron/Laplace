@@ -6,7 +6,7 @@ source "$ROOT/deploy/linux/payload-sync.sh"
 source "$ROOT/deploy/linux/app-dir-contract.sh"
 
 TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+trap 'chmod -R u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
 
 STAGE="$TEST_ROOT/stage"
 APP_DIR="$TEST_ROOT/app"
@@ -157,11 +157,16 @@ for suffix in dll deps.json runtimeconfig.json; do
 done
 echo "OK apphost-only and incomplete UCI packages are rejected"
 
-# Garbage collection must reclaim unreferenced pre-lease directories that are
-# mechanically incomplete, while retaining a complete legacy release whose
-# cross-UID process ownership cannot be proved. This is the recovery path for a
-# partial runtime left by an older deploy implementation.
+# Garbage collection must continue past an inaccessible old layout. The first
+# fixture is intentionally incomplete but has a non-writable child directory,
+# matching the production failure where an older runtime contained service/root
+# owned files. It must be left completely intact while the later runner-owned
+# incomplete release is reclaimed.
 GC_APP="$TEST_ROOT/gc-app"
+inaccessible="$GC_APP/releases/runtime.inaccessible"
+mkdir -p "$inaccessible/mcp"
+printf 'protected\n' > "$inaccessible/mcp/Laplace.Agents.dll"
+chmod 0555 "$inaccessible/mcp"
 mkdir -p "$GC_APP/releases/runtime.incomplete/mcp"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$GC_APP/releases/runtime.incomplete/mcp/Laplace.Endpoints.Mcp"
 chmod 0755 "$GC_APP/releases/runtime.incomplete/mcp/Laplace.Endpoints.Mcp"
@@ -175,9 +180,11 @@ for suffix in dll deps.json runtimeconfig.json; do
   printf 'legacy\n' > "$legacy/uci/laplace-uci.$suffix"
 done
 laplace_prune_unreferenced_releases "$GC_APP"
+[[ -f "$inaccessible/mcp/Laplace.Agents.dll" ]]
 [[ ! -e "$GC_APP/releases/runtime.incomplete" ]]
 [[ -d "$legacy" ]]
-echo "OK release GC reclaims incomplete pre-lease debris and preserves complete legacy runtimes"
+chmod 0755 "$inaccessible/mcp"
+echo "OK release GC skips inaccessible old layouts, reclaims later failed debris, and preserves complete legacy runtimes"
 
 # Completed transaction backups are not an archive. Preserve exactly the active
 # rollback receipt when one is supplied, then reclaim it after the transaction ends.
