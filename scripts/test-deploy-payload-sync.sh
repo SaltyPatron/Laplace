@@ -106,32 +106,17 @@ legacy_apphost_inode="$(stat -c '%d:%i' "$MCP_DIR/Laplace.Endpoints.Mcp")"
 legacy_shared_inode="$(stat -c '%d:%i' "$MCP_DIR/legacy-shared.dll")"
 partial_shared_inode="$(stat -c '%d:%i' "$APP_DIR/releases/runtime.partial/mcp/partial-shared.dll")"
 
-# The engine install and application publish live on the same managed prefix
-# filesystem. The install job already materializes the exact candidate native
-# image before deploy, so managed runtime staging must hardlink those identical
-# bytes instead of demanding a second copy on a nearly-full prefix.
-INSTALL_PREFIX="$TEST_ROOT/install"
-mkdir -p "$INSTALL_PREFIX/lib"
-printf 'installed-native\n' > "$MCP_STAGE/liblaplace_core.so.0.1.0"
-printf 'installed-native\n' > "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0"
-export LAPLACE_INSTALL_PREFIX="$INSTALL_PREFIX"
-installed_native_inode="$(stat -c '%d:%i' "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0")"
+# Keep the original hardlink contract deterministic in every CI filesystem. The
+# COW helper has its own real-filesystem probe below; disabling it here proves the
+# existing exact-byte fallback remains intact when reflink is unavailable.
+reflink_function="$(declare -f laplace_reflink_seed_runtime)"
+laplace_reflink_seed_runtime() { return 1; }
 
 old_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE" "$UCI_STAGE")"
 [[ "$(stat -c '%d:%i' "$old_release/mcp/Laplace.Endpoints.Mcp.native")" == "$legacy_apphost_inode" ]]
 [[ "$(stat -c '%d:%i' "$old_release/mcp/legacy-shared.dll")" == "$legacy_shared_inode" ]]
 [[ "$(stat -c '%d:%i' "$old_release/mcp/partial-shared.dll")" == "$partial_shared_inode" ]]
-[[ "$(stat -c '%d:%i' "$old_release/mcp/liblaplace_core.so.0.1.0")" == "$installed_native_inode" ]]
-
-# Replacing the installed pathname later must not mutate an already-published
-# immutable runtime. GNU install creates/replaces the destination inode; the old
-# runtime retains the inode it hardlinked during this publication.
-printf 'next-installed-native\n' > "$TEST_ROOT/next-native"
-install -m 0644 "$TEST_ROOT/next-native" "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0"
-[[ "$(<"$old_release/mcp/liblaplace_core.so.0.1.0")" == installed-native ]]
-[[ "$(stat -c '%d:%i' "$old_release/mcp/liblaplace_core.so.0.1.0")" != \
-   "$(stat -c '%d:%i' "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0")" ]]
-echo "OK first managed publish hardlinks unchanged legacy/retained/installed native bytes instead of duplicating them"
+echo "OK first managed publish hardlinks unchanged legacy/retained runtime bytes instead of duplicating them"
 
 # Select the first immutable release exactly as production does. The second staging
 # operation must retain the old release for existing processes while hardlinking every
@@ -197,6 +182,29 @@ for suffix in dll deps.json runtimeconfig.json; do
   mv "$TEST_ROOT/missing-uci-file" "$UCI_STAGE/laplace-uci.$suffix"
 done
 echo "OK apphost-only and incomplete UCI packages are rejected"
+
+# Restore the production helper and exercise a real reflink when the CI filesystem
+# provides one. Destination and donor must be distinct inodes; modifying the clone
+# must not alter the older runtime. Main delivery on /opt/laplace is the acceptance
+# test for the target XFS volume, so lack of reflink on /tmp is not papered over.
+eval "$reflink_function"
+COW_APP="$TEST_ROOT/cow-app"
+COW_REFERENCE="$COW_APP/releases/runtime.old/mcp"
+COW_DESTINATION="$COW_APP/releases/runtime.new/mcp"
+mkdir -p "$COW_REFERENCE" "$COW_DESTINATION"
+printf 'old-runtime-bytes\n' > "$COW_REFERENCE/payload.bin"
+if cp --reflink=always "$COW_REFERENCE/payload.bin" "$COW_APP/reflink-probe" 2>/dev/null; then
+  rm "$COW_APP/reflink-probe"
+  old_inode="$(stat -c '%i' "$COW_REFERENCE/payload.bin")"
+  laplace_reflink_seed_runtime "$COW_APP" mcp "$COW_REFERENCE" "$COW_DESTINATION"
+  [[ "$(<"$COW_DESTINATION/payload.bin")" == old-runtime-bytes ]]
+  [[ "$(stat -c '%i' "$COW_DESTINATION/payload.bin")" != "$old_inode" ]]
+  printf 'new-runtime-bytes\n' > "$COW_DESTINATION/payload.bin"
+  [[ "$(<"$COW_REFERENCE/payload.bin")" == old-runtime-bytes ]]
+  echo "OK reflink runtime seed is private copy-on-write state"
+else
+  echo "reflink unavailable on test filesystem; ordinary exact-byte fallback remains covered"
+fi
 
 # Garbage collection must continue past an inaccessible old layout. The first
 # fixture is intentionally incomplete but has a non-writable child directory,
