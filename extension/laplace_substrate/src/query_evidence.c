@@ -3,7 +3,6 @@
 #include <limits.h>
 
 #include "catalog/pg_type.h"
-#include "miscadmin.h"
 #include "utils/array.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -72,6 +71,17 @@ typedef struct QueryEvidenceState
     LaplaceQueryEvidenceStats *stats;
 } QueryEvidenceState;
 
+struct LaplaceQueryState
+{
+    MemoryContext owner;
+    ArrayType *types;
+    LaplaceQueryChannel *channels;
+    int channel_count;
+    int channel_capacity;
+    int operand_count;
+    int fanout;
+};
+
 static void
 validate_id_array(ArrayType *array, const char *what)
 {
@@ -104,7 +114,7 @@ channel_key(const LaplaceQueryChannel *channel)
     return key;
 }
 
-/* Negative means a is the stronger retained channel.  Candidate generation is
+/* Negative means a is the stronger retained channel. Candidate generation is
  * bounded by pooled conservative standing only; relation identity/direction
  * remain explicit operands for the later query-relative operator. */
 static int
@@ -362,7 +372,6 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
 {
     MemoryContext owner = CurrentMemoryContext;
     MemoryContext work;
-    MemoryContext previous;
     Datum *values;
     bool *nulls;
     int operand_count;
@@ -392,7 +401,7 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         return NULL;
 
     work = AllocSetContextCreate(owner, "query evidence channels", ALLOCSET_DEFAULT_SIZES);
-    previous = MemoryContextSwitchTo(work);
+    MemoryContextSwitchTo(work);
     deconstruct_array(operands, BYTEAOID, -1, false, TYPALIGN_INT,
                       &values, &nulls, &operand_count);
     if (operand_count <= 0)
@@ -425,7 +434,7 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
     ctl.entrysize = sizeof(QueryChannelIndex);
     ctl.hcxt = work;
     scan.channels = hash_create("query evidence retained channels",
-                                Max(operand_count * Min(fanout, 16), 16),
+                                Max(operand_count, 16),
                                 &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
     for (int i = operand_count - 1; i >= 0; --i)
@@ -459,8 +468,16 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
     laplace_consensus_scan_ranked(NULL, unique_operands, types, false,
         query_consensus_cell, NULL, &scan, stats ? &stats->reverse : NULL);
 
-    for (int i = 0; i < operand_count; ++i)
-        result_count += scan.buckets[i].count;
+    {
+        int64 retained = 0;
+        for (int i = 0; i < operand_count; ++i)
+        {
+            retained += scan.buckets[i].count;
+            if (retained > INT_MAX)
+                ereport(ERROR, (errmsg("query evidence: retained channel count exceeds int capacity")));
+        }
+        result_count = (int) retained;
+    }
     if (result_count == 0)
     {
         MemoryContextSwitchTo(owner);
@@ -486,7 +503,7 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         }
     }
 
-    /* Index the retained typed channels by exact query occurrence.  The raw
+    /* Index the retained typed channels by exact query occurrence. The raw
      * witness read is one set operation over all retained relation families and
      * observation_read remaps storage deduplication back to every ordinal. */
     {
@@ -538,9 +555,9 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         ctl.entrysize = sizeof(QueryEvidenceKey);
         ctl.hcxt = work;
         evidence.sources = hash_create("query evidence sources",
-            Max(result_count * 2, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            Max(result_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
         evidence.contexts = hash_create("query evidence contexts",
-            Max(result_count * 2, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            Max(result_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
         evidence.channels = result;
         evidence.stats = stats;
 
@@ -556,4 +573,168 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         stats->channels = (uint64) result_count;
     MemoryContextDelete(work);
     return result;
+}
+
+static void
+query_state_reserve(LaplaceQueryState *state, int additional)
+{
+    int64 needed = (int64) state->channel_count + additional;
+    int capacity;
+
+    if (additional < 0 || needed > INT_MAX ||
+        (uint64) needed > MaxAllocSize / sizeof(LaplaceQueryChannel))
+        ereport(ERROR, (errmsg("query evidence: persistent channel state exceeds allocation capacity")));
+    if (needed <= state->channel_capacity)
+        return;
+    capacity = state->channel_capacity ? state->channel_capacity : 16;
+    while (capacity < needed)
+    {
+        int64 grown = (int64) capacity * 2;
+        capacity = grown > INT_MAX ? (int) needed : (int) Min(grown, (int64) INT_MAX);
+        if (capacity == INT_MAX && capacity < needed)
+            capacity = (int) needed;
+    }
+    state->channels = state->channels
+        ? (LaplaceQueryChannel *) repalloc(state->channels,
+                                           sizeof(LaplaceQueryChannel) * capacity)
+        : (LaplaceQueryChannel *) palloc(sizeof(LaplaceQueryChannel) * capacity);
+    state->channel_capacity = capacity;
+}
+
+LaplaceQueryState *
+laplace_query_state_create(ArrayType *operands, ArrayType *types, int fanout,
+                           LaplaceQueryEvidenceStats *stats)
+{
+    MemoryContext parent = CurrentMemoryContext;
+    MemoryContext owner;
+    MemoryContext previous;
+    LaplaceQueryState *state;
+    LaplaceQueryChannel *initial;
+    int count = 0;
+
+    validate_id_array(operands, "operands");
+    validate_id_array(types, "relation types");
+    if (!operands)
+        ereport(ERROR, (errmsg("query evidence: ordered operands are required")));
+    if (fanout < 0)
+        ereport(ERROR, (errmsg("query evidence: fanout must not be negative")));
+
+    owner = AllocSetContextCreate(parent, "query evidence state", ALLOCSET_DEFAULT_SIZES);
+    previous = MemoryContextSwitchTo(owner);
+    state = (LaplaceQueryState *) palloc0(sizeof(*state));
+    state->owner = owner;
+    state->fanout = fanout;
+    state->operand_count = ArrayGetNItems(ARR_NDIM(operands), ARR_DIMS(operands));
+    state->types = types ? DatumGetArrayTypePCopy(PointerGetDatum(types)) : NULL;
+    initial = laplace_query_evidence_channels(operands, state->types, fanout, &count, stats);
+    query_state_reserve(state, count);
+    if (count > 0)
+    {
+        memcpy(state->channels, initial, sizeof(*initial) * count);
+        state->channel_count = count;
+        pfree(initial);
+    }
+    MemoryContextSwitchTo(previous);
+    return state;
+}
+
+void
+laplace_query_state_extend(LaplaceQueryState *state, Datum selected,
+                           LaplaceQueryEvidenceStats *stats)
+{
+    MemoryContext previous;
+    ArrayType *operand;
+    LaplaceQueryChannel *added;
+    int count = 0;
+    int ordinal;
+
+    if (!state)
+        return;
+    if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(selected)) != sizeof(hash128_t))
+        ereport(ERROR, (errmsg("query evidence: selected identity must be 16 bytes")));
+    if (state->operand_count == INT_MAX)
+        ereport(ERROR, (errmsg("query evidence: working-state ordinal exceeds int capacity")));
+
+    previous = MemoryContextSwitchTo(state->owner);
+    operand = construct_array(&selected, 1, BYTEAOID, -1, false, TYPALIGN_INT);
+    added = laplace_query_evidence_channels(operand, state->types,
+                                            state->fanout, &count, stats);
+    pfree(operand);
+    ordinal = ++state->operand_count;
+    query_state_reserve(state, count);
+    for (int i = 0; i < count; ++i)
+    {
+        added[i].ordinal = ordinal;
+        state->channels[state->channel_count++] = added[i];
+    }
+    if (added)
+        pfree(added);
+    MemoryContextSwitchTo(previous);
+}
+
+const LaplaceQueryChannel *
+laplace_query_state_channels(const LaplaceQueryState *state, int *count)
+{
+    if (!count)
+        ereport(ERROR, (errmsg("query evidence: channel count output is required")));
+    *count = state ? state->channel_count : 0;
+    return state ? state->channels : NULL;
+}
+
+static ArrayType *
+query_state_distinct_ids(const LaplaceQueryState *state, bool relations)
+{
+    MemoryContext owner = CurrentMemoryContext;
+    HASHCTL ctl;
+    HTAB *seen;
+    ArrayBuildState *values = NULL;
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = owner;
+    seen = hash_create(relations ? "query state relation ids" : "query state candidate ids",
+                       state && state->channel_count > 0 ? state->channel_count : 16,
+                       &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    if (state)
+    {
+        for (int i = 0; i < state->channel_count; ++i)
+        {
+            const hash128_t *id = relations
+                ? &state->channels[i].relation : &state->channels[i].candidate;
+            bool found;
+            (void) hash_search(seen, id, HASH_ENTER, &found);
+            if (!found)
+                values = accumArrayResult(values, hash128_to_datum(id), false,
+                                          BYTEAOID, owner);
+        }
+    }
+    hash_destroy(seen);
+    return values
+        ? DatumGetArrayTypeP(makeArrayResult(values, owner))
+        : construct_empty_array(BYTEAOID);
+}
+
+ArrayType *
+laplace_query_state_candidates(const LaplaceQueryState *state)
+{
+    return query_state_distinct_ids(state, false);
+}
+
+ArrayType *
+laplace_query_state_relation_types(const LaplaceQueryState *state)
+{
+    return query_state_distinct_ids(state, true);
+}
+
+void
+laplace_query_state_destroy(LaplaceQueryState **state)
+{
+    MemoryContext owner;
+
+    if (!state || !*state)
+        return;
+    owner = (*state)->owner;
+    *state = NULL;
+    MemoryContextDelete(owner);
 }
