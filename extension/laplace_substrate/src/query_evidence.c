@@ -270,6 +270,43 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
     }
 }
 
+/* laplace_consensus_scan_ranked walks each endpoint range in descending
+ * (rating - 2*rd) order. Stop one endpoint/partition only after every duplicate
+ * occurrence of that exact operand has filled its own bounded typed heap and
+ * the current score is STRICTLY below every retained worst score. Equal-score
+ * rows must still run so deterministic candidate/relation tie election remains
+ * exact across partitions. */
+static bool
+query_consensus_cutoff(const LaplaceConsensusRow *row, void *opaque)
+{
+    QueryScanState *state = (QueryScanState *) opaque;
+    const hash128_t *anchor;
+    QueryOperandEntry *operand;
+    __int128 score;
+
+    if (row->object_is_null)
+        return false;
+    anchor = state->reverse ? &row->object : &row->subject;
+    operand = (QueryOperandEntry *) hash_search(state->operands, anchor, HASH_FIND, NULL);
+    if (!operand)
+        return false;
+    score = (__int128) row->rating - 2 * (__int128) row->rd;
+
+    for (int index = operand->first; index >= 0; index = state->next[index])
+    {
+        QueryBucket *bucket = &state->buckets[index];
+        __int128 worst;
+
+        if (bucket->count < state->fanout)
+            return false;
+        worst = (__int128) bucket->heap[0].rating -
+                2 * (__int128) bucket->heap[0].rd;
+        if (score >= worst)
+            return false;
+    }
+    return true;
+}
+
 static bool
 add_occurrences(int64 *target, int64 value)
 {
@@ -463,10 +500,12 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
     unique_operands = hash128_array_from_ids(unique, unique_count);
     scan.reverse = false;
     laplace_consensus_scan_ranked(unique_operands, NULL, types, false,
-        query_consensus_cell, NULL, &scan, stats ? &stats->forward : NULL);
+        query_consensus_cell, query_consensus_cutoff, &scan,
+        stats ? &stats->forward : NULL);
     scan.reverse = true;
     laplace_consensus_scan_ranked(NULL, unique_operands, types, false,
-        query_consensus_cell, NULL, &scan, stats ? &stats->reverse : NULL);
+        query_consensus_cell, query_consensus_cutoff, &scan,
+        stats ? &stats->reverse : NULL);
 
     {
         int64 retained = 0;
