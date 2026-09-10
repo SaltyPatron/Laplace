@@ -112,7 +112,7 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 49 (`extension/laplace_substrate/src/`)
+## Native extension sources — 50 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `attestation_response.c`
@@ -122,6 +122,7 @@ Chess:
 - `chess_rating_repair.c`
 - `chess_roster.c`
 - `chess_syzygy.c`
+- `cognition_program.c`
 - `consensus_fold_step.c`
 - `consensus_neighbors.c`
 - `consensus_scan.c`
