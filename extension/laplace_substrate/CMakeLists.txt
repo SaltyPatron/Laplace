@@ -16,6 +16,7 @@ set(EXT_EXECUTION_SOURCES
     src/conversation_session.c
     src/consensus_scan.c
     src/consensus_neighbors.c
+    src/query_evidence.c
     src/steer_candidates.c
     src/explore_web.c
     src/trajectory_continuations.c
