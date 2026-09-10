@@ -202,25 +202,24 @@ laplace_stage_managed_runtimes() {
   release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
 
   if ! (
-    set -e
-    chmod 0755 "$release"
-    mkdir -m 0755 "$release/mcp" "$release/lichess" "$release/uci"
+    chmod 0755 "$release" || exit $?
+    mkdir -m 0755 "$release/mcp" "$release/lichess" "$release/uci" || exit $?
     laplace_stage_runtime_payload "$app_dir" mcp "$app_dir/laplace-mcp" \
-      "$mcp_stage" "$release/mcp"
+      "$mcp_stage" "$release/mcp" || exit $?
     laplace_stage_runtime_payload "$app_dir" lichess "$app_dir/laplace-lichess" \
-      "$lichess_stage" "$release/lichess"
+      "$lichess_stage" "$release/lichess" || exit $?
     laplace_stage_runtime_payload "$app_dir" uci "$app_dir/laplace-uci" \
-      "$uci_stage" "$release/uci"
-    install -m 0644 /dev/null "$release/.runtime-lease"
+      "$uci_stage" "$release/uci" || exit $?
+    install -m 0644 /dev/null "$release/.runtime-lease" || exit $?
     laplace_wrap_runtime_lease "$release/mcp/Laplace.Endpoints.Mcp" \
-      "$(laplace_current_runtime_dir "$app_dir" mcp "$app_dir/laplace-mcp" || true)"
+      "$(laplace_current_runtime_dir "$app_dir" mcp "$app_dir/laplace-mcp" || true)" || exit $?
     laplace_wrap_runtime_lease "$release/lichess/Laplace.Endpoints.Lichess" \
-      "$(laplace_current_runtime_dir "$app_dir" lichess "$app_dir/laplace-lichess" || true)"
+      "$(laplace_current_runtime_dir "$app_dir" lichess "$app_dir/laplace-lichess" || true)" || exit $?
     laplace_wrap_runtime_lease "$release/uci/laplace-uci" \
-      "$(laplace_current_runtime_dir "$app_dir" uci "$app_dir/laplace-uci" || true)"
-    ln -s ../../../logs "$release/mcp/logs"
-    ln -s ../../../logs "$release/lichess/logs"
-    ln -s ../../../logs "$release/uci/logs"
+      "$(laplace_current_runtime_dir "$app_dir" uci "$app_dir/laplace-uci" || true)" || exit $?
+    ln -s ../../../logs "$release/mcp/logs" || exit $?
+    ln -s ../../../logs "$release/lichess/logs" || exit $?
+    ln -s ../../../logs "$release/uci/logs" || exit $?
   ); then
     find "$release" -xdev -depth -delete || true
     return 1
