@@ -75,12 +75,14 @@ laplace_current_runtime_dir() {
 # second copy of framework/native dependencies before the stable pointer can move.
 #
 # Priority is the currently selected immutable runtime, then the exact bootstrap-owned
-# legacy MCP runtime, then newest retained immutable/partial releases. Rsync accepts at
-# most 20 --link-dest directories; duplicates are removed before that bound is applied.
+# legacy MCP runtime, the exact installed native engine on the same filesystem, then
+# newest retained immutable/partial releases. Rsync accepts at most 20 --link-dest
+# directories; duplicates are removed before that bound is applied.
 laplace_runtime_reference_dirs() {
   local app_dir="$1" service="$2" stable_link="$3"
   local target="" runtime="" candidate="" resolved="" stamp="" count=0
   local releases="$app_dir/releases"
+  local installed_native="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/lib"
   declare -A seen=()
 
   runtime="$(laplace_current_runtime_dir "$app_dir" "$service" "$stable_link" 2>/dev/null || true)"
@@ -108,6 +110,22 @@ laplace_runtime_reference_dirs() {
   fi
 
   [[ -d "$releases" && ! -L "$releases" ]] || return 0
+
+  # pipeline.sh install runs before application publication and materializes the
+  # exact candidate engine under the install prefix. On the managed host the app
+  # directory is inside that same install-prefix filesystem. Reusing those exact
+  # bytes avoids allocating another native image merely to give the managed
+  # runtime its private pathname. A later install replaces the installed pathname;
+  # this release keeps the shared inode it was published with.
+  if [[ "$count" -lt 20 && -d "$installed_native" && ! -L "$installed_native" \
+     && "$(stat -c '%d' "$installed_native" 2>/dev/null || true)" == \
+        "$(stat -c '%d' "$releases" 2>/dev/null || true)" \
+     && -z "${seen[$installed_native]+x}" ]]; then
+    seen["$installed_native"]=1
+    printf '%s\n' "$installed_native"
+    count=$((count + 1))
+  fi
+
   while IFS=$'\t' read -r -d '' stamp candidate; do
     ((${#stamp} > 0)) || continue
     [[ "$count" -lt 20 ]] || break

@@ -105,11 +105,33 @@ ln -s "mcp-runtime/Laplace.Endpoints.Mcp" "$APP_DIR/laplace-mcp"
 legacy_apphost_inode="$(stat -c '%d:%i' "$MCP_DIR/Laplace.Endpoints.Mcp")"
 legacy_shared_inode="$(stat -c '%d:%i' "$MCP_DIR/legacy-shared.dll")"
 partial_shared_inode="$(stat -c '%d:%i' "$APP_DIR/releases/runtime.partial/mcp/partial-shared.dll")"
+
+# The engine install and application publish live on the same managed prefix
+# filesystem. The install job already materializes the exact candidate native
+# image before deploy, so managed runtime staging must hardlink those identical
+# bytes instead of demanding a second copy on a nearly-full prefix.
+INSTALL_PREFIX="$TEST_ROOT/install"
+mkdir -p "$INSTALL_PREFIX/lib"
+printf 'installed-native\n' > "$MCP_STAGE/liblaplace_core.so.0.1.0"
+printf 'installed-native\n' > "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0"
+export LAPLACE_INSTALL_PREFIX="$INSTALL_PREFIX"
+installed_native_inode="$(stat -c '%d:%i' "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0")"
+
 old_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE" "$UCI_STAGE")"
 [[ "$(stat -c '%d:%i' "$old_release/mcp/Laplace.Endpoints.Mcp.native")" == "$legacy_apphost_inode" ]]
 [[ "$(stat -c '%d:%i' "$old_release/mcp/legacy-shared.dll")" == "$legacy_shared_inode" ]]
 [[ "$(stat -c '%d:%i' "$old_release/mcp/partial-shared.dll")" == "$partial_shared_inode" ]]
-echo "OK first managed publish hardlinks unchanged legacy/retained runtime bytes instead of duplicating them"
+[[ "$(stat -c '%d:%i' "$old_release/mcp/liblaplace_core.so.0.1.0")" == "$installed_native_inode" ]]
+
+# Replacing the installed pathname later must not mutate an already-published
+# immutable runtime. GNU install creates/replaces the destination inode; the old
+# runtime retains the inode it hardlinked during this publication.
+printf 'next-installed-native\n' > "$TEST_ROOT/next-native"
+install -m 0644 "$TEST_ROOT/next-native" "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0"
+[[ "$(<"$old_release/mcp/liblaplace_core.so.0.1.0")" == installed-native ]]
+[[ "$(stat -c '%d:%i' "$old_release/mcp/liblaplace_core.so.0.1.0")" != \
+   "$(stat -c '%d:%i' "$INSTALL_PREFIX/lib/liblaplace_core.so.0.1.0")" ]]
+echo "OK first managed publish hardlinks unchanged legacy/retained/installed native bytes instead of duplicating them"
 
 # Select the first immutable release exactly as production does. The second staging
 # operation must retain the old release for existing processes while hardlinking every
