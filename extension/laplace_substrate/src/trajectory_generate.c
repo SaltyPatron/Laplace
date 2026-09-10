@@ -31,15 +31,25 @@
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
 PG_FUNCTION_INFO_V1(pg_laplace_forward_prompt);
 
+typedef struct EvidenceSummary
+{
+    bool has_positive;
+    bool has_negative;
+    LaplaceQueryChannel positive;
+    LaplaceQueryChannel negative;
+    int32 positive_covered_occurrences;
+    int32 positive_relation_families;
+    int32 negative_covered_occurrences;
+    int32 negative_relation_families;
+} EvidenceSummary;
+
 typedef struct Candidate
 {
     hash128_t id;
     int64 sequence_occurrences;
     int stride;
-    double query_score;
-    int64 query_edges;
-    double projection_score;
-    double effective;
+    EvidenceSummary query;
+    EvidenceSummary projection;
 } Candidate;
 
 typedef struct CandidateIndex
@@ -48,25 +58,37 @@ typedef struct CandidateIndex
     int index;
 } CandidateIndex;
 
-typedef struct QueryScore
+typedef struct EvidenceEntry
 {
     hash128_t id;
-    double score;
-    int64 edges;
-    int32 covered;
-} QueryScore;
+    EvidenceSummary summary;
+} EvidenceEntry;
 
-typedef struct QueryCoverageKey
+typedef struct EvidenceCoverageKey
 {
     hash128_t id;
     int32 ordinal;
-    int32 reserved;
-} QueryCoverageKey;
+    uint8 polarity;
+    uint8 reserved[3];
+} EvidenceCoverageKey;
 
-typedef struct QueryCoverage
+typedef struct EvidenceCoverage
 {
-    QueryCoverageKey key;
-} QueryCoverage;
+    EvidenceCoverageKey key;
+} EvidenceCoverage;
+
+typedef struct EvidenceRelationKey
+{
+    hash128_t id;
+    hash128_t relation;
+    uint8 polarity;
+    uint8 reserved[7];
+} EvidenceRelationKey;
+
+typedef struct EvidenceRelation
+{
+    EvidenceRelationKey key;
+} EvidenceRelation;
 
 typedef struct PromptFrontier
 {
@@ -225,69 +247,255 @@ query_operands(ArrayType *ordered, ArrayType *frontier, MemoryContext owner)
     return result;
 }
 
+static int
+positive_channel_compare(const LaplaceQueryChannel *a,
+                         const LaplaceQueryChannel *b)
+{
+    double arank = walk_relation_rank(a->relation);
+    double brank = walk_relation_rank(b->relation);
+    __int128 aconservative = (__int128) a->rating - 2 * (__int128) a->rd;
+    __int128 bconservative = (__int128) b->rating - 2 * (__int128) b->rd;
+    int cmp;
+
+    if (arank != brank)
+        return arank > brank ? 1 : -1;
+    if (aconservative != bconservative)
+        return aconservative > bconservative ? 1 : -1;
+    if (a->rd != b->rd)
+        return a->rd < b->rd ? 1 : -1;
+    if (a->witnesses != b->witnesses)
+        return a->witnesses > b->witnesses ? 1 : -1;
+    if (a->distinct_sources != b->distinct_sources)
+        return a->distinct_sources > b->distinct_sources ? 1 : -1;
+    if (a->distinct_contexts != b->distinct_contexts)
+        return a->distinct_contexts > b->distinct_contexts ? 1 : -1;
+    if (a->confirm_occurrences != b->confirm_occurrences)
+        return a->confirm_occurrences > b->confirm_occurrences ? 1 : -1;
+    if (a->refute_occurrences != b->refute_occurrences)
+        return a->refute_occurrences < b->refute_occurrences ? 1 : -1;
+    if (a->outbound != b->outbound)
+        return a->outbound ? 1 : -1;
+    cmp = memcmp(&a->relation, &b->relation, sizeof(hash128_t));
+    if (cmp != 0)
+        return cmp < 0 ? 1 : -1;
+    cmp = memcmp(&a->anchor, &b->anchor, sizeof(hash128_t));
+    if (cmp != 0)
+        return cmp < 0 ? 1 : -1;
+    return 0;
+}
+
+static int
+negative_channel_compare(const LaplaceQueryChannel *a,
+                         const LaplaceQueryChannel *b)
+{
+    double arank = walk_relation_rank(a->relation);
+    double brank = walk_relation_rank(b->relation);
+    __int128 aupper = (__int128) a->rating + 2 * (__int128) a->rd;
+    __int128 bupper = (__int128) b->rating + 2 * (__int128) b->rd;
+    int cmp;
+
+    if (arank != brank)
+        return arank > brank ? 1 : -1;
+    if (aupper != bupper)
+        return aupper < bupper ? 1 : -1;
+    if (a->rd != b->rd)
+        return a->rd < b->rd ? 1 : -1;
+    if (a->witnesses != b->witnesses)
+        return a->witnesses > b->witnesses ? 1 : -1;
+    if (a->distinct_sources != b->distinct_sources)
+        return a->distinct_sources > b->distinct_sources ? 1 : -1;
+    if (a->distinct_contexts != b->distinct_contexts)
+        return a->distinct_contexts > b->distinct_contexts ? 1 : -1;
+    if (a->refute_occurrences != b->refute_occurrences)
+        return a->refute_occurrences > b->refute_occurrences ? 1 : -1;
+    if (a->confirm_occurrences != b->confirm_occurrences)
+        return a->confirm_occurrences < b->confirm_occurrences ? 1 : -1;
+    if (a->outbound != b->outbound)
+        return a->outbound ? 1 : -1;
+    cmp = memcmp(&a->relation, &b->relation, sizeof(hash128_t));
+    if (cmp != 0)
+        return cmp < 0 ? 1 : -1;
+    cmp = memcmp(&a->anchor, &b->anchor, sizeof(hash128_t));
+    if (cmp != 0)
+        return cmp < 0 ? 1 : -1;
+    return 0;
+}
+
+/* Build a typed evidence index without reducing different relation families,
+ * occurrences, source diversity, and standing into one scalar. The retained
+ * query state remains the exact authority; this summary is only the bounded
+ * election tuple used for the current candidate set. */
 static HTAB *
-query_scores(const LaplaceQueryState *state, bool projection_only,
-             MemoryContext owner)
+evidence_summaries(const LaplaceQueryState *state, bool projection_only,
+                   MemoryContext owner)
 {
     int count = 0;
     const LaplaceQueryChannel *channels = laplace_query_state_channels(state, &count);
-    HTAB *scores = new_id_index(projection_only ? "forward projection scores" :
-                                "forward query scores", count, owner,
-                                sizeof(QueryScore));
+    HTAB *summaries = new_id_index(projection_only ? "forward projection evidence" :
+                                   "forward query evidence", count, owner,
+                                   sizeof(EvidenceEntry));
     HASHCTL coverage_ctl = {0};
-    coverage_ctl.keysize = sizeof(QueryCoverageKey);
-    coverage_ctl.entrysize = sizeof(QueryCoverage);
+    HASHCTL relation_ctl = {0};
+    coverage_ctl.keysize = sizeof(EvidenceCoverageKey);
+    coverage_ctl.entrysize = sizeof(EvidenceCoverage);
     coverage_ctl.hcxt = owner;
-    HTAB *coverage = hash_create(projection_only ? "forward projection coverage" :
-                                 "forward query coverage", Max(count, 16),
+    relation_ctl.keysize = sizeof(EvidenceRelationKey);
+    relation_ctl.entrysize = sizeof(EvidenceRelation);
+    relation_ctl.hcxt = owner;
+    HTAB *coverage = hash_create(projection_only ? "forward projection occurrence coverage" :
+                                 "forward query occurrence coverage", Max(count, 16),
                                  &coverage_ctl,
                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    HTAB *relations = hash_create(projection_only ? "forward projection relation coverage" :
+                                  "forward query relation coverage", Max(count, 16),
+                                  &relation_ctl,
+                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
     for (int i = 0; i < count; ++i)
     {
         const LaplaceQueryChannel *channel = &channels[i];
-        QueryScore *score;
-        QueryCoverageKey coverage_key;
-        double edge;
-        bool found, covered;
+        EvidenceEntry *entry;
+        EvidenceCoverageKey occurrence_key;
+        EvidenceRelationKey relation_key;
+        double sign;
+        bool found, occurrence_found, relation_found;
 
-        /* An incoming asymmetric claim remains in the retained query state as
-         * evidence. It does not become an output traversal in reverse. */
+        /* Incoming asymmetric testimony is valid retained evidence, but an
+         * output projection may not silently invert its traversal law. */
         if (projection_only && !channel->outbound &&
             !relation_can_traverse_reverse(&channel->relation))
             continue;
 
-        edge = walk_edge_score(channel->relation, channel->rating, channel->rd);
-        score = hash_search(scores, &channel->candidate, HASH_ENTER, &found);
+        entry = hash_search(summaries, &channel->candidate, HASH_ENTER, &found);
         if (!found)
-        {
-            score->score = 0.0;
-            score->edges = 0;
-            score->covered = 0;
-        }
-        score->score += edge;
-        score->edges++;
+            MemSet(&entry->summary, 0, sizeof(entry->summary));
 
-        MemSet(&coverage_key, 0, sizeof(coverage_key));
-        coverage_key.id = channel->candidate;
-        coverage_key.ordinal = channel->ordinal;
-        hash_search(coverage, &coverage_key, HASH_ENTER, &covered);
-        if (!covered)
-            score->covered++;
+        sign = walk_edge_score(channel->relation, channel->rating, channel->rd);
+        if (sign > 0.0 && isfinite(sign))
+        {
+            MemSet(&occurrence_key, 0, sizeof(occurrence_key));
+            occurrence_key.id = channel->candidate;
+            occurrence_key.ordinal = channel->ordinal;
+            occurrence_key.polarity = 1;
+            hash_search(coverage, &occurrence_key, HASH_ENTER, &occurrence_found);
+            if (!occurrence_found)
+            {
+                if (entry->summary.positive_covered_occurrences == PG_INT32_MAX)
+                    ereport(ERROR,
+                            (errmsg("forward execution: positive occurrence coverage overflow")));
+                entry->summary.positive_covered_occurrences++;
+            }
+
+            MemSet(&relation_key, 0, sizeof(relation_key));
+            relation_key.id = channel->candidate;
+            relation_key.relation = channel->relation;
+            relation_key.polarity = 1;
+            hash_search(relations, &relation_key, HASH_ENTER, &relation_found);
+            if (!relation_found)
+            {
+                if (entry->summary.positive_relation_families == PG_INT32_MAX)
+                    ereport(ERROR,
+                            (errmsg("forward execution: positive relation family coverage overflow")));
+                entry->summary.positive_relation_families++;
+            }
+
+            if (!entry->summary.has_positive ||
+                positive_channel_compare(channel, &entry->summary.positive) > 0)
+            {
+                entry->summary.positive = *channel;
+                entry->summary.has_positive = true;
+            }
+        }
+        else if (sign < 0.0 && isfinite(sign))
+        {
+            MemSet(&occurrence_key, 0, sizeof(occurrence_key));
+            occurrence_key.id = channel->candidate;
+            occurrence_key.ordinal = channel->ordinal;
+            occurrence_key.polarity = 2;
+            hash_search(coverage, &occurrence_key, HASH_ENTER, &occurrence_found);
+            if (!occurrence_found)
+            {
+                if (entry->summary.negative_covered_occurrences == PG_INT32_MAX)
+                    ereport(ERROR,
+                            (errmsg("forward execution: negative occurrence coverage overflow")));
+                entry->summary.negative_covered_occurrences++;
+            }
+
+            MemSet(&relation_key, 0, sizeof(relation_key));
+            relation_key.id = channel->candidate;
+            relation_key.relation = channel->relation;
+            relation_key.polarity = 2;
+            hash_search(relations, &relation_key, HASH_ENTER, &relation_found);
+            if (!relation_found)
+            {
+                if (entry->summary.negative_relation_families == PG_INT32_MAX)
+                    ereport(ERROR,
+                            (errmsg("forward execution: negative relation family coverage overflow")));
+                entry->summary.negative_relation_families++;
+            }
+
+            if (!entry->summary.has_negative ||
+                negative_channel_compare(channel, &entry->summary.negative) > 0)
+            {
+                entry->summary.negative = *channel;
+                entry->summary.has_negative = true;
+            }
+        }
     }
 
-    {
-        HASH_SEQ_STATUS sequence;
-        QueryScore *score;
-        hash_seq_init(&sequence, scores);
-        while ((score = hash_seq_search(&sequence)) != NULL)
-        {
-            if (score->covered > 1 && score->score > 0.0)
-                score->score *= 1.0 + log((double) score->covered);
-        }
-    }
+    hash_destroy(relations);
     hash_destroy(coverage);
-    return scores;
+    return summaries;
+}
+
+static int
+positive_summary_compare(const EvidenceSummary *a, const EvidenceSummary *b)
+{
+    int cmp;
+    if (a->has_positive != b->has_positive)
+        return a->has_positive ? 1 : -1;
+    if (!a->has_positive)
+        return 0;
+    cmp = positive_channel_compare(&a->positive, &b->positive);
+    if (cmp != 0)
+        return cmp;
+    if (a->positive_covered_occurrences != b->positive_covered_occurrences)
+        return a->positive_covered_occurrences > b->positive_covered_occurrences ? 1 : -1;
+    if (a->positive_relation_families != b->positive_relation_families)
+        return a->positive_relation_families > b->positive_relation_families ? 1 : -1;
+    return 0;
+}
+
+/* For opposition, absence is preferable. When both candidates are opposed,
+ * the one with the weaker strongest refutation wins. */
+static int
+opposition_summary_compare(const EvidenceSummary *a, const EvidenceSummary *b)
+{
+    int cmp;
+    if (a->has_negative != b->has_negative)
+        return a->has_negative ? -1 : 1;
+    if (!a->has_negative)
+        return 0;
+    cmp = negative_channel_compare(&a->negative, &b->negative);
+    if (cmp != 0)
+        return -cmp;
+    if (a->negative_covered_occurrences != b->negative_covered_occurrences)
+        return a->negative_covered_occurrences < b->negative_covered_occurrences ? 1 : -1;
+    if (a->negative_relation_families != b->negative_relation_families)
+        return a->negative_relation_families < b->negative_relation_families ? 1 : -1;
+    return 0;
+}
+
+static bool
+context_contains_id(Datum *context, int count, const hash128_t *id)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        if (memcmp(VARDATA_ANY(DatumGetByteaPP(context[i])),
+                   id, sizeof(hash128_t)) == 0)
+            return true;
+    }
+    return false;
 }
 
 static int
@@ -325,10 +533,8 @@ candidate_add(Candidate **items, int *count, int *capacity, HTAB *index,
         .id = *id,
         .sequence_occurrences = occurrences,
         .stride = stride,
-        .query_score = 0.0,
-        .query_edges = 0,
-        .projection_score = 0.0,
-        .effective = 0.0,
+        .query = {0},
+        .projection = {0},
     };
     return (*count)++;
 }
@@ -338,10 +544,23 @@ candidate_compare(const void *left, const void *right)
 {
     const Candidate *a = left;
     const Candidate *b = right;
-    if (a->effective != b->effective)
-        return a->effective > b->effective ? -1 : 1;
+    int cmp;
+
+    /* Declared election tuple: output-purpose testimony, query testimony,
+     * exact structural match, observed recurrence, then opposition. No cross-
+     * family score product or universal adjacency scalar is materialized. */
+    cmp = positive_summary_compare(&a->projection, &b->projection);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    cmp = positive_summary_compare(&a->query, &b->query);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    if (a->stride != b->stride)
+        return a->stride > b->stride ? -1 : 1;
     if (a->sequence_occurrences != b->sequence_occurrences)
         return a->sequence_occurrences > b->sequence_occurrences ? -1 : 1;
+    cmp = opposition_summary_compare(&a->query, &b->query);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    cmp = opposition_summary_compare(&a->projection, &b->projection);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
     return memcmp(&a->id, &b->id, sizeof(hash128_t));
 }
 
@@ -497,7 +716,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         Candidate *candidates = NULL;
         int candidate_count = 0, candidate_capacity = 0;
         HTAB *candidate_index;
-        HTAB *query_score_table;
+        HTAB *query_evidence_table;
         HTAB *projection_table = NULL;
         int pick = -1;
 
@@ -529,87 +748,80 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             }
         }
 
-        query_score_table = query_scores(query_state, false, step_context);
+        query_evidence_table = evidence_summaries(query_state, false, step_context);
+
+        /* Natural prompt execution is not confined to the compatibility
+         * CONTINUATION_OUTPUT vocabulary. Positive typed channels from the
+         * query itself are semantic candidates; the explicit output projection
+         * remains a stronger declared purpose when one exists. This is the
+         * missing generic path for definitions, causes, taxonomy, roles, etc.
+         * without a prompt-keyword router or a second graph engine. */
+        if (input && (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
+        {
+            HASH_SEQ_STATUS sequence;
+            EvidenceEntry *query_nomination;
+            hash_seq_init(&sequence, query_evidence_table);
+            while ((query_nomination = hash_seq_search(&sequence)) != NULL)
+            {
+                if (!query_nomination->summary.has_positive ||
+                    context_contains_id(context, context_length, &query_nomination->id))
+                    continue;
+                int at = candidate_add(&candidates, &candidate_count, &candidate_capacity,
+                                       candidate_index, &query_nomination->id, 0, 0);
+                candidates[at].query = query_nomination->summary;
+            }
+        }
 
         if (output_state &&
             (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
         {
-            projection_table = query_scores(output_state, true, step_context);
+            projection_table = evidence_summaries(output_state, true, step_context);
             HASH_SEQ_STATUS sequence;
-            QueryScore *projection;
+            EvidenceEntry *projection;
             hash_seq_init(&sequence, projection_table);
             while ((projection = hash_seq_search(&sequence)) != NULL)
             {
-                if (!(projection->score > 0.0) || !isfinite(projection->score))
+                if (!projection->summary.has_positive)
                     continue;
                 /* Semantic-only output is a simple path. Exact observed
                  * sequence continuations may repeat independently. */
-                bool already_in_context = false;
-                for (int i = 0; i < context_length; ++i)
-                {
-                    if (memcmp(VARDATA_ANY(DatumGetByteaPP(context[i])),
-                               &projection->id, sizeof(hash128_t)) == 0)
-                    {
-                        already_in_context = true;
-                        break;
-                    }
-                }
                 CandidateIndex *existing = hash_search(candidate_index,
                     &projection->id, HASH_FIND, NULL);
-                if (!existing && already_in_context)
+                if (!existing &&
+                    context_contains_id(context, context_length, &projection->id))
                     continue;
                 int at = candidate_add(&candidates, &candidate_count, &candidate_capacity,
                                        candidate_index, &projection->id, 0, 0);
-                candidates[at].projection_score = projection->score;
+                candidates[at].projection = projection->summary;
             }
         }
 
         if (candidate_count == 0)
             break;
 
-        bool has_positive_query = false;
-        for (int i = 0; i < candidate_count; ++i)
-        {
-            QueryScore *score = hash_search(query_score_table,
-                                             &candidates[i].id, HASH_FIND, NULL);
-            if (score)
-            {
-                candidates[i].query_score = score->score;
-                candidates[i].query_edges = score->edges;
-                if (score->edges > 0 && score->score > 0.0 && isfinite(score->score))
-                    has_positive_query = true;
-            }
-            if (projection_table)
-            {
-                QueryScore *projection = hash_search(projection_table,
-                    &candidates[i].id, HASH_FIND, NULL);
-                if (projection && projection->score > candidates[i].projection_score)
-                    candidates[i].projection_score = projection->score;
-            }
-        }
-
         int kept = 0;
         for (int i = 0; i < candidate_count; ++i)
         {
-            Candidate candidate = candidates[i];
-            if (candidate.query_edges > 0 &&
-                (!(candidate.query_score > 0.0) || !isfinite(candidate.query_score)))
-                continue;
-            if (has_positive_query && candidate.query_edges == 0 &&
-                !trajectory_scope && !(candidate.projection_score > 0.0))
-                continue;
-            if (candidate.sequence_occurrences == 0 &&
-                !(candidate.projection_score > 0.0))
-                continue;
+            EvidenceEntry *query = hash_search(query_evidence_table,
+                                               &candidates[i].id, HASH_FIND, NULL);
+            if (query)
+                candidates[i].query = query->summary;
+            if (projection_table)
+            {
+                EvidenceEntry *projection = hash_search(projection_table,
+                    &candidates[i].id, HASH_FIND, NULL);
+                if (projection)
+                    candidates[i].projection = projection->summary;
+            }
 
-            candidate.effective =
-                (candidate.sequence_occurrences > 0 ?
-                    (double) candidate.sequence_occurrences : 1.0) *
-                (candidate.query_edges > 0 ? candidate.query_score :
-                    candidate.projection_score > 0.0 ? candidate.projection_score : 1.0);
-            if (!(candidate.effective > 0.0) || !isfinite(candidate.effective))
+            /* A graph-only result must be nominated by positive typed query
+             * evidence or by the stronger explicit output contract. Physical
+             * continuations remain independently valid observations. */
+            if (candidates[i].sequence_occurrences == 0 &&
+                !candidates[i].projection.has_positive &&
+                !(input && candidates[i].query.has_positive))
                 continue;
-            candidates[kept++] = candidate;
+            candidates[kept++] = candidates[i];
         }
         candidate_count = kept;
         if (candidate_count == 0)
@@ -625,7 +837,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             for (int i = 0; i < limit; ++i)
             {
                 double u = rng_uniform(&rng);
-                double key = log(candidates[i].effective) / spread - log(-log(u));
+                /* Spread is applied to the ordinal election result, not to a
+                 * fabricated cross-plane evidence scalar. */
+                double key = -((double) i) / spread - log(-log(u));
                 if (i == 0 || key > best)
                 {
                     best = key;
