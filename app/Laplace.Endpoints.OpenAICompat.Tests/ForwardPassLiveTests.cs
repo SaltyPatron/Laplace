@@ -124,8 +124,8 @@ public sealed class ForwardPassLiveTests
         var rows = await client.ConverseAsync(
             Prompt,
             session: null,
-            new ConverseOptions(MaxTokens: 24, Window: 5, Temperature: 0.0, TopK: 10),
-            CancellationToken.None);
+            options: new ConverseOptions(MaxTokens: 24, Window: 5, Temperature: 0.0, TopK: 10),
+            ct: CancellationToken.None);
         Assert.NotEmpty(rows);
         var reply = string.Concat(rows.Select(static row => row.Reply));
         Assert.Contains(Expected, reply, StringComparison.OrdinalIgnoreCase);
