@@ -74,6 +74,24 @@ def main() -> int:
     assert "laplace_query_state_extend(output_state, selected" in program
     assert "walk_continuations(walk_call, input, hops)" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
+
+    # Typed testimony and physical observation are separate planes. A forward
+    # implementation that restores a query_score/effective product has silently
+    # flattened relation identity, standing topology and structural recurrence
+    # back into one generic adjacency scalar.
+    assert "typedef struct EvidenceSummary" in program
+    assert "positive_covered_occurrences" in program
+    assert "negative_covered_occurrences" in program
+    assert "positive_relation_families" in program
+    assert "negative_relation_families" in program
+    assert "positive_channel_compare(" in program
+    assert "opposition_summary_compare(" in program
+    assert "query_score" not in program
+    assert "projection_score" not in program
+    assert ".effective" not in program
+    assert "candidate.effective" not in program
+    assert "query_nomination->summary.has_positive" in program
+
     assert "generation.forward_frontier_ids(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
     assert "generation.forward_frontier(p_prompt" not in walk
 
@@ -105,8 +123,8 @@ def main() -> int:
 
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
-        f"forward_text=exact_tree1 query_state=persistent route_owner=native "
-        f"retired_wrappers=5 chat_steps={steps}"
+        f"forward_text=exact_tree1 query_state=persistent evidence=typed-separate "
+        f"route_owner=native retired_wrappers=5 chat_steps={steps}"
     )
     return 0
 
