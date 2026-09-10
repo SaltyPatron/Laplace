@@ -13,7 +13,7 @@ BEGIN ATOMIC
     -- identities from an exhausted search are not silently promoted to an answer.
     WITH execution AS MATERIALIZED (
         SELECT g.*
-        FROM generation.forward_trace(
+        FROM generation.forward_program(
                  p_prompt, p_steps, p_max_stride, p_spread, p_top_k,
                  COALESCE(
                      p_seed,

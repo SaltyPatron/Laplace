@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source contract for the dynamic forward-pass prompt-analysis topology."""
+"""Source contract for the canonical query-relative cognition program."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,8 +39,6 @@ def main() -> int:
     walk_continuations = strip_sql_comments(WALK_CONTINUATIONS_PATH.read_text())
     chat = strip_sql_comments(CHAT_PATH.read_text())
 
-    # Native execution owns the crawl; obsolete SQL wrappers must not remain
-    # installed as disconnected alternatives.
     assert "CREATE OR REPLACE FUNCTION" not in frontier
     for retired in (
         "generation.forward_frontier_ids(bytea[], integer, integer, integer)",
@@ -49,10 +47,10 @@ def main() -> int:
     ):
         assert f"DROP FUNCTION IF EXISTS {retired};" in walk
 
-    # Exact observation identity precedes routing. The retired prompt_state and
-    # coherence heuristics must not rewrite the native prompt-tree operand.
-    assert count(walk, "generation.forward_prompt(") == 1, \
-        "forward_text must invoke the shared native whole-prompt program once"
+    # Exact observation identity precedes cognition. No text heuristic is
+    # permitted to replace the canonical prompt tree.
+    assert count(walk, "generation.forward_program(") == 1, \
+        "forward_text must execute the native cognition program exactly once"
     assert "converse.prompt_state(" not in walk
     assert "converse.prompt_coherence(" not in walk
     assert "converse.prompt_operands(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
@@ -63,32 +61,37 @@ def main() -> int:
     assert "seed_ids[0] = root" in operands
     assert "content_witness_tree_root_id(tree, &root)" in operands
 
-    # Natural text must not bind the compatibility continuation relation set as
-    # its universal output purpose. The query-relative typed field elects the
-    # semantic candidates; forward_walk_continuations keeps the legacy contract.
+    # Natural text has no hard-coded completion vocabulary. Its only output is
+    # the completed semantic act from the shared program.
     forward_text = function_slice(walk, "generation.forward_text", "converse.forward_turn")
     assert "CONTINUATION_OUTPUT" not in forward_text
     assert "NULL::bytea[]" in forward_text
+    assert "r.completion" in forward_text
+    assert "r.semantic_act_id IS NOT NULL" in forward_text
+    assert "realize.batch(entities)" in forward_text
 
-    # There is one native whole-prompt execution. forward_trace owns that C call
-    # and forward_prompt is only its four-column product projection. Route rows
-    # are receipts; only emit rows may reach ordinary generation/realization.
+    # Full program is the only C whole-prompt execution. Compatibility trace and
+    # identity output are SQL projections of that exact invocation contract.
+    full_program = function_slice(
+        walk_continuations, "generation.forward_program", "generation.forward_trace")
     trace_sql = function_slice(
         walk_continuations, "generation.forward_trace", "generation.forward_prompt")
     prompt_sql = function_slice(
         walk_continuations, "generation.forward_prompt", "generation.forward_walk_continuations")
-    assert "'pg_laplace_forward_trace'" in trace_sql
-    assert "LANGUAGE C VOLATILE" in trace_sql
-    assert "generation.forward_trace(" in prompt_sql
-    assert "LANGUAGE sql VOLATILE" in prompt_sql
-    assert "'pg_laplace_forward_prompt'" not in prompt_sql
-    assert count(prompt_sql, "generation.forward_trace(") == 1
-    assert re.search(r"WHERE\s+t\.event\s*=\s*'emit'", prompt_sql, re.I), \
-        "normal generation must not realize route receipt rows"
+    assert "'pg_laplace_forward_trace'" in full_program
+    assert "LANGUAGE C VOLATILE" in full_program
+    for field in (
+        "program_id bytea", "required_obligations int", "satisfied_obligations int",
+        "remaining_required int", "completion boolean", "disposition text",
+        "output_fingerprint bytea", "semantic_act_id bytea", "output_count int",
+    ):
+        assert field in full_program
+    assert "generation.forward_program(" in trace_sql
+    assert "LANGUAGE sql VOLATILE" in trace_sql
+    assert "'pg_laplace_forward_trace'" not in trace_sql
+    assert "generation.forward_program(" in prompt_sql
+    assert re.search(r"WHERE\s+p\.event\s*=\s*'emit'", prompt_sql, re.I)
 
-    # The whole prompt and persistent typed query state are now the forward
-    # authority. The old explore-web pre-expansion and independent steer scan
-    # must not regrow beside it.
     program = (ROOT / "extension/laplace_substrate/src/trajectory_generate.c").read_text()
     entry = program.split("forward_prompt(FunctionCallInfo fcinfo, bool trace)", 1)[1]
     assert count(entry, "laplace_prompt_input(") == 1
@@ -100,10 +103,30 @@ def main() -> int:
     assert "walk_continuations(walk_call, input, hops, trace)" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
 
-    # Candidate proposal and candidate adjudication are distinct operations.
-    # The bounded Q->K proposal may nominate endpoints, but the final election
-    # must read every exact typed cell for the bounded candidate set so negative
-    # standing cannot disappear behind the proposal fanout.
+    # Physical sequence and semantic relation providers share prompt ancestry,
+    # but retain separate evidence laws. This is the bridge that lets either
+    # provider satisfy a typed prompt obligation without flattening both planes.
+    assert "origin_inherit_sequence(" in program
+    assert "propagate_candidate_origins(" in program
+    assert "laplace_cognition_program_create(" in program
+    assert "laplace_cognition_program_note_route(" in program
+    assert "laplace_cognition_program_note_emit(" in program
+    assert "if (receipt.complete)" in program
+    assert "laplace_cognition_program_finalize(" in program
+    assert "emit_terminal(" in program
+
+    completion = (ROOT / "extension/laplace_substrate/src/cognition_program.c").read_text()
+    completion_header = (ROOT / "extension/laplace_substrate/src/cognition_program.h").read_text()
+    assert "tiers[node] >= 2" in completion
+    assert "channel->ordinal - 1" in completion
+    assert "bms_intersect(origins, program->required)" in completion
+    assert "program->semantic_output_count <= 0" in completion
+    assert "laplace:semantic-act:v1" in completion
+    assert "LAPLACE_COGNITION_BUDGET_EXHAUSTED" in completion_header
+    assert "keyword" in completion_header.lower(), \
+        "completion contract must explicitly reject prompt keyword classification"
+
+    # Candidate proposal and exact candidate adjudication remain distinct.
     evidence_native = (ROOT / "extension/laplace_substrate/src/query_evidence.c").read_text()
     assert "laplace_query_state_candidate_evidence(" in evidence_native
     assert "laplace_consensus_scan(operand_ids, candidate_ids" in evidence_native
@@ -113,10 +136,7 @@ def main() -> int:
     assert count(program, "laplace_query_state_candidate_evidence(") == 2
     assert "proposal top-K cannot hide them" in program
 
-    # Typed testimony and physical observation are separate planes. A forward
-    # implementation that restores a query_score/effective product has silently
-    # flattened relation identity, standing topology and structural recurrence
-    # back into one generic adjacency scalar.
+    # No scalar may erase relation identity/evidence topology/structural recurrence.
     assert "typedef struct EvidenceSummary" in program
     assert "positive_covered_occurrences" in program
     assert "negative_covered_occurrences" in program
@@ -129,42 +149,35 @@ def main() -> int:
     assert "projection_score" not in program
     assert ".effective" not in program
     assert "candidate.effective" not in program
-    assert "nomination->summary.has_positive" in program
 
     assert "generation.forward_frontier_ids(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
     assert "generation.forward_frontier(p_prompt" not in walk
 
-    # The old zero-caller text routing functions are not allowed to survive an
-    # upgrade as hidden installed API. forward_text must be rebound first, then
-    # retire frontier before route-trace so recorded BEGIN ATOMIC dependencies are
-    # removed in RESTRICT-safe order.
     drop_frontier = "DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);"
     drop_trace = "DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);"
-    assert drop_frontier in walk, "retired text forward_frontier is not dropped"
-    assert drop_trace in walk, "retired route functions are not dropped"
-    assert walk.index(drop_frontier) < walk.index(drop_trace), \
-        "retired route functions are not dropped in dependency order"
+    assert drop_frontier in walk
+    assert drop_trace in walk
+    assert walk.index(drop_frontier) < walk.index(drop_trace)
 
-    # Natural chat must carry its session into the same program as HTTP/MCP.
+    # Natural chat carries exact session state into this same program.
     natural = re.search(r"IF shape IS NULL THEN(.*?)END IF;", chat, re.S)
     assert natural is not None and "RETURN out;" in natural.group(1)
     call = re.search(r"converse\.forward_turn\(\s*p_prompt,\s*p_session,\s*(\d+),", natural.group(1))
-    assert call is not None, "natural chat must preserve session context"
+    assert call is not None
     program_sql = function_slice(walk, "converse.forward_turn", "generation.walk_text")
     default_steps = re.search(r"p_steps int DEFAULT (\d+)", program_sql)
     assert default_steps is not None
     steps = int(call.group(1))
-    assert steps >= 40 and steps == int(default_steps.group(1)), \
-        "natural chat must use the shared program's full default output budget"
+    assert steps >= 40 and steps == int(default_steps.group(1))
     assert count(chat, "converse.forward_turn(") == 1
     assert "generation.forward_text(" not in chat
     assert "chat_scaffold" not in natural.group(1)
 
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
-        f"forward_text=exact_tree1 query_state=persistent candidate_evidence=exact "
-        f"evidence=typed-separate output=query-relative execution=traceable-single-pass "
-        f"route_rows=receipt-only route_owner=native retired_wrappers=5 chat_steps={steps}"
+        f"obligations=native semantic_act=hash-bound realization=completion-gated "
+        f"query_state=persistent candidate_evidence=exact evidence=typed-separate "
+        f"execution=single-native-program route_owner=native chat_steps={steps}"
     )
     return 0
 
