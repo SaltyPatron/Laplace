@@ -93,13 +93,27 @@ laplace_legacy_release_complete() {
   done
 }
 
+# A user-level publish may only recursively delete a release when every directory
+# in that tree is writable by the publishing identity. Preflighting the complete
+# directory set prevents `find -delete` from partially dismantling an older
+# root/service-owned release before discovering one inaccessible subtree.
+laplace_release_tree_writable() {
+  local candidate="$1" directory
+  [[ -d "$candidate" && ! -L "$candidate" && -w "$(dirname "$candidate")" ]] || return 1
+  while IFS= read -r -d '' directory; do
+    [[ -w "$directory" ]] || return 1
+  done < <(find "$candidate" -xdev -type d -print0)
+  return 0
+}
+
 # Reclaim only release directories whose liveness is mechanically decidable.
 # Current stable pointers always win. Lease-aware releases are collected under an
 # exclusive lock, so another user's running process keeps its closure alive. Complete
 # pre-lease releases are retained because their process ownership cannot be proved by
-# an unprivileged runner. Incomplete pre-lease directories, however, cannot be valid
-# runtimes and are safe to remove; this also recovers ENOSPC debris from a failed
-# staging transaction before the next publish allocates anything.
+# an unprivileged runner. Incomplete pre-lease directories are reclaimed only when the
+# publishing identity can delete the entire tree atomically enough to avoid damaging
+# an older root/service-owned layout. Inaccessible legacy debris is retained but does
+# not abort scanning later releases, allowing runner-owned failed stages to be reclaimed.
 laplace_prune_unreferenced_releases() {
   local app_dir="$1" releases="$1/releases" candidate reclaimed=0 retained=0
   [[ -d "$releases" && ! -L "$releases" ]] || return 0
@@ -110,6 +124,11 @@ laplace_prune_unreferenced_releases() {
     }
 
     if [[ -f "$candidate/.runtime-lease" && ! -L "$candidate/.runtime-lease" ]]; then
+      if ! laplace_release_tree_writable "$candidate"; then
+        echo "retaining inaccessible leased application release: $candidate"
+        retained=$((retained + 1))
+        continue
+      fi
       if (
         exec 9<"$candidate/.runtime-lease" || exit 1
         flock -n -x 9 || exit 1
@@ -124,9 +143,18 @@ laplace_prune_unreferenced_releases() {
     fi
 
     if ! laplace_legacy_release_complete "$candidate"; then
-      find "$candidate" -xdev -depth -delete || return 1
-      echo "reclaimed incomplete application release: $candidate"
-      reclaimed=$((reclaimed + 1))
+      if ! laplace_release_tree_writable "$candidate"; then
+        echo "retaining inaccessible incomplete application release: $candidate"
+        retained=$((retained + 1))
+        continue
+      fi
+      if find "$candidate" -xdev -depth -delete; then
+        echo "reclaimed incomplete application release: $candidate"
+        reclaimed=$((reclaimed + 1))
+      else
+        echo "retaining incomplete application release after failed reclaim: $candidate"
+        retained=$((retained + 1))
+      fi
     else
       retained=$((retained + 1))
     fi
