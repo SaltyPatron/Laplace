@@ -150,4 +150,8 @@ public sealed record ExplainReportRequest(
     [property: JsonPropertyName("prompt")] string? Prompt,
     [property: JsonPropertyName("depth")] int Depth,
     [property: JsonPropertyName("beam")] int Beam,
-    [property: JsonPropertyName("academic")] bool Academic = false);
+    [property: JsonPropertyName("academic")] bool Academic = false,
+    [property: JsonPropertyName("steps")] int Steps = 128,
+    [property: JsonPropertyName("max_stride")] int MaxStride = 5,
+    [property: JsonPropertyName("spread")] double Spread = 0.0,
+    [property: JsonPropertyName("top_k")] int TopK = 10);

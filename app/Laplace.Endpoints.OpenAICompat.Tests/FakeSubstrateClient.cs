@@ -41,6 +41,11 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         int limit, bool includeGeometry, bool includeEvidence, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
+    public Task<IReadOnlyList<ForwardTraceStep>> ForwardTraceAsync(
+        string prompt, int steps, int maxStride, double spread, int topK,
+        int hops, int fanout, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
     public Task<IReadOnlyList<ExplainTraceStep>> ExplainTraceAsync(
         string prompt, int depth, int beam, bool includeEvidence, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
@@ -294,6 +299,67 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                     EvidenceRows: includeEvidence ? 17 : null)
             ],
             Edges: [TopEdge()]));
+
+    public Task<IReadOnlyList<ForwardTraceStep>> ForwardTraceAsync(
+        string prompt, int steps, int maxStride, double spread, int topK,
+        int hops, int fanout, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<ForwardTraceStep>>(
+        [
+            new ForwardTraceStep(
+                Step: 1,
+                EntityIdHex: WhaleIdHex,
+                Entity: "whale",
+                StrideUsed: 0,
+                RootIdHex: WhaleIdHex,
+                CandidateCount: 2,
+                OrderedContextCount: 3,
+                ProposalChannelCount: 4,
+                ExactChannelCount: 2,
+                SequenceOccurrences: 0,
+                CoveredOccurrences: 1,
+                RelationFamilies: 1,
+                OpposedOccurrences: 0,
+                SupportAnchorIdHex: WhaleIdHex,
+                SupportAnchor: "whale",
+                SupportRelationIdHex: IsAIdHex,
+                SupportRelation: "IS_A",
+                SupportOutbound: true,
+                SupportRating: 1600,
+                SupportRd: 50,
+                SupportWitnesses: 42,
+                SupportSources: 1,
+                SupportContexts: 1,
+                DeclaredResult: true,
+                Event: "emit",
+                RoutingRound: 0),
+            new ForwardTraceStep(
+                Step: 2,
+                EntityIdHex: CetaceanIdHex,
+                Entity: "cetacean",
+                StrideUsed: 0,
+                RootIdHex: WhaleIdHex,
+                CandidateCount: 3,
+                OrderedContextCount: 4,
+                ProposalChannelCount: 5,
+                ExactChannelCount: 3,
+                SequenceOccurrences: 0,
+                CoveredOccurrences: 2,
+                RelationFamilies: 1,
+                OpposedOccurrences: 0,
+                SupportAnchorIdHex: WhaleIdHex,
+                SupportAnchor: "whale",
+                SupportRelationIdHex: IsAIdHex,
+                SupportRelation: "IS_A",
+                SupportOutbound: true,
+                SupportRating: 1580,
+                SupportRd: 60,
+                SupportWitnesses: 17,
+                SupportSources: 1,
+                SupportContexts: 1,
+                DeclaredResult: true,
+                Event: "emit",
+                RoutingRound: 0)
+        ]);
 
     public Task<IReadOnlyList<ExplainTraceStep>> ExplainTraceAsync(
         string prompt, int depth, int beam, bool includeEvidence, CancellationToken ct) =>

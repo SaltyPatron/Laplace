@@ -7,8 +7,11 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    -- Native execution retains the complete query tree. This typed SQL surface
-    -- binds execution controls and realizes the selected identities in a batch.
+    -- Native execution retains the complete query tree. Natural prompt output
+    -- is elected from that query-relative typed state; the compatibility
+    -- CONTINUATION_OUTPUT set remains on forward_walk_continuations, not here.
+    -- This prevents a fixed completion vocabulary from standing in for the
+    -- prompt's actual definitional/causal/taxonomic/etc. evidence field.
     WITH walked AS MATERIALIZED (
         SELECT g.*
         FROM generation.forward_prompt(
@@ -18,7 +21,7 @@ BEGIN ATOMIC
                      laplace.hash128_lo(public.laplace_hash128_blake3(
                          convert_to(p_prompt, 'UTF8')))),
                  p_hops, p_fanout, p_prior_frontier,
-                 consensus.relation_set_ids('CONTINUATION_OUTPUT')) g
+                 NULL::bytea[]) g
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,
                array_agg(sep_entity ORDER BY step) AS separators

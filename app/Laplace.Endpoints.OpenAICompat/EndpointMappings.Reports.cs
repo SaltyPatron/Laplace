@@ -95,14 +95,25 @@ internal static class ReportEndpoints
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'prompt' is required.");
             if (payload.Depth < 1 || payload.Beam < 1)
                 return EndpointJson.BadRequest("invalid_request_error", "Fields 'depth' and 'beam' must each be >= 1.");
+            if (payload.Steps < 1 || payload.MaxStride < 0 || payload.TopK < 1 ||
+                !double.IsFinite(payload.Spread) || payload.Spread < 0.0)
+                return EndpointJson.BadRequest(
+                    "invalid_request_error",
+                    "Forward controls require steps >= 1, max_stride >= 0, top_k >= 1, and finite spread >= 0.");
 
             return await RunGatedReportAsync(request, billing, "explain.trace", ct, async gateQuote =>
             {
-                var trace = await substrate.ExplainTraceAsync(
+                // This is the same native forward execution consumed by normal
+                // generation. depth/beam retain the public report spelling but
+                // bind directly to semantic hops/fanout; no walk_branches replay.
+                var trace = await substrate.ForwardTraceAsync(
                     payload.Prompt.Trim(),
-                    payload.Depth,
-                    payload.Beam,
-                    includeEvidence: payload.Academic,
+                    steps: payload.Steps,
+                    maxStride: payload.MaxStride,
+                    spread: payload.Spread,
+                    topK: payload.TopK,
+                    hops: payload.Depth,
+                    fanout: payload.Beam,
                     ct);
                 if (gateQuote is not null) await billing.MarkConsumedAndRecordAsync(gateQuote, ct);
 
@@ -114,6 +125,10 @@ internal static class ReportEndpoints
                     Depth: payload.Depth,
                     Beam: payload.Beam,
                     Academic: payload.Academic,
+                    Steps: payload.Steps,
+                    MaxStride: payload.MaxStride,
+                    Spread: payload.Spread,
+                    TopK: payload.TopK,
                     Trace: trace,
                     Billing: gateQuote is null ? null : QuoteGate.MakeReceipt(gateQuote)));
             });

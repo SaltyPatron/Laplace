@@ -32,6 +32,7 @@ typedef struct ObservationReceiver
 } ObservationReceiver;
 
 static SPIPlanPtr observation_plan;
+static SPIPlanPtr observation_cell_plan;
 
 static void
 read_id(Datum value, hash128_t *id)
@@ -120,9 +121,10 @@ observation_shutdown(DestReceiver *destination)
     (void) destination;
 }
 
-void
-laplace_observation_read(ArrayType *operands, ArrayType *sources,
-    ArrayType *types, int roles, LaplaceObservationVisitor visitor, void *context)
+static void
+observation_read(ArrayType *operands, ArrayType *sources,
+    ArrayType *types, int roles, const LaplaceObservationCell *cells, int cell_count,
+    LaplaceObservationVisitor visitor, void *context)
 {
     MemoryContext work, previous;
     HASHCTL ctl = {0};
@@ -176,13 +178,18 @@ laplace_observation_read(ArrayType *operands, ArrayType *sources,
         SPIExecuteOptions options = {.params = params, .read_only = true,
             .must_return_tuples = true, .dest = &receiver.receiver};
         int result;
-        if (!observation_plan)
+        SPIPlanPtr *plan = cells ? &observation_cell_plan : &observation_plan;
+        if (!*plan)
         {
             Oid parameter_types[] = {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT4OID};
-            observation_plan = SPI_prepare_cursor(
-                laplace_sql_query_text("evidence.observation_bindings"),
+            if (cells) parameter_types[3] = BYTEAARRAYOID;
+            const char *query = laplace_sql_query_text(cells
+                ? "evidence.observation_cells" : "evidence.observation_bindings");
+            if (!query)
+                elog(ERROR, "observation bindings: required static query is unavailable");
+            *plan = SPI_prepare_cursor(query,
                 4, parameter_types, CURSOR_OPT_PARALLEL_OK);
-            if (!observation_plan || SPI_keepplan(observation_plan) != 0)
+            if (!*plan || SPI_keepplan(*plan) != 0)
                 elog(ERROR, "observation bindings: preparing static read failed");
         }
         params->params[0].value = PointerGetDatum(hash128_array_from_ids(unique, unique_count));
@@ -198,7 +205,34 @@ laplace_observation_read(ArrayType *operands, ArrayType *sources,
         params->params[3].isnull = false;
         params->params[3].pflags = PARAM_FLAG_CONST;
         params->params[3].ptype = INT4OID;
-        result = SPI_execute_plan_extended(observation_plan, &options);
+        if (cells)
+        {
+            HASHCTL cell_ctl = {0};
+            cell_ctl.keysize = cell_ctl.entrysize = sizeof(LaplaceObservationCell);
+            HTAB *seen = hash_create("observation exact cells", Max(cell_count,1),
+                                     &cell_ctl, HASH_ELEM | HASH_BLOBS);
+            ArrayBuildState *subjects = NULL, *relations = NULL, *objects = NULL;
+            for (int i = 0; i < cell_count; ++i)
+            {
+                bool found;
+                hash_search(seen, &cells[i], HASH_ENTER, &found);
+                if (found) continue;
+                subjects = accumArrayResult(subjects, hash128_to_datum(&cells[i].subject),
+                                              false, BYTEAOID, work);
+                relations = accumArrayResult(relations, hash128_to_datum(&cells[i].type),
+                                               false, BYTEAOID, work);
+                objects = accumArrayResult(objects, hash128_to_datum(&cells[i].object),
+                                             false, BYTEAOID, work);
+            }
+            params->params[0].value = makeArrayResult(subjects, work);
+            params->params[1].value = makeArrayResult(relations, work);
+            params->params[2].value = makeArrayResult(objects, work);
+            for (int i = 0; i < 3; ++i) params->params[i].isnull = false;
+            params->params[3].value = sources ? PointerGetDatum(sources) : (Datum)0;
+            params->params[3].isnull = sources == NULL;
+            params->params[3].ptype = BYTEAARRAYOID;
+        }
+        result = SPI_execute_plan_extended(*plan, &options);
         /* SELECT to DestNone reports SPI_OK_UTILITY; startup checks its shape. */
         if (result != SPI_OK_SELECT && result != SPI_OK_UTILITY)
             elog(ERROR, "observation bindings: read failed: %s", SPI_result_code_string(result));
@@ -206,6 +240,24 @@ laplace_observation_read(ArrayType *operands, ArrayType *sources,
     MemoryContextSwitchTo(previous);
     MemoryContextDelete(work);
     laplace_spi_finish(spi_top);
+}
+
+void
+laplace_observation_read(ArrayType *operands, ArrayType *sources,
+    ArrayType *types, int roles, LaplaceObservationVisitor visitor, void *context)
+{
+    observation_read(operands, sources, types, roles, NULL, 0, visitor, context);
+}
+
+void
+laplace_observation_read_cells(ArrayType *operands, ArrayType *sources,
+    const LaplaceObservationCell *cells, int cell_count,
+    LaplaceObservationVisitor visitor, void *context)
+{
+    if (cell_count < 0 || (cell_count > 0 && !cells))
+        elog(ERROR, "observation bindings: invalid exact cell set");
+    if (cell_count == 0) return;
+    observation_read(operands, sources, NULL, 3, cells, cell_count, visitor, context);
 }
 
 static void

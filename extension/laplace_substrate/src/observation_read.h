@@ -26,4 +26,16 @@ typedef void (*LaplaceObservationVisitor)(int ordinal, int16 role,
 void laplace_observation_read(ArrayType *operands, ArrayType *sources,
     ArrayType *types, int roles, LaplaceObservationVisitor visitor, void *context);
 
+typedef struct LaplaceObservationCell
+{
+    hash128_t subject, type, object;
+} LaplaceObservationCell;
+
+/* Exact binary cells after candidate election. The shared receiver preserves
+ * every operand occurrence and both stored endpoint roles. Duplicate cells
+ * share one read; unrelated endpoint witnesses are not fetched and discarded. */
+void laplace_observation_read_cells(ArrayType *operands, ArrayType *sources,
+    const LaplaceObservationCell *cells, int cell_count,
+    LaplaceObservationVisitor visitor, void *context);
+
 #endif

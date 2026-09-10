@@ -14,6 +14,133 @@ NOTICE:  extension "laplace_substrate" already exists, skipping
 -- stride_used = 0. New-era invariant replacing "probe invalidation": there is no
 -- cache to invalidate — a trajectory written now is visible to the next read.
 BEGIN;
+-- Exercise the whole-input matcher, including its stride-zero cancellation
+-- callbacks. A real matched physicality used to crash the backend before it
+-- could nominate its first successor; an empty corpus concealed the defect.
+DO $whole_input$
+DECLARE
+    start_id bytea := laplace.word_id('β');
+    next_id bytea := laplace.word_id('λ');
+    root bytea := public.laplace_hash128_blake3('test/forward/whole-input');
+    actual bytea[];
+    traced bytea[];
+BEGIN
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+    VALUES (public.laplace_hash128_blake3('test/forward/whole-input/physicality'),
+        root,1,public.ST_MakePoint(1,1,1,1),decode(repeat('00',16),'hex'),
+        public.ST_MakeLine(ARRAY[
+            public.laplace_mantissa_pack(start_id,1,1,0),
+            public.laplace_mantissa_pack(next_id,2,1,0)]),2,now());
+    SELECT array_agg(entity ORDER BY step) INTO actual
+    FROM generation.forward_prompt('β',3,5,0.0,8,7,0,8,NULL,'{}'::bytea[]);
+    IF actual IS DISTINCT FROM ARRAY[next_id] THEN
+        RAISE EXCEPTION 'FAIL: whole-input match lost its successor or restarted after exhaustion: %',actual;
+    END IF;
+    SELECT array_agg(entity ORDER BY step) INTO traced
+    FROM generation.forward_trace('β',3,5,0.0,8,7,0,8,NULL,'{}'::bytea[]);
+    IF traced IS DISTINCT FROM actual OR NOT EXISTS (
+        SELECT 1 FROM generation.forward_trace('β',3,5,0.0,8,7,0,8,NULL,'{}'::bytea[])
+        WHERE root_id=start_id AND sequence_occurrences=1
+          AND candidate_count=1 AND stride_used=1 AND NOT declared_result) THEN
+        RAISE EXCEPTION 'FAIL: forward trace changed execution or misreported observed support';
+    END IF;
+    DELETE FROM laplace.physicalities WHERE entity_id=root;
+END
+$whole_input$;
+-- The declared relational operation is evaluated against the joint operand
+-- set. An isolated stronger cell must not outrank combined query support.
+DO $joint_election$
+DECLARE
+    left_id bytea := laplace.word_id('β');
+    right_id bytea := laplace.word_id('γ');
+    joint_id bytea := laplace.word_id('δ');
+    isolated_id bytea := laplace.word_id('λ');
+    relation_id bytea := laplace.relation_type_id('CAUSES');
+    actual bytea;
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(left_id,relation_id,isolated_id),left_id,relation_id,isolated_id,
+         3000000000000,30000000000,60000000,5,now()),
+        (laplace.consensus_id(left_id,relation_id,joint_id),left_id,relation_id,joint_id,
+         2000000000000,30000000000,60000000,5,now()),
+        (laplace.consensus_id(right_id,relation_id,joint_id),right_id,relation_id,joint_id,
+         2000000000000,30000000000,60000000,5,now());
+    SELECT entity INTO actual FROM generation.forward_walk_continuations(
+        ARRAY[left_id,right_id],1,0,0.0,8,7,NULL,ARRAY[relation_id],8,NULL,NULL,
+        ARRAY[relation_id]);
+    IF actual IS DISTINCT FROM joint_id THEN
+        RAISE EXCEPTION 'FAIL: one isolated edge defeated joint query evidence';
+    END IF;
+    DELETE FROM laplace.consensus
+    WHERE id=laplace.consensus_id(right_id,relation_id,joint_id);
+    SELECT entity INTO actual FROM generation.forward_walk_continuations(
+        ARRAY[left_id,right_id],1,0,0.0,8,7,NULL,ARRAY[relation_id],8,NULL,NULL,
+        ARRAY[relation_id]);
+    IF actual IS DISTINCT FROM isolated_id THEN
+        RAISE EXCEPTION 'FAIL: removing joint support did not change the election';
+    END IF;
+    DELETE FROM laplace.consensus WHERE subject_id=left_id AND type_id=relation_id
+      AND object_id IN (joint_id,isolated_id);
+END
+$joint_election$;
+-- Interpretation hypotheses are internal state. Keep both routed alternatives:
+-- the weaker initial route is the one that discharges the declared operation.
+-- Routing does not consume output steps, fabricate sequence, or restart a cycle.
+DO $routing_state$
+DECLARE
+    prompt_id bytea := laplace.word_id('β');
+    first_route bytea := laplace.word_id('γ');
+    useful_route bytea := laplace.word_id('δ');
+    result_id bytea := laplace.word_id('λ');
+    next_id bytea := laplace.word_id('μ');
+    route_relation bytea := laplace.relation_type_id('RELATED_TO');
+    result_relation bytea := laplace.relation_type_id('CAUSES');
+    actual bytea[];
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    SELECT laplace.consensus_id(s,t,o),s,t,o,rating,30000000000,60000000,5,now()
+    FROM (VALUES
+        (prompt_id,route_relation,first_route,3000000000000::bigint),
+        (prompt_id,route_relation,useful_route,2000000000000::bigint),
+        (first_route,route_relation,prompt_id,2000000000000::bigint),
+        (useful_route,result_relation,result_id,2000000000000::bigint),
+        (result_id,result_relation,next_id,2000000000000::bigint)
+    ) cells(s,t,o,rating);
+    SELECT array_agg(entity ORDER BY step) INTO actual
+    FROM generation.forward_prompt('β',2,0,0.0,8,7,1,8,NULL,ARRAY[result_relation]);
+    IF actual IS DISTINCT FROM ARRAY[result_id,next_id] THEN
+        RAISE EXCEPTION 'FAIL: routing emitted metadata, lost a hypothesis, or consumed output capacity: %',actual;
+    END IF;
+    IF EXISTS (SELECT 1 FROM generation.forward_prompt(
+        'β',2,0,0.0,8,7,0,8,NULL,ARRAY[result_relation])) THEN
+        RAISE EXCEPTION 'FAIL: a result behind an unexecuted route was emitted';
+    END IF;
+    SELECT array_agg(entity ORDER BY step) INTO actual
+    FROM generation.forward_trace('β',2,0,0.0,8,7,1,8,NULL,ARRAY[result_relation])
+    WHERE event='emit';
+    IF actual IS DISTINCT FROM ARRAY[result_id,next_id]
+       OR (SELECT count(*) FROM generation.forward_trace(
+            'β',2,0,0.0,8,7,1,8,NULL,ARRAY[result_relation])
+           WHERE event='route' AND step=1 AND routing_round=1
+             AND ordered_context_count=1 AND NOT declared_result) <> 2 THEN
+        RAISE EXCEPTION 'FAIL: trace confused routing hypotheses with emitted state';
+    END IF;
+    IF EXISTS (SELECT 1 FROM generation.forward_prompt('β',2,0,0.0,8,7,2,8,NULL,NULL)) THEN
+        RAISE EXCEPTION 'FAIL: an unbound relation target became an answer';
+    END IF;
+    DELETE FROM laplace.consensus WHERE id=laplace.consensus_id(prompt_id,route_relation,useful_route);
+    IF EXISTS (SELECT 1 FROM generation.forward_prompt(
+        'β',2,0,0.0,8,7,1,8,NULL,ARRAY[result_relation])) THEN
+        RAISE EXCEPTION 'FAIL: removing the supporting route did not remove its result';
+    END IF;
+    DELETE FROM laplace.consensus WHERE subject_id IN (prompt_id,first_route,useful_route,result_id)
+      AND type_id IN (route_relation,result_relation);
+END
+$routing_state$;
 DO $$
 DECLARE
     type_t    bytea := public.laplace_hash128_blake3('Type');
@@ -563,8 +690,12 @@ BEGIN
     IF realize.render_text(result_id) IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL: semantic result unexpectedly has a text physicality';
     END IF;
-    SELECT array_agg(g.entity ORDER BY g.step) INTO actual
-    FROM generation.forward_text('β',1,0,0.0,8,7,0,8) g;
+    -- Bind the result operation explicitly. This fixture establishes a
+    -- continuation claim; it does not establish a natural-language request.
+    -- Zero interpretation hops must not suppress an already bound result.
+    SELECT realize.batch(array_agg(g.entity ORDER BY g.step)) INTO actual
+    FROM generation.forward_prompt('β',1,0,0.0,8,7,0,8,NULL,
+                                   ARRAY[relation_id]) g;
     IF actual IS DISTINCT FROM ARRAY['λ'] THEN
         RAISE EXCEPTION 'FAIL: selected semantic result lost its witnessed surface: %',actual;
     END IF;

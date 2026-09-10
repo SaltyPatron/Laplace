@@ -264,6 +264,12 @@ record_successor(void *context, size_t ordinal, size_t stride,
     bool found;
     size_t matched_stride = stride;
     CHECK_FOR_INTERRUPTS();
+    /* The shared matcher visits packed-vertex boundaries with stride zero
+     * and no successor so long scans remain cancellable. Test that contract
+     * before translating an actual match to the whole-input stride. Otherwise
+     * a nonempty input turns the progress callback into a match and dereferences
+     * its NULL successor. Terminal occurrences likewise nominate no output. */
+    if (stride == 0 || successor == NULL) return 0;
     if (state->input_stride) stride = state->input_stride;
     if (stride == 0 || stride < state->stride) return 0;
     if (state->scope && state->trajectory)
