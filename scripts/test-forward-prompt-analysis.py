@@ -71,8 +71,8 @@ def main() -> int:
     assert "NULL::bytea[]" in forward_text
 
     # There is one native whole-prompt execution. forward_trace owns that C call
-    # and forward_prompt is only its four-column product projection. This makes
-    # receipts and normal conversation observe the same election, not two runs.
+    # and forward_prompt is only its four-column product projection. Route rows
+    # are receipts; only emit rows may reach ordinary generation/realization.
     trace_sql = function_slice(
         walk_continuations, "generation.forward_trace", "generation.forward_prompt")
     prompt_sql = function_slice(
@@ -83,6 +83,8 @@ def main() -> int:
     assert "LANGUAGE sql VOLATILE" in prompt_sql
     assert "'pg_laplace_forward_prompt'" not in prompt_sql
     assert count(prompt_sql, "generation.forward_trace(") == 1
+    assert re.search(r"WHERE\s+t\.event\s*=\s*'emit'", prompt_sql, re.I), \
+        "normal generation must not realize route receipt rows"
 
     # The whole prompt and persistent typed query state are now the forward
     # authority. The old explore-web pre-expansion and independent steer scan
@@ -162,7 +164,7 @@ def main() -> int:
         "FORWARD_PROMPT_ANALYSIS_OK "
         f"forward_text=exact_tree1 query_state=persistent candidate_evidence=exact "
         f"evidence=typed-separate output=query-relative execution=traceable-single-pass "
-        f"route_owner=native retired_wrappers=5 chat_steps={steps}"
+        f"route_rows=receipt-only route_owner=native retired_wrappers=5 chat_steps={steps}"
     )
     return 0
 
