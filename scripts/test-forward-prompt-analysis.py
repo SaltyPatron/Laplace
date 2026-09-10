@@ -60,11 +60,19 @@ def main() -> int:
     assert count(operands, "laplace_content_tree_build_public(") == 1
     assert "seed_ids[0] = root" in operands
     assert "content_witness_tree_root_id(tree, &root)" in operands
+
+    # The whole prompt and persistent typed query state are now the forward
+    # authority. The old explore-web pre-expansion and independent steer scan
+    # must not regrow beside it.
     program = (ROOT / "extension/laplace_substrate/src/trajectory_generate.c").read_text()
     entry = program.split("pg_laplace_forward_prompt(PG_FUNCTION_ARGS)", 1)[1]
     assert count(entry, "laplace_prompt_input(") == 1
-    assert count(entry, "laplace_explore_web(") == 1
-    assert "walk_continuations(walk_call, input)" in entry
+    assert "laplace_explore_web(" not in program
+    assert "laplace_steer_candidates(" not in program
+    assert "laplace_query_state_create(" in program
+    assert "laplace_query_state_extend(query_state, selected" in program
+    assert "laplace_query_state_extend(output_state, selected" in program
+    assert "walk_continuations(walk_call, input, hops)" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
     assert "generation.forward_frontier_ids(" not in walk.split("DROP FUNCTION IF EXISTS generation.forward_frontier(")[0]
     assert "generation.forward_frontier(p_prompt" not in walk
@@ -81,15 +89,12 @@ def main() -> int:
         "retired route functions are not dropped in dependency order"
 
     # Natural chat must carry its session into the same program as HTTP/MCP.
-    # It returns before the explicit inspection shapes elect a topic. Keep the
-    # established minimum output budget and agree with the program's default;
-    # dead legacy branches must not be counted as implemented generation paths.
     natural = re.search(r"IF shape IS NULL THEN(.*?)END IF;", chat, re.S)
     assert natural is not None and "RETURN out;" in natural.group(1)
     call = re.search(r"converse\.forward_turn\(\s*p_prompt,\s*p_session,\s*(\d+),", natural.group(1))
     assert call is not None, "natural chat must preserve session context"
-    program = function_slice(walk, "converse.forward_turn", "generation.walk_text")
-    default_steps = re.search(r"p_steps int DEFAULT (\d+)", program)
+    program_sql = function_slice(walk, "converse.forward_turn", "generation.walk_text")
+    default_steps = re.search(r"p_steps int DEFAULT (\d+)", program_sql)
     assert default_steps is not None
     steps = int(call.group(1))
     assert steps >= 40 and steps == int(default_steps.group(1)), \
@@ -100,7 +105,8 @@ def main() -> int:
 
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
-        f"forward_text=exact_tree1 route_owner=native retired_wrappers=5 chat_steps={steps}"
+        f"forward_text=exact_tree1 query_state=persistent route_owner=native "
+        f"retired_wrappers=5 chat_steps={steps}"
     )
     return 0
 
