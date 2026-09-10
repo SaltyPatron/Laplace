@@ -323,15 +323,13 @@ negative_channel_compare(const LaplaceQueryChannel *a,
 }
 
 /* Build a typed evidence index without reducing different relation families,
- * occurrences, source diversity, and standing into one scalar. The retained
- * query state remains the exact authority; this summary is only the bounded
- * election tuple used for the current candidate set. */
+ * occurrences, source diversity, and standing into one scalar. The channel set
+ * may be a bounded proposal field or the exact bounded-candidate adjudication
+ * field; the election tuple itself is identical. */
 static HTAB *
-evidence_summaries(const LaplaceQueryState *state, bool projection_only,
-                   MemoryContext owner)
+evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
+                                 bool projection_only, MemoryContext owner)
 {
-    int count = 0;
-    const LaplaceQueryChannel *channels = laplace_query_state_channels(state, &count);
     HTAB *summaries = new_id_index(projection_only ? "forward projection evidence" :
                                    "forward query evidence", count, owner,
                                    sizeof(EvidenceEntry));
@@ -449,6 +447,15 @@ evidence_summaries(const LaplaceQueryState *state, bool projection_only,
     return summaries;
 }
 
+static HTAB *
+evidence_summaries(const LaplaceQueryState *state, bool projection_only,
+                   MemoryContext owner)
+{
+    int count = 0;
+    const LaplaceQueryChannel *channels = laplace_query_state_channels(state, &count);
+    return evidence_summaries_from_channels(channels, count, projection_only, owner);
+}
+
 static int
 positive_summary_compare(const EvidenceSummary *a, const EvidenceSummary *b)
 {
@@ -539,6 +546,27 @@ candidate_add(Candidate **items, int *count, int *capacity, HTAB *index,
         .projection = {0},
     };
     return (*count)++;
+}
+
+static ArrayType *
+candidate_id_array(const Candidate *candidates, int count)
+{
+    Datum *ids;
+    ArrayType *array;
+
+    if (count <= 0)
+        return construct_empty_array(BYTEAOID);
+    if ((Size) count > MaxAllocSize / sizeof(Datum))
+        ereport(ERROR,
+                (errmsg("forward execution: candidate identity array exceeds allocation capacity")));
+    ids = palloc(sizeof(Datum) * count);
+    for (int i = 0; i < count; ++i)
+        ids[i] = hash128_to_datum(&candidates[i].id);
+    array = construct_array(ids, count, BYTEAOID, -1, false, TYPALIGN_INT);
+    for (int i = 0; i < count; ++i)
+        pfree(DatumGetPointer(ids[i]));
+    pfree(ids);
+    return array;
 }
 
 static int
@@ -720,8 +748,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         Candidate *candidates = NULL;
         int candidate_count = 0, candidate_capacity = 0;
         HTAB *candidate_index;
+        HTAB *query_proposals;
+        HTAB *query_traversal_proposals = NULL;
+        HTAB *projection_proposals = NULL;
         HTAB *query_evidence_table;
-        HTAB *query_traversal_table = NULL;
+        HTAB *query_traversal_table;
         HTAB *projection_table = NULL;
         int pick = -1;
 
@@ -753,59 +784,75 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             }
         }
 
-        query_evidence_table = evidence_summaries(query_state, false, step_context);
+        /* Q->K proposal is bounded per active occurrence. It may nominate a
+         * candidate, but it is not the final evidence field used to elect it. */
+        query_proposals = evidence_summaries(query_state, false, step_context);
 
-        /* Natural prompt execution is not confined to the compatibility
-         * CONTINUATION_OUTPUT vocabulary. Positive typed channels from the
-         * query itself are semantic candidates; the explicit output projection
-         * remains a stronger declared purpose when one exists. This is the
-         * missing generic path for definitions, causes, taxonomy, roles, etc.
-         * without a prompt-keyword router or a second graph engine. */
         if (input && (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
         {
-            /* Keep inbound asymmetric claims in query_evidence_table as
-             * evidence, but never turn them into reverse output traversal. */
-            query_traversal_table = evidence_summaries(query_state, true, step_context);
+            query_traversal_proposals = evidence_summaries(query_state, true, step_context);
             HASH_SEQ_STATUS sequence;
-            EvidenceEntry *query_nomination;
-            hash_seq_init(&sequence, query_traversal_table);
-            while ((query_nomination = hash_seq_search(&sequence)) != NULL)
+            EvidenceEntry *nomination;
+            hash_seq_init(&sequence, query_traversal_proposals);
+            while ((nomination = hash_seq_search(&sequence)) != NULL)
             {
-                if (!query_nomination->summary.has_positive ||
-                    context_contains_id(context, context_length, &query_nomination->id))
+                if (!nomination->summary.has_positive ||
+                    context_contains_id(context, context_length, &nomination->id))
                     continue;
-                int at = candidate_add(&candidates, &candidate_count, &candidate_capacity,
-                                       candidate_index, &query_nomination->id, 0, 0);
-                candidates[at].query_traversal = query_nomination->summary;
+                candidate_add(&candidates, &candidate_count, &candidate_capacity,
+                              candidate_index, &nomination->id, 0, 0);
             }
         }
 
         if (output_state &&
             (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
         {
-            projection_table = evidence_summaries(output_state, true, step_context);
+            projection_proposals = evidence_summaries(output_state, true, step_context);
             HASH_SEQ_STATUS sequence;
             EvidenceEntry *projection;
-            hash_seq_init(&sequence, projection_table);
+            hash_seq_init(&sequence, projection_proposals);
             while ((projection = hash_seq_search(&sequence)) != NULL)
             {
                 if (!projection->summary.has_positive)
                     continue;
-                /* Semantic-only output is a simple path. Exact observed
-                 * sequence continuations may repeat independently. */
                 CandidateIndex *existing = hash_search(candidate_index,
                     &projection->id, HASH_FIND, NULL);
-                if (!existing &&
-                    context_contains_id(context, context_length, &projection->id))
+                if (!existing && context_contains_id(context, context_length, &projection->id))
                     continue;
-                int at = candidate_add(&candidates, &candidate_count, &candidate_capacity,
-                                       candidate_index, &projection->id, 0, 0);
-                candidates[at].projection = projection->summary;
+                candidate_add(&candidates, &candidate_count, &candidate_capacity,
+                              candidate_index, &projection->id, 0, 0);
             }
         }
 
+        (void) query_proposals;
+        (void) projection_proposals;
         if (candidate_count == 0)
             break;
+
+        /* K->V/evidence binding: after all bounded providers nominate the
+         * candidate set, read EVERY exact stored typed cell between those
+         * candidates and every active query occurrence. Negative/refuted cells
+         * are retained here; proposal top-K cannot hide them. */
+        ArrayType *candidate_ids = candidate_id_array(candidates, candidate_count);
+        int query_channel_count = 0;
+        LaplaceQueryChannel *query_channels =
+            laplace_query_state_candidate_evidence(query_state, candidate_ids,
+                                                   &query_channel_count, NULL);
+        query_evidence_table = evidence_summaries_from_channels(
+            query_channels, query_channel_count, false, step_context);
+        query_traversal_table = evidence_summaries_from_channels(
+            query_channels, query_channel_count, true, step_context);
+
+        if (output_state)
+        {
+            int projection_channel_count = 0;
+            LaplaceQueryChannel *projection_channels =
+                laplace_query_state_candidate_evidence(output_state, candidate_ids,
+                                                       &projection_channel_count, NULL);
+            projection_table = evidence_summaries_from_channels(
+                projection_channels, projection_channel_count, true, step_context);
+        }
+        pfree(candidate_ids);
 
         int kept = 0;
         for (int i = 0; i < candidate_count; ++i)
@@ -814,13 +861,10 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                                                &candidates[i].id, HASH_FIND, NULL);
             if (query)
                 candidates[i].query = query->summary;
-            if (query_traversal_table)
-            {
-                EvidenceEntry *traversal = hash_search(query_traversal_table,
-                    &candidates[i].id, HASH_FIND, NULL);
-                if (traversal)
-                    candidates[i].query_traversal = traversal->summary;
-            }
+            EvidenceEntry *traversal = hash_search(query_traversal_table,
+                                                   &candidates[i].id, HASH_FIND, NULL);
+            if (traversal)
+                candidates[i].query_traversal = traversal->summary;
             if (projection_table)
             {
                 EvidenceEntry *projection = hash_search(projection_table,
@@ -829,9 +873,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                     candidates[i].projection = projection->summary;
             }
 
-            /* A graph-only result must be nominated by positive typed query
-             * evidence or by the stronger explicit output contract. Physical
-             * continuations remain independently valid observations. */
+            /* A graph-only result must survive exact positive typed evidence
+             * after candidate adjudication. Physical continuations remain an
+             * independently witnessed observation plane. */
             if (candidates[i].sequence_occurrences == 0 &&
                 !candidates[i].projection.has_positive &&
                 !(input && candidates[i].query_traversal.has_positive))
