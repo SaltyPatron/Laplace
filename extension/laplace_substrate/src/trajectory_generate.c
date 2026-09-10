@@ -49,6 +49,7 @@ typedef struct Candidate
     int64 sequence_occurrences;
     int stride;
     EvidenceSummary query;
+    EvidenceSummary query_traversal;
     EvidenceSummary projection;
 } Candidate;
 
@@ -534,6 +535,7 @@ candidate_add(Candidate **items, int *count, int *capacity, HTAB *index,
         .sequence_occurrences = occurrences,
         .stride = stride,
         .query = {0},
+        .query_traversal = {0},
         .projection = {0},
     };
     return (*count)++;
@@ -550,6 +552,8 @@ candidate_compare(const void *left, const void *right)
      * exact structural match, observed recurrence, then opposition. No cross-
      * family score product or universal adjacency scalar is materialized. */
     cmp = positive_summary_compare(&a->projection, &b->projection);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    cmp = positive_summary_compare(&a->query_traversal, &b->query_traversal);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
     cmp = positive_summary_compare(&a->query, &b->query);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
@@ -717,6 +721,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         int candidate_count = 0, candidate_capacity = 0;
         HTAB *candidate_index;
         HTAB *query_evidence_table;
+        HTAB *query_traversal_table = NULL;
         HTAB *projection_table = NULL;
         int pick = -1;
 
@@ -758,9 +763,12 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
          * without a prompt-keyword router or a second graph engine. */
         if (input && (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
         {
+            /* Keep inbound asymmetric claims in query_evidence_table as
+             * evidence, but never turn them into reverse output traversal. */
+            query_traversal_table = evidence_summaries(query_state, true, step_context);
             HASH_SEQ_STATUS sequence;
             EvidenceEntry *query_nomination;
-            hash_seq_init(&sequence, query_evidence_table);
+            hash_seq_init(&sequence, query_traversal_table);
             while ((query_nomination = hash_seq_search(&sequence)) != NULL)
             {
                 if (!query_nomination->summary.has_positive ||
@@ -768,7 +776,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                     continue;
                 int at = candidate_add(&candidates, &candidate_count, &candidate_capacity,
                                        candidate_index, &query_nomination->id, 0, 0);
-                candidates[at].query = query_nomination->summary;
+                candidates[at].query_traversal = query_nomination->summary;
             }
         }
 
@@ -806,6 +814,13 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                                                &candidates[i].id, HASH_FIND, NULL);
             if (query)
                 candidates[i].query = query->summary;
+            if (query_traversal_table)
+            {
+                EvidenceEntry *traversal = hash_search(query_traversal_table,
+                    &candidates[i].id, HASH_FIND, NULL);
+                if (traversal)
+                    candidates[i].query_traversal = traversal->summary;
+            }
             if (projection_table)
             {
                 EvidenceEntry *projection = hash_search(projection_table,
@@ -819,7 +834,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
              * continuations remain independently valid observations. */
             if (candidates[i].sequence_occurrences == 0 &&
                 !candidates[i].projection.has_positive &&
-                !(input && candidates[i].query.has_positive))
+                !(input && candidates[i].query_traversal.has_positive))
                 continue;
             candidates[kept++] = candidates[i];
         }
