@@ -145,6 +145,18 @@ SQL_QUERY("leaders.arena", "int4,int8",
 
 SQL_QUERY("conversation.forward_turn", "text,bytea,int4,int4,float8,int4",
     "SELECT step,entity,stride_used FROM converse.forward_turn($1,$2,$3,$4,$5,$6) ORDER BY step")
+SQL_QUERY("conversation.forward_trace", "text,int4,int4,float8,int4,int4,int4",
+    "SELECT t.step,encode(t.entity,'hex'),converse.label_or_hex(t.entity),t.stride_used,"
+    "encode(t.root_id,'hex'),t.candidate_count,t.ordered_context_count,t.proposal_channel_count,"
+    "t.exact_channel_count,t.sequence_occurrences,t.covered_occurrences,t.relation_families,"
+    "t.opposed_occurrences,CASE WHEN t.support_anchor IS NULL THEN NULL ELSE encode(t.support_anchor,'hex') END,"
+    "CASE WHEN t.support_anchor IS NULL THEN NULL ELSE converse.label_or_hex(t.support_anchor) END,"
+    "CASE WHEN t.support_relation IS NULL THEN NULL ELSE encode(t.support_relation,'hex') END,"
+    "CASE WHEN t.support_relation IS NULL THEN NULL ELSE converse.label_or_hex(t.support_relation) END,"
+    "t.support_outbound,t.support_rating,t.support_rd,t.support_witnesses,t.support_sources,t.support_contexts,"
+    "t.declared_result,t.event,t.routing_round FROM generation.forward_trace("
+    "$1,$2,$3,$4,$5,NULL::bigint,$6,$7,NULL::bytea[],NULL::bytea[]) t "
+    "ORDER BY t.step,t.routing_round,CASE t.event WHEN 'route' THEN 0 ELSE 1 END")
 SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz",
     "SELECT converse.session_append_turns($1,$2,$3)")
 SQL_QUERY("conversation.manifest", "bytea",
