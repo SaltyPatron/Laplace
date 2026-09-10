@@ -122,12 +122,17 @@ new_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_
    "$(stat -c '%d:%i' "$old_release/mcp/Laplace.Endpoints.Mcp.dll")" ]]
 [[ -x "$APP_DIR/laplace-uci" ]]
 echo "OK repeat managed publishes preserve existing clients and hardlink unchanged immutable payloads"
+
 if failed_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$TEST_ROOT/missing-stage" "$LICHESS_STAGE" "$UCI_STAGE")"; then
   echo "missing apphost was accepted: $failed_release" >&2
   exit 1
 fi
-# Deliberately break the copy implementation: even inside $(...), failure must
-# propagate instead of the final path print falsely reporting a good release.
+
+# A failed copy happens only after runtime.XXXXXX has been allocated. It must
+# remove that exact partial release before returning failure; otherwise each
+# ENOSPC retry consumes more of the application LV and guarantees the next retry
+# also fails. Count release directories before and after the injected failure.
+release_count_before="$(find "$APP_DIR/releases" -mindepth 1 -maxdepth 1 -type d -name 'runtime.*' | wc -l)"
 if (
   laplace_sync_payload() { return 23; }
   failed_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE" "$UCI_STAGE")"
@@ -135,7 +140,13 @@ if (
   echo "failed runtime copy was accepted" >&2
   exit 1
 fi
-echo "OK failed managed runtime staging never reports a publishable release"
+release_count_after="$(find "$APP_DIR/releases" -mindepth 1 -maxdepth 1 -type d -name 'runtime.*' | wc -l)"
+[[ "$release_count_after" == "$release_count_before" ]] || {
+  echo "failed runtime staging leaked a release directory: before=$release_count_before after=$release_count_after" >&2
+  exit 1
+}
+echo "OK failed managed runtime staging reclaims its partial release"
+
 for suffix in dll deps.json runtimeconfig.json; do
   mv "$UCI_STAGE/laplace-uci.$suffix" "$TEST_ROOT/missing-uci-file"
   if failed_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE" "$UCI_STAGE")"; then
@@ -145,6 +156,28 @@ for suffix in dll deps.json runtimeconfig.json; do
   mv "$TEST_ROOT/missing-uci-file" "$UCI_STAGE/laplace-uci.$suffix"
 done
 echo "OK apphost-only and incomplete UCI packages are rejected"
+
+# Garbage collection must reclaim unreferenced pre-lease directories that are
+# mechanically incomplete, while retaining a complete legacy release whose
+# cross-UID process ownership cannot be proved. This is the recovery path for a
+# partial runtime left by an older deploy implementation.
+GC_APP="$TEST_ROOT/gc-app"
+mkdir -p "$GC_APP/releases/runtime.incomplete/mcp"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$GC_APP/releases/runtime.incomplete/mcp/Laplace.Endpoints.Mcp"
+chmod 0755 "$GC_APP/releases/runtime.incomplete/mcp/Laplace.Endpoints.Mcp"
+legacy="$GC_APP/releases/runtime.legacy"
+mkdir -p "$legacy/mcp" "$legacy/lichess" "$legacy/uci"
+for exe in "$legacy/mcp/Laplace.Endpoints.Mcp" "$legacy/lichess/Laplace.Endpoints.Lichess" "$legacy/uci/laplace-uci"; do
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$exe"
+  chmod 0755 "$exe"
+done
+for suffix in dll deps.json runtimeconfig.json; do
+  printf 'legacy\n' > "$legacy/uci/laplace-uci.$suffix"
+done
+laplace_prune_unreferenced_releases "$GC_APP"
+[[ ! -e "$GC_APP/releases/runtime.incomplete" ]]
+[[ -d "$legacy" ]]
+echo "OK release GC reclaims incomplete pre-lease debris and preserves complete legacy runtimes"
 
 # Completed transaction backups are not an archive. Preserve exactly the active
 # rollback receipt when one is supplied, then reclaim it after the transaction ends.
