@@ -61,6 +61,13 @@ def main() -> int:
     assert "seed_ids[0] = root" in operands
     assert "content_witness_tree_root_id(tree, &root)" in operands
 
+    # Natural text must not bind the compatibility continuation relation set as
+    # its universal output purpose. The query-relative typed field elects the
+    # semantic candidates; forward_walk_continuations keeps the legacy contract.
+    forward_text = function_slice(walk, "generation.forward_text", "converse.forward_turn")
+    assert "CONTINUATION_OUTPUT" not in forward_text
+    assert "NULL::bytea[]" in forward_text
+
     # The whole prompt and persistent typed query state are now the forward
     # authority. The old explore-web pre-expansion and independent steer scan
     # must not regrow beside it.
@@ -124,7 +131,7 @@ def main() -> int:
     print(
         "FORWARD_PROMPT_ANALYSIS_OK "
         f"forward_text=exact_tree1 query_state=persistent evidence=typed-separate "
-        f"route_owner=native retired_wrappers=5 chat_steps={steps}"
+        f"output=query-relative route_owner=native retired_wrappers=5 chat_steps={steps}"
     )
     return 0
 
