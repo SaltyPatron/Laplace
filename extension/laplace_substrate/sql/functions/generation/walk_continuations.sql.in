@@ -35,8 +35,8 @@ CREATE OR REPLACE FUNCTION generation.forward_trace(
     LANGUAGE C VOLATILE;
 
 -- Normal generation is a projection of the traceable canonical native pass,
--- not another implementation. This keeps HTTP/chat/walk callers on exactly the
--- same election that the receipt surface observes without replaying the query.
+-- not another implementation. Route rows are execution receipts only; normal
+-- generation projects EMIT events so diagnostics never become output content.
 CREATE OR REPLACE FUNCTION generation.forward_prompt(
         p_prompt text, p_steps int, p_max_stride int,
         p_spread float8, p_top_k int, p_seed bigint,
@@ -48,7 +48,8 @@ BEGIN ATOMIC
     SELECT t.step, t.entity, t.stride_used, t.sep_entity
     FROM generation.forward_trace(
         p_prompt, p_steps, p_max_stride, p_spread, p_top_k, p_seed,
-        p_hops, p_fanout, p_prior_frontier, p_output_relation_types) AS t;
+        p_hops, p_fanout, p_prior_frontier, p_output_relation_types) AS t
+    WHERE t.event = 'emit';
 END;
 
 -- Physical co-occurrence is an independent observation route. The complete
