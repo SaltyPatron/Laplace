@@ -6,9 +6,11 @@ Exit codes (same contract as verify-model-behavioral.py):
   1 content-gate failure (or missing baseline without --record)
   2 harness/setup error (unseeded / unreachable / bad inputs)
 
-election_correctness lands first: hand-written expected topic surfaces vs
-prompt_coherence / resolve_topic rank-1. Content-rate detectors reuse the
-GLUE_WORDS stoplist from verify-model-behavioral (imported, not retyped).
+election_correctness remains a separately reported diagnostic. Production forward
+acceptance is blocking: every forward probe must emit something, must not leak
+substrate bookkeeping, and every probe with an explicit expected answer must reach
+that answer. A green elector or hygienic-but-empty/incorrect output is not a product
+success.
 """
 
 from __future__ import annotations
@@ -192,7 +194,8 @@ def prompt_coherence_rank1(
 
 # Rendering hygiene for the FORWARD PASS. These need no hand-written expected
 # answer, which is the point: they fail on output that is structurally wrong
-# regardless of whether the topic was right.
+# regardless of whether the topic was right. Hygiene is necessary but is not a
+# substitute for the expected-answer probes below.
 #
 # GROUNDED 2026-08-05, infer('The opposite of hot is') in production:
 #     WordNet_Synset   2264.2   <- rank 1, an entity TYPE as a prediction
@@ -242,12 +245,16 @@ def infer_predictions(api: str, prompt: str, limit: int = 8) -> tuple[list[str],
 
 
 def run_forward(api: str, probe: dict, type_names: set[str]) -> dict:
-    """The PRODUCTION entry point, not the elector behind it. A probe passes only
-    if the forward pass emits no leaked bookkeeping AND, when an answer is
-    specified, actually reaches it."""
+    """Exercise the deployed forward path.
+
+    Nonempty output is required but never sufficient. Every emitted surface must
+    pass bookkeeping hygiene, and an explicit expected answer is a blocking exact
+    requirement rather than report-only metadata.
+    """
     prompt = probe["prompt"]
     expected = probe.get("expected_answer_surface")
     preds, latency = infer_predictions(api, prompt, probe.get("limit", 8))
+    nonempty = bool(preds)
 
     leaks = []
     for p in preds:
@@ -262,7 +269,7 @@ def run_forward(api: str, probe: dict, type_names: set[str]) -> dict:
     if expected is not None:
         answered = any(p.lower() == expected.lower() for p in preds)
 
-    ok = not leaks and (answered is not False)
+    ok = nonempty and not leaks and (answered is not False)
     return {
         "id": probe.get("id"),
         "surface": "forward",
@@ -271,6 +278,7 @@ def run_forward(api: str, probe: dict, type_names: set[str]) -> dict:
         "prompt": prompt,
         "expected_answer_surface": expected,
         "predictions": preds,
+        "nonempty": nonempty,
         "leaks": leaks,
         "answer_reached": answered,
         "latency_s": round(latency, 4),
@@ -402,13 +410,21 @@ def main() -> None:
         "glue_words_imported": len(GLUE_WORDS),
     }
 
-    # The forward pass, scored separately from the elector behind it. An election
-    # verdict says the right topic was CHOSEN; it says nothing about what the
-    # system then emits, and the two came apart measurably on 2026-08-05.
+    # The forward pass is an independent blocking authority. A clean label is not
+    # a semantic success, and no output is not a clean success. Expected answers
+    # are part of the verdict, not report-only diagnostics.
     forward = [r for r in results if r.get("surface") == "forward"]
     if forward:
+        empty = [r for r in forward if not r.get("nonempty")]
         leaked = [r for r in forward if r.get("leaks")]
-        unreached = [r for r in forward if r.get("answer_reached") is False]
+        answerable = [r for r in forward if r.get("answer_reached") is not None]
+        unreached = [r for r in answerable if r.get("answer_reached") is False]
+        verdicts["forward_output"] = {
+            "passed": len(forward) - len(empty),
+            "total": len(forward),
+            "all_nonempty": len(empty) == 0,
+            "empty": [r["id"] for r in empty],
+        }
         verdicts["forward_hygiene"] = {
             "passed": len(forward) - len(leaked),
             "total": len(forward),
@@ -416,8 +432,9 @@ def main() -> None:
             "leaks": sorted({leak for r in leaked for leak in r["leaks"]}),
         }
         verdicts["forward_answer"] = {
-            "passed": len([r for r in forward if r.get("answer_reached") is True]),
-            "total": len([r for r in forward if r.get("answer_reached") is not None]),
+            "passed": len(answerable) - len(unreached),
+            "total": len(answerable),
+            "exact": len(answerable) > 0 and len(unreached) == 0,
             "unreached": [r["id"] for r in unreached],
         }
     if not election:
@@ -448,10 +465,10 @@ def main() -> None:
             },
             "latency_ceiling_s": latency_ceiling,
             "notes": (
-                "election_correctness is exact. Baseline sources are a required floor; "
-                "additional sources are allowed. Row estimates are reported for diagnosis "
-                "but never gate semantic comparability: planner maintenance and intentional "
-                "normalization both move them independently of probe correctness."
+                "election correctness, nonempty forward output, forward hygiene, and "
+                "explicit expected-answer probes are blocking. Baseline sources are a "
+                "required floor; additional sources are allowed. Row estimates are "
+                "reported for diagnosis but never gate semantic comparability."
             ),
         }
         baseline_path.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
@@ -476,16 +493,21 @@ def main() -> None:
             print(json.dumps(report, indent=2, ensure_ascii=False))
             sys.exit(1)
 
+    forward_required = "forward" in surfaces
     ok = (
         len(election) > 0
         and verdicts["election_correctness"]["exact"]
         and latency_budget_ok
         and "fingerprint_drift" not in verdicts
         and "no_scorable_probes" not in verdicts
-        # Forward hygiene is BLOCKING. A leaked entity type or internal key is a
-        # structural defect in the reply, not a ranking preference, so it fails
-        # the run outright rather than reporting alongside a PASS.
-        and verdicts.get("forward_hygiene", {"clean": True})["clean"]
+        and (
+            not forward_required
+            or (
+                verdicts.get("forward_output", {}).get("all_nonempty") is True
+                and verdicts.get("forward_hygiene", {}).get("clean") is True
+                and verdicts.get("forward_answer", {}).get("exact") is True
+            )
+        )
     )
     report["ok"] = ok
 
@@ -497,9 +519,15 @@ def main() -> None:
     print(
         f"\nEVAL {'PASS' if ok else 'FAIL'}: election "
         f"{len(election_ok)}/{len(election)} exact; "
+        f"forward_output "
+        f"{verdicts.get('forward_output', {}).get('passed', 0)}/"
+        f"{verdicts.get('forward_output', {}).get('total', 0)} nonempty; "
         f"forward_hygiene "
         f"{verdicts.get('forward_hygiene', {}).get('passed', 0)}/"
         f"{verdicts.get('forward_hygiene', {}).get('total', 0)} clean; "
+        f"forward_answer "
+        f"{verdicts.get('forward_answer', {}).get('passed', 0)}/"
+        f"{verdicts.get('forward_answer', {}).get('total', 0)} exact; "
         f"p50_latency={p50}s ceiling={latency_ceiling}s"
     )
     sys.exit(0 if ok else 1)
