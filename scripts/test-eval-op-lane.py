@@ -42,6 +42,10 @@ def _load_test_profiles():
 
 
 class _Response(BytesIO):
+    def __init__(self, data: bytes, headers: dict[str, str] | None = None):
+        super().__init__(data)
+        self.headers = headers or {}
+
     def __enter__(self):
         return self
 
