@@ -73,4 +73,45 @@ BEGIN
     END IF;
 END
 $completion_provenance$;
+
+-- The exact prompt trunk is itself the first cognition operand. A typed result
+-- attached to that trunk denotes the whole admitted request, so it must be able
+-- to discharge the request without pretending one constituent was the root.
+DO $whole_trunk_grounding$
+DECLARE
+    prompt text := 'cognitionalpha cognitionbeta';
+    prompt_root bytea;
+    answer_id bytea := public.laplace_hash128_blake3('test/cognition/trunk-answer');
+    causes_id bytea := laplace.relation_type_id('CAUSES');
+    completed boolean;
+    remaining int;
+BEGIN
+    SELECT p.root_id INTO prompt_root
+      FROM converse.prompt_tree(prompt) p
+     LIMIT 1;
+    IF prompt_root IS NULL THEN
+        RAISE EXCEPTION 'FAIL: canonical prompt trunk was not produced';
+    END IF;
+
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(prompt_root,causes_id,answer_id),
+         prompt_root,causes_id,answer_id,
+         2000000000000,30000000000,60000000,5,now());
+
+    SELECT p.completion, p.remaining_required
+      INTO completed, remaining
+      FROM generation.forward_program(
+          prompt,1,0,0.0,8,7,0,8,NULL,ARRAY[causes_id]) p
+     WHERE p.event IN ('complete','unresolved')
+     ORDER BY p.step DESC
+     LIMIT 1;
+    IF completed IS DISTINCT FROM true OR remaining IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION
+            'FAIL: typed whole-trunk result did not discharge the exact request: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+END
+$whole_trunk_grounding$;
 ROLLBACK;
