@@ -190,7 +190,16 @@ public sealed class ElectorArchitectureGateTests
     {
         var sql = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
             "extension","laplace_substrate","sql","functions","generation","walk_text.sql.in"));
-        Assert.Contains("generation.forward_prompt(", sql);
+        Assert.Contains("generation.forward_program(", sql);
+        Assert.DoesNotContain("generation.forward_prompt(", sql);
+        Assert.Contains("r.completion", sql);
+        Assert.Contains("r.semantic_act_id IS NOT NULL", sql);
+        var programSql = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "extension","laplace_substrate","sql","functions","generation","walk_continuations.sql.in"));
+        Assert.Contains("CREATE OR REPLACE FUNCTION generation.forward_program(", programSql);
+        Assert.Contains("program_id bytea", programSql);
+        Assert.Contains("remaining_required int", programSql);
+        Assert.Contains("semantic_act_id bytea", programSql);
         var native = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
             "extension", "laplace_substrate", "src", "trajectory_generate.c"));
         Assert.Contains("laplace_prompt_input(PG_GETARG_TEXT_PP(0))", native);
@@ -198,6 +207,9 @@ public sealed class ElectorArchitectureGateTests
         Assert.DoesNotContain("laplace_steer_candidates(", native);
         Assert.Contains("laplace_query_state_create(", native);
         Assert.Contains("laplace_query_state_extend(query_state, selected", native);
+        Assert.Contains("laplace_cognition_program_create(", native);
+        Assert.Contains("laplace_cognition_program_note_emit(", native);
+        Assert.Contains("if (receipt.complete)", native);
         Assert.Contains("forward_prompt(FunctionCallInfo fcinfo, bool trace)", native);
         Assert.Contains("walk_continuations(walk_call, input, hops, trace)", native);
         Assert.Contains("return forward_prompt(fcinfo, false);", native);

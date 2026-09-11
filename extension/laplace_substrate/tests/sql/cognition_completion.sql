@@ -1,0 +1,165 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+
+-- Completion must be driven by semantic grounding, not by the union of every
+-- ancestry provider that happened to nominate the selected identity. The same
+-- candidate below is a physical successor of `cognitionbeta` and a typed CAUSES
+-- result of `cognitionalpha`. Structural ancestry from the second constituent
+-- must not let the first constituent's semantic edge certify the whole request.
+BEGIN;
+DO $completion_provenance$
+DECLARE
+    alpha_id bytea := laplace.word_id('cognitionalpha');
+    beta_id bytea := laplace.word_id('cognitionbeta');
+    answer_id bytea := public.laplace_hash128_blake3('test/cognition/answer');
+    causes_id bytea := laplace.relation_type_id('CAUSES');
+    alpha_root bytea := public.laplace_hash128_blake3('test/cognition/alpha-sequence');
+    beta_root bytea := public.laplace_hash128_blake3('test/cognition/beta-sequence');
+    completed boolean;
+    remaining int;
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(alpha_id,causes_id,answer_id),
+         alpha_id,causes_id,answer_id,
+         2000000000000,30000000000,60000000,5,now());
+
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('test/cognition/alpha-physicality'),
+         alpha_root,1,public.ST_MakePoint(1,1,1,1),decode(repeat('00',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(alpha_id,1,1,0),
+             public.laplace_mantissa_pack(answer_id,2,1,0)]),2,now()),
+        (public.laplace_hash128_blake3('test/cognition/beta-physicality'),
+         beta_root,1,public.ST_MakePoint(2,2,2,2),decode(repeat('00',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(beta_id,1,1,0),
+             public.laplace_mantissa_pack(answer_id,2,1,0)]),2,now());
+
+    -- Control: one prompt coordinate has both exact structural continuation and
+    -- positive typed grounding to the emitted identity, so it can close.
+    SELECT p.completion, p.remaining_required
+      INTO completed, remaining
+      FROM generation.forward_program('cognitionalpha',1,1,0.0,8,7,0,8,NULL,NULL) p
+     WHERE p.event IN ('complete','unresolved')
+     ORDER BY p.step DESC
+     LIMIT 1;
+    IF completed IS DISTINCT FROM true OR remaining IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION
+            'FAIL: directly grounded single-coordinate program did not complete: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+
+    -- Regression: `answer` is structurally inherited from cognitionbeta and
+    -- semantically grounded from cognitionalpha. The mixed ancestry bitmap
+    -- contains both coordinates, but only alpha has typed grounding to this
+    -- selected identity. Beta must stay unresolved instead of being silently
+    -- dropped or certified by sequence.
+    SELECT p.completion, p.remaining_required
+      INTO completed, remaining
+      FROM generation.forward_program(
+          'cognitionalpha cognitionbeta',1,1,0.0,8,7,0,8,NULL,NULL) p
+     WHERE p.event IN ('complete','unresolved')
+     ORDER BY p.step DESC
+     LIMIT 1;
+    IF completed IS DISTINCT FROM false OR remaining IS NULL OR remaining <= 0 THEN
+        RAISE EXCEPTION
+            'FAIL: structural ancestry certified semantic completion: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+END
+$completion_provenance$;
+
+-- The exact prompt trunk is itself the first cognition operand. A typed result
+-- attached to that trunk denotes the whole admitted request, so it must be able
+-- to discharge the request without pretending one constituent was the root.
+DO $whole_trunk_grounding$
+DECLARE
+    prompt text := 'cognitionalpha cognitionbeta';
+    prompt_root bytea;
+    answer_id bytea := public.laplace_hash128_blake3('test/cognition/trunk-answer');
+    causes_id bytea := laplace.relation_type_id('CAUSES');
+    completed boolean;
+    remaining int;
+BEGIN
+    SELECT p.root_id INTO prompt_root
+      FROM converse.prompt_tree(prompt) p
+     LIMIT 1;
+    IF prompt_root IS NULL THEN
+        RAISE EXCEPTION 'FAIL: canonical prompt trunk was not produced';
+    END IF;
+
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(prompt_root,causes_id,answer_id),
+         prompt_root,causes_id,answer_id,
+         2000000000000,30000000000,60000000,5,now());
+
+    SELECT p.completion, p.remaining_required
+      INTO completed, remaining
+      FROM generation.forward_program(
+          prompt,1,0,0.0,8,7,0,8,NULL,ARRAY[causes_id]) p
+     WHERE p.event IN ('complete','unresolved')
+     ORDER BY p.step DESC
+     LIMIT 1;
+    IF completed IS DISTINCT FROM true OR remaining IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION
+            'FAIL: typed whole-trunk result did not discharge the exact request: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+END
+$whole_trunk_grounding$;
+
+-- Routing is a semantic state transition, not disposable search metadata. A
+-- typed path that must first route through one identity and then execute the
+-- requested result relation has to retain the original prompt grounding across
+-- that route. Otherwise a valid two-stage cognition program emits an answer but
+-- falsely reports its obligation unresolved.
+DO $routed_semantic_grounding$
+DECLARE
+    prompt text := 'cognitionhopalpha';
+    alpha_id bytea := laplace.word_id(prompt);
+    route_id bytea := public.laplace_hash128_blake3('test/cognition/route');
+    result_id bytea := public.laplace_hash128_blake3('test/cognition/routed-result');
+    route_relation bytea := laplace.relation_type_id('RELATED_TO');
+    result_relation bytea := laplace.relation_type_id('CAUSES');
+    completed boolean;
+    remaining int;
+    emitted bytea[];
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(alpha_id,route_relation,route_id),
+         alpha_id,route_relation,route_id,
+         2000000000000,30000000000,60000000,5,now()),
+        (laplace.consensus_id(route_id,result_relation,result_id),
+         route_id,result_relation,result_id,
+         2000000000000,30000000000,60000000,5,now());
+
+    SELECT array_agg(p.entity ORDER BY p.step) FILTER (WHERE p.event='emit'),
+           (array_agg(p.completion ORDER BY p.step DESC)
+                FILTER (WHERE p.event IN ('complete','unresolved')))[1],
+           (array_agg(p.remaining_required ORDER BY p.step DESC)
+                FILTER (WHERE p.event IN ('complete','unresolved')))[1]
+      INTO emitted, completed, remaining
+      FROM generation.forward_program(
+          prompt,1,0,0.0,8,7,1,8,NULL,ARRAY[result_relation]) p;
+
+    IF emitted IS DISTINCT FROM ARRAY[result_id] THEN
+        RAISE EXCEPTION
+            'FAIL: routed semantic program did not emit its declared result: %', emitted;
+    END IF;
+    IF completed IS DISTINCT FROM true OR remaining IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION
+            'FAIL: routed semantic grounding was lost before completion: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+END
+$routed_semantic_grounding$;
+ROLLBACK;

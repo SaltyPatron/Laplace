@@ -6,9 +6,13 @@ Exit codes (same contract as verify-model-behavioral.py):
   1 content-gate failure (or missing baseline without --record)
   2 harness/setup error (unseeded / unreachable / bad inputs)
 
-election_correctness lands first: hand-written expected topic surfaces vs
-prompt_coherence / resolve_topic rank-1. Content-rate detectors reuse the
-GLUE_WORDS stoplist from verify-model-behavioral (imported, not retyped).
+election_correctness remains a separately reported diagnostic. Production forward
+acceptance is blocking: every forward probe must emit something, must not leak
+substrate bookkeeping, and every probe with an explicit expected answer must reach
+that answer. The deployed OpenAI-compatible chat endpoint is exercised against the
+same probes and must independently satisfy the same output/answer requirements. A
+green elector, a valid JSON envelope, or hygienic-but-empty/incorrect output is not
+a product success.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-from laplace_api import LaplaceApiError, op_rows
+from laplace_api import LaplaceApiError, chat_completion, op_rows
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROBES = ROOT / "scripts" / "eval-probes.json"
@@ -190,39 +194,49 @@ def prompt_coherence_rank1(
     ), latency
 
 
-# Rendering hygiene for the FORWARD PASS. These need no hand-written expected
-# answer, which is the point: they fail on output that is structurally wrong
-# regardless of whether the topic was right.
-#
-# GROUNDED 2026-08-05, infer('The opposite of hot is') in production:
-#     WordNet_Synset   2264.2   <- rank 1, an entity TYPE as a prediction
-#     buz              1501.9
-#     jaa              1499.8
-#     lod              1455.2
-#     14915184-n       1373.3   <- a raw WordNet offset key as a prediction
-# The harness scored the run GREEN, because it only ever asked
-# prompt_coherence for a topic and never called the forward pass at all.
-#
-# A type is not an answer and an internal address is not an answer. Both are
-# leaks of the substrate's own bookkeeping into the reply.
+# Rendering hygiene for production inference/chat. Hygiene is necessary but is
+# not a substitute for answer correctness or nonempty output.
 OFFSET_KEY_RE = re.compile(r"^\d{6,10}-[nvasr]$")
 ILI_KEY_RE = re.compile(r"^i\d+$")
-# The content hash itself, rendered as a word. realize()'s last arm is
-# _realize_canonical, which prints the id when every naming arm abstains --
-# measured 2026-08-05 on the ice synset's IS_SYNONYM_OF neighbours:
-#     b6b080e5de7a4654728bb8519930859c...
-#     b9e2f3c9ceacc91f94d8ba386ff7fba0...
-# "Hubs are ADDRESSES, not names." A reply that cannot name a thing must say so,
-# not print where the thing lives. Trailing ellipsis because render_text
-# truncates.
 HEX_ID_RE = re.compile(r"^[0-9a-f]{16,32}\W*$")
 
 
 def entity_type_names(api: str) -> set[str]:
-    """The substrate's own entity-type roster, so the leak check is not a
-    hardcoded list that drifts the moment a type is added."""
+    """The substrate's own entity-type roster, so leak checks cannot drift."""
     rows = op_rows(api, "ops.entity_type_counts_approx", max_rows=1000)
     return {str(row["type"]).strip() for row in rows if str(row.get("type", "")).strip()}
+
+
+def prediction_leaks(predictions: list[str], type_names: set[str]) -> list[str]:
+    leaks: list[str] = []
+    for value in predictions:
+        if value in type_names:
+            leaks.append(f"entity-type:{value}")
+        elif OFFSET_KEY_RE.match(value) or ILI_KEY_RE.match(value):
+            leaks.append(f"internal-key:{value}")
+        elif HEX_ID_RE.match(value):
+            leaks.append(f"rendered-id:{value}")
+    return leaks
+
+
+def text_leaks(content: str, type_names: set[str]) -> list[str]:
+    leaks: list[str] = []
+    for type_name in sorted(type_names):
+        if type_name and re.search(rf"(?<!\w){re.escape(type_name)}(?!\w)", content):
+            leaks.append(f"entity-type:{type_name}")
+    for token in re.findall(r"\S+", content):
+        normalized = token.strip(".,;:!?()[]{}<>\"'`")
+        if not normalized:
+            continue
+        if OFFSET_KEY_RE.match(normalized) or ILI_KEY_RE.match(normalized):
+            leaks.append(f"internal-key:{normalized}")
+        elif HEX_ID_RE.match(normalized):
+            leaks.append(f"rendered-id:{normalized}")
+    return sorted(set(leaks))
+
+
+def contains_expected_surface(content: str, expected: str) -> bool:
+    return bool(re.search(rf"(?<!\w){re.escape(expected)}(?!\w)", content, re.IGNORECASE))
 
 
 def infer_predictions(api: str, prompt: str, limit: int = 8) -> tuple[list[str], float]:
@@ -242,27 +256,18 @@ def infer_predictions(api: str, prompt: str, limit: int = 8) -> tuple[list[str],
 
 
 def run_forward(api: str, probe: dict, type_names: set[str]) -> dict:
-    """The PRODUCTION entry point, not the elector behind it. A probe passes only
-    if the forward pass emits no leaked bookkeeping AND, when an answer is
-    specified, actually reaches it."""
+    """Exercise the deployed forward operation path."""
     prompt = probe["prompt"]
     expected = probe.get("expected_answer_surface")
     preds, latency = infer_predictions(api, prompt, probe.get("limit", 8))
-
-    leaks = []
-    for p in preds:
-        if p in type_names:
-            leaks.append(f"entity-type:{p}")
-        elif OFFSET_KEY_RE.match(p) or ILI_KEY_RE.match(p):
-            leaks.append(f"internal-key:{p}")
-        elif HEX_ID_RE.match(p):
-            leaks.append(f"rendered-id:{p}")
+    nonempty = bool(preds)
+    leaks = prediction_leaks(preds, type_names)
 
     answered = None
     if expected is not None:
         answered = any(p.lower() == expected.lower() for p in preds)
 
-    ok = not leaks and (answered is not False)
+    ok = nonempty and not leaks and (answered is not False)
     return {
         "id": probe.get("id"),
         "surface": "forward",
@@ -271,10 +276,51 @@ def run_forward(api: str, probe: dict, type_names: set[str]) -> dict:
         "prompt": prompt,
         "expected_answer_surface": expected,
         "predictions": preds,
+        "nonempty": nonempty,
         "leaks": leaks,
         "answer_reached": answered,
         "latency_s": round(latency, 4),
         "forward_clean": ok,
+        "miss": not ok,
+    }
+
+
+def run_chat(api: str, probe: dict, type_names: set[str]) -> dict:
+    """Exercise the actual non-streaming OpenAI-compatible product endpoint."""
+    prompt = probe["prompt"]
+    expected = probe.get("expected_answer_surface")
+    t0 = time.perf_counter()
+    content, session, response = chat_completion(api, prompt)
+    latency = time.perf_counter() - t0
+    content = content.strip()
+    nonempty = bool(content)
+    leaks = text_leaks(content, type_names)
+    answered = None
+    if expected is not None:
+        answered = contains_expected_surface(content, str(expected))
+    metadata = response.get("metadata") if isinstance(response.get("metadata"), dict) else {}
+    reply_rows = metadata.get("reply_rows") if isinstance(metadata, dict) else None
+    if reply_rows is None and isinstance(metadata, dict):
+        reply_rows = metadata.get("replyRows")
+    if reply_rows is not None and not isinstance(reply_rows, int):
+        reply_rows = None
+    session_present = bool(session)
+    ok = nonempty and not leaks and session_present and (answered is not False)
+    return {
+        "id": probe.get("id"),
+        "surface": "chat",
+        "class": "forward",
+        "held_out": bool(probe.get("held_out", False)),
+        "prompt": prompt,
+        "expected_answer_surface": expected,
+        "content": content,
+        "nonempty": nonempty,
+        "leaks": leaks,
+        "answer_reached": answered,
+        "session_present": session_present,
+        "reply_rows": reply_rows,
+        "latency_s": round(latency, 4),
+        "chat_clean": ok,
         "miss": not ok,
     }
 
@@ -308,6 +354,52 @@ def run_op_election(api: str, probe: dict) -> dict:
     }
 
 
+def summarize_surface(verdicts: dict, name: str, rows: list[dict]) -> None:
+    if not rows:
+        return
+    empty = [r for r in rows if not r.get("nonempty")]
+    leaked = [r for r in rows if r.get("leaks")]
+    answerable = [r for r in rows if r.get("answer_reached") is not None]
+    unreached = [r for r in answerable if r.get("answer_reached") is False]
+    verdicts[f"{name}_output"] = {
+        "passed": len(rows) - len(empty),
+        "total": len(rows),
+        "all_nonempty": len(empty) == 0,
+        "empty": [r["id"] for r in empty],
+    }
+    verdicts[f"{name}_hygiene"] = {
+        "passed": len(rows) - len(leaked),
+        "total": len(rows),
+        "clean": len(leaked) == 0,
+        "leaks": sorted({leak for r in leaked for leak in r["leaks"]}),
+    }
+    verdicts[f"{name}_answer"] = {
+        "passed": len(answerable) - len(unreached),
+        "total": len(answerable),
+        "exact": len(answerable) > 0 and len(unreached) == 0,
+        "unreached": [r["id"] for r in unreached],
+    }
+    if name == "chat":
+        missing_session = [r for r in rows if not r.get("session_present")]
+        verdicts["chat_session"] = {
+            "passed": len(rows) - len(missing_session),
+            "total": len(rows),
+            "all_present": len(missing_session) == 0,
+            "missing": [r["id"] for r in missing_session],
+        }
+
+
+def surface_passes(verdicts: dict, name: str) -> bool:
+    result = (
+        verdicts.get(f"{name}_output", {}).get("all_nonempty") is True
+        and verdicts.get(f"{name}_hygiene", {}).get("clean") is True
+        and verdicts.get(f"{name}_answer", {}).get("exact") is True
+    )
+    if name == "chat":
+        result = result and verdicts.get("chat_session", {}).get("all_present") is True
+    return result
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--api", default="http://127.0.0.1:8080", help="deployed HTTP base")
@@ -317,11 +409,8 @@ def main() -> None:
     ap.add_argument("--record", action="store_true", help="write baseline from this run")
     ap.add_argument(
         "--surfaces",
-        # `forward` is ON by default deliberately. It is the production entry
-        # point; leaving it opt-in is how a green board coexisted with a forward
-        # pass emitting an entity type as its rank-1 answer.
-        default="op,forward",
-        help="comma list: op,forward",
+        default="op,forward,chat",
+        help="comma list: op,forward,chat",
     )
     args = ap.parse_args()
 
@@ -344,7 +433,6 @@ def main() -> None:
         sys.exit(2)
 
     baseline_path: Path = args.baseline
-    # Refuse before expensive election probes when there is nothing to compare to.
     if not args.record:
         baseline_pre = {}
         if baseline_path.is_file():
@@ -359,25 +447,33 @@ def main() -> None:
     probes_doc = json.loads(args.probes.read_text(encoding="utf-8"))
     probes = probes_doc.get("probes") or []
     surfaces = {s.strip() for s in args.surfaces.split(",") if s.strip()}
+    unknown_surfaces = surfaces - {"op", "forward", "chat"}
+    if unknown_surfaces:
+        sys.stderr.write(f"unknown evaluation surfaces: {sorted(unknown_surfaces)}\n")
+        sys.exit(2)
 
     results: list[dict] = []
-    # Fetched once, not per probe: the roster is the substrate's own, so a new
-    # entity type is covered the moment it exists.
     type_names: set[str] = set()
-    if any(p.get("class") == "forward" for p in probes) and "forward" in surfaces:
+    if any(p.get("class") == "forward" for p in probes) and ({"forward", "chat"} & surfaces):
         type_names = entity_type_names(args.api)
 
-    for probe in probes:
-        if probe.get("class") == "forward":
-            if "forward" in surfaces:
-                results.append(run_forward(args.api, probe, type_names))
-            continue
-        if "op" in surfaces and probe.get("surface", "op") in ("op", "both"):
-            if probe.get("class") == "election" or probe.get("expected_topic_surface"):
-                results.append(run_op_election(args.api, probe))
+    try:
+        for probe in probes:
+            if probe.get("class") == "forward":
+                if "forward" in surfaces:
+                    results.append(run_forward(args.api, probe, type_names))
+                if "chat" in surfaces:
+                    results.append(run_chat(args.api, probe, type_names))
+                continue
+            if "op" in surfaces and probe.get("surface", "op") in ("op", "both"):
+                if probe.get("class") == "election" or probe.get("expected_topic_surface"):
+                    results.append(run_op_election(args.api, probe))
+    except (LaplaceApiError, KeyError, TypeError, ValueError) as ex:
+        sys.stderr.write(f"product evaluation failed: {ex}\n")
+        sys.exit(1)
 
     # Misses before hits (plan standard of evidence).
-    results.sort(key=lambda r: (0 if r.get("miss") else 1, r.get("id") or ""))
+    results.sort(key=lambda r: (0 if r.get("miss") else 1, r.get("surface") or "", r.get("id") or ""))
 
     election = [r for r in results if "election_correctness" in r]
     election_ok = [r for r in election if r["election_correctness"]]
@@ -402,25 +498,11 @@ def main() -> None:
         "glue_words_imported": len(GLUE_WORDS),
     }
 
-    # The forward pass, scored separately from the elector behind it. An election
-    # verdict says the right topic was CHOSEN; it says nothing about what the
-    # system then emits, and the two came apart measurably on 2026-08-05.
     forward = [r for r in results if r.get("surface") == "forward"]
-    if forward:
-        leaked = [r for r in forward if r.get("leaks")]
-        unreached = [r for r in forward if r.get("answer_reached") is False]
-        verdicts["forward_hygiene"] = {
-            "passed": len(forward) - len(leaked),
-            "total": len(forward),
-            "clean": len(leaked) == 0,
-            "leaks": sorted({leak for r in leaked for leak in r["leaks"]}),
-        }
-        verdicts["forward_answer"] = {
-            "passed": len([r for r in forward if r.get("answer_reached") is True]),
-            "total": len([r for r in forward if r.get("answer_reached") is not None]),
-            "unreached": [r["id"] for r in unreached],
-        }
-    if not election:
+    chat = [r for r in results if r.get("surface") == "chat"]
+    summarize_surface(verdicts, "forward", forward)
+    summarize_surface(verdicts, "chat", chat)
+    if "op" in surfaces and not election:
         verdicts["no_scorable_probes"] = True
 
     report = {
@@ -436,22 +518,19 @@ def main() -> None:
             "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "advisory_until": probes_doc.get("advisory_until", "2026-08-10"),
             "blocking_flip_date": probes_doc.get("blocking_flip_date"),
-            # These sources are the minimum corpus floor needed by the probes.
-            # Later seed workflows may add sources before the next code push.
             "sources": sources,
             "fingerprint": fp,
             "election": {
                 "passed": len(election_ok),
                 "total": len(election),
-                # Hand-written expected surfaces are the truth; rates are informational.
                 "require_exact": True,
             },
             "latency_ceiling_s": latency_ceiling,
             "notes": (
-                "election_correctness is exact. Baseline sources are a required floor; "
-                "additional sources are allowed. Row estimates are reported for diagnosis "
-                "but never gate semantic comparability: planner maintenance and intentional "
-                "normalization both move them independently of probe correctness."
+                "election correctness and each enabled production surface independently "
+                "block on nonempty output, hygiene, and explicit expected-answer probes; "
+                "chat additionally requires a returned substrate session key. Baseline "
+                "sources are a required floor; row estimates are diagnostic only."
             ),
         }
         baseline_path.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
@@ -463,7 +542,6 @@ def main() -> None:
             "recorded_at": baseline.get("recorded_at"),
             "advisory_until": baseline.get("advisory_until"),
         }
-        # Incomparable substrate → re-record required (not a silent pass).
         drift = fingerprint_drift(baseline, fp, sources)
         if drift is not None:
             verdicts["fingerprint_drift"] = drift
@@ -476,16 +554,17 @@ def main() -> None:
             print(json.dumps(report, indent=2, ensure_ascii=False))
             sys.exit(1)
 
+    enabled_product_surfaces = [name for name in ("forward", "chat") if name in surfaces]
     ok = (
-        len(election) > 0
-        and verdicts["election_correctness"]["exact"]
-        and latency_budget_ok
+        ("op" not in surfaces or (
+            len(election) > 0
+            and verdicts["election_correctness"]["exact"]
+            and latency_budget_ok
+            and "no_scorable_probes" not in verdicts
+        ))
         and "fingerprint_drift" not in verdicts
-        and "no_scorable_probes" not in verdicts
-        # Forward hygiene is BLOCKING. A leaked entity type or internal key is a
-        # structural defect in the reply, not a ranking preference, so it fails
-        # the run outright rather than reporting alongside a PASS.
-        and verdicts.get("forward_hygiene", {"clean": True})["clean"]
+        and bool(enabled_product_surfaces)
+        and all(surface_passes(verdicts, name) for name in enabled_product_surfaces)
     )
     report["ok"] = ok
 
@@ -497,9 +576,16 @@ def main() -> None:
     print(
         f"\nEVAL {'PASS' if ok else 'FAIL'}: election "
         f"{len(election_ok)}/{len(election)} exact; "
-        f"forward_hygiene "
-        f"{verdicts.get('forward_hygiene', {}).get('passed', 0)}/"
-        f"{verdicts.get('forward_hygiene', {}).get('total', 0)} clean; "
+        f"forward_output {verdicts.get('forward_output', {}).get('passed', 0)}/"
+        f"{verdicts.get('forward_output', {}).get('total', 0)} nonempty; "
+        f"forward_answer {verdicts.get('forward_answer', {}).get('passed', 0)}/"
+        f"{verdicts.get('forward_answer', {}).get('total', 0)} exact; "
+        f"chat_output {verdicts.get('chat_output', {}).get('passed', 0)}/"
+        f"{verdicts.get('chat_output', {}).get('total', 0)} nonempty; "
+        f"chat_answer {verdicts.get('chat_answer', {}).get('passed', 0)}/"
+        f"{verdicts.get('chat_answer', {}).get('total', 0)} exact; "
+        f"chat_session {verdicts.get('chat_session', {}).get('passed', 0)}/"
+        f"{verdicts.get('chat_session', {}).get('total', 0)} present; "
         f"p50_latency={p50}s ceiling={latency_ceiling}s"
     )
     sys.exit(0 if ok else 1)

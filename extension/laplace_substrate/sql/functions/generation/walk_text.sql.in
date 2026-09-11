@@ -7,14 +7,13 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    -- Native execution retains the complete query tree. Natural prompt output
-    -- is elected from that query-relative typed state; the compatibility
-    -- CONTINUATION_OUTPUT set remains on forward_walk_continuations, not here.
-    -- This prevents a fixed completion vocabulary from standing in for the
-    -- prompt's actual definitional/causal/taxonomic/etc. evidence field.
-    WITH walked AS MATERIALIZED (
+    -- One native invocation owns admission, routing, exact candidate evidence,
+    -- completion and the semantic-act receipt. Realization is allowed only after
+    -- that invocation has closed every required prompt obligation. Raw emitted
+    -- identities from an exhausted search are not silently promoted to an answer.
+    WITH execution AS MATERIALIZED (
         SELECT g.*
-        FROM generation.forward_prompt(
+        FROM generation.forward_program(
                  p_prompt, p_steps, p_max_stride, p_spread, p_top_k,
                  COALESCE(
                      p_seed,
@@ -22,17 +21,31 @@ BEGIN ATOMIC
                          convert_to(p_prompt, 'UTF8')))),
                  p_hops, p_fanout, p_prior_frontier,
                  NULL::bytea[]) g
+    ), receipt AS MATERIALIZED (
+        SELECT completion, disposition, semantic_act_id, output_fingerprint
+        FROM execution
+        WHERE event IN ('complete', 'unresolved')
+        ORDER BY step DESC
+        LIMIT 1
+    ), walked AS MATERIALIZED (
+        SELECT g.step, g.entity, g.stride_used, g.sep_entity
+        FROM execution g
+        CROSS JOIN receipt r
+        WHERE g.event = 'emit'
+          AND r.completion
+          AND r.semantic_act_id IS NOT NULL
     ), ids AS MATERIALIZED (
         SELECT array_agg(entity ORDER BY step) AS entities,
                array_agg(sep_entity ORDER BY step) AS separators
         FROM walked
     ), txt AS MATERIALIZED (
-        -- Selection retains semantic identities. The shared realization ladder
-        -- preserves exact content first and descends to witnessed surfaces for
-        -- typed results that have no text physicality of their own.
+        -- The semantic act has already been selected in hash space. This is a
+        -- lazy, positional realization of only that completed act; rendering
+        -- cannot alter standing, obligation closure, or act identity.
         SELECT realize.batch(entities) AS entities,
                realize.render_text_batch(separators) AS separators
         FROM ids
+        WHERE entities IS NOT NULL
     )
     SELECT w.step,
            t.entities[rn] || COALESCE(t.separators[rn], ''),
@@ -94,7 +107,7 @@ END;
 
 -- Upgrade retirement. These text routing surfaces had no callers outside the
 -- recursive chain removed above. They must be dropped only AFTER forward_text is
--- rebound to the native forward_prompt: BEGIN ATOMIC records pg_depend, so dropping
+-- rebound to the native forward program: BEGIN ATOMIC records pg_depend, so dropping
 -- them earlier would make an in-place extension upgrade fail under RESTRICT.
 DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);
 DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);
