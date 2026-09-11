@@ -333,6 +333,22 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
 }
 
 void
+laplace_cognition_program_note_semantic_channels(
+    LaplaceCognitionProgram *program,
+    const LaplaceQueryChannel *channels,
+    int channel_count)
+{
+    MemoryContext previous;
+
+    if (!program || !channels || channel_count <= 0 || program->complete)
+        return;
+    previous = MemoryContextSwitchTo(program->owner);
+    for (int i = 0; i < channel_count; ++i)
+        record_semantic_channel(program, &channels[i]);
+    MemoryContextSwitchTo(previous);
+}
+
+void
 laplace_cognition_program_note_route(LaplaceCognitionProgram *program)
 {
     if (!program || program->complete)
