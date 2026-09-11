@@ -46,6 +46,16 @@ LaplaceCognitionProgram *laplace_cognition_program_create(
     const LaplaceQueryChannel *initial_channels,
     int initial_channel_count);
 
+/* Fold exact positive typed transitions into semantic provenance. This is
+ * separate from physical/trajectory ancestry: a structural successor never
+ * acquires semantic grounding merely because it shares an identity with a
+ * typed candidate. Repeated calls advance provenance through routed semantic
+ * state without rescanning or reclassifying the prompt text. */
+void laplace_cognition_program_note_semantic_channels(
+    LaplaceCognitionProgram *program,
+    const LaplaceQueryChannel *channels,
+    int channel_count);
+
 /* ROUTE changes working knowledge but is not an output act. */
 void laplace_cognition_program_note_route(LaplaceCognitionProgram *program);
 
