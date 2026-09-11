@@ -4,12 +4,19 @@
 
 #include "catalog/pg_type.h"
 #include "utils/array.h"
+#include "utils/hsearch.h"
 #include "utils/memutils.h"
 
 #include "laplace/core/hash128.h"
 
 #include "cognition_program.h"
 #include "walk_score.h"
+
+typedef struct SemanticOriginEntry
+{
+    hash128_t id;
+    Bitmapset *origins;
+} SemanticOriginEntry;
 
 struct LaplaceCognitionProgram
 {
@@ -18,6 +25,7 @@ struct LaplaceCognitionProgram
     hash128_t program_id;
     Bitmapset *required;
     Bitmapset *satisfied;
+    HTAB *direct_semantic_origins;
     hash128_t *outputs;
     int output_count;
     int output_capacity;
@@ -123,6 +131,38 @@ program_reserve_output(LaplaceCognitionProgram *program)
     program->output_capacity = capacity;
 }
 
+static HTAB *
+semantic_origin_index(MemoryContext owner, int expected)
+{
+    HASHCTL ctl = {0};
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(SemanticOriginEntry);
+    ctl.hcxt = owner;
+    return hash_create("cognition direct semantic origins", Max(expected, 16), &ctl,
+                       HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+}
+
+static void
+record_direct_semantic_origin(LaplaceCognitionProgram *program,
+                              const LaplaceQueryChannel *channel,
+                              Bitmapset *eligible, int prompt_origin_count)
+{
+    int origin = channel->ordinal - 1;
+    bool found;
+    SemanticOriginEntry *entry;
+
+    if (origin < 0 || origin >= prompt_origin_count ||
+        !bms_is_member(origin, eligible) ||
+        !(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0))
+        return;
+
+    entry = hash_search(program->direct_semantic_origins,
+                        &channel->candidate, HASH_ENTER, &found);
+    if (!found)
+        entry->origins = NULL;
+    entry->origins = bms_add_member(entry->origins, origin);
+}
+
 LaplaceCognitionProgram *
 laplace_cognition_program_create(const LaplacePromptInput *input,
                                  int prompt_origin_count,
@@ -142,7 +182,6 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     const uint8_t *tiers;
     size_t tree_nodes;
     Bitmapset *eligible = NULL;
-    Bitmapset *addressable = NULL;
     hash128_t *required_ids;
     int required_count = 0;
 
@@ -162,12 +201,10 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         ereport(ERROR,
                 (errmsg("cognition program: prompt occurrence projections disagree")));
 
-    /* Obligations are coordinates in the exact admitted prompt, not guessed
-     * English intents. Tier-2-or-higher boundary occurrences are semantic
-     * content candidates. If typed query evidence can address at least one of
-     * them, only addressable semantic coordinates become required; otherwise
-     * the exact semantic coordinates remain unresolved requirements rather
-     * than disappearing because the current world has no edge for them. */
+    /* These are exact semantic-coordinate requirements, not evidence-presence
+     * requirements. A coordinate with no currently addressable typed edge must
+     * remain required and unresolved. Dropping it merely because proposal-time
+     * evidence cannot reach it turns missing knowledge into false completion. */
     for (int i = 0; i < prompt_origin_count; ++i)
     {
         int32 node;
@@ -182,17 +219,6 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
             eligible = bms_add_member(eligible, i);
     }
 
-    for (int i = 0; i < initial_channel_count; ++i)
-    {
-        const LaplaceQueryChannel *channel = &initial_channels[i];
-        int origin = channel->ordinal - 1;
-        if (origin < 0 || origin >= prompt_origin_count ||
-            !bms_is_member(origin, eligible))
-            continue;
-        if (walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0)
-            addressable = bms_add_member(addressable, origin);
-    }
-
     owner = AllocSetContextCreate(parent, "cognition completion program",
                                   ALLOCSET_DEFAULT_SIZES);
     previous = MemoryContextSwitchTo(owner);
@@ -200,11 +226,26 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     program->owner = owner;
     program->root = input->root;
     program->disposition = LAPLACE_COGNITION_OPEN;
-    program->required = addressable ? bms_copy(addressable) : bms_copy(eligible);
+    program->required = bms_copy(eligible);
+    program->direct_semantic_origins = semantic_origin_index(owner, initial_channel_count);
+
+    /* Preserve semantic and structural provenance as different facts. The
+     * forward executor's ancestry bitmap can contain both a trajectory suffix
+     * and typed relation ancestry. It is therefore not, by itself, proof that
+     * every inherited prompt coordinate received semantic support. Record the
+     * direct typed grounding available at program compilation and require an
+     * emitted identity to match that grounding before it may satisfy a semantic
+     * coordinate. Later routed semantic grounding remains conservative here:
+     * until it is explicitly supplied as a typed resolution it cannot create a
+     * false completion certificate. */
+    for (int i = 0; i < initial_channel_count; ++i)
+        record_direct_semantic_origin(program, &initial_channels[i], eligible,
+                                      prompt_origin_count);
+
     if (!program->required && prompt_origin_count > 0)
     {
         /* A punctuation-only/unknown prompt still has an exact observation.
-         * Keep it as an unresolved obligation rather than auto-completing an
+         * Keep it as an unresolved requirement rather than auto-completing an
          * empty semantic program. */
         for (int i = 0; i < prompt_origin_count; ++i)
             program->required = bms_add_member(program->required, i);
@@ -230,7 +271,6 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     MemoryContextSwitchTo(previous);
 
     bms_free(eligible);
-    bms_free(addressable);
     if (node_value_count > 0)
     {
         pfree(node_values);
@@ -261,6 +301,7 @@ laplace_cognition_program_note_emit(LaplaceCognitionProgram *program,
                                     bool semantic_support)
 {
     MemoryContext previous;
+    Bitmapset *semantic = NULL;
     Bitmapset *covered = NULL;
 
     if (!program || !selected)
@@ -274,11 +315,22 @@ laplace_cognition_program_note_emit(LaplaceCognitionProgram *program,
             elog(ERROR, "cognition program: semantic output count overflow");
         ++program->semantic_output_count;
     }
-    if (origins && program->required)
+
+    /* Structural ancestry cannot satisfy a semantic requirement. The selected
+     * identity must have direct positive typed grounding for the exact prompt
+     * origin as well as carry that origin in the executor's provenance. */
+    if (semantic_support && origins && program->required)
     {
-        covered = bms_intersect(origins, program->required);
-        program->satisfied = bms_add_members(program->satisfied, covered);
-        bms_free(covered);
+        SemanticOriginEntry *grounding = hash_search(
+            program->direct_semantic_origins, selected, HASH_FIND, NULL);
+        if (grounding && grounding->origins)
+        {
+            semantic = bms_intersect(origins, grounding->origins);
+            covered = bms_intersect(semantic, program->required);
+            program->satisfied = bms_add_members(program->satisfied, covered);
+            bms_free(covered);
+            bms_free(semantic);
+        }
     }
     program_output_fingerprint(program);
     program_try_complete(program);
