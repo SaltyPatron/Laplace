@@ -8,6 +8,7 @@
 #include "utils/memutils.h"
 
 #include "laplace/core/hash128.h"
+#include "laplace/core/relation_law.h"
 
 #include "cognition_program.h"
 #include "walk_score.h"
@@ -25,7 +26,7 @@ struct LaplaceCognitionProgram
     hash128_t program_id;
     Bitmapset *required;
     Bitmapset *satisfied;
-    HTAB *direct_semantic_origins;
+    HTAB *semantic_origins;
     hash128_t *outputs;
     int output_count;
     int output_capacity;
@@ -138,29 +139,58 @@ semantic_origin_index(MemoryContext owner, int expected)
     ctl.keysize = sizeof(hash128_t);
     ctl.entrysize = sizeof(SemanticOriginEntry);
     ctl.hcxt = owner;
-    return hash_create("cognition direct semantic origins", Max(expected, 16), &ctl,
+    return hash_create("cognition semantic origins", Max(expected, 16), &ctl,
                        HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 }
 
-static void
-record_direct_semantic_origin(LaplaceCognitionProgram *program,
-                              const LaplaceQueryChannel *channel,
-                              Bitmapset *eligible, int prompt_origin_count)
+static SemanticOriginEntry *
+semantic_origin_get(LaplaceCognitionProgram *program, const hash128_t *id,
+                    bool create)
 {
-    int origin = channel->ordinal - 1;
-    bool found;
-    SemanticOriginEntry *entry;
+    bool found = false;
+    SemanticOriginEntry *entry = hash_search(
+        program->semantic_origins, id, create ? HASH_ENTER : HASH_FIND,
+        create ? &found : NULL);
+    if (create && entry && !found)
+        entry->origins = NULL;
+    return entry;
+}
 
-    if (origin < 0 || origin >= prompt_origin_count ||
-        !bms_is_member(origin, eligible) ||
-        !(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0))
+static void
+semantic_origin_add(LaplaceCognitionProgram *program, const hash128_t *id,
+                    int origin)
+{
+    SemanticOriginEntry *entry = semantic_origin_get(program, id, true);
+    entry->origins = bms_add_member(entry->origins, origin);
+}
+
+static bool
+semantic_channel_traversable(const LaplaceQueryChannel *channel)
+{
+    const laplace_relation_def_t *def = NULL;
+
+    if (channel->outbound)
+        return true;
+    return laplace_relation_lookup(&channel->relation, &def) == 0 &&
+           def != NULL && def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC;
+}
+
+static void
+record_semantic_channel(LaplaceCognitionProgram *program,
+                        const LaplaceQueryChannel *channel)
+{
+    SemanticOriginEntry *anchor;
+    SemanticOriginEntry *candidate;
+
+    if (!(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0) ||
+        !semantic_channel_traversable(channel))
         return;
 
-    entry = hash_search(program->direct_semantic_origins,
-                        &channel->candidate, HASH_ENTER, &found);
-    if (!found)
-        entry->origins = NULL;
-    entry->origins = bms_add_member(entry->origins, origin);
+    anchor = semantic_origin_get(program, &channel->anchor, false);
+    if (!anchor || !anchor->origins)
+        return;
+    candidate = semantic_origin_get(program, &channel->candidate, true);
+    candidate->origins = bms_add_members(candidate->origins, anchor->origins);
 }
 
 LaplaceCognitionProgram *
@@ -227,20 +257,8 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     program->root = input->root;
     program->disposition = LAPLACE_COGNITION_OPEN;
     program->required = bms_copy(eligible);
-    program->direct_semantic_origins = semantic_origin_index(owner, initial_channel_count);
-
-    /* Preserve semantic and structural provenance as different facts. The
-     * forward executor's ancestry bitmap can contain both a trajectory suffix
-     * and typed relation ancestry. It is therefore not, by itself, proof that
-     * every inherited prompt coordinate received semantic support. Record the
-     * direct typed grounding available at program compilation and require an
-     * emitted identity to match that grounding before it may satisfy a semantic
-     * coordinate. Later routed semantic grounding remains conservative here:
-     * until it is explicitly supplied as a typed resolution it cannot create a
-     * false completion certificate. */
-    for (int i = 0; i < initial_channel_count; ++i)
-        record_direct_semantic_origin(program, &initial_channels[i], eligible,
-                                      prompt_origin_count);
+    program->semantic_origins = semantic_origin_index(
+        owner, prompt_origin_count + initial_channel_count + 1);
 
     if (!program->required && prompt_origin_count > 0)
     {
@@ -250,6 +268,36 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         for (int i = 0; i < prompt_origin_count; ++i)
             program->required = bms_add_member(program->required, i);
     }
+
+    /* Semantic provenance starts at the admitted prompt occurrences themselves.
+     * The whole prompt trunk denotes the exact observation, so it carries the
+     * union of those required coordinates. Supplemental history/frontier ids are
+     * intentionally not seeded: they may guide this turn but are not this turn's
+     * completion obligations. */
+    for (int i = 0; i < prompt_origin_count; ++i)
+    {
+        bytea *value;
+        hash128_t id;
+        if (!bms_is_member(i, program->required))
+            continue;
+        value = DatumGetByteaPP(context_values[i]);
+        if (VARSIZE_ANY_EXHDR(value) != sizeof(hash128_t))
+            ereport(ERROR,
+                    (errmsg("cognition program: prompt identity must be 16 bytes")));
+        memcpy(&id, VARDATA_ANY(value), sizeof(id));
+        semantic_origin_add(program, &id, i);
+    }
+    {
+        SemanticOriginEntry *root = semantic_origin_get(program, &input->root, true);
+        root->origins = bms_add_members(root->origins, program->required);
+    }
+
+    /* Proposal channels are not completion by themselves, but they establish
+     * typed semantic reachability from the exact prompt/trunk. Incoming
+     * asymmetric testimony is retained elsewhere as evidence and cannot be
+     * inverted into a semantic transition here. */
+    for (int i = 0; i < initial_channel_count; ++i)
+        record_semantic_channel(program, &initial_channels[i]);
 
     required_count = bms_num_members(program->required);
     required_ids = palloc(sizeof(hash128_t) * Max(required_count, 1));
@@ -317,12 +365,11 @@ laplace_cognition_program_note_emit(LaplaceCognitionProgram *program,
     }
 
     /* Structural ancestry cannot satisfy a semantic requirement. The selected
-     * identity must have direct positive typed grounding for the exact prompt
-     * origin as well as carry that origin in the executor's provenance. */
+     * identity must have positive typed reachability from the same prompt
+     * coordinates that the executor reports in its provenance. */
     if (semantic_support && origins && program->required)
     {
-        SemanticOriginEntry *grounding = hash_search(
-            program->direct_semantic_origins, selected, HASH_FIND, NULL);
+        SemanticOriginEntry *grounding = semantic_origin_get(program, selected, false);
         if (grounding && grounding->origins)
         {
             semantic = bms_intersect(origins, grounding->origins);
