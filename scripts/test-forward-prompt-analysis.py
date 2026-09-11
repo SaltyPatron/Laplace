@@ -103,9 +103,10 @@ def main() -> int:
     assert "walk_continuations(walk_call, input, hops, trace)" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
 
-    # Physical sequence and semantic relation providers share prompt ancestry,
-    # but retain separate evidence laws. This is the bridge that lets either
-    # provider satisfy a typed prompt obligation without flattening both planes.
+    # Structural and semantic providers may contribute ancestry to the same
+    # selected identity, but structural ancestry alone must never satisfy a
+    # semantic requirement. The completion program therefore keeps direct typed
+    # grounding by candidate separate from the executor's mixed ancestry bitmap.
     assert "origin_inherit_sequence(" in program
     assert "propagate_candidate_origins(" in program
     assert "laplace_cognition_program_create(" in program
@@ -119,7 +120,10 @@ def main() -> int:
     completion_header = (ROOT / "extension/laplace_substrate/src/cognition_program.h").read_text()
     assert "tiers[node] >= 2" in completion
     assert "channel->ordinal - 1" in completion
-    assert "bms_intersect(origins, program->required)" in completion
+    assert "program->required = bms_copy(eligible)" in completion
+    assert "direct_semantic_origins" in completion
+    assert "bms_intersect(origins, grounding->origins)" in completion
+    assert "addressable ? bms_copy(addressable)" not in completion
     assert "program->semantic_output_count <= 0" in completion
     assert "laplace:semantic-act:v1" in completion
     assert "LAPLACE_COGNITION_BUDGET_EXHAUSTED" in completion_header
