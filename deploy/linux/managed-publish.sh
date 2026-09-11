@@ -93,7 +93,16 @@ case "${1:-}" in
     python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --snapshot "$backup/stockfish.json"
     # Snapshot before replacing any app file. Preserve runtime config, logs,
     # user work, and all prior immutable runtime directories IN PLACE.
-    rsync -a --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'chess-lab-work/' \
+    #
+    # The rollback snapshot lives on the same /opt/laplace filesystem as APP_DIR.
+    # Do not allocate a second physical copy of every unchanged runtime/native file:
+    # --link-dest links the snapshot to the current inode. The deploy path below uses
+    # laplace_sync_payload's ordinary rsync replacement semantics (never --inplace),
+    # so a changed/deleted live file gets a new inode while the snapshot keeps the old
+    # bytes. This makes rollback space proportional to changed payload instead of the
+    # complete installed application and prevents ENOSPC while creating the backup.
+    rsync -a --link-dest="$APP_DIR" \
+      --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'chess-lab-work/' \
       --exclude 'mcp-runtime/' --exclude 'mcp/' --exclude 'releases/' "$APP_DIR/" "$backup/app/"
     for name in mcp operator lichess stripe; do
       if [[ -f "/opt/laplace/secrets/$name.env" ]]; then

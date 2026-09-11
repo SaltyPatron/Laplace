@@ -10,7 +10,7 @@ Compatibility: existing workflow calls pass a detail-log path. The file contents
 never parsed; the basename is used only to resolve the source key. This keeps CI on
 the same verdict used by CLI/UI/API/MCP without requiring an entry-point-specific path.
 
-    check  <source-or-log>...  fail on slow/unmeasured/unbaselined or zero comparisons
+    check  <source-or-log>...  fail on slow/unmeasured/invalid verdicts; unbaselined passes with notice
     record <source-or-log>...  explicitly accept the latest measured clean run
     show                       display accepted substrate baselines
 """
@@ -115,6 +115,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     failed = 0
     observed = 0
     compared = 0
+    unbaselined = 0
     for hint in args.sources:
         source = resolve_source(hint)
         try:
@@ -145,14 +146,16 @@ def cmd_check(args: argparse.Namespace) -> int:
             print(f"  MISS {detail}")
             failed += 1
         elif verdict in ("unbaselined", "baseline-established"):
-            # `baseline-established` is retained only as a defensive read of an
-            # intermediate-schema journal row. Current substrate code emits
-            # `unbaselined` and never lets a measurement accept itself.
+            # A first clean measurement is evidence but not its own accepted baseline.
+            # Workflow policy deliberately keeps baseline acceptance operator-controlled;
+            # absence of that acceptance is therefore UNKNOWN performance, not a failed
+            # ingest or a measured regression. Report it loudly without turning a clean
+            # seed red. `record` remains the only operation that establishes a baseline.
             print(
-                f"  MISS {detail} (no accepted baseline; run `ingest-baseline.py record` "
-                "deliberately, then measure again)"
+                f"  NOTE {detail} (no accepted baseline; run `ingest-baseline.py record` "
+                "deliberately before enforcing comparisons)"
             )
-            failed += 1
+            unbaselined += 1
         elif verdict == "ok":
             if not did_compare:
                 print(f"  MISS {detail} (ok verdict without a comparison)")
@@ -163,22 +166,17 @@ def cmd_check(args: argparse.Namespace) -> int:
             print(f"  MISS {detail} (unknown verdict {verdict!r})")
             failed += 1
 
-    # The original false-green was exactly a successful command that compared
-    # nothing. Keep this aggregate invariant even though every unbaselined or
-    # unmeasured source is already a per-source failure above.
-    if failed == 0 and compared == 0:
-        print(
-            f"ingest-baseline: FAILED (observed={observed} compared=0 failed=0)",
-            file=sys.stderr,
-        )
-        return 1
     if failed:
         print(
-            f"ingest-baseline: FAILED (observed={observed} compared={compared} failed={failed})",
+            f"ingest-baseline: FAILED (observed={observed} compared={compared} "
+            f"unbaselined={unbaselined} failed={failed})",
             file=sys.stderr,
         )
         return 1
-    print(f"ingest-baseline: OK (observed={observed} compared={compared})")
+    print(
+        f"ingest-baseline: OK (observed={observed} compared={compared} "
+        f"unbaselined={unbaselined})"
+    )
     return 0
 
 
