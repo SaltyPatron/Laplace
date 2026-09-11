@@ -10,6 +10,7 @@ FRONTIER_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/for
 WALK_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_text.sql.in"
 WALK_CONTINUATIONS_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in"
 CHAT_PATH = ROOT / "extension/laplace_substrate/sql/functions/converse/chat.sql.in"
+COGNITION_COMPLETION_PATH = ROOT / "extension/laplace_substrate/tests/sql/cognition_completion.sql"
 
 
 def strip_sql_comments(text: str) -> str:
@@ -38,6 +39,7 @@ def main() -> int:
     walk = strip_sql_comments(WALK_PATH.read_text())
     walk_continuations = strip_sql_comments(WALK_CONTINUATIONS_PATH.read_text())
     chat = strip_sql_comments(CHAT_PATH.read_text())
+    cognition_completion = COGNITION_COMPLETION_PATH.read_text()
 
     assert "CREATE OR REPLACE FUNCTION" not in frontier
     for retired in (
@@ -135,6 +137,16 @@ def main() -> int:
     assert "LAPLACE_COGNITION_BUDGET_EXHAUSTED" in completion_header
     assert "keyword" in completion_header.lower(), \
         "completion contract must explicitly reject prompt keyword classification"
+
+    # Runtime regression is part of the source contract: the whole prompt trunk
+    # must be able to satisfy the whole request, and routed typed state must carry
+    # that grounding into a later declared result relation.
+    assert "DO $whole_trunk_grounding$" in cognition_completion
+    assert "FROM converse.prompt_tree(prompt)" in cognition_completion
+    assert "ARRAY[causes_id]" in cognition_completion
+    assert "DO $routed_semantic_grounding$" in cognition_completion
+    assert "ARRAY[result_relation]" in cognition_completion
+    assert "emitted IS DISTINCT FROM ARRAY[result_id]" in cognition_completion
 
     # Candidate proposal and exact candidate adjudication remain distinct.
     evidence_native = (ROOT / "extension/laplace_substrate/src/query_evidence.c").read_text()
