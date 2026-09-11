@@ -4,10 +4,21 @@ using Xunit;
 namespace Laplace.Core.Tests;
 
 /// <summary>
+/// GC.GetTotalMemory is process-wide. This measurement must not overlap another
+/// xUnit collection allocating in the same testhost, or unrelated live allocations
+/// are charged to the fold dictionary and the measured bytes/entry becomes random.
+/// </summary>
+[CollectionDefinition("Fold memory topology measurement", DisableParallelization = true)]
+public sealed class FoldMemoryTopologyMeasurementCollection
+{
+}
+
+/// <summary>
 /// MemoryTopology's fold constants size the ingest memory envelope. This test must
 /// mirror the CURRENT retained accumulator shape; a stale surrogate is worse than no
 /// measurement because it gives a precise-looking justification to the wrong batch size.
 /// </summary>
+[Collection("Fold memory topology measurement")]
 public sealed class FoldMemoryTopologyMeasurementTests
 {
     private readonly record struct PeriodKey(long OpponentRatingFp1e9, long PhiFp1e9);
