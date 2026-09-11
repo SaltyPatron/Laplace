@@ -84,20 +84,21 @@ public static class MemoryTopology
     ///
     /// MEASURED on the production runner by FoldMemoryTopologyMeasurementTests with the current
     /// accumulator shape -- Dictionary&lt;(Hash128,Hash128,Hash128?), Delta&gt; with an inline first
-    /// rating period, optional overflow dictionary reference, and aggregate totals. The same
-    /// 200,000-entry probe measured 125 bytes/entry on 2026-09-04 and 103 bytes/entry on
-    /// 2026-09-11. A 160-byte envelope remains above both observations (28% headroom over the
-    /// larger measurement) while staying below the test's 2x upper bound for the lower one.
+    /// rating period, optional overflow dictionary reference, and aggregate totals. Before the
+    /// measurement was isolated from parallel xUnit collections, the same 200,000-entry probe
+    /// reported 103, 125, and 163 bytes/entry on the production runner. The 192-byte envelope
+    /// covers the largest observation while remaining below 2x the smallest observation.
     ///
-    /// That headroom is deliberate: accumulatorCapacity = budget / this, so over-reserving
-    /// directly increases flush frequency and calls to consensus.upsert_type, while
-    /// under-reserving can outrun back-pressure. Keep this value tied to the measured retained
-    /// accumulator shape rather than to an unrelated fixed row-count heuristic.
+    /// The measurement test now runs in a non-parallel collection because GC.GetTotalMemory is
+    /// process-wide; unrelated concurrent test allocations must not be charged to this shape.
+    /// The remaining headroom is deliberate: accumulatorCapacity = budget / this, so
+    /// over-reserving directly increases flush frequency and calls to consensus.upsert_type,
+    /// while under-reserving can outrun back-pressure.
     ///
     /// The test pins both directions -- below the measurement is an under-reserved envelope,
     /// above 2x is memory reserved for nothing.
     /// </summary>
-    public const int ConsensusFoldBytesPerRelation = 160;
+    public const int ConsensusFoldBytesPerRelation = 192;
 
     /// <summary>
     /// Conservative transient resident cost per cell while a fold chunk crosses
