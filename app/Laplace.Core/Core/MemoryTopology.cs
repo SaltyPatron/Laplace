@@ -80,25 +80,24 @@ public static class MemoryTopology
 
     /// <summary>
     /// Approx resident bytes one accumulated consensus relation holds in the client-side fold
-    /// dictionary: a (3×16B) key + the Acc state + ConcurrentDictionary node/bucket overhead.
+    /// dictionary: a (3×16B) key + the Acc state + Dictionary node/bucket overhead.
     ///
-    /// MEASURED 2026-09-04 (FoldMemoryTopologyMeasurementTests): the current accumulator
-    /// shape -- Dictionary&lt;(Hash128,Hash128,Hash128?), Delta&gt; with an inline first
-    /// rating period, optional overflow dictionary reference, and aggregate totals -- costs
-    /// <b>125 bytes/entry</b> over 200,000 entries on the production runner. This constant
-    /// is 224, so it remains 1.79x conservative without halving useful accumulator capacity.
+    /// MEASURED on the production runner by FoldMemoryTopologyMeasurementTests with the current
+    /// accumulator shape -- Dictionary&lt;(Hash128,Hash128,Hash128?), Delta&gt; with an inline first
+    /// rating period, optional overflow dictionary reference, and aggregate totals. The same
+    /// 200,000-entry probe measured 125 bytes/entry on 2026-09-04 and 103 bytes/entry on
+    /// 2026-09-11. A 160-byte envelope remains above both observations (28% headroom over the
+    /// larger measurement) while staying below the test's 2x upper bound for the lower one.
     ///
-    /// That is not free: accumulatorCapacity = budget / this, so the fold accumulator holds
-    /// 44% of what memory actually allows and flushes correspondingly more often, and each
-    /// flush lands on consensus.upsert_type -- the most expensive statement in the ingest
-    /// (3,189s over 1,058 calls on the live foundation seed, against 1,121s for all COPY
-    /// combined). Lowering it toward the measurement is a real throughput lever and is NOT
-    /// taken here: it needs an A/B on a cluster, not a guess swapped for a guess.
+    /// That headroom is deliberate: accumulatorCapacity = budget / this, so over-reserving
+    /// directly increases flush frequency and calls to consensus.upsert_type, while
+    /// under-reserving can outrun back-pressure. Keep this value tied to the measured retained
+    /// accumulator shape rather than to an unrelated fixed row-count heuristic.
     ///
     /// The test pins both directions -- below the measurement is an under-reserved envelope,
     /// above 2x is memory reserved for nothing.
     /// </summary>
-    public const int ConsensusFoldBytesPerRelation = 224;
+    public const int ConsensusFoldBytesPerRelation = 160;
 
     /// <summary>
     /// Conservative transient resident cost per cell while a fold chunk crosses
