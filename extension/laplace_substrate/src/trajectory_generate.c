@@ -1090,9 +1090,24 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         }
         pfree(candidate_ids);
 
+        /* Completion provenance follows only typed semantic transitions. It is
+         * folded from the exact candidate evidence for this iteration, before
+         * structural ancestry is merged for trace/election accounting. Routed
+         * identities therefore carry their prompt grounding into later hops
+         * without letting a physical continuation manufacture semantic support. */
+        if (cognition)
+        {
+            laplace_cognition_program_note_semantic_channels(
+                cognition, query_channels, query_channel_count);
+            if (projection_channels)
+                laplace_cognition_program_note_semantic_channels(
+                    cognition, projection_channels, projection_channel_count);
+        }
+
         /* Bind candidate ancestry once, before either ROUTE or SELECT. Typed
          * relations and exact structural continuations therefore feed the same
-         * completion state without being flattened into the same evidence law. */
+         * trace/election provenance without becoming the semantic completion
+         * certificate above. */
         propagate_candidate_origins(origins, candidate_index,
                                     query_channels, query_channel_count,
                                     walk_context);
