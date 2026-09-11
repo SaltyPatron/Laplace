@@ -11,6 +11,7 @@ WALK_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_te
 WALK_CONTINUATIONS_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in"
 CHAT_PATH = ROOT / "extension/laplace_substrate/sql/functions/converse/chat.sql.in"
 COGNITION_COMPLETION_PATH = ROOT / "extension/laplace_substrate/tests/sql/cognition_completion.sql"
+REGRESS_CMAKE_PATH = ROOT / "extension/laplace_substrate/tests/CMakeLists.txt"
 
 
 def strip_sql_comments(text: str) -> str:
@@ -40,6 +41,7 @@ def main() -> int:
     walk_continuations = strip_sql_comments(WALK_CONTINUATIONS_PATH.read_text())
     chat = strip_sql_comments(CHAT_PATH.read_text())
     cognition_completion = COGNITION_COMPLETION_PATH.read_text()
+    regress_cmake = REGRESS_CMAKE_PATH.read_text()
 
     assert "CREATE OR REPLACE FUNCTION" not in frontier
     for retired in (
@@ -138,9 +140,10 @@ def main() -> int:
     assert "keyword" in completion_header.lower(), \
         "completion contract must explicitly reject prompt keyword classification"
 
-    # Runtime regression is part of the source contract: the whole prompt trunk
-    # must be able to satisfy the whole request, and routed typed state must carry
-    # that grounding into a later declared result relation.
+    # Runtime regressions are part of the executable DB suite: the whole prompt
+    # trunk must satisfy the whole request when typed evidence says so, and
+    # routed typed state must carry that grounding into a later result relation.
+    assert re.search(r"set\(REGRESS_TESTS\b[^\n]*\bcognition_completion\b", regress_cmake)
     assert "DO $whole_trunk_grounding$" in cognition_completion
     assert "FROM converse.prompt_tree(prompt)" in cognition_completion
     assert "ARRAY[causes_id]" in cognition_completion
