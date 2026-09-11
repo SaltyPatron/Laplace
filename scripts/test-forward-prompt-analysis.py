@@ -105,11 +105,12 @@ def main() -> int:
 
     # Structural and semantic providers may contribute ancestry to the same
     # selected identity, but structural ancestry alone must never satisfy a
-    # semantic requirement. The completion program therefore keeps typed
-    # semantic provenance separate from the executor's mixed ancestry bitmap.
+    # semantic requirement. Exact typed channels are folded into a separate
+    # semantic-provenance state on every routed execution iteration.
     assert "origin_inherit_sequence(" in program
     assert "propagate_candidate_origins(" in program
     assert "laplace_cognition_program_create(" in program
+    assert count(program, "laplace_cognition_program_note_semantic_channels(") == 2
     assert "laplace_cognition_program_note_route(" in program
     assert "laplace_cognition_program_note_emit(" in program
     assert "if (receipt.complete)" in program
@@ -124,6 +125,8 @@ def main() -> int:
     assert "semantic_origin_add(program, &id, i)" in completion
     assert "semantic_origin_get(program, &input->root, true)" in completion
     assert "record_semantic_channel(program, &initial_channels[i])" in completion
+    assert "laplace_cognition_program_note_semantic_channels(" in completion
+    assert "record_semantic_channel(program, &channels[i])" in completion
     assert "semantic_channel_traversable(" in completion
     assert "bms_intersect(origins, grounding->origins)" in completion
     assert "addressable ? bms_copy(addressable)" not in completion
