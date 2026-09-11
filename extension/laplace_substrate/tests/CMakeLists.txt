@@ -8,7 +8,19 @@ if(NOT LAPLACE_PG_REGRESS)
     return()
 endif()
 
-set(REGRESS_DB "laplace_regress_substrate")
+# Database QA must be able to run an exact branch build without touching the
+# canonical database or colliding with another proof.  PR proof supplies a
+# run-scoped name before configure; ordinary local/main builds retain the stable
+# historical regression database name.
+if(DEFINED ENV{LAPLACE_REGRESS_DB} AND NOT "$ENV{LAPLACE_REGRESS_DB}" STREQUAL "")
+    set(REGRESS_DB "$ENV{LAPLACE_REGRESS_DB}")
+else()
+    set(REGRESS_DB "laplace_regress_substrate")
+endif()
+if(NOT REGRESS_DB MATCHES "^laplace_[A-Za-z0-9_]+$")
+    message(FATAL_ERROR "LAPLACE_REGRESS_DB must be an isolated laplace_* database name")
+endif()
+
 set(REGRESS_TESTS bootstrap glicko2_aggregate entities_exist_bitmap consensus_signed consensus_upsert explore_web_neighbors attestation_merge generation_corpus cognition_completion steer_semantic_precedence converse chat_loop word_law identity_law schema_law structural_surface walk_richer_forward_pass chess_read chess_ranked_scope chess_player_identity_scope chess_fold_debt_repair ops_reads ops_control ingest_throughput walk_edge_weight_parity belief_distribution realize_ladder_parity perfcache_read display_label search_path_independence evict_source prompt_election apply_epoch walk_symmetry highway_mask_deposit)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
