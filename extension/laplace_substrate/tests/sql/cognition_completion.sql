@@ -1,0 +1,74 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+
+-- Completion must be driven by semantic grounding, not by the union of every
+-- ancestry provider that happened to nominate the selected identity. The same
+-- candidate below is a physical successor of `cat` and a typed CAUSES result of
+-- `dog`. Structural ancestry from cat must not let dog's semantic edge certify
+-- the whole two-constituent request.
+BEGIN;
+DO $completion_provenance$
+DECLARE
+    dog_id bytea := laplace.word_id('dog');
+    cat_id bytea := laplace.word_id('cat');
+    answer_id bytea := laplace.word_id('answer');
+    causes_id bytea := laplace.relation_type_id('CAUSES');
+    dog_root bytea := public.laplace_hash128_blake3('test/cognition/dog-sequence');
+    cat_root bytea := public.laplace_hash128_blake3('test/cognition/cat-sequence');
+    completed boolean;
+    remaining int;
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(dog_id,causes_id,answer_id),
+         dog_id,causes_id,answer_id,
+         2000000000000,30000000000,60000000,5,now());
+
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('test/cognition/dog-physicality'),
+         dog_root,1,public.ST_MakePoint(1,1,1,1),decode(repeat('00',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(dog_id,1,1,0),
+             public.laplace_mantissa_pack(answer_id,2,1,0)]),2,now()),
+        (public.laplace_hash128_blake3('test/cognition/cat-physicality'),
+         cat_root,1,public.ST_MakePoint(2,2,2,2),decode(repeat('00',16),'hex'),
+         public.ST_MakeLine(ARRAY[
+             public.laplace_mantissa_pack(cat_id,1,1,0),
+             public.laplace_mantissa_pack(answer_id,2,1,0)]),2,now());
+
+    -- Control: one prompt coordinate has both exact structural continuation and
+    -- positive typed grounding to the emitted identity, so it can close.
+    SELECT p.completion, p.remaining_required
+      INTO completed, remaining
+      FROM generation.forward_program('dog',1,1,0.0,8,7,0,8,NULL,NULL) p
+     WHERE p.event IN ('complete','unresolved')
+     ORDER BY p.step DESC
+     LIMIT 1;
+    IF completed IS DISTINCT FROM true OR remaining IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION
+            'FAIL: directly grounded single-coordinate program did not complete: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+
+    -- Regression: `answer` is structurally inherited from cat and semantically
+    -- grounded from dog. The mixed ancestry bitmap contains both coordinates,
+    -- but only dog has typed grounding to this selected identity. Cat must stay
+    -- unresolved instead of being silently dropped or certified by sequence.
+    SELECT p.completion, p.remaining_required
+      INTO completed, remaining
+      FROM generation.forward_program('dog cat',1,1,0.0,8,7,0,8,NULL,NULL) p
+     WHERE p.event IN ('complete','unresolved')
+     ORDER BY p.step DESC
+     LIMIT 1;
+    IF completed IS DISTINCT FROM false OR remaining IS NULL OR remaining <= 0 THEN
+        RAISE EXCEPTION
+            'FAIL: structural ancestry certified semantic completion: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+END
+$completion_provenance$;
+ROLLBACK;
