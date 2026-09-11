@@ -21,9 +21,8 @@ public static class ChessLabRunners
         int maxPlies = int.Parse(Config(cfg, "maxPlies", "160"));
         int concurrency = ResolveConcurrency(cfg);
         bool openings = Config(cfg, "openings", "false") == "true";
+        bool persistPgn = ChessLabStorage.PersistPgn(cfg);
 
-        var workDir = Path.Combine(LabDir, slot.Job.Id);
-        Directory.CreateDirectory(workDir);
         var liveHost = await lab.GetLiveHostAsync(ct);
 
         lab.Publish(slot, new ChessLabLogEvent("info",
@@ -38,7 +37,7 @@ public static class ChessLabRunners
             : () => SearchChooser(depth, exactBias, boardEvaluator, tablebase, ct);
         Func<MoveChooser> pure = () => SearchChooser(depth, null, null, tablebase, ct);
         var book = openings ? OpeningSeed.Fens(OpeningSeed.DefaultDir) : null;
-        var pgnSink = new ConcurrentBag<MatchPgnGame>();
+        ConcurrentBag<MatchPgnGame>? pgnSink = persistPgn ? new() : null;
 
         var progress = new Progress<(int Done, int AWins, int Draws, int BWins)>(p =>
         {
@@ -57,9 +56,8 @@ public static class ChessLabRunners
             eventName: $"Laplace substrate lift ({mode})",
             externalIdPrefix: $"laplace-lab/substrate/{mode}/seed-99"), ct);
 
-        var pgnPath = Path.Combine(workDir, "games.pgn");
-        ChessPgnWriter.WriteFile(pgnPath, pgnSink, @event: $"chess-lab/substrate-test/{mode}");
-        lab.AddArtifact(slot, "games.pgn", pgnPath);
+        if (pgnSink is not null)
+            AddPgnArtifact(lab, slot, pgnSink, $"chess-lab/substrate-test/{mode}");
 
         int recorded = r.AWins + r.Draws + r.BWins;
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
@@ -105,6 +103,7 @@ public static class ChessLabRunners
         int maxPlies = int.Parse(Config(slot.Job.Config, "maxPlies", "160"));
         int budget = ResolveConcurrency(slot.Job.Config);
         bool record = bool.TryParse(Config(slot.Job.Config, "record", "false"), out bool recordValue) && recordValue;
+        bool persistPgn = ChessLabStorage.PersistPgn(slot.Job.Config);
         var terms = new[]
         {
             EvalTerm.Material, EvalTerm.Pst, EvalTerm.BishopPair,
@@ -113,10 +112,8 @@ public static class ChessLabRunners
         int perTerm = Math.Max(1, budget / terms.Length);
         int totalGames = games * terms.Length;
 
-        var workDir = Path.Combine(LabDir, slot.Job.Id);
-        Directory.CreateDirectory(workDir);
         var liveHost = record ? await lab.GetLiveHostAsync(ct) : null;
-        var pgnSink = new ConcurrentBag<MatchPgnGame>();
+        ConcurrentBag<MatchPgnGame>? pgnSink = persistPgn ? new() : null;
 
         lab.Publish(slot, new ChessLabLogEvent("info",
             $"ladder depth {depth} × {games} games × {terms.Length} terms "
@@ -170,9 +167,8 @@ public static class ChessLabRunners
             });
         }, ct);
 
-        var pgnPath = Path.Combine(workDir, "games.pgn");
-        ChessPgnWriter.WriteFile(pgnPath, pgnSink, @event: "chess-lab/ladder");
-        lab.AddArtifact(slot, "games.pgn", pgnPath);
+        if (pgnSink is not null)
+            AddPgnArtifact(lab, slot, pgnSink, "chess-lab/ladder");
 
         lab.Publish(slot, new ChessLabMetricEvent("games_generated", totalGames));
         lab.Publish(slot, new ChessLabMetricEvent("games_recorded", record ? totalGames : 0));
@@ -198,9 +194,6 @@ public static class ChessLabRunners
         => Task.Run(() =>
         {
             string path = Config(slot.Job.Config, "path", "");
-            // GH #528 class: `path` arrives from the (still unauthenticated, #489) HTTP config
-            // dict. Reviewing is legitimate only over the dirs this stack writes PGNs to — an
-            // unconstrained path is an arbitrary-file-read primitive.
             if (!IsReviewablePath(path))
             {
                 lab.Publish(slot, new ChessLabLogEvent("error",
@@ -234,15 +227,15 @@ public static class ChessLabRunners
     public static async Task RunCutechessAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
         var cfg = slot.Job.Config;
-        var dir = Path.Combine(LabDir, slot.Job.Id);
-        Directory.CreateDirectory(dir);
-        var pgnOut = Path.Combine(dir, "games.pgn");
+        bool ingest = bool.TryParse(Config(cfg, "ingest", "true"), out bool ingestValue) && ingestValue;
+        bool persistPgn = ChessLabStorage.PersistPgn(cfg, defaultValue: !ingest);
+        bool persistTranscript = ChessLabStorage.PersistTranscript(cfg);
+        var spoolDir = ChessLabStorage.CreateJobSpool(slot.Job.Id);
+        var pgnOut = Path.Combine(spoolDir, "games.pgn");
 
         var options = new CutechessOptions
         {
             Rounds = int.Parse(Config(cfg, "rounds", "10")),
-            // Watchable by default: 1s/move via cutechess st. depth>0 switches to the old
-            // tc=inf/depth mode, where a deep search may sit on one move for minutes.
             Depth = int.Parse(Config(cfg, "depth", "0")),
             SecondsPerMove = double.Parse(Config(cfg, "st", "1"), System.Globalization.CultureInfo.InvariantCulture),
             StockfishElo = int.Parse(Config(cfg, "elo", "2000")),
@@ -254,31 +247,32 @@ public static class ChessLabRunners
 
         var final = ChessLabJobState.Completed;
         string? finalMessage = null;
-        // The in-memory transcript is a bounded ring — right for a live pane, useless as the
-        // record of a match that ran for an hour. The file is the complete one, and it is
-        // what /terminal.txt serves once it exists.
-        var transcriptPath = Path.Combine(dir, "transcript.log");
-        await using var transcript = new StreamWriter(transcriptPath) { AutoFlush = false };
+        StreamWriter? transcript = null;
+        string? transcriptPath = null;
+        if (persistTranscript)
+        {
+            var transcriptDir = Path.Combine(LabDir, slot.Job.Id);
+            Directory.CreateDirectory(transcriptDir);
+            transcriptPath = Path.Combine(transcriptDir, "transcript.log");
+            transcript = new StreamWriter(transcriptPath) { AutoFlush = false };
+        }
+
         try
         {
             await foreach (var evt in CutechessRunner.RunAsync(options, ct))
             {
                 switch (evt)
                 {
-                    // Raw process I/O never enters the bounded event channel — see
-                    // ChessLabService.AppendTerminal for why the two are separate.
                     case ChessLabTerminalEvent terminal:
-                        await transcript.WriteLineAsync(ChessLabTerminal.Format(
-                            lab.AppendTerminal(slot, terminal)));
+                    {
+                        var line = ChessLabTerminal.Format(lab.AppendTerminal(slot, terminal));
+                        if (transcript is not null) await transcript.WriteLineAsync(line);
                         break;
+                    }
                     case ChessLabProgressEvent prog:
                         lab.UpdateSummary(slot, new ChessLabJobSummary(prog.Done, prog.Total, prog.Label));
                         lab.Publish(slot, prog);
                         break;
-                    // The runner owns the verdict. Publishing this straight through and then
-                    // calling Finish(Completed) below is how a match that died on argv
-                    // parsing still reported "Completed" — to the web UI, to the CLI's exit
-                    // code, and to anyone reading the job list afterwards.
                     case ChessLabDoneEvent done:
                         final = done.FinalState;
                         finalMessage = done.Message;
@@ -291,37 +285,54 @@ public static class ChessLabRunners
         }
         finally
         {
-            await transcript.FlushAsync(CancellationToken.None);
-            lab.AddArtifact(slot, "transcript.log", transcriptPath);
-            // A stopped match keeps whatever games it finished: cutechess writes the PGN
-            // incrementally, so the artifact is real evidence even when the run was cut short.
-            if (File.Exists(pgnOut)) lab.AddArtifact(slot, "games.pgn", pgnOut);
+            if (transcript is not null)
+            {
+                await transcript.FlushAsync(CancellationToken.None);
+                await transcript.DisposeAsync();
+                lab.AddArtifact(slot, "transcript.log", transcriptPath!);
+            }
         }
 
-        // Loop closure: cutechess games are played by the external laplace-uci binary, which
-        // cannot record its own plies — without this the PGN artifact is where the evidence
-        // dies. Opt out with config ingest=false. Skipped for a failed run, whose PGN is
-        // either absent or a fragment of a match that never happened.
-        if (final == ChessLabJobState.Completed
-            && Config(cfg, "ingest", "true") == "true"
-            && File.Exists(pgnOut))
+        bool ingestSucceeded = !ingest;
+        if (final == ChessLabJobState.Completed && ingest && File.Exists(pgnOut))
         {
             try
             {
-                lab.Publish(slot, new ChessLabLogEvent("info", "ingesting games.pgn into substrate…"));
+                lab.Publish(slot, new ChessLabLogEvent("info", "ingesting temporary games.pgn into substrate…"));
                 var liveHost = await lab.GetLiveHostAsync(ct);
                 await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
                 var r = await ingestor.IngestFileAsync(
                     pgnOut, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
                 lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
+                ingestSucceeded = true;
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                lab.Publish(slot, new ChessLabLogEvent(
-                    "error", $"substrate ingest failed ({ex.Message}) — artifact kept, retry via /ingest"));
+                final = ChessLabJobState.Failed;
+                finalMessage = $"substrate ingest failed: {ex.Message}";
+                lab.Publish(slot, new ChessLabLogEvent("error",
+                    $"substrate ingest failed ({ex.Message}) — PGN remains only in temporary spool for retry"));
             }
         }
+
+        if (File.Exists(pgnOut))
+        {
+            if (persistPgn)
+            {
+                var artifact = ChessLabStorage.PersistArtifact(pgnOut, LabDir, slot.Job.Id, "games.pgn");
+                lab.AddArtifact(slot, "games.pgn", artifact);
+            }
+            else if (ingestSucceeded)
+            {
+                ChessLabStorage.DeleteFile(pgnOut);
+            }
+            else
+            {
+                lab.AddArtifact(slot, "games.pgn", pgnOut);
+            }
+        }
+        ChessLabStorage.DeleteDirectoryIfEmpty(spoolDir);
 
         Finish(lab, slot, final, finalMessage);
     }
@@ -359,15 +370,12 @@ public static class ChessLabRunners
         string site = Config(slot.Job.Config, "site", "lichess");
         bool all = bool.TryParse(Config(slot.Job.Config, "all", "true"), out bool allValue) && allValue;
         bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
+        bool persistPgn = ChessLabStorage.PersistPgn(slot.Job.Config, defaultValue: !ingest);
         int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
         int concurrency = ResolveConcurrency(slot.Job.Config);
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
 
-        // Identity/profile acquisition is the first observation. In particular, an explicitly
-        // supplied FIDE id must resolve and be admitted before an all-games archive download can
-        // begin. The former order downloaded thousands of games and only then discovered that
-        // the selected identity was invalid or the provider parser had drifted.
         var profiles = new List<ChessPlayerProfile>
         {
             await ChessGameFetcher.FetchProfileAsync(user, site, ct),
@@ -379,6 +387,9 @@ public static class ChessLabRunners
 
         ChessPgnIngestor? ingestor = null;
         ChessPgnIngestor.ProfileResult profileResult = default;
+        string? spoolDir = null;
+        string? outPath = null;
+        bool completed = false;
         try
         {
             if (ingest)
@@ -390,9 +401,18 @@ public static class ChessLabRunners
                 lab.Publish(slot, new ChessLabMetricEvent("identity_links", profileResult.Links));
             }
 
-            var outPath = Path.Combine(
-                LabDir, slot.Job.Id, $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn");
-            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            string fileName = $"{ChessGameFetcher.Sanitize(user)}_{ChessGameFetcher.Sanitize(site)}.pgn";
+            if (persistPgn)
+            {
+                outPath = Path.Combine(LabDir, slot.Job.Id, fileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            }
+            else
+            {
+                spoolDir = ChessLabStorage.CreateJobSpool(slot.Job.Id);
+                outPath = Path.Combine(spoolDir, fileName);
+            }
+
             int appliedWhileFetching = 0;
             int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
                 msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
@@ -408,7 +428,6 @@ public static class ChessLabRunners
                     }
                     : null,
                 concurrency);
-            lab.AddArtifact(slot, "games.pgn", outPath);
             lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
 
             if (ingest)
@@ -428,10 +447,18 @@ public static class ChessLabRunners
                 lab.UpdateSummary(slot, new ChessLabJobSummary(
                     games, games, $"{profiles.Count} profiles acquired · {games} fetched oldest-to-newest · not ingested"));
             }
+
+            if (persistPgn)
+                lab.AddArtifact(slot, "games.pgn", outPath);
+            completed = true;
         }
         finally
         {
             if (ingestor is not null) await ingestor.DisposeAsync();
+            if (!persistPgn && completed && outPath is not null)
+                ChessLabStorage.DeleteFile(outPath);
+            if (spoolDir is not null)
+                ChessLabStorage.DeleteDirectoryIfEmpty(spoolDir);
         }
         Finish(lab, slot, ChessLabJobState.Completed);
     }
@@ -496,6 +523,19 @@ public static class ChessLabRunners
         }
     }
 
+    private static void AddPgnArtifact(
+        ChessLabService lab,
+        ChessLabService.JobSlot slot,
+        IEnumerable<MatchPgnGame> games,
+        string eventName)
+    {
+        string workDir = Path.Combine(LabDir, slot.Job.Id);
+        Directory.CreateDirectory(workDir);
+        string pgnPath = Path.Combine(workDir, "games.pgn");
+        ChessPgnWriter.WriteFile(pgnPath, games, @event: eventName);
+        lab.AddArtifact(slot, "games.pgn", pgnPath);
+    }
+
     private static void Finish(ChessLabService lab, ChessLabService.JobSlot slot, ChessLabJobState state, string? msg = null)
     {
         lock (slot.Gate)
@@ -504,9 +544,6 @@ public static class ChessLabRunners
             {
                 State = state,
                 FinishedAt = DateTimeOffset.UtcNow,
-                // Keep the last summary line when the terminal state has nothing to add —
-                // this used to blank the final score the moment the run succeeded, which is
-                // what ChessLabService.Finish has always done and these two had drifted apart.
                 Summary = slot.Job.Summary with { Message = msg ?? slot.Job.Summary.Message },
             };
         }
@@ -536,10 +573,6 @@ public static class ChessLabRunners
         return false;
     }
 
-    // Live-board tap for in-process self-play: convert the recorded ply's position surface
-    // to a FEN and publish it as a board event. Parallel games at shallow depth emit plies
-    // every few ms, so throttle per game (first ply always passes; then min 250ms apart)
-    // — the viewer needs a watchable stream, not every node.
     private static Action<int, int, string, string> LiveBoardPublisher(
         ChessLabService lab, ChessLabService.JobSlot slot, string nameA, string nameB)
     {
@@ -552,7 +585,7 @@ public static class ChessLabRunners
             lastEmit[game] = now;
             if (!Laplace.Modality.Chess.PositionContent.TryFenFromSurface(toKey, out var fen))
                 return;
-            bool aWhite = game % 2 == 0; // MatchRunner alternates colors per game index
+            bool aWhite = game % 2 == 0;
             lab.Publish(slot, new ChessLabBoardEvent(
                 game, ply, uci, fen, aWhite ? nameA : nameB, aWhite ? nameB : nameA));
         };
