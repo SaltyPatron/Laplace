@@ -47,22 +47,34 @@ trap cleanup EXIT INT TERM
 # would publish, while the C modules themselves remain the exact build-tree ELFs.
 DESTDIR="$stage" cmake --install "$BUILD" >/dev/null
 staged_prefix="$stage${INSTALL_PREFIX}"
-control_path="$staged_prefix/share/postgresql/18/extension"
+control_root="$staged_prefix/share/postgresql/18"
+control_dir="$control_root/extension"
 
-[[ -f "$control_path/laplace_geom.control" ]] || {
-  echo "pr-db-proof: staged laplace_geom.control missing: $control_path" >&2
+[[ -f "$control_dir/laplace_geom.control" ]] || {
+  echo "pr-db-proof: staged laplace_geom.control missing: $control_dir" >&2
   exit 2
 }
-[[ -f "$control_path/laplace_substrate.control" ]] || {
-  echo "pr-db-proof: staged laplace_substrate.control missing: $control_path" >&2
+[[ -f "$control_dir/laplace_substrate.control" ]] || {
+  echo "pr-db-proof: staged laplace_substrate.control missing: $control_dir" >&2
   exit 2
 }
 
-# PostgreSQL 18 accepts both paths as session GUCs. $system keeps third-party
-# controls (PostGIS) visible; $libdir remains the final fallback only after the
-# exact branch build directories.
+# PostgreSQL 18 appends /extension to every extension_control_path entry. The
+# previous proof incorrectly supplied the already-suffixed directory, causing
+# PostgreSQL to search .../extension/extension and making every CREATE EXTENSION
+# fail before any branch SQL or native code executed.
 build_library_path="$BUILD/extension/laplace_substrate:$BUILD/extension/laplace_geom:$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis"
-export PGOPTIONS="-c extension_control_path=${control_path}:\$system -c dynamic_library_path=${build_library_path}:\$libdir"
+export PGOPTIONS="-c extension_control_path=${control_root}:\$system -c dynamic_library_path=${build_library_path}:\$libdir"
+
+# Fail before pg_regress if the server cannot actually discover the staged branch
+# extensions through the same session settings the regress clients inherit.
+available="$($PG_PREFIX/bin/psql -X -A -t -U laplace_admin -d postgres -v ON_ERROR_STOP=1 -c \
+  "SELECT string_agg(name, ',' ORDER BY name) FROM pg_available_extensions WHERE name IN ('laplace_geom','laplace_substrate');")"
+if [[ "$available" != "laplace_geom,laplace_substrate" ]]; then
+  echo "pr-db-proof: staged extensions are not discoverable (found: ${available:-<none>})" >&2
+  "$PG_PREFIX/bin/psql" -X -U laplace_admin -d postgres -v ON_ERROR_STOP=1 -c "SHOW extension_control_path" >&2 || true
+  exit 2
+fi
 
 # Every SQL regression executes CREATE EXTENSION against staged branch control/SQL
 # and loads branch-native modules through dynamic_library_path. Preserve the
