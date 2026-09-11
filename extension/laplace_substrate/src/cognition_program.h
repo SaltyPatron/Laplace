@@ -37,9 +37,10 @@ typedef struct LaplaceCognitionProgramReceipt
 typedef struct LaplaceCognitionProgram LaplaceCognitionProgram;
 
 /* Compile the exact admitted prompt into a finite completion program. Prompt
- * occurrence ordinals are the obligation coordinates; supplemental/history
- * operands remain usable evidence but never become obligations for this turn.
- * There is no prompt-text/keyword classifier here. */
+ * occurrence ordinals are the obligation coordinates; the exact prompt trunk
+ * carries their union as the initial whole-observation operand. Supplemental
+ * history/frontier operands remain usable evidence but never become obligations
+ * for this turn. There is no prompt-text/keyword classifier here. */
 LaplaceCognitionProgram *laplace_cognition_program_create(
     const LaplacePromptInput *input,
     int prompt_origin_count,
