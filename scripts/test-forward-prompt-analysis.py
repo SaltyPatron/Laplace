@@ -105,8 +105,8 @@ def main() -> int:
 
     # Structural and semantic providers may contribute ancestry to the same
     # selected identity, but structural ancestry alone must never satisfy a
-    # semantic requirement. The completion program therefore keeps direct typed
-    # grounding by candidate separate from the executor's mixed ancestry bitmap.
+    # semantic requirement. The completion program therefore keeps typed
+    # semantic provenance separate from the executor's mixed ancestry bitmap.
     assert "origin_inherit_sequence(" in program
     assert "propagate_candidate_origins(" in program
     assert "laplace_cognition_program_create(" in program
@@ -119,9 +119,12 @@ def main() -> int:
     completion = (ROOT / "extension/laplace_substrate/src/cognition_program.c").read_text()
     completion_header = (ROOT / "extension/laplace_substrate/src/cognition_program.h").read_text()
     assert "tiers[node] >= 2" in completion
-    assert "channel->ordinal - 1" in completion
     assert "program->required = bms_copy(eligible)" in completion
-    assert "direct_semantic_origins" in completion
+    assert "semantic_origins" in completion
+    assert "semantic_origin_add(program, &id, i)" in completion
+    assert "semantic_origin_get(program, &input->root, true)" in completion
+    assert "record_semantic_channel(program, &initial_channels[i])" in completion
+    assert "semantic_channel_traversable(" in completion
     assert "bms_intersect(origins, grounding->origins)" in completion
     assert "addressable ? bms_copy(addressable)" not in completion
     assert "program->semantic_output_count <= 0" in completion
