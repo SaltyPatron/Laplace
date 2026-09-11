@@ -114,4 +114,52 @@ BEGIN
     END IF;
 END
 $whole_trunk_grounding$;
+
+-- Routing is a semantic state transition, not disposable search metadata. A
+-- typed path that must first route through one identity and then execute the
+-- requested result relation has to retain the original prompt grounding across
+-- that route. Otherwise a valid two-stage cognition program emits an answer but
+-- falsely reports its obligation unresolved.
+DO $routed_semantic_grounding$
+DECLARE
+    prompt text := 'cognitionhopalpha';
+    alpha_id bytea := laplace.word_id(prompt);
+    route_id bytea := public.laplace_hash128_blake3('test/cognition/route');
+    result_id bytea := public.laplace_hash128_blake3('test/cognition/routed-result');
+    route_relation bytea := laplace.relation_type_id('RELATED_TO');
+    result_relation bytea := laplace.relation_type_id('CAUSES');
+    completed boolean;
+    remaining int;
+    emitted bytea[];
+BEGIN
+    INSERT INTO laplace.consensus
+        (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+    VALUES
+        (laplace.consensus_id(alpha_id,route_relation,route_id),
+         alpha_id,route_relation,route_id,
+         2000000000000,30000000000,60000000,5,now()),
+        (laplace.consensus_id(route_id,result_relation,result_id),
+         route_id,result_relation,result_id,
+         2000000000000,30000000000,60000000,5,now());
+
+    SELECT array_agg(p.entity ORDER BY p.step) FILTER (WHERE p.event='emit'),
+           (array_agg(p.completion ORDER BY p.step DESC)
+                FILTER (WHERE p.event IN ('complete','unresolved')))[1],
+           (array_agg(p.remaining_required ORDER BY p.step DESC)
+                FILTER (WHERE p.event IN ('complete','unresolved')))[1]
+      INTO emitted, completed, remaining
+      FROM generation.forward_program(
+          prompt,1,0,0.0,8,7,1,8,NULL,ARRAY[result_relation]) p;
+
+    IF emitted IS DISTINCT FROM ARRAY[result_id] THEN
+        RAISE EXCEPTION
+            'FAIL: routed semantic program did not emit its declared result: %', emitted;
+    END IF;
+    IF completed IS DISTINCT FROM true OR remaining IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION
+            'FAIL: routed semantic grounding was lost before completion: completion=% remaining=%',
+            completed, remaining;
+    END IF;
+END
+$routed_semantic_grounding$;
 ROLLBACK;
