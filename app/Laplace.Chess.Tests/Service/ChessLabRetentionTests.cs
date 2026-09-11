@@ -1,4 +1,5 @@
 using Laplace.Chess.Service;
+using Xunit;
 
 namespace Laplace.Chess.Tests.Service;
 
