@@ -10,11 +10,19 @@ public sealed class ChessLabService
     private readonly ILogger _log;
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
     private readonly ConcurrentDictionary<string, JobSlot> _jobs = new();
+    private readonly string _labDir;
 
     // The /chess/lab/* HTTP surface has no request-level auth (see EndpointMappings.Chess.cs) —
     // this cap is the actual mitigation against an unbounded number of concurrent cutechess/
     // Stockfish process spawns or self-play jobs, independent of caller identity.
     private const int MaxConcurrentJobs = 4;
+
+    // Job metadata, event channels, transcripts, and per-job files are one lifecycle.
+    // They are process-local observability, not the durable chess corpus: completed PGNs
+    // that are meant to become knowledge are already ingested into the substrate. Keeping
+    // every terminal job forever previously made both _jobs and chess-lab-work append-only.
+    internal const int MaxRetainedTerminalJobs = 32;
+    internal static readonly TimeSpan OrphanWorkspaceMinimumAge = TimeSpan.FromHours(24);
 
     public ChessLabService(
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
@@ -22,6 +30,7 @@ public sealed class ChessLabService
     {
         _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
         _log = log ?? NullLogger.Instance;
+        _labDir = Path.GetFullPath(ChessLabPaths.LabDir);
     }
 
     // Kept for non-substrate unit callers. Production composition supplies the Generic-Host
@@ -36,6 +45,11 @@ public sealed class ChessLabService
 
     public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null)
     {
+        // Every new run first bounds process-local history and stale work left by a prior
+        // service process. This turns job creation into the maintenance cadence instead of
+        // requiring a separate cron job with weaker knowledge of which jobs are live.
+        PruneRetainedState(DateTimeOffset.UtcNow);
+
         int running = 0;
         foreach (var s in _jobs.Values)
             if (Snapshot(s).State == ChessLabJobState.Running && ++running >= MaxConcurrentJobs)
@@ -215,6 +229,122 @@ public sealed class ChessLabService
     }
 
     internal bool TryGetSlot(string jobId, out JobSlot slot) => _jobs.TryGetValue(jobId, out slot!);
+
+    internal int PruneRetainedState(DateTimeOffset now)
+    {
+        int removed = 0;
+        var terminal = _jobs.Values
+            .Select(Snapshot)
+            .Where(static job => IsTerminal(job.State))
+            .OrderByDescending(static job => job.FinishedAt ?? job.CreatedAt)
+            .ThenByDescending(static job => job.CreatedAt)
+            .ToArray();
+
+        foreach (var job in terminal.Skip(MaxRetainedTerminalJobs))
+        {
+            if (!_jobs.TryRemove(job.Id, out var slot)) continue;
+            slot.Cts?.Dispose();
+            if (TryDeleteJobWorkspace(job.Id)) removed++;
+        }
+
+        removed += PruneOrphanedWorkspaces(now);
+        return removed;
+    }
+
+    internal static IReadOnlyList<string> SelectTerminalJobsForRemoval(
+        IEnumerable<ChessLabJob> jobs, int retain = MaxRetainedTerminalJobs)
+    {
+        if (retain < 0) throw new ArgumentOutOfRangeException(nameof(retain));
+        return jobs
+            .Where(static job => IsTerminal(job.State))
+            .OrderByDescending(static job => job.FinishedAt ?? job.CreatedAt)
+            .ThenByDescending(static job => job.CreatedAt)
+            .Skip(retain)
+            .Select(static job => job.Id)
+            .ToArray();
+    }
+
+    private int PruneOrphanedWorkspaces(DateTimeOffset now)
+    {
+        if (!Directory.Exists(_labDir)) return 0;
+        int removed = 0;
+        foreach (var path in Directory.EnumerateDirectories(_labDir))
+        {
+            string name = Path.GetFileName(path);
+            if (!IsCanonicalJobId(name) || _jobs.ContainsKey(name)) continue;
+            try
+            {
+                var info = new DirectoryInfo(path);
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                var age = now - new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero);
+                if (age < OrphanWorkspaceMinimumAge) continue;
+                if (ContainsReparsePoint(path))
+                {
+                    _log.LogWarning("preserving chess lab orphan with reparse point: {Path}", path);
+                    continue;
+                }
+                Directory.Delete(path, recursive: true);
+                removed++;
+                _log.LogInformation("reclaimed orphaned chess lab workspace {JobId}", name);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log.LogWarning(ex, "could not reclaim orphaned chess lab workspace {Path}", path);
+            }
+        }
+        return removed;
+    }
+
+    private bool TryDeleteJobWorkspace(string jobId)
+    {
+        if (!IsCanonicalJobId(jobId)) return false;
+        string path = Path.GetFullPath(Path.Combine(_labDir, jobId));
+        if (!string.Equals(Path.GetDirectoryName(path), _labDir,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            return false;
+        if (!Directory.Exists(path)) return false;
+        try
+        {
+            var info = new DirectoryInfo(path);
+            if ((info.Attributes & FileAttributes.ReparsePoint) != 0 || ContainsReparsePoint(path))
+            {
+                _log.LogWarning("preserving chess lab workspace with reparse point: {Path}", path);
+                return false;
+            }
+            Directory.Delete(path, recursive: true);
+            _log.LogInformation("reclaimed retained chess lab workspace {JobId}", jobId);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.LogWarning(ex, "could not reclaim chess lab workspace {Path}", path);
+            return false;
+        }
+    }
+
+    internal static bool IsCanonicalJobId(string value) =>
+        Guid.TryParseExact(value, "N", out var parsed)
+        && string.Equals(parsed.ToString("N"), value, StringComparison.Ordinal);
+
+    private static bool ContainsReparsePoint(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            string current = pending.Pop();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(current))
+            {
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0) return true;
+                if ((attributes & FileAttributes.Directory) != 0) pending.Push(entry);
+            }
+        }
+        return false;
+    }
+
+    private static bool IsTerminal(ChessLabJobState state) =>
+        state is ChessLabJobState.Completed or ChessLabJobState.Failed or ChessLabJobState.Cancelled;
 
     private static ChessLabJob Snapshot(JobSlot slot)
     {
