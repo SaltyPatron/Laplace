@@ -17,6 +17,7 @@ export LAPLACE_REGRESS_DB="${LAPLACE_REGRESS_DB:-laplace_pr_${run_id}_${run_atte
 python3 scripts/check-sql-manifest-dependencies.py
 bash scripts/test-parallel.sh --policy
 bash scripts/test-managed-publish-snapshot.sh
+bash scripts/test-runtime-reuse-idempotency.sh
 bash scripts/pipeline.sh build
 
 # Compile success is not database/product execution. Exercise the exact branch
@@ -27,4 +28,4 @@ bash scripts/pr-db-proof.sh
 # Only a database-valid branch spends time on the full DEV/BAT matrix.
 bash scripts/test-parallel.sh --engine --all
 
-echo "PR_PROOF_OK policy=green publish_snapshot=green build=green native_db=green dev_bat=green production_mutations=0"
+echo "PR_PROOF_OK policy=green publish_snapshot=green runtime_reuse=green build=green native_db=green dev_bat=green production_mutations=0"
