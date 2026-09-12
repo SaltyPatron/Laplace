@@ -44,8 +44,8 @@ class HostTests(unittest.TestCase):
             setattr(self.host, name, self.base / suffix)
         self.host.TRUSTED_UID = os.getuid()
         for path in (self.host.STATE, self.host.SYSTEMD, self.host.LIBEXEC,
-            self.host.NGINX_CONFIG.parent, self.host.NGINX_ENABLED.parent):
-            path.mkdir(parents=True)
+            self.host.NGINX_CONFIG.parent, self.host.NGINX_ENABLED.parent, self.host.SUDOERS.parent):
+            path.mkdir(parents=True, mode=0o755)
         self.ident = self.host.ROOT / "pgsql-18/conf/pg_ident.conf"
         self.ident.parent.mkdir(parents=True)
         self.ident.write_text("laplace_map ahart laplace_admin\nother_map existing existing_role\n")

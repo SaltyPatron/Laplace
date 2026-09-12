@@ -34,10 +34,12 @@ done
 if [[ "$mode" == --repair ]]; then
     # Only workspace trees are recursive. Never apply build permissions to the
     # data/WAL/tablespace contents or follow a workspace symlink into them.
-    for path in /build/laplace/build /build/laplace/work /build/laplace/worktrees /build/laplace/recovery; do
-        find "$path" -xdev ! -type l -exec chgrp "$group" {} +
-        find "$path" -xdev -type d -exec chmod g+rws {} +
-        find "$path" -xdev -type f -exec chmod g+rwX {} +
+    immutable_inputs=$(readlink -m /opt/laplace/package-inputs/postgresql)
+    immutable_releases=$(readlink -m /opt/laplace/releases)
+    for path in /build/laplace/build /build/laplace/work /build/laplace/worktrees; do
+        find "$path" -xdev \( -path "$immutable_inputs" -o -path "$immutable_releases" \) -prune -o ! -type l -exec chgrp "$group" {} +
+        find "$path" -xdev \( -path "$immutable_inputs" -o -path "$immutable_releases" \) -prune -o -type d -exec chmod g+rws {} +
+        find "$path" -xdev \( -path "$immutable_inputs" -o -path "$immutable_releases" \) -prune -o -type f -exec chmod g+rwX {} +
     done
     while read -r unit _; do
         [[ "$unit" == actions.runner.SaltyPatron-Laplace.hart-server.service ]] || continue
