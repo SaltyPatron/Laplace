@@ -46,6 +46,9 @@ if [[ "$mode" == --repair ]]; then
         dropin="/etc/systemd/system/$unit.d"
         install -d -m 0755 "$dropin"
         cat > "$dropin/50-laplace-storage.conf" <<EOF
+[Unit]
+RequiresMountsFor=/build /var/lib/agents
+
 [Service]
 Group=laplace-runner
 UMask=0002
