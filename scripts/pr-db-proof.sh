@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Execute the exact pull-request native extension build against throwaway
-# PostgreSQL databases without installing into /opt/laplace or touching the
-# canonical Laplace database. SQL/control files are staged under DESTDIR and
-# PostgreSQL 18 resolves them through session-scoped extension_control_path;
-# native modules are loaded from the build tree so their branch build RPATHs and
-# exact bytes are exercised.
+# Execute the exact pull-request native extension build against an isolated
+# throwaway PostgreSQL cluster. The proof must not reuse the production
+# postmaster: production preloads the installed laplace_substrate image, while
+# PR proof deliberately loads the branch image from the build tree. Loading both
+# copies in one postmaster re-registers custom GUCs and makes CREATE EXTENSION
+# fail before branch SQL is exercised.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,12 +32,23 @@ REGRESS_DB="${LAPLACE_REGRESS_DB:-}"
   exit 2
 }
 
+for tool in initdb pg_ctl psql createdb dropdb; do
+  [[ -x "$PG_PREFIX/bin/$tool" ]] || {
+    echo "pr-db-proof: PostgreSQL tool missing: $PG_PREFIX/bin/$tool" >&2
+    exit 2
+  }
+done
+
 stage="$(mktemp -d -t laplace-pr-db-proof.XXXXXXXX)"
+pgdata="$stage/pgdata"
+socket_dir="$stage/socket"
+mkdir -p "$socket_dir"
+postmaster_started=0
 cleanup() {
   set +e
-  "$PG_PREFIX/bin/dropdb" -U laplace_admin --if-exists "$REGRESS_DB" >/dev/null 2>&1
-  "$PG_PREFIX/bin/dropdb" -U laplace_admin --if-exists "${REGRESS_DB}_geom" >/dev/null 2>&1
-  "$PG_PREFIX/bin/dropdb" -U laplace_admin --if-exists "${REGRESS_DB}_substrate" >/dev/null 2>&1
+  if (( postmaster_started )); then
+    "$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -m immediate -w stop >/dev/null 2>&1 || true
+  fi
   rm -rf "$stage"
 }
 trap cleanup EXIT INT TERM
@@ -59,20 +70,51 @@ control_dir="$control_root/extension"
   exit 2
 }
 
-# PostgreSQL 18 appends /extension to every extension_control_path entry. The
-# previous proof incorrectly supplied the already-suffixed directory, causing
-# PostgreSQL to search .../extension/extension and making every CREATE EXTENSION
-# fail before any branch SQL or native code executed.
 build_library_path="$BUILD/extension/laplace_substrate:$BUILD/extension/laplace_geom:$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis"
+
+# Use a private postmaster for branch-native regression. The production host
+# intentionally preloads its installed laplace_substrate image, so using that
+# postmaster while dynamic_library_path points at a branch build can load two
+# different copies of the extension into one process. Besides invalidating the
+# proof, that redefines custom GUCs such as laplace_substrate.perfcache_path.
+# A private socket directory makes concurrent proofs independent; listen_addresses
+# is empty, so the arbitrary fixed port never opens a TCP listener or conflicts
+# with production.
+"$PG_PREFIX/bin/initdb" -D "$pgdata" -A trust -U laplace_admin --no-sync >/dev/null
+cat >>"$pgdata/postgresql.conf" <<EOF
+listen_addresses = ''
+port = 55432
+unix_socket_directories = '$socket_dir'
+shared_preload_libraries = ''
+extension_control_path = '$control_root:\$system'
+dynamic_library_path = '$build_library_path:\$libdir'
+EOF
+
+"$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -w start >/dev/null
+postmaster_started=1
+export PGHOST="$socket_dir"
+export PGPORT=55432
+export PGUSER=laplace_admin
+export PGDATABASE=postgres
+# Keep the branch resolution settings explicit on every client as well. This
+# prevents a caller-provided PGOPTIONS from redirecting extension discovery.
 export PGOPTIONS="-c extension_control_path=${control_root}:\$system -c dynamic_library_path=${build_library_path}:\$libdir"
 
-# Fail before pg_regress if the server cannot actually discover the staged branch
-# extensions through the same session settings the regress clients inherit.
-available="$($PG_PREFIX/bin/psql -X -A -t -U laplace_admin -d postgres -v ON_ERROR_STOP=1 -c \
+# Fail before pg_regress if the isolated server cannot discover the staged branch
+# extensions through the same settings the regress clients inherit.
+available="$($PG_PREFIX/bin/psql -X -A -t -d postgres -v ON_ERROR_STOP=1 -c \
   "SELECT string_agg(name, ',' ORDER BY name) FROM pg_available_extensions WHERE name IN ('laplace_geom','laplace_substrate');")"
 if [[ "$available" != "laplace_geom,laplace_substrate" ]]; then
   echo "pr-db-proof: staged extensions are not discoverable (found: ${available:-<none>})" >&2
-  "$PG_PREFIX/bin/psql" -X -U laplace_admin -d postgres -v ON_ERROR_STOP=1 -c "SHOW extension_control_path" >&2 || true
+  "$PG_PREFIX/bin/psql" -X -d postgres -v ON_ERROR_STOP=1 -c "SHOW extension_control_path" >&2 || true
+  exit 2
+fi
+
+# Prove the branch image, not a preloaded installed image, owns the process.
+preload="$($PG_PREFIX/bin/psql -X -A -t -d postgres -v ON_ERROR_STOP=1 -c \
+  "SHOW shared_preload_libraries;")"
+if [[ -n "$preload" ]]; then
+  echo "pr-db-proof: isolated postmaster unexpectedly preloaded libraries: $preload" >&2
   exit 2
 fi
 
@@ -99,4 +141,4 @@ if (( ctest_rc != 0 )); then
   exit "$ctest_rc"
 fi
 
-echo "PR_DB_PROOF_OK database_stem=$REGRESS_DB controls=staged modules=build-tree canonical_mutations=0"
+echo "PR_DB_PROOF_OK database_stem=$REGRESS_DB postgres=isolated controls=staged modules=build-tree canonical_mutations=0"
