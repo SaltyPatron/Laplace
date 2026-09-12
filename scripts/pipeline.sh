@@ -193,6 +193,14 @@ preloaded_so_digest() {
   done | sha256sum | cut -d' ' -f1
 }
 
+# A source stamp belongs to this build, but the install prefix is shared with
+# operator setup and other checkouts. Verify every installed manifest member
+# before reusing the stamp; another installation can replace identical-source
+# binaries with a different configured installed form.
+installed_artifact_digest() {
+  python3 "$ROOT/scripts/installed-artifact-digest.py" "$ROOT/build/install_manifest.txt"
+}
+
 # Staged extension modules must win before pg_config's compatibility $libdir.
 # The control files deliberately name the module without a directory so this is
 # the one authoritative resolution order on Linux.  Preserve any operator-added
@@ -499,7 +507,7 @@ phase_test() {
 phase_install() (
   echo "===== PHASE — INSTALL ====="
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
-  local native_fp library_path_changed=0
+  local native_fp installed_fp library_path_changed=0
   native_fp=$(fp_native)
   if ensure_extension_library_path; then
     library_path_changed=1
@@ -517,7 +525,8 @@ phase_install() (
   fi
   if [[ "$library_path_changed" -eq 0 ]] \
      && fp_check install-native "$native_fp" \
-     && [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]]; then
+     && installed_fp=$(installed_artifact_digest) \
+     && fp_check install-artifacts "$installed_fp"; then
     echo "install up-to-date — skipped (engine/extension unchanged since last install; no API stop, no PG bounce)"
     return 0
   fi
@@ -571,6 +580,8 @@ phase_install() (
     sudo -n systemctl start laplace-api
     api_was_active=0
   fi
+  installed_fp=$(installed_artifact_digest)
+  fp_record install-artifacts "$installed_fp"
   fp_record install-native "$native_fp"
 )
 

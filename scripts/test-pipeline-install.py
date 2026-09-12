@@ -45,6 +45,29 @@ class InstallTests(unittest.TestCase):
         path = self.base / "calls"
         return path.read_text() if path.exists() else ""
 
+    def test_install_manifest_detects_replacement_deletion_and_symlink_change(self):
+        import runpy
+        digest = runpy.run_path(str(ROOT / "scripts/installed-artifact-digest.py"))["installed_digest"]
+        first = self.base / "first.so"
+        second = self.base / "second.so"
+        link = self.base / "library.so"
+        first.write_bytes(b"same")
+        second.write_bytes(b"same")
+        link.symlink_to(first.name)
+        manifest = self.base / "build/install_manifest.txt"
+        manifest.write_text(str(link) + "\n")
+        before = digest(manifest)
+        self.assertEqual(before, digest(manifest))
+        first.write_bytes(b"changed")
+        self.assertNotEqual(before, digest(manifest))
+        first.write_bytes(b"same")
+        link.unlink()
+        link.symlink_to(second.name)
+        self.assertNotEqual(before, digest(manifest))
+        second.unlink()
+        with self.assertRaises(FileNotFoundError):
+            digest(manifest)
+
     def test_preload_digest_tracks_engine_dependencies(self):
         modules = Path(self.env["LAPLACE_EXT_LIBDIR"])
         modules.mkdir(parents=True)
@@ -148,7 +171,11 @@ psql -d postgres -U laplace_admin -c 'SHOW dynamic_library_path'
     def phase(self, source=None, **env):
         return self.run_shell((source or function("phase_install")) + r'''
 fp_native() { echo known; }
-fp_check() { return 1; }
+fp_check() {
+  if [[ "$1" == install-native ]]; then return "${NATIVE_MATCH_RC:-1}"; fi
+  return "${ARTIFACT_MATCH_RC:-1}"
+}
+installed_artifact_digest() { echo live; }
 fp_record() { echo stamp >> "$CALLS"; }
 ensure_extension_library_path() { return "${PATH_RC:-1}"; }
 systemctl() { [[ "${API_ACTIVE:-1}" == 1 ]]; }
@@ -162,6 +189,16 @@ psql() { echo probe >> "$CALLS"; return "${PROBE_RC:-0}"; }
 restart_postgres() { echo bounce >> "$CALLS"; }
 phase_install
 ''', **env)
+
+    def test_matching_source_with_changed_install_reinstalls(self):
+        result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="1")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("install\n", self.calls())
+
+    def test_matching_source_and_live_artifacts_skip_service_actions(self):
+        result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="0")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("", self.calls())
 
     def test_failed_preflight_never_installs_or_touches_services(self):
         result = self.phase(PATH_RC="2")
