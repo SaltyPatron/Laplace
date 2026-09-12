@@ -458,3 +458,6 @@ deploy/**/migrations/
 # checkout — a repo-root manifest of URLs+shas reads as a sync target to any agent
 # or tool that finds it, which is exactly what .gitmodules did before 391d9be7.
 external-pins.tsv
+
+# Archived generated build lives on the permanent recovery drive.
+/recovery/native-build
