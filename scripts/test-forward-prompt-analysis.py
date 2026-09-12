@@ -117,7 +117,14 @@ def main() -> int:
     assert count(program, "laplace_cognition_program_note_semantic_channels(") == 2
     assert "laplace_cognition_program_note_route(" in program
     assert "laplace_cognition_program_note_emit(" in program
-    assert "if (receipt.complete)" in program
+    # Completion terminates an open-ended cognition pass. An explicitly bound
+    # output operation is different: it retains the full active operand frontier
+    # and must honor its declared bounded result chain without synthesizing
+    # sequence support for supplemental semantic operands.
+    assert "DatumGetArrayTypePCopy(PointerGetDatum(operands))" in program
+    assert "if (receipt.complete &&" in program
+    assert "!output_relations" in program
+    assert "ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0" in program
     assert "laplace_cognition_program_finalize(" in program
     assert "emit_terminal(" in program
 
