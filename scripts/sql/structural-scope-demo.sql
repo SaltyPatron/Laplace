@@ -38,8 +38,9 @@ ORDER BY witness_id, sep_id;
 ROLLBACK;
 
 -- Additional complete-set query (not part of the fast co-occurrence demo).
--- The live two-hop probe exceeded 15 seconds on 2026-09-12; performance remains
--- an implementation obligation. Run separately to inspect the full result.
+-- On 2026-09-12 this returned 1,534 first-hop and 156 second-hop containers
+-- in 654 ms after flushing the pending GIN lists (previously exceeded 15 s).
+-- Run separately to inspect the full result; timings depend on the current data.
 -- Exactly two upward composition hops, with no caller top-K ceiling.
 -- These are shortest containment hops, not arbitrary semantic relations.
 -- SELECT encode(entity_id,'hex') AS containing_composition, tier,

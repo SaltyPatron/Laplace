@@ -81,26 +81,13 @@ public static class NpgsqlIngestOps
     public static Task CleanGinPendingListsAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
         NpgsqlRead.ExecuteNonQueryAsync(conn, """
-            DO $$
-            DECLARE r record;
-            BEGIN
-                FOR r IN
-                    SELECT i.indexrelid::regclass AS idx
-                    FROM pg_index i
-                    JOIN pg_class c  ON c.oid = i.indexrelid
-                    JOIN pg_am    am ON am.oid = c.relam
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE am.amname = 'gin' AND n.nspname = 'laplace'
-                LOOP
-                    -- Per-index and tolerant: a partition dropped concurrently, or an
-                    -- index built without fastupdate, must not abort the sweep.
-                    BEGIN
-                        PERFORM gin_clean_pending_list(r.idx);
-                    EXCEPTION WHEN OTHERS THEN
-                        NULL;
-                    END;
-                END LOOP;
-            END $$;
+            SELECT pg_catalog.gin_clean_pending_list(i.indexrelid::regclass)
+            FROM pg_catalog.pg_index i
+            JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+            JOIN pg_catalog.pg_am am ON am.oid = c.relam
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE am.amname = 'gin' AND n.nspname = 'laplace'
+              AND c.relkind = 'i' AND i.indisvalid AND i.indisready
             """, timeoutSeconds: 0, ct: ct, label: "gin_clean_pending_lists");
 
     public static Task<long> EvidenceCountForSourceNameAsync(

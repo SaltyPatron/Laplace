@@ -209,7 +209,7 @@ public sealed partial class NpgsqlSubstrateWriter
             await PreloadPresenceSetsAsync(ct).ConfigureAwait(false);
     }
 
-    public Task CompleteBulkRunAsync(CancellationToken ct = default)
+    public async Task CompleteBulkRunAsync(CancellationToken ct = default)
     {
         _persistedEntityIds = null;
         _persistedPhysIds = null;
@@ -220,7 +220,13 @@ public sealed partial class NpgsqlSubstrateWriter
         _presenceCacheOverflowed = false;
         Laplace.Decomposers.Abstractions.ContentLadderLedger.End();
         _tier0LayerComplete = false;
-        return Task.CompletedTask;
+        // This is part of generic ingest completion, after the accumulator drains
+        // its writes. It must run for every host, independently of CLI validation.
+        // A failed drain must fail completion rather than promise read-ready output.
+        var drain = System.Diagnostics.Stopwatch.StartNew();
+        await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await NpgsqlIngestOps.CleanGinPendingListsAsync(conn, ct).ConfigureAwait(false);
+        _log.LogInformation("WS_APPLY completion gin_drain_ms={GinMs}", drain.ElapsedMilliseconds);
     }
 
     /// <summary>

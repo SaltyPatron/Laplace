@@ -24,7 +24,7 @@
 -- The pending list is scanned LINEARLY on every search until it is flushed, so left
 -- alone a raised limit would simply move the cost onto the probe this index exists to
 -- serve. It is not left alone: NpgsqlIngestOps.CleanGinPendingListsAsync drains every
--- laplace GIN at the end of an ingest, right after the post-ingest ANALYZE, so the
+-- valid leaf GIN during shared writer completion, after queued writes drain, so the
 -- limit is sized for write batching and readers never scan a populated list. That is
 -- the whole trade-off removed rather than split — do not raise this without keeping
 -- that flush, or the read path pays for the write path.

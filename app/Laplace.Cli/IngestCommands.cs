@@ -864,14 +864,6 @@ internal static class IngestCommands
         long analyzeMs = phase.ElapsedMilliseconds;
         phase.Restart();
 
-        // The write burst is over: drain the GIN pending lists so the first reader
-        // after a seed does not scan them linearly. See CleanGinPendingListsAsync —
-        // this is what lets gin_pending_list_limit be sized for bulk-load batching
-        // without taxing the containment probe the read model runs on.
-        await NpgsqlIngestOps.CleanGinPendingListsAsync(conn);
-        long ginMs = phase.ElapsedMilliseconds;
-        phase.Restart();
-
         Task<long> EvidenceForSource(string sourceKey) =>
             NpgsqlIngestOps.EvidenceCountForSourceNameAsync(conn, sourceKey);
         Task<long> ContentForSource(string sourceKey) =>
@@ -890,7 +882,7 @@ internal static class IngestCommands
         }
         long summaryMs = phase.ElapsedMilliseconds;
         Console.WriteLine(
-            $"LAPSIGHT_POST_INGEST analyze_ms={analyzeMs} gin_drain_ms={ginMs} "
+            $"LAPSIGHT_POST_INGEST analyze_ms={analyzeMs} "
             + $"summary_ms={summaryMs} exact_source_validation={exactSourceValidation.ToString().ToLowerInvariant()}");
 
         // Keep automatic ingest completion bounded. The stats refresh above is necessary
