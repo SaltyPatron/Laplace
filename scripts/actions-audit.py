@@ -129,7 +129,7 @@ all_workflow_source = "\n".join(path.read_text(encoding="utf-8") for path in pat
 if "Tier!=db&Tier!=perf" in all_workflow_source: fail("workflow filter still accidentally includes Tier=live")
 
 runner = (ROOT / "scripts" / "bootstrap-laplace-runner.sh").read_text(encoding="utf-8")
-for token in ('RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"', "--name hart-server", "--work _work"):
+for token in ('RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"', "--name hart-server", "--work /build/laplace/work/legacy-runner"):
     if token not in runner: fail(f"runner contract missing {token}")
 
 registry_tool = ROOT / "scripts" / "test-profile-registry.py"

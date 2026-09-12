@@ -73,7 +73,7 @@ assert_app_contract
 # Legacy deploys copied mktemp's 0700 mode onto mcp-runtime. A current deploy
 # converges mode-only drift without taking ownership repair away from bootstrap.
 chmod 0700 "$MCP_DIR"
-laplace_reconcile_app_dir_contract "$APP_DIR" "$(id -un)" "$(id -gn)"
+laplace_reconcile_app_dir_contract "$APP_DIR" "$(id -un)" "$(stat -c %G "$APP_DIR")"
 assert_app_contract
 
 echo "OK deploy payload sync preserves bootstrap-owned host metadata across repeat publishes"
