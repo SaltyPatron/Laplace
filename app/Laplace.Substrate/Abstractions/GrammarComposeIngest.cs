@@ -331,7 +331,7 @@ public static class GrammarSourceFileSupport
                 ? Path.GetFileName(full)
                 : Path.GetRelativePath(fullRoot, full).Replace('\\', '/');
             string? modality = modalityFor(full);
-            bool excluded = !rootIsFile && VendoredPathFilter.IsVendoredOrBuildPath(full);
+            bool excluded = !rootIsFile && VendoredPathFilter.IsVendoredOrBuildPath(full, fullRoot);
             bool registered = modality is not null && GrammarDecomposer.LookupById(modality) != IntPtr.Zero;
             IngestArtifactDisposition disposition = excluded
                 ? IngestArtifactDisposition.ExcludedWithReason

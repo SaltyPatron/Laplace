@@ -106,7 +106,7 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
         if (!Directory.Exists(path)) yield break;
 
         foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
-                                         .Where(f => !VendoredPathFilter.IsVendoredOrBuildLocation(f))
+                                         .Where(f => !VendoredPathFilter.IsVendoredOrBuildLocation(f, path))
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
     }
@@ -136,7 +136,7 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
             {
                 string full = Path.GetFullPath(file);
                 string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
-                if (VendoredPathFilter.IsVendoredOrBuildLocation(full))
+                if (VendoredPathFilter.IsVendoredOrBuildLocation(full, root))
                     return BuildArtifact(
                         full,
                         relative,

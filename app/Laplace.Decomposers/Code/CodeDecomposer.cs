@@ -102,7 +102,7 @@ public sealed class CodeDecomposer : GrammarComposeDecomposerMultiFile<CodeSourc
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
                                       .OrderBy(p => p, StringComparer.Ordinal))
         {
-            if (VendoredPathFilter.IsVendoredOrBuildPath(file)) continue;
+            if (VendoredPathFilter.IsVendoredOrBuildPath(file, root)) continue;
             var m = ModalityOf(file);
             if (m is not null) yield return (file, m);
         }

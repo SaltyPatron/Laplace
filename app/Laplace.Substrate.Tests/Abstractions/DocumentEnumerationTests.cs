@@ -18,6 +18,27 @@ namespace Laplace.Substrate.Tests.Abstractions;
 public sealed class DocumentEnumerationTests
 {
     [Fact]
+    public void SourceRootUnderBuildDirectory_PreservesAuthoredInputAndNestedExclusions()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "build", "source_" + Path.GetRandomFileName());
+        try
+        {
+            Write(root, "authored.txt", "source content");
+            Write(root, Path.Combine("build", "generated.txt"), "generated content");
+            Assert.Equal("authored.txt", Path.GetFileName(Assert.Single(
+                DocumentDecomposer.EnumerateInputFiles(root))));
+            IngestArtifactGraph graph = Assert.IsType<IngestArtifactGraph>(
+                DocumentDecomposer.BuildArtifactGraph(root));
+            Assert.Single(graph.Artifacts, a => a.Disposition == IngestArtifactDisposition.Admitted);
+            Assert.Single(graph.Artifacts, a => a.Disposition == IngestArtifactDisposition.ExcludedWithReason);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MixedDirectory_OneArtifactSnapshotAccountsForEveryFileAndSchedulesOnlySupportedText()
     {
         string root = Path.Combine(Path.GetTempPath(), "laplace1403_" + Path.GetRandomFileName());

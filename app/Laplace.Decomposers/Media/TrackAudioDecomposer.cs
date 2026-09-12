@@ -92,7 +92,7 @@ public sealed class TrackAudioDecomposer
         if (!Directory.Exists(path)) yield break;
         foreach (string file in Directory.EnumerateFiles(path, "*.*", SearchOption.AllDirectories)
                                          .Where(f => AudioFileOpen.IsSupportedPath(f)
-                                                     && !VendoredPathFilter.IsVendoredOrBuildPath(f))
+                                                     && !VendoredPathFilter.IsVendoredOrBuildPath(f, path))
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
     }

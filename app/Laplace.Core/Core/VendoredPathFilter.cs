@@ -66,12 +66,31 @@ public static class VendoredPathFilter
     }
 
     /// <summary>
+    /// Evaluate ownership inside the selected source, independently of the drive
+    /// or workspace directory hosting it. Preserve first-segment matching.
+    /// </summary>
+    public static bool IsVendoredOrBuildLocation(string file, string sourceRoot) =>
+        IsVendoredOrBuildLocation(
+            Path.DirectorySeparatorChar + Path.GetRelativePath(sourceRoot, file));
+
+    /// <summary>
     /// Provenance plus the source-code size heuristic. Code lanes only — see the
     /// MaxFileBytes scope note.
     /// </summary>
     public static bool IsVendoredOrBuildPath(string file)
     {
         if (IsVendoredOrBuildLocation(file)) return true;
+        return IsOversizedSource(file);
+    }
+
+    public static bool IsVendoredOrBuildPath(string file, string sourceRoot)
+    {
+        if (IsVendoredOrBuildLocation(file, sourceRoot)) return true;
+        return IsOversizedSource(file);
+    }
+
+    private static bool IsOversizedSource(string file)
+    {
         try { return new FileInfo(file).Length > MaxFileBytes; }
         catch (IOException) { return false; }
     }

@@ -193,7 +193,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
                                       .OrderBy(p => p, StringComparer.Ordinal))
         {
-            if (VendoredPathFilter.IsVendoredOrBuildPath(file)) continue;
+            if (VendoredPathFilter.IsVendoredOrBuildPath(file, root)) continue;
 
             string? modality = ModalityFor(file);
             if (modality is null) continue;
