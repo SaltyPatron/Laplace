@@ -48,7 +48,8 @@ typedef struct LaplaceCognitionProgram LaplaceCognitionProgram;
  * operator and `operation_relations` contains only the relation identities it
  * names. In that case the completion program contracts to the witnessed
  * operator + its prompt operands rather than treating grammatical scaffolding
- * as an answer obligation. No answer identity or prompt phrase is encoded here. */
+ * as an answer obligation. No answer identity, prompt phrase switch, or prompt
+ * keyword classifier is encoded here. */
 LaplaceCognitionProgram *laplace_cognition_program_create(
     const LaplacePromptInput *input,
     int prompt_origin_count,
