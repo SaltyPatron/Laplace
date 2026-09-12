@@ -75,6 +75,29 @@ ensure_host() {
   preflight
 }
 
+snapshot_application_payload() {
+  local source_dir="$1" destination_dir="$2"
+  shift 2
+  local rc=0
+
+  # Prefer same-filesystem hardlinks so the rollback snapshot consumes blocks
+  # only for payload that later changes. Linux protected_hardlinks can reject an
+  # otherwise valid identical file when the publishing runner does not own the
+  # active inode (for example root/service-owned stable launchers). Rsync treats
+  # that single EPERM as transfer failure instead of copying the file.
+  #
+  # Do not discard the successfully linked prefix. A second complete rsync pass
+  # without --link-dest validates the whole snapshot and copies only entries the
+  # first pass could not materialize; already-created hardlinks remain intact.
+  rsync -a --link-dest="$source_dir" "$@" "$source_dir/" "$destination_dir/" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "::notice::hardlink rollback snapshot was incomplete (rsync=$rc); completing it with private copies"
+  rsync -a "$@" "$source_dir/" "$destination_dir/"
+}
+
 case "${1:-}" in
   preflight) ensure_host ;;
   begin)
@@ -96,14 +119,13 @@ case "${1:-}" in
     #
     # The rollback snapshot lives on the same /opt/laplace filesystem as APP_DIR.
     # Do not allocate a second physical copy of every unchanged runtime/native file:
-    # --link-dest links the snapshot to the current inode. The deploy path below uses
-    # laplace_sync_payload's ordinary rsync replacement semantics (never --inplace),
-    # so a changed/deleted live file gets a new inode while the snapshot keeps the old
-    # bytes. This makes rollback space proportional to changed payload instead of the
-    # complete installed application and prevents ENOSPC while creating the backup.
-    rsync -a --link-dest="$APP_DIR" \
+    # the first pass hardlinks unchanged files where host ownership permits it. If
+    # protected_hardlinks rejects individual service-owned launchers, a second
+    # ordinary rsync completes only the missing entries without throwing away the
+    # successfully shared snapshot prefix.
+    snapshot_application_payload "$APP_DIR" "$backup/app" \
       --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'chess-lab-work/' \
-      --exclude 'mcp-runtime/' --exclude 'mcp/' --exclude 'releases/' "$APP_DIR/" "$backup/app/"
+      --exclude 'mcp-runtime/' --exclude 'mcp/' --exclude 'releases/'
     for name in mcp operator lichess stripe; do
       if [[ -f "/opt/laplace/secrets/$name.env" ]]; then
         cp -p "/opt/laplace/secrets/$name.env" "$backup/secrets/$name.env"
