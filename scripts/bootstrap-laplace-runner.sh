@@ -609,7 +609,7 @@ pg_prepare_waldir() {
     local want_total=$(( LAPLACE_PG_MAX_WAL_GB + LAPLACE_PG_WAL_RESERVE_GB ))
     local data_dev wal_dev device_mb fs_total_mb free_mb
 
-    install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_WAL"
+    install -d -m 2770 -g "$RUNNER_GROUP" "$LAPLACE_PG_WAL"
 
     data_dev="$(pg_device_of "$LAPLACE_PG_MOUNT")"
     wal_dev="$(pg_device_of "$LAPLACE_PG_WAL")"
@@ -788,7 +788,7 @@ bootstrap_laplace_pg_cluster() {
         install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_DATA"
         sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/initdb" \
             -D "$LAPLACE_PG_DATA" \
-            --waldir "$LAPLACE_PG_WAL" \
+            --waldir "$LAPLACE_PG_WAL/pg_wal" \
             --auth-host=trust --auth-local=peer \
             --username=laplace_admin \
             --no-locale --encoding=UTF8 \
@@ -1129,7 +1129,7 @@ bootstrap_pg_tempspace() {
     [ -n "$LAPLACE_PG_TEMP" ] || { yellow "  LAPLACE_PG_TEMP empty — spill stays in PGDATA"; return 0; }
     say "Ensure temp tablespace '$LAPLACE_PG_TEMP_TS' at $LAPLACE_PG_TEMP (spill off the heap device)"
 
-    install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_TEMP"
+    install -d -m 2770 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_TEMP"
 
     local heap_dev temp_dev
     heap_dev="$(pg_device_of "$LAPLACE_PG_MOUNT")"
@@ -1161,6 +1161,9 @@ PG_EOF
     else
         yellow "  pg-machine-tuning.sh not sourced — run it to set temp_tablespaces"
     fi
+    # CREATE TABLESPACE may restrict the volume root; private PostgreSQL files
+    # remain beneath it while the mounted parent stays shared.
+    chmod 2770 "$LAPLACE_PG_TEMP"
     green "✓ Tablespace $LAPLACE_PG_TEMP_TS → $LAPLACE_PG_TEMP"
 }
 
@@ -1773,20 +1776,20 @@ do_bootstrap() {
 
     echo
     echo "Peer auth (OS laplace-runner → PG laplace_admin on 'postgres' DB):"
-    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" -d postgres -U laplace_admin -tAc \
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin -tAc \
         "SELECT current_user || ' on ' || current_database();" 2>&1 \
         | sed 's/^/  → /'
 
     if [ -n "$GH_SUDO_USER" ]; then
         echo
         echo "Peer auth (OS $GH_SUDO_USER → matching PG operator on 'postgres' DB):"
-        sudo -u "$GH_SUDO_USER" "$LAPLACE_PG_PREFIX/bin/psql" -d postgres -tAc \
+        sudo -u "$GH_SUDO_USER" "$LAPLACE_PG_PREFIX/bin/psql" -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -tAc \
             "SELECT current_user || ' on ' || current_database();" 2>&1 \
             | sed 's/^/  → /'
 
         echo
         echo "Administrative role path (OS $GH_SUDO_USER → PG laplace_admin):"
-        sudo -u "$GH_SUDO_USER" "$LAPLACE_PG_PREFIX/bin/psql" -d postgres -U laplace_admin -tAc \
+        sudo -u "$GH_SUDO_USER" "$LAPLACE_PG_PREFIX/bin/psql" -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin -tAc \
             "SELECT current_user || ' on ' || current_database();" 2>&1 \
             | sed 's/^/  → /'
     fi
