@@ -30,8 +30,8 @@ typedef struct LaplacePromptIntent
 } LaplacePromptIntent;
 
 /* These aliases already belong to the established prompt-coherence operation
- * naming law. They map a relation's canonical noun to an attested prompt-facing
- * operation name; they never name or synthesize an answer identity. */
+ * naming law. They map a relation's canonical noun to a prompt-facing operation
+ * name; they never name or synthesize an answer identity. */
 static inline const char *
 laplace_prompt_intent_alias(const char *segment)
 {
@@ -56,9 +56,9 @@ laplace_prompt_intent_has_relation(const LaplacePromptIntent *intent,
 
 /* Compile S3 relation intent from the already-admitted canonical prompt tree.
  * No second prompt decomposition and no answer lookup occurs here. Relation
- * canonical names are manifest data. Their final identifier token is the same
- * bounded addressing law used by prompt_coherence: grammar-leading fragments
- * are ignored, and fragments shorter than three bytes cannot become operators.
+ * canonical names are manifest data. The longest identifier segment is the
+ * lexical relation name (ANTONYM in IS_ANTONYM_OF, PART in HAS_PART); fragments
+ * shorter than three bytes cannot become operators.
  *
  * The returned cue bitmap uses input->context occurrence ordinals, allowing the
  * cognition program to distinguish a relation operator from its operands and
@@ -115,9 +115,11 @@ laplace_prompt_intent_compile(const LaplacePromptInput *input,
     for (size_t r = 0; r < laplace_relation_table_count; ++r)
     {
         const char *canonical = laplace_relation_table[r].canonical;
-        const char *segment;
+        const char *segment = NULL;
         const char *alias;
-        size_t len;
+        size_t len = 0;
+        char *copy;
+        char *scan;
         char *lower;
         hash128_t cue_id;
         hash128_t relation_id;
@@ -126,11 +128,28 @@ laplace_prompt_intent_compile(const LaplacePromptInput *input,
 
         if (!canonical || !*canonical)
             continue;
-        segment = strrchr(canonical, '_');
-        segment = segment ? segment + 1 : canonical;
-        len = strlen(segment);
-        if (len < 3)
+
+        copy = pstrdup(canonical);
+        scan = copy;
+        while (scan && *scan)
+        {
+            char *next = strchr(scan, '_');
+            size_t part_len = next ? (size_t) (next - scan) : strlen(scan);
+            if (part_len > len)
+            {
+                segment = scan;
+                len = part_len;
+            }
+            if (!next)
+                break;
+            *next = '\0';
+            scan = next + 1;
+        }
+        if (!segment || len < 3)
+        {
+            pfree(copy);
             continue;
+        }
 
         lower = pnstrdup(segment, len);
         for (size_t i = 0; i < len; ++i)
@@ -138,6 +157,7 @@ laplace_prompt_intent_compile(const LaplacePromptInput *input,
         if (laplace_content_root_id((const uint8_t *) lower, len, &cue_id) != 0)
         {
             pfree(lower);
+            pfree(copy);
             continue;
         }
         cue = hash_search(tokens, &cue_id, HASH_FIND, NULL);
@@ -150,6 +170,7 @@ laplace_prompt_intent_compile(const LaplacePromptInput *input,
                 cue = hash_search(tokens, &cue_id, HASH_FIND, NULL);
         }
         pfree(lower);
+        pfree(copy);
         if (!cue)
             continue;
         if (laplace_relation_type_id(canonical, &relation_id) != 0)
