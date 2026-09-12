@@ -55,6 +55,9 @@ env:
   LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
   LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  PGHOST: /var/run/postgresql
+  PGPORT: 5432
+  PGUSER: laplace_admin
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
   LAPLACE_FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.force_all && '1' || '' }}

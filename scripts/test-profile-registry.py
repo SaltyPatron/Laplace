@@ -383,6 +383,11 @@ def _finish_receipt(
 
 
 def run_profile(request: str, registry_path: Path, receipt_path: Path | None) -> int:
+    # Every subprocess (including CTest setup/teardown and pg_regress) uses
+    # the configured substrate socket, independent of pipeline.sh inheritance.
+    for key, value in {"PGHOST": "/var/run/postgresql", "PGPORT": "5432",
+                       "PGUSER": "laplace_admin", "PGDATABASE": "laplace"}.items():
+        os.environ.setdefault(key, value)
     suites = load_validated(registry_path)
     chosen = suites_for_request(suites, request)
     started_wall = time.time()
