@@ -46,8 +46,8 @@ def place(checkout):
         fcntl.flock(lock, fcntl.LOCK_EX)
         if source.is_symlink():
             actual = source.resolve()
-            if not actual.is_relative_to('/build/laplace/build'):
-                raise RuntimeError(f'build link is outside build storage: {source} -> {actual}')
+            if actual != target:
+                raise RuntimeError(f'build link does not match this checkout: {source} -> {actual}')
             actual.mkdir(parents=True, exist_ok=True)
             return actual
         if source.exists():

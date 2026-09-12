@@ -190,6 +190,7 @@ layer1_build_install_extensions() {
         sudo find -H "$REPO_DIR/build" -xdev -type d -exec chmod g+rws {} +
         sudo find -H "$REPO_DIR/build" -xdev -type f -exec chmod g+rwX {} +
     fi
+    sudo python3 "$REPO_DIR/scripts/place-build-directory.py" "$REPO_DIR" >/dev/null
     sudo -u "$RUNNER_USER" -H env \
         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO_DIR" \
         TMPDIR=/build/laplace/work/legacy-scratch TMP=/build/laplace/work/legacy-scratch TEMP=/build/laplace/work/legacy-scratch \
