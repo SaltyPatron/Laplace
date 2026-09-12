@@ -296,6 +296,10 @@ laplace_reuse_runtime_file() {
   [[ -f "$reference" && ! -L "$reference" && -f "$destination" && ! -L "$destination" ]] || return 0
   [[ "$(stat -c '%a' "$reference")" == "$(stat -c '%a' "$destination")" ]] || return 0
   cmp -s "$reference" "$destination" || return 0
+  # Rsync/link-dest may already have produced the desired inode identity. Treat
+  # that state as success instead of creating another link and asking mv to
+  # replace a pathname with the same inode (which GNU mv rejects as an error).
+  [[ "$(stat -c '%d:%i' "$reference")" != "$(stat -c '%d:%i' "$destination")" ]] || return 0
   # A cross-device reference is still valid content, but cannot share an inode.
   # Keep the staged file until a replacement link has actually been created.
   if ln "$reference" "$destination.reuse" 2>/dev/null; then
