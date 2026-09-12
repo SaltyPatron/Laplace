@@ -827,6 +827,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     int next_origin = 0;
     int semantic_hops = 0;
     bool exhausted = false;
+    bool explicit_observation_scope = false;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("forward execution: context must not be NULL")));
@@ -951,11 +952,13 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
     if (PG_NARGS() > 9 && !PG_ARGISNULL(9) && max_stride > 0)
     {
+        explicit_observation_scope = true;
         trajectory_scope = laplace_trajectory_scope_create();
         laplace_trajectory_scope_extend(trajectory_scope, PG_GETARG_ARRAYTYPE_P(9));
     }
     if (PG_NARGS() > 10 && !PG_ARGISNULL(10) && max_stride > 0)
     {
+        explicit_observation_scope = true;
         if (!trajectory_scope)
             trajectory_scope = laplace_trajectory_scope_create();
         laplace_trajectory_scope_extend_containing(trajectory_scope,
@@ -1153,6 +1156,39 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         {
             exhausted = true;
             break;
+        }
+
+        /* An explicit observation scope is already a selected physical evidence
+         * boundary, not corpus-wide frequency. If it yields an unrefuted exact
+         * ordinal continuation, unrelated positive graph testimony cannot evict
+         * that continuation merely because the observed candidate has no edge of
+         * its own. Explicit refutation removes the protection and lets the typed
+         * result plane supply the fallback. */
+        if (explicit_observation_scope)
+        {
+            bool has_unopposed_scoped_sequence = false;
+            for (int i = 0; i < candidate_count; ++i)
+            {
+                if (candidates[i].sequence_occurrences > 0 &&
+                    !candidates[i].query.has_negative &&
+                    !candidates[i].query_traversal.has_negative &&
+                    !candidates[i].projection.has_negative)
+                {
+                    has_unopposed_scoped_sequence = true;
+                    break;
+                }
+            }
+            if (has_unopposed_scoped_sequence)
+            {
+                kept = 0;
+                for (int i = 0; i < candidate_count; ++i)
+                    if (candidates[i].sequence_occurrences > 0 &&
+                        !candidates[i].query.has_negative &&
+                        !candidates[i].query_traversal.has_negative &&
+                        !candidates[i].projection.has_negative)
+                        candidates[kept++] = candidates[i];
+                candidate_count = kept;
+            }
         }
 
         qsort(candidates, (size_t) candidate_count, sizeof(Candidate), candidate_compare);
