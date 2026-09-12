@@ -549,7 +549,7 @@ phase_install() (
   local so_before so_after
   so_before=$(preloaded_so_digest)
   umask 0002
-  cmake --install "${LAPLACE_BUILD_DIRECTORY:-$ROOT/build}"
+  cmake --install "$LAPLACE_BUILD_DIRECTORY"
   test -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so"
   so_after=$(preloaded_so_digest)
   # shared_preload_libraries pins the extension image in the postmaster, so a

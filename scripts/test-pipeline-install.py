@@ -169,6 +169,7 @@ psql -d postgres -U laplace_admin -c 'SHOW dynamic_library_path'
         self.assertEqual(["-X", "-w", "-c", "SELECT"], self.calls().splitlines())
 
     def phase(self, source=None, **env):
+        env.setdefault("LAPLACE_BUILD_DIRECTORY", str(self.base / "build"))
         return self.run_shell((source or function("phase_install")) + r'''
 fp_native() { echo known; }
 fp_check() {
