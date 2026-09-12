@@ -104,8 +104,21 @@ def main() -> int:
     assert "laplace_query_state_create(" in program
     assert "laplace_query_state_extend(query_state, selected" in program
     assert "laplace_query_state_extend(output_state, selected" in program
-    assert "walk_continuations(walk_call, input, hops, trace)" in entry
+    assert "laplace_prompt_intent_compile(input, CurrentMemoryContext)" in entry
+    assert "intent.relation_count > 0 ? &intent : NULL" in entry
+    assert "laplace_prompt_intent_has_relation(" in program
+    assert "candidate_is_intent_result(" in program
+    assert "walk_continuations(" in entry and "intent.relation_count > 0 ? &intent : NULL" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
+
+    intent_header = (ROOT / "extension/laplace_substrate/src/prompt_intent.h").read_text()
+    assert "laplace_relation_table_count" in intent_header
+    assert "laplace_relation_table[r].canonical" in intent_header
+    assert 'return "opposite"' in intent_header
+    assert 'strcmp(segment, "antonym")' in intent_header
+    assert "laplace_content_root_id(" in intent_header
+    assert "laplace_relation_type_id(canonical, &relation_id)" in intent_header
+    assert "cold" not in intent_header.lower()
 
     # Structural and semantic providers may contribute ancestry to the same
     # selected identity, but structural ancestry alone must never satisfy a
@@ -131,7 +144,10 @@ def main() -> int:
     completion = (ROOT / "extension/laplace_substrate/src/cognition_program.c").read_text()
     completion_header = (ROOT / "extension/laplace_substrate/src/cognition_program.h").read_text()
     assert "tiers[node] >= 2" in completion
-    assert "program->required = bms_copy(eligible)" in completion
+    assert "program->required = bms_copy(compiled_required ? compiled_required : eligible)" in completion
+    assert "bms_num_members(compiled_required) <= operator_count" in completion
+    assert "program_operation_relation(" in completion
+    assert "program->operation_origins" in completion
     assert "semantic_origins" in completion
     assert "semantic_origin_add(program, &id, i)" in completion
     assert "semantic_origin_get(program, &input->root, true)" in completion
@@ -209,7 +225,7 @@ def main() -> int:
         "FORWARD_PROMPT_ANALYSIS_OK "
         f"obligations=native semantic_act=hash-bound realization=completion-gated "
         f"query_state=persistent candidate_evidence=exact evidence=typed-separate "
-        f"execution=single-native-program route_owner=native chat_steps={steps}"
+        f"intent=manifest-typed execution=single-native-program route_owner=native chat_steps={steps}"
     )
     return 0
 

@@ -213,7 +213,8 @@ public sealed class ElectorArchitectureGateTests
         Assert.Contains("!output_relations", native);
         Assert.Contains("ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0", native);
         Assert.Contains("forward_prompt(FunctionCallInfo fcinfo, bool trace)", native);
-        Assert.Contains("walk_continuations(walk_call, input, hops, trace)", native);
+        Assert.Contains("laplace_prompt_intent_compile(input, CurrentMemoryContext)", native);
+        Assert.Matches(@"walk_continuations\(\s*walk_call,\s*input,\s*hops,\s*trace,\s*intent\.relation_count\s*>\s*0\s*\?\s*&intent\s*:\s*NULL\s*\)", native);
         Assert.Contains("return forward_prompt(fcinfo, false);", native);
         Assert.Contains("return forward_prompt(fcinfo, true);", native);
         Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);

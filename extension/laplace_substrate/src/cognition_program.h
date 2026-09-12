@@ -3,6 +3,7 @@
 
 #include "postgres.h"
 #include "nodes/bitmapset.h"
+#include "utils/array.h"
 
 #include "laplace/core/hash128.h"
 
@@ -40,12 +41,22 @@ typedef struct LaplaceCognitionProgram LaplaceCognitionProgram;
  * occurrence ordinals are the obligation coordinates; the exact prompt trunk
  * carries their union as the initial whole-observation operand. Supplemental
  * history/frontier operands remain usable evidence but never become obligations
- * for this turn. There is no prompt-text/keyword classifier here. */
+ * for this turn.
+ *
+ * When native prompt admission has compiled a witnessed relation operator,
+ * `operation_origins` identifies the exact prompt occurrences that name that
+ * operator and `operation_relations` contains only the relation identities it
+ * names. In that case the completion program contracts to the witnessed
+ * operator + its prompt operands rather than treating grammatical scaffolding
+ * as an answer obligation. No answer identity, prompt phrase switch, or prompt
+ * keyword classifier is encoded here. */
 LaplaceCognitionProgram *laplace_cognition_program_create(
     const LaplacePromptInput *input,
     int prompt_origin_count,
     const LaplaceQueryChannel *initial_channels,
-    int initial_channel_count);
+    int initial_channel_count,
+    const Bitmapset *operation_origins,
+    ArrayType *operation_relations);
 
 /* Fold exact positive typed transitions into semantic provenance. This is
  * separate from physical/trajectory ancestry: a structural successor never
