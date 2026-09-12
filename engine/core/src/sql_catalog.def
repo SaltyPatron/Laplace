@@ -202,3 +202,12 @@ SQL_QUERY("evidence.response_type", "bytea,bytea,int4",
     "FROM ops.attestation_response_type($1,$2,NULL,NULL,$3)")
 SQL_QUERY("evidence.unary_response_type", "bytea,bytea",
     "SELECT combined_eff_mu,source_count FROM ops.attestation_unary_response_type($1,$2,NULL,NULL)")
+
+SQL_QUERY("ingest.clean_gin_pending_lists", "",
+    "SELECT pg_catalog.gin_clean_pending_list(i.indexrelid::regclass) "
+    "FROM pg_catalog.pg_index i "
+    "JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid "
+    "JOIN pg_catalog.pg_am am ON am.oid = c.relam "
+    "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+    "WHERE am.amname = 'gin' AND n.nspname = 'laplace' "
+    "AND c.relkind = 'i' AND i.indisvalid AND i.indisready")

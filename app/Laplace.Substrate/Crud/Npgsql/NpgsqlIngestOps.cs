@@ -1,3 +1,4 @@
+using Laplace.Engine.Core;
 using global::Npgsql;
 using NpgsqlTypes;
 
@@ -80,15 +81,8 @@ public static class NpgsqlIngestOps
     /// </summary>
     public static Task CleanGinPendingListsAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
-        NpgsqlRead.ExecuteNonQueryAsync(conn, """
-            SELECT pg_catalog.gin_clean_pending_list(i.indexrelid::regclass)
-            FROM pg_catalog.pg_index i
-            JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
-            JOIN pg_catalog.pg_am am ON am.oid = c.relam
-            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-            WHERE am.amname = 'gin' AND n.nspname = 'laplace'
-              AND c.relkind = 'i' AND i.indisvalid AND i.indisready
-            """, timeoutSeconds: 0, ct: ct, label: "gin_clean_pending_lists");
+        NpgsqlRead.ExecuteNonQueryAsync(conn, SqlCatalog.Get("ingest.clean_gin_pending_lists").Text,
+            timeoutSeconds: 0, ct: ct, label: "gin_clean_pending_lists");
 
     public static Task<long> EvidenceCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
