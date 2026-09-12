@@ -192,6 +192,7 @@ mint_gh_token() {
 }
 
 bootstrap_user() {
+    mountpoint -q /var/lib/agents || { red "Required runner volume /var/lib/agents is not mounted"; return 1; }
     say "Ensure system account: $RUNNER_USER"
     if id -u "$RUNNER_USER" >/dev/null 2>&1; then
         green "✓ User $RUNNER_USER exists (UID $(id -u "$RUNNER_USER"))"
@@ -205,9 +206,9 @@ bootstrap_user() {
         green "✓ Created system user $RUNNER_USER (UID $(id -u "$RUNNER_USER"))"
     fi
     mkdir -p "$RUNNER_HOME"
-    chown -R "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
-    chmod 750 "$RUNNER_HOME"
-    green "✓ $RUNNER_HOME owned by $RUNNER_USER:$RUNNER_GROUP (mode 750)"
+    chown "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
+    chmod 2770 "$RUNNER_HOME"
+    green "✓ $RUNNER_HOME owned by $RUNNER_USER:$RUNNER_GROUP (mode 2770)"
 
     if id "$GH_SUDO_USER" >/dev/null 2>&1; then
         if id -nG "$GH_SUDO_USER" | tr ' ' '\n' | grep -qx "$RUNNER_GROUP"; then
@@ -244,9 +245,9 @@ bootstrap_build_environment() {
     green "✓ Build-deps + nginx + chess-lab apt packages present"
 
     mkdir -p /opt/laplace
-    chown "$RUNNER_USER:$RUNNER_GROUP" /opt/laplace
+    chgrp "$RUNNER_GROUP" /opt/laplace
     chmod 2775 /opt/laplace
-    green "✓ /opt/laplace: $RUNNER_USER:$RUNNER_GROUP mode 2775 (setgid, no sticky)"
+    green "✓ /opt/laplace: shared group $RUNNER_GROUP mode 2775 (setgid, owner preserved)"
 }
 
 bootstrap_migrate_runner_home() {
@@ -255,16 +256,14 @@ bootstrap_migrate_runner_home() {
     if [ ! -d "$RUNNER_HOME_LEGACY" ] || [ -z "$(ls -A "$RUNNER_HOME_LEGACY" 2>/dev/null)" ]; then
         green "✓ No legacy $RUNNER_HOME_LEGACY content to migrate"
         mkdir -p "$RUNNER_HOME"
-        chown -R "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
-        chmod 750 "$RUNNER_HOME"
+        chown "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
+        chmod 2770 "$RUNNER_HOME"
         return
     fi
 
     if [ ! -d /var/lib/agents ] || ! mountpoint -q /var/lib/agents; then
-        yellow "  /var/lib/agents not mounted — skipping migration (keeping runner at $RUNNER_HOME_LEGACY)"
-        RUNNER_HOME="$RUNNER_HOME_LEGACY"
-        RUNNER_DIR="$RUNNER_HOME/actions-runner"
-        return
+        red "Required runner volume /var/lib/agents is not mounted"
+        return 1
     fi
 
     local runner_was_active=0
@@ -276,8 +275,8 @@ bootstrap_migrate_runner_home() {
 
     mkdir -p "$RUNNER_HOME"
     rsync -aHAX "$RUNNER_HOME_LEGACY/" "$RUNNER_HOME/"
-    chown -R "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
-    chmod 750 "$RUNNER_HOME"
+    chown "$RUNNER_USER:$RUNNER_GROUP" "$RUNNER_HOME"
+    chmod 2770 "$RUNNER_HOME"
     green "✓ Copied $RUNNER_HOME_LEGACY -> $RUNNER_HOME"
 
     if [ "$(getent passwd "$RUNNER_USER" | cut -d: -f6)" != "$RUNNER_HOME" ]; then
@@ -322,9 +321,7 @@ bootstrap_legacy_runner_teardown() {
     fi
     yellow "Found legacy runner; tearing down"
 
-    local svc
-    svc=$(systemctl list-unit-files --type=service 2>/dev/null \
-          | grep -oE 'actions\.runner\.[^[:space:]]+\.service' | head -1 || true)
+    local svc="$RUNNER_SERVICE"
     if [ -n "$svc" ]; then
         systemctl stop "$svc" 2>/dev/null || true
         systemctl disable "$svc" 2>/dev/null || true
@@ -343,9 +340,11 @@ bootstrap_legacy_runner_teardown() {
     fi
 
     local archive
-    archive="/tmp/laplace-runner-prev-$(date +%s)"
-    mv "$old" "$archive"
-    rm -rf /home/ahart/_work 2>/dev/null || true
+    archive=$(mktemp -d /build/laplace/recovery/runner-prev.XXXXXXXX)
+    mv "$old" "$archive/actions-runner"
+    if [[ -e /home/ahart/_work ]]; then
+        mv /home/ahart/_work "$archive/operator-workspace"
+    fi
     green "✓ Legacy runner archived at $archive"
 }
 
@@ -359,7 +358,7 @@ bootstrap_runner_install() {
         return
     fi
 
-    local tarball="/tmp/$RUNNER_TARBALL"
+    local tarball="$TMPDIR/$RUNNER_TARBALL"
     if [ ! -f "$tarball" ]; then
         echo "Downloading $RUNNER_DL_URL ..."
         curl -sSLo "$tarball" "$RUNNER_DL_URL"
@@ -387,12 +386,13 @@ bootstrap_runner_register() {
         exit 1
     fi
 
+    install -d -g "$RUNNER_GROUP" -m 2770 /build/laplace/work/legacy-runner
     (cd "$RUNNER_DIR" && sudo -u "$RUNNER_USER" -H ./config.sh \
         --url "$REPO_URL" \
         --token "$token" \
         --name hart-server \
         --labels laplace,oneapi,postgres-18,dotnet-10,avx2 \
-        --work _work \
+        --work /build/laplace/work/legacy-runner \
         --unattended \
         --replace)
     green "✓ Registered runner as 'hart-server'"
@@ -829,7 +829,7 @@ bootstrap_laplace_pg_cluster() {
 $marker_begin
 port = $LAPLACE_PG_PORT
 listen_addresses = '$pg_listen'
-unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR,/tmp'
+unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR'
 extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'
 dynamic_library_path = '/opt/laplace/lib/postgresql/$PG_VERSION:\$libdir'
 logging_collector = on
@@ -1720,6 +1720,9 @@ EOF
 do_bootstrap() {
     bootstrap_user
     bash "$(dirname "${BASH_SOURCE[0]}")/setup-storage.sh"
+    # shellcheck source=scripts/lib/storage.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/storage.sh"
+    laplace_storage_init
     bootstrap_build_environment
     bootstrap_migrate_runner_home
     bootstrap_legacy_runner_teardown
@@ -1814,6 +1817,9 @@ do_prefix() {
     require_root
     bootstrap_user
     bash "$(dirname "${BASH_SOURCE[0]}")/setup-storage.sh"
+    # shellcheck source=scripts/lib/storage.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/storage.sh"
+    laplace_storage_init
     bootstrap_build_environment
     bootstrap_external_dirs
     green "===== PREFIX READY (/opt/laplace + apt) — next: vendor deps, then full bootstrap ====="
