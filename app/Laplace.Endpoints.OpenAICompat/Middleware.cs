@@ -43,6 +43,12 @@ internal sealed class ExceptionEnvelopeMiddleware
         }
         catch (SubstrateQueryException ex)
         {
+            if (IsTimeoutFailure(ex))
+            {
+                _logger.LogError(ex, "Substrate query exceeded time budget.");
+                await WriteTimeoutAsync(context);
+                return;
+            }
 
             _logger.LogError(ex, "Substrate query error.");
             await Results.Json(
@@ -51,23 +57,33 @@ internal sealed class ExceptionEnvelopeMiddleware
         }
         catch (SubstrateUnavailableException ex)
         {
+            if (IsTimeoutFailure(ex))
+            {
+                _logger.LogError(ex, "Substrate query exceeded time budget.");
+                await WriteTimeoutAsync(context);
+                return;
+            }
+
             _logger.LogError(ex, "Substrate unavailable.");
             await EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message).ExecuteAsync(context);
         }
         catch (Exception ex) when (ex is NpgsqlException or PostgresException or TimeoutException)
         {
-            // A tripped command timeout surfaces as NpgsqlException wrapping
-            // TimeoutException (or 57014 after a server-side cancel). Report it as a
-            // time budget, not unreachability — the substrate is up, the query is slow.
-            var timedOut = ex is TimeoutException
-                || (ex as PostgresException)?.SqlState == PostgresErrorCodes.QueryCanceled
-                || ex.InnerException is TimeoutException;
-            _logger.LogError(ex, timedOut ? "Substrate query exceeded time budget." : "Substrate connection failed.");
+            // Command timeouts can be wrapped by Npgsql and, on the chat path,
+            // by endpoint exception types before reaching this middleware. Walk
+            // the complete exception chain so a slow query is never relabelled as
+            // a connectivity failure merely because an intermediate layer wrapped it.
+            if (IsTimeoutFailure(ex))
+            {
+                _logger.LogError(ex, "Substrate query exceeded time budget.");
+                await WriteTimeoutAsync(context);
+                return;
+            }
+
+            _logger.LogError(ex, "Substrate connection failed.");
             await EndpointJson.ServiceUnavailable(
                 "substrate_unavailable",
-                timedOut
-                    ? $"Substrate query exceeded the API time budget ({SubstrateClient.DefaultCommandTimeoutSeconds}s)."
-                    : $"Substrate unreachable: {ex.Message}").ExecuteAsync(context);
+                $"Substrate unreachable: {ex.Message}").ExecuteAsync(context);
         }
         catch (InvalidOperationException ex) when (IsInfrastructureFailure(ex))
         {
@@ -88,6 +104,24 @@ internal sealed class ExceptionEnvelopeMiddleware
                 new ErrorResponse(new ErrorBody("internal_error", "unhandled_exception", "Unexpected endpoint failure.")),
                 statusCode: StatusCodes.Status500InternalServerError).ExecuteAsync(context);
         }
+    }
+
+    private static Task WriteTimeoutAsync(HttpContext context) =>
+        EndpointJson.ServiceUnavailable(
+            "substrate_timeout",
+            $"Substrate query exceeded the API time budget ({SubstrateClient.DefaultCommandTimeoutSeconds}s).")
+        .ExecuteAsync(context);
+
+    private static bool IsTimeoutFailure(Exception failure)
+    {
+        for (Exception? current = failure; current is not null; current = current.InnerException)
+        {
+            if (current is TimeoutException)
+                return true;
+            if (current is PostgresException pg && pg.SqlState == PostgresErrorCodes.QueryCanceled)
+                return true;
+        }
+        return false;
     }
 
     private static bool IsInfrastructureFailure(InvalidOperationException ex)
