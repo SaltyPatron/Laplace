@@ -378,7 +378,7 @@ phase_build() {
   else
     local build_flags=()
     [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
-    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    cmake -S "$ROOT" -B "$LAPLACE_BUILD_DIRECTORY" -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
       -DLAPLACE_REQUIRE_MKL=ON \
       -DCMAKE_INSTALL_PREFIX="$LAPLACE_INSTALL_PREFIX" \
@@ -391,7 +391,7 @@ phase_build() {
       -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
       -DLAPLACE_CHESS_OPENINGS="$chess_openings"
     LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-      cmake --build build "${build_flags[@]}"
+      cmake --build "$LAPLACE_BUILD_DIRECTORY" "${build_flags[@]}"
     fp_record build-native "$native_fp"
   fi
   # Perfcache targets are ALL — existence check only (parity with rebuild-all.cmd).
@@ -549,7 +549,7 @@ phase_install() (
   local so_before so_after
   so_before=$(preloaded_so_digest)
   umask 0002
-  cmake --install build
+  cmake --install "${LAPLACE_BUILD_DIRECTORY:-$ROOT/build}"
   test -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so"
   so_after=$(preloaded_so_digest)
   # shared_preload_libraries pins the extension image in the postmaster, so a

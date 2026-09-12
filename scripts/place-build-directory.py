@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -33,6 +34,24 @@ def inventory(root):
     return result
 
 
+def canonicalize_cmake_cache(target, lock_root, identity):
+    cache = target / 'CMakeCache.txt'
+    if not cache.is_file():
+        return
+    old = cache.read_text()
+    updated = re.sub(r'^CMAKE_CACHEFILE_DIR:INTERNAL=.*$',
+                     'CMAKE_CACHEFILE_DIR:INTERNAL=' + str(target), old, flags=re.MULTILINE)
+    if updated == old:
+        return
+    preserved = lock_root / (identity + '-' + str(time.time_ns()) + '-CMakeCache.txt')
+    preserved.write_text(old)
+    with preserved.open('rb') as stream:
+        os.fsync(stream.fileno())
+    cache.write_text(updated)
+    # Regenerate Ninja using the physical build path before a fingerprint skip.
+    (target / '.stamps/build-native').unlink(missing_ok=True)
+
+
 def place(checkout):
     if subprocess.run(['mountpoint', '-q', '/build']).returncode:
         raise RuntimeError('/build must be mounted')
@@ -49,6 +68,7 @@ def place(checkout):
             if actual != target:
                 raise RuntimeError(f'build link does not match this checkout: {source} -> {actual}')
             actual.mkdir(parents=True, exist_ok=True)
+            canonicalize_cmake_cache(actual, lock_root, identity)
             return actual
         if source.exists():
             if not source.is_dir():
@@ -71,6 +91,7 @@ def place(checkout):
         else:
             target.mkdir(parents=True, exist_ok=True)
         source.symlink_to(target, target_is_directory=True)
+        canonicalize_cmake_cache(target, lock_root, identity)
         return target
 
 
