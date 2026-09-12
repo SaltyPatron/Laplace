@@ -98,6 +98,13 @@ snapshot_application_payload() {
   rsync -a "$@" "$source_dir/" "$destination_dir/"
 }
 
+# Unit tests source this file to exercise the transaction helpers without invoking
+# host reconciliation or changing application state. Execution retains the normal
+# command dispatcher below.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
 case "${1:-}" in
   preflight) ensure_host ;;
   begin)
