@@ -71,6 +71,15 @@ control_dir="$control_root/extension"
 }
 
 build_library_path="$BUILD/extension/laplace_substrate:$BUILD/extension/laplace_geom:$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis"
+t0_perfcache="$BUILD/engine/core/perfcache/laplace_t0_perfcache.bin"
+highway_perfcache="$BUILD/engine/core/perfcache/laplace_highway_perfcache.bin"
+chess_position_perfcache="$BUILD/engine/core/perfcache/laplace_chess_position_perfcache.bin"
+for blob in "$t0_perfcache" "$highway_perfcache" "$chess_position_perfcache"; do
+  [[ -f "$blob" ]] || {
+    echo "pr-db-proof: branch perfcache blob missing: $blob" >&2
+    exit 2
+  }
+done
 
 # Use a private postmaster for branch-native regression. The production host
 # intentionally preloads its installed laplace_substrate image, so using that
@@ -88,6 +97,9 @@ unix_socket_directories = '$socket_dir'
 shared_preload_libraries = ''
 extension_control_path = '$control_root:\$system'
 dynamic_library_path = '$build_library_path:\$libdir'
+laplace_substrate.perfcache_path = '$t0_perfcache'
+laplace_substrate.highway_perfcache_path = '$highway_perfcache'
+laplace_substrate.chess_position_perfcache_path = '$chess_position_perfcache'
 EOF
 
 "$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -w start >/dev/null
