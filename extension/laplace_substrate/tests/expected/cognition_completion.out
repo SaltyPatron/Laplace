@@ -10,7 +10,6 @@ NOTICE:  extension "laplace_substrate" already exists, skipping
 -- result of `cognitionalpha`. Structural ancestry from the second constituent
 -- must not let the first constituent's semantic edge certify the whole request.
 BEGIN;
-BEGIN
 DO $completion_provenance$
 DECLARE
     alpha_id bytea := laplace.word_id('cognitionalpha');
@@ -76,7 +75,6 @@ BEGIN
     END IF;
 END
 $completion_provenance$;
-DO
 
 -- The exact prompt trunk is itself the first cognition operand. A typed result
 -- attached to that trunk denotes the whole admitted request, so it must be able
@@ -118,7 +116,6 @@ BEGIN
     END IF;
 END
 $whole_trunk_grounding$;
-DO
 
 -- Routing is a semantic state transition, not disposable search metadata. A
 -- typed path that must first route through one identity and then execute the
@@ -167,6 +164,4 @@ BEGIN
     END IF;
 END
 $routed_semantic_grounding$;
-DO
 ROLLBACK;
-ROLLBACK
