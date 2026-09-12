@@ -827,6 +827,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     int next_origin = 0;
     int semantic_hops = 0;
     bool exhausted = false;
+    bool explicit_observation_scope = false;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("forward execution: context must not be NULL")));
@@ -937,8 +938,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         }
         else
         {
-            output_operands = construct_array(context, context_length,
-                                              BYTEAOID, -1, false, TYPALIGN_INT);
+            /* Explicit output projection is evaluated against the same active
+             * query operand frontier as steering. Ordered context remains the
+             * independent sequence operand; supplemental semantic frontier ids
+             * gain no synthetic trajectory stride by participating here. */
+            output_operands = DatumGetArrayTypePCopy(PointerGetDatum(operands));
         }
         output_state = laplace_query_state_create(output_operands, output_relations,
                                                   fanout, NULL);
@@ -948,11 +952,13 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
     if (PG_NARGS() > 9 && !PG_ARGISNULL(9) && max_stride > 0)
     {
+        explicit_observation_scope = true;
         trajectory_scope = laplace_trajectory_scope_create();
         laplace_trajectory_scope_extend(trajectory_scope, PG_GETARG_ARRAYTYPE_P(9));
     }
     if (PG_NARGS() > 10 && !PG_ARGISNULL(10) && max_stride > 0)
     {
+        explicit_observation_scope = true;
         if (!trajectory_scope)
             trajectory_scope = laplace_trajectory_scope_create();
         laplace_trajectory_scope_extend_containing(trajectory_scope,
@@ -1152,6 +1158,39 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             break;
         }
 
+        /* An explicit observation scope is already a selected physical evidence
+         * boundary, not corpus-wide frequency. If it yields an unrefuted exact
+         * ordinal continuation, unrelated positive graph testimony cannot evict
+         * that continuation merely because the observed candidate has no edge of
+         * its own. Explicit refutation removes the protection and lets the typed
+         * result plane supply the fallback. */
+        if (explicit_observation_scope)
+        {
+            bool has_unopposed_scoped_sequence = false;
+            for (int i = 0; i < candidate_count; ++i)
+            {
+                if (candidates[i].sequence_occurrences > 0 &&
+                    !candidates[i].query.has_negative &&
+                    !candidates[i].query_traversal.has_negative &&
+                    !candidates[i].projection.has_negative)
+                {
+                    has_unopposed_scoped_sequence = true;
+                    break;
+                }
+            }
+            if (has_unopposed_scoped_sequence)
+            {
+                kept = 0;
+                for (int i = 0; i < candidate_count; ++i)
+                    if (candidates[i].sequence_occurrences > 0 &&
+                        !candidates[i].query.has_negative &&
+                        !candidates[i].query_traversal.has_negative &&
+                        !candidates[i].projection.has_negative)
+                        candidates[kept++] = candidates[i];
+                candidate_count = kept;
+            }
+        }
+
         qsort(candidates, (size_t) candidate_count, sizeof(Candidate), candidate_compare);
         int retained_channel_count = 0;
         (void) laplace_query_state_channels(query_state, &retained_channel_count);
@@ -1268,7 +1307,13 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         {
             LaplaceCognitionProgramReceipt receipt;
             laplace_cognition_program_receipt(cognition, &receipt);
-            if (receipt.complete)
+            /* Completion closes an open-ended cognition request. An explicit
+             * output relation is a caller-declared bounded operation, so the
+             * executor honors its requested step budget (or natural exhaustion)
+             * instead of truncating the result chain at its first grounded row. */
+            if (receipt.complete &&
+                (!output_relations ||
+                 ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0))
                 break;
         }
     }

@@ -209,7 +209,9 @@ public sealed class ElectorArchitectureGateTests
         Assert.Contains("laplace_query_state_extend(query_state, selected", native);
         Assert.Contains("laplace_cognition_program_create(", native);
         Assert.Contains("laplace_cognition_program_note_emit(", native);
-        Assert.Contains("if (receipt.complete)", native);
+        Assert.Contains("if (receipt.complete &&", native);
+        Assert.Contains("!output_relations", native);
+        Assert.Contains("ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0", native);
         Assert.Contains("forward_prompt(FunctionCallInfo fcinfo, bool trace)", native);
         Assert.Contains("walk_continuations(walk_call, input, hops, trace)", native);
         Assert.Contains("return forward_prompt(fcinfo, false);", native);
