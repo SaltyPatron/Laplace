@@ -48,6 +48,7 @@ usage() {
 Usage: sudo bash $0
 
   setup                    (default) Full host bring-up, including managed services.
+  storage                  Repair shared storage and runner environment; verify both writers.
   managed-services         Reconcile managed host policy only; no DB rebuild or app restart.
   managed-services-status  Read-only managed host configuration/drift report.
   status / reset           Debug / teardown.
@@ -129,37 +130,14 @@ layer1_clean_foreign_build_artifacts() {
         ls "$proj"/*.csproj >/dev/null 2>&1 || continue
         for dir in obj bin; do
             local d="$proj/$dir"
-            if [ -e "$d" ] && [ "$(stat -c '%U' "$d")" != "$RUNNER_USER" ]; then
-                sudo rm -rf "$d"
-                yellow "  - removed $d (was not owned by $RUNNER_USER)"
-            fi
             if [ ! -e "$d" ]; then
-                sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 775 "$d"
-                yellow "  - created $d owned by $RUNNER_USER"
+                sudo install -d -g "$RUNNER_USER" -m 2770 "$d"
             fi
-            # The stat above only inspects the TOP directory. MSBuild writes
-            # thousands of files underneath it, and a developer `dotnet build` as
-            # ahart — or this script's own Layer 1 extension build, which runs
-            # pipeline.sh as root — leaves foreign-owned files inside a directory
-            # that still passes the ownership test. layer1_up then runs as
-            # $RUNNER_USER and dies on MSB3374 "last access/last write time ...
-            # cannot be set" the first time MSBuild touches one of them
-            # (measured: 1587 ahart-owned and 121 root-owned files under
-            # app/Laplace.*/{obj,bin} against 105 correctly owned).
-            # Repair recursively; chown is idempotent and cheap at this size.
-            # SHARED, not seized. chown alone made these trees runner-owned at mode
-            # 644, so the operator — who IS in the laplace-runner group — got
-            # "Access to the path ... is denied" building in their own home
-            # directory. Both identities build here: the operator interactively,
-            # and $RUNNER_USER via layer1_up and CI. Group-write plus setgid makes
-            # the tree writable by both and keeps new files in the shared group
-            # instead of re-splitting ownership on the next build.
-            if [ -n "$(sudo find "$d" \( ! -user "$RUNNER_USER" -o ! -perm -g+w \) -print -quit 2>/dev/null)" ]; then
-                sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$d"
-                sudo chmod -R g+w "$d"
-                sudo find "$d" -type d -exec chmod g+s {} +
-                yellow "  - re-owned + group-shared $d ($RUNNER_USER:$RUNNER_USER, g+w, setgid)"
-            fi
+            # User identity is not drift: repair shared access without deleting
+            # another group member's outputs or transferring their ownership.
+            sudo find "$d" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
+            sudo find "$d" -xdev -type d -exec chmod g+rws {} +
+            sudo find "$d" -xdev -type f -exec chmod g+rwX {} +
         done
     done
     return 0
@@ -170,7 +148,8 @@ runner_dotnet() {
         PATH="$PATH" \
         DOTNET_NOLOGO=1 \
         DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-        bash -c "cd '$REPO_DIR/app' && dotnet $*"
+        TMPDIR=/build/laplace/work/legacy-scratch TMP=/build/laplace/work/legacy-scratch TEMP=/build/laplace/work/legacy-scratch \
+        bash -c "umask 0002; cd '$REPO_DIR/app' && dotnet $*"
 }
 
 layer1_up() {
@@ -233,11 +212,11 @@ layer1_build_install_extensions() {
     # Same remedy: shared, not seized -- the operator and $RUNNER_USER both build
     # here, so group-write plus setgid keeps new files in the shared group.
     if [ -d "$REPO_DIR/build" ] \
-       && [ -n "$(sudo find "$REPO_DIR/build" \( ! -user "$RUNNER_USER" -o ! -perm -g+w \) -print -quit 2>/dev/null)" ]; then
-        sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$REPO_DIR/build"
+       && [ -n "$(sudo find "$REPO_DIR/build" \( ! -group "$RUNNER_USER" -o ! -perm -g+w \) -print -quit 2>/dev/null)" ]; then
+        sudo find "$REPO_DIR/build" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
         sudo chmod -R g+w "$REPO_DIR/build"
         sudo find "$REPO_DIR/build" -type d -exec chmod g+s {} +
-        yellow "  - re-owned + group-shared build/ ($RUNNER_USER:$RUNNER_USER, g+w, setgid)"
+        yellow "  - repaired build/ group access ($RUNNER_USER, g+w, setgid; user owners preserved)"
     fi
 
     if [ "$_pipeline_rc" -ne 0 ]; then
@@ -353,6 +332,10 @@ do_stripe() {
 
 case "$MODE" in
     setup)          do_setup ;;
+    storage)
+        sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" bash "$SCRIPT_DIR/setup-storage.sh"
+        sudo systemctl restart actions.runner.SaltyPatron-Laplace.hart-server.service
+        ;;
     managed-services) managed_services_setup "${@:2}" ;;
     managed-services-status) managed_services_status ;;
     status)         do_status ;;

@@ -5,6 +5,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=scripts/lib/storage.sh
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+
 MODE=all
 SERIAL="${LAPLACE_TEST_SERIAL:-0}"
 

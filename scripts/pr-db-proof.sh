@@ -10,6 +10,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=scripts/lib/storage.sh
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+
 BUILD="$ROOT/build"
 PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"

@@ -7,6 +7,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=scripts/lib/storage.sh
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+
 # Use a run-scoped database name at CMake configure time so concurrent/retried PR
 # proofs cannot share a regression database. Local invocation gets a process-
 # scoped fallback and is still forbidden from naming the canonical database.

@@ -405,6 +405,10 @@ bootstrap_runner_oom_guard() {
     cat > "$dropin_dir/10-oom-guard.conf" <<'EOF'
 [Service]
 OOMScoreAdjust=-800
+UMask=0002
+Environment=TMPDIR=/build/laplace/work/legacy-scratch
+Environment=TMP=/build/laplace/work/legacy-scratch
+Environment=TEMP=/build/laplace/work/legacy-scratch
 Restart=always
 RestartSec=10
 EOF
@@ -1715,6 +1719,7 @@ EOF
 
 do_bootstrap() {
     bootstrap_user
+    bash "$(dirname "${BASH_SOURCE[0]}")/setup-storage.sh"
     bootstrap_build_environment
     bootstrap_migrate_runner_home
     bootstrap_legacy_runner_teardown
@@ -1808,6 +1813,7 @@ do_bootstrap() {
 do_prefix() {
     require_root
     bootstrap_user
+    bash "$(dirname "${BASH_SOURCE[0]}")/setup-storage.sh"
     bootstrap_build_environment
     bootstrap_external_dirs
     green "===== PREFIX READY (/opt/laplace + apt) — next: vendor deps, then full bootstrap ====="

@@ -69,6 +69,10 @@ cd "$ROOT"
 # class); a sudo repair silently re-poisons on the next run by the other user.
 umask 0002
 
+# shellcheck source=scripts/lib/storage.sh
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+
 # Content-fingerprint gates (build/.stamps): build/install/test phases no-op
 # when their input domain hasn't changed. LAPLACE_FORCE_ALL=1 (or --force-all)
 # bypasses every gate; `pipeline.sh clean` wipes the stamps with build/.

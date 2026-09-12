@@ -16,10 +16,10 @@
 # git worktree already solves it: one .git, N independent checkouts, each on its
 # own branch, sharing objects so there is no clone cost.
 #
-#   scripts/agent-worktree.sh claude              -> .worktrees/claude on a new branch
-#   scripts/agent-worktree.sh cursor fix/thing    -> .worktrees/cursor on fix/thing
+#   scripts/agent-worktree.sh claude              -> /build/laplace/worktrees/claude
+#   scripts/agent-worktree.sh cursor fix/thing    -> /build/laplace/worktrees/cursor
 #
-# Removal is `git worktree remove .worktrees/<name>`; `git worktree list` shows
+# Removal is `git worktree remove /build/laplace/worktrees/<name>`; `git worktree list` shows
 # who holds what.
 set -euo pipefail
 
@@ -29,11 +29,18 @@ branch="${2:-}"
 
 if [[ -z "$name" ]]; then
     echo "usage: $0 <agent-name> [branch]" >&2
-    echo "       agents work in .worktrees/<agent-name>; the root tree stays on main" >&2
+    echo "       agents work in /build/laplace/worktrees/<agent-name>; the root tree stays on main" >&2
     exit 2
 fi
 
-wt="$ROOT/.worktrees/$name"
+case "$name" in
+    .|..|*[!a-zA-Z0-9_.-]*) echo 'agent-name must be one directory name' >&2; exit 2 ;;
+esac
+# shellcheck source=scripts/lib/storage.sh
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+worktree_root=/build/laplace/worktrees
+wt="$worktree_root/$name"
 branch="${branch:-agent/$name/$(date -u +%Y%m%d-%H%M%S)}"
 
 if [[ -d "$wt" ]]; then
@@ -44,7 +51,7 @@ fi
 
 # Always branch from the published main, never from whatever the root tree is on.
 git -C "$ROOT" fetch origin --quiet
-mkdir -p "$ROOT/.worktrees"
+mkdir -p "$worktree_root"
 
 # Shared .git config: the inventory pre-commit hook heals docs/INVENTORY.md so an
 # agent cannot leave the shrink-only docs-inventory CI gate red by forgetting to

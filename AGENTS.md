@@ -100,6 +100,27 @@ Each step ends in a demonstrable operator result before it is treated as deliver
 
 ## Repository discipline
 
+- Worktrees, builds, compiler/package scratch, test outputs, logs, scripts, and
+  recovery evidence must use permanent storage. Do not operate in `/tmp`,
+  `/var/tmp`, or a memory-backed filesystem, or create a new checkout there.
+- Use `/build/laplace/worktrees` for worktrees, `/build/laplace/build` for builds,
+  `/build/laplace/work` for tool scratch, and `/build/laplace/recovery` for preserved
+  artifacts and branch bundles. Set `TMPDIR`, `TMP`, and `TEMP` to a shared
+  directory under the build drive before running tools. Never silently fall back
+  to OS temp when the drive is missing or unwritable.
+- PostgreSQL data belongs on the configured data volume (`/opt/laplace/pgdata`),
+  WAL on `/var/lib/pgwal`, database spill on `/pgtemp`, and admitted source data
+  on its configured `/vault` volume. Do not repurpose those volumes for builds.
+- Preserve and verify dirty/untracked work and branch tips before cleanup. Move
+  cross-device worktrees with verified copies followed by `git worktree repair`.
+  Do not delete unique branch behavior merely because its branch is old or closed.
+- Operators and CI share the `laplace-runner` group. Preserve existing user owners;
+  reconcile group ownership, group write, setgid inheritance, and `umask 0002` on
+  mutable build/work/output directories. Setup and repair must not remove an
+  artifact or seize its user ownership merely because another group member made it.
+  PostgreSQL cluster roots retain PostgreSQL's required service ownership and data
+  directory modes; shared parent directories do not inherit those restrictions.
+
 - Prefer repairing/finishing an existing owning issue/branch/PR to creating parallel partial work.
 - Do not leave multiple open PRs carrying overlapping slices of one accepted task.
 - Keep commits coherent and mergeable; update generated inventories/ratchets/tests in the same change that changes their authority.
