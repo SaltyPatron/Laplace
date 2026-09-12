@@ -937,8 +937,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         }
         else
         {
-            output_operands = construct_array(context, context_length,
-                                              BYTEAOID, -1, false, TYPALIGN_INT);
+            /* Explicit output projection is evaluated against the same active
+             * query operand frontier as steering. Ordered context remains the
+             * independent sequence operand; supplemental semantic frontier ids
+             * gain no synthetic trajectory stride by participating here. */
+            output_operands = DatumGetArrayTypePCopy(PointerGetDatum(operands));
         }
         output_state = laplace_query_state_create(output_operands, output_relations,
                                                   fanout, NULL);
@@ -1268,7 +1271,13 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         {
             LaplaceCognitionProgramReceipt receipt;
             laplace_cognition_program_receipt(cognition, &receipt);
-            if (receipt.complete)
+            /* Completion closes an open-ended cognition request. An explicit
+             * output relation is a caller-declared bounded operation, so the
+             * executor honors its requested step budget (or natural exhaustion)
+             * instead of truncating the result chain at its first grounded row. */
+            if (receipt.complete &&
+                (!output_relations ||
+                 ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0))
                 break;
         }
     }
