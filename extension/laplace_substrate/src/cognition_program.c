@@ -26,6 +26,9 @@ struct LaplaceCognitionProgram
     hash128_t program_id;
     Bitmapset *required;
     Bitmapset *satisfied;
+    Bitmapset *operation_origins;
+    hash128_t *operation_relations;
+    int operation_relation_count;
     HTAB *semantic_origins;
     hash128_t *outputs;
     int output_count;
@@ -175,6 +178,38 @@ semantic_channel_traversable(const LaplaceQueryChannel *channel)
            def != NULL && def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC;
 }
 
+static bool
+relation_in_datums(Datum *values, bool *nulls, int count,
+                   const hash128_t *relation)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        bytea *value;
+        if (nulls && nulls[i])
+            continue;
+        value = DatumGetByteaPP(values[i]);
+        if (VARSIZE_ANY_EXHDR(value) != sizeof(hash128_t))
+            ereport(ERROR,
+                    (errmsg("cognition program: operation relation identities must be 16 bytes")));
+        if (memcmp(VARDATA_ANY(value), relation, sizeof(hash128_t)) == 0)
+            return true;
+    }
+    return false;
+}
+
+static bool
+program_operation_relation(const LaplaceCognitionProgram *program,
+                           const hash128_t *relation)
+{
+    if (!program || !relation)
+        return false;
+    for (int i = 0; i < program->operation_relation_count; ++i)
+        if (memcmp(&program->operation_relations[i], relation,
+                   sizeof(hash128_t)) == 0)
+            return true;
+    return false;
+}
+
 static void
 record_semantic_channel(LaplaceCognitionProgram *program,
                         const LaplaceQueryChannel *channel)
@@ -191,13 +226,24 @@ record_semantic_channel(LaplaceCognitionProgram *program,
         return;
     candidate = semantic_origin_get(program, &channel->candidate, true);
     candidate->origins = bms_add_members(candidate->origins, anchor->origins);
+
+    /* A compiled relation operator is part of the semantic provenance of a
+     * result reached through that exact relation. This is not fabricated graph
+     * ancestry: the cue occurrence names the operator, while the stored typed
+     * cell supplies the operand -> result transition. */
+    if (program->operation_origins &&
+        program_operation_relation(program, &channel->relation))
+        candidate->origins = bms_add_members(candidate->origins,
+                                              program->operation_origins);
 }
 
 LaplaceCognitionProgram *
 laplace_cognition_program_create(const LaplacePromptInput *input,
                                  int prompt_origin_count,
                                  const LaplaceQueryChannel *initial_channels,
-                                 int initial_channel_count)
+                                 int initial_channel_count,
+                                 const Bitmapset *operation_origins,
+                                 ArrayType *operation_relations)
 {
     MemoryContext parent = CurrentMemoryContext;
     MemoryContext owner;
@@ -209,9 +255,13 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     Datum *context_values = NULL;
     bool *context_nulls = NULL;
     int context_value_count = 0;
+    Datum *operation_values = NULL;
+    bool *operation_nulls = NULL;
+    int operation_count = 0;
     const uint8_t *tiers;
     size_t tree_nodes;
     Bitmapset *eligible = NULL;
+    Bitmapset *compiled_required = NULL;
     hash128_t *required_ids;
     int required_count = 0;
 
@@ -219,6 +269,15 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         prompt_origin_count < 0 || initial_channel_count < 0 ||
         (initial_channel_count > 0 && !initial_channels))
         ereport(ERROR, (errmsg("cognition program: invalid prompt program input")));
+    if (operation_relations)
+    {
+        if (ARR_NDIM(operation_relations) > 1 ||
+            ARR_ELEMTYPE(operation_relations) != BYTEAOID)
+            ereport(ERROR,
+                    (errmsg("cognition program: operation relations must be a one-dimensional bytea array")));
+        deconstruct_array(operation_relations, BYTEAOID, -1, false, TYPALIGN_INT,
+                          &operation_values, &operation_nulls, &operation_count);
+    }
 
     tree_nodes = tier_tree_node_count(input->tree);
     tiers = tier_tree_tier_array(input->tree);
@@ -231,10 +290,8 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         ereport(ERROR,
                 (errmsg("cognition program: prompt occurrence projections disagree")));
 
-    /* These are exact semantic-coordinate requirements, not evidence-presence
-     * requirements. A coordinate with no currently addressable typed edge must
-     * remain required and unresolved. Dropping it merely because proposal-time
-     * evidence cannot reach it turns missing knowledge into false completion. */
+    /* Default unresolved program: every semantic coordinate remains required.
+     * Missing evidence cannot silently erase an obligation. */
     for (int i = 0; i < prompt_origin_count; ++i)
     {
         int32 node;
@@ -249,6 +306,46 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
             eligible = bms_add_member(eligible, i);
     }
 
+    /* A witnessed relation cue compiles a real operation. Its obligations are
+     * the exact cue occurrence(s) plus prompt occurrences that actually bind as
+     * operands of that relation. Grammar scaffolding is context, not a demanded
+     * answer coordinate. If no prompt operand has a positive typed cell, fail
+     * closed to the default all-semantic-coordinate program. */
+    if (operation_origins && operation_count > 0)
+    {
+        int operator_count = bms_num_members(operation_origins);
+        int member = -1;
+
+        while ((member = bms_next_member(operation_origins, member)) >= 0)
+        {
+            if (member < 0 || member >= prompt_origin_count ||
+                !bms_is_member(member, eligible))
+                ereport(ERROR,
+                        (errmsg("cognition program: operation cue is outside the admitted semantic prompt")));
+        }
+        compiled_required = bms_copy(operation_origins);
+        for (int i = 0; i < initial_channel_count; ++i)
+        {
+            const LaplaceQueryChannel *channel = &initial_channels[i];
+            int origin = channel->ordinal - 1;
+
+            if (origin < 0 || origin >= prompt_origin_count)
+                continue;
+            if (!relation_in_datums(operation_values, operation_nulls,
+                                    operation_count, &channel->relation))
+                continue;
+            if (!(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0) ||
+                !semantic_channel_traversable(channel))
+                continue;
+            compiled_required = bms_add_member(compiled_required, origin);
+        }
+        if (bms_num_members(compiled_required) <= operator_count)
+        {
+            bms_free(compiled_required);
+            compiled_required = NULL;
+        }
+    }
+
     owner = AllocSetContextCreate(parent, "cognition completion program",
                                   ALLOCSET_DEFAULT_SIZES);
     previous = MemoryContextSwitchTo(owner);
@@ -256,9 +353,29 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     program->owner = owner;
     program->root = input->root;
     program->disposition = LAPLACE_COGNITION_OPEN;
-    program->required = bms_copy(eligible);
+    program->required = bms_copy(compiled_required ? compiled_required : eligible);
     program->semantic_origins = semantic_origin_index(
         owner, prompt_origin_count + initial_channel_count + 1);
+
+    if (compiled_required && operation_count > 0)
+    {
+        program->operation_origins = bms_copy(operation_origins);
+        program->operation_relations = palloc(sizeof(hash128_t) * operation_count);
+        for (int i = 0; i < operation_count; ++i)
+        {
+            bytea *value;
+            if (operation_nulls[i])
+                ereport(ERROR,
+                        (errmsg("cognition program: operation relations must not contain NULL")));
+            value = DatumGetByteaPP(operation_values[i]);
+            if (VARSIZE_ANY_EXHDR(value) != sizeof(hash128_t))
+                ereport(ERROR,
+                        (errmsg("cognition program: operation relation identities must be 16 bytes")));
+            memcpy(&program->operation_relations[i], VARDATA_ANY(value),
+                   sizeof(hash128_t));
+        }
+        program->operation_relation_count = operation_count;
+    }
 
     if (!program->required && prompt_origin_count > 0)
     {
@@ -269,11 +386,9 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
             program->required = bms_add_member(program->required, i);
     }
 
-    /* Semantic provenance starts at the admitted prompt occurrences themselves.
-     * The whole prompt trunk denotes the exact observation, so it carries the
-     * union of those required coordinates. Supplemental history/frontier ids are
-     * intentionally not seeded: they may guide this turn but are not this turn's
-     * completion obligations. */
+    /* Semantic provenance starts at the admitted required prompt occurrences.
+     * Supplemental history/frontier ids remain usable guidance but never become
+     * completion obligations for this turn. */
     for (int i = 0; i < prompt_origin_count; ++i)
     {
         bytea *value;
@@ -318,6 +433,7 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     pfree(required_ids);
     MemoryContextSwitchTo(previous);
 
+    bms_free(compiled_required);
     bms_free(eligible);
     if (node_value_count > 0)
     {
@@ -328,6 +444,11 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     {
         pfree(context_values);
         pfree(context_nulls);
+    }
+    if (operation_count > 0)
+    {
+        pfree(operation_values);
+        pfree(operation_nulls);
     }
     return program;
 }
