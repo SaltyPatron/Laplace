@@ -35,7 +35,86 @@ def manifest(root):
     return result
 
 
+def require_inactive(source):
+    check = subprocess.run(['lsof', '-nP', '-t', '+D' if source.is_dir() else '--',
+                            str(source)], capture_output=True, text=True)
+    if check.returncode not in (0, 1) or 'Permission denied' in check.stderr:
+        raise RuntimeError(f'Cannot establish open-file state: {source}: {check.stderr}')
+    if check.stdout.strip():
+        return False
+    if stat.S_ISSOCK(source.lstat().st_mode):
+        for line in Path('/proc/net/unix').read_text().splitlines()[1:]:
+            fields = line.split(maxsplit=7)
+            if len(fields) == 8 and fields[7] == str(source):
+                return False
+    return True
+
+
+def identity(source):
+    info = source.lstat()
+    return dict(device=info.st_dev, inode=info.st_ino, uid=info.st_uid,
+                gid=info.st_gid, mode=info.st_mode, ctime_ns=info.st_ctime_ns)
+
+
+def write_receipt(receipt, value):
+    with receipt.open('x') as stream:
+        json.dump(value, stream, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def retire_endpoint(source, receipt, apply):
+    before = identity(source)
+    if not (stat.S_ISSOCK(before['mode']) or stat.S_ISFIFO(before['mode'])):
+        raise RuntimeError(f'Unsupported special file: {source}')
+    if not apply:
+        print(f'WOULD RETIRE inactive endpoint: {source}', flush=True)
+        return
+    value = {'source': str(source), 'endpoint_identity': before,
+             'disposition': 'inactive endpoint metadata preserved; no durable file payload'}
+    if receipt.exists():
+        if json.loads(receipt.read_text()) != value:
+            raise RuntimeError(f'Endpoint receipt differs; source retained: {source}')
+    else:
+        write_receipt(receipt, value)
+    subprocess.run(['sync', '-f', str(receipt)], check=True)
+    if not require_inactive(source) or identity(source) != before:
+        raise RuntimeError(f'Endpoint became active or changed; retained: {source}')
+    source.unlink()
+    print(f'RETIRED inactive endpoint {source}; metadata: {receipt}', flush=True)
+
+
+def preserve_regular(source, target, receipt, apply):
+    before = manifest(source)
+    if not apply:
+        print(f'WOULD PRESERVE {source} -> {target} ({len(before)} entries)', flush=True)
+        return
+    if not target.exists():
+        if source.is_dir():
+            shutil.copytree(source, target, symlinks=True)
+        else:
+            shutil.copy2(source, target)
+    if manifest(target) != before or manifest(source) != before:
+        raise RuntimeError(f'Copy verification failed; source retained: {source}')
+    value = {'source': str(source), 'destination': str(target),
+             'sha256_manifest': before}
+    if receipt.exists():
+        if json.loads(receipt.read_text()) != value:
+            raise RuntimeError(f'Preservation receipt differs; source retained: {source}')
+    else:
+        write_receipt(receipt, value)
+    if not require_inactive(source):
+        raise RuntimeError(f'Artifact became active; source and copy retained: {source}')
+    # Flush the destination filesystem before removing the verified source.
+    subprocess.run(['sync', '-f', str(target)], check=True)
+    if source.is_dir():
+        shutil.rmtree(source)
+    else:
+        source.unlink()
+    print(f'PRESERVED {source} -> {target} ({len(before)} entries)', flush=True)
+
 def main():
+    os.umask(0o002)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--destination', required=True, type=Path)
     parser.add_argument('--apply', action='store_true')
@@ -69,42 +148,15 @@ def main():
             archive.mkdir(exist_ok=True)
             target = archive / source.name
             receipt = archive / (source.name + '.preservation.json')
-            if target.exists() or receipt.exists():
-                raise RuntimeError(f'Destination already exists: {target}')
-            check = subprocess.run(['lsof', '-nP', '-t', '+D' if source.is_dir() else '--',
-                                    str(source)], capture_output=True, text=True)
-            if check.stdout.strip():
+            if not require_inactive(source):
                 print(f'ACTIVE retained: {source}', flush=True)
                 continue
-            if check.returncode not in (0, 1) or 'Permission denied' in check.stderr:
-                raise RuntimeError(f'Cannot establish open-file state: {source}: {check.stderr}')
-            before = manifest(source)
-            if not args.apply:
-                print(f'WOULD PRESERVE {source} -> {target} ({len(before)} entries)', flush=True)
+            info = source.lstat()
+            if stat.S_ISSOCK(info.st_mode) or stat.S_ISFIFO(info.st_mode):
+                retire_endpoint(source, receipt, args.apply)
                 continue
-            if source.is_dir():
-                shutil.copytree(source, target, symlinks=True)
-            else:
-                shutil.copy2(source, target)
-            if manifest(target) != before or manifest(source) != before:
-                raise RuntimeError(f'Copy verification failed; source retained: {source}')
-            with receipt.open('x') as stream:
-                json.dump({'source': str(source), 'destination': str(target),
-                           'sha256_manifest': before}, stream, indent=2)
-                stream.flush()
-                os.fsync(stream.fileno())
-            recheck = subprocess.run(['lsof', '-nP', '-t', '+D' if source.is_dir() else '--',
-                                      str(source)], capture_output=True, text=True)
-            if recheck.stdout.strip() or recheck.returncode not in (0, 1) or 'Permission denied' in recheck.stderr:
-                raise RuntimeError(f'Artifact became active or unverifiable; source and copy retained: {source}')
-            # Flush the destination filesystem before removing the verified source.
-            subprocess.run(['sync', '-f', str(target)], check=True)
-            if source.is_dir():
-                shutil.rmtree(source)
-            else:
-                source.unlink()
-            print(f'PRESERVED {source} -> {target} ({len(before)} entries)', flush=True)
-        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            preserve_regular(source, target, receipt, args.apply)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
             failures.append({"path": row["path"], "error": str(error)})
             print(f"RETAINED: {row['path']}: {error}", flush=True)
             if not args.keep_going:
