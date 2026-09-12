@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Place a checkout's build directory on /build without discarding existing output."""
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import subprocess
+import sys
+import time
+
+
+def inventory(root):
+    result = {}
+    for path in sorted(root.rglob('*')):
+        metadata = path.lstat()
+        mode = stat.S_IMODE(metadata.st_mode)
+        if path.is_symlink():
+            value = ['link', os.readlink(path)]
+        elif path.is_dir():
+            value = ['directory', mode]
+        elif path.is_file():
+            digest = hashlib.sha256()
+            with path.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            value = ['file', mode, metadata.st_size, digest.hexdigest()]
+        else:
+            raise RuntimeError(f'unsupported build artifact: {path}')
+        result[str(path.relative_to(root))] = value
+    return result
+
+
+def place(checkout):
+    if subprocess.run(['mountpoint', '-q', '/build']).returncode:
+        raise RuntimeError('/build must be mounted')
+    checkout = checkout.resolve(strict=True)
+    identity = hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
+    target = Path('/build/laplace/build') / ('legacy-' + identity)
+    source = checkout / 'build'
+    lock_root = Path('/build/laplace/work/build-placement')
+    lock_root.mkdir(parents=True, exist_ok=True)
+    with (lock_root / (identity + '.lock')).open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if source.is_symlink():
+            actual = source.resolve()
+            if not actual.is_relative_to('/build/laplace/build'):
+                raise RuntimeError(f'build link is outside build storage: {source} -> {actual}')
+            actual.mkdir(parents=True, exist_ok=True)
+            return actual
+        if source.exists():
+            if not source.is_dir():
+                raise RuntimeError(f'build path is not a directory: {source}')
+            before = inventory(source)
+            if target.exists():
+                if inventory(target) != before:
+                    raise RuntimeError(f'build destination differs; both trees retained: {target}')
+            else:
+                shutil.copytree(source, target, symlinks=True)
+            if inventory(target) != before or inventory(source) != before:
+                raise RuntimeError('build copy changed during placement; both trees retained')
+            receipt = lock_root / (identity + '-' + str(time.time_ns()) + '.json')
+            receipt.write_text(json.dumps({'source': str(source), 'target': str(target),
+                                          'entries': before}, sort_keys=True) + '\n')
+            with receipt.open('rb') as stream:
+                os.fsync(stream.fileno())
+            # The checked copy is permanent before the old directory is removed.
+            shutil.rmtree(source)
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+        source.symlink_to(target, target_is_directory=True)
+        return target
+
+
+if __name__ == '__main__':
+    os.umask(0o002)
+    print(place(Path(sys.argv[1])))

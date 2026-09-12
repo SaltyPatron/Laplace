@@ -72,6 +72,8 @@ umask 0002
 # shellcheck source=scripts/lib/storage.sh
 source "$ROOT/scripts/lib/storage.sh"
 laplace_storage_init
+LAPLACE_BUILD_DIRECTORY=$(python3 "$ROOT/scripts/place-build-directory.py" "$ROOT")
+export LAPLACE_BUILD_DIRECTORY
 
 # Content-fingerprint gates (build/.stamps): build/install/test phases no-op
 # when their input domain hasn't changed. LAPLACE_FORCE_ALL=1 (or --force-all)
@@ -296,7 +298,8 @@ restart_postgres() {
 
 phase_clean() {
   echo "===== PHASE — CLEAN ====="
-  rm -rf "$ROOT/build"
+  rm -rf "$LAPLACE_BUILD_DIRECTORY"
+  mkdir -p "$LAPLACE_BUILD_DIRECTORY"
   # Stale generated SQL fragments trip the manifest-completeness gate on reconfigure.
   find "$ROOT/extension/laplace_substrate/sql/generated" -name '[0-9]*_*.sql.in' -delete 2>/dev/null || true
 }
@@ -385,8 +388,8 @@ phase_build() {
   fi
   # Perfcache targets are ALL — existence check only (parity with rebuild-all.cmd).
   local t0 hw
-  t0=$(find "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | head -1 || true)
-  hw=$(find "$ROOT/build" -name 'laplace_highway_perfcache*.bin' 2>/dev/null | head -1 || true)
+  t0=$(find -H "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | head -1 || true)
+  hw=$(find -H "$ROOT/build" -name 'laplace_highway_perfcache*.bin' 2>/dev/null | head -1 || true)
   if [[ -z "$t0" || -z "$hw" ]]; then
     echo "::error::perfcache blobs missing after ALL build — expected under build/"
     exit 1
@@ -413,13 +416,13 @@ phase_build() {
   if [[ "$chess_target_declared" -eq 0 ]]; then
     echo "chess position perfcache: no laplace_chess_position_perfcache target in engine/core/CMakeLists.txt — gate inactive"
   else
-    chess_bin=$(find "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | head -1 || true)
+    chess_bin=$(find -H "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | head -1 || true)
     if [[ -z "$chess_bin" ]]; then
       echo "::error::chess position perfcache missing after ALL build — the declared CMake target was skipped"
       exit 1
     fi
     echo "chess position perfcache ready: $chess_bin"
-    chess_transition_bin=$(find "$ROOT/build" -name 'laplace_chess_transition_perfcache*.bin' 2>/dev/null | head -1 || true)
+    chess_transition_bin=$(find -H "$ROOT/build" -name 'laplace_chess_transition_perfcache*.bin' 2>/dev/null | head -1 || true)
     if [[ -z "$chess_transition_bin" ]]; then
       echo "::error::chess transition perfcache missing after catalog generation — it must be a declared CMake output, not an undeclared side effect"
       exit 1

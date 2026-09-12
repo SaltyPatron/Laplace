@@ -183,46 +183,24 @@ layer1_build_install_extensions() {
         red "missing $setvars — install Intel oneAPI before setup-host Layer 1"
         return 1
     fi
-    set +u
-    # shellcheck disable=SC1090
-    source "$setvars" --force >/dev/null
-    set -u
-    if [ -z "${MKLROOT:-}" ] || [ -z "${TBBROOT:-}" ] || [ -z "${CMPLR_ROOT:-}" ]; then
-        red "oneAPI setvars did not export MKLROOT/TBBROOT/CMPLR_ROOT"
-        return 1
+    # Reconcile pre-existing mutable outputs once before handing build ownership
+    # to the same account that runs CI. Never run the compiler/install phase as root.
+    if [ -d "$REPO_DIR/build" ]; then
+        sudo find -H "$REPO_DIR/build" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
+        sudo find -H "$REPO_DIR/build" -xdev -type d -exec chmod g+rws {} +
+        sudo find -H "$REPO_DIR/build" -xdev -type f -exec chmod g+rwX {} +
     fi
-    # Capture rather than abort. pipeline.sh runs AS ROOT here, so if it fails under
-    # `set -e` the script exits BEFORE the ownership repair below and leaves precisely the
-    # root-owned build/ tree that repair exists to prevent. Run the repair, then propagate.
-    local _pipeline_rc=0
-    (
-        cd "$REPO_DIR"
-        bash scripts/pipeline.sh build &&
-        bash scripts/pipeline.sh install
-    ) || _pipeline_rc=$?
-    # This runs pipeline.sh AS ROOT, so every artifact it writes into build/ is
-    # root-owned and the operator cannot rebuild afterwards. Measured 2026-08-12:
-    # 31 root-owned entries under build/, and cmake died on
-    #   file failed to open for writing (Permission denied):
-    #     build/engine/core/tests/laplace_core_tests[1]_include.cmake
-    # from gtest_discover_tests -- a CMake error that says nothing about
-    # ownership. layer1_clean_foreign_build_artifacts already repairs
-    # app/*/{obj,bin} for exactly this reason and stops at the managed tree;
-    # build/ has the same problem from the same cause and was never covered.
-    # Same remedy: shared, not seized -- the operator and $RUNNER_USER both build
-    # here, so group-write plus setgid keeps new files in the shared group.
-    if [ -d "$REPO_DIR/build" ] \
-       && [ -n "$(sudo find "$REPO_DIR/build" \( ! -group "$RUNNER_USER" -o ! -perm -g+w \) -print -quit 2>/dev/null)" ]; then
-        sudo find "$REPO_DIR/build" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
-        sudo chmod -R g+w "$REPO_DIR/build"
-        sudo find "$REPO_DIR/build" -type d -exec chmod g+s {} +
-        yellow "  - repaired build/ group access ($RUNNER_USER, g+w, setgid; user owners preserved)"
-    fi
-
-    if [ "$_pipeline_rc" -ne 0 ]; then
-        red "✗ pipeline.sh build/install failed (rc=$_pipeline_rc) — build/ ownership repaired first"
-        return "$_pipeline_rc"
-    fi
+    sudo -u "$RUNNER_USER" -H env \
+        GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO_DIR" \
+        TMPDIR=/build/laplace/work/legacy-scratch TMP=/build/laplace/work/legacy-scratch TEMP=/build/laplace/work/legacy-scratch \
+        bash -c '
+            set -e
+            source "$2" --force >/dev/null
+            set -u
+            cd "$1"
+            bash scripts/pipeline.sh build &&
+            bash scripts/pipeline.sh install
+        ' _ "$REPO_DIR" "$setvars"
     green "✓ extensions installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 

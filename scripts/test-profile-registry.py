@@ -326,6 +326,7 @@ def _write_receipt(path: Path, receipt: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
     try:
+        os.fchmod(fd, 0o664)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(receipt, stream, indent=2, sort_keys=True)
             stream.write("\n")

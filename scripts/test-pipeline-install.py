@@ -208,21 +208,24 @@ phase_install
 
     def test_setup_does_not_install_after_failed_build(self):
         setup = (ROOT / "scripts/setup-host.sh").read_text()
-        match = re.search(r"    \(\n        cd \"\$REPO_DIR\".*?\) \|\| _pipeline_rc=\$\?", setup, re.S)
+        match = re.search(r"bash -c '(.*?)' _ \"\$REPO_DIR\" \"\$setvars\"", setup, re.S)
         self.assertIsNotNone(match)
+        self.assertIn('sudo -u "$RUNNER_USER" -H env', setup)
         script = self.base / "scripts/pipeline.sh"
         script.parent.mkdir()
         script.write_text('#!/bin/bash\necho "$1" >> "$CALLS"\n[[ "$1" != build ]]\n')
-        body = '_pipeline_rc=0\n' + match.group() + '\nexit "$_pipeline_rc"'
-        result = self.run_shell(body, REPO_DIR=str(self.base))
+        oneapi = self.base / "setvars.sh"
+        oneapi.write_text(':\n')
+        body = 'set -- "$REPO_DIR" "$ONEAPI"\n' + match.group(1)
+        result = self.run_shell(body, REPO_DIR=str(self.base), ONEAPI=str(oneapi))
         self.assertNotEqual(0, result.returncode)
         self.assertEqual("build\n", self.calls())
-        # The old subshell continued to a successful install and lost build's rc.
         (self.base / "calls").write_text("")
-        broken = body.replace('bash scripts/pipeline.sh build &&', 'bash scripts/pipeline.sh build')
+        broken = body.replace('bash scripts/pipeline.sh build &&', 'bash scripts/pipeline.sh build').replace('set -e', 'set +e')
         self.assertNotEqual(body, broken)
-        self.assertEqual(0, self.run_shell(broken, REPO_DIR=str(self.base)).returncode)
+        self.assertEqual(0, self.run_shell(broken, REPO_DIR=str(self.base), ONEAPI=str(oneapi)).returncode)
         self.assertEqual("build\ninstall\n", self.calls())
+
 
 
 if __name__ == "__main__":
