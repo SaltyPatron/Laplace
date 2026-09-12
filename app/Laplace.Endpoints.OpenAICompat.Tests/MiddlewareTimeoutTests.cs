@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -62,7 +63,13 @@ public sealed class MiddlewareTimeoutTests
 
     private static DefaultHttpContext NewContext()
     {
-        var context = new DefaultHttpContext();
+        var context = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddLogging()
+                .AddOptions()
+                .BuildServiceProvider(),
+        };
         context.Response.Body = new MemoryStream();
         return context;
     }
