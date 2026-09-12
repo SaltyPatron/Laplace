@@ -122,3 +122,15 @@ TEST(LaplaceSynthesisRecipe, TypedReadsRejectRatherThanGuess) {
 
     recipe_free(r);
 }
+
+TEST(Recipe, RejectsIncompleteOrConcatenatedObjects) {
+    const char* invalid[] = {
+        "{", "{\"hidden_size\":2048", "{\"a\":1,}",
+        "{\"a\":1 \"b\":2}", "{}{}", "{\"a\":[1,2]"
+    };
+    for (const char* json : invalid) {
+        recipe_t* r = recipe_parse(json, strlen(json));
+        EXPECT_EQ(r, nullptr) << json;
+        recipe_free(r);
+    }
+}

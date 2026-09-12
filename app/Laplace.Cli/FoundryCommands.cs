@@ -526,19 +526,10 @@ internal static class FoundryCommands
         int nLayers = recipe.NumLayers;
 
         byte[] configJson = File.ReadAllBytes(recipePath);
-        IntPtr recipeHandle, tmplHandle;
-        TensorSpec[] specs;
-        int tensorCount;
-        unsafe
-        {
-            fixed (byte* jp = configJson) recipeHandle = SynthInterop.RecipeParse(jp, (nuint)configJson.Length);
-            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse returned null");
-            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
-            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
-            tensorCount = SynthInterop.ArchTemplateRequiredTensorsComplete(
-                tmplHandle, recipeHandle, out specs);
-        }
-        if (tensorCount <= 0) return Fail($"arch_template_required_tensors returned {tensorCount}");
+        using var manifest = SynthInterop.ArchTemplateManifestMaterialize(configJson, "llama", out var manifestError);
+        if (manifest is null) return Fail(manifestError ?? "architecture manifest unavailable");
+        TensorSpec[] specs = manifest.Specs;
+        int tensorCount = manifest.Count;
         Console.WriteLine($"  recipe + arch template: {tensorCount} tensor slots, vocab={vocab}, hidden={dModel}, "
             + $"layers={nLayers}, heads={nHeadsR}/{nKvR}, ffn={intermR}");
 
@@ -1008,8 +999,6 @@ internal static class FoundryCommands
 
         int status = WriteCast(outputPath, attnGainEnv, residGainEnv);
 
-        SynthInterop.ArchTemplateFree(tmplHandle);
-        SynthInterop.RecipeFree(recipeHandle);
         return status == 0 ? 0 : Fail($"foundry write failed (status {status})");
     }
 
@@ -1383,24 +1372,12 @@ internal static class FoundryCommands
         Stage("basis (eigensolve + discipline)");
 
         byte[] configJson = BuildHfConfigJson(dModel, nLayers, nHeads, nKv, intermR, vocab);
-        string bridgePath = Path.Combine(Path.GetTempPath(),
-            $"laplace-bab-{Convert.ToHexString(desc.RecipeId.ToBytes())[..12]}-config.json");
-        await File.WriteAllBytesAsync(bridgePath, configJson);
-        var recipe = LlamaRecipeExtractor.Parse(bridgePath);
+        var recipe = LlamaRecipeExtractor.ParseBytes(configJson, "foundry architecture bridge");
 
-        IntPtr recipeHandle, tmplHandle;
-        TensorSpec[] specs;
-        int tensorCount;
-        unsafe
-        {
-            fixed (byte* jp = configJson) recipeHandle = SynthInterop.RecipeParse(jp, (nuint)configJson.Length);
-            if (recipeHandle == IntPtr.Zero) return Fail("recipe_parse(bridge) returned null");
-            tmplHandle = SynthInterop.ArchTemplateLoad("llama");
-            if (tmplHandle == IntPtr.Zero) return Fail("arch_template_load returned null");
-            tensorCount = SynthInterop.ArchTemplateRequiredTensorsComplete(
-                tmplHandle, recipeHandle, out specs);
-        }
-        if (tensorCount <= 0) return Fail($"required_tensors returned {tensorCount}");
+        using var manifest = SynthInterop.ArchTemplateManifestMaterialize(configJson, "llama", out var manifestError);
+        if (manifest is null) return Fail(manifestError ?? "architecture manifest unavailable");
+        TensorSpec[] specs = manifest.Specs;
+        int tensorCount = manifest.Count;
         Console.WriteLine($"  dims: vocab={vocab} hidden={dModel} layers={nLayers} heads={nHeads} headDim={headDim} ffn={intermR} | {tensorCount} tensors");
 
 
@@ -1825,8 +1802,6 @@ internal static class FoundryCommands
         }
         int rcw = SynthInterop.GgufWriterFinalize(gguf);
         SynthInterop.GgufWriterFree(gguf);
-        SynthInterop.ArchTemplateFree(tmplHandle);
-        SynthInterop.RecipeFree(recipeHandle);
         if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
         long fsz = new FileInfo(outputPath).Length;
         Stage("lm_head + tensor fill + gguf write");

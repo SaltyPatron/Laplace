@@ -58,25 +58,37 @@ public static partial class NativeInterop
             return null;
         }
 
-        IntPtr template = ArchTemplateLoad(architecture);
-        if (template == IntPtr.Zero)
+        IntPtr template = IntPtr.Zero;
+        bool transferred = false;
+        try
         {
-            RecipeFree(recipe);
-            error = "arch_template_load returned null";
-            return null;
-        }
+            template = ArchTemplateLoad(architecture);
+            if (template == IntPtr.Zero)
+            {
+                error = "arch_template_load returned null";
+                return null;
+            }
 
-        int count = ArchTemplateRequiredTensorsComplete(template, recipe, out var specs);
-        if (count <= 0)
+            int count = ArchTemplateRequiredTensorsComplete(template, recipe, out var specs);
+            if (count <= 0)
+            {
+                error = $"arch_template_required_tensors returned {count}";
+                return null;
+            }
+
+            var lease = new ArchTemplateManifestLease(template, recipe, specs);
+            transferred = true;
+            error = null;
+            return lease;
+        }
+        finally
         {
-            ArchTemplateFree(template);
-            RecipeFree(recipe);
-            error = $"arch_template_required_tensors returned {count}";
-            return null;
+            if (!transferred)
+            {
+                if (template != IntPtr.Zero) ArchTemplateFree(template);
+                RecipeFree(recipe);
+            }
         }
-
-        error = null;
-        return new ArchTemplateManifestLease(template, recipe, specs);
     }
 
     /// <summary>

@@ -37,9 +37,12 @@ public sealed class LlamaRecipeExtractor
     /// RecipeEntityId, so any change to it moves a content id. Relocating it to the
     /// engine is GH #552, gated on proving byte-identical output over real configs.
     /// </summary>
-    public static RecipeInfo Parse(string configJsonPath)
+    public static RecipeInfo Parse(string configJsonPath) =>
+        ParseBytes(File.ReadAllBytes(configJsonPath), configJsonPath);
+
+    public static RecipeInfo ParseBytes(byte[] raw, string configJsonPath = "in-memory recipe")
     {
-        byte[] raw = File.ReadAllBytes(configJsonPath);
+        ArgumentNullException.ThrowIfNull(raw);
 
         IntPtr r;
         unsafe

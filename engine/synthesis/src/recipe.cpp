@@ -86,9 +86,11 @@ extern "C" recipe_t* recipe_parse(const char* json_text, size_t len) {
 
     while (p < end) {
         p = skip_ws(p, end);
-        if (p >= end) break;
-        if (*p == '}') break;
-        if (*p == ',') { ++p; continue; }
+        if (p >= end) { delete r; return nullptr; }
+        if (*p == '}') {
+            if (skip_ws(p + 1, end) != end) { delete r; return nullptr; }
+            return r;
+        }
 
         std::string key;
         p = parse_json_string(p, end, key);
@@ -121,9 +123,19 @@ extern "C" recipe_t* recipe_parse(const char* json_text, size_t len) {
 
         if (!p) { delete r; return nullptr; }
         r->fields[key] = val;
+        p = skip_ws(p, end);
+        if (p >= end) { delete r; return nullptr; }
+        if (*p == ',') {
+            p = skip_ws(p + 1, end);
+            if (p >= end || *p == '}') { delete r; return nullptr; }
+        } else if (*p != '}') {
+            delete r;
+            return nullptr;
+        }
     }
 
-    return r;
+    delete r;
+    return nullptr;
 }
 
 extern "C" const char* recipe_get_field(const recipe_t* r, const char* field_name) {
