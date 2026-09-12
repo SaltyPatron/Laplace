@@ -12,6 +12,9 @@ if [[ "$(id -u)" -ne 0 ]]; then
   echo "✗ must run as root (use sudo)"; exit 1
 fi
 
+mountpoint -q /build || { echo "Required /build volume is not mounted" >&2; exit 1; }
+install -d -m 2770 -o "$RUN_USER" -g "$RUN_GROUP" /build/laplace/work/legacy-api
+
 echo "==> app dir: $APP_DIR (owner $RUN_USER)"
 install -d -m 2775 -o "$RUN_USER" -g "$RUN_GROUP" \
   "$APP_DIR" "$APP_DIR/logs" "$APP_DIR/mcp-runtime"

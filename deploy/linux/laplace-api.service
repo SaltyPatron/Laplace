@@ -3,11 +3,16 @@ Description=Laplace API (OpenAI-compat endpoints + self-hosted SPA)
 Documentation=https://github.com/SaltyPatron/Laplace
 After=network.target laplace-postgresql.service
 Wants=laplace-postgresql.service
+RequiresMountsFor=/build
 
 [Service]
 Type=simple
 User=laplace-runner
 Group=laplace-runner
+UMask=0002
+Environment=TMPDIR=/build/laplace/work/legacy-api
+Environment=TMP=/build/laplace/work/legacy-api
+Environment=TEMP=/build/laplace/work/legacy-api
 WorkingDirectory=/opt/laplace/app
 # Non-secret runtime config (DB, perfcache, URLs). Owned by laplace-runner; CI may refresh.
 EnvironmentFile=/opt/laplace/app/laplace-api.env

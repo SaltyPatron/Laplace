@@ -78,8 +78,15 @@ class HostTests(unittest.TestCase):
             name = argv[-1]
             self.accounts[name] = types.SimpleNamespace(pw_uid=501 + len(self.accounts),
                 pw_gid=501 + len(self.accounts), pw_dir="/var/lib/" + name, pw_shell="/usr/sbin/nologin")
+        elif argv[0] == "/usr/bin/mountpoint":
+            self.assertEqual(("-q", "/build"), argv[1:])
         elif argv[0] == "/usr/bin/install":
-            Path(argv[-1]).mkdir(parents=True, exist_ok=True)
+            destination = Path(argv[-1])
+            if destination.parent == Path("/build/laplace/work") and destination.name in ("legacy-mcp", "legacy-lichess"):
+                self.assertIn("laplace-runner", argv)
+                self.assertIn("2770", argv)
+                destination = self.base / "scratch" / destination.name
+            destination.mkdir(parents=True, exist_ok=True)
         elif argv[0] == "/usr/sbin/runuser":
             self.assertIn("/var/run/postgresql", argv)
             self.assertEqual("SELECT pg_reload_conf()", argv[-1])

@@ -144,7 +144,7 @@ class DeploymentTests(unittest.TestCase):
             canonical.replace("EnvironmentFile=/var/lib/laplace-managed/mcp-host.env\n", ""),
             canonical.replace("Host=/var/run/postgresql", "Host=127.0.0.1"),
             canonical.replace("Database=laplace", "Database=laplace;Password=test-only-sentinel"),
-            canonical.replace("Group=laplace-mcp", "Group=laplace-runner"),
+            canonical.replace("Group=laplace-runner", "Group=root"),
             canonical.replace("ExecStart=/opt/laplace/app/laplace-mcp --http", "ExecStart=/bin/sh -c id")]
         for mutation in mutations:
             with self.subTest(mutation=mutation[:30]):

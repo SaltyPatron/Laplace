@@ -2,12 +2,13 @@
 Description=Laplace authenticated Streamable HTTP MCP
 After=network-online.target laplace-postgresql.service laplace-managed-host.service
 Wants=network-online.target laplace-postgresql.service
+RequiresMountsFor=/build
 ConditionPathExists=!/var/lib/laplace-managed/mcp.stopped
 
 [Service]
 Type=simple
 User=laplace-mcp
-Group=laplace-mcp
+Group=laplace-runner
 WorkingDirectory=/var/lib/laplace-mcp
 Environment="LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
 EnvironmentFile=/opt/laplace/secrets/mcp.env
@@ -21,11 +22,15 @@ TimeoutStopSec=45
 StateDirectory=laplace-mcp
 LogsDirectory=laplace-mcp
 Environment=LAPLACE_OPS_LOG_DIR=/var/log/laplace-mcp
-UMask=0077
+UMask=0002
+Environment=TMPDIR=/build/laplace/work/legacy-mcp
+Environment=TMP=/build/laplace/work/legacy-mcp
+Environment=TEMP=/build/laplace/work/legacy-mcp
+ReadWritePaths=/build/laplace/work/legacy-mcp
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-PrivateTmp=true
+PrivateTmp=false
 PrivateDevices=true
 ProtectProc=invisible
 RestrictSUIDSGID=true
