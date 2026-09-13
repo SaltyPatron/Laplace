@@ -116,12 +116,8 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessTransitionsDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
-        // Stockfish eval pass over recorded games (GH #573). --depth N sets the per-position
-        // search depth (default 10 — the v1 census budget); --nodes N switches to a
-        // node-capped search (bounded worst case). A run-level memo searches each unique
-        // content-addressed position once regardless of how many games share it.
         // Move-outcome fold over recorded games: each witnessed line's result deposited as
-        // aggregated OUTCOME testimony on its MOVE objects (7,797-entity vocabulary), so the
+        // aggregated OUTCOME testimony on its MOVE objects (bounded move vocabulary), so the
         // learned table is a consensus lookup, never a read-time fold. Marker-gated per line.
         ("chess-move-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessMoveOutcomesDecomposer(), "",
@@ -133,6 +129,18 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessPositionOutcomesDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
+        // Reusable tactical-pattern outcome fold. Fork/pin/skewer subjects are color-normalized
+        // and bounded, so historical games teach a compact pattern->OUTCOME plane that Search
+        // can consume at every static leaf. This is marker-gated and additive; never bump the
+        // main analyzer version merely to backfill it.
+        ("chess-tactic-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessTacticOutcomesDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
+        // Stockfish eval pass over recorded games (GH #573). --depth N sets the per-position
+        // search depth (default 10 — the v1 census budget); --nodes N switches to a
+        // node-capped search (bounded worst case). A run-level memo searches each unique
+        // content-addressed position once regardless of how many games share it.
         ("chess-eval", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
                 cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
@@ -218,22 +226,10 @@ internal static class IngestDispatchTable
         return false;
     }
 
-    /// <summary>A safetensors snapshot reaches the same handler under three names.</summary>
-    private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
+    internal static IReadOnlyCollection<string> RegisteredKeys => Routes.Keys;
 
-    /// <summary>
-    /// EVERYTHING <see cref="TryDispatch"/> can actually route — the explicit table,
-    /// the model aliases, and the manifest rows reachable through the generic ETL
-    /// lane. This used to report only Routes.Keys, so it under-reported by the model
-    /// aliases and by every ETL-routable source, and callers that printed it (the
-    /// unknown-source error, `ingest` usage) told the operator less than the binary
-    /// supports. One property, so help text and error text cannot disagree with
-    /// dispatch or with each other.
-    /// </summary>
-    internal static IReadOnlyCollection<string> RegisteredKeys =>
-        Routes.Keys
-              .Concat(ModelAliases)
-              .Concat(EtlManifest.Names.Where(EtlManifest.IsRoutable))
-              .Distinct(StringComparer.OrdinalIgnoreCase)
-              .ToArray();
+    private static readonly string[] ModelAliases =
+    [
+        "safetensors", "hf-model", "bge-m3", "qwen", "qwen3", "minilm", "model",
+    ];
 }
