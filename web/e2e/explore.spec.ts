@@ -126,6 +126,37 @@ test('Browse routes an unwitnessed surface to its geometric neighborhood', async
   await expect(page).toHaveURL('/explore/notfound/unheld');
 });
 
+test('Not-found decomposition keeps tier-2 word constituents visible', async ({ page }) => {
+  const sodiumId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const chlorideId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  await page.route('**/v1/explore/notfound?**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        reference: 'Sodium Chloride',
+        word_id_hex: 'cccccccccccccccccccccccccccccccc',
+        exists: false,
+        coord: [0, 0, 0, 1],
+        decomposition: [
+          { ordinal: 0, id_hex: 'dddddddddddddddddddddddddddddddd', label: 'S', tier: 0, text_offset: 0, text_length: 1 },
+          { ordinal: 1, id_hex: sodiumId, label: 'Sodium', tier: 2, text_offset: 0, text_length: 6 },
+          { ordinal: 2, id_hex: chlorideId, label: 'Chloride', tier: 2, text_offset: 7, text_length: 8 },
+          { ordinal: 3, id_hex: 'cccccccccccccccccccccccccccccccc', label: 'Sodium Chloride', tier: 3, text_offset: 0, text_length: 15 },
+        ],
+        neighbors: [],
+        suggestions: [],
+        did_you_mean: null,
+      }),
+    });
+  });
+
+  await page.goto('/explore/notfound/Sodium%20Chloride');
+  const decomposition = page.getByText('Decomposition').locator('..');
+  await expect(decomposition.getByRole('link', { name: 'Sodium', exact: true })).toHaveAttribute('href', `/explore/entity/${sodiumId}`);
+  await expect(decomposition.getByRole('link', { name: 'Chloride', exact: true })).toHaveAttribute('href', `/explore/entity/${chlorideId}`);
+  await expect(decomposition.getByRole('link', { name: 'Sodium Chloride', exact: true })).toHaveCount(0);
+});
+
 test('Glome canvas mounts after unlock', async ({ page }) => {
   await page.goto('/explore/resolve/whale');
   await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 15_000 });
