@@ -8,4 +8,12 @@
 bool laplace_consensus_copy_novel(Datum type, Datum *values, int count,
                                   uint64 *processed);
 
+/* Phase-1 already locked every matched row. Re-route those same folded rows to
+ * their exact HASH leaves and update them there, avoiding a second parent
+ * partition route and INSERT/ON CONFLICT arbitration. Returns false whenever
+ * direct leaf UPDATE would change PostgreSQL's parent-table policy/permission/
+ * trigger behavior; the caller then retains the existing keyed SQL path. */
+bool laplace_consensus_update_matched(Datum type, Datum *values, int count,
+                                      uint64 expected, uint64 *processed);
+
 #endif
