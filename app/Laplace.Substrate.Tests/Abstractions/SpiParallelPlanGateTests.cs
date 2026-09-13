@@ -27,7 +27,13 @@ public sealed class SpiParallelPlanGateTests
     /// Parallelism is not available to them and asking for it would be wrong, not slow.
     /// </summary>
     private static readonly HashSet<string> ReadWritePlanFiles =
-        new(StringComparer.OrdinalIgnoreCase) { "fold_route.c", "chess_rating_repair.c", "conversation_session.c" };
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "fold_route.c",
+            "chess_rating_repair.c",
+            "conversation_session.c",
+            "consensus_bulk_write.c",
+        };
 
     // Matches a real call, not the "SPI_prepare(unpack) failed" text inside elog messages.
     private static readonly Regex SerialPrepare = new(
