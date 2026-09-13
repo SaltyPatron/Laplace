@@ -15,17 +15,25 @@
 #
 # Env: LAPLACE_API   endpoint            (default http://hart-server:8080)
 #      LAPLACE_DEPTH search depth        (default 6)
-#      CHESS_STATE   state file          (default /tmp/laplace-chess-$USER.state)
+#      CHESS_STATE   state file          (default build-drive scratch/chess-$UID.state)
 #
 # Anything other than "white wins"/"black wins"/"draw" folds as a DRAW
 # (ChessEngineService.ParseTerminalStatus), so a typo silently misrecords the
 # game — the result is validated here rather than at the endpoint.
 
 set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
 
 API="${LAPLACE_API:-http://hart-server:8080}"
 DEPTH="${LAPLACE_DEPTH:-6}"
-STATE="${CHESS_STATE:-/tmp/laplace-chess-$USER.state}"
+STATE="$(realpath -m -- "${CHESS_STATE:-$TMPDIR/chess-$UID.state}")"
+case "$STATE" in
+    /build/laplace/work/*) ;;
+    *) echo "Chess state must use /build/laplace/work: $STATE" >&2; exit 1 ;;
+esac
+mkdir -p -- "$(dirname "$STATE")"
 START_FEN="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 die() { echo "$*" >&2; exit 1; }
@@ -49,7 +57,13 @@ post() { curl -sS -m 120 -X POST "$API$1" -H 'Content-Type: application/json' -d
 load() { [ -f "$STATE" ] || die "no session — run: $0 new"; . "$STATE"; }
 # FEN contains spaces — the state file is sourced, so the values must be quoted
 # or "w KQkq - 0 1" runs as a command and FEN keeps only the first token.
-save() { printf 'SESSION=%s\nFEN="%s"\n' "$SESSION" "$1" > "$STATE"; }
+save() {
+    local staged
+    staged=$(mktemp "${STATE}.XXXXXXXX")
+    printf 'SESSION=%q\nFEN=%q\n' "$SESSION" "$1" > "$staged"
+    chmod 0660 "$staged"
+    mv -- "$staged" "$STATE"
+}
 
 # Print Laplace's reply and store the resulting FEN. effMu/rated say whether the
 # move came out of consensus or fell back to plain alpha-beta, which is the whole
