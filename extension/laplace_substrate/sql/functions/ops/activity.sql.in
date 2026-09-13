@@ -17,7 +17,15 @@
 -- indistinguishable from an idle backend unless it is named, so `restricted`
 -- reports the difference explicitly rather than leaving a caller to conclude the
 -- substrate is quiet when it is merely opaque.
-DROP FUNCTION IF EXISTS ops.activity(double precision, boolean, boolean);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.activity(double precision, boolean, boolean)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(pid integer, is_self boolean, restricted boolean, usename text, application_name text, client_addr text, backend_type text, state text, wait_event_type text, wait_event text, query_seconds double precision, xact_seconds double precision, backend_seconds double precision, query text)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_min_seconds','p_include_idle','p_include_background','pid','is_self','restricted','usename','application_name','client_addr','backend_type','state','wait_event_type','wait_event','query_seconds','xact_seconds','backend_seconds','query']::text[])) THEN
+        DROP FUNCTION ops.activity(double precision, boolean, boolean);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.activity(
     p_min_seconds        double precision DEFAULT 0,
     p_include_idle       boolean          DEFAULT true,

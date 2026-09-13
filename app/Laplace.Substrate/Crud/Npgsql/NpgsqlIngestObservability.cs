@@ -391,7 +391,9 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             "UPDATE laplace.ingest_run_journal SET "
             + "units_attempted = $2, units_applied = $3, units_failed = $4, "
             + "entities = $5, physicalities = $6, attestations = $7, "
-            + "files_done = $8, input_units_done = $9 "
+            + "files_done = $8, input_units_done = $9, "
+            + "consensus_backend_ms = $10, highway_mask_backend_ms = $11, "
+            + "consensus_calls = $12, highway_mask_calls = $13, highway_mask_pairs = $14 "
             + "WHERE run_id = $1",
             cmd =>
             {
@@ -404,6 +406,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = progress.AttestationsInserted });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (long)progress.FilesDone });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = progress.InputUnitsDone });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)progress.ConsensusBackendWork.TotalMilliseconds });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)progress.HighwayMaskBackendWork.TotalMilliseconds });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = progress.ConsensusCalls });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = progress.HighwayMaskCalls });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = progress.HighwayMaskPairs });
             });
     }
 

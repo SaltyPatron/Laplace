@@ -76,6 +76,18 @@ int bilinear_projected_contraction_create(
     bilinear_contraction_context_t** out_context,
     double* out_arena_rms, size_t* out_resident_bytes);
 
+/* Explicit output vocabulary; tied callers delegate with output_rows=embedding_rows. */
+int bilinear_projected_contraction_create_output(
+    const float* embedding_rows, const float* output_rows,
+    size_t vocabulary_rows, size_t dimension,
+    const int* token_rows, const int* entity_indexes,
+    size_t token_count, size_t entity_count,
+    const float* left_weight, const float* left_bias,
+    const float* right_weight, const float* right_bias,
+    size_t rank,
+    bilinear_contraction_context_t** out_context,
+    double* out_arena_rms, size_t* out_resident_bytes);
+
 int bilinear_contraction_candidates_calibrate(
     const bilinear_contraction_context_t* context,
     const int* rows, const int* cols, size_t pair_count,
@@ -85,6 +97,16 @@ int bilinear_contraction_candidates_calibrate(
  * activation. Retains [mean(FFN(E_alias)), mean(E_alias)] factors of width d;
  * candidate calibration and arena reduction use the shared context operations. */
 int ffn_contraction_create(const float* embedding_rows,
+    size_t vocabulary_rows, size_t dimension,
+    const int* token_rows, const int* entity_indexes,
+    size_t token_count, size_t entity_count,
+    const float* up, const float* up_bias, const float* gate, const float* gate_bias,
+    const float* down, const float* down_bias, size_t intermediate, int activation,
+    bilinear_contraction_context_t** out_context,
+    double* out_arena_rms, size_t* out_resident_bytes);
+
+/* Explicit output vocabulary; tied callers delegate with output_rows=embedding_rows. */
+int ffn_contraction_create_output(const float* embedding_rows, const float* output_rows,
     size_t vocabulary_rows, size_t dimension,
     const int* token_rows, const int* entity_indexes,
     size_t token_count, size_t entity_count,

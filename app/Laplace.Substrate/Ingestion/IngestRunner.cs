@@ -1081,9 +1081,10 @@ public sealed class IngestRunner
             c._currentFile = unit;
     }
 
-    private static IngestProgress MakeProgress(RunCounters c)
+    private IngestProgress MakeProgress(RunCounters c)
     {
         var inv = c.Inventory;
+        var fold = _writer as IConsensusFoldMetrics;
         inv?.PublishObservedFloor(Math.Max(c.InputUnitsDone, c.InputUnitsComposed));
         return new(
             c.SourceName ?? "",
@@ -1103,7 +1104,12 @@ public sealed class IngestRunner
             c.AttestationsInserted,
             c.RoundTrips,
             c.UnitsProduced,
-            c.InputUnitsComposed);
+            c.InputUnitsComposed,
+            fold?.ConsensusUpsertBackendWallClock ?? TimeSpan.Zero,
+            fold?.HighwayMaskBackendWallClock ?? TimeSpan.Zero,
+            fold?.ConsensusUpsertCalls ?? 0,
+            fold?.HighwayMaskCalls ?? 0,
+            fold?.HighwayMaskPairs ?? 0);
     }
 
     private sealed class ApplyEnvelopeTransfer(SubstrateChange change) : IDisposable

@@ -191,7 +191,8 @@ public static class ChessAnalyze
         // entities/physicalities merely because this game passed through them.
         bool useReplay = replay is not null
             && replay.Boards.Length == sans.Count + 1
-            && replay.Positions.Length == replay.Boards.Length;
+            && replay.Positions.Length == replay.Boards.Length
+            && replay.Moves.Length == sans.Count;
         var state = initial;
         var line = new List<ChessNode>(sans.Count + 1);
         var boards = useReplay
@@ -207,18 +208,10 @@ public static class ChessAnalyze
             ChessNode to;
             if (useReplay)
             {
-                mv = replay!.Boards.Length > ply + 1 && ply < sans.Count
-                    ? replay.Boards[ply].WhiteToMove == replay.Boards[ply + 1].WhiteToMove
-                        ? default
-                        : default
-                    : default;
-                // Parsed replay positions are indexed by ply boundary. ResolvedMoves is not
-                // part of the hydrated witness contract, so recover the move only for motif
-                // consumers from the already-known board delta's SAN. The fused PGN caller
-                // supplies an exact replay and takes the dedicated overload below instead.
-                var resolved = San.Resolve(replay.Boards[ply], sans[ply], scratch);
-                if (resolved is null) return;
-                mv = resolved.Value;
+                // The parser already resolved and validated this move against this
+                // board. Share that result with motifs and outcomes as well as the
+                // composed positions; resolving SAN again repeats legal-move work.
+                mv = replay!.Moves[ply];
                 mover = replay.Boards[ply].WhiteToMove ? 0 : 1;
                 from = replay.Positions[ply].Position;
                 to = replay.Positions[ply + 1].Position;

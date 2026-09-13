@@ -2,8 +2,8 @@ DROP FUNCTION IF EXISTS laplace.consensus_export_unary(bytea);
 CREATE OR REPLACE FUNCTION structural.consensus_export_unary(p_type_id bytea)
     RETURNS TABLE(subject_id bytea, rating bigint, witness_count bigint)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
     SELECT c.subject_id, c.rating, c.witness_count
     FROM laplace.consensus c
-    WHERE c.type_id = p_type_id AND c.object_id IS NULL
-$$;
+    WHERE c.type_id = p_type_id AND c.object_id IS NULL;
+END;

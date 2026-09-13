@@ -18,7 +18,6 @@
 -- ORDERING IS PER TERM. row_number() OVER (PARTITION BY term ORDER BY the complete
 -- evidence order) applies an explicit p_k independently to each term. This file owns
 -- that order; the scalar is only a one-element adapter and cannot drift from it.
-DROP FUNCTION IF EXISTS taxonomy.bubble_up_batch(bytea[], bytea[], integer);
 CREATE OR REPLACE FUNCTION taxonomy.bubble_up_batch(
     p_terms bytea[],
     p_domain_context bytea[] DEFAULT NULL,

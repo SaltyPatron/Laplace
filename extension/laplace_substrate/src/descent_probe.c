@@ -1,10 +1,19 @@
 #include "descent_probe.h"
 
+#include "access/table.h"
+#include "catalog/namespace.h"
 #include "executor/spi.h"
 #include "catalog/pg_type.h"
+#include "miscadmin.h"
+#include "partitioning/partbounds.h"
+#include "partitioning/partdesc.h"
 #include "utils/builtins.h"
+#include "utils/acl.h"
 #include "utils/hsearch.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/partcache.h"
+#include "utils/rls.h"
 
 #include "perfcache_native.h"
 
@@ -521,6 +530,50 @@ laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_
                                      "SELECT idx FROM laplace.attestations_present_ordinals($1, $2, $3)");
 }
 
+typedef struct PhysicalityLeafPlan
+{
+    Oid leaf_oid;
+    SPIPlanPtr plan;
+} PhysicalityLeafPlan;
+
+static HTAB *physicality_leaf_plans = NULL;
+
+static SPIPlanPtr
+physicality_leaf_probe_plan(Oid leaf_oid)
+{
+    PhysicalityLeafPlan *entry;
+    bool found;
+
+    if (physicality_leaf_plans == NULL)
+    {
+        HASHCTL ctl;
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = sizeof(Oid);
+        ctl.entrysize = sizeof(PhysicalityLeafPlan);
+        ctl.hcxt = TopMemoryContext;
+        physicality_leaf_plans = hash_create("physicality leaf probe plans", 64,
+            &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+    entry = hash_search(physicality_leaf_plans, &leaf_oid, HASH_ENTER, &found);
+    if (!found) entry->plan = NULL;
+    if (entry->plan == NULL)
+    {
+        Oid argtypes[2] = {BYTEAARRAYOID, INT4ARRAYOID};
+        char *qualified = quote_qualified_identifier(
+            get_namespace_name(get_rel_namespace(leaf_oid)), get_rel_name(leaf_oid));
+        char *query = psprintf(
+            "SELECT u.ord FROM unnest($1::bytea[], $2::int[]) AS u(id, ord) "
+            "JOIN ONLY %s p ON p.id = u.id", qualified);
+        SPIPlanPtr plan = SPI_prepare(query, 2, argtypes);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+            ereport(ERROR, (errmsg("physicality leaf probe plan preparation failed")));
+        entry->plan = plan;
+        pfree(query);
+        pfree(qualified);
+    }
+    return entry->plan;
+}
+
 int
 laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
@@ -530,9 +583,114 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
      * staged for an entity that already exists (projections, building
      * blocks land after the entity), so presence is decided by the
      * physicality's OWN id, never inferred from its entity. */
-    return batch_presence_core(ids_array, bm, candidate_count,
-                               "SELECT idx FROM laplace.physicalities_present_ordinals($1)",
-                               false);
+    Oid root_oid = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
+    Relation root = table_open(root_oid, AccessShareLock);
+    PartitionKey key = RelationGetPartitionKey(root);
+    PartitionDesc desc;
+    Datum *ids, *routed_ids, *ordinals;
+    bool *nulls;
+    int n, *owners, *counts, *offsets, *next;
+    int rc = SPI_OK_SELECT;
+
+    /* Older layouts retain the existing generic semantics. Read the live
+     * descriptor each call: a cached partition count cannot own routing. */
+    if ((pg_class_aclcheck(root_oid, GetUserId(), ACL_SELECT) != ACLCHECK_OK &&
+         pg_attribute_aclcheck(root_oid, get_attnum(root_oid, "id"),
+                               GetUserId(), ACL_SELECT) != ACLCHECK_OK) ||
+        check_enable_rls(root_oid, InvalidOid, true) == RLS_ENABLED ||
+        key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
+        key->partnatts != 1 || key->partattrs[0] != get_attnum(root_oid, "id"))
+    {
+        table_close(root, AccessShareLock);
+        return batch_presence_core(ids_array, bm, candidate_count,
+            "SELECT idx FROM laplace.physicalities_present_ordinals($1)", false);
+    }
+    desc = RelationGetPartitionDesc(root, false);
+    /* Parent grants need not be repeated on children. Keep the parent query
+     * for those roles, and for children whose own RLS would change its result. */
+    for (int p = 0; p < desc->nparts; p++)
+    {
+        Oid leaf = desc->oids[p];
+        if (!desc->is_leaf[p] ||
+            (pg_class_aclcheck(leaf, GetUserId(), ACL_SELECT) != ACLCHECK_OK &&
+             pg_attribute_aclcheck(leaf, get_attnum(leaf, "id"),
+                                   GetUserId(), ACL_SELECT) != ACLCHECK_OK) ||
+            check_enable_rls(leaf, InvalidOid, true) == RLS_ENABLED)
+        {
+            table_close(root, AccessShareLock);
+            return batch_presence_core(ids_array, bm, candidate_count,
+                "SELECT idx FROM laplace.physicalities_present_ordinals($1)", false);
+        }
+    }
+    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &ids, &nulls, &n);
+    if (n != candidate_count)
+        ereport(ERROR, (errmsg("physicality probe candidate count mismatch")));
+    owners = palloc(sizeof(int) * n);
+    counts = palloc0(sizeof(int) * desc->nparts);
+    offsets = palloc0(sizeof(int) * (desc->nparts + 1));
+    next = palloc0(sizeof(int) * desc->nparts);
+    routed_ids = palloc(sizeof(Datum) * n);
+    ordinals = palloc(sizeof(Datum) * n);
+    for (int i = 0; i < n; i++)
+    {
+        bool isnull[1] = {false};
+        uint64 hash;
+        int owner;
+        owners[i] = -1;
+        if (nulls[i] || VARSIZE_ANY_EXHDR(DatumGetByteaPP(ids[i])) != 16)
+            continue;
+        if (desc->boundinfo->nindexes == 0) continue;
+        hash = compute_partition_hash_value(1, key->partsupfunc,
+            key->partcollation, &ids[i], isnull);
+        owner = desc->boundinfo->indexes[hash % desc->boundinfo->nindexes];
+        if (owner < 0) continue;
+        if (!desc->is_leaf[owner])
+            ereport(ERROR, (errmsg("physicality HASH child must be a leaf")));
+        owners[i] = owner;
+        counts[owner]++;
+    }
+    for (int p = 0; p < desc->nparts; p++)
+        offsets[p + 1] = offsets[p] + counts[p];
+    for (int i = 0; i < n; i++)
+    {
+        int owner = owners[i];
+        if (owner < 0) continue;
+        int at = offsets[owner] + next[owner]++;
+        routed_ids[at] = ids[i];
+        ordinals[at] = Int32GetDatum(i);
+    }
+    for (int p = 0; p < desc->nparts; p++)
+    {
+        Datum args[2];
+        ArrayType *id_array, *ordinal_array;
+        if (counts[p] == 0) continue;
+        CHECK_FOR_INTERRUPTS();
+        id_array = construct_array(routed_ids + offsets[p], counts[p], BYTEAOID, -1, false, 'i');
+        ordinal_array = construct_array(ordinals + offsets[p], counts[p], INT4OID, 4, true, 'i');
+        args[0] = PointerGetDatum(id_array);
+        args[1] = PointerGetDatum(ordinal_array);
+        rc = SPI_execute_plan(physicality_leaf_probe_plan(desc->oids[p]), args, NULL, true, 0);
+        if (rc != SPI_OK_SELECT) break;
+        for (uint64 r = 0; r < SPI_processed; r++)
+        {
+            bool isnull;
+            Datum ordinal = SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull);
+            if (!isnull) bitmap_set(bm, DatumGetInt32(ordinal));
+        }
+        SPI_freetuptable(SPI_tuptable);
+        pfree(id_array);
+        pfree(ordinal_array);
+    }
+    pfree(ids);
+    pfree(nulls);
+    pfree(owners);
+    pfree(counts);
+    pfree(offsets);
+    pfree(next);
+    pfree(routed_ids);
+    pfree(ordinals);
+    table_close(root, AccessShareLock);
+    return rc;
 }
 
 int

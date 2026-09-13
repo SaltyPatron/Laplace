@@ -19,7 +19,12 @@ public sealed record IngestProgress(
     long AttestationsInserted = 0,
     long RoundTrips = 0,
     long UnitsProduced = 0,
-    long InputUnitsComposed = 0)
+    long InputUnitsComposed = 0,
+    TimeSpan ConsensusBackendWork = default,
+    TimeSpan HighwayMaskBackendWork = default,
+    long ConsensusCalls = 0,
+    long HighwayMaskCalls = 0,
+    long HighwayMaskPairs = 0)
 {
     public double InputPercent =>
         InputUnitsTotal > 0

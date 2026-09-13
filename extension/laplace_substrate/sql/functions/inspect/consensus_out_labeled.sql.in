@@ -1,5 +1,13 @@
 DROP FUNCTION IF EXISTS laplace.consensus_out_labeled(bytea, integer);
-DROP FUNCTION IF EXISTS ops.consensus_out_labeled(bytea, integer);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.consensus_out_labeled(bytea, integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(type_id bytea, object_id bytea, type_label text, object_label text, eff_mu numeric, witnesses bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_id','p_limit','type_id','object_id','type_label','object_label','eff_mu','witnesses']::text[])) THEN
+        DROP FUNCTION ops.consensus_out_labeled(bytea, integer);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(
         type_id bytea,
@@ -9,7 +17,7 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
         eff_mu numeric,
         witnesses bigint)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     WITH subj(id) AS (
         SELECT p_id
         UNION
@@ -40,5 +48,5 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
            o.eff_mu,
            o.witness_count
     FROM ordered o, labels
-    ORDER BY o.ord
-$$;
+    ORDER BY o.ord;
+END;

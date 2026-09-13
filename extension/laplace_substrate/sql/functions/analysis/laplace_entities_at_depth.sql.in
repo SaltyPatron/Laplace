@@ -3,7 +3,15 @@
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace.laplace_entities_at_depth(smallint);
 DROP FUNCTION IF EXISTS laplace.laplace_entities_at_depth(smallint);
-DROP FUNCTION IF EXISTS structural.entities_at_depth(smallint);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('structural.entities_at_depth(smallint)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'SETOF entities'
+             OR proargnames IS DISTINCT FROM ARRAY['p_depth']::text[])) THEN
+        DROP FUNCTION structural.entities_at_depth(smallint);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION structural.entities_at_depth(p_depth smallint)
 RETURNS SETOF laplace.entities
 LANGUAGE sql STABLE

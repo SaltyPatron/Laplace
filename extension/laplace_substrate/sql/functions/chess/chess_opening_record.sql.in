@@ -20,7 +20,7 @@ CREATE OR REPLACE FUNCTION chess.opening_record(p_limit int DEFAULT 25,
     RETURNS TABLE(opening text, lines bigint, playings bigint,
                   eff_mu double precision)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
 WITH claim AS MATERIALIZED (
     -- (opening name id, line) pairs. DISTINCT because ChessPgn and ChessAnalysis both
     -- assert the opening for the same line — two witnesses, one line.
@@ -55,5 +55,5 @@ lbl AS MATERIALIZED (
 SELECT lbl.l[o.ix], o.lines::bigint, o.playings::bigint,
        round((o.mu / 1e9)::numeric, 3)::double precision
 FROM ord o CROSS JOIN lbl
-ORDER BY o.ix
-$$;
+ORDER BY o.ix;
+END;

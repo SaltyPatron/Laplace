@@ -177,6 +177,8 @@ CEILINGS = {
     # own file installs it as the rejected form beside the winner it derives. main has
     # since given it a caller, so the exception is obsolete and is removed rather than
     # left standing: a recorded exception that outlives its cause is just a hole.
+    # Removing the obsolete attested_language DROP exposes its existing zero-caller
+    # adapter in the measured baseline; no new function or ceiling increase.
     "g4_dead_canonical": 14,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
@@ -186,7 +188,7 @@ CEILINGS = {
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
     # 206 -> 205 (2026-08-20): the game_plies string body went with the projection.
-    "g12_string_sql_bodies": 199,
+    "g12_string_sql_bodies": 2,
     # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
     # that introduced it, so it lands enumerated rather than red on merge day.
     # Both survivors are in translate_to's language-reference matcher, where the

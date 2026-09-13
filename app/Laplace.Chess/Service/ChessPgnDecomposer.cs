@@ -351,7 +351,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             boards[ply + 1] = board;
             positions[ply + 1] = ChessCompose.Position(board);
         }
-        return new ChessParsedReplay(boards, positions, start.StandardStart);
+        return new ChessParsedReplay(boards, positions, game.ResolvedMoves, start.StandardStart);
     }
 
     private static async IAsyncEnumerable<ChessGameRecord> StreamNovelGamesAsync(
@@ -452,7 +452,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         PgnMovetext.PgnWalkResult walk;
         using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
             walk = PgnMovetext.Walk(ast, gameBytes);
-        if (walk.Result is null || walk.Mainline.Count == 0)
+        // A recorded resignation or forfeit may precede the first move. Its
+        // players, result and occurrence are still source facts; the line is
+        // the declared starting position followed by an empty move sequence.
+        if (walk.Result is null)
         {
             ChessDropLedger.Drop(ChessDropLedger.NoResultOrMoves, Headline(gameText));
             return null;
@@ -993,12 +996,14 @@ internal sealed record ChessLineReplay(
 internal sealed record ChessParsedReplay(
     Board[] Boards,
     ChessComposed[] Positions,
+    ChessMove[] Moves,
     bool StandardStart)
 {
-    internal static readonly ChessParsedReplay Empty = new([], [], false);
+    internal static readonly ChessParsedReplay Empty = new([], [], [], false);
     internal bool IsCompleteFor(ChessGameRecord game) =>
         Boards.Length == game.ResolvedMoves.Length + 1
-        && Positions.Length == Boards.Length;
+        && Positions.Length == Boards.Length
+        && Moves.Length == game.ResolvedMoves.Length;
 }
 
 /// <summary>

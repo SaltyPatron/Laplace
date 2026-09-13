@@ -1,8 +1,11 @@
 DROP FUNCTION IF EXISTS laplace.word_curve(bytea);
 CREATE OR REPLACE FUNCTION structural.word_curve(p_word bytea) RETURNS geometry
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+
     SELECT public.ST_MakeLine(p.coord ORDER BY c.ordinal)
     FROM realize.constituents(p_word) c
     JOIN laplace.physicalities p
       ON p.entity_id = c.child_id AND p.type = 1 AND p.coord IS NOT NULL
-$$;
+;
+END;

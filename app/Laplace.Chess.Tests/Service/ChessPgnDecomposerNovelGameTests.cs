@@ -137,6 +137,31 @@ public sealed class ChessPgnDecomposerNovelGameTests
         => Assert.Null(ChessPgnDecomposer.TryParseGame("garbage, not a pgn game at all"));
 
     [Fact]
+    public void TryParseGame_ResignationBeforeFirstMove_PreservesPlaying()
+    {
+        const string pgn = """
+            [Event "Live Chess"]
+            [Site "Chess.com"]
+            [Date "2026.02.21"]
+            [White "Anthony-Hart"]
+            [Black "fishygoldycamel007"]
+            [Result "1-0"]
+            [Termination "Anthony-Hart won by resignation"]
+
+            1-0
+            """;
+        var game = ChessPgnDecomposer.TryParseGame(pgn);
+        Assert.NotNull(game);
+        Assert.Equal("Anthony-Hart", game.WhiteName);
+        Assert.Equal("fishygoldycamel007", game.BlackName);
+        Assert.Equal("1-0", game.Result.ResultToken);
+        Assert.Empty(game.MoveIds);
+        Assert.Single(game.PositionIds);
+        Assert.NotEqual(default, game.PlayingId);
+        Assert.Equal(game.PlayingId, ChessPgnDecomposer.TryParseGame(pgn)!.PlayingId);
+    }
+
+    [Fact]
     public void TryParseGame_SameGameTwice_SameIdentity()
     {
         var a1 = ChessPgnDecomposer.TryParseGame(GameA)!;

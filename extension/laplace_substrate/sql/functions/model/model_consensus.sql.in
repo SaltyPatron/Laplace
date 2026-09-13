@@ -52,11 +52,43 @@
 -- Dependents first: circuit_coupling/row/matrix are BEGIN ATOMIC and pin
 -- circuit_coord's OID, so on a live upgrade the base cannot drop while they
 -- stand (same RESTRICT shape metric_ladder hit; d1fa0245).
-DROP FUNCTION IF EXISTS generation.circuit_coupling(bytea, bytea, text, integer, integer, text);
-DROP FUNCTION IF EXISTS generation.circuit_row(bytea, text, integer, integer, integer, text);
-DROP FUNCTION IF EXISTS generation.circuit_matrix(text, integer, integer, integer, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.circuit_coupling(bytea, bytea, text, integer, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'double precision'
+             OR proargnames IS DISTINCT FROM ARRAY['p_subject','p_object','p_plane','p_layer','p_head','p_relation']::text[])) THEN
+        DROP FUNCTION generation.circuit_coupling(bytea, bytea, text, integer, integer, text);
+    END IF;
+END $upgrade_shape$;
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.circuit_row(bytea, text, integer, integer, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(partner bytea, magnitude double precision, observations bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_subject','p_plane','p_layer','p_head','p_k','p_relation','partner','magnitude','observations']::text[])) THEN
+        DROP FUNCTION generation.circuit_row(bytea, text, integer, integer, integer, text);
+    END IF;
+END $upgrade_shape$;
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.circuit_matrix(text, integer, integer, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(subject bytea, object bytea, magnitude double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_plane','p_layer','p_head','p_limit','p_relation','subject','object','magnitude']::text[])) THEN
+        DROP FUNCTION generation.circuit_matrix(text, integer, integer, integer, text);
+    END IF;
+END $upgrade_shape$;
 DROP FUNCTION IF EXISTS generation.circuit_coord(text, integer, integer);
-DROP FUNCTION IF EXISTS generation.circuit_coord(text, integer, integer, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.circuit_coord(text, integer, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'bytea'
+             OR proargnames IS DISTINCT FROM ARRAY['p_plane','p_layer','p_head','p_structure_relation']::text[])) THEN
+        DROP FUNCTION generation.circuit_coord(text, integer, integer, text);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION generation.circuit_coord(
     p_plane text,
     p_layer integer DEFAULT NULL,
@@ -114,7 +146,15 @@ COMMENT ON FUNCTION generation.circuit_coord(text, integer, integer, text) IS
 -- written, and per Elhage et al. those are the only two observable objects in an
 -- attention head. Naming one of them in the body would make the other
 -- unreachable through this surface.
-DROP FUNCTION IF EXISTS generation.circuit_coupling(bytea, bytea, text, integer, integer, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.circuit_coupling(bytea, bytea, text, integer, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'double precision'
+             OR proargnames IS DISTINCT FROM ARRAY['p_subject','p_object','p_plane','p_layer','p_head','p_relation']::text[])) THEN
+        DROP FUNCTION generation.circuit_coupling(bytea, bytea, text, integer, integer, text);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION generation.circuit_coupling(
     p_subject  bytea,
     p_object   bytea,
@@ -142,7 +182,15 @@ COMMENT ON FUNCTION generation.circuit_coupling(bytea, bytea, text, integer, int
 --
 -- The analogue of generation.model_row_topk. Bounded by the attested partners of
 -- this subject in this circuit, not by V.
-DROP FUNCTION IF EXISTS generation.circuit_row(bytea, text, integer, integer, integer, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.circuit_row(bytea, text, integer, integer, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(partner bytea, magnitude double precision, observations bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_subject','p_plane','p_layer','p_head','p_k','p_relation','partner','magnitude','observations']::text[])) THEN
+        DROP FUNCTION generation.circuit_row(bytea, text, integer, integer, integer, text);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION generation.circuit_row(
     p_subject  bytea,
     p_plane    text,
@@ -177,7 +225,15 @@ COMMENT ON FUNCTION generation.circuit_row(bytea, text, integer, integer, intege
 -- nothing else, which is the same asymmetry Wanda measures from the other side --
 -- half a checkpoint's weights are removable with no measured loss, and softmax
 -- cannot express the removal.
-DROP FUNCTION IF EXISTS generation.circuit_matrix(text, integer, integer, integer, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.circuit_matrix(text, integer, integer, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(subject bytea, object bytea, magnitude double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_plane','p_layer','p_head','p_limit','p_relation','subject','object','magnitude']::text[])) THEN
+        DROP FUNCTION generation.circuit_matrix(text, integer, integer, integer, text);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION generation.circuit_matrix(
     p_plane    text,
     p_layer    integer DEFAULT NULL,
@@ -207,7 +263,15 @@ COMMENT ON FUNCTION generation.circuit_matrix(text, integer, integer, integer, t
 -- the fold across every source and circuit, and a stored float tile has no
 -- notion of a claim that lost. eff_mu = rating - 2*rd is the conservative lower
 -- bound, freely <= 0.
-DROP FUNCTION IF EXISTS generation.adjudicated_coupling(bytea, bytea, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.adjudicated_coupling(bytea, bytea, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(eff_mu bigint, rating bigint, rd bigint, witness_count bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_subject','p_object','p_relation','eff_mu','rating','rd','witness_count']::text[])) THEN
+        DROP FUNCTION generation.adjudicated_coupling(bytea, bytea, text);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION generation.adjudicated_coupling(
     p_subject  bytea,
     p_object   bytea,
@@ -237,7 +301,15 @@ COMMENT ON FUNCTION generation.adjudicated_coupling(bytea, bytea, text) IS
 --
 -- Rides consensus_subject_type_eff_mu_btree, so it is a bounded index scan and
 -- not a scan of V.
-DROP FUNCTION IF EXISTS generation.adjudicated_row(bytea, integer, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.adjudicated_row(bytea, integer, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(object bytea, eff_mu bigint, rd bigint, witness_count bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_subject','p_k','p_relation','object','eff_mu','rd','witness_count']::text[])) THEN
+        DROP FUNCTION generation.adjudicated_row(bytea, integer, text);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION generation.adjudicated_row(
     p_subject  bytea,
     p_k        integer DEFAULT 20,

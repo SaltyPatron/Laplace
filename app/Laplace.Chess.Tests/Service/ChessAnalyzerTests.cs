@@ -33,8 +33,18 @@ public sealed class ChessAnalyzerTests
         ChessAnalyze.DeriveFromWitnessed(b, ChessAnalyze.WitnessedFromParsed(parsed));
         var viaWitness = b.SetInputUnitsConsumed(1).Build();
 
-        Assert.Equal(direct.Entities.Length, viaWitness.Entities.Length);
-        Assert.Equal(direct.Physicalities.Length, viaWitness.Physicalities.Length);
+        Assert.Equal(direct.Entities.OrderBy(e => e.Id.ToString()),
+            viaWitness.Entities.OrderBy(e => e.Id.ToString()));
+        Assert.Equal(direct.Attestations.OrderBy(a => a.Id.ToString())
+                .Select(a => a with { LastObservedAtUnixUs = 0 }),
+            viaWitness.Attestations.OrderBy(a => a.Id.ToString())
+                .Select(a => a with { LastObservedAtUnixUs = 0 }));
+        var json = new System.Text.Json.JsonSerializerOptions { IncludeFields = true };
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(direct.Physicalities
+                .OrderBy(p => p.Id.ToString()).Select(p => p with { ObservedAtUnixUs = 0 }), json),
+            System.Text.Json.JsonSerializer.Serialize(viaWitness.Physicalities
+                .OrderBy(p => p.Id.ToString()).Select(p => p with { ObservedAtUnixUs = 0 }), json));
         Assert.DoesNotContain(viaWitness.Entities, e => e.TypeId == ChessVocabulary.PositionType);
     }
 

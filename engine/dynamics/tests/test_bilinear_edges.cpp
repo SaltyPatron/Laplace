@@ -416,3 +416,67 @@ TEST(ProjectEmbedding, NonDyadicInputsAgreeToFp32) {
             << "index " << i << " fp32=" << outF[i] << " fp64=" << outD[i];
     }
 }
+
+TEST(BilinearEdges, UntiedOutputVocabularyMatchesExplicitNarrowAndWideProducts) {
+    const float input[] = {1, -2, 0, 3, 2, 1};
+    const float output[] = {-3, 1, 4, -2, 0, 5};
+    const int mapping[] = {0, 1, 2};
+    const int rows[] = {0, 0, 1, 1, 2, 2};
+    const int cols[] = {1, 2, 0, 2, 0, 1};
+    for (size_t rank : {2u, 4u}) {
+        std::vector<float> a(rank * 2), b(rank * 2);
+        std::vector<double> left(3 * rank), right(3 * rank);
+        for (size_t k = 0; k < rank; ++k) {
+            a[k * 2] = float(k + 1); a[k * 2 + 1] = -1;
+            b[k * 2] = 2; b[k * 2 + 1] = float(k) - 1;
+            for (size_t r = 0; r < 3; ++r) {
+                left[r * rank + k] = input[r * 2] * a[k * 2] + input[r * 2 + 1] * a[k * 2 + 1];
+                right[r * rank + k] = output[r * 2] * b[k * 2] + output[r * 2 + 1] * b[k * 2 + 1];
+            }
+        }
+        int64_t expected[6]{}, actual[6]{};
+        int16_t expected_outcome[6]{}, actual_outcome[6]{};
+        double expected_arena = 0, arena = 0;
+        size_t resident = 0;
+        bilinear_contraction_context_t* context = nullptr;
+        ASSERT_EQ(0, bilinear_candidates_calibrate(left.data(), 3, right.data(), 3, rank,
+            rows, cols, 6, expected, expected_outcome, &expected_arena));
+        ASSERT_EQ(0, bilinear_projected_contraction_create_output(input, output, 3, 2,
+            mapping, mapping, 3, 3, a.data(), nullptr, b.data(), nullptr, rank,
+            &context, &arena, &resident));
+        ASSERT_EQ(0, bilinear_contraction_candidates_calibrate(context, rows, cols, 6, actual, actual_outcome));
+        EXPECT_NEAR(expected_arena, arena, 1e-10);
+        for (int i = 0; i < 6; ++i) {
+            EXPECT_EQ(expected[i], actual[i]);
+            EXPECT_EQ(expected_outcome[i], actual_outcome[i]);
+        }
+        bilinear_contraction_free(context);
+    }
+}
+
+TEST(BilinearEdges, NonlinearFfnUsesUntiedOutputRowsAfterAliasActivation) {
+    const float input[] = {-2, 4, 1, 0, 0, 2};
+    const float output[] = {3, -1, 1, 5, -2, 1};
+    const float identity[] = {1, 0, 0, 1};
+    const int tokens[] = {0, 1, 2}, entities[] = {0, 0, 1};
+    // Mean(ReLU(alias)) differs from ReLU(mean(alias)): first coordinate 0.5 vs 0.
+    const double left[] = {0.5, 2, 0, 2}, right[] = {2, 2, -2, 1};
+    const int rows[] = {0, 1}, cols[] = {1, 0};
+    int64_t expected[2]{}, actual[2]{};
+    int16_t expected_outcome[2]{}, actual_outcome[2]{};
+    double expected_arena = 0, arena = 0;
+    size_t resident = 0;
+    bilinear_contraction_context_t* context = nullptr;
+    ASSERT_EQ(0, bilinear_candidates_calibrate(left, 2, right, 2, 2,
+        rows, cols, 2, expected, expected_outcome, &expected_arena));
+    ASSERT_EQ(0, ffn_contraction_create_output(input, output, 3, 2,
+        tokens, entities, 3, 2, identity, nullptr, nullptr, nullptr, identity, nullptr,
+        2, 4, &context, &arena, &resident));
+    ASSERT_EQ(0, bilinear_contraction_candidates_calibrate(context, rows, cols, 2, actual, actual_outcome));
+    EXPECT_NEAR(expected_arena, arena, 1e-12);
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_EQ(expected[i], actual[i]);
+        EXPECT_EQ(expected_outcome[i], actual_outcome[i]);
+    }
+    bilinear_contraction_free(context);
+}

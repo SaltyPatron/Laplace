@@ -63,6 +63,7 @@
 #include "laplace/core/glicko2.h"
 
 #include "consensus_fold_math.h"
+#include "consensus_bulk_write.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge);
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge_type);
@@ -1038,8 +1039,7 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 /* consensus_upsert — routed inline fold                               */
 /* ------------------------------------------------------------------ */
 
-/* The fold is now three phases per type run, all literal-routed and
- * session-plan-cached:
+/* The fold has three phases per type run:
  *
  *  1. read_run_priors partitions the input by PostgreSQL's own HASH support
  *     function, then reads and row-locks each stored cell from its exact owning
@@ -1052,9 +1052,10 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
  *     scalar through the executor once per matched row — the last per-row
  *     fold work in the write path.
  *  3. UPSERT_MATCHED_SQL sends rows seen in phase 1 through the primary-key
- *     conflict arbiter, while UPSERT_NOVEL_SQL inserts unseen rows without a
- *     target read. UPSERT_MERGE_SQL is reached only after a concurrent insert
- *     invalidates phase 1's novel classification.
+ *     conflict arbiter. Newly folded rows stream through PostgreSQL COPY's
+ *     bulk insertion machinery; SQL INSERT remains the policy/rewrite path.
+ *     UPSERT_MERGE_SQL is reached only after a concurrent insert invalidates
+ *     phase 1's novel classification.
  *
  * b.seen is the router's own matched prediction from phase 1. A MERGE-matched
  * row the router did NOT see can only be a cell inserted by a concurrent
@@ -1069,9 +1070,10 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 /* Phase 3 has no target join on the ordinary path. Phase 1 already classified
  * and row-locked every existing cell. Persist those rows through the declared
  * primary-key arbiter; PostgreSQL routes the proposed row by type+subject and
- * probes the owning HASH leaf's unique index. Novel rows are plain inserts and
- * therefore perform no target read at all. This removes the empty-leaf MERGE
- * plan that produced O(rows x leaves) sequential scans in GH #1370.
+ * probes the owning HASH leaf's unique index. Novel rows use a native binary
+ * COPY callback without another target join or a client round trip. PostgreSQL
+ * owns tuple routing, constraints, indexes, triggers and bulk heap insertion.
+ * Relations with rewrite rules or active row policies retain SQL INSERT.
  *
  * A cell inserted by a concurrent writer after phase 1 makes the novel INSERT
  * raise unique_violation. upsert_persist_keyed_or_fallback rolls back this
@@ -1229,6 +1231,7 @@ upsert_persist_keyed_or_fallback(SPIPlanPtr matched_plan,
                                  SPIPlanPtr novel_plan,
                                  SPIPlanPtr merge_plan,
                                  Datum *write_vals, Datum *merge_vals,
+                                 Datum type,
                                  uint64 matched_n, uint64 total_n,
                                  const char *label)
 {
@@ -1259,15 +1262,21 @@ upsert_persist_keyed_or_fallback(SPIPlanPtr matched_plan,
         {
             uint64 novel_n = total_n - matched_n;
 
-            rc = SPI_execute_plan(novel_plan, write_vals, NULL, false, 0);
-            if (rc != SPI_OK_INSERT || SPI_processed != novel_n)
+            uint64 inserted;
+            if (!laplace_consensus_copy_novel(type, write_vals, (int) total_n, &inserted))
+            {
+                rc = SPI_execute_plan(novel_plan, write_vals, NULL, false, 0);
+                if (rc != SPI_OK_INSERT)
+                    elog(ERROR, "%s: novel INSERT failed: %s", label, SPI_result_code_string(rc));
+                inserted = SPI_processed;
+            }
+            if (inserted != novel_n)
                 ereport(ERROR,
                         (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("%s: keyed novel insert affected %lu of %lu rows (%s)",
-                                label, (unsigned long) SPI_processed,
-                                (unsigned long) novel_n,
-                                SPI_result_code_string(rc))));
-            processed += SPI_processed;
+                         errmsg("%s: keyed novel insert affected %lu of %lu rows",
+                                label, (unsigned long) inserted,
+                                (unsigned long) novel_n)));
+            processed += inserted;
         }
         ReleaseCurrentSubTransaction();
         MemoryContextSwitchTo(oldcontext);
@@ -1488,6 +1497,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         write_vals[8] = vals[10];
         affected += (int64) upsert_persist_keyed_or_fallback(
             matched_plan, novel_plan, merge_plan, write_vals, vals,
+            types.elems[run_start],
             matched_n, (uint64) run_n, label);
 
         run_start = j;
@@ -1647,6 +1657,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     {
         int64 affected = (int64) upsert_persist_keyed_or_fallback(
             matched_plan, novel_plan, merge_plan, write_vals, vals,
+            PG_GETARG_DATUM(0),
             matched_n, (uint64) subjects.n, label);
         SPI_finish();
         PG_RETURN_INT64(affected);

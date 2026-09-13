@@ -122,6 +122,7 @@ set(EXT_C_SOURCES
     src/grammar_source.c
     src/descent_probe.c
     src/fold_route.c
+    src/consensus_bulk_write.c
     src/containers_of.c
     src/browse_native.c
     src/band_leaders.c

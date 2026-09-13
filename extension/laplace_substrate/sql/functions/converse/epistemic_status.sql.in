@@ -5,7 +5,15 @@
 -- hot entity (Carlsen, limit 500): 1,984 ms through the rendering wrapper, 308 ms
 -- through this core — identical counts (8/0/0/317). One rule, two consumers:
 -- epistemic_status adds the text; counters stop paying for it.
-DROP FUNCTION IF EXISTS converse.epistemic_status_core(bytea, int);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('converse.epistemic_status_core(bytea, int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(type_id bytea, object_id bytea, status text, rating bigint, rd bigint, volatility bigint, witnesses bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_word','p_limit','type_id','object_id','status','rating','rd','volatility','witnesses']::text[])) THEN
+        DROP FUNCTION converse.epistemic_status_core(bytea, int);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION converse.epistemic_status_core(p_word bytea, p_limit int DEFAULT 30)
     RETURNS TABLE(type_id bytea, object_id bytea, status text, rating bigint,
                   rd bigint, volatility bigint, witnesses bigint)
@@ -39,7 +47,9 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea 
                                             p_limit int DEFAULT 30)
     RETURNS TABLE(type text, fact text, status text, mu numeric,
                   volatility numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     WITH rels AS MATERIALIZED (
             SELECT * FROM converse.epistemic_status_core(p_word, p_limit)),
          lang(id) AS (SELECT COALESCE(p_lang, converse.word_language(p_word))),
@@ -73,4 +83,5 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea 
     LEFT JOIN rendered rd ON rd.id = r.object_id
     LEFT JOIN type_labels td ON td.id = r.type_id
     ORDER BY consensus.edge_rank(r.type_id, consensus.eff_mu(r.rating, r.rd)) DESC
-$$;
+;
+END;

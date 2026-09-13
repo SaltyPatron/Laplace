@@ -34,7 +34,8 @@ CREATE OR REPLACE FUNCTION lexical.sense_audit(p_term text, p_lang_rel bytea,
                                        p_limit int DEFAULT 64)
     RETURNS TABLE(sense text, sense_type text, via_relation text,
                   language text, denote_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
 WITH w AS (SELECT laplace.word_id(p_term) AS id),
 cand AS (
     SELECT s.synset_id, s.eff_mu, s.witnesses,
@@ -91,5 +92,5 @@ SELECT lbl.l[r.rk * 4 - 3],
        round(r.eff_mu::numeric, 0),
        r.witnesses
 FROM rows r CROSS JOIN lbl
-ORDER BY r.rk
-$$;
+ORDER BY r.rk;
+END;

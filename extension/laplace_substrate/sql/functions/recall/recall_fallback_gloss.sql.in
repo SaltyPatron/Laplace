@@ -8,7 +8,9 @@ CREATE OR REPLACE FUNCTION converse.recall_fallback_gloss(
     LANGUAGE sql
     STABLE
     PARALLEL SAFE
-AS $$
+
+BEGIN ATOMIC
+
     -- Identity existing without an eligible human realization is UNKNOWN
     -- presentation state, not an empty answer and not permission to print the
     -- content hash. label_or_hex is the compatibility-named shared display
@@ -17,4 +19,5 @@ AS $$
     SELECT t.label || ': ' || d.definition, d.eff_mu, d.witnesses
     FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
     CROSS JOIN topic t
-$$;
+;
+END;

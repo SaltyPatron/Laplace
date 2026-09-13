@@ -33,7 +33,9 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
         witness_sat    double precision,
         icf_x_sat      double precision,
         bands          integer)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+
     WITH t AS MATERIALIZED (
         SELECT s.ord, s.surface, laplace.word_id(s.surface) AS id
         FROM unnest(p_surfaces) WITH ORDINALITY AS s(surface, ord)
@@ -82,4 +84,5 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
     LEFT JOIN edg ON edg.entity_id = t.id
     LEFT JOIN ent ON ent.entity_id = t.id
     ORDER BY t.ord
-$$;
+;
+END;

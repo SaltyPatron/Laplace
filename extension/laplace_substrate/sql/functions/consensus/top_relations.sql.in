@@ -2,7 +2,9 @@ DROP FUNCTION IF EXISTS laplace.top_relations(integer, bytea);
 CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
 -- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+
     -- Exact global top-k over the index's identical immutable expression. The
     -- previous implementation took p_limit from each relation type, but the
     -- LATERAL type parameter could not prune the LIST(type_id) parent. At the
@@ -44,4 +46,5 @@ CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p
              c.subject_id,
              c.object_id
     LIMIT p_limit
-$$;
+;
+END;

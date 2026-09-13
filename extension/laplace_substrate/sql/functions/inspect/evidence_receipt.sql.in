@@ -16,7 +16,9 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
         witness_count bigint,
         source_labels text)
     LANGUAGE sql STABLE
-    AS $$
+
+BEGIN ATOMIC
+
     WITH subj(id) AS (
         SELECT p_id
         UNION
@@ -171,4 +173,5 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
              lb.type_id,
              lb.object_id
     LIMIT GREATEST(p_limit, 0)
-$$;
+;
+END;

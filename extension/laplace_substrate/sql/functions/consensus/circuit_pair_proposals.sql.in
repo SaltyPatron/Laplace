@@ -2,7 +2,15 @@
 -- not confirm p_target_type; two independent model witnesses must still agree
 -- on that exact target kind before OP9. The complete selected vocabulary is
 -- walked by endpoint keyset. p_page_size is only a wire/memory bound.
-DROP FUNCTION IF EXISTS consensus.circuit_pair_proposals(bytea[], bytea, boolean, bytea, bytea, integer);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('consensus.circuit_pair_proposals(bytea[], bytea, boolean, bytea, bytea, integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(subject_id bytea, object_id bytea, basis_type_ids bytea[])'
+             OR proargnames IS DISTINCT FROM ARRAY['p_vocabulary','p_target_type','p_target_symmetric','p_after_subject','p_after_object','p_page_size','subject_id','object_id','basis_type_ids']::text[])) THEN
+        DROP FUNCTION consensus.circuit_pair_proposals(bytea[], bytea, boolean, bytea, bytea, integer);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION consensus.circuit_pair_proposals(
     p_vocabulary bytea[], p_target_type bytea, p_target_symmetric boolean,
     p_after_subject bytea, p_after_object bytea, p_page_size integer)

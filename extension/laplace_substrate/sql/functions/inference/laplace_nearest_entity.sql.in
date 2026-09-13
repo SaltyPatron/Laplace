@@ -56,7 +56,9 @@ CREATE OR REPLACE FUNCTION generation.nearest_entity(
     p_band_mask bytea DEFAULT NULL,
     p_tiers smallint[] DEFAULT NULL)
 RETURNS TABLE(entity_id bytea, distance float8)
-LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
+LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
+
     WITH nearest AS (
         SELECT w.id, w.coord,
                public.laplace_direction_4d(w.coord) <<->>
@@ -80,4 +82,5 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
                public.ST_SetSRID(public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0))
     FROM nearest
     ORDER BY nearest.chord, nearest.id
-$$;
+;
+END;

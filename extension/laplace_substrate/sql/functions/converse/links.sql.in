@@ -37,7 +37,7 @@ DROP FUNCTION IF EXISTS laplace.links(text);
 CREATE OR REPLACE FUNCTION converse.links(p_word text)
     RETURNS TABLE(relation text, target text, strength double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    AS $$
+BEGIN ATOMIC
     WITH base AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
                consensus.eff_mu(c.rating, c.rd) AS emu
@@ -66,5 +66,5 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
     JOIN rel r ON r.type_id = b.type_id
     JOIN labels l ON l.id = b.object_id
     ORDER BY consensus.edge_rank(b.type_id, b.emu) DESC,
-             strength DESC, r.relation
-$$;
+             strength DESC, r.relation;
+END;

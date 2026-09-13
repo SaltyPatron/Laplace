@@ -374,10 +374,42 @@ internal static class CopyTupleParser
                     packed.AsSpan(filled + countValueOffsets![i], 8), patchedCounts[i]);
                 BinaryPrimitives.WriteInt64BigEndian(
                     packed.AsSpan(filled + sumValueOffsets![i], 8), patchedSums![i]);
+                PatchAggregatedOutcome(packed.AsSpan(filled, row.Length),
+                    patchedCounts[i], patchedSums[i]);
             }
             filled += row.Length;
         }
         return packed;
+    }
+
+    private static void PatchAggregatedOutcome(Span<byte> row, long games, long sum)
+    {
+        // Count/score patches collapse attestation tuples. Retaining one
+        // representative's outcome would disagree with the combined evidence
+        // and make the stored category depend on worker completion order.
+        // Decode wire offsets here; the native attestation law owns classification.
+        if (BinaryPrimitives.ReadInt16BigEndian(row) != AttestationFields)
+            throw new InvalidOperationException("aggregate patch requires an attestation tuple");
+        int offset = 2, outcomeOffset = -1;
+        for (int field = 0; field <= 12; field++)
+        {
+            int length = BinaryPrimitives.ReadInt32BigEndian(row.Slice(offset, 4));
+            offset += 4;
+            if (field == 6)
+            {
+                if (length != 2) throw new InvalidOperationException("invalid attestation outcome width");
+                outcomeOffset = offset;
+            }
+            if (field == 12)
+            {
+                if (length != 1) throw new InvalidOperationException("invalid fold_replayable width");
+                if (row[offset] != 0)
+                    BinaryPrimitives.WriteInt16BigEndian(row.Slice(outcomeOffset, 2),
+                        (short)AttestationMergeMath.ClassifyOutcome(games, sum));
+                return;
+            }
+            offset = checked(offset + Math.Max(0, length));
+        }
     }
 
     /// <summary>

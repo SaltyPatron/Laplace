@@ -4,7 +4,7 @@ DROP FUNCTION IF EXISTS laplace.consensus_out_readable(bytea, integer);
 CREATE OR REPLACE FUNCTION ops.consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     -- Rank + LIMIT on bare ids in the inner query, render only the survivors (the define/examples
     -- pattern). realize.render() is a heavy non-inlinable call; at the same level as ORDER BY..LIMIT it was
     -- projected over EVERY out-edge of the subject before the cut — thousands of renders to return 40.
@@ -22,5 +22,5 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_readable(p_id bytea, p_limit intege
              realize.render_batch(array_agg(object_id ORDER BY rn)) AS objects FROM numbered
     )
     SELECT b.types[s.rn], b.objects[s.rn], s.eff_mu, s.witness_count
-    FROM numbered s CROSS JOIN batch b ORDER BY s.rn
-$$;
+    FROM numbered s CROSS JOIN batch b ORDER BY s.rn;
+END;

@@ -34,7 +34,15 @@
 -- BEGIN ATOMIC, not AS $$ (G12 / GH #764): the body parses at CREATE time and
 -- records pg_depend on ingest_run_journal, so a column rename there fails here
 -- rather than at the first call after a reseed.
-DROP FUNCTION IF EXISTS ops.ingest_integrity_gate(timestamptz);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.ingest_integrity_gate(timestamptz)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(run_id uuid, source_name text, started_at timestamp with time zone, entities bigint, physicalities bigint, orphaned bigint, status text)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_since','run_id','source_name','started_at','entities','physicalities','orphaned','status']::text[])) THEN
+        DROP FUNCTION ops.ingest_integrity_gate(timestamptz);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.ingest_integrity_gate(p_since timestamptz DEFAULT NULL)
 RETURNS TABLE(run_id        uuid,
               source_name   text,
@@ -62,7 +70,15 @@ COMMENT ON FUNCTION ops.ingest_integrity_gate(timestamptz) IS
 
 -- ops.orphan_physicality_count — the direct measurement, for when the journal is
 -- not trusted or the rows predate it. Full anti-join: ~4.3 s at 15.6M rows.
-DROP FUNCTION IF EXISTS ops.orphan_physicality_count();
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.orphan_physicality_count()')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'bigint'
+             OR proargnames IS DISTINCT FROM NULL::text[])) THEN
+        DROP FUNCTION ops.orphan_physicality_count();
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.orphan_physicality_count()
 RETURNS bigint
 LANGUAGE sql STABLE PARALLEL SAFE

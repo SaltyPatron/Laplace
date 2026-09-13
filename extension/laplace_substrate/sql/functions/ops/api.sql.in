@@ -1,6 +1,14 @@
 -- CREATE OR REPLACE cannot widen a function's result set, so the upgrade path
 -- has to drop first — adding `kind` below is exactly that change.
-DROP FUNCTION IF EXISTS ops.api(text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.api(text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(name text, args text, returns text, kind text)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_like','name','args','returns','kind']::text[])) THEN
+        DROP FUNCTION ops.api(text);
+    END IF;
+END $upgrade_shape$;
 
 -- `kind` distinguishes a function from a procedure, and it is not cosmetic: a
 -- procedure is invoked with CALL and a function with SELECT, so a caller that
@@ -11,7 +19,9 @@ DROP FUNCTION IF EXISTS ops.api(text);
 -- Appended last so existing named-column readers are unaffected.
 CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text, kind text)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+
     SELECT CASE WHEN n.nspname = 'laplace' THEN p.proname::text
                 ELSE n.nspname || '.' || p.proname END,
            pg_get_function_arguments(p.oid),
@@ -44,4 +54,5 @@ CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
            OR p.proname ILIKE '%'||p_like||'%'
            OR (n.nspname || '.' || p.proname) ILIKE '%'||p_like||'%')
     ORDER BY n.nspname, p.proname
-$$;
+;
+END;

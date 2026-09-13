@@ -15,7 +15,7 @@ DROP FUNCTION IF EXISTS laplace.relation_in_family(bytea, text);
 CREATE OR REPLACE FUNCTION consensus.relation_in_family(p_type_id bytea, p_family text)
     RETURNS boolean
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     SELECT consensus.relation_type_in_family(p_type_id, p_family)
         OR EXISTS (
             SELECT 1 FROM laplace.consensus c
@@ -28,5 +28,5 @@ CREATE OR REPLACE FUNCTION consensus.relation_in_family(p_type_id bytea, p_famil
               -- row presence made "witnessed as NOT in this family" and "witnessed
               -- as in this family" the same answer.
               AND consensus.eff_mu(c.rating, c.rd) > 0
-        )
-$$;
+        );
+END;

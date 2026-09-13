@@ -32,7 +32,15 @@ CREATE OR REPLACE FUNCTION converse.session_append_turns(
     AS 'EXECUTION_LIBRARY', 'pg_laplace_session_append_turns'
     LANGUAGE C VOLATILE STRICT PARALLEL UNSAFE;
 
-DROP FUNCTION IF EXISTS converse.session_turns(bytea, int);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('converse.session_turns(bytea, int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(ordinal integer, turn_id bytea, role text, model text, observed_at timestamp with time zone, surface text)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_session','p_limit','ordinal','turn_id','role','model','observed_at','surface']::text[])) THEN
+        DROP FUNCTION converse.session_turns(bytea, int);
+    END IF;
+END $upgrade_shape$;
 -- The typed message record is [metadata, exact content]. Decode its second
 -- occurrence through the canonical native manifest operation. Older content-only
 -- turns already name their own content. No testimony can change either identity.

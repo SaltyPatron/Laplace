@@ -41,7 +41,9 @@ CREATE OR REPLACE FUNCTION consensus.edges(
                   neighbour text, eff_mu numeric, witnesses bigint)
 -- No SET search_path — it blocks inlining and this body wraps consensus.edges_raw(), the
 -- one consensus scan. Every reference is @extschema@-qualified instead. GH #860.
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     WITH ranked AS MATERIALIZED (
         SELECT e.direction AS dir,e.type_id,e.neighbour_id AS nid,
                e.rating,e.rd,e.witness_count,e.ord
@@ -77,7 +79,8 @@ CREATE OR REPLACE FUNCTION consensus.edges(
     JOIN labels nl ON nl.id=k.nid
     CROSS JOIN lbl
     ORDER BY k.ord
-$$;
+;
+END;
 
 DROP FUNCTION IF EXISTS laplace.edges(text, text, int, boolean);
 CREATE OR REPLACE FUNCTION consensus.edges(
@@ -87,18 +90,29 @@ CREATE OR REPLACE FUNCTION consensus.edges(
         p_refuted   boolean DEFAULT false)
     RETURNS TABLE(direction text, relation text, neighbour_id bytea,
                   neighbour text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     SELECT e.direction, e.relation, e.neighbour_id, e.neighbour, e.eff_mu, e.witnesses
     FROM consensus.edges(@extschema@.word_id(p_word), p_direction, NULL::bytea[],
                            p_limit, p_refuted,
                            converse.word_language(laplace.word_id(p_word))) e
-$$;
+;
+END;
 
 -- Generic Browse NAME lane. Structural candidate generation stays behind the
 -- sanctioned trajectory-containment boundary; all relation-family/Glicko access
 -- stays here in the consensus boundary. The result is still canonical ids and
 -- typed standing state; rendering happens after page selection.
-DROP FUNCTION IF EXISTS consensus.browse_named_entities(bytea[], bytea, int, int, int);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('consensus.browse_named_entities(bytea[], bytea, int, int, int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, tier smallint, type_id bytea, matched_name_id bytea, match_kind text, rating numeric, rd numeric, eff_mu numeric, witness_count bigint, candidate_name_count bigint, candidate_truncated boolean, matched_entity_count bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_members','p_exact','p_offset','p_limit','p_capacity','entity_id','tier','type_id','matched_name_id','match_kind','rating','rd','eff_mu','witness_count','candidate_name_count','candidate_truncated','matched_entity_count']::text[])) THEN
+        DROP FUNCTION consensus.browse_named_entities(bytea[], bytea, int, int, int);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION consensus.browse_named_entities(
     p_members bytea[],
     p_exact bytea DEFAULT NULL,

@@ -35,7 +35,15 @@
 -- Latin-shaped and silently a no-op for most of the codespace. Internal aliases
 -- avoid the RETURNS TABLE column names, which are OUT parameters in scope over
 -- an atomic body.
-DROP FUNCTION IF EXISTS ops.render_trace(bytea, integer, boolean);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.render_trace(bytea, integer, boolean)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(parent_id bytea, ordinal integer, child_id bytea, tier smallint, label text, verdict text)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_entity','p_max_depth','p_failures_only','parent_id','ordinal','child_id','tier','label','verdict']::text[])) THEN
+        DROP FUNCTION ops.render_trace(bytea, integer, boolean);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.render_trace(
     p_entity        bytea,
     p_max_depth     integer DEFAULT 32,

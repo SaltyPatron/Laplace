@@ -2,7 +2,8 @@
 DROP FUNCTION IF EXISTS laplace.correlate(text[]);
 CREATE OR REPLACE FUNCTION converse.correlate(p_words text[])
     RETURNS TABLE(relation text, target text, words text[], strength double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- Group on ids, not rendered strings: content-addressing means one id = one
     -- content, but one surface string can cover many ids (homographs), so the
     -- old GROUP BY realize.label(type)/realize.label(object) both conflated distinct targets
@@ -30,5 +31,5 @@ CREATE OR REPLACE FUNCTION converse.correlate(p_words text[])
     SELECT COALESCE(NULLIF(consensus.relation_canonical(g.type_id), ''), rt.txt) AS relation,
            ro.txt AS target, g.words, g.strength
     FROM g JOIN labels rt ON rt.id=g.type_id JOIN labels ro ON ro.id=g.object_id
-    ORDER BY g.nwords DESC, g.strength DESC, 1
-$$;
+    ORDER BY g.nwords DESC, g.strength DESC, 1;
+END;

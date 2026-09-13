@@ -26,8 +26,24 @@
 -- alive to roll back cleanly. Terminate drops the connection and is for a
 -- backend that ignored a cancel (uninterruptible wait) — an in-flight ingest
 -- batch loses its open transaction, which is the point.
-DROP FUNCTION IF EXISTS ops.cancel_backend(int);
-DROP FUNCTION IF EXISTS ops.terminate_backend(int);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.cancel_backend(int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(pid integer, signalled boolean, was_state text, was_query text, was_seconds double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_pid','pid','signalled','was_state','was_query','was_seconds']::text[])) THEN
+        DROP FUNCTION ops.cancel_backend(int);
+    END IF;
+END $upgrade_shape$;
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.terminate_backend(int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(pid integer, signalled boolean, was_state text, was_query text, was_seconds double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_pid','pid','signalled','was_state','was_query','was_seconds']::text[])) THEN
+        DROP FUNCTION ops.terminate_backend(int);
+    END IF;
+END $upgrade_shape$;
 
 CREATE OR REPLACE FUNCTION ops.cancel_backend(p_pid int)
     RETURNS TABLE(pid int, signalled boolean, was_state text, was_query text,

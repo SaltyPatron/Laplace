@@ -70,6 +70,13 @@ public static partial class NativeInterop
         float* leftWeight, float* leftBias, float* rightWeight, float* rightBias,
         nuint rank, IntPtr* context, double* arenaRms, nuint* residentBytes);
 
+    [LibraryImport(Library, EntryPoint = "bilinear_projected_contraction_create_output")]
+    public static unsafe partial int BilinearProjectedContractionCreateOutput(
+        float* embeddingRows, float* outputRows, nuint vocabularyRows, nuint dimension,
+        int* tokenRows, int* entityIndexes, nuint tokenCount, nuint entityCount,
+        float* leftWeight, float* leftBias, float* rightWeight, float* rightBias,
+        nuint rank, IntPtr* context, double* arenaRms, nuint* residentBytes);
+
     [LibraryImport(Library, EntryPoint = "bilinear_contraction_candidates_calibrate")]
     public static unsafe partial int BilinearContractionCandidatesCalibrate(
         IntPtr context, int* rows, int* cols, nuint pairCount,
@@ -78,6 +85,14 @@ public static partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "ffn_contraction_create")]
     public static unsafe partial int FfnContractionCreate(
         float* embeddingRows, nuint vocabularyRows, nuint dimension,
+        int* tokenRows, int* entityIndexes, nuint tokenCount, nuint entityCount,
+        float* up, float* upBias, float* gate, float* gateBias,
+        float* down, float* downBias, nuint intermediate, int activation,
+        IntPtr* context, double* arenaRms, nuint* residentBytes);
+
+    [LibraryImport(Library, EntryPoint = "ffn_contraction_create_output")]
+    public static unsafe partial int FfnContractionCreateOutput(
+        float* embeddingRows, float* outputRows, nuint vocabularyRows, nuint dimension,
         int* tokenRows, int* entityIndexes, nuint tokenCount, nuint entityCount,
         float* up, float* upBias, float* gate, float* gateBias,
         float* down, float* downBias, nuint intermediate, int activation,
