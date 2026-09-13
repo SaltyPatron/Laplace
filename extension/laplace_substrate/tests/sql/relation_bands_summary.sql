@@ -31,20 +31,21 @@ SELECT NOT EXISTS (
 
 WITH fixture AS (
     SELECT decode(repeat('a1',16),'hex')::bytea AS subject_id,
-           decode(repeat('b1',16),'hex')::bytea AS object_id,
+           decode(repeat('b1',16),'hex')::bytea AS object_is_a,
+           decode(repeat('b2',16),'hex')::bytea AS object_causes,
            laplace.relation_type_id('IS_A') AS is_a,
            laplace.relation_type_id('CAUSES') AS causes
 )
 INSERT INTO laplace.consensus(
     id, subject_id, type_id, object_id,
     rating, rd, volatility, witness_count, last_observed_at)
-SELECT laplace.consensus_id(subject_id, is_a, object_id),
-       subject_id, is_a, object_id,
+SELECT laplace.consensus_id(subject_id, is_a, object_is_a),
+       subject_id, is_a, object_is_a,
        1500000000000, 30000000000, 60000000, 1, clock_timestamp()
 FROM fixture
 UNION ALL
-SELECT laplace.consensus_id(subject_id, causes, object_id),
-       subject_id, causes, object_id,
+SELECT laplace.consensus_id(subject_id, causes, object_causes),
+       subject_id, causes, object_causes,
        1500000000000, 30000000000, 60000000, 1, clock_timestamp()
 FROM fixture;
 
@@ -64,7 +65,7 @@ SELECT NOT EXISTS (
 
 WITH fixture AS (
     SELECT decode(repeat('a1',16),'hex')::bytea AS subject_id,
-           decode(repeat('b1',16),'hex')::bytea AS object_id,
+           decode(repeat('b1',16),'hex')::bytea AS object_is_a,
            laplace.relation_type_id('IS_A') AS is_a,
            laplace.relation_type_id('CAUSES') AS causes
 )
@@ -72,7 +73,7 @@ UPDATE laplace.consensus AS c
 SET type_id = fixture.causes,
     id = laplace.consensus_id(c.subject_id, fixture.causes, c.object_id)
 FROM fixture
-WHERE c.id = laplace.consensus_id(fixture.subject_id, fixture.is_a, fixture.object_id)
+WHERE c.id = laplace.consensus_id(fixture.subject_id, fixture.is_a, fixture.object_is_a)
   AND c.type_id = fixture.is_a
   AND c.subject_id = fixture.subject_id;
 
@@ -92,12 +93,12 @@ SELECT NOT EXISTS (
 
 WITH fixture AS (
     SELECT decode(repeat('a1',16),'hex')::bytea AS subject_id,
-           decode(repeat('b1',16),'hex')::bytea AS object_id,
+           decode(repeat('b2',16),'hex')::bytea AS object_causes,
            laplace.relation_type_id('CAUSES') AS causes
 )
 DELETE FROM laplace.consensus AS c
 USING fixture
-WHERE c.id = laplace.consensus_id(fixture.subject_id, fixture.causes, fixture.object_id)
+WHERE c.id = laplace.consensus_id(fixture.subject_id, fixture.causes, fixture.object_causes)
   AND c.type_id = fixture.causes
   AND c.subject_id = fixture.subject_id;
 
