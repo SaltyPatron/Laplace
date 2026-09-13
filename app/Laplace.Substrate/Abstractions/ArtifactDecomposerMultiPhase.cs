@@ -13,10 +13,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// marker-complete artifact true-skips before its parser opens, and a completion marker
 /// is emitted only after an uncapped full artifact execution.
 /// </summary>
-public abstract class ArtifactDecomposerMultiPhase<TSource, TScope>
-    : DecomposerMultiPhase<TSource, TScope>, IDecomposer
-    where TSource : ISeedSource
-    where TScope : ISeedScope
+public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDecomposer
 {
     /// <summary>
     /// Re-declare the interface on this derived base so the runner sees per-file
