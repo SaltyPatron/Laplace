@@ -131,6 +131,24 @@ public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
         return new SearchSnapshot(this, snapshot, snapshot.Generation);
     }
 
+    /// <summary>
+    /// Force a fresh bounded provider snapshot before the next search. This is for external
+    /// writers (for example another process folding a just-finished gauntlet game) that cannot
+    /// advance this process's in-memory evidence epoch. It is intentionally never called from
+    /// an alpha-beta node or after a move clock starts.
+    /// </summary>
+    public void Refresh()
+    {
+        if (_ds is null) return;
+        lock (_refreshGate)
+        {
+            var next = ReadSnapshot(_ds);
+            next.Generation = Volatile.Read(ref _snapshot).Generation + 1;
+            Volatile.Write(ref _snapshot, next);
+            Volatile.Write(ref _observedEpoch, _epoch());
+        }
+    }
+
     public int Evaluate(Board board) => EvaluatePlanes(board).TotalCp;
 
     public ChessPositionPlaneScore EvaluatePlanes(Board board)
