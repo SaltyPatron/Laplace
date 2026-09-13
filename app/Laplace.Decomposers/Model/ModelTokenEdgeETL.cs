@@ -13,7 +13,7 @@ namespace Laplace.Decomposers.Model;
 /// </summary>
 public sealed class ModelTokenEdgeETL
 {
-    internal const int AnalyzerVersion = 7;
+    internal const int AnalyzerVersion = 8;
     private const string DerivationFamily = "model-existing-claims-bilinear";
     private static readonly Hash128[] CircuitRelationTypeIds =
     [

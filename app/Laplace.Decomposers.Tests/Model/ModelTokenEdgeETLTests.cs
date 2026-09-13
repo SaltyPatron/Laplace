@@ -486,6 +486,55 @@ public sealed class ModelTokenEdgeETLTests
         return result;
     }
 
+    [Fact]
+    public void UntiedOutputChangesOvAndFfnButNotAttention()
+    {
+        var normal = WriteCircuitFixture(1);
+        var reversed = WriteCircuitFixture(1, -1);
+        try
+        {
+            var tokens = FixtureTokens();
+            var canonical = tokens.Select((token, index) => (token.EntityId, index))
+                .ToDictionary(pair => pair.EntityId, pair => pair.index);
+            using var a = SourceEntityIdConventions.OpenModelContentSnapshot(normal.Directory)!;
+            using var b = SourceEntityIdConventions.OpenModelContentSnapshot(reversed.Directory)!;
+            var left = new ModelCircuitEstate(new SelectedModelAnalysisInput(
+                normal.Directory, normal.Manifest, tokens, a.SourceId, a), canonical);
+            var right = new ModelCircuitEstate(new SelectedModelAnalysisInput(
+                reversed.Directory, reversed.Manifest, tokens, b.SourceId, b), canonical);
+            foreach (var type in new[] { ModelDecomposer.AttendsTypeId,
+                         ModelDecomposer.OvRelatesTypeId, ModelDecomposer.CompletesToTypeId })
+            {
+                var first = left.Enumerate(type).Select(c =>
+                    (c.Plane, Score: c.Contraction.Score([0], [1]).Scores[0])).ToArray();
+                var second = right.Enumerate(type).Select(c =>
+                {
+                    if (c.Plane is "value-output" or "ffn")
+                        Assert.Contains("lm_head.weight", c.TensorNames);
+                    return (c.Plane, Score: c.Contraction.Score([0], [1]).Scores[0]);
+                }).ToArray();
+                Assert.NotEmpty(first);
+                Assert.Equal(first.Length, second.Length);
+                for (int i = 0; i < first.Length; i++)
+                {
+                    Assert.Equal(first[i].Plane, second[i].Plane);
+                    if (type == ModelDecomposer.AttendsTypeId)
+                        Assert.Equal(first[i].Score, second[i].Score);
+                    else
+                    {
+                        Assert.True(first[i].Score > 500_000_000);
+                        Assert.True(second[i].Score < 500_000_000);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Directory.Delete(normal.Directory, recursive: true);
+            Directory.Delete(reversed.Directory, recursive: true);
+        }
+    }
+
     private static string WriteEmbeddingFixture(float[]? tensorValues = null)
     {
         string dir = Path.Combine(Path.GetTempPath(), "laplace-model-contraction-" + Guid.NewGuid().ToString("N"));
@@ -502,7 +551,7 @@ public sealed class ModelTokenEdgeETLTests
         return dir;
     }
 
-    private static (string Directory, ModelManifest Manifest) WriteCircuitFixture(float scale)
+    private static (string Directory, ModelManifest Manifest) WriteCircuitFixture(float scale, float outputSign = 1)
     {
         string dir = Path.Combine(
             Path.GetTempPath(), "laplace-model-circuits-" + Guid.NewGuid().ToString("N"));
@@ -512,7 +561,7 @@ public sealed class ModelTokenEdgeETLTests
             ("embeddings.word_embeddings.weight", [3, 2],
                 [scale, scale, scale, scale, -scale, -scale], TensorRoleKind.Embedding),
             ("lm_head.weight", [3, 2],
-                [scale, scale, scale, scale, -scale, -scale], TensorRoleKind.LmHead),
+                [outputSign * scale, outputSign * scale, outputSign * scale, outputSign * scale, -outputSign * scale, -outputSign * scale], TensorRoleKind.LmHead),
             ("encoder.layer.0.attention.self.query.weight", [2, 2],
                 [scale, 0, 0, scale], TensorRoleKind.AttnQ),
             ("encoder.layer.0.attention.self.key.weight", [2, 2],

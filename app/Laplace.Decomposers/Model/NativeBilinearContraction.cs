@@ -49,9 +49,11 @@ internal sealed class NativeBilinearContraction : IDisposable
         float[] embeddingRows, int vocabularyRows, int dimension,
         int[] tokenRows, int[] entityIndexes, int entityCount,
         float[] leftWeight, float[]? leftBias,
-        float[] rightWeight, float[]? rightBias, int rank)
+        float[] rightWeight, float[]? rightBias, int rank, float[]? outputRows = null)
     {
         ValidateRows(embeddingRows, vocabularyRows, dimension, nameof(embeddingRows));
+        outputRows ??= embeddingRows;
+        ValidateRows(outputRows, vocabularyRows, dimension, nameof(outputRows));
         ValidateMapping(tokenRows, entityIndexes, entityCount);
         if (rank <= 0) throw new ArgumentOutOfRangeException(nameof(rank));
         if (leftWeight.LongLength != (long)rank * dimension)
@@ -68,14 +70,15 @@ internal sealed class NativeBilinearContraction : IDisposable
         nuint resident = 0;
         int rc;
         fixed (float* embedding = embeddingRows)
+        fixed (float* output = outputRows)
         fixed (int* tokens = tokenRows)
         fixed (int* entities = entityIndexes)
         fixed (float* left = leftWeight)
         fixed (float* leftB = leftBias)
         fixed (float* right = rightWeight)
         fixed (float* rightB = rightBias)
-            rc = DynInterop.BilinearProjectedContractionCreate(
-                embedding, (nuint)vocabularyRows, (nuint)dimension,
+            rc = DynInterop.BilinearProjectedContractionCreateOutput(
+                embedding, output, (nuint)vocabularyRows, (nuint)dimension,
                 tokens, entities, (nuint)tokenRows.Length, (nuint)entityCount,
                 left, leftB, right, rightB, (nuint)rank,
                 &handle, &arena, &resident);
@@ -88,9 +91,11 @@ internal sealed class NativeBilinearContraction : IDisposable
         float[] embeddingRows, int vocabularyRows, int dimension,
         int[] tokenRows, int[] entityIndexes, int entityCount,
         float[] up, float[]? upBias, float[]? gate, float[]? gateBias,
-        float[] down, float[]? downBias, int intermediate, int activation)
+        float[] down, float[]? downBias, int intermediate, int activation, float[]? outputRows = null)
     {
         ValidateRows(embeddingRows, vocabularyRows, dimension, nameof(embeddingRows));
+        outputRows ??= embeddingRows;
+        ValidateRows(outputRows, vocabularyRows, dimension, nameof(outputRows));
         ValidateMapping(tokenRows, entityIndexes, entityCount);
         ValidateRows(up, intermediate, dimension, nameof(up));
         ValidateRows(down, dimension, intermediate, nameof(down));
@@ -104,11 +109,12 @@ internal sealed class NativeBilinearContraction : IDisposable
         nuint resident = 0;
         int rc;
         fixed (float* embedding = embeddingRows)
+        fixed (float* output = outputRows)
         fixed (int* tokens = tokenRows)
         fixed (int* entities = entityIndexes)
         fixed (float* u = up, ub = upBias, g = gate, gb = gateBias, dn = down, db = downBias)
-            rc = DynInterop.FfnContractionCreate(
-                embedding, (nuint)vocabularyRows, (nuint)dimension,
+            rc = DynInterop.FfnContractionCreateOutput(
+                embedding, output, (nuint)vocabularyRows, (nuint)dimension,
                 tokens, entities, (nuint)tokenRows.Length, (nuint)entityCount,
                 u, ub, g, gb, dn, db, (nuint)intermediate, activation,
                 &handle, &arena, &resident);

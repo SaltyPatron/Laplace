@@ -354,11 +354,24 @@ int ffn_contraction_create(const float* embedding_rows,
     bilinear_contraction_context_t** out_context,
     double* out_arena_rms, std::size_t* out_resident_bytes)
 {
+    return ffn_contraction_create_output(embedding_rows, embedding_rows, vocabulary_rows, dimension, token_rows, entity_indexes, token_count, entity_count, up, up_bias, gate, gate_bias, down, down_bias, intermediate, activation, out_context, out_arena_rms, out_resident_bytes);
+}
+
+extern "C"
+int ffn_contraction_create_output(const float* embedding_rows, const float* output_rows,
+    std::size_t vocabulary_rows, std::size_t dimension,
+    const int* token_rows, const int* entity_indexes,
+    std::size_t token_count, std::size_t entity_count,
+    const float* up, const float* up_bias, const float* gate, const float* gate_bias,
+    const float* down, const float* down_bias, std::size_t intermediate, int activation,
+    bilinear_contraction_context_t** out_context,
+    double* out_arena_rms, std::size_t* out_resident_bytes)
+{
     if (!out_context || !out_arena_rms || !out_resident_bytes) return -1;
     *out_context = nullptr;
     *out_arena_rms = 0.0;
     *out_resident_bytes = 0;
-    if (!embedding_rows || !up || !down || !token_rows || !entity_indexes ||
+    if (!embedding_rows || !output_rows || !up || !down || !token_rows || !entity_indexes ||
         dimension == 0 || intermediate == 0 || token_count == 0 || entity_count == 0 ||
         dimension > (std::size_t)INT32_MAX || entity_count > (std::size_t)INT32_MAX ||
         intermediate > SIZE_MAX / dimension || dimension > SIZE_MAX / dimension ||
@@ -379,7 +392,7 @@ int ffn_contraction_create(const float* embedding_rows,
         auto context = std::make_unique<bilinear_contraction_context_t>();
         context->entity_count = entity_count;
         context->rank = dimension;
-        int rc = aggregate_canonical_rows(embedding_rows, vocabulary_rows, dimension,
+        int rc = aggregate_canonical_rows(output_rows, vocabulary_rows, dimension,
             token_rows, entity_indexes, token_count, entity_count, false, context->right);
         if (rc != 0) return rc;
         context->left.assign(entity_count * dimension, 0.0);
@@ -439,7 +452,22 @@ int bilinear_projected_contraction_create(
     bilinear_contraction_context_t** out_context,
     double* out_arena_rms, std::size_t* out_resident_bytes)
 {
-    if (!embedding_rows || !left_weight || !right_weight || !out_context
+    return bilinear_projected_contraction_create_output(embedding_rows, embedding_rows, vocabulary_rows, dimension, token_rows, entity_indexes, token_count, entity_count, left_weight, left_bias, right_weight, right_bias, rank, out_context, out_arena_rms, out_resident_bytes);
+}
+
+extern "C"
+int bilinear_projected_contraction_create_output(
+    const float* embedding_rows, const float* output_rows,
+    std::size_t vocabulary_rows, std::size_t dimension,
+    const int* token_rows, const int* entity_indexes,
+    std::size_t token_count, std::size_t entity_count,
+    const float* left_weight, const float* left_bias,
+    const float* right_weight, const float* right_bias,
+    std::size_t rank,
+    bilinear_contraction_context_t** out_context,
+    double* out_arena_rms, std::size_t* out_resident_bytes)
+{
+    if (!embedding_rows || !output_rows || !left_weight || !right_weight || !out_context
         || !out_arena_rms || !out_resident_bytes || rank == 0)
         return -1;
     *out_context = nullptr;
@@ -449,6 +477,13 @@ int bilinear_projected_contraction_create(
         embedding_rows, vocabulary_rows, dimension, token_rows, entity_indexes,
         token_count, entity_count, true, x);
     if (rc != 0) return rc;
+    std::vector<double> output;
+    if (output_rows != embedding_rows) {
+        rc = aggregate_canonical_rows(output_rows, vocabulary_rows, dimension,
+            token_rows, entity_indexes, token_count, entity_count, true, output);
+        if (rc != 0) return rc;
+    }
+    const double* y = output_rows == embedding_rows ? x.data() : output.data();
     const std::size_t augmented = dimension + 1;
     std::vector<double> aw;
     std::vector<double> bw;
@@ -476,7 +511,7 @@ int bilinear_projected_contraction_create(
                 context->left.data() + begin * rank, (MKL_INT)rank);
             cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                 (MKL_INT)rows, (MKL_INT)rank, (MKL_INT)augmented,
-                1.0, x.data() + begin * augmented, (MKL_INT)augmented,
+                1.0, y + begin * augmented, (MKL_INT)augmented,
                 bw.data(), (MKL_INT)augmented, 0.0,
                 context->right.data() + begin * rank, (MKL_INT)rank);
         }
@@ -486,7 +521,7 @@ int bilinear_projected_contraction_create(
                 double l = 0.0, r = 0.0;
                 for (std::size_t j = 0; j < augmented; ++j) {
                     l += x[row * augmented + j] * aw[k * augmented + j];
-                    r += x[row * augmented + j] * bw[k * augmented + j];
+                    r += y[row * augmented + j] * bw[k * augmented + j];
                 }
                 context->left[row * rank + k] = l;
                 context->right[row * rank + k] = r;
@@ -499,7 +534,6 @@ int bilinear_projected_contraction_create(
         // (X A^T)(X B^T)^T = (X (A^T B)) X^T. Resident rank is therefore
         // d+1, never the FFN width, and both Gram reductions are (d+1)^2.
         context->rank = augmented;
-        context->right = std::move(x);
         std::vector<double> kernel(augmented * augmented);
 #ifdef LAPLACE_HAS_MKL
         cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
@@ -512,7 +546,7 @@ int bilinear_projected_contraction_create(
             const std::size_t rows = std::min(kProjectionTileRows, entity_count - begin);
             cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                 (MKL_INT)rows, (MKL_INT)augmented, (MKL_INT)augmented,
-                1.0, context->right.data() + begin * augmented, (MKL_INT)augmented,
+                1.0, x.data() + begin * augmented, (MKL_INT)augmented,
                 kernel.data(), (MKL_INT)augmented, 0.0,
                 context->left.data() + begin * augmented, (MKL_INT)augmented);
         }
@@ -529,10 +563,11 @@ int bilinear_projected_contraction_create(
             for (std::size_t a = 0; a < augmented; ++a) {
                 double v = 0.0;
                 for (std::size_t b = 0; b < augmented; ++b)
-                    v += context->right[row * augmented + b] * kernel[b * augmented + a];
+                    v += x[row * augmented + b] * kernel[b * augmented + a];
                 context->left[row * augmented + a] = v;
             }
 #endif
+        context->right = output_rows == embedding_rows ? std::move(x) : std::move(output);
     }
 
     double arena = 0.0;

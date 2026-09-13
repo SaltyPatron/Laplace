@@ -26,6 +26,22 @@ internal sealed class ModelCircuitEstate
     private readonly SelectedModelAnalysisInput _model;
     private readonly Dictionary<string, SafetensorsContainerParser.TensorReference> _refs;
     private readonly float[] _embedding;
+    private float[]? _output;
+
+    private TensorRole OutputRole => _model.Manifest.LmHead ?? _model.Manifest.Embedding!;
+
+    private float[] OutputRows
+    {
+        get
+        {
+            if (_output is not null) return _output;
+            if (OutputRole.Name == _model.Manifest.Embedding!.Name) return _output = _embedding;
+            _output = Load(OutputRole.Name, (long)_cfg.VocabSize * _cfg.HiddenSize);
+            if (_output.Length == 0)
+                throw new InvalidDataException($"Declared output tensor '{OutputRole.Name}' has no numeric interpretation.");
+            return _output;
+        }
+    }
     private readonly int[] _tokenRows;
     private readonly int[] _entityRows;
     private readonly int _entityCount;
@@ -105,7 +121,7 @@ internal sealed class ModelCircuitEstate
         if (lmHead is not null
             && !string.Equals(lmHead.Name, embeddingRole.Name, StringComparison.Ordinal))
         {
-            float[] lm = Load(lmHead.Name, (long)_cfg.VocabSize * d);
+            float[] lm = OutputRows;
             if (lm.Length > 0)
             {
                 using NativeBilinearContraction circuit = Direct(lm);
@@ -136,9 +152,9 @@ internal sealed class ModelCircuitEstate
             using NativeBilinearContraction circuit = NativeBilinearContraction.Ffn(
                 _embedding, _cfg.VocabSize, d, _tokenRows, _entityRows, _entityCount,
                 up, upBias, gate, gateBias, down, downBias, intermediate,
-                profile.ResolveFfnActCode(gate is not null));
+                profile.ResolveFfnActCode(gate is not null), OutputRows);
             Track(circuit);
-            var tensors = new List<string> { upRole.Name, downRole.Name };
+            var tensors = new List<string> { embeddingRole.Name, upRole.Name, downRole.Name, OutputRole.Name };
             if (gateRole is not null) tensors.Add(gateRole.Name);
             if (upBias is not null) tensors.Add(ArchitectureProfile.BiasOf(upRole.Name));
             if (gateBias is not null) tensors.Add(ArchitectureProfile.BiasOf(gateRole!.Name));
@@ -218,9 +234,9 @@ internal sealed class ModelCircuitEstate
                 using NativeBilinearContraction circuit = Projected(
                     SliceRows(v, kvHead * headDim, headDim, d),
                     vBias is null ? null : SliceVector(vBias, kvHead * headDim, headDim),
-                    rightWeight, null, headDim);
+                    rightWeight, null, headDim, OutputRows);
                 yield return Describe(
-                    "value-output", layer, head, [vRole.Name, oRole.Name], circuit);
+                    "value-output", layer, head, [_model.Manifest.Embedding!.Name, vRole.Name, oRole.Name, OutputRole.Name], circuit);
             }
         }
     }
@@ -236,12 +252,12 @@ internal sealed class ModelCircuitEstate
 
     private NativeBilinearContraction Projected(
         float[] leftWeight, float[]? leftBias,
-        float[] rightWeight, float[]? rightBias, int rank)
+        float[] rightWeight, float[]? rightBias, int rank, float[]? outputRows = null)
     {
         NativeBilinearContraction circuit = NativeBilinearContraction.Projected(
             _embedding, _cfg.VocabSize, _cfg.HiddenSize,
             _tokenRows, _entityRows, _entityCount,
-            leftWeight, leftBias, rightWeight, rightBias, rank);
+            leftWeight, leftBias, rightWeight, rightBias, rank, outputRows);
         Track(circuit);
         return circuit;
     }
