@@ -22,6 +22,14 @@ public static class ChessTacticOutcomes
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;
     private const double OutcomeWeight = 0.9;
 
+    private static readonly Piece[] CanonicalPieces =
+    [
+        Piece.WPawn, Piece.WKnight, Piece.WBishop,
+        Piece.WRook, Piece.WQueen, Piece.WKing,
+    ];
+
+    private static IReadOnlyList<(Hash128 Id, ChessTacticPattern Pattern)>? _patternUniverse;
+
     public static Hash128 MarkerId(Hash128 playingId)
         => Hash128.OfCanonical($"chess/tactic-outcomes/{playingId}/{Version}");
 
@@ -30,6 +38,32 @@ public static class ChessTacticOutcomes
 
     public static Hash128? PatternId(ChessTacticPattern pattern)
         => ContentEmitter.RootId(Surface(pattern));
+
+    /// <summary>
+    /// Closed tactical vocabulary used by the hot-path reader. It is intentionally bounded:
+    /// three tactic kinds × six attacker types × canonical victim pairs, deduplicated by the
+    /// color-normalized pattern key. Search never scans the corpus to discover motif subjects.
+    /// </summary>
+    public static IReadOnlyList<(Hash128 Id, ChessTacticPattern Pattern)> PatternUniverse()
+    {
+        if (_patternUniverse is not null) return _patternUniverse;
+        var byKey = new Dictionary<long, ChessTacticPattern>();
+        foreach (TacticKind kind in Enum.GetValues<TacticKind>())
+        foreach (Piece attacker in CanonicalPieces)
+        foreach (Piece victim1 in CanonicalPieces)
+        foreach (Piece victim2 in CanonicalPieces)
+        {
+            var pattern = new ChessTacticPattern(kind, attacker, victim1, victim2);
+            byKey.TryAdd(pattern.Key, pattern);
+        }
+
+        var rows = new List<(Hash128, ChessTacticPattern)>(byKey.Count);
+        foreach (var pattern in byKey.Values)
+            if (PatternId(pattern) is { } id)
+                rows.Add((id, pattern));
+        _patternUniverse = rows;
+        return rows;
+    }
 
     /// <summary>Fused path for a replay whose board sequence is already available.</summary>
     public static void AppendGame(
@@ -187,7 +221,7 @@ public sealed class ChessTacticOutcomesDecomposer
     {
         if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
             return Task.FromResult<long?>(null);
-        return ChessWitnessHydrator.CountRecordedPlayingsAsync(ds, ct);
+        return ChessWitnessHydrator.CountRecordedEventsAsync(ds, ct);
     }
 
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
