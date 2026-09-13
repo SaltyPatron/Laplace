@@ -7,21 +7,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
-public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
+public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = ISOSource.SourceId;
-    // ONE SPELLING. Two sites emit this relation -- the ISO 639-3 reference name and the
-    // name-index print name -- and both arrived when a misuse of HAS_DEFINITION was
-    // corrected: a name attested as a definition rendered "Batui HAS_DEFINITION Batui",
-    // subject and object the same string, a claim that cannot be false. The correction was
-    // right and it left the literal written twice, which g3_csharp reads as growth even
-    // though the file's total fell 500 -> 499. Named once so the ratchet measures what
-    // actually happened.
     private const string NameAliasRelation = "HAS_NAME_ALIAS";
-
-    /// Hoisted because the retirement lane refutes it and the code-table lane asserts it --
-    /// two call sites for one relation, which §15 and the g3 vocabulary gate both forbid
-    /// spelling twice.
     private const string LanguageTypeRelation = "HAS_LANGUAGE_TYPE";
 
     public static readonly Hash128 TrustClass = ISOSource.TrustClass;
@@ -45,36 +34,79 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _codeNames;
 
+    private static readonly string[] RelativePhysicalFiles =
+    [
+        "iso-639-3.tab",
+        "iso-639-3-macrolanguages.tab",
+        Path.Combine("cldr", "supplementalData.xml"),
+        "iso-639-3_Retirements.tab",
+        Path.Combine("iana", "language-subtag-registry.txt"),
+        "iso-639-3_Name_Index.tab",
+    ];
+
+    private static bool SelectedOrUnmanifested(IDecomposerContext context, string path)
+    {
+        if (!File.Exists(path)) return false;
+        if (!context.HasArtifactGraph) return true;
+        string full = Path.GetFullPath(path);
+        return context.SelectedArtifacts.Any(artifact => string.Equals(
+            Path.GetFullPath(artifact.Path), full, StringComparison.Ordinal));
+    }
+
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (File.Exists(Path.Combine(context.EcosystemPath, "iso-639-3.tab")))
+        string iso639 = Path.Combine(context.EcosystemPath, "iso-639-3.tab");
+        if (SelectedOrUnmanifested(context, iso639))
         {
-            await foreach (var change in RunPhaseAsync(new Iso6393Phase(this), context, options, ct))
+            await foreach (var change in RunPhaseAsync(
+                new Iso6393Phase(this), context, options, "iso-639-3.tab", iso639, ct))
                 yield return change;
         }
 
-        await foreach (var change in RunPhaseAsync(new MacrolanguagePhase(this), context, options, ct))
-            yield return change;
+        string macro = Path.Combine(context.EcosystemPath, "iso-639-3-macrolanguages.tab");
+        if (SelectedOrUnmanifested(context, macro))
+        {
+            await foreach (var change in RunPhaseAsync(
+                new MacrolanguagePhase(this), context, options,
+                "iso-639-3-macrolanguages.tab", macro, ct))
+                yield return change;
+        }
 
-        await foreach (var change in RunPhaseAsync(new ScriptPhase(this), context, options, ct))
-            yield return change;
+        string script = Path.Combine(context.EcosystemPath, "cldr", "supplementalData.xml");
+        if (SelectedOrUnmanifested(context, script))
+        {
+            await foreach (var change in RunPhaseAsync(
+                new ScriptPhase(this), context, options, "cldr/supplementalData.xml", script, ct))
+                yield return change;
+        }
 
         string retPath = Path.Combine(context.EcosystemPath, "iso-639-3_Retirements.tab");
-        if (File.Exists(retPath))
+        if (SelectedOrUnmanifested(context, retPath))
         {
-            await foreach (var change in RunPhaseAsync(new RetirementPhase(this), context, options, ct))
+            await foreach (var change in RunPhaseAsync(
+                new RetirementPhase(this), context, options,
+                "iso-639-3_Retirements.tab", retPath, ct))
                 yield return change;
         }
 
-        await foreach (var change in RunPhaseAsync(new VariantPhase(this), context, options, ct))
-            yield return change;
-
-        if (File.Exists(Path.Combine(context.EcosystemPath, "iso-639-3_Name_Index.tab")))
+        string variant = Path.Combine(context.EcosystemPath, "iana", "language-subtag-registry.txt");
+        if (SelectedOrUnmanifested(context, variant))
         {
-            await foreach (var change in RunPhaseAsync(new NameIndexPhase(this), context, options, ct))
+            await foreach (var change in RunPhaseAsync(
+                new VariantPhase(this), context, options,
+                "iana/language-subtag-registry.txt", variant, ct))
+                yield return change;
+        }
+
+        string names = Path.Combine(context.EcosystemPath, "iso-639-3_Name_Index.tab");
+        if (SelectedOrUnmanifested(context, names))
+        {
+            await foreach (var change in RunPhaseAsync(
+                new NameIndexPhase(this), context, options,
+                "iso-639-3_Name_Index.tab", names, ct))
                 yield return change;
         }
 
@@ -134,15 +166,8 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
         {
             var nameId = ContentEmitter.Emit(b, rec.RefName, Source);
             if (nameId is { } nid)
-            {
-                // A NAME IS NOT A DEFINITION. rec.RefName is ISO 639-3's reference name for
-                // the language; attesting it as HAS_DEFINITION as well produced rows that
-                // render "Batui HAS_DEFINITION Batui" — the subject and object are the same
-                // string, so the claim cannot be false and carries nothing. ISO 639-3
-                // publishes no glosses; the alias below is the whole of what the source says.
                 b.AddAttestation(NativeAttestation.Categorical(
                     langId, NameAliasRelation, nid, Source, TC.StandardsDerived));
-            }
         }
     }
 
@@ -171,8 +196,34 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             variantId, "HAS_VARIANT_OF", parentId, Source, TC.StandardsDerived));
     }
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(7929L);
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        List<IngestFileSpec> files = context.HasArtifactGraph
+            ? context.SelectedArtifacts
+                .Select(artifact => new IngestFileSpec(
+                    artifact.FileLabel, artifact.Path,
+                    EtlInventory.EstimateNewlineCount(artifact.Path, ct)))
+                .ToList()
+            : RelativePhysicalFiles
+                .Select(relative => (Relative: relative, Path: Path.Combine(context.EcosystemPath, relative)))
+                .Where(static file => File.Exists(file.Path))
+                .Select(file => new IngestFileSpec(
+                    file.Relative.Replace(Path.DirectorySeparatorChar, '/'), file.Path,
+                    EtlInventory.EstimateNewlineCount(file.Path, ct)))
+                .ToList();
+        if (files.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        long total = files.Sum(static file => file.InputUnits);
+        long effective = options.MaxInputUnits > 0 ? Math.Min(total, options.MaxInputUnits) : total;
+        return Task.FromResult<IngestInventory?>(new IngestInventory("records", effective, files));
+    }
+
+    public override async Task<long?> EstimateUnitCountAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        var inventory = await DescribeInputAsync(context, DecomposerOptions.Default, ct).ConfigureAwait(false);
+        return inventory?.TotalInputUnits;
+    }
 
     internal readonly record struct IsoRecord(
         string Id, string Part2b, string Part2t, string Part1,
@@ -272,24 +323,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
         }
     }
 
-    /// <summary>
-    /// ISO 639-3 retires codes for five stated reasons, and the phase used to require a
-    /// 3-character Change_To, which dropped 174 of the corpus's 386 retirement rows:
-    ///
-    ///   N  non-existent  72 rows -- the standard says the code names NO real language.
-    ///                    Change_To is empty by construction; there is nothing to point at.
-    ///                    This is ISO refuting its own earlier assertion, and it was the
-    ///                    single largest block of negative evidence the source states.
-    ///   S  split        102 rows -- the code split into several successors, so Change_To is
-    ///                    empty and the targets live in Ret_Remedy as bracketed codes
-    ///                    ("Split into ... [sfb], and ... [vgt]"). Every one was lost.
-    ///   C/D/M          212 rows -- one successor in Change_To; these already worked.
-    ///
-    /// The N arm folds an object-null REFUTE against HAS_LANGUAGE_TYPE: the relation holds
-    /// for no object because ISO says the language is not there. Absence of a row would have
-    /// meant UNKNOWN (spec 05); ISO said something stronger, and the substrate now carries it
-    /// as evidence that contradicts any other source asserting the code is a language.
-    /// </summary>
     private sealed class RetirementPhase : IsoComposePhase<(string Retired, string Reason, string[] Successors)>
     {
         public RetirementPhase(ISODecomposer owner) : base(owner) { }
@@ -339,11 +372,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
                 string changeTo = c[3].Trim();
                 string remedy = c.Length > 4 ? c[4].Trim() : "";
 
-                // The whole per-row decision lives in one pure function so it can be tested
-                // against the real corpus. Testing only SuccessorsFromRemedy tested the
-                // PARSER, not the rule that decides whether to consult it -- reverting this
-                // call site left those tests green while 174 of 386 rows went back to being
-                // dropped.
                 var (reasonOut, successors, keep) =
                     IsoRetirementRemedy.Classify(reason, changeTo, remedy);
                 if (!keep) continue;
@@ -380,9 +408,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
         {
             var lid = LanguageEntityId.FromIso639_3(rec.Id);
             b.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
-            // Same defect as the RefName site above: PrintName is a NAME. It was the only
-            // thing this phase deposited, so the fix is to record it as what it is rather
-            // than to drop it — the language keeps its printed name, as an alias.
             if (ContentEmitter.Emit(b, rec.PrintName, Source) is { } nid)
                 b.AddAttestation(NativeAttestation.Categorical(
                     lid, NameAliasRelation, nid, Source, TC.StandardsDerived));
@@ -436,25 +461,8 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
     }
 }
 
-/// <summary>
-/// ISO 639-3 names split-retirement successors only inside Ret_Remedy, as bracketed
-/// 3-letter codes. A pure function, lifted out of the phase so it is testable without
-/// widening the phase hierarchy's accessibility.
-/// </summary>
 internal static class IsoRetirementRemedy
 {
-    /// ISO 639-3 retires a code for one of five stated reasons. The phase used to require a
-    /// 3-character Change_To, which silently dropped 174 of the corpus's 386 rows:
-    ///
-    ///   N  non-existent  72 rows -- the standard says the code names NO real language, so
-    ///                    Change_To is empty by construction and there is nothing to point at.
-    ///                    Emitted as an object-null REFUTE by the caller.
-    ///   S  split        102 rows -- several successors, named in Ret_Remedy as bracketed
-    ///                    codes rather than in Change_To.
-    ///   C/D/M          212 rows -- one successor in Change_To; these already worked.
-    ///
-    /// Returns keep=false only for a row that names no successor and is not a stated
-    /// non-existence -- a malformed row, not a retirement the corpus expressed.
     internal static (string Reason, string[] Successors, bool Keep) Classify(
         string reason, string changeTo, string remedy)
     {
@@ -464,23 +472,21 @@ internal static class IsoRetirementRemedy
         return (reason, successors, successors.Length > 0);
     }
 
-    /// Ret_Remedy names split targets as bracketed 3-letter codes, e.g.
-    /// "Split into five languages: Nong Zhuang [zhn];  Yang Zhuang [zyg]; ...".
     internal static string[] SuccessorsFromRemedy(string remedy)
     {
         if (remedy.Length == 0) return [];
         var found = new List<string>();
         for (int i = 0; i + 4 < remedy.Length + 1; i++)
         {
-        if (remedy[i] != '[') continue;
-        int close = remedy.IndexOf(']', i + 1);
-        if (close != i + 4) continue;
-        var code = remedy.AsSpan(i + 1, 3);
-        bool lower = true;
-        foreach (char ch in code) if (ch is < 'a' or > 'z') { lower = false; break; }
-        if (!lower) continue;
-        string c = new(code);
-        if (!found.Contains(c)) found.Add(c);
+            if (remedy[i] != '[') continue;
+            int close = remedy.IndexOf(']', i + 1);
+            if (close != i + 4) continue;
+            var code = remedy.AsSpan(i + 1, 3);
+            bool lower = true;
+            foreach (char ch in code) if (ch is < 'a' or > 'z') { lower = false; break; }
+            if (!lower) continue;
+            string c = new(code);
+            if (!found.Contains(c)) found.Add(c);
         }
         return [.. found];
     }
