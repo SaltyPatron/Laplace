@@ -27,6 +27,11 @@ public enum ReferenceIdentityKind : ushort
     PredicateMatrixPredicate = 10,
     PredicateMatrixVocabulary = 11,
     PredicateMatrixAnnotationValue = 12,
+    // Exact integer coordinates published by WordNet's frames.vrb and sents.vrb.
+    // Keeping them as source references lets data.* and sentidx.vrb resolve their
+    // operands without reopening a different physical artifact.
+    WordNetVerbFrame = 13,
+    WordNetVerbSentence = 14,
 }
 
 /// <summary>
@@ -46,7 +51,7 @@ public static class ReferenceAnchor
 
     public static Hash128 IdUtf8(ReferenceIdentityKind kind, ReadOnlySpan<byte> normalizedKey)
     {
-        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.PredicateMatrixAnnotationValue)
+        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.WordNetVerbSentence)
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown reference identity domain");
         if (normalizedKey.IsEmpty)
             throw new ArgumentException("reference key must not be empty", nameof(normalizedKey));
