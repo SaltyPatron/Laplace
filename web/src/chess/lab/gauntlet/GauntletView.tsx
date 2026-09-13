@@ -126,7 +126,7 @@ export function GauntletView() {
   // drift from CutechessRunner.BuildArguments. Debounced — the sliders move continuously.
   useEffect(() => {
     const q = new URLSearchParams({
-      rounds: setup.rounds || '1',
+      rounds: setup.rounds || '2',
       depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
       st: setup.clock === 'seconds' ? setup.st || '1' : '0',
       elo: setup.elo || '2000',
@@ -196,16 +196,21 @@ export function GauntletView() {
 
   const start = async () => {
     if (busy || running || missing.length > 0) return;
+    const rounds = Number(setup.rounds);
+    if (!Number.isInteger(rounds) || rounds < 2 || rounds % 2 !== 0) {
+      setErr('Games must be an even number of at least 2 so every opening is played once from each color.');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
       const config: Record<string, string> = {
-        rounds: setup.rounds || '1',
+        rounds: setup.rounds,
         elo: setup.elo || '2000',
         limitStrength: String(setup.limitStrength),
         concurrency: setup.concurrency || '1',
         ingest: String(setup.ingest),
-        // Exactly one clock reaches the runner: depth>0 is what selects unclocked mode.
+        // Exactly one shared match budget reaches both engines.
         depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
         st: setup.clock === 'seconds' ? setup.st || '1' : '0',
       };
@@ -248,8 +253,8 @@ export function GauntletView() {
         <div>
           <h3>Engine Gauntlet</h3>
           <Muted>
-            laplace-uci against Stockfish, driven by cutechess-cli. Every process line is
-            captured — the command, both engines' UCI traffic, and anything either writes to stderr.
+            laplace-uci against Stockfish, driven by cutechess-cli with paired openings, color swaps,
+            captured UCI traffic, and runtime engine-identity verification.
           </Muted>
         </div>
         {active && <span className={stateClass(active.state)}>{active.state}</span>}
@@ -291,7 +296,7 @@ export function GauntletView() {
           <div className={styles.form}>
             <Field
               label="Clock"
-              help="Per-move seconds is watchable. Fixed depth has no clock at all — one move can take minutes."
+              help="Per-move seconds is watchable. Fixed depth is a matched limit applied to both engines, not unrestricted Stockfish search."
               className={styles.wide}
             >
               <SegmentedControl
@@ -303,7 +308,7 @@ export function GauntletView() {
             </Field>
 
             {setup.clock === 'seconds' ? (
-              <Field label="Seconds per move" valueDisplay={`${setup.st}s`} help="cutechess st, with a 2s time margin.">
+              <Field label="Seconds per move" valueDisplay={`${setup.st}s`} help="cutechess st, with a 2s time margin, applied to both engines.">
                 <SliderField
                   min={0.1}
                   max={10}
@@ -325,24 +330,25 @@ export function GauntletView() {
               </Field>
             )}
 
-            {/* cutechess's -rounds IS the game count for a two-engine match; colours
-                alternate between games on their own. Calling it "rounds" in the UI is what
-                made everyone assume it doubled. */}
-            <Field label="Games" help="Colours alternate each game.">
+            <Field label="Games" help="Each opening is played twice with colors swapped. Use an even game count.">
               <Input
                 type="number"
-                min={1}
+                min={2}
+                step={2}
                 value={setup.rounds}
                 aria-label="Games"
                 onChange={(e) => setSetup((s) => ({ ...s, rounds: e.target.value }))}
               />
             </Field>
 
-            <Field label="Stockfish strength" help="Full strength disables UCI_LimitStrength; Elo estimates depend on the engine version and time control.">
+            <Field
+              label="Limit Stockfish by UCI Elo"
+              help="Checked enables UCI_LimitStrength. Unchecked removes only the Elo limiter; the selected shared depth/time budget still limits Stockfish search."
+            >
               <Toggle
                 checked={setup.limitStrength}
                 onCheckedChange={(value) => setSetup((s) => ({ ...s, limitStrength: value }))}
-                aria-label="Limit Stockfish strength"
+                aria-label="Limit Stockfish by UCI Elo"
               />
             </Field>
             <Field label="Stockfish Elo cap" help="2000 is a default, not a fixed level. The installed engine reports its supported range in the transcript.">
