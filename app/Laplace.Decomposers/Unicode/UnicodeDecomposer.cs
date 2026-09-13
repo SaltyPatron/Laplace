@@ -479,7 +479,7 @@ public sealed class UnicodeDecomposer
         {
             Hash128 byteId = ByteAtoms.Id(value);
             builder.AddEntity(byteId, tier: 0, ByteAtoms.TypeId, firstObservedBy: Source);
-            double[] coord = ByteAtoms.Coord(value);
+            ReadOnlySpan<double> coord = ByteAtoms.Coord(value);
             Hash128 physicalityId = PhysicalityId.Compute(byteId, PhysicalityType.Content);
             builder.AddPhysicality(new PhysicalityRow(
                 Id: physicalityId,
