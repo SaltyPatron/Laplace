@@ -7,7 +7,11 @@ using Laplace.SubstrateCRUD.Npgsql;
 namespace Laplace.Chess.Service;
 
 /// <summary>Typed leaf contributions kept distinct until the active chess search combines them.</summary>
-public readonly record struct ChessPositionPlaneScore(int TotalCp, int AtomOutcomeCp, int LearnedPstCp);
+public readonly record struct ChessPositionPlaneScore(
+    int TotalCp,
+    int AtomOutcomeCp,
+    int LearnedPstCp,
+    int TacticOutcomeCp);
 
 /// <summary>
 /// Search-position evaluator that can expose the typed contribution split used to produce its
@@ -22,11 +26,12 @@ public interface IChessSearchPositionPlanes : ISearchPositionEvaluator
 
 /// <summary>
 /// Immutable, bounded substrate snapshot used at every search leaf without database queries.
-/// Two independently inspectable planes participate here:
-/// (1) OUTCOME consensus on reusable board atoms; and
-/// (2) the learned PST residual projected from move OUTCOME consensus.
-/// The classical material/PeSTO/tactical proposal remains in <see cref="Evaluation"/>; these are
-/// learned substrate additions to that deterministic floor, not replacements for it.
+/// Three independently inspectable learned planes participate here:
+/// (1) OUTCOME consensus on reusable board atoms;
+/// (2) the learned PST residual projected from move OUTCOME consensus; and
+/// (3) color-normalized tactical-pattern OUTCOME consensus for forks/pins/skewers.
+/// The classical material/PeSTO proposal remains in <see cref="Evaluation"/>; these are learned
+/// substrate additions to that deterministic floor, not replacements for it.
 /// </summary>
 public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
 {
@@ -36,10 +41,12 @@ public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
         public readonly AtomValue[] Castling = new AtomValue[16];
         public readonly AtomValue[] EnPassant = new AtomValue[65];
         public readonly AtomValue[] PieceSquare = new AtomValue[12 * 64];
+        public readonly Dictionary<Hash128, AtomValue> Tactics = new();
         public int[][]? LearnedMg;
         public int[][]? LearnedEg;
         public int LearnedNonZeroCells;
         public int LoadedAtoms;
+        public int LoadedTactics;
         public long Generation;
     }
 
@@ -63,6 +70,8 @@ public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
     private long _positionsWithEvidence;
     private long _learnedPstReads;
     private long _learnedPstContributions;
+    private long _tacticReads;
+    private long _tacticContributions;
 
     private readonly record struct AtomValue(double EffMu, double Rd, double Witnesses, bool Present);
 
@@ -115,9 +124,9 @@ public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
                 epoch = _epoch();
                 if (epoch != _observedEpoch)
                 {
-                    // The same completed game that advances transition observations can also
-                    // advance move-OUTCOME cells. Refresh both atom consensus and learned PST as
-                    // one immutable generation so a search never mixes old/new provider state.
+                    // A completed game can advance transition, move, atom and tactic outcome
+                    // evidence. Capture them as one immutable generation so a search never mixes
+                    // provider epochs halfway through its tree.
                     var next = _ds is not null
                         ? ReadSnapshot(_ds)
                         : SnapshotFrom(_loadValues!());
@@ -133,9 +142,8 @@ public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
 
     /// <summary>
     /// Force a fresh bounded provider snapshot before the next search. This is for external
-    /// writers (for example another process folding a just-finished gauntlet game) that cannot
-    /// advance this process's in-memory evidence epoch. It is intentionally never called from
-    /// an alpha-beta node or after a move clock starts.
+    /// writers that cannot advance this process's in-memory evidence epoch. It is intentionally
+    /// never called from an alpha-beta node or after a move clock starts.
     /// </summary>
     public void Refresh()
     {
@@ -198,16 +206,64 @@ public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
                 Interlocked.Increment(ref _learnedPstContributions);
         }
 
-        return new ChessPositionPlaneScore(atomCp + learnedCp, atomCp, learnedCp);
+        int tacticCp = 0;
+        if (snapshot.LoadedTactics != 0)
+        {
+            Interlocked.Increment(ref _tacticReads);
+            double tacticSum = 0d, tacticWeight = 0d;
+            AccumulateTactics(board, ownerWhite: true, snapshot, ref tacticSum, ref tacticWeight);
+            AccumulateTactics(board, ownerWhite: false, snapshot, ref tacticSum, ref tacticWeight);
+            if (tacticWeight != 0d)
+            {
+                tacticCp = Math.Clamp(
+                    (int)Math.Round((tacticSum / tacticWeight) * _cpPerPoint),
+                    -_capCp, _capCp);
+                if (tacticCp != 0)
+                    Interlocked.Increment(ref _tacticContributions);
+            }
+        }
+
+        return new ChessPositionPlaneScore(
+            atomCp + learnedCp + tacticCp,
+            atomCp,
+            learnedCp,
+            tacticCp);
+    }
+
+    private static void AccumulateTactics(
+        Board board,
+        bool ownerWhite,
+        Snapshot snapshot,
+        ref double sum,
+        ref double weightSum)
+    {
+        double sign = ownerWhite == board.WhiteToMove ? 1d : -1d;
+        foreach (var pattern in ChessTacticGeometry.Forks(board, ownerWhite)
+                     .Concat(ChessTacticGeometry.PinsAndSkewers(board, ownerWhite)))
+        {
+            if (ChessTacticOutcomes.PatternId(pattern) is not { } id
+                || !snapshot.Tactics.TryGetValue(id, out var value)
+                || !value.Present)
+                continue;
+            double confidence = GlickoPriors.InitialRd /
+                                (GlickoPriors.InitialRd + Math.Max(0d, value.Rd));
+            double weight = Math.Sqrt(Math.Max(1d, value.Witnesses)) * confidence;
+            double deviation = (value.EffMu - GlickoPriors.NeutralMu) / 1e9;
+            sum += sign * deviation * weight;
+            weightSum += weight;
+        }
     }
 
     public int LoadedAtoms => Volatile.Read(ref _snapshot).LoadedAtoms;
     public int LearnedPstNonZeroCells => Volatile.Read(ref _snapshot).LearnedNonZeroCells;
+    public int LoadedTacticPatterns => Volatile.Read(ref _snapshot).LoadedTactics;
     public long EvidenceGeneration => Version;
     public long PositionReads => Volatile.Read(ref _positionReads);
     public long PositionsWithEvidence => Volatile.Read(ref _positionsWithEvidence);
     public long LearnedPstReads => Volatile.Read(ref _learnedPstReads);
     public long LearnedPstContributions => Volatile.Read(ref _learnedPstContributions);
+    public long TacticReads => Volatile.Read(ref _tacticReads);
+    public long TacticContributions => Volatile.Read(ref _tacticContributions);
 
     private static void Add(AtomValue value, ref double sum, ref double weightSum)
     {
@@ -225,20 +281,33 @@ public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
     private static Snapshot ReadSnapshot(NpgsqlDataSource ds)
     {
         var slots = AtomUniverse();
-        var edgeIds = slots.Select(static slot => ConsensusKeys.EdgeId(
+        var atomEdgeIds = slots.Select(static slot => ConsensusKeys.EdgeId(
             slot.Id, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject)).ToArray();
-        var rows = NpgsqlConsensusByIds.Read(ds, edgeIds, ChessVocabulary.OutcomeType);
+        var atomRows = NpgsqlConsensusByIds.Read(ds, atomEdgeIds, ChessVocabulary.OutcomeType);
         var snapshot = new Snapshot();
         for (int i = 0; i < slots.Count; i++)
         {
-            if (!rows.TryGetValue(edgeIds[i], out var row)) continue;
+            if (!atomRows.TryGetValue(atomEdgeIds[i], out var row)) continue;
             Set(snapshot, slots[i], new AtomValue(row.EffMu, row.Rd, row.Witnesses, true));
             snapshot.LoadedAtoms++;
         }
 
+        // Bounded tactical vocabulary: read only the closed pattern universe's OUTCOME cells.
+        // No motif query or corpus scan occurs during search.
+        var patterns = ChessTacticOutcomes.PatternUniverse();
+        var tacticEdges = patterns.Select(static p => ConsensusKeys.EdgeId(
+            p.Id, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject)).ToArray();
+        var tacticRows = NpgsqlConsensusByIds.Read(ds, tacticEdges, ChessVocabulary.OutcomeType);
+        for (int i = 0; i < patterns.Count; i++)
+        {
+            if (!tacticRows.TryGetValue(tacticEdges[i], out var row)) continue;
+            snapshot.Tactics[patterns[i].Id] = new AtomValue(row.EffMu, row.Rd, row.Witnesses, true);
+            snapshot.LoadedTactics++;
+        }
+
         // Learned PST is also bounded state: 384 residual cells derived from the fixed move
         // vocabulary. Prepare it outside the search clock and carry the arrays in the same
-        // immutable generation as the atom census.
+        // immutable generation as the atom/tactic census.
         var (learnedMg, learnedEg) = LearnedPst.BuildTables(ds);
         snapshot.LearnedMg = learnedMg;
         snapshot.LearnedEg = learnedEg;
