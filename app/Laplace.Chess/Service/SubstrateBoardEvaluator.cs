@@ -6,11 +6,29 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
+/// <summary>Typed leaf contributions kept distinct until the active chess search combines them.</summary>
+public readonly record struct ChessPositionPlaneScore(int TotalCp, int AtomOutcomeCp, int LearnedPstCp);
+
 /// <summary>
-/// Immutable, bounded snapshot of substrate outcome consensus for chess position atoms.
-/// Search calls <see cref="Evaluate"/> at every leaf without issuing database queries.
+/// Search-position evaluator that can expose the typed contribution split used to produce its
+/// scalar search value. Search itself still consumes <see cref="ISearchPositionEvaluator"/>;
+/// receipt wrappers can retain the plane boundary instead of pretending one opaque cp number is
+/// proof that every advertised provider participated.
 /// </summary>
-public sealed class SubstrateBoardEvaluator : ISearchPositionEvaluator
+public interface IChessSearchPositionPlanes : ISearchPositionEvaluator
+{
+    ChessPositionPlaneScore EvaluatePlanes(Board board);
+}
+
+/// <summary>
+/// Immutable, bounded substrate snapshot used at every search leaf without database queries.
+/// Two independently inspectable planes participate here:
+/// (1) OUTCOME consensus on reusable board atoms; and
+/// (2) the learned PST residual projected from move OUTCOME consensus.
+/// The classical material/PeSTO/tactical proposal remains in <see cref="Evaluation"/>; these are
+/// learned substrate additions to that deterministic floor, not replacements for it.
+/// </summary>
+public sealed class SubstrateBoardEvaluator : IChessSearchPositionPlanes
 {
     private sealed class Snapshot
     {
@@ -18,15 +36,19 @@ public sealed class SubstrateBoardEvaluator : ISearchPositionEvaluator
         public readonly AtomValue[] Castling = new AtomValue[16];
         public readonly AtomValue[] EnPassant = new AtomValue[65];
         public readonly AtomValue[] PieceSquare = new AtomValue[12 * 64];
+        public int[][]? LearnedMg;
+        public int[][]? LearnedEg;
+        public int LearnedNonZeroCells;
         public int LoadedAtoms;
         public long Generation;
     }
 
     private sealed class SearchSnapshot(
-        SubstrateBoardEvaluator owner, Snapshot snapshot, long version) : ISearchPositionEvaluator
+        SubstrateBoardEvaluator owner, Snapshot snapshot, long version) : IChessSearchPositionPlanes
     {
         public long Version => version;
-        public int Evaluate(Board board) => owner.Evaluate(board, snapshot);
+        public int Evaluate(Board board) => EvaluatePlanes(board).TotalCp;
+        public ChessPositionPlaneScore EvaluatePlanes(Board board) => owner.EvaluatePlanes(board, snapshot);
     }
 
     private readonly NpgsqlDataSource? _ds;
@@ -39,6 +61,8 @@ public sealed class SubstrateBoardEvaluator : ISearchPositionEvaluator
     private long _observedEpoch;
     private long _positionReads;
     private long _positionsWithEvidence;
+    private long _learnedPstReads;
+    private long _learnedPstContributions;
 
     private readonly record struct AtomValue(double EffMu, double Rd, double Witnesses, bool Present);
 
@@ -91,6 +115,9 @@ public sealed class SubstrateBoardEvaluator : ISearchPositionEvaluator
                 epoch = _epoch();
                 if (epoch != _observedEpoch)
                 {
+                    // The same completed game that advances transition observations can also
+                    // advance move-OUTCOME cells. Refresh both atom consensus and learned PST as
+                    // one immutable generation so a search never mixes old/new provider state.
                     var next = _ds is not null
                         ? ReadSnapshot(_ds)
                         : SnapshotFrom(_loadValues!());
@@ -104,9 +131,12 @@ public sealed class SubstrateBoardEvaluator : ISearchPositionEvaluator
         return new SearchSnapshot(this, snapshot, snapshot.Generation);
     }
 
-    public int Evaluate(Board board) => Evaluate(board, Volatile.Read(ref _snapshot));
+    public int Evaluate(Board board) => EvaluatePlanes(board).TotalCp;
 
-    private int Evaluate(Board board, Snapshot snapshot)
+    public ChessPositionPlaneScore EvaluatePlanes(Board board)
+        => EvaluatePlanes(board, Volatile.Read(ref _snapshot));
+
+    private ChessPositionPlaneScore EvaluatePlanes(Board board, Snapshot snapshot)
     {
         Interlocked.Increment(ref _positionReads);
         double sum = 0d, weightSum = 0d;
@@ -125,19 +155,41 @@ public sealed class SubstrateBoardEvaluator : ISearchPositionEvaluator
             Add(snapshot.PieceSquare[ChessPositionIdentity.PieceOrdinal(piece) * 64 + bit],
                 ref sum, ref weightSum);
         }
-        if (weightSum == 0d) return 0;
-        Interlocked.Increment(ref _positionsWithEvidence);
 
-        // Stored constituent outcomes use White's fixed POV. Negamax needs side-to-move POV.
-        double whitePoints = sum / weightSum / 1e9;
-        double stmPoints = board.WhiteToMove ? whitePoints : -whitePoints;
-        return Math.Clamp((int)Math.Round(stmPoints * _cpPerPoint), -_capCp, _capCp);
+        int atomCp = 0;
+        if (weightSum != 0d)
+        {
+            Interlocked.Increment(ref _positionsWithEvidence);
+            // Stored constituent outcomes use White's fixed POV. Negamax needs side-to-move POV.
+            double whitePoints = sum / weightSum / 1e9;
+            double stmPoints = board.WhiteToMove ? whitePoints : -whitePoints;
+            atomCp = Math.Clamp((int)Math.Round(stmPoints * _cpPerPoint), -_capCp, _capCp);
+        }
+
+        int learnedCp = 0;
+        if (snapshot.LearnedMg is not null && snapshot.LearnedEg is not null
+            && snapshot.LearnedNonZeroCells != 0)
+        {
+            Interlocked.Increment(ref _learnedPstReads);
+            // BuildTables returns the learned RESIDUAL, not PeSTO itself. Evaluating only the PST
+            // term over these delta tables gives exactly the corpus contribution to add beside
+            // the ordinary deterministic Evaluation result already calculated by Search.
+            learnedCp = Evaluation.Evaluate(
+                board, EvalTerm.Pst, snapshot.LearnedMg, snapshot.LearnedEg);
+            if (learnedCp != 0)
+                Interlocked.Increment(ref _learnedPstContributions);
+        }
+
+        return new ChessPositionPlaneScore(atomCp + learnedCp, atomCp, learnedCp);
     }
 
     public int LoadedAtoms => Volatile.Read(ref _snapshot).LoadedAtoms;
+    public int LearnedPstNonZeroCells => Volatile.Read(ref _snapshot).LearnedNonZeroCells;
     public long EvidenceGeneration => Version;
     public long PositionReads => Volatile.Read(ref _positionReads);
     public long PositionsWithEvidence => Volatile.Read(ref _positionsWithEvidence);
+    public long LearnedPstReads => Volatile.Read(ref _learnedPstReads);
+    public long LearnedPstContributions => Volatile.Read(ref _learnedPstContributions);
 
     private static void Add(AtomValue value, ref double sum, ref double weightSum)
     {
@@ -165,6 +217,19 @@ public sealed class SubstrateBoardEvaluator : ISearchPositionEvaluator
             Set(snapshot, slots[i], new AtomValue(row.EffMu, row.Rd, row.Witnesses, true));
             snapshot.LoadedAtoms++;
         }
+
+        // Learned PST is also bounded state: 384 residual cells derived from the fixed move
+        // vocabulary. Prepare it outside the search clock and carry the arrays in the same
+        // immutable generation as the atom census.
+        var (learnedMg, learnedEg) = LearnedPst.BuildTables(ds);
+        snapshot.LearnedMg = learnedMg;
+        snapshot.LearnedEg = learnedEg;
+        int nonZero = 0;
+        for (int piece = 0; piece < learnedMg.Length; piece++)
+            for (int square = 0; square < learnedMg[piece].Length; square++)
+                if (learnedMg[piece][square] != 0 || learnedEg[piece][square] != 0)
+                    nonZero++;
+        snapshot.LearnedNonZeroCells = nonZero;
         return snapshot;
     }
 
