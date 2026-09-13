@@ -1222,10 +1222,12 @@ upsert_merge_with_retry(SPIPlanPtr plan, Datum *vals, const char *label)
 }
 
 /* Persist a phase-1 classification without joining the batch back to the
- * partitioned target. Existing rows use the PK conflict arbiter; novel rows
- * insert directly. Both writes share a subtransaction so a concurrent insert
- * of a phase-1-novel cell can roll back any preceding matched updates before
- * the established MERGE race fallback reclassifies it under a fresh snapshot. */
+ * partitioned target. Existing rows update on their already-known exact HASH
+ * leaves when PostgreSQL policy semantics permit it; the parent PK-arbitrated
+ * INSERT/ON CONFLICT remains the conservative fallback. Novel rows insert
+ * directly. Both writes share a subtransaction so a concurrent insert of a
+ * phase-1-novel cell can roll back any preceding matched updates before the
+ * established MERGE race fallback reclassifies it under a fresh snapshot. */
 static uint64
 upsert_persist_keyed_or_fallback(SPIPlanPtr matched_plan,
                                  SPIPlanPtr novel_plan,
@@ -1248,15 +1250,26 @@ upsert_persist_keyed_or_fallback(SPIPlanPtr matched_plan,
 
         if (matched_n > 0)
         {
-            rc = SPI_execute_plan(matched_plan, write_vals, NULL, false, 0);
-            if (rc != SPI_OK_INSERT || SPI_processed != matched_n)
+            uint64 updated = 0;
+
+            if (!laplace_consensus_update_matched(
+                    type, write_vals, (int) total_n, matched_n, &updated))
+            {
+                rc = SPI_execute_plan(matched_plan, write_vals, NULL, false, 0);
+                if (rc != SPI_OK_INSERT)
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INTERNAL_ERROR),
+                             errmsg("%s: keyed matched upsert failed: %s",
+                                    label, SPI_result_code_string(rc))));
+                updated = SPI_processed;
+            }
+            if (updated != matched_n)
                 ereport(ERROR,
                         (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("%s: keyed matched upsert affected %lu of %lu rows (%s)",
-                                label, (unsigned long) SPI_processed,
-                                (unsigned long) matched_n,
-                                SPI_result_code_string(rc))));
-            processed += SPI_processed;
+                         errmsg("%s: keyed matched persistence affected %lu of %lu rows",
+                                label, (unsigned long) updated,
+                                (unsigned long) matched_n)));
+            processed += updated;
         }
         if (matched_n < total_n)
         {
