@@ -235,7 +235,7 @@ relation_allows_direct_update(Oid oid, bool require_insert)
     table_close(relation, AccessShareLock);
     if (!allowed) return false;
 
-    AclMode mode = ACL_UPDATE | (require_insert ? ACL_INSERT : 0);
+    AclMode mode = ACL_SELECT | ACL_UPDATE | (require_insert ? ACL_INSERT : 0);
     return pg_class_aclcheck(oid, GetUserId(), mode) == ACLCHECK_OK;
 }
 
