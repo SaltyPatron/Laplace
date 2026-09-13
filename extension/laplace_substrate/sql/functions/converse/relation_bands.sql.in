@@ -4,11 +4,10 @@
 -- precomputed highway mask. Selecting bands is how a caller narrows a read
 -- without naming a single relation and without naming a language.
 --
--- Two functions, because they cost different amounts. converse.relation_band_catalog()
--- is the NAMING — IMMUTABLE, no table access, safe to JOIN inside any read.
--- converse.relation_bands() adds LIVE consensus counts, which is a full aggregate over
--- the consensus tree (measured 1.34s at 5.66M rows), so it belongs in a catalog
--- call a client makes once and caches — never in a per-query join.
+-- relation_band_catalog() is immutable naming. relation_bands() is an exact live
+-- catalog read. The live counts are maintained transactionally from statement-wide
+-- consensus deltas so an interactive catalog request never aggregates the complete
+-- partitioned consensus tree.
 DROP FUNCTION IF EXISTS laplace.relation_band_catalog();
 CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
     RETURNS TABLE(band integer, name text, rank double precision)
@@ -30,25 +29,147 @@ BEGIN ATOMIC
       (12, 'probationary',         0.05);
 END;
 
+CREATE TABLE IF NOT EXISTS converse.relation_band_live_counts (
+    type_id bytea PRIMARY KEY CHECK (octet_length(type_id) = 16),
+    consensus_rows bigint NOT NULL CHECK (consensus_rows > 0)
+);
+
+-- Exact one-time/reconciliation rebuild. This is intentionally the only whole-tree
+-- aggregate in this surface: install/upgrade pays it once, then statement-level
+-- transition tables maintain the catalog in the same transaction as consensus.
+TRUNCATE TABLE converse.relation_band_live_counts;
+INSERT INTO converse.relation_band_live_counts(type_id, consensus_rows)
+SELECT c.type_id, count(*)::bigint
+FROM laplace.consensus AS c
+GROUP BY c.type_id;
+
+CREATE OR REPLACE FUNCTION converse.relation_band_counts_after_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $body$
+BEGIN
+    INSERT INTO converse.relation_band_live_counts AS counts(type_id, consensus_rows)
+    SELECT n.type_id, count(*)::bigint
+    FROM new_consensus_rows AS n
+    GROUP BY n.type_id
+    ON CONFLICT (type_id) DO UPDATE
+    SET consensus_rows = counts.consensus_rows + EXCLUDED.consensus_rows;
+    RETURN NULL;
+END
+$body$;
+
+CREATE OR REPLACE FUNCTION converse.relation_band_counts_after_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $body$
+BEGIN
+    UPDATE converse.relation_band_live_counts AS counts
+    SET consensus_rows = counts.consensus_rows - removed.row_count
+    FROM (
+        SELECT o.type_id, count(*)::bigint AS row_count
+        FROM old_consensus_rows AS o
+        GROUP BY o.type_id
+    ) AS removed
+    WHERE counts.type_id = removed.type_id;
+
+    DELETE FROM converse.relation_band_live_counts
+    WHERE consensus_rows = 0;
+    RETURN NULL;
+END
+$body$;
+
+CREATE OR REPLACE FUNCTION converse.relation_band_counts_after_update()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $body$
+BEGIN
+    UPDATE converse.relation_band_live_counts AS counts
+    SET consensus_rows = counts.consensus_rows - removed.row_count
+    FROM (
+        SELECT o.type_id, count(*)::bigint AS row_count
+        FROM old_consensus_rows AS o
+        GROUP BY o.type_id
+    ) AS removed
+    WHERE counts.type_id = removed.type_id;
+
+    DELETE FROM converse.relation_band_live_counts
+    WHERE consensus_rows = 0;
+
+    INSERT INTO converse.relation_band_live_counts AS counts(type_id, consensus_rows)
+    SELECT n.type_id, count(*)::bigint
+    FROM new_consensus_rows AS n
+    GROUP BY n.type_id
+    ON CONFLICT (type_id) DO UPDATE
+    SET consensus_rows = counts.consensus_rows + EXCLUDED.consensus_rows;
+    RETURN NULL;
+END
+$body$;
+
+CREATE OR REPLACE FUNCTION converse.relation_band_counts_after_truncate()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $body$
+BEGIN
+    TRUNCATE TABLE converse.relation_band_live_counts;
+    RETURN NULL;
+END
+$body$;
+
+DROP TRIGGER IF EXISTS relation_band_counts_insert ON laplace.consensus;
+CREATE TRIGGER relation_band_counts_insert
+AFTER INSERT ON laplace.consensus
+REFERENCING NEW TABLE AS new_consensus_rows
+FOR EACH STATEMENT
+EXECUTE FUNCTION converse.relation_band_counts_after_insert();
+
+DROP TRIGGER IF EXISTS relation_band_counts_delete ON laplace.consensus;
+CREATE TRIGGER relation_band_counts_delete
+AFTER DELETE ON laplace.consensus
+REFERENCING OLD TABLE AS old_consensus_rows
+FOR EACH STATEMENT
+EXECUTE FUNCTION converse.relation_band_counts_after_delete();
+
+DROP TRIGGER IF EXISTS relation_band_counts_update ON laplace.consensus;
+CREATE TRIGGER relation_band_counts_update
+AFTER UPDATE ON laplace.consensus
+REFERENCING OLD TABLE AS old_consensus_rows NEW TABLE AS new_consensus_rows
+FOR EACH STATEMENT
+EXECUTE FUNCTION converse.relation_band_counts_after_update();
+
+DROP TRIGGER IF EXISTS relation_band_counts_truncate ON laplace.consensus;
+CREATE TRIGGER relation_band_counts_truncate
+AFTER TRUNCATE ON laplace.consensus
+FOR EACH STATEMENT
+EXECUTE FUNCTION converse.relation_band_counts_after_truncate();
+
+GRANT SELECT ON TABLE converse.relation_band_live_counts TO PUBLIC;
+
 DROP FUNCTION IF EXISTS laplace.relation_bands();
 CREATE OR REPLACE FUNCTION converse.relation_bands()
     RETURNS TABLE(band integer, name text, rank double precision,
                   relation_types bigint, consensus_rows bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    WITH live AS (
+    WITH live AS NOT MATERIALIZED (
         SELECT consensus.relation_highway_band(c.type_id) AS band,
                c.type_id,
-               count(*) AS rows
-        FROM laplace.consensus c
-        GROUP BY 1, 2
+               c.consensus_rows AS rows
+        FROM converse.relation_band_live_counts AS c
     )
     SELECT b.band,
            b.name,
            b.rank,
            count(live.type_id)::bigint,
            COALESCE(sum(live.rows), 0)::bigint
-    FROM converse.relation_band_catalog() b
+    FROM converse.relation_band_catalog() AS b
     LEFT JOIN live ON live.band = b.band
     GROUP BY b.band, b.name, b.rank
     ORDER BY b.band;
