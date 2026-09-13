@@ -26,6 +26,16 @@ function positiveInt(value: string | null, fallback: number) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
+function matchKindLabel(kind: string) {
+  switch (kind) {
+    case 'name': return 'name / alias evidence';
+    case 'surface': return 'exact witnessed surface';
+    case 'contains_all': return 'contains all query words';
+    case 'constituent': return 'query constituent';
+    default: return kind.replaceAll('_', ' ');
+  }
+}
+
 export function BrowseHome() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q')?.trim() ?? '';
@@ -164,7 +174,7 @@ export function BrowseHome() {
                       </Td>
                       <Td>{hit.type}</Td>
                       <Td>{hit.tier}</Td>
-                      <Td>{hit.match_kind === 'name' ? 'name / alias evidence' : 'exact surface'}</Td>
+                      <Td>{matchKindLabel(hit.match_kind)}</Td>
                       <Td>{hit.eff_mu != null ? hit.eff_mu.toFixed(3) : '—'}</Td>
                       <Td>{hit.rating != null ? hit.rating.toFixed(3) : '—'}</Td>
                       <Td>{hit.rd != null ? `±${hit.rd.toFixed(3)}` : '—'}</Td>
