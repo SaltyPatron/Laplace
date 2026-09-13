@@ -16,6 +16,38 @@ namespace Laplace.Ingestion.Tests;
 public sealed class IngestBootstrapAccountingTests
 {
     [Fact]
+    public async Task CommittedProgress_ReportsFoldWorkBeforeCompletion()
+    {
+        var writer = new InsertAllWriter();
+        var progress = new CapturedProgress(writer);
+        var runner = new IngestRunner(writer, new EmptyReader(), NullLoggerFactory.Instance);
+        await runner.RunAsync(new BootstrapThenContentDecomposer(),
+            IngestRunOptions.Default with
+            {
+                SkipLayerOrderingCheck = true,
+                SkipSourceCompletion = true,
+                Progress = progress,
+            });
+        var committed = Assert.Single(progress.Committed);
+        Assert.Equal(TimeSpan.FromMilliseconds(37), committed.ConsensusBackendWork);
+        Assert.Equal(TimeSpan.FromMilliseconds(11), committed.HighwayMaskBackendWork);
+        Assert.Equal(1, committed.ConsensusCalls);
+        Assert.Equal(1, committed.HighwayMaskCalls);
+        Assert.Equal(2, committed.HighwayMaskPairs);
+    }
+
+    private sealed class CapturedProgress(InsertAllWriter writer) : IProgress<IngestProgress>
+    {
+        public List<IngestProgress> Committed { get; } = [];
+        public void Report(IngestProgress value)
+        {
+            if (value.UnitsApplied == 0) return;
+            Assert.False(writer.Completed);
+            Committed.Add(value);
+        }
+    }
+
+    [Fact]
     public async Task InitializeWrites_AreIncludedInRunRowsAndAdmission()
     {
         var writer = new InsertAllWriter();
@@ -150,6 +182,17 @@ public sealed class IngestBootstrapAccountingTests
         public List<string> AppliedUnits { get; } = [];
         public long ObservationsAccumulated { get; private set; } = 11;
         public long CellsFolded { get; private set; } = 7;
+        public long ConsensusUpsertCalls { get; private set; }
+        public long HighwayMaskCalls => ConsensusUpsertCalls;
+        public long HighwayMaskPairs => ConsensusUpsertCalls * 2;
+        public TimeSpan ConsensusUpsertBackendWallClock => TimeSpan.FromMilliseconds(ConsensusUpsertCalls * 37);
+        public TimeSpan HighwayMaskBackendWallClock => TimeSpan.FromMilliseconds(ConsensusUpsertCalls * 11);
+        public bool Completed { get; private set; }
+        public Task CompleteBulkRunAsync(CancellationToken ct = default)
+        {
+            Completed = true;
+            return Task.CompletedTask;
+        }
 
         public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
         {
@@ -166,6 +209,7 @@ public sealed class IngestBootstrapAccountingTests
                 }
             ObservationsAccumulated += attestations;
             CellsFolded += attestations;
+            if (attestations > 0) ConsensusUpsertCalls++;
             return Task.FromResult(new ApplyResult(
                 entities, entities,
                 physicalities, physicalities,
