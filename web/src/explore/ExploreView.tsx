@@ -4,8 +4,9 @@ import { AuditPanel } from './catalog/AuditPanel';
 import { BrowseHome } from './browse/BrowseHome';
 import { StageBrowse } from './browse/StageBrowse';
 import { SourceBrowse } from './browse/SourceBrowse';
-import { EntityDetail, ResolveRedirect } from './entity/EntityDetail';
+import { EntityDetail } from './entity/EntityDetail';
 import { NotFoundExplorer } from './entity/NotFoundExplorer';
+import { ResolveBrowseRedirect } from './entity/ResolveBrowseRedirect';
 import { ConstellationView } from './glome/ConstellationView';
 import { HighwayLanding } from './highway/HighwayLanding';
 import { LayerPage } from './highway/LayerPage';
@@ -83,7 +84,7 @@ export function ExploreView() {
           <Route path="source/:sourceKey" element={<SourceBrowse />} />
           <Route path="entity/:idHex" element={<EntityDetail />} />
           <Route path="notfound/:ref" element={<NotFoundExplorer />} />
-          <Route path="resolve/:ref" element={<ResolveRedirect />} />
+          <Route path="resolve/:ref" element={<ResolveBrowseRedirect />} />
           <Route path="walk" element={<WalkPanel />} />
           <Route path="highway" element={<HighwayLanding />} />
           <Route path="highway/:slug" element={<LayerPage />} />
