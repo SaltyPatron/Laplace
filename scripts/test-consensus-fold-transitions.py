@@ -6,6 +6,7 @@ strict floating-point flags as the engine. Never installs modules or changes a
 live database. Requires psycopg2, a C compiler and a scratch extension template.
 """
 import argparse
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -23,6 +24,8 @@ SIGNATURES = (
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--socket', type=Path, required=True)
+    parser.add_argument('--port', type=int, default=5432)
+    parser.add_argument('--work-dir', type=Path, default=Path('/build/laplace/work'))
     parser.add_argument('--data', type=Path, required=True)
     parser.add_argument('--user', required=True)
     parser.add_argument('--template', required=True)
@@ -30,9 +33,12 @@ def main():
     parser.add_argument('--core-lib', type=Path, default=Path('/opt/laplace/lib'))
     parser.add_argument('--mutations', action='store_true')
     args = parser.parse_args()
-    if not args.socket.is_absolute() or not args.data.resolve().is_relative_to(Path('/tmp')):
-        raise SystemExit('requires an explicit /tmp scratch cluster, never TCP')
-    connargs = dict(host=str(args.socket), user=args.user)
+    if not args.socket.is_absolute() or not args.data.is_absolute():
+        raise SystemExit('requires an explicit cluster data directory and Unix socket')
+    if not args.work_dir.resolve().is_relative_to(Path('/build')):
+        raise SystemExit('native test artifacts must use permanent /build storage')
+    args.work_dir.mkdir(parents=True, exist_ok=True)
+    connargs = dict(host=str(args.socket), port=args.port, user=args.user)
     admin = psycopg2.connect(**connargs, dbname='postgres')
     admin.autocommit = True
     cur = admin.cursor()
@@ -51,7 +57,7 @@ def main():
         for signature in SIGNATURES:
             q.execute('SELECT pg_get_functiondef(%s::regprocedure)', (signature,))
             definition = q.fetchone()[0]
-            if "AS 'laplace_substrate'" not in definition:
+            if not re.search(r"AS '(?:\$libdir/)?laplace_substrate',", definition):
                 raise RuntimeError('template must use the unmodified extension functions')
             definitions.append(definition)
         source_dir = ROOT/'extension/laplace_substrate/src'
@@ -65,17 +71,19 @@ def main():
                     raise RuntimeError('mutation no longer applies exactly once')
                 variants.append((f'omit-{field}', source.replace(before, f'input[{field}] = 0;'), True))
             variants.append(('restored', source, False))
-        with tempfile.TemporaryDirectory(prefix='laplace-fold-mutations-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='laplace-fold-mutations-', dir=args.work_dir) as temporary:
             for label, content, should_fail in variants:
                 module = Path(temporary)/f'{label}.so'
                 generated = '#include "postgres.h"\n#include "fmgr.h"\nPG_MODULE_MAGIC;\n' + content
                 subprocess.run(['cc','-shared','-fPIC','-O3','-fno-fast-math','-ffp-contract=off',
+                    '-Wl,-Bsymbolic-functions',
                     '-I'+str(args.pg_prefix/'include/server'), '-I'+str(ROOT/'engine/core/include'),
                     '-I'+str(source_dir), '-L'+str(args.core_lib), '-Wl,-rpath,'+str(args.core_lib),
-                    '-x','c','-','-llaplace_core','-o',str(module)], input=generated, text=True, check=True)
+                    '-x','c','-',str(source_dir/'consensus_bulk_write.c'),
+                    '-llaplace_core','-o',str(module)], input=generated, text=True, check=True)
                 quoted = q.mogrify('%s', (str(module),)).decode()
                 for definition in definitions:
-                    q.execute(definition.replace("AS 'laplace_substrate'", 'AS '+quoted))
+                    q.execute(re.sub(r"AS '(?:\$libdir/)?laplace_substrate',", 'AS '+quoted+',', definition))
                 try:
                     q.execute(checks)
                 except psycopg2.Error as error:
@@ -91,9 +99,10 @@ def main():
                     output.mkdir()
                     subprocess.run([str(args.pg_prefix/'lib/pgxs/src/test/regress/pg_regress'),
                         '--bindir='+str(args.pg_prefix/'bin'), '--host='+str(args.socket), '--user='+args.user,
+                        '--port='+str(args.port),
                         '--dbname='+name, '--use-existing',
                         '--inputdir='+str(ROOT/'extension/laplace_substrate/tests'),
-                        '--outputdir='+str(output), 'consensus_upsert'], check=True)
+                        '--outputdir='+str(output), 'consensus_upsert', 'consensus_bulk_write'], check=True)
     finally:
         if db is not None:
             db.close()
