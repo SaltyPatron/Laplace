@@ -26,6 +26,15 @@ function positiveInt(value: string | null, fallback: number) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
+function matchKindLabel(kind: BrowseHit['match_kind']) {
+  switch (kind) {
+    case 'exact': return 'exact admitted content';
+    case 'member': return 'query constituent';
+    case 'container': return 'contains all query constituents';
+    case 'name': return 'name / alias evidence';
+  }
+}
+
 export function BrowseHome() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q')?.trim() ?? '';
@@ -95,18 +104,18 @@ export function BrowseHome() {
     <Stack gap={4}>
       <header className={styles.hero}>
         <p className={styles.eyebrow}>SUBSTRATE BROWSER</p>
-        <h2>Browse Laplace like a reference site</h2>
+        <h2>Browse admitted Laplace structure</h2>
         <Muted>
           {view === 'mesh'
-            ? 'Choose the canonical entity you mean, then enter that same identity in the Mesh.'
-            : 'Start with a name or surface, open a canonical entity, then keep following relations, compositions, evidence, 2D graph nodes, or the same neighborhood in 3D.'}
+            ? 'Choose an admitted canonical entity, then enter that same identity in the Mesh.'
+            : 'Input is decomposed into canonical constituents. Browse can return an admitted exact composition, the admitted constituents themselves, structures containing all constituents, and entities attached by witnessed name or alias evidence.'}
         </Muted>
         <LookupRow
           value={draft}
           onChange={setDraft}
           onSubmit={submit}
-          placeholder="Hikaru, Japan, whale, Moby Dick, an entity id…"
-          ariaLabel="Find a starting point in the substrate"
+          placeholder="Sodium Chloride, Hikaru, Japan, whale, an entity id…"
+          ariaLabel="Find admitted content and containing structure in the substrate"
           submitLabel="Browse"
           submitDisabled={!draft.trim()}
         >
@@ -117,14 +126,14 @@ export function BrowseHome() {
       {!query ? <BrowseDirectories /> : null}
 
       {err ? <ErrorText role="alert">Browse failed: {err}</ErrorText> : null}
-      {query && !err && !data ? <LoadingText>Traversing the name lane…</LoadingText> : null}
+      {query && !err && !data ? <LoadingText>Resolving admitted identities and containment…</LoadingText> : null}
 
       {data ? (
         <>
           <Panel title={`Browse results for “${data.query}”`}>
             <div className={styles.toolbar}>
               <Muted>
-                {data.receipt.matched_entities.toLocaleString()} canonical result{data.receipt.matched_entities === 1 ? '' : 's'}
+                {data.receipt.matched_entities.toLocaleString()} admitted result{data.receipt.matched_entities === 1 ? '' : 's'}
                 {data.receipt.candidate_truncated ? ' inside the current frontier' : ''}
               </Muted>
               {data.receipt.candidate_truncated && capacity < MAX_CAPACITY ? (
@@ -136,9 +145,10 @@ export function BrowseHome() {
 
             {data.hits.length === 0 ? (
               <div className={styles.empty}>
-                <strong>No canonical entity was reached in this browse lane.</strong>
-                <Muted>The exact surface can still be explored geometrically if it has not been witnessed.</Muted>
-                <Link to={`/explore/notfound/${encodeURIComponent(data.query)}`}>Open its structural neighborhood ›</Link>
+                <strong>No admitted entity or containing structure was reached by this browse program.</strong>
+                <Muted>
+                  The input still has a deterministic content identity, but Browse does not turn that calculated identity into an entity result unless the substrate actually contains it.
+                </Muted>
               </div>
             ) : (
               <Table>
@@ -164,7 +174,7 @@ export function BrowseHome() {
                       </Td>
                       <Td>{hit.type}</Td>
                       <Td>{hit.tier}</Td>
-                      <Td>{hit.match_kind === 'name' ? 'name / alias evidence' : 'exact surface'}</Td>
+                      <Td>{matchKindLabel(hit.match_kind)}</Td>
                       <Td>{hit.eff_mu != null ? hit.eff_mu.toFixed(3) : '—'}</Td>
                       <Td>{hit.rating != null ? hit.rating.toFixed(3) : '—'}</Td>
                       <Td>{hit.rd != null ? `±${hit.rd.toFixed(3)}` : '—'}</Td>
@@ -195,7 +205,7 @@ export function BrowseHome() {
             <dl className={styles.receipt}>
               <div><dt>Query root</dt><dd>{data.receipt.query_root_id_hex}</dd></div>
               <div><dt>Word identities</dt><dd>{data.receipt.query_member_ids_hex.length.toLocaleString()}</dd></div>
-              <div><dt>Name frontier</dt><dd>{data.receipt.candidate_names.toLocaleString()} / {data.receipt.candidate_capacity.toLocaleString()}</dd></div>
+              <div><dt>Containment frontier</dt><dd>{data.receipt.candidate_names.toLocaleString()} / {data.receipt.candidate_capacity.toLocaleString()}</dd></div>
               <div><dt>Frontier complete</dt><dd>{data.receipt.candidate_truncated ? 'no — capacity reached' : 'yes for this lane'}</dd></div>
               <div><dt>Returned</dt><dd>{data.receipt.returned.toLocaleString()}</dd></div>
               <div><dt>Substrate read</dt><dd>{data.receipt.elapsed_us.toLocaleString()} μs</dd></div>
