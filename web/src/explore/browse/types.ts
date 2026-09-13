@@ -4,7 +4,7 @@ export interface BrowseHit {
   tier: number;
   type: string;
   matched_name_id_hex: string;
-  match_kind: 'name' | 'surface' | string;
+  match_kind: 'exact' | 'member' | 'container' | 'name';
   rating?: number | null;
   rd?: number | null;
   eff_mu?: number | null;
