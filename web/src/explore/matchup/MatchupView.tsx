@@ -9,11 +9,9 @@ import { GatePrompt } from '../components/GatePrompt';
 import styles from './MatchupView.module.css';
 
 /**
- * Head-to-head. Two entities as a sports matchup: each side's card and record,
- * the tale of the tape (what each holds that the other doesn't, from
- * contrast()), and — fetched separately because its path search is slow — the
- * substrate's verdict on how they relate. This is the single most demoable
- * screen the rated graph can produce: two things, compared on the evidence.
+ * Head-to-head. Generic entities compare on consensus facts; typed domains may supply their own
+ * evidence boundary. Chess_Player, for example, uses source Elo/career/head-to-head evidence
+ * instead of pretending a relation's Glicko eff_mu is the player's chess rating.
  */
 export function MatchupView() {
   const { x = '', y = '' } = useParams();
@@ -21,8 +19,6 @@ export function MatchupView() {
   const nav = useNavigate();
   const { tenant, quoteId } = useAppStore();
 
-  // Path params drive the loaded comparison; ?x=/?y= only prefill the picker
-  // (a "compare from here" handoff that waits for the second contender).
   const [xInput, setXInput] = useState(decodeURIComponent(x) || params.get('x') || '');
   const [yInput, setYInput] = useState(decodeURIComponent(y) || params.get('y') || '');
 
@@ -53,12 +49,6 @@ export function MatchupView() {
       })
       .finally(() => { if (!stale) setLoading(false); });
 
-    // The verdict rides its own request — path search runs seconds; never let
-    // it hold up the cards and the tape.
-    // The verdict is optional — the tape still carries the comparison — but a
-    // failed one must not read as a slow one. Swallowed, it left "weighing the
-    // path…" on screen forever, so a 500 from the path search was
-    // indistinguishable from a search still running.
     exploreMatchupVerdict(decodeURIComponent(x), decodeURIComponent(y), opts)
       .then((v) => { if (!stale) setVerdict(v); })
       .catch((e) => {
@@ -117,23 +107,45 @@ export function MatchupView() {
 
 function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' }) {
   const topMu = side.top_facts.length ? Math.max(...side.top_facts.map((f) => Number(f.eff_mu))) : null;
+  const chess = side.chess ?? null;
   return (
     <div className={`${styles.side} ${align === 'right' ? styles.right : ''}`}>
       <RouterLink className={styles.sideName} to={`/explore/entity/${side.id}`}>{side.label}</RouterLink>
       <div className={styles.record}>
-        <Rec n={side.record.confirmed} label="confirmed" tone="confirm" />
-        <Rec n={side.record.contested} label="contested" tone="draw" />
-        <Rec n={side.record.refuted} label="refuted" tone="refute" />
-        <Rec n={side.record.thin} label="thin" />
+        {chess ? (
+          <>
+            <Rec n={chess.wins} label="wins" tone="confirm" />
+            <Rec n={chess.draws} label="draws" tone="draw" />
+            <Rec n={chess.losses} label="losses" tone="refute" />
+            <Rec n={chess.unscored} label="unscored" />
+          </>
+        ) : (
+          <>
+            <Rec n={side.record.confirmed} label="confirmed" tone="confirm" />
+            <Rec n={side.record.contested} label="contested" tone="draw" />
+            <Rec n={side.record.refuted} label="refuted" tone="refute" />
+            <Rec n={side.record.thin} label="thin" />
+          </>
+        )}
       </div>
       <div className={styles.topStat}>
-        <span className={styles.topMu}>{topMu != null ? topMu.toFixed(0) : '—'}</span>
-        <span className={styles.topLabel}>top rating · {side.record.thin + side.record.confirmed + side.record.contested + side.record.refuted} rated edges</span>
+        {chess ? (
+          <>
+            <span className={styles.topMu}>{chess.peak_source_elo ?? '—'}</span>
+            <span className={styles.topLabel}>peak source Elo · {chess.games.toLocaleString()} witnessed games</span>
+          </>
+        ) : (
+          <>
+            <span className={styles.topMu}>{topMu != null ? topMu.toFixed(0) : '—'}</span>
+            <span className={styles.topLabel}>top relation standing · {side.record.thin + side.record.confirmed + side.record.contested + side.record.refuted} rated edges</span>
+          </>
+        )}
       </div>
       <ul className={styles.facts}>
-        {side.top_facts.slice(0, 5).map((f, i) => (
-          <li key={i}><span className={styles.factType}>{f.type}</span> {f.fact}</li>
-        ))}
+        {side.top_facts.slice(0, 5).map((f, i) => {
+          const type = chess && f.type.toLowerCase() === 'played by' ? 'played against' : f.type;
+          return <li key={i}><span className={styles.factType}>{type}</span> {f.fact}</li>;
+        })}
       </ul>
     </div>
   );
