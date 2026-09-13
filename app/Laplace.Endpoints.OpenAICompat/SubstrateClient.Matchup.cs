@@ -111,19 +111,7 @@ internal sealed partial class SubstrateClient
         AddChessSide(rows, "x-only", xs);
         AddChessSide(rows, "y-only", ys);
 
-        // Pairing evidence was historically stored under the badly named PLAYED_BY relation.
-        // Do not expose that predicate here as English: its actual chess meaning is a direct
-        // opponent meeting. The relation migration is handled separately; this read reports the
-        // witnessed fact rather than repeating the ontology label into the product.
-        var xId = Hash128.FromBytes(x);
-        var yId = Hash128.FromBytes(y);
-        var xy = ConsensusKeys.EdgeId(xId, ChessVocabulary.PlayedByType, yId);
-        var yx = ConsensusKeys.EdgeId(yId, ChessVocabulary.PlayedByType, xId);
-        var pair = await NpgsqlConsensusByIds.ReadAsync(
-            _dataSource, [xy, yx], ChessVocabulary.PlayedByType, ct);
-        long meetings = 0;
-        if (pair.TryGetValue(xy, out var xr)) meetings = Math.Max(meetings, (long)Math.Round(xr.Witnesses));
-        if (pair.TryGetValue(yx, out var yr)) meetings = Math.Max(meetings, (long)Math.Round(yr.Witnesses));
+        long meetings = await ChessMeetingsAsync(x, y, ct);
         if (meetings > 0)
             rows.Insert(0, new TapeRow("both", "direct meetings", $"{meetings:N0} witnessed games", null));
 
@@ -142,6 +130,23 @@ internal sealed partial class SubstrateClient
             rows.Add(new TapeRow(holder, "unscored games", side.Unscored.ToString("N0"), null));
     }
 
+    private async Task<long> ChessMeetingsAsync(byte[] x, byte[] y, CancellationToken ct)
+    {
+        // Pairing evidence was historically stored under the badly named PLAYED_BY relation.
+        // Treat it according to its actual chess grain here (player met opponent), never as an
+        // English assertion that the opponent somehow "played" the player.
+        var xId = Hash128.FromBytes(x);
+        var yId = Hash128.FromBytes(y);
+        var xy = ConsensusKeys.EdgeId(xId, ChessVocabulary.PlayedByType, yId);
+        var yx = ConsensusKeys.EdgeId(yId, ChessVocabulary.PlayedByType, xId);
+        var pair = await NpgsqlConsensusByIds.ReadAsync(
+            _dataSource, [xy, yx], ChessVocabulary.PlayedByType, ct);
+        long meetings = 0;
+        if (pair.TryGetValue(xy, out var xr)) meetings = Math.Max(meetings, (long)Math.Round(xr.Witnesses));
+        if (pair.TryGetValue(yx, out var yr)) meetings = Math.Max(meetings, (long)Math.Round(yr.Witnesses));
+        return meetings;
+    }
+
     private async Task<IReadOnlyList<TapeRow>> TapeAsync(byte[] x, byte[] y, CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.ContrastAsync(_dataSource, x, y, 60, ct, TranslateSubstrateError);
@@ -149,14 +154,30 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// The slow half: relation_summary's path search and verdict. Measured
-    /// 6–14s under an active seed — served separately so the tape never waits.
+    /// Domain-specific verdicts must use the domain's witnessed evidence. Sending Chess_Player
+    /// through lexical relation_summary produced "no witnessed conceptual path" even for players
+    /// with dozens of directly witnessed games against one another.
     /// </summary>
     public async Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct)
     {
         var x = await ResolveTopicAsync(xRef, ct);
         var y = await ResolveTopicAsync(yRef, ct);
         if (x is null || y is null) return null;
+
+        var xChessTask = ChessMatchupSideAsync(x.Value.Id, ct);
+        var yChessTask = ChessMatchupSideAsync(y.Value.Id, ct);
+        await Task.WhenAll(xChessTask, yChessTask);
+        if (xChessTask.Result is not null && yChessTask.Result is not null)
+        {
+            long meetings = await ChessMeetingsAsync(x.Value.Id, y.Value.Id, ct);
+            return meetings > 0
+                ? new MatchupVerdictResponse(
+                    "matchup.verdict", "played against", "chess pairing", null,
+                    meetings, null, $"{meetings:N0} witnessed direct games")
+                : new MatchupVerdictResponse(
+                    "matchup.verdict", "Chess_Player", "chess career", null,
+                    0, null, "no direct games witnessed");
+        }
 
         var s = await NpgsqlSubstrateReads.RelationSummaryAsync(_dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError);
         return new MatchupVerdictResponse("matchup.verdict",
