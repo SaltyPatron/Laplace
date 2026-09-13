@@ -211,3 +211,6 @@ SQL_QUERY("ingest.clean_gin_pending_lists", "",
     "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
     "WHERE am.amname = 'gin' AND n.nspname = 'laplace' "
     "AND c.relkind = 'i' AND i.indisvalid AND i.indisready")
+
+SQL_QUERY("physicalities.present_ordinals", "bytea[]",
+    "SELECT idx FROM laplace.physicalities_present_ordinals($1)")

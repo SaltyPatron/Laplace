@@ -24,55 +24,45 @@
 #include "utils/snapmgr.h"
 #include "laplace/core/content_witness_batch.h"
 #include "content_trajectory_read.h"
+#include "identity_scan.h"
 #include "spi_common.h"
+
+typedef struct ContentReadContext
+{
+    LaplaceContentTrajectoryConsumer consume;
+    void *context;
+    AttrNumber entity, type, trajectory;
+} ContentReadContext;
+
+static void
+consume_content(TupleTableSlot *slot, AttrNumber id, void *opaque)
+{
+    ContentReadContext *read = opaque;
+    bool isnull;
+    Datum kind = slot_getattr(slot, read->type, &isnull);
+    if (!isnull && DatumGetInt16(kind) == 1)
+    {
+        Datum geometry = slot_getattr(slot, read->trajectory, &isnull);
+        if (!isnull)
+        {
+            bool physicality_null, entity_null;
+            Datum physicality_id = slot_getattr(slot, id, &physicality_null);
+            Datum entity_id = slot_getattr(slot, read->entity, &entity_null);
+            if (physicality_null || entity_null)
+                elog(ERROR, "content trajectory read requires physicality and entity identities");
+            read->consume(physicality_id, entity_id, geometry, read->context);
+        }
+    }
+}
 
 static void
 read_leaf(Oid oid, ArrayType *ids, LaplaceContentTrajectoryConsumer consume, void *context)
 {
-    Relation relation = table_open(oid, AccessShareLock);
-    Oid index_oid = RelationGetPrimaryKeyIndex(relation, false);
-    AttrNumber id = get_attnum(oid, "id");
-    AttrNumber entity = get_attnum(oid, "entity_id");
-    AttrNumber type = get_attnum(oid, "type");
-    AttrNumber trajectory = get_attnum(oid, "trajectory");
-    if (!OidIsValid(index_oid) || id <= 0 || entity <= 0 || type <= 0 || trajectory <= 0)
-        elog(ERROR, "content trajectory read requires canonical physicality storage");
-    Relation index = index_open(index_oid, AccessShareLock);
-    if (index->rd_rel->relam != BTREE_AM_OID || !index->rd_index->indisvalid ||
-        !index->rd_index->indisready || index->rd_index->indnkeyatts != 1 ||
-        index->rd_index->indkey.values[0] != id ||
-        index->rd_opfamily[0] != BYTEA_BTREE_FAM_OID || RelationGetIndexPredicate(index) != NIL)
-        elog(ERROR, "content trajectory read requires a valid identity primary key");
-    TupleTableSlot *slot = table_slot_create(relation, NULL);
-    ScanKeyData key;
-    ScanKeyEntryInitialize(&key, SK_SEARCHARRAY, 1, BTEqualStrategyNumber,
-        BYTEAOID, InvalidOid, F_BYTEAEQ, PointerGetDatum(ids));
-    IndexScanDesc scan = index_beginscan(relation, index, GetActiveSnapshot(), NULL, 1, 0);
-    index_rescan(scan, &key, 1, NULL, 0);
-    while (index_getnext_slot(scan, ForwardScanDirection, slot))
-    {
-        bool isnull;
-        Datum kind = slot_getattr(slot, type, &isnull);
-        if (!isnull && DatumGetInt16(kind) == 1)
-        {
-            Datum geometry = slot_getattr(slot, trajectory, &isnull);
-            if (!isnull)
-            {
-                bool physicality_null, entity_null;
-                Datum physicality_id = slot_getattr(slot, id, &physicality_null);
-                Datum entity_id = slot_getattr(slot, entity, &entity_null);
-                if (physicality_null || entity_null)
-                    elog(ERROR, "content trajectory read requires physicality and entity identities");
-                consume(physicality_id, entity_id, geometry, context);
-            }
-        }
-        ExecClearTuple(slot);
-        CHECK_FOR_INTERRUPTS();
-    }
-    index_endscan(scan);
-    ExecDropSingleTupleTableSlot(slot);
-    index_close(index, AccessShareLock);
-    table_close(relation, NoLock);
+    ContentReadContext read = {consume, context, get_attnum(oid, "entity_id"),
+        get_attnum(oid, "type"), get_attnum(oid, "trajectory")};
+    if (read.entity <= 0 || read.type <= 0 || read.trajectory <= 0 ||
+        !laplace_identity_scan(oid, ids, consume_content, &read))
+        elog(ERROR, "content trajectory read requires canonical identity storage");
 }
 
 void

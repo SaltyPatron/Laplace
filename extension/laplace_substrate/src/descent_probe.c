@@ -1,4 +1,6 @@
 #include "descent_probe.h"
+#include "identity_scan.h"
+#include "laplace/core/sql_catalog.h"
 
 #include "access/table.h"
 #include "catalog/namespace.h"
@@ -530,48 +532,26 @@ laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_
                                      "SELECT idx FROM laplace.attestations_present_ordinals($1, $2, $3)");
 }
 
-typedef struct PhysicalityLeafPlan
+typedef struct PhysicalityPresence
 {
-    Oid leaf_oid;
-    SPIPlanPtr plan;
-} PhysicalityLeafPlan;
+    unsigned char id[16];
+    bool present;
+} PhysicalityPresence;
 
-static HTAB *physicality_leaf_plans = NULL;
-
-static SPIPlanPtr
-physicality_leaf_probe_plan(Oid leaf_oid)
+static void
+mark_physicality_presence(TupleTableSlot *slot, AttrNumber id, void *opaque)
 {
-    PhysicalityLeafPlan *entry;
-    bool found;
-
-    if (physicality_leaf_plans == NULL)
+    bool isnull;
+    Datum value = slot_getattr(slot, id, &isnull);
+    if (!isnull)
     {
-        HASHCTL ctl;
-        memset(&ctl, 0, sizeof(ctl));
-        ctl.keysize = sizeof(Oid);
-        ctl.entrysize = sizeof(PhysicalityLeafPlan);
-        ctl.hcxt = TopMemoryContext;
-        physicality_leaf_plans = hash_create("physicality leaf probe plans", 64,
-            &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        bytea *bytes = DatumGetByteaPP(value);
+        if (VARSIZE_ANY_EXHDR(bytes) == 16)
+        {
+            PhysicalityPresence *entry = hash_search(opaque, VARDATA_ANY(bytes), HASH_FIND, NULL);
+            if (entry != NULL) entry->present = true;
+        }
     }
-    entry = hash_search(physicality_leaf_plans, &leaf_oid, HASH_ENTER, &found);
-    if (!found) entry->plan = NULL;
-    if (entry->plan == NULL)
-    {
-        Oid argtypes[2] = {BYTEAARRAYOID, INT4ARRAYOID};
-        char *qualified = quote_qualified_identifier(
-            get_namespace_name(get_rel_namespace(leaf_oid)), get_rel_name(leaf_oid));
-        char *query = psprintf(
-            "SELECT u.ord FROM unnest($1::bytea[], $2::int[]) AS u(id, ord) "
-            "JOIN ONLY %s p ON p.id = u.id", qualified);
-        SPIPlanPtr plan = SPI_prepare(query, 2, argtypes);
-        if (plan == NULL || SPI_keepplan(plan) != 0)
-            ereport(ERROR, (errmsg("physicality leaf probe plan preparation failed")));
-        entry->plan = plan;
-        pfree(query);
-        pfree(qualified);
-    }
-    return entry->plan;
 }
 
 int
@@ -587,7 +567,9 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
     Relation root = table_open(root_oid, AccessShareLock);
     PartitionKey key = RelationGetPartitionKey(root);
     PartitionDesc desc;
-    Datum *ids, *routed_ids, *ordinals;
+    Datum *ids, *routed_ids;
+    HASHCTL presence_ctl;
+    HTAB *presence;
     bool *nulls;
     int n, *owners, *counts, *offsets, *next;
     int rc = SPI_OK_SELECT;
@@ -603,7 +585,7 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
     {
         table_close(root, AccessShareLock);
         return batch_presence_core(ids_array, bm, candidate_count,
-            "SELECT idx FROM laplace.physicalities_present_ordinals($1)", false);
+            laplace_sql_query_text("physicalities.present_ordinals"), false);
     }
     desc = RelationGetPartitionDesc(root, false);
     /* Parent grants need not be repeated on children. Keep the parent query
@@ -619,7 +601,7 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
         {
             table_close(root, AccessShareLock);
             return batch_presence_core(ids_array, bm, candidate_count,
-                "SELECT idx FROM laplace.physicalities_present_ordinals($1)", false);
+                laplace_sql_query_text("physicalities.present_ordinals"), false);
         }
     }
     deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &ids, &nulls, &n);
@@ -630,7 +612,12 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
     offsets = palloc0(sizeof(int) * (desc->nparts + 1));
     next = palloc0(sizeof(int) * desc->nparts);
     routed_ids = palloc(sizeof(Datum) * n);
-    ordinals = palloc(sizeof(Datum) * n);
+    memset(&presence_ctl, 0, sizeof(presence_ctl));
+    presence_ctl.keysize = 16;
+    presence_ctl.entrysize = sizeof(PhysicalityPresence);
+    presence_ctl.hcxt = CurrentMemoryContext;
+    presence = hash_create("physicality batch presence", Max(n, 1), &presence_ctl,
+        HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     for (int i = 0; i < n; i++)
     {
         bool isnull[1] = {false};
@@ -657,30 +644,34 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
         if (owner < 0) continue;
         int at = offsets[owner] + next[owner]++;
         routed_ids[at] = ids[i];
-        ordinals[at] = Int32GetDatum(i);
+        bool found;
+        PhysicalityPresence *entry = hash_search(presence,
+            VARDATA_ANY(DatumGetByteaPP(ids[i])), HASH_ENTER, &found);
+        if (!found) entry->present = false;
     }
     for (int p = 0; p < desc->nparts; p++)
     {
-        Datum args[2];
-        ArrayType *id_array, *ordinal_array;
         if (counts[p] == 0) continue;
         CHECK_FOR_INTERRUPTS();
-        id_array = construct_array(routed_ids + offsets[p], counts[p], BYTEAOID, -1, false, 'i');
-        ordinal_array = construct_array(ordinals + offsets[p], counts[p], INT4OID, 4, true, 'i');
-        args[0] = PointerGetDatum(id_array);
-        args[1] = PointerGetDatum(ordinal_array);
-        rc = SPI_execute_plan(physicality_leaf_probe_plan(desc->oids[p]), args, NULL, true, 0);
-        if (rc != SPI_OK_SELECT) break;
-        for (uint64 r = 0; r < SPI_processed; r++)
+        ArrayType *id_array = construct_array(routed_ids + offsets[p], counts[p],
+            BYTEAOID, -1, false, 'i');
+        if (!laplace_identity_scan(desc->oids[p], id_array, mark_physicality_presence, presence))
         {
-            bool isnull;
-            Datum ordinal = SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull);
-            if (!isnull) bitmap_set(bm, DatumGetInt32(ordinal));
+            rc = batch_presence_core(ids_array, bm, candidate_count,
+                laplace_sql_query_text("physicalities.present_ordinals"), false);
+            pfree(id_array);
+            break;
         }
-        SPI_freetuptable(SPI_tuptable);
         pfree(id_array);
-        pfree(ordinal_array);
     }
+    for (int i = 0; i < n; i++)
+    {
+        if (owners[i] < 0) continue;
+        PhysicalityPresence *entry = hash_search(presence,
+            VARDATA_ANY(DatumGetByteaPP(ids[i])), HASH_FIND, NULL);
+        if (entry != NULL && entry->present) bitmap_set(bm, i);
+    }
+    hash_destroy(presence);
     pfree(ids);
     pfree(nulls);
     pfree(owners);
@@ -688,7 +679,6 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
     pfree(offsets);
     pfree(next);
     pfree(routed_ids);
-    pfree(ordinals);
     table_close(root, AccessShareLock);
     return rc;
 }
