@@ -99,12 +99,14 @@ export function NotFoundExplorer() {
       <Panel title="Decomposition">
         <div className={styles.decomp}>
           {data.decomposition
-            .filter((d) => d.tier <= 1 && d.label.length > 0)
+            .filter((d) => d.tier <= 2 && d.label.length > 0)
             .sort((a, b) => a.text_offset - b.text_offset || a.tier - b.tier)
             .map((d) => (
               <RouterLink
                 key={`d-${d.ordinal}`}
-                to={`/explore/entity/${d.id_hex}`}
+                to={d.tier === 2
+                  ? `/explore/resolve/${encodeURIComponent(d.label)}`
+                  : `/explore/entity/${d.id_hex}`}
                 className={styles.glyph}
                 title={`tier ${d.tier}`}
               >
