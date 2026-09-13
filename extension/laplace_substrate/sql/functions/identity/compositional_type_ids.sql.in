@@ -5,7 +5,7 @@ IMMUTABLE
 -- No SET search_path: every reference below is already schema-qualified (public.laplace_hash128_blake3),
 -- and the clause would block Postgres from INLINING/constant-folding this into callers' predicates —
 -- turning a compile-time-constant id set into 5 BLAKE3 hashes recomputed per entity row.
-AS $$
+BEGIN ATOMIC
     SELECT ARRAY[
         public.laplace_hash128_blake3('Codepoint'::bytea),
         public.laplace_hash128_blake3('Grapheme'::bytea),
@@ -13,4 +13,4 @@ AS $$
         public.laplace_hash128_blake3('Sentence'::bytea),
         public.laplace_hash128_blake3('Document'::bytea)
     ];
-$$;
+END;

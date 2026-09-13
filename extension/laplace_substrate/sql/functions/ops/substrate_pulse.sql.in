@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION ops.substrate_pulse()
                   physicalities bigint, last_flush_at timestamptz,
                   flushes_last_min bigint, folding boolean)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     SELECT
       (SELECT value FROM ops.substrate_counts() WHERE metric = 'entities(ESTIMATE)'),
       (SELECT value FROM ops.substrate_counts() WHERE metric = 'attestations(ESTIMATE)'),
@@ -28,5 +28,5 @@ CREATE OR REPLACE FUNCTION ops.substrate_pulse()
           WHERE a.datname = current_database()
             AND a.state = 'active'
             AND a.pid <> pg_backend_pid()
-            AND a.query ILIKE ANY (ARRAY['%attestation_merge%', '%consensus_upsert%', '%COPY %laplace.%']))
-$$;
+            AND a.query ILIKE ANY (ARRAY['%attestation_merge%', '%consensus_upsert%', '%COPY %laplace.%']));
+END;

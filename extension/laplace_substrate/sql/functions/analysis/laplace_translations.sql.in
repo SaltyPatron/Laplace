@@ -4,7 +4,15 @@
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
 DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
-DROP FUNCTION IF EXISTS lexical.translations(bytea, bytea);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('lexical.translations(bytea, bytea)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_entity_id','p_band_mask','translation_id','shared_object_id','eff_mu']::text[])) THEN
+        DROP FUNCTION lexical.translations(bytea, bytea);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION lexical.translations(
     p_entity_id bytea, p_band_mask bytea)
 RETURNS TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)

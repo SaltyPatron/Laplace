@@ -1,5 +1,13 @@
 DROP FUNCTION IF EXISTS laplace.explore_web(bytea, int, int, int);
-DROP FUNCTION IF EXISTS consensus.explore_web(bytea, int, int, int);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('consensus.explore_web(bytea, int, int, int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(source_id bytea, type_id bytea, object_id bytea, hop smallint, rating bigint, rd bigint, witness_count bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_seed','p_hops','p_fanout','p_max_nodes','source_id','type_id','object_id','hop','rating','rd','witness_count']::text[])) THEN
+        DROP FUNCTION consensus.explore_web(bytea, int, int, int);
+    END IF;
+END $upgrade_shape$;
 -- Explicit execution policy shares the native crawl and filters reverse
 -- directed relations before neighbor election, so they consume no fanout slots.
 CREATE OR REPLACE FUNCTION consensus.explore_web(

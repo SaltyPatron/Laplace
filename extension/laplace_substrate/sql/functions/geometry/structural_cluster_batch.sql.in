@@ -14,9 +14,25 @@
 DROP FUNCTION IF EXISTS laplace.structural_cluster_batch(bytea[], double precision, integer);
 -- The scalar BEGIN ATOMIC body records a dependency on the batch core. Retire the
 -- adapter first so future extension upgrades can replace the core without CASCADE.
-DROP FUNCTION IF EXISTS structural.cluster(bytea, double precision, integer);
-DROP FUNCTION IF EXISTS structural.cluster_batch(bytea[], double precision, integer);
-CREATE FUNCTION structural.cluster_batch(
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('structural.cluster(bytea, double precision, integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, label text, frechet double precision, recurrence bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_seed','p_eps','p_limit','entity_id','label','frechet','recurrence']::text[])) THEN
+        DROP FUNCTION structural.cluster(bytea, double precision, integer);
+    END IF;
+END $upgrade_shape$;
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('structural.cluster_batch(bytea[], double precision, integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(input_ordinal bigint, seed bytea, entity_id bytea, label text, frechet double precision, recurrence bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_seeds','p_eps','p_limit','input_ordinal','seed','entity_id','label','frechet','recurrence']::text[])) THEN
+        DROP FUNCTION structural.cluster_batch(bytea[], double precision, integer);
+    END IF;
+END $upgrade_shape$;
+CREATE OR REPLACE FUNCTION structural.cluster_batch(
     p_seeds bytea[],
     p_eps   double precision DEFAULT 0.05,
     p_limit integer          DEFAULT 200)

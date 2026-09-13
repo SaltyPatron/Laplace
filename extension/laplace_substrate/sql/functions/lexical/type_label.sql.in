@@ -12,6 +12,7 @@
 DROP FUNCTION IF EXISTS laplace.type_label(bytea);
 CREATE OR REPLACE FUNCTION lexical.type_label(p_type bytea)
     RETURNS text
-    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
-    SELECT lower(replace(realize.render(p_type), '_', ' '))
-$$;
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+BEGIN ATOMIC
+    SELECT lower(replace(realize.render(p_type), '_', ' '));
+END;

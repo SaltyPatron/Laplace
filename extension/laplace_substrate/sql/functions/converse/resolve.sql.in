@@ -10,10 +10,11 @@
 DROP FUNCTION IF EXISTS laplace.resolve(text);
 CREATE OR REPLACE FUNCTION converse.resolve(p_text text)
     RETURNS bytea
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     SELECT CASE
         WHEN position(' ' IN btrim(p_text)) = 0
             THEN laplace.word_id(btrim(p_text))
         ELSE converse.resolve_phrase(p_text)
-    END
-$$;
+    END;
+END;

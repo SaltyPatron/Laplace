@@ -2,7 +2,8 @@ DROP FUNCTION IF EXISTS laplace.consensus_stats_approx();
 CREATE OR REPLACE FUNCTION consensus.stats_approx()
     RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,
                   avg_witnesses numeric, max_witnesses bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     WITH est AS (
         SELECT c.relname,
                GREATEST(c.reltuples, 0)::bigint AS est_rows
@@ -21,5 +22,5 @@ CREATE OR REPLACE FUNCTION consensus.stats_approx()
            round((SELECT est_rows FROM est WHERE relname = 'attestations')::numeric
                  / NULLIF((SELECT est_rows FROM est WHERE relname = 'consensus'), 0), 3),
            NULL::numeric,
-           NULL::bigint
-$$;
+           NULL::bigint;
+END;

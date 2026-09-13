@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION taxonomy.tree(
     p_child_limit integer DEFAULT NULL)
     RETURNS TABLE(dir text, ord int, id bytea, label text, eff_mu numeric)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     WITH root AS MATERIALIZED (
         SELECT COALESCE(taxonomy.top_synset(p_id), p_id) AS id
     ), raw AS MATERIALIZED (
@@ -37,5 +37,5 @@ CREATE OR REPLACE FUNCTION taxonomy.tree(
     )
     SELECT r.dir, r.ord, r.id, l.txt, r.eff_mu
     FROM raw r JOIN labels l ON l.id=r.id
-    ORDER BY CASE r.dir WHEN 'self' THEN 0 WHEN 'up' THEN 1 ELSE 2 END, r.ord
-$$;
+    ORDER BY CASE r.dir WHEN 'self' THEN 0 WHEN 'up' THEN 1 ELSE 2 END, r.ord;
+END;

@@ -16,7 +16,7 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     -- surface still ship that default; each needs a measured cardinality or a bound
     -- like this one, never a guessed number.
     ROWS 64
-    AS $$
+BEGIN ATOMIC
     SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
     FROM taxonomy.bubble_up(p_word, NULL::bytea[], 64) b
     -- EVIDENCE BEFORE ADJUDICATED STRENGTH — see the matching note in
@@ -38,5 +38,5 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     -- |rating - neutral| 192.85 against mean rd 262.24 across 447,145 consensus
     -- rows, so 2*rd runs ~2.7x the signal and consensus.eff_mu sorts substantially by how
     -- little rd has shrunk.
-    ORDER BY b.witnesses DESC, b.score DESC
-$$;
+    ORDER BY b.witnesses DESC, b.score DESC;
+END;

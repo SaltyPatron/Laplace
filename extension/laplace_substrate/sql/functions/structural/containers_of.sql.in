@@ -36,7 +36,15 @@ CREATE OR REPLACE FUNCTION structural.containers_containing_all(p_members bytea[
 -- word-point surface, but accepts the decomposer's word identities as input.
 -- It delegates to the same native reader with those identities intact.
 -- The compatibility capacity never limits the discoverable set.
-DROP FUNCTION IF EXISTS structural.word_containers_containing_all(bytea[], int);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('structural.word_containers_containing_all(bytea[], int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, candidate_count bigint, truncated boolean)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_members','p_capacity','entity_id','candidate_count','truncated']::text[])) THEN
+        DROP FUNCTION structural.word_containers_containing_all(bytea[], int);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION structural.word_containers_containing_all(
     p_members bytea[],
     p_capacity int DEFAULT 2048)

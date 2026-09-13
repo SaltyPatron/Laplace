@@ -1,12 +1,20 @@
--- View still binds the flat name until its CREATE OR REPLACE later in the
--- install chain; drop it so the dual-name ban (#532) DROP can proceed.
-DROP VIEW IF EXISTS laplace.v_attestation_readable;
-DROP FUNCTION IF EXISTS laplace.label_or_hex(bytea);
+-- Retire the historical flat-name binding only when it still exists.
+-- Current atomic callers retain their dependency on the current view OID.
+DO $retire_flat_label$
+BEGIN
+    IF to_regprocedure('laplace.label_or_hex(bytea)') IS NOT NULL THEN
+        DROP VIEW IF EXISTS laplace.v_attestation_readable;
+        DROP FUNCTION laplace.label_or_hex(bytea);
+    END IF;
+END $retire_flat_label$;
 CREATE OR REPLACE FUNCTION converse.label_or_hex(p_id bytea)
     RETURNS text
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+
     -- Legacy name retained for installed-call compatibility. Human-facing reads
     -- receive the entity's realized label or an honest abstention marker. A hash
     -- is identity metadata and must never be fabricated as display content.
     SELECT COALESCE(realize.label(p_id), 'unrealized entity')
-$$;
+;
+END;

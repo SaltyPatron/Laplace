@@ -1,18 +1,19 @@
 DROP FUNCTION IF EXISTS laplace.grapheme_order(bytea[], int, int);
 CREATE OR REPLACE FUNCTION generation.grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    
-    
-    
-    
-    
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
+
+
+
+
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     t AS (
-        
-        
-        
-        
+
+
+
+
         -- Role by TYPE, not tier. `tier = 2` was never "word": bootstrap mints relation
         -- types, trust classes, POS tags, sources and languages at tier 2 too, so this
         -- was spelling out the grapheme runs of RelationType and Language laplace.entities. It
@@ -34,10 +35,10 @@ CREATE OR REPLACE FUNCTION generation.grapheme_order(p_vocab bytea[], p_words in
         LIMIT p_words
     ),
     g AS (
-        
-        
-        
-        
+
+
+
+
         SELECT t.wid, tc.ordinal AS ord, gs.i AS sub, tc.entity_id AS ch
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
         CROSS JOIN LATERAL generate_series(1, GREATEST(tc.run_length, 1)) gs(i)
@@ -52,5 +53,5 @@ CREATE OR REPLACE FUNCTION generation.grapheme_order(p_vocab bytea[], p_words in
     SELECT b.cur, b.nxt, b.c
     FROM cnt b
     JOIN v vs ON vs.id = b.cur
-    JOIN v vo ON vo.id = b.nxt
-$$;
+    JOIN v vo ON vo.id = b.nxt;
+END;

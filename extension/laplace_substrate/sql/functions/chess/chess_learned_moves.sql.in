@@ -11,7 +11,15 @@
 -- thereafter, which is exactly what chess.moves already reads and what the rated
 -- MOVE web was designed to hold. Materializing it is the follow-up; until then
 -- callers must state how much testimony they are willing to pay for.
-DROP FUNCTION IF EXISTS chess.learned_moves(integer);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('chess.learned_moves(integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(move_id bytea, plays bigint, mover_score double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_games','move_id','plays','mover_score']::text[])) THEN
+        DROP FUNCTION chess.learned_moves(integer);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION chess.learned_moves(p_games integer DEFAULT 20000)
     RETURNS TABLE(move_id bytea, plays bigint, mover_score double precision)
     LANGUAGE C STABLE PARALLEL SAFE
