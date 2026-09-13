@@ -1,7 +1,19 @@
-CREATE OR REPLACE FUNCTION laplace.physicalities_exist_bitmap(ids bytea[])
+-- Native positive-confirmation core. It already treats malformed-width values as
+-- absent while preserving input ordinals. Keep this binding separate so the public
+-- surface can map SQL NULL elements to the same explicit absent sentinel without a
+-- PL/pgSQL/RBAR loop or another database crossing.
+CREATE OR REPLACE FUNCTION laplace.physicalities_exist_bitmap_native(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap'
     LANGUAGE C STABLE;
+
+CREATE OR REPLACE FUNCTION laplace.physicalities_exist_bitmap(ids bytea[])
+    RETURNS bytea
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT laplace.physicalities_exist_bitmap_native(
+        array_replace(ids, NULL::bytea, ''::bytea));
+END;
 
 -- The (ids, hilberts) keyed overload is GONE (2026-08-04). It pruned each probe
 -- to the RANGE(hilbert_index) band holding the row; physicalities is now
