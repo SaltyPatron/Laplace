@@ -105,6 +105,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     // independently, so none of them tracked RAM, row width, or connection fanout.
     private static readonly IngestSizing.ConsensusFoldPlan FoldSizing =
         IngestSizing.ResolveConsensusFold(IngestTopology.Current.ApplyPartitions);
+    // The atomic evidence+consensus path owns exactly one PostgreSQL backend and
+    // one transaction. Reusing the parallel-lane chunk width divided its memory
+    // envelope by ApplyPartitions even though no parallel fold connections can
+    // exist inside that transaction, multiplying serial calls for no memory gain.
+    private static readonly int AtomicFoldChunkCells =
+        IngestSizing.ResolveConsensusFold(1).ChunkCells;
     private readonly SemaphoreSlim _foldDepth =
         new(FoldSizing.PipelineDepth, FoldSizing.PipelineDepth);
     private readonly object _foldChainLock = new();
@@ -549,7 +555,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         return delta.Count == 0 ? null : delta;
     }
 
-    private static Dictionary<(Hash128, Hash128, Hash128?), Delta> NewDeltaMap(int hint) =>
+    private static Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> NewDeltaMap(int hint) =>
         new(Math.Clamp(hint, 1, FoldSizing.DeltaCapacityCells));
 
     /// <summary>
@@ -765,9 +771,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             while (runEnd < cells.Length && cells[runEnd].Key.T == cells[runStart].Key.T)
                 runEnd++;
             Hash128 type = cells[runStart].Key.T;
-            for (int off = runStart; off < runEnd; off += FoldSizing.ChunkCells)
+            for (int off = runStart; off < runEnd; off += AtomicFoldChunkCells)
             {
-                int count = Math.Min(FoldSizing.ChunkCells, runEnd - off);
+                int count = Math.Min(AtomicFoldChunkCells, runEnd - off);
                 var subjects = new byte[count][];
                 var objects = new byte[count][];
                 var phis = new long[count];
@@ -851,9 +857,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         long masks = 0;
         long maskCalls = 0;
         long maskStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-        for (int off = 0; off < orderedPairs.Count; off += FoldSizing.ChunkCells)
+        for (int off = 0; off < orderedPairs.Count; off += AtomicFoldChunkCells)
         {
-            int count = Math.Min(FoldSizing.ChunkCells, orderedPairs.Count - off);
+            int count = Math.Min(AtomicFoldChunkCells, orderedPairs.Count - off);
             var entities = new byte[count][];
             var maskTypes = new byte[count][];
             for (int i = 0; i < count; i++)
