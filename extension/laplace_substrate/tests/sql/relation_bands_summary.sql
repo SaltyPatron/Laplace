@@ -6,12 +6,12 @@ BEGIN;
 
 DO $relation_bands_summary$
 DECLARE
-    subject_id bytea := decode(repeat('a1',16),'hex');
-    object_is_a bytea := decode(repeat('b1',16),'hex');
-    object_causes bytea := decode(repeat('b2',16),'hex');
-    is_a bytea := laplace.relation_type_id('IS_A');
-    causes bytea := laplace.relation_type_id('CAUSES');
-    plan json;
+    v_subject_id bytea := decode(repeat('a1',16),'hex');
+    v_object_is_a bytea := decode(repeat('b1',16),'hex');
+    v_object_causes bytea := decode(repeat('b2',16),'hex');
+    v_is_a bytea := laplace.relation_type_id('IS_A');
+    v_causes bytea := laplace.relation_type_id('CAUSES');
+    v_plan json;
 BEGIN
     IF EXISTS (
         WITH direct AS (
@@ -32,11 +32,11 @@ BEGIN
         id, subject_id, type_id, object_id,
         rating, rd, volatility, witness_count, last_observed_at)
     VALUES
-      (laplace.consensus_id(subject_id, is_a, object_is_a),
-       subject_id, is_a, object_is_a,
+      (laplace.consensus_id(v_subject_id, v_is_a, v_object_is_a),
+       v_subject_id, v_is_a, v_object_is_a,
        1500000000000, 30000000000, 60000000, 1, clock_timestamp()),
-      (laplace.consensus_id(subject_id, causes, object_causes),
-       subject_id, causes, object_causes,
+      (laplace.consensus_id(v_subject_id, v_causes, v_object_causes),
+       v_subject_id, v_causes, v_object_causes,
        1500000000000, 30000000000, 60000000, 1, clock_timestamp());
 
     IF EXISTS (
@@ -55,11 +55,11 @@ BEGIN
     END IF;
 
     UPDATE laplace.consensus AS c
-    SET type_id = causes,
-        id = laplace.consensus_id(c.subject_id, causes, c.object_id)
-    WHERE c.id = laplace.consensus_id(subject_id, is_a, object_is_a)
-      AND c.type_id = is_a
-      AND c.subject_id = subject_id;
+    SET type_id = v_causes,
+        id = laplace.consensus_id(c.subject_id, v_causes, c.object_id)
+    WHERE c.id = laplace.consensus_id(v_subject_id, v_is_a, v_object_is_a)
+      AND c.type_id = v_is_a
+      AND c.subject_id = v_subject_id;
 
     IF EXISTS (
         WITH direct AS (
@@ -77,9 +77,9 @@ BEGIN
     END IF;
 
     DELETE FROM laplace.consensus AS c
-    WHERE c.id = laplace.consensus_id(subject_id, causes, object_causes)
-      AND c.type_id = causes
-      AND c.subject_id = subject_id;
+    WHERE c.id = laplace.consensus_id(v_subject_id, v_causes, v_object_causes)
+      AND c.type_id = v_causes
+      AND c.subject_id = v_subject_id;
 
     IF EXISTS (
         WITH direct AS (
@@ -103,9 +103,9 @@ BEGIN
 
     EXECUTE 'EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) '
             'SELECT * FROM converse.relation_bands()'
-    INTO STRICT plan;
-    IF plan::text LIKE '%"Relation Name": "consensus"%' THEN
-        RAISE EXCEPTION 'relation_bands still scans consensus: %', plan;
+    INTO STRICT v_plan;
+    IF v_plan::text LIKE '%"Relation Name": "consensus"%' THEN
+        RAISE EXCEPTION 'relation_bands still scans consensus: %', v_plan;
     END IF;
 
     TRUNCATE TABLE laplace.consensus;
