@@ -87,23 +87,64 @@ pg_laplace_word_containers_containing_all(PG_FUNCTION_ARGS)
     return (Datum)0;
 }
 
+typedef enum {
+    BROWSE_MATCH_EXACT = 0,
+    BROWSE_MATCH_MEMBER = 1,
+    BROWSE_MATCH_CONTAINER = 2,
+    BROWSE_MATCH_NAME = 3
+} BrowseMatchKind;
+
 typedef struct {
     hash128_t id;
     hash128_t name;
     hash128_t type;
     int64 rating, rd, witnesses;
     int16 tier;
-    bool direct, exists;
+    uint8 match_kind;
+    bool exists;
 } BrowseHit;
+
+static const char *
+match_kind_name(uint8 kind)
+{
+    switch ((BrowseMatchKind) kind) {
+        case BROWSE_MATCH_EXACT: return "exact";
+        case BROWSE_MATCH_MEMBER: return "member";
+        case BROWSE_MATCH_CONTAINER: return "container";
+        case BROWSE_MATCH_NAME: return "name";
+    }
+    return "unknown";
+}
+
+static void
+promote_direct_hit(HTAB *hits, const hash128_t *id, BrowseMatchKind kind)
+{
+    bool found;
+    BrowseHit *hit = hash_search(hits, id, HASH_ENTER, &found);
+    if (!found) {
+        memset(hit, 0, sizeof(*hit));
+        hit->id = *id;
+        hit->name = *id;
+        hit->match_kind = (uint8) kind;
+        return;
+    }
+    if ((uint8) kind < hit->match_kind) {
+        hit->match_kind = (uint8) kind;
+        hit->name = *id;
+    }
+}
 
 static int
 hit_compare(const void *a, const void *b)
 {
     const BrowseHit *x = a, *y = b;
-    if (x->direct != y->direct) return x->direct ? 1 : -1;
-    int64 xm = eff_mu_display_fp(x->rating, x->rd), ym = eff_mu_display_fp(y->rating, y->rd);
-    if (xm != ym) return xm > ym ? -1 : 1;
-    if (x->witnesses != y->witnesses) return x->witnesses > y->witnesses ? -1 : 1;
+    if (x->match_kind != y->match_kind)
+        return x->match_kind < y->match_kind ? -1 : 1;
+    if (x->match_kind == BROWSE_MATCH_NAME) {
+        int64 xm = eff_mu_display_fp(x->rating, x->rd), ym = eff_mu_display_fp(y->rating, y->rd);
+        if (xm != ym) return xm > ym ? -1 : 1;
+        if (x->witnesses != y->witnesses) return x->witnesses > y->witnesses ? -1 : 1;
+    }
     return id_compare(&x->id, &y->id);
 }
 
@@ -120,9 +161,10 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     bool spi_top = false, truncated = false;
     int count = 0;
     Oid array_type[] = {BYTEAARRAYOID};
+    ArrayType *member_array = PG_ARGISNULL(0) ? NULL : PG_GETARG_ARRAYTYPE_P(0);
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT) elog(ERROR, "browse: SPI connect failed");
-    hash128_t *names = PG_ARGISNULL(0) ? NULL : candidate_names(
-        PG_GETARG_ARRAYTYPE_P(0), capacity, &count, &truncated);
+    hash128_t *names = member_array == NULL ? NULL : candidate_names(
+        member_array, capacity, &count, &truncated);
     HTAB *hits = id_table("browse selected names", sizeof(BrowseHit));
     Datum *name_datums = palloc(Max(count, 1) * sizeof(Datum));
     for (int i = 0; i < count; ++i) name_datums[i] = hash128_to_datum(&names[i]);
@@ -143,33 +185,49 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
             BrowseHit hit = {0};
             hit.id = datum_to_hash128(v[0]); hit.name = datum_to_hash128(v[1]);
             hit.rating = DatumGetInt64(v[2]); hit.rd = DatumGetInt64(v[3]); hit.witnesses = DatumGetInt64(v[4]);
+            hit.match_kind = BROWSE_MATCH_NAME;
             if (laplace_glicko2_refuted(hit.rating, hit.rd)) continue;
             BrowseHit *old = hash_search(hits, &hit.id, HASH_ENTER, &found);
             int64 mu = laplace_effective_mu_fp(hit.rating, hit.rd);
             int64 old_mu = found ? laplace_effective_mu_fp(old->rating, old->rd) : 0;
-            if (!found || mu > old_mu || (mu == old_mu && (hit.witnesses > old->witnesses ||
-                (hit.witnesses == old->witnesses && id_compare(&hit.name, &old->name) < 0)))) *old = hit;
+            if (!found || (old->match_kind == BROWSE_MATCH_NAME &&
+                (mu > old_mu || (mu == old_mu && (hit.witnesses > old->witnesses ||
+                (hit.witnesses == old->witnesses && id_compare(&hit.name, &old->name) < 0))))))
+                *old = hit;
         }
         SPI_freetuptable(SPI_tuptable);
         if (n == 0) break;
     }
     SPI_cursor_close(cursor);
+
+    /* Exact input and decomposed members are distinct result classes. Merely
+     * calculating these ids still does not make them present; the facets batch
+     * below is the presence gate. */
     if (!PG_ARGISNULL(1)) {
         hash128_t exact = datum_to_hash128(PG_GETARG_DATUM(1));
-        bool found;
-        BrowseHit *hit = hash_search(hits, &exact, HASH_ENTER, &found);
-        if (!found) { memset(hit, 0, sizeof(*hit)); hit->id = exact; hit->name = exact; hit->direct = true; }
+        promote_direct_hit(hits, &exact, BROWSE_MATCH_EXACT);
     }
-    /* Containment is a product result in its own right. Attested names above
-     * attach domain entities; they do not hide the matched content DAG. */
-    for (int i = 0; i < count; ++i) {
-        bool found;
-        BrowseHit *hit = hash_search(hits,&names[i],HASH_ENTER,&found);
-        if (!found) {
-            memset(hit,0,sizeof(*hit)); hit->id = names[i]; hit->name = names[i]; hit->direct = true;
+    if (member_array != NULL) {
+        Datum *member_datums;
+        bool *member_nulls;
+        int n_members;
+        deconstruct_array(member_array, BYTEAOID, -1, false, TYPALIGN_INT,
+                          &member_datums, &member_nulls, &n_members);
+        for (int i = 0; i < n_members; ++i) {
+            if (member_nulls[i]) continue;
+            hash128_t member = datum_to_hash128(member_datums[i]);
+            promote_direct_hit(hits, &member, BROWSE_MATCH_MEMBER);
         }
     }
-    /* One batch hydrates all matched identities, including the exact arm. */
+
+    /* Containment is a product result in its own right. Attested names above
+     * attach domain entities; they do not hide the matched content DAG. */
+    for (int i = 0; i < count; ++i)
+        promote_direct_hit(hits, &names[i], BROWSE_MATCH_CONTAINER);
+
+    /* One batch hydrates all matched identities, including exact/member/container
+     * arms. Unwitnessed calculated ids disappear here instead of becoming empty
+     * entity results. */
     args[0] = PointerGetDatum(id_array(hits));
     p = plan(&facets_plan, laplace_sql_query_text("entity.facets"), 1, array_type);
     if (SPI_execute_plan(p, args, NULL, true, 0) != SPI_OK_SELECT) elog(ERROR, "browse: facet read failed");
@@ -193,12 +251,13 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     qsort(ordered, n, sizeof(BrowseHit), hit_compare);
     for (int64 i = offset; i < n && i < (int64)offset + limit; ++i) {
         hit = &ordered[i];
+        bool scored = hit->match_kind == BROWSE_MATCH_NAME;
         Datum v[] = {hash128_to_datum(&hit->id), Int16GetDatum(hit->tier), hash128_to_datum(&hit->type),
-            hash128_to_datum(&hit->name), CStringGetTextDatum(hit->direct ? "surface" : "name"),
+            hash128_to_datum(&hit->name), CStringGetTextDatum(match_kind_name(hit->match_kind)),
             fp_display_numeric(hit->rating), fp_display_numeric(hit->rd), eff_mu_display_numeric(hit->rating, hit->rd),
             Int64GetDatum(hit->witnesses), Int64GetDatum(count), BoolGetDatum(truncated), Int64GetDatum(n)};
         bool nulls[12] = {false};
-        nulls[5] = nulls[6] = nulls[7] = hit->direct;
+        nulls[5] = nulls[6] = nulls[7] = !scored;
         tuplestore_putvalues(r->setResult, r->setDesc, v, nulls);
     }
     hash_destroy(hits);
