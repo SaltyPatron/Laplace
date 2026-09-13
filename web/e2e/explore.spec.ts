@@ -151,8 +151,8 @@ test('Not-found decomposition keeps tier-2 word constituents visible', async ({ 
   });
 
   await page.goto('/explore/notfound/Sodium%20Chloride');
-  await expect(page.getByRole('link', { name: 'Sodium', exact: true })).toHaveAttribute('href', `/explore/entity/${sodiumId}`);
-  await expect(page.getByRole('link', { name: 'Chloride', exact: true })).toHaveAttribute('href', `/explore/entity/${chlorideId}`);
+  await expect(page.getByRole('link', { name: 'Sodium', exact: true })).toHaveAttribute('href', '/explore/resolve/Sodium');
+  await expect(page.getByRole('link', { name: 'Chloride', exact: true })).toHaveAttribute('href', '/explore/resolve/Chloride');
   await expect(page.getByRole('link', { name: 'Sodium Chloride', exact: true })).toHaveCount(0);
 });
 
