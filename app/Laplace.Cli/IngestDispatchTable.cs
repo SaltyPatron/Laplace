@@ -226,10 +226,22 @@ internal static class IngestDispatchTable
         return false;
     }
 
-    internal static IReadOnlyCollection<string> RegisteredKeys => Routes.Keys;
+    /// <summary>A safetensors snapshot reaches the same handler under three names.</summary>
+    private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
 
-    private static readonly string[] ModelAliases =
-    [
-        "safetensors", "hf-model", "bge-m3", "qwen", "qwen3", "minilm", "model",
-    ];
+    /// <summary>
+    /// EVERYTHING <see cref="TryDispatch"/> can actually route — the explicit table,
+    /// the model aliases, and the manifest rows reachable through the generic ETL
+    /// lane. This used to report only Routes.Keys, so it under-reported by the model
+    /// aliases and by every ETL-routable source, and callers that printed it (the
+    /// unknown-source error, `ingest` usage) told the operator less than the binary
+    /// supports. One property, so help text and error text cannot disagree with
+    /// dispatch or with each other.
+    /// </summary>
+    internal static IReadOnlyCollection<string> RegisteredKeys =>
+        Routes.Keys
+              .Concat(ModelAliases)
+              .Concat(EtlManifest.Names.Where(EtlManifest.IsRoutable))
+              .Distinct(StringComparer.OrdinalIgnoreCase)
+              .ToArray();
 }
