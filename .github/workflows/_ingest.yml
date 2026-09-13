@@ -94,9 +94,7 @@ jobs:
     # 10-hour one that happened to finish.
     outputs:
       elapsed_s: ${{ steps.run_ingest.outputs.elapsed_s }}
-      # A PREEMPTED run reports green (#S5) so the seed lane's red keeps meaning
-      # "something is broken". Green is not certified: every gate below refuses to
-      # run on it, so nothing reads a bounce-killed seed as a completed one.
+      # Interrupted ingests fail the job; this output preserves the reason.
       preempted: ${{ steps.run_ingest.outputs.preempted }}
       journal_verified: ${{ steps.journal_proof.outcome == 'success' }}
     env:

@@ -6,23 +6,8 @@
 #
 #   classify-ingest-exit.sh <detail-log> [run-started-epoch]
 #
-# WHY THIS IS A SEPARATE FILE. It is the one piece of S5 that can be wrong in a way
-# nobody notices: classifying a real defect as "preempted" hides it, and that is strictly
-# worse than the red it replaces. A classifier inlined in a workflow step is a classifier
-# nobody can run against a fixture. This one is a pure function of a log file, so it is
-# testable, and scripts/tests/classify-ingest-exit.test.sh proves both directions.
-#
-# WHAT IT IS FOR. MEASURED 2026-08-15 (docs/sql-refactor-tasklist.md §S5): a chess seed
-# died at 22:36:41 to
-#     sudo systemctl restart laplace-postgresql.service
-# and reported `failure` after 1 s with 57P03. .github/workflows/laplace.yml:17-19 already states that
-# rebuilds preempt seeds BY DESIGN and that seed steps are idempotent/resumable, so "a
-# preempted seed loses nothing and re-runs cleanly". A run that the workflow's own header
-# calls expected must not be indistinguishable from a broken decomposer -- that is how a
-# 0%-green seed lane stops carrying information.
-#
-# PREEMPTED IS NOT SUCCESS. It only suppresses the red. The caller must still refuse to
-# certify: nothing downstream may read a preempted run as a completed seed.
+# This is diagnostic classification only. The caller preserves the nonzero process
+# exit code for both outcomes; neither outcome certifies a completed ingest.
 set -euo pipefail
 
 LOG="${1:?usage: classify-ingest-exit.sh <detail-log> [run-started-epoch]}"

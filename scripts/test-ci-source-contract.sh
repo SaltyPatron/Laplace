@@ -82,3 +82,6 @@ python3 scripts/test-forward-prompt-analysis.py
 # a synthetic manifest before the live-catalog checker uses that model.
 python3 scripts/test-upgrade-drop-order.py
 python3 scripts/test-sql-manifest-dependencies.py
+
+# Ingest interruption is diagnostic metadata, never successful completion.
+python3 scripts/test-ingest-source-exit.py

@@ -4,7 +4,6 @@ set -euo pipefail
 
 source="${1:-}"
 path="${2:-}"
-LOGDIR="${INGEST_LOGDIR:-/tmp}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 
 FLOOR=(unicode iso639 cili)
@@ -19,6 +18,15 @@ if [[ -z "$source" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/storage.sh"
+laplace_storage_init
+LOGDIR="${INGEST_LOGDIR:-$TMPDIR/laplace-ingest}"
+LOGDIR="$(realpath -m -- "$LOGDIR")"
+case "$LOGDIR" in
+    /tmp|/tmp/*|/var/tmp|/var/tmp/*|/dev/shm|/dev/shm/*)
+        echo "Ingest logs require permanent storage: $LOGDIR" >&2; exit 2 ;;
+esac
+mkdir -p -- "$LOGDIR"
 export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
 DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
 
@@ -26,11 +34,6 @@ DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
 # a log warehouse — default CI/console to quiet unless the operator overrides.
 if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; then
     export LAPLACE_INGEST_CONSOLE=ci
-fi
-# Detail log on disk when CI (journal still validates); keep job log short.
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-    LOGDIR="${INGEST_LOGDIR:-${RUNNER_TEMP:-/tmp}/laplace-ingest}"
-    mkdir -p "$LOGDIR"
 fi
 
 # Content-fingerprint gate for the CLI build (scripts/lib/fp.sh, stamp cli-build):
@@ -68,20 +71,11 @@ ingest() {
         # Job log: timing + journal. Full stderr → file on the runner.
         ( cd "$ROOT/app" && dotnet "$DLL" ingest "${ingest_args[@]}" ) >"$detail" 2>&1 || rc=$?
         if [[ "$rc" -ne 0 ]]; then
-            # PREEMPTION IS NOT FAILURE (#S5). .github/workflows/laplace.yml:17-19 states that rebuilds
-            # preempt seeds BY DESIGN and that seed steps are idempotent/resumable, so
-            # "a preempted seed loses nothing and re-runs cleanly". MEASURED 2026-08-15:
-            # a chess seed was killed at 22:36:41 by `systemctl restart
-            # laplace-postgresql.service` and reported failure after 1s on 57P03. A run
-            # the workflow's own header calls expected must not look identical to a
-            # broken decomposer, or the seed lane's red stops carrying information.
-            #
-            # It only suppresses the red. `preempted` is NOT success: every downstream
-            # certifier in _ingest.yml refuses to run on it, so nothing reads a preempted
-            # run as a completed seed.
+            # Preserve the process failure even when a database restart caused it.
+            # Classification adds diagnosis; it must never certify an incomplete run.
             if [[ "$(bash "$ROOT/scripts/classify-ingest-exit.sh" "$detail" "$t0_epoch")" == "preempted" ]]; then
                 preempted=1
-                echo "::warning::ingest ${source} PREEMPTED — the cluster went away mid-run (rc=${rc}). Resumable by design (.github/workflows/laplace.yml:17-19); re-dispatch to continue. Not certified: no journal proof, no throughput gate, no idempotency check."
+                echo "::error::ingest ${source} PREEMPTED — the cluster went away mid-run (rc=${rc}). The ingest did not complete; a resumed run must pass its own completion checks. Not certified: no journal proof, no throughput gate, no idempotency check."
                 tail -20 "$detail" >&2 || true
             else
                 echo "::error::ingest ${source} failed rc=${rc} — last 80 lines of ${detail}"
@@ -96,17 +90,17 @@ ingest() {
     if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
         # The throughput gate parses the detail log; under LAPLACE_INGEST_CONSOLE=ci
         # nothing else machine-readable lands there.
-        echo "INGEST_TIMING ${TIMING_LABEL:-source=$source} elapsed_s=$elapsed rc=$rc" >> "$detail"
+        if ! echo "INGEST_TIMING ${TIMING_LABEL:-source=$source} elapsed_s=$elapsed rc=$rc" >> "$detail"; then
+            echo "::error::cannot persist ingest timing to $detail (process rc=$rc)" >&2
+            [[ "$rc" -ne 0 ]] || rc=1
+        fi
     fi
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-        echo "elapsed_s=$elapsed" >> "$GITHUB_OUTPUT"
-        echo "preempted=$([[ "$preempted" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-    fi
-    # A preempted run reports green so the lane's red keeps meaning "something is broken",
-    # and reports it ONLY here -- rc stays non-zero for every non-CI caller, and the
-    # certifiers downstream all gate on outputs.preempted != 'true'.
-    if [[ "$preempted" -eq 1 ]]; then
-        return 0
+        if ! printf 'elapsed_s=%s\npreempted=%s\n' "$elapsed" \
+            "$([[ "$preempted" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"; then
+            echo "::error::cannot persist ingest outputs to $GITHUB_OUTPUT (process rc=$rc)" >&2
+            [[ "$rc" -ne 0 ]] || rc=1
+        fi
     fi
     if [[ "$rc" -eq 0 ]]; then
         # Pass/fail is the journal row when this source is in decomposer-gates.json.
