@@ -35,8 +35,20 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
         string path,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        fileLabel = ClaimArtifact(context, path, fileLabel);
-        Hash128? fileRoot = IngestBatchPipeline.TryResolveFileIdentity(path);
+        string fullPath = Path.GetFullPath(path);
+        if (context.HasArtifactGraph
+            && !context.SelectedArtifacts.Any(artifact => string.Equals(
+                Path.GetFullPath(artifact.Path), fullPath, StringComparison.Ordinal)))
+        {
+            // The manifest explicitly knows this physical file but did not admit it.
+            // Do not open it and do not claim completion. Conversely, any admitted file
+            // that the source never reaches is caught by DecomposerMultiPhase's terminal
+            // selected-artifact closure check.
+            yield break;
+        }
+
+        fileLabel = ClaimArtifact(context, fullPath, fileLabel);
+        Hash128? fileRoot = IngestBatchPipeline.TryResolveFileIdentity(fullPath);
         var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
 
         if (fileRoot is { } root
@@ -54,7 +66,7 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
         }
 
         observability.OnFileStarted(
-            phase.SourceName, fileLabel, IngestBatchPipeline.TryFileBytes(path));
+            phase.SourceName, fileLabel, IngestBatchPipeline.TryFileBytes(fullPath));
 
         long records = 0;
         long entities = 0;
