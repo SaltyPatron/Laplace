@@ -67,17 +67,17 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $body$
 BEGIN
-    UPDATE converse.relation_band_live_counts AS counts
-    SET consensus_rows = counts.consensus_rows - removed.row_count
-    FROM (
-        SELECT o.type_id, count(*)::bigint AS row_count
+    MERGE INTO converse.relation_band_live_counts AS counts
+    USING (
+        SELECT o.type_id, (-count(*))::bigint AS delta
         FROM old_consensus_rows AS o
         GROUP BY o.type_id
-    ) AS removed
-    WHERE counts.type_id = removed.type_id;
-
-    DELETE FROM converse.relation_band_live_counts
-    WHERE consensus_rows = 0;
+    ) AS change
+    ON counts.type_id = change.type_id
+    WHEN MATCHED AND counts.consensus_rows + change.delta = 0 THEN
+        DELETE
+    WHEN MATCHED THEN
+        UPDATE SET consensus_rows = counts.consensus_rows + change.delta;
     RETURN NULL;
 END
 $body$;
@@ -89,24 +89,27 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $body$
 BEGIN
-    UPDATE converse.relation_band_live_counts AS counts
-    SET consensus_rows = counts.consensus_rows - removed.row_count
-    FROM (
-        SELECT o.type_id, count(*)::bigint AS row_count
-        FROM old_consensus_rows AS o
-        GROUP BY o.type_id
-    ) AS removed
-    WHERE counts.type_id = removed.type_id;
-
-    DELETE FROM converse.relation_band_live_counts
-    WHERE consensus_rows = 0;
-
-    INSERT INTO converse.relation_band_live_counts AS counts(type_id, consensus_rows)
-    SELECT n.type_id, count(*)::bigint
-    FROM new_consensus_rows AS n
-    GROUP BY n.type_id
-    ON CONFLICT (type_id) DO UPDATE
-    SET consensus_rows = counts.consensus_rows + EXCLUDED.consensus_rows;
+    MERGE INTO converse.relation_band_live_counts AS counts
+    USING (
+        SELECT delta.type_id, sum(delta.row_delta)::bigint AS delta
+        FROM (
+            SELECT o.type_id, -1::bigint AS row_delta
+            FROM old_consensus_rows AS o
+            UNION ALL
+            SELECT n.type_id, 1::bigint AS row_delta
+            FROM new_consensus_rows AS n
+        ) AS delta
+        GROUP BY delta.type_id
+        HAVING sum(delta.row_delta) <> 0
+    ) AS change
+    ON counts.type_id = change.type_id
+    WHEN MATCHED AND counts.consensus_rows + change.delta = 0 THEN
+        DELETE
+    WHEN MATCHED THEN
+        UPDATE SET consensus_rows = counts.consensus_rows + change.delta
+    WHEN NOT MATCHED AND change.delta > 0 THEN
+        INSERT (type_id, consensus_rows)
+        VALUES (change.type_id, change.delta);
     RETURN NULL;
 END
 $body$;
