@@ -6,6 +6,9 @@ BEGIN ATOMIC
     -- Deterministic content identity is not proof that an entity is admitted.
     -- Direct resolution returns only identities witnessed by the current world;
     -- free-form discovery belongs to Browse/decomposition and containment.
+    -- entities_exist_bitmap is installed before the converse functions and owns
+    -- the same committed-row + tier-0 perfcache presence semantics as the later
+    -- scalar consensus.entity_exists helper.
     WITH candidate AS (
         SELECT CASE
             WHEN p_ref ~ '^[0-9a-f]{32}$' THEN decode(p_ref, 'hex')
@@ -15,5 +18,5 @@ BEGIN ATOMIC
     SELECT candidate.id
     FROM candidate
     WHERE candidate.id IS NOT NULL
-      AND consensus.entity_exists(candidate.id);
+      AND (get_byte(laplace.entities_exist_bitmap(ARRAY[candidate.id]::bytea[]), 0) & 1) = 1;
 END;
