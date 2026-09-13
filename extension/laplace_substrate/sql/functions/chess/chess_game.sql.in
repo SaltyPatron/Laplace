@@ -6,12 +6,22 @@ DROP FUNCTION IF EXISTS laplace.chess_game(bytea);
 -- (SubstrateClient.ChessGameAsync -> ChessReplay.ToMovetext). A column that can only
 -- ever return NULL advertises a value the substrate cannot produce. Dropping a column
 -- from RETURNS TABLE is not a REPLACE, so the purpose-schema name drops explicitly.
-DROP FUNCTION IF EXISTS chess.game(bytea);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('chess.game(bytea)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(white_id bytea, white text, black_id bytea, black text, result text, played_on text, event text, eco text, termination text, time_control text, tc_class text)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_event','white_id','white','black_id','black','result','played_on','event','eco','termination','time_control','tc_class']::text[])) THEN
+        DROP FUNCTION chess.game(bytea);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
     RETURNS TABLE(white_id bytea, white text, black_id bytea, black text,
                   result text, played_on text, event text, eco text,
                   termination text, time_control text, tc_class text)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     -- One PLAYING, as its source recorded it (GH #736). The parameter is the
     -- playing-EVENT handle; the game CONTENT is the line it plays. Hop 1 follows
     -- the one record edge whose subject is the event -- (event, PLAYS_LINE, line)
@@ -105,4 +115,5 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
     LEFT JOIN surface_text tcc ON tcc.id = h.tcc_id
     WHERE h.white_id IS NOT NULL OR h.black_id IS NOT NULL
        OR EXISTS (SELECT 1 FROM line)
-$$;
+;
+END;

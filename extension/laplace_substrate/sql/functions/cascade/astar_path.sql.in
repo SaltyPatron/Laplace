@@ -4,7 +4,9 @@ CREATE OR REPLACE FUNCTION converse.astar_path(
     p_types bytea[] DEFAULT NULL, p_directed bool DEFAULT false,
     p_use_geometry bool DEFAULT false)
     RETURNS TABLE(step int, entity_id bytea, g double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     -- Default traversal vocabulary is DECLARED: engine/manifest/relation_types.toml
     -- [[set]] PATH_TRAVERSABLE (= PATH_UPWARD u PATH_LATERAL), emitted IMMUTABLE by
     -- codegen so the array folds at plan time. These 13 names were hand-listed here AND
@@ -13,4 +15,5 @@ CREATE OR REPLACE FUNCTION converse.astar_path(
     SELECT * FROM converse.astar_path_raw(p_start, p_goals,
         COALESCE(p_types, consensus.relation_set_ids('PATH_TRAVERSABLE')),
         p_max_depth, p_directed, p_use_geometry)
-$$;
+;
+END;

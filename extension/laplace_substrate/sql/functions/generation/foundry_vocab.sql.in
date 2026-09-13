@@ -3,7 +3,9 @@ DROP FUNCTION IF EXISTS generation.foundry_vocab(int);
 CREATE OR REPLACE FUNCTION generation.foundry_vocab(
         p_size int, p_trajs int DEFAULT NULL)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     -- Pillar 5 (2026-07-20): seed frequency comes from the GEOMETRY, not from
     -- PRECEDES out-degree. Identical shape to corpus_word_vocab, which is already the
     -- geometry-native vocabulary source.
@@ -54,12 +56,12 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(
               laplace.relation_type_id('DERIVATIONALLY_RELATED'), laplace.relation_type_id('IS_COORDINATE_TERM_WITH'))
     ),
     ids AS (SELECT id FROM seeds UNION SELECT id FROM closure),
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     ranked AS MATERIALIZED (
         SELECT i.id, COALESCE(f.d, 0) AS d,
                row_number() OVER (ORDER BY COALESCE(f.d, 0) DESC, i.id) AS rn
@@ -73,8 +75,8 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(
         GROUP BY ((rn - 1) / GREATEST(p_size, 1))
     ),
     named AS (
-        
-        
+
+
         SELECT u.id, u.s, r.d
         FROM pages p
         CROSS JOIN LATERAL unnest(p.ids, realize.render_text_batch(p.ids))
@@ -92,4 +94,5 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(
     FROM clean c
     ORDER BY c.d DESC, c.id
     LIMIT GREATEST(p_size, 0)
-$$;
+;
+END;

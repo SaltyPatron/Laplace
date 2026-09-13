@@ -1,9 +1,17 @@
 DROP FUNCTION IF EXISTS laplace.chess_players_by_initial(text, integer, integer);
 DROP FUNCTION IF EXISTS chess.players_by_initial(text, integer, integer, text, text);
 DROP FUNCTION IF EXISTS chess.players_by_initial(text, integer, integer);
-DROP FUNCTION IF EXISTS chess.players_by_initial(text[], integer, integer, text, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('chess.players_by_initial(text[], integer, integer, text, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(player_id bytea, name text, games bigint, rating double precision, rd double precision, eff_mu double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_initials','p_limit','p_offset','p_sort','p_direction','player_id','name','games','rating','rd','eff_mu']::text[])) THEN
+        DROP FUNCTION chess.players_by_initial(text[], integer, integer, text, text);
+    END IF;
+END $upgrade_shape$;
 
-CREATE FUNCTION chess.players_by_initial(
+CREATE OR REPLACE FUNCTION chess.players_by_initial(
         p_initials text[], p_limit integer, p_offset integer, p_sort text, p_direction text)
     RETURNS TABLE(player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)

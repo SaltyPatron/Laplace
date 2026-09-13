@@ -17,7 +17,8 @@
 DROP FUNCTION IF EXISTS laplace.corpus_trajectory_probe();
 CREATE OR REPLACE FUNCTION generation.corpus_trajectory_probe()
     RETURNS TABLE(rows bigint, max_us bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH m AS (
         SELECT max(observed_at) AS max_at
         FROM laplace.physicalities
@@ -27,5 +28,5 @@ CREATE OR REPLACE FUNCTION generation.corpus_trajectory_probe()
                      FROM laplace.physicalities p
                      WHERE p.type = 1 AND p.trajectory IS NOT NULL
                        AND p.observed_at = (SELECT max_at FROM m)), 0)::int8,
-           COALESCE((SELECT (extract(epoch FROM max_at) * 1000000)::int8 FROM m), 0)
-$$;
+           COALESCE((SELECT (extract(epoch FROM max_at) * 1000000)::int8 FROM m), 0);
+END;

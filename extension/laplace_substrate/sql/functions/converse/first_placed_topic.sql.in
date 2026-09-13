@@ -2,7 +2,8 @@
 DROP FUNCTION IF EXISTS laplace.first_placed_topic(text);
 CREATE OR REPLACE FUNCTION converse.first_placed_topic(p_text text)
     RETURNS bytea
-    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+BEGIN ATOMIC
     SELECT w.id
     FROM laplace.v_word_points w
     JOIN converse.prompt_state(p_text) s ON w.id = s.id
@@ -13,5 +14,5 @@ CREATE OR REPLACE FUNCTION converse.first_placed_topic(p_text text)
     -- siblings use (structural_locale, structural_neighbors): prompt ordinal, then
     -- physicality_id to break the tie a repeated surface would otherwise leave open.
     ORDER BY s.ord, w.physicality_id
-    LIMIT 1
-$$;
+    LIMIT 1;
+END;

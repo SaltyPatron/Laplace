@@ -11,6 +11,7 @@
 DROP FUNCTION IF EXISTS laplace.define(bytea, bytea[], int);
 CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_context bytea[], p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT NULL::text, NULL::numeric, NULL::bigint WHERE false
-$$;
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT NULL::text, NULL::numeric, NULL::bigint WHERE false;
+END;

@@ -1,7 +1,9 @@
 DROP FUNCTION IF EXISTS laplace.corpus_word_vocab(int, int);
 CREATE OR REPLACE FUNCTION generation.corpus_word_vocab(p_size int, p_trajs int DEFAULT 400000)
     RETURNS TABLE(surface text, weight bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     WITH t AS (
         SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
         FROM laplace.v_word_points w
@@ -15,9 +17,9 @@ CREATE OR REPLACE FUNCTION generation.corpus_word_vocab(p_size int, p_trajs int 
         JOIN laplace.entities e ON e.id = tc.entity_id AND e.type_id = realize.canonical_id('Word')
         GROUP BY tc.entity_id
     ),
-    
-    
-    
+
+
+
     -- Rank the complete candidate population, then render in caller-sized pages.
     -- The old `p_size * 4` head could underfill whenever lexical validity was
     -- below 25% in that prefix. Page width is a memory bound derived from the
@@ -45,4 +47,5 @@ CREATE OR REPLACE FUNCTION generation.corpus_word_vocab(p_size int, p_trajs int 
     WHERE xr.s ~ '^[A-Za-z][A-Za-z''.-]*$'
     ORDER BY xw.c DESC, xw.id
     LIMIT GREATEST(p_size, 0)
-$$;
+;
+END;

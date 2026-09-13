@@ -2,7 +2,31 @@
 -- relation-family surface is replaced during an extension upgrade, so remove
 -- every installed reader that depends on it before that replacement. Their
 -- current definitions are recreated after all dependencies exist.
-DROP FUNCTION IF EXISTS converse.execute_prompt(text, bytea);
-DROP FUNCTION IF EXISTS converse.compile_prompt(text, bytea);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('converse.execute_prompt(text, bytea)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(rank bigint, reply text, operation_id bytea, shape text, container_id bytea, route_mu numeric, primary_language bytea, prompt_language bytea, effective_language bytea, widened boolean)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_prompt','p_primary_language','rank','reply','operation_id','shape','container_id','route_mu','primary_language','prompt_language','effective_language','widened']::text[])) THEN
+        DROP FUNCTION converse.execute_prompt(text, bytea);
+    END IF;
+END $upgrade_shape$;
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('converse.compile_prompt(text, bytea)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(operation_id bytea, shape text, request_ids bytea[], binder_ids bytea[], operand_ids bytea[], route_mu numeric, primary_language bytea, prompt_language bytea, effective_language bytea, widened boolean)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_prompt','p_primary_language','operation_id','shape','request_ids','binder_ids','operand_ids','route_mu','primary_language','prompt_language','effective_language','widened']::text[])) THEN
+        DROP FUNCTION converse.compile_prompt(text, bytea);
+    END IF;
+END $upgrade_shape$;
 DROP FUNCTION IF EXISTS chess.player_search_candidates(text[], integer);
-DROP FUNCTION IF EXISTS chess.players_by_initial(text[], integer, integer, text, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('chess.players_by_initial(text[], integer, integer, text, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(player_id bytea, name text, games bigint, rating double precision, rd double precision, eff_mu double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_initials','p_limit','p_offset','p_sort','p_direction','player_id','name','games','rating','rd','eff_mu']::text[])) THEN
+        DROP FUNCTION chess.players_by_initial(text[], integer, integer, text, text);
+    END IF;
+END $upgrade_shape$;

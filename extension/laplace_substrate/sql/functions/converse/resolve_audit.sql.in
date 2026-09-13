@@ -40,7 +40,8 @@ DROP FUNCTION IF EXISTS laplace.resolve_audit(text, bytea);
 CREATE OR REPLACE FUNCTION converse.resolve_audit(p_prompt text, p_lang_rel bytea)
     RETURNS TABLE(ord int, token text, resolved boolean, tier smallint,
                   senses bigint, top_language text, verdict text)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
 WITH tok AS (
     -- prompt_words is the UAX-29 segmentation with its entity lookup. It
     -- returns one row per (ord, id) and an id living at two tiers appears
@@ -83,5 +84,5 @@ SELECT o.ord,
          ELSE 'resolved'
        END
 FROM ord o CROSS JOIN lbl
-ORDER BY o.ord
-$$;
+ORDER BY o.ord;
+END;

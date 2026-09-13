@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.collocates(text, int);
 CREATE OR REPLACE FUNCTION structural.collocates(p_word text, p_limit int DEFAULT 12)
     RETURNS TABLE(next_word text, mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
     -- Rank + LIMIT on ids first, realize.render the ≤p_limit survivors (define/examples pattern) —
     -- realize.render() was projected over every PRECEDES edge of the word before the cut.
     -- Pillar 5 (2026-07-20): collocates are read from the GEOMETRY --
@@ -21,5 +21,5 @@ CREATE OR REPLACE FUNCTION structural.collocates(p_word text, p_limit int DEFAUL
     ), batch AS MATERIALIZED (
       SELECT realize.render_batch(array_agg(successor_id ORDER BY rn)) AS labels FROM numbered
     )
-    SELECT b.labels[s.rn],NULL::numeric,s.seen FROM numbered s CROSS JOIN batch b ORDER BY s.rn
-$$;
+    SELECT b.labels[s.rn],NULL::numeric,s.seen FROM numbered s CROSS JOIN batch b ORDER BY s.rn;
+END;

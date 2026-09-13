@@ -25,11 +25,12 @@ DROP FUNCTION IF EXISTS laplace.related_objects(bytea, text, int);
 CREATE OR REPLACE FUNCTION consensus.related_objects(
         p_subject bytea, p_relation text, p_limit int DEFAULT 8)
     RETURNS TABLE(object_id bytea, eff_mu bigint, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT e.neighbour_id,
            consensus.eff_mu(e.rating, e.rd) AS eff_mu,
            e.witness_count                    AS witnesses
     FROM consensus.edges_raw(p_subject, 'out',
                                ARRAY[laplace.relation_type_id(p_relation)],
-                               p_limit, false, 'eff_mu') e
-$$;
+                               p_limit, false, 'eff_mu') e;
+END;

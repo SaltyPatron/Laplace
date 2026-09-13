@@ -20,7 +20,15 @@
 -- physical layout, a different claim on a different layer.
 DROP FUNCTION IF EXISTS laplace.consensus_partition_pressure(bigint);
 DROP FUNCTION IF EXISTS ops.consensus_partition_pressure(bigint);
-DROP FUNCTION IF EXISTS ops.consensus_partition_pressure();
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.consensus_partition_pressure()')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(tbl text, relation text, type_id bytea, rows bigint, pct_of_default numeric)'
+             OR proargnames IS DISTINCT FROM ARRAY['tbl','relation','type_id','rows','pct_of_default']::text[])) THEN
+        DROP FUNCTION ops.consensus_partition_pressure();
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.consensus_partition_pressure()
 RETURNS TABLE(
     tbl         text,
@@ -31,7 +39,9 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
-    AS $$
+
+BEGIN ATOMIC
+
     WITH targets(tbl, relname) AS (
         VALUES ('consensus'::text, 'consensus_rdefault'::text),
                ('attestations'::text, 'attestations_rdefault'::text)
@@ -69,4 +79,5 @@ STABLE
         agg.pct_of_default
       FROM numbered agg CROSS JOIN batch b
      ORDER BY agg.rn;
-$$;
+;
+END;

@@ -1,6 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.register_canonicals(text[]);
 CREATE OR REPLACE FUNCTION realize.register_canonicals(p_names text[]) RETURNS bigint
-    LANGUAGE sql AS $$
+    LANGUAGE sql
+BEGIN ATOMIC
+
     WITH requested(name) AS MATERIALIZED (
         SELECT DISTINCT btrim(n)
         FROM unnest(COALESCE(p_names, ARRAY[]::text[])) AS names(n)
@@ -14,4 +16,5 @@ CREATE OR REPLACE FUNCTION realize.register_canonicals(p_names text[]) RETURNS b
         RETURNING 1
     )
     SELECT count(*)::bigint FROM inserted
-$$;
+;
+END;

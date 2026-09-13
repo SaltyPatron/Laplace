@@ -32,6 +32,31 @@ class ManifestTests(unittest.TestCase):
                 manifest.write_text("producer.sql.in\nconsumer.sql.in\n")
                 self.assertEqual([], checker.validate_atomic_dependencies(manifest))
 
+    def test_views_aggregates_and_extension_schema_bind_before_consumers(self):
+        cases = [
+            ("CREATE FUNCTION laplace.label(bytea) RETURNS text LANGUAGE C;",
+             "CREATE VIEW laplace.v_labels AS SELECT laplace.label(NULL::bytea);"),
+            ("CREATE AGGREGATE fold(bigint) (sfunc = sum, stype = bigint);",
+             "CREATE FUNCTION laplace.total() RETURNS bigint LANGUAGE sql "
+             "BEGIN ATOMIC SELECT laplace.fold(1); END;"),
+            ("CREATE VIEW laplace.v_values AS SELECT 1;",
+             "CREATE FUNCTION laplace.read_values() RETURNS int LANGUAGE sql "
+             "BEGIN ATOMIC SELECT * FROM @extschema@.v_values; END;"),
+        ]
+        for producer, consumer in cases:
+            with self.subTest(producer=producer), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "producer.sql.in").write_text(producer)
+                (root / "consumer.sql.in").write_text(consumer)
+                manifest = root / "manifest.install"
+                with patch.object(checker, "SQL_ROOT", root):
+                    manifest.write_text("consumer.sql.in\nproducer.sql.in\n")
+                    self.assertTrue(checker.validate_manifest(manifest)
+                                    + checker.validate_atomic_dependencies(manifest))
+                    manifest.write_text("producer.sql.in\nconsumer.sql.in\n")
+                    self.assertEqual([], checker.validate_manifest(manifest)
+                                     + checker.validate_atomic_dependencies(manifest))
+
     def test_install_and_upgrade_bind_all_atomic_dependencies_in_order(self):
         for manifest in checker.MANIFESTS:
             self.assertEqual([], checker.validate_atomic_dependencies(manifest))

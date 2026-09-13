@@ -14,7 +14,15 @@
 -- claims and collapsing them is how the detector became a green light in the first
 -- place. deep_checked says which one you got.
 DROP FUNCTION IF EXISTS laplace.substrate_health();
-DROP FUNCTION IF EXISTS laplace.substrate_health(boolean);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('laplace.substrate_health(boolean)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(ok boolean, fake_tier_bands bigint, identity_violations bigint, bootstrap_entities bigint, deep_checked boolean)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_deep','ok','fake_tier_bands','identity_violations','bootstrap_entities','deep_checked']::text[])) THEN
+        DROP FUNCTION laplace.substrate_health(boolean);
+    END IF;
+END $upgrade_shape$;
 
 CREATE OR REPLACE FUNCTION laplace.substrate_health(p_deep boolean DEFAULT false)
 RETURNS TABLE(
@@ -26,7 +34,7 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
-    AS $$
+BEGIN ATOMIC
     -- Each verification scan runs exactly once: the planner does not
     -- common-subexpression-eliminate independent scalar subqueries in one
     -- targetlist, so deriving `ok` from the scanned columns (not re-invoking
@@ -55,4 +63,4 @@ STABLE
         s.bootstrap_entities,
         p_deep AS deep_checked
     FROM scans s;
-$$;
+END;
