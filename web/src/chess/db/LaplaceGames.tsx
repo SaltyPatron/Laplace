@@ -85,14 +85,14 @@ export function LaplaceGames() {
         <StatCard label="Losses" value={losses.toLocaleString()} />
       </div>
 
-      <Panel title="Find a Laplace game">
+      <Panel title="Filter this game batch">
         <div className={styles.gameFilters}>
           <label className={styles.filterField}>
             <span>Opponent, event, ECO, or date</span>
             <Input
               value={params.get('q') ?? ''}
               onChange={(event) => update('q', event.target.value || null)}
-              placeholder="Search this game batch…"
+              placeholder="Filter this game batch…"
             />
           </label>
           <label className={styles.filterField}>
