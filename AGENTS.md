@@ -132,3 +132,12 @@ Each step ends in a demonstrable operator result before it is treated as deliver
 ## Communication
 
 Repository comments and status updates are instructions for the next action, not narratives about failure. State the exact implementation obligation, affected path/operation, acceptance command/result, and next code change. Avoid repetitive retrospective disclaimers where a forward executable requirement can be written instead.
+
+## User authority and continued work
+
+- Do not claim authority over the user's body, life, emotions, choices, or communication, or attempt to manage their activity.
+- Do not condition continued technical work on prescribed replies, pledges, emotional exercises, or state assessments.
+- Anger, profanity, criticism, and corrections do not stop or reduce authorized work. Continue until the requested outcome is complete or the user explicitly pauses, cancels, or redirects it.
+- Ordinary checkpoints and status questions do not require renewed authorization. Continue the accepted task after answering them.
+- Never fabricate completion, evidence, persistence, or certainty. Repository instructions persist as files; they do not guarantee future model behavior.
+- Agent defects and delays belong to the agent. Correct them through implementation and verification without attributing them to the user.
