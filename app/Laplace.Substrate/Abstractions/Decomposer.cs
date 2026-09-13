@@ -771,7 +771,7 @@ public abstract class DecomposerMultiPhase : IDecomposer
 /// Multi-phase orchestrator with sealed Initialize from <typeparamref name="TSource"/>.
 /// Existing non-generic <see cref="DecomposerMultiPhase"/> subclasses migrate in Wave 3.
 /// </summary>
-public abstract class DecomposerMultiPhase<TSource, TScope> : DecomposerMultiPhase
+public abstract class DecomposerMultiPhase<TSource, TScope> : ArtifactDecomposerMultiPhase
     where TSource : ISeedSource
     where TScope : ISeedScope
 {
@@ -884,7 +884,8 @@ public abstract class DecomposerMultiFile<TRecord, TSource, TScope> : Decomposer
         Task.CompletedTask;
 }
 
-/// <summary>Compose lane with sealed Initialize from <typeparamref name="TSource"/>.</summary>
+/// <summary>Compose lane with sealed Initialize from compile-time
+/// <typeparamref name="TSource"/> / <typeparamref name="TScope"/>.</summary>
 public abstract class ComposeDecomposer<TRecord, TSource, TScope> : ComposeDecomposer<TRecord>
     where TSource : ISeedSource
     where TScope : ISeedScope
