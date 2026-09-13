@@ -104,7 +104,9 @@ export function NotFoundExplorer() {
             .map((d) => (
               <RouterLink
                 key={`d-${d.ordinal}`}
-                to={`/explore/entity/${d.id_hex}`}
+                to={d.tier === 2
+                  ? `/explore/resolve/${encodeURIComponent(d.label)}`
+                  : `/explore/entity/${d.id_hex}`}
                 className={styles.glyph}
                 title={`tier ${d.tier}`}
               >
