@@ -1,17 +1,15 @@
 using Laplace.Api.Contracts;
+using Laplace.Chess.Service;
+using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
 /// The league surface: per-band leaderboards, entity verdict records, and the
-/// head-to-head matchup. The rating math is a literal sports rating — Glicko-2 —
-/// so this presents it as one: leaders per arena, games played, win/loss record.
-/// Split into fast reads (leaders, record, tape) and the slow path/verdict read,
-/// which the UI fetches lazily; path search competes with active seeds for the
-/// box, so it must never block the parts that return in a second. The SQL
-/// itself lives in <see cref="NpgsqlSubstrateReads"/> (doc 41) — salient_facts
-/// in particular is shared with the CLI's neighbors command and the MCP facts tool.
+/// head-to-head matchup. Generic entities compare through converse.contrast; Chess_Player is
+/// deliberately type-aware because lexical contrast excludes the chess evidence families and
+/// source Elo is not the same quantity as consensus relation standing.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
@@ -51,23 +49,97 @@ internal sealed partial class SubstrateClient
         var xHex = Convert.ToHexString(x.Value.Id).ToLowerInvariant();
         var yHex = Convert.ToHexString(y.Value.Id).ToLowerInvariant();
 
-        // The three cheap reads are independent — run them together.
-        var tapeTask = TapeAsync(x.Value.Id, y.Value.Id, ct);
         var xSideTask = SideAsync(xHex, x.Value.Id, x.Value.Label, ct);
         var ySideTask = SideAsync(yHex, y.Value.Id, y.Value.Label, ct);
-        await Task.WhenAll(tapeTask, xSideTask, ySideTask);
+        await Task.WhenAll(xSideTask, ySideTask);
+        var xSide = xSideTask.Result;
+        var ySide = ySideTask.Result;
 
-        return new MatchupResponse("matchup", xSideTask.Result, ySideTask.Result, tapeTask.Result);
+        IReadOnlyList<TapeRow> tape = xSide.Chess is not null && ySide.Chess is not null
+            ? await ChessTapeAsync(x.Value.Id, y.Value.Id, xSide.Chess, ySide.Chess, ct)
+            : await TapeAsync(x.Value.Id, y.Value.Id, ct);
+
+        return new MatchupResponse("matchup", xSide, ySide, tape);
     }
 
     private async Task<MatchupSide> SideAsync(string hex, byte[] id, string label, CancellationToken ct)
     {
         var recordTask = EntityRecordAsync(hex, ct);
-        var factsTask = NpgsqlSubstrateReads.SalientFactsAsync(_dataSource, id, 6, ct, TranslateSubstrateError);
-        await Task.WhenAll(recordTask, factsTask);
+        var factsTask = NpgsqlSubstrateReads.SalientFactsAsync(_dataSource, id, 12, ct, TranslateSubstrateError);
+        var chessTask = ChessMatchupSideAsync(id, ct);
+        await Task.WhenAll(recordTask, factsTask, chessTask);
         return new MatchupSide(hex, label,
             recordTask.Result ?? new EntityRecordResponse("entity.record", hex, 0, 0, 0, 0),
-            [.. factsTask.Result.Select(f => new SalientFactRow(f.Type, f.Fact, f.EffMu, f.Witnesses))]);
+            [.. factsTask.Result.Select(f => new SalientFactRow(f.Type, f.Fact, f.EffMu, f.Witnesses))],
+            chessTask.Result);
+    }
+
+    private async Task<ChessMatchupSide?> ChessMatchupSideAsync(byte[] id, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        var facet = await NpgsqlDisplayLabels.FacetAsync(conn, id, ct);
+        if (facet is not { Exists: true } f
+            || !f.TypeId.AsSpan().SequenceEqual(ChessVocabulary.PlayerType.ToBytes()))
+            return null;
+
+        var recordTask = NpgsqlSubstrateReads.ChessPlayerRecordAsync(
+            _dataSource, id, ct, TranslateReadError);
+        var ratingsTask = NpgsqlSubstrateReads.ChessPlayerRatingsAsync(
+            _dataSource, id, ct, TranslateReadError);
+        await Task.WhenAll(recordTask, ratingsTask);
+
+        var overall = recordTask.Result.FirstOrDefault(static r => r.AsWhite is null);
+        int? peak = ratingsTask.Result.Count == 0 ? null : ratingsTask.Result[0].Rating;
+        return new ChessMatchupSide(
+            peak,
+            overall.Games,
+            overall.Wins,
+            overall.Draws,
+            overall.Losses,
+            overall.Unscored,
+            overall.Score);
+    }
+
+    private async Task<IReadOnlyList<TapeRow>> ChessTapeAsync(
+        byte[] x,
+        byte[] y,
+        ChessMatchupSide xs,
+        ChessMatchupSide ys,
+        CancellationToken ct)
+    {
+        var rows = new List<TapeRow>(9);
+        AddChessSide(rows, "x-only", xs);
+        AddChessSide(rows, "y-only", ys);
+
+        // Pairing evidence was historically stored under the badly named PLAYED_BY relation.
+        // Do not expose that predicate here as English: its actual chess meaning is a direct
+        // opponent meeting. The relation migration is handled separately; this read reports the
+        // witnessed fact rather than repeating the ontology label into the product.
+        var xId = Hash128.FromBytes(x);
+        var yId = Hash128.FromBytes(y);
+        var xy = ConsensusKeys.EdgeId(xId, ChessVocabulary.PlayedByType, yId);
+        var yx = ConsensusKeys.EdgeId(yId, ChessVocabulary.PlayedByType, xId);
+        var pair = await NpgsqlConsensusByIds.ReadAsync(
+            _dataSource, [xy, yx], ChessVocabulary.PlayedByType, ct);
+        long meetings = 0;
+        if (pair.TryGetValue(xy, out var xr)) meetings = Math.Max(meetings, (long)Math.Round(xr.Witnesses));
+        if (pair.TryGetValue(yx, out var yr)) meetings = Math.Max(meetings, (long)Math.Round(yr.Witnesses));
+        if (meetings > 0)
+            rows.Insert(0, new TapeRow("both", "direct meetings", $"{meetings:N0} witnessed games", null));
+
+        return rows;
+    }
+
+    private static void AddChessSide(List<TapeRow> rows, string holder, ChessMatchupSide side)
+    {
+        if (side.PeakSourceElo is { } elo)
+            rows.Add(new TapeRow(holder, "peak source Elo", elo.ToString(System.Globalization.CultureInfo.InvariantCulture), null));
+        rows.Add(new TapeRow(holder, "career record",
+            $"{side.Wins:N0}-{side.Draws:N0}-{side.Losses:N0} over {side.Games:N0} witnessed games", null));
+        if (side.Score is { } score)
+            rows.Add(new TapeRow(holder, "career score", $"{score * 100d:F1}%", null));
+        if (side.Unscored > 0)
+            rows.Add(new TapeRow(holder, "unscored games", side.Unscored.ToString("N0"), null));
     }
 
     private async Task<IReadOnlyList<TapeRow>> TapeAsync(byte[] x, byte[] y, CancellationToken ct)
