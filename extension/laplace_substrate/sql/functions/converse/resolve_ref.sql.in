@@ -2,13 +2,26 @@ DROP FUNCTION IF EXISTS laplace.resolve_ref(text);
 CREATE OR REPLACE FUNCTION converse.resolve_ref(p_ref text)
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- Resolve a caller-supplied reference to an entity id: a 32-hex string is a
-    -- literal content id (decode it); anything else is a surface to content-
-    -- address via laplace.word_id. Centralizes the identical `WITH resolved AS (SELECT
-    -- CASE WHEN @target ~ '^[0-9a-f]{32}$' ...)` CTE that EvidenceAsync and
-    -- EmbeddingAsync each inlined. No SET search_path so it inlines.
-    SELECT CASE
-        WHEN p_ref ~ '^[0-9a-f]{32}$' THEN decode(p_ref, 'hex')
-        ELSE laplace.word_id(p_ref)
-    END
+    -- Resolve a caller-supplied *witnessed* reference to an entity id.
+    --
+    -- Computing a deterministic content id is not proof that the corresponding
+    -- entity is admitted in the substrate.  The previous implementation returned
+    -- laplace.word_id(p_ref) for every non-hex string, so arbitrary input such as
+    -- "Sodium Chloride" could be presented by callers as a resolved entity even
+    -- when no such entity existed.  Identity calculation and world-state
+    -- resolution are different operations.
+    --
+    -- This function is intentionally the narrow word/concept/id resolver used by
+    -- query surfaces.  Free-form multi-part discovery belongs to the decomposition
+    -- + containment/browse/search path, not to fabrication of an unwitnessed topic.
+    WITH candidate AS (
+        SELECT CASE
+            WHEN p_ref ~ '^[0-9a-f]{32}$' THEN decode(p_ref, 'hex')
+            ELSE laplace.word_id(p_ref)
+        END AS id
+    )
+    SELECT c.id
+    FROM candidate c
+    WHERE c.id IS NOT NULL
+      AND consensus.entity_exists(c.id)
 $$;
