@@ -1,0 +1,9 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+NOTICE:  extension "postgis" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+NOTICE:  extension "laplace_geom" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+NOTICE:  extension "laplace_substrate" already exists, skipping
+
+\set ECHO none
+NOTICE:  browse query constituents: witnessed words and shared container pass
