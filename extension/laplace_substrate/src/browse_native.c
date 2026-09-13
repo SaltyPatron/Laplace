@@ -87,23 +87,84 @@ pg_laplace_word_containers_containing_all(PG_FUNCTION_ARGS)
     return (Datum)0;
 }
 
+typedef enum {
+    BROWSE_MATCH_NAME = 0,
+    BROWSE_MATCH_SURFACE,
+    BROWSE_MATCH_CONTAINS_ALL,
+    BROWSE_MATCH_CONSTITUENT
+} BrowseMatchKind;
+
 typedef struct {
     hash128_t id;
     hash128_t name;
     hash128_t type;
     int64 rating, rd, witnesses;
     int16 tier;
-    bool direct, exists;
+    BrowseMatchKind match_kind;
+    bool exists;
 } BrowseHit;
+
+static const char *
+match_kind_text(BrowseMatchKind kind)
+{
+    switch (kind) {
+        case BROWSE_MATCH_NAME: return "name";
+        case BROWSE_MATCH_SURFACE: return "surface";
+        case BROWSE_MATCH_CONTAINS_ALL: return "contains_all";
+        case BROWSE_MATCH_CONSTITUENT: return "constituent";
+    }
+    elog(ERROR, "browse: invalid match kind");
+    return "";
+}
+
+static void
+add_structural_hit(HTAB *hits, const hash128_t *id, BrowseMatchKind match_kind)
+{
+    bool found;
+    BrowseHit *hit = hash_search(hits, id, HASH_ENTER, &found);
+    if (!found) {
+        memset(hit, 0, sizeof(*hit));
+        hit->id = *id;
+        hit->name = *id;
+        hit->match_kind = match_kind;
+    }
+}
+
+static void
+add_member_hits(HTAB *hits, ArrayType *members)
+{
+    if (members == NULL) return;
+    if (ARR_NDIM(members) > 1 || ARR_ELEMTYPE(members) != BYTEAOID)
+        elog(ERROR, "browse: members must be a 1-D bytea array");
+    Datum *values;
+    bool *nulls;
+    int count;
+    deconstruct_array(members, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &values, &nulls, &count);
+    for (int i = 0; i < count; ++i) {
+        if (nulls[i]) continue;
+        bytea *value = DatumGetByteaPP(values[i]);
+        if (VARSIZE_ANY_EXHDR(value) != sizeof(hash128_t))
+            elog(ERROR, "browse: members must contain 16-byte identities");
+        hash128_t id = datum_to_hash128(values[i]);
+        add_structural_hit(hits, &id, BROWSE_MATCH_CONSTITUENT);
+    }
+    pfree(values);
+    pfree(nulls);
+}
 
 static int
 hit_compare(const void *a, const void *b)
 {
     const BrowseHit *x = a, *y = b;
-    if (x->direct != y->direct) return x->direct ? 1 : -1;
-    int64 xm = eff_mu_display_fp(x->rating, x->rd), ym = eff_mu_display_fp(y->rating, y->rd);
-    if (xm != ym) return xm > ym ? -1 : 1;
-    if (x->witnesses != y->witnesses) return x->witnesses > y->witnesses ? -1 : 1;
+    bool x_structural = x->match_kind != BROWSE_MATCH_NAME;
+    bool y_structural = y->match_kind != BROWSE_MATCH_NAME;
+    if (x_structural != y_structural) return x_structural ? 1 : -1;
+    if (!x_structural) {
+        int64 xm = eff_mu_display_fp(x->rating, x->rd), ym = eff_mu_display_fp(y->rating, y->rd);
+        if (xm != ym) return xm > ym ? -1 : 1;
+        if (x->witnesses != y->witnesses) return x->witnesses > y->witnesses ? -1 : 1;
+    }
     return id_compare(&x->id, &y->id);
 }
 
@@ -121,8 +182,9 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     int count = 0;
     Oid array_type[] = {BYTEAARRAYOID};
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT) elog(ERROR, "browse: SPI connect failed");
-    hash128_t *names = PG_ARGISNULL(0) ? NULL : candidate_names(
-        PG_GETARG_ARRAYTYPE_P(0), capacity, &count, &truncated);
+    ArrayType *members = PG_ARGISNULL(0) ? NULL : PG_GETARG_ARRAYTYPE_P(0);
+    hash128_t *names = members == NULL ? NULL : candidate_names(
+        members, capacity, &count, &truncated);
     HTAB *hits = id_table("browse selected names", sizeof(BrowseHit));
     Datum *name_datums = palloc(Max(count, 1) * sizeof(Datum));
     for (int i = 0; i < count; ++i) name_datums[i] = hash128_to_datum(&names[i]);
@@ -143,6 +205,7 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
             BrowseHit hit = {0};
             hit.id = datum_to_hash128(v[0]); hit.name = datum_to_hash128(v[1]);
             hit.rating = DatumGetInt64(v[2]); hit.rd = DatumGetInt64(v[3]); hit.witnesses = DatumGetInt64(v[4]);
+            hit.match_kind = BROWSE_MATCH_NAME;
             if (laplace_glicko2_refuted(hit.rating, hit.rd)) continue;
             BrowseHit *old = hash_search(hits, &hit.id, HASH_ENTER, &found);
             int64 mu = laplace_effective_mu_fp(hit.rating, hit.rd);
@@ -156,20 +219,18 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     SPI_cursor_close(cursor);
     if (!PG_ARGISNULL(1)) {
         hash128_t exact = datum_to_hash128(PG_GETARG_DATUM(1));
-        bool found;
-        BrowseHit *hit = hash_search(hits, &exact, HASH_ENTER, &found);
-        if (!found) { memset(hit, 0, sizeof(*hit)); hit->id = exact; hit->name = exact; hit->direct = true; }
+        add_structural_hit(hits, &exact, BROWSE_MATCH_SURFACE);
     }
     /* Containment is a product result in its own right. Attested names above
      * attach domain entities; they do not hide the matched content DAG. */
-    for (int i = 0; i < count; ++i) {
-        bool found;
-        BrowseHit *hit = hash_search(hits,&names[i],HASH_ENTER,&found);
-        if (!found) {
-            memset(hit,0,sizeof(*hit)); hit->id = names[i]; hit->name = names[i]; hit->direct = true;
-        }
-    }
-    /* One batch hydrates all matched identities, including the exact arm. */
+    for (int i = 0; i < count; ++i)
+        add_structural_hit(hits, &names[i], BROWSE_MATCH_CONTAINS_ALL);
+    /* The query's witnessed words are also real substrate results. A missing
+     * higher-tier phrase must not erase the canonical constituents that formed
+     * the query. Existing stronger matches retain precedence by insertion order. */
+    add_member_hits(hits, members);
+    /* One batch hydrates all matched identities, including exact, containment,
+     * and constituent arms. Unwitnessed computed ids disappear here. */
     args[0] = PointerGetDatum(id_array(hits));
     p = plan(&facets_plan, laplace_sql_query_text("entity.facets"), 1, array_type);
     if (SPI_execute_plan(p, args, NULL, true, 0) != SPI_OK_SELECT) elog(ERROR, "browse: facet read failed");
@@ -193,12 +254,13 @@ pg_laplace_browse_named_entities(PG_FUNCTION_ARGS)
     qsort(ordered, n, sizeof(BrowseHit), hit_compare);
     for (int64 i = offset; i < n && i < (int64)offset + limit; ++i) {
         hit = &ordered[i];
+        bool structural = hit->match_kind != BROWSE_MATCH_NAME;
         Datum v[] = {hash128_to_datum(&hit->id), Int16GetDatum(hit->tier), hash128_to_datum(&hit->type),
-            hash128_to_datum(&hit->name), CStringGetTextDatum(hit->direct ? "surface" : "name"),
+            hash128_to_datum(&hit->name), CStringGetTextDatum(match_kind_text(hit->match_kind)),
             fp_display_numeric(hit->rating), fp_display_numeric(hit->rd), eff_mu_display_numeric(hit->rating, hit->rd),
             Int64GetDatum(hit->witnesses), Int64GetDatum(count), BoolGetDatum(truncated), Int64GetDatum(n)};
         bool nulls[12] = {false};
-        nulls[5] = nulls[6] = nulls[7] = hit->direct;
+        nulls[5] = nulls[6] = nulls[7] = structural;
         tuplestore_putvalues(r->setResult, r->setDesc, v, nulls);
     }
     hash_destroy(hits);
