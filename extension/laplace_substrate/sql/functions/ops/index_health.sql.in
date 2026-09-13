@@ -13,7 +13,15 @@
 -- is distinguishable from a mid-build (indisvalid=false, leaves>0).
 -- BEGIN ATOMIC per G12: pg_catalog relation OIDs are stable for the cluster's
 -- life, and the regnamespace literals name schemas this extension guarantees.
-DROP FUNCTION IF EXISTS ops.index_health();
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.index_health()')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(index_name text, table_name text, valid boolean, is_partitioned_parent boolean, leaf_count bigint, schema_name text)'
+             OR proargnames IS DISTINCT FROM ARRAY['index_name','table_name','valid','is_partitioned_parent','leaf_count','schema_name']::text[])) THEN
+        DROP FUNCTION ops.index_health();
+    END IF;
+END $upgrade_shape$;
 -- schema_name is appended last, not inserted: it was added for ops.reindex_invalid,
 -- which cannot issue REINDEX without it (an index name alone is ambiguous across
 -- the four substrate schemas), and appending leaves any positional reader intact.

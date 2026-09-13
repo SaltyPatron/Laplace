@@ -3,7 +3,9 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
         p_position bytea, p_player bytea, p_as_white boolean,
         p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, games bigint, score double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     -- The transition decomposer materializes every witnessed position --MOVE--> position
     -- with context_id = the playing event. Resolve this player's playing contexts first,
     -- then join those contexts to exact position evidence. This follows the indexed
@@ -59,4 +61,5 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
     GROUP BY next_position
     ORDER BY games DESC
     LIMIT p_limit
-$$;
+;
+END;

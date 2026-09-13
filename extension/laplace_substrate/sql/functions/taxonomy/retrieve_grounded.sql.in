@@ -19,7 +19,8 @@ RETURNS TABLE(
     score numeric,
     witnesses bigint
 )
-LANGUAGE sql STABLE PARALLEL SAFE AS $$
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
 WITH term AS (
     SELECT laplace.word_id(p_term) AS id
 ),
@@ -60,5 +61,5 @@ SELECT entity_id,
        score,
        witnesses
 FROM numbered g CROSS JOIN batches b
-ORDER BY g.rn
-$$;
+ORDER BY g.rn;
+END;

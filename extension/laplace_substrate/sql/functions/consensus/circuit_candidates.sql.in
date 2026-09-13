@@ -1,7 +1,15 @@
 -- Phase-5a candidate admission.  The caller supplies the complete selected
 -- vocabulary and walks this stable keyset page-by-page; p_page_size is a wire
 -- bound, never a ranked top-K or semantic threshold.
-DROP FUNCTION IF EXISTS consensus.circuit_candidates(bytea[], bytea, bytea, bytea, integer);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('consensus.circuit_candidates(bytea[], bytea, bytea, bytea, integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(subject_id bytea, object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_vocabulary','p_type_id','p_after_subject','p_after_object','p_page_size','subject_id','object_id','type_id','eff_mu','witnesses']::text[])) THEN
+        DROP FUNCTION consensus.circuit_candidates(bytea[], bytea, bytea, bytea, integer);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION consensus.circuit_candidates(
     p_vocabulary bytea[], p_type_id bytea,
     p_after_subject bytea, p_after_object bytea, p_page_size integer)

@@ -2,7 +2,8 @@ DROP FUNCTION IF EXISTS laplace.chess_head_to_head(bytea, integer);
 CREATE OR REPLACE FUNCTION chess.head_to_head(p_player bytea, p_limit integer DEFAULT 25)
     RETURNS TABLE(opponent_id bytea, opponent text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- Head-to-head as a READ. chess_opponents() answers the same question by walking every
     -- game this player appeared in, joining each to its result and regrouping by the opposite
     -- colour edge. That work was already done at ingest: each game folds its result onto the
@@ -49,5 +50,5 @@ CREATE OR REPLACE FUNCTION chess.head_to_head(p_player bytea, p_limit integer DE
            consensus.eff_mu_display(rec.rating, rec.rd)::double precision
     FROM rec
     LEFT JOIN named n ON n.id = rec.opponent
-    ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.opponent
-$$;
+    ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.opponent;
+END;

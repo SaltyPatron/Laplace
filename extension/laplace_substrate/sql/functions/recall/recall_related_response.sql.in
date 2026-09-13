@@ -2,7 +2,9 @@ DROP FUNCTION IF EXISTS laplace.recall_related_response(bytea, text);
 CREATE OR REPLACE FUNCTION converse.recall_related_response(p_topic bytea, p_type_name text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+
+BEGIN ATOMIC
+
     -- A witnessed relation does not disappear because either endpoint lacks an
     -- eligible surface realization. Preserve the semantic row and render an
     -- explicit abstention marker; never turn NULL realization into a blank reply
@@ -12,4 +14,5 @@ CREATE OR REPLACE FUNCTION converse.recall_related_response(p_topic bytea, p_typ
            f.eff_mu, f.witnesses
     FROM consensus.related(p_topic, laplace.relation_type_id(p_type_name), converse.word_language(p_topic)) f
     CROSS JOIN topic t
-$$;
+;
+END;

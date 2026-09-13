@@ -2,7 +2,9 @@ DROP FUNCTION IF EXISTS laplace.chess_moves(bytea, integer);
 CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, eff_mu double precision, rd double precision,
                   witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+
     -- Opening explorer over the rated MOVE web: every continuation the substrate has
     -- ever witnessed out of one position, ranked by the conservative estimate.
     --
@@ -34,4 +36,5 @@ CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT
       AND c.object_id IS NOT NULL
     ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
-$$;
+;
+END;

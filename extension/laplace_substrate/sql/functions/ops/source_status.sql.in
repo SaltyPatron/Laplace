@@ -11,7 +11,15 @@
 -- while the previous real run remains the relevant throughput observation; an
 -- `unmeasured` clean run is itself a verdict and must remain visible rather than exposing
 -- an older green comparison.
-DROP FUNCTION IF EXISTS ops.source_status(text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.source_status(text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(source text, source_id bytea, ingested boolean, known boolean, evidence_approx bigint, has_entities boolean, last_run_status text, last_run_at timestamp with time zone, throughput_status text, throughput_compared boolean, throughput_rows_per_s double precision, throughput_baseline_rows_per_s double precision, throughput_slowdown_ratio double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_source','source','source_id','ingested','known','evidence_approx','has_entities','last_run_status','last_run_at','throughput_status','throughput_compared','throughput_rows_per_s','throughput_baseline_rows_per_s','throughput_slowdown_ratio']::text[])) THEN
+        DROP FUNCTION ops.source_status(text);
+    END IF;
+END $upgrade_shape$;
 DROP FUNCTION IF EXISTS laplace.source_status(text);
 
 CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
@@ -29,7 +37,7 @@ CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
                   throughput_baseline_rows_per_s double precision,
                   throughput_slowdown_ratio      double precision)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
     FROM ops.source_counts_approx() s
@@ -133,5 +141,5 @@ SELECT p_source,
        NULL::double precision
 WHERE p_source IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM matched)
-ORDER BY evidence_approx DESC, source_id
-$$;
+ORDER BY evidence_approx DESC, source_id;
+END;

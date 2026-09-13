@@ -1,17 +1,33 @@
 DROP FUNCTION IF EXISTS laplace.chess_ranked(integer, integer);
-DROP FUNCTION IF EXISTS chess.ranked(integer, integer);
-DROP FUNCTION IF EXISTS chess.ranked(integer, integer, text, text);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('chess.ranked(integer, integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(rank bigint, player_id bytea, name text, games bigint, rating double precision, rd double precision, eff_mu double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_limit','p_offset','rank','player_id','name','games','rating','rd','eff_mu']::text[])) THEN
+        DROP FUNCTION chess.ranked(integer, integer);
+    END IF;
+END $upgrade_shape$;
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('chess.ranked(integer, integer, text, text)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(rank bigint, player_id bytea, name text, games bigint, rating double precision, rd double precision, eff_mu double precision)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_limit','p_offset','p_sort','p_direction','rank','player_id','name','games','rating','rd','eff_mu']::text[])) THEN
+        DROP FUNCTION chess.ranked(integer, integer, text, text);
+    END IF;
+END $upgrade_shape$;
 
 -- Sortable roster core. The two-argument wrapper below preserves the established
 -- SQL/API contract while the web reader can request a real server-side order.
-CREATE FUNCTION chess.ranked(
+CREATE OR REPLACE FUNCTION chess.ranked(
         p_limit integer, p_offset integer, p_sort text, p_direction text)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
     AS 'MODULE_PATHNAME', 'pg_laplace_chess_ranked'
     LANGUAGE C STABLE PARALLEL RESTRICTED;
 
-CREATE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
+CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE

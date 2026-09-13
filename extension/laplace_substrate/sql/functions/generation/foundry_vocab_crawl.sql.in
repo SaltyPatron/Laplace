@@ -3,20 +3,22 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         p_seeds text[], p_max int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64,
         p_rank_floor float8 DEFAULT 0.5)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
-    LANGUAGE sql VOLATILE AS $$
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+
     WITH seed_ids AS (
         SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
         FROM (SELECT laplace.word_id(s) AS wid FROM unnest(p_seeds) AS s) q
         WHERE wid IS NOT NULL
     ),
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
     rel_types AS (
 
 
@@ -32,11 +34,11 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         FROM seed_ids si, rel_types rt
         CROSS JOIN LATERAL generation.foundry_crawl(si.ids, p_max, p_hops, p_fanout, rt.ids) c
     ),
-    
-    
-    
-    
-    
+
+
+
+
+
     -- Pillar 5 (2026-07-20): sequence proposals come from geometry_successors --
     -- the next content constituent in the text projection of every trajectory --
     -- not from PRECEDES consensus, which merely materialized the same sequence
@@ -90,13 +92,13 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         ) u
         GROUP BY entity_id
     ),
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
     -- The scaffold is contextual vocabulary, so discover it from trajectories
     -- containing at least one requested seed.  The previous global branch sorted
     -- by content hash, cut at 400,000 trajectories regardless of p_max, and only
@@ -162,4 +164,5 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         ORDER BY n.s, n.pri DESC, n.weight DESC
     )
     SELECT c.entity_id, c.s, c.weight FROM clean c ORDER BY c.pri DESC, c.weight DESC LIMIT p_max
-$$;
+;
+END;

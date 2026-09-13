@@ -9,7 +9,15 @@
 -- caller (top-k is only ever a query LIMIT).
 -- BEGIN ATOMIC: GH #764.
 -- Model artifact scan → generation (ELECT / forward-pass family).
-DROP FUNCTION IF EXISTS generation.model_jitter_catalog(text, bigint);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('generation.model_jitter_catalog(text, bigint)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(subject_id bytea, type_id bytea, object_id bytea, source_id bytea, outcome smallint, observations bigint, rating bigint, rd bigint, eff_mu bigint, witness_count bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_relation','p_rd_floor','subject_id','type_id','object_id','source_id','outcome','observations','rating','rd','eff_mu','witness_count']::text[])) THEN
+        DROP FUNCTION generation.model_jitter_catalog(text, bigint);
+    END IF;
+END $upgrade_shape$;
 DROP FUNCTION IF EXISTS laplace.model_jitter_catalog(text, bigint);
 CREATE OR REPLACE FUNCTION generation.model_jitter_catalog(
         p_relation text DEFAULT NULL,

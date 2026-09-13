@@ -5,10 +5,11 @@
 DROP FUNCTION IF EXISTS laplace.entity_hilbert_keys(bytea[]);
 CREATE OR REPLACE FUNCTION generation.entity_hilbert_keys(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, hilbert_index bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT DISTINCT ON (w.id) w.id, w.hilbert_index
     FROM laplace.v_word_points w
     JOIN unnest(p_vocab) AS u(id) ON u.id = w.id
     WHERE w.hilbert_index IS NOT NULL
-    ORDER BY w.id, w.physicality_id
-$$;
+    ORDER BY w.id, w.physicality_id;
+END;

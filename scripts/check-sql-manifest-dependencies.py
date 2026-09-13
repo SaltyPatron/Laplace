@@ -54,7 +54,7 @@ def available_module_text(module: str) -> str | None:
     module_path = SQL_ROOT / module
     if not module_path.is_file():
         return None
-    return module_path.read_text(encoding="utf-8")
+    return module_path.read_text(encoding="utf-8").replace("@extschema@", "laplace")
 
 
 def sql_without_line_comments(text: str) -> list[str]:
@@ -131,11 +131,22 @@ def validate_atomic_dependencies(path: Path) -> list[str]:
     for module in modules:
         for match in FUNCTION_RE.finditer(texts[module]):
             owners.setdefault(match.group(1).lower(), module)
+    for module in modules:
+        for match in re.finditer(
+            r"\bCREATE\s+(?:OR\s+REPLACE\s+)?AGGREGATE\s+([a-z_][\w]*(?:\.[a-z_][\w]*)?)\s*\(",
+            texts[module], re.IGNORECASE,
+        ):
+            name = match.group(1).lower()
+            owners.setdefault(name if "." in name else "laplace." + name, module)
     positions = {module: index for index, module in enumerate(modules)}
     errors: list[str] = []
     for module in modules:
-        for body in ATOMIC_RE.finditer(texts[module]):
-            for call in set(CALL_RE.findall(body.group(1))):
+        bodies = [body.group(1) for body in ATOMIC_RE.finditer(texts[module])]
+        # Views bind their callees at CREATE time just as atomic functions do.
+        if CREATE_VIEW_RE.search(texts[module]):
+            bodies.append(texts[module])
+        for body in bodies:
+            for call in set(CALL_RE.findall(body)):
                 owner = owners.get(call.lower())
                 if owner is not None and positions[owner] > positions[module]:
                     errors.append(f"{path.name}: {module} binds {call} before {owner}")

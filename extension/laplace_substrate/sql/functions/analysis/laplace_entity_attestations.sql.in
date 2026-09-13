@@ -4,7 +4,15 @@
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace.laplace_entity_attestations(bytea, bigint);
 DROP FUNCTION IF EXISTS laplace.laplace_entity_attestations(bytea, bigint);
-DROP FUNCTION IF EXISTS ops.entity_attestations(bytea, bigint);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.entity_attestations(bytea, bigint)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(type_id bytea, object_id bytea, eff_mu_raw bigint, eff_mu numeric, witnesses bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_subject','p_min_eff_mu_raw','type_id','object_id','eff_mu_raw','eff_mu','witnesses']::text[])) THEN
+        DROP FUNCTION ops.entity_attestations(bytea, bigint);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_attestations(
     p_subject bytea, p_min_eff_mu_raw bigint DEFAULT 0)
 RETURNS TABLE(type_id bytea, object_id bytea, eff_mu_raw bigint, eff_mu numeric, witnesses bigint)

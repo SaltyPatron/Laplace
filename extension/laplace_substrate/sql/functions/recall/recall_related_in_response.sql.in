@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.recall_related_in_response(bytea, text);
 CREATE OR REPLACE FUNCTION converse.recall_related_in_response(p_topic bytea, p_type_name text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     SELECT f.fact, f.eff_mu, f.witnesses
-    FROM consensus.related_in(p_topic, laplace.relation_type_id(p_type_name), converse.word_language(p_topic)) f
-$$;
+    FROM consensus.related_in(p_topic, laplace.relation_type_id(p_type_name), converse.word_language(p_topic)) f;
+END;

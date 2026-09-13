@@ -1,11 +1,22 @@
 DROP FUNCTION IF EXISTS laplace.entity_facets(bytea);
-DROP FUNCTION IF EXISTS ops.entity_facets(bytea);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.entity_facets(bytea)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(tier smallint, type_id bytea)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_id','tier','type_id']::text[])) THEN
+        DROP FUNCTION ops.entity_facets(bytea);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)
     LANGUAGE sql STABLE
-    AS $$
+
+BEGIN ATOMIC
+
     SELECT e.tier, e.type_id FROM laplace.entities e WHERE e.id = p_id
-$$;
+;
+END;
 
 -- LIVE-UPGRADE DROP ORDER. These BEGIN-ATOMIC functions pin the exact OIDs of
 -- bases that are recompiled later in manifest.upgrade:
@@ -20,12 +31,36 @@ $$;
 -- can be replaced with RESTRICT semantics intact. Their normal modules recreate
 -- them later after all bases exist. Do not use CASCADE: an unlisted dependent is
 -- a contract change that scripts/check-upgrade-drop-order.py must expose.
-DROP FUNCTION IF EXISTS consensus.browse_named_entities(bytea[], bytea, int, int, int);
-DROP FUNCTION IF EXISTS structural.word_containers_containing_all(bytea[], int);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('consensus.browse_named_entities(bytea[], bytea, int, int, int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, tier smallint, type_id bytea, matched_name_id bytea, match_kind text, rating numeric, rd numeric, eff_mu numeric, witness_count bigint, candidate_name_count bigint, candidate_truncated boolean, matched_entity_count bigint)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_members','p_exact','p_offset','p_limit','p_capacity','entity_id','tier','type_id','matched_name_id','match_kind','rating','rd','eff_mu','witness_count','candidate_name_count','candidate_truncated','matched_entity_count']::text[])) THEN
+        DROP FUNCTION consensus.browse_named_entities(bytea[], bytea, int, int, int);
+    END IF;
+END $upgrade_shape$;
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('structural.word_containers_containing_all(bytea[], int)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, candidate_count bigint, truncated boolean)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_members','p_capacity','entity_id','candidate_count','truncated']::text[])) THEN
+        DROP FUNCTION structural.word_containers_containing_all(bytea[], int);
+    END IF;
+END $upgrade_shape$;
 
 -- Batch form for serving/browse paths.  One set read over surviving ids; callers
 -- must not LATERAL-loop the scalar facet reader or hand-read laplace.entities.
-DROP FUNCTION IF EXISTS ops.entity_facets_batch(bytea[]);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.entity_facets_batch(bytea[])')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, tier smallint, type_id bytea)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_ids','entity_id','tier','type_id']::text[])) THEN
+        DROP FUNCTION ops.entity_facets_batch(bytea[]);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE

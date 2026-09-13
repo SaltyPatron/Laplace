@@ -23,10 +23,11 @@ CREATE OR REPLACE FUNCTION structural.word_anchor(p_id bytea)
     -- returns at most one row. Undeclared, Postgres assumes 1000 -- a 1000x
     -- overestimate on the inner side of any join, which is what makes scanning
     -- look cheaper than probing.
-    ROWS 1 AS $$
+    ROWS 1
+BEGIN ATOMIC
     SELECT w.id, w.type_id, w.tier, w.coord, w.trajectory, w.hilbert_index
     FROM laplace.v_word_points w
     WHERE w.id = p_id
       AND w.trajectory IS NOT NULL
-    LIMIT 1
-$$;
+    LIMIT 1;
+END;

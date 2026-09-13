@@ -49,7 +49,15 @@
 -- are OUT parameters and are in scope over an atomic body -- an inner alias
 -- sharing their name is a silent capture waiting to happen.
 DROP FUNCTION IF EXISTS ops.placement_health(double precision, double precision);
-DROP FUNCTION IF EXISTS ops.placement_health(double precision);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.placement_health(double precision)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(cohort text, rows bigint, min_r numeric, avg_r numeric, off_sphere bigint, unreliable bigint, pct_unreliable numeric, worst_digits_lost numeric, fp32_digits_left numeric)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_unreliable','cohort','rows','min_r','avg_r','off_sphere','unreliable','pct_unreliable','worst_digits_lost','fp32_digits_left']::text[])) THEN
+        DROP FUNCTION ops.placement_health(double precision);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.placement_health(
     p_unreliable double precision DEFAULT 0.1)
 RETURNS TABLE(cohort              text,
@@ -101,7 +109,15 @@ COMMENT ON FUNCTION ops.placement_health(double precision) IS
 -- so it samples; use ops.placement_health() when the exact tier0/composed split
 -- is enough. plpgsql, because TABLESAMPLE takes a literal rather than a
 -- parameter, so the percentage has to reach the parser through format().
-DROP FUNCTION IF EXISTS ops.placement_health_by_tier(double precision, double precision);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.placement_health_by_tier(double precision, double precision)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(tier smallint, sampled bigint, min_r numeric, avg_r numeric, max_r numeric, off_sphere bigint, unreliable bigint, pct_unreliable numeric)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_sample_pct','p_unreliable','tier','sampled','min_r','avg_r','max_r','off_sphere','unreliable','pct_unreliable']::text[])) THEN
+        DROP FUNCTION ops.placement_health_by_tier(double precision, double precision);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.placement_health_by_tier(
     p_sample_pct  double precision DEFAULT 2.0,
     p_unreliable  double precision DEFAULT 0.1)
@@ -151,7 +167,15 @@ COMMENT ON FUNCTION ops.placement_health_by_tier(double precision, double precis
 -- already-LIMITed id array, not by p_limit scalar calls in the projection.
 -- Measured cost of the scalar form: ~42 ms per label (4,587 labels = 195 s), so
 -- at the default limit the difference is roughly one call against 50.
-DROP FUNCTION IF EXISTS ops.placement_unreliable(double precision, integer);
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('ops.placement_unreliable(double precision, integer)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'TABLE(entity_id bytea, tier smallint, radius double precision, label text)'
+             OR proargnames IS DISTINCT FROM ARRAY['p_threshold','p_limit','entity_id','tier','radius','label']::text[])) THEN
+        DROP FUNCTION ops.placement_unreliable(double precision, integer);
+    END IF;
+END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.placement_unreliable(
     p_threshold double precision DEFAULT 0.1,
     p_limit     integer          DEFAULT 50)

@@ -16,9 +16,10 @@
 DROP FUNCTION IF EXISTS laplace.relation_family_members(text);
 CREATE OR REPLACE FUNCTION consensus.relation_family_members(p_family text)
     RETURNS TABLE(id bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT et.id
     FROM laplace.entities et
     WHERE et.type_id = laplace.entity_type_id('RelationType')
-      AND consensus.relation_type_in_family(et.id, p_family)
-$$;
+      AND consensus.relation_type_in_family(et.id, p_family);
+END;

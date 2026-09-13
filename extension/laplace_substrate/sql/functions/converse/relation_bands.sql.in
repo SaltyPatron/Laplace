@@ -12,7 +12,8 @@
 DROP FUNCTION IF EXISTS laplace.relation_band_catalog();
 CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
     RETURNS TABLE(band integer, name text, rank double precision)
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+BEGIN ATOMIC
     VALUES
       (0,  'mandate',              1.00::double precision),
       (1,  'definitional',         0.97),
@@ -26,14 +27,15 @@ CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
       (9,  'lexical_glue',         0.18),
       (10, 'scalar_valued',        0.12),
       (11, 'standards_structural', 0.08),
-      (12, 'probationary',         0.05)
-$$;
+      (12, 'probationary',         0.05);
+END;
 
 DROP FUNCTION IF EXISTS laplace.relation_bands();
 CREATE OR REPLACE FUNCTION converse.relation_bands()
     RETURNS TABLE(band integer, name text, rank double precision,
                   relation_types bigint, consensus_rows bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH live AS (
         SELECT consensus.relation_highway_band(c.type_id) AS band,
                c.type_id,
@@ -49,5 +51,5 @@ CREATE OR REPLACE FUNCTION converse.relation_bands()
     FROM converse.relation_band_catalog() b
     LEFT JOIN live ON live.band = b.band
     GROUP BY b.band, b.name, b.rank
-    ORDER BY b.band
-$$;
+    ORDER BY b.band;
+END;

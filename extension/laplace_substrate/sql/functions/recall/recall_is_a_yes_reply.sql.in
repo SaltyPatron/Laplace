@@ -3,6 +3,6 @@ CREATE OR REPLACE FUNCTION converse.recall_is_a_yes_reply(
         p_path bytea[], p_types bytea[], p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
-    SELECT 'Yes — ' || realize.path(p_path, p_types, p_lang)
-$$;
+BEGIN ATOMIC
+    SELECT 'Yes — ' || realize.path(p_path, p_types, p_lang);
+END;

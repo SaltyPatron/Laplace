@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION chess.opening_endgames(p_opening text,
                                                   p_scan_lines int DEFAULT 5000)
     RETURNS TABLE(wdl text, positions bigint, lines_probed bigint)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
 WITH lines AS MATERIALIZED (
     SELECT DISTINCT g.line_id FROM chess.opening_games(p_opening, p_scan_lines) g
 ),
@@ -46,5 +46,5 @@ verdict AS MATERIALIZED (
 SELECT v.wdl, v.positions::bigint, v.lines_probed::bigint
 FROM verdict v
 ORDER BY v.positions DESC, v.wdl
-LIMIT p_limit
-$$;
+LIMIT p_limit;
+END;

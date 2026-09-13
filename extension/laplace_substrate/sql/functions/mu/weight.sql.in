@@ -49,8 +49,17 @@ $weight_mode$;
 -- its OID through pg_depend. Drop the dependent while the old base still exists,
 -- then recreate it immediately below against the two-argument folded-state law.
 -- The signature itself has no live dependents (checked by the upgrade gate).
-DROP FUNCTION IF EXISTS consensus.weight(
+-- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
+DO $upgrade_shape$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('consensus.weight(
+    bigint, bigint, consensus.weight_mode, bigint, bytea)')
+        AND (pg_get_function_result(oid) IS DISTINCT FROM 'double precision'
+             OR proargnames IS DISTINCT FROM ARRAY['p_rating','p_rd','p_mode','p_witness_count','p_type']::text[])) THEN
+        DROP FUNCTION consensus.weight(
     bigint, bigint, consensus.weight_mode, bigint, bytea);
+    END IF;
+END $upgrade_shape$;
 
 CREATE OR REPLACE FUNCTION consensus.weight(
         p_rating        bigint,

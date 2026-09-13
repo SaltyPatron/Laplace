@@ -2,7 +2,8 @@
 DROP FUNCTION IF EXISTS laplace._realize_defines(bytea);
 CREATE OR REPLACE FUNCTION realize._defines(p_id bytea)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+BEGIN ATOMIC
     -- RANK IN ID SPACE, RENDER THE WINNER. The ordering key is eff_mu, not the
     -- rendered text, so nothing needs a surface to decide. Rendering in the target
     -- list made realize.render_text run for EVERY candidate and kept one: each call opens
@@ -16,5 +17,5 @@ CREATE OR REPLACE FUNCTION realize._defines(p_id bytea)
          -- object_id CLOSES the order: without it a tie is broken by plan order,
          -- which is not reproducible. Matches Q_DEFINES in realize_batch.c.
          ORDER BY consensus.eff_mu(g.rating, g.rd) DESC, g.object_id
-         LIMIT 1), 24)
-$$;
+         LIMIT 1), 24);
+END;
