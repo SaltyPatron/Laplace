@@ -2,6 +2,8 @@
 #define LAPLACE_CONSENSUS_BULK_WRITE_H
 
 #include "postgres.h"
+#include "executor/spi.h"
+#include "utils/builtins.h"
 
 /* Consume the canonical nine folded arrays. Returns false when the relation
  * requires SQL rewriting or row policies; the caller retains its INSERT path. */
