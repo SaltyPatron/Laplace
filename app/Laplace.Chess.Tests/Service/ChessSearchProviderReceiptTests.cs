@@ -21,7 +21,7 @@ public sealed class ChessSearchProviderReceiptTests
         public long Version => 7;
         public int Evaluate(Board board) => EvaluatePlanes(board).TotalCp;
         public ChessPositionPlaneScore EvaluatePlanes(Board board)
-            => new(TotalCp: 17, AtomOutcomeCp: 5, LearnedPstCp: 12);
+            => new(TotalCp: 20, AtomOutcomeCp: 5, LearnedPstCp: 12, TacticOutcomeCp: 3);
     }
 
     [Fact]
