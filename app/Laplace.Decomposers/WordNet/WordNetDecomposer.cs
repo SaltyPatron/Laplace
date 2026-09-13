@@ -63,8 +63,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // GH #520: same hard-fail as OMW/SemLink/MapNet — a missing CILI map
-        // silently drops synset anchors and leaves WordNet unmeshed.
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
 
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
@@ -156,12 +154,12 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             Hash128? frameId = ReferenceAnchor.Emit(
                 b, ReferenceIdentityKind.WordNetVerbFrame,
                 frame.Number.ToString(CultureInfo.InvariantCulture),
-                EntityTypeRegistry.SourceReference, Source, SourceTrust.StandardsDerived);
+                EntityTypeRegistry.SourceReference, Source, TC.StandardsDerived);
             Hash128? templateId = EmitSurface(b, frame.Template, Source);
             if (frameId is { } fid && templateId is { } tid)
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     fid, WordNetSource.CorrespondsToTypeId, tid, Source,
-                    null, SourceTrust.StandardsDerived));
+                    null, TC.StandardsDerived));
         }
 
         protected override IAsyncEnumerable<WnVerbFrame> ExtractRecordsAsync(
@@ -219,12 +217,12 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             Hash128? sentenceId = ReferenceAnchor.Emit(
                 b, ReferenceIdentityKind.WordNetVerbSentence,
                 sentence.Number.ToString(CultureInfo.InvariantCulture),
-                EntityTypeRegistry.SourceReference, Source, SourceTrust.StandardsDerived);
+                EntityTypeRegistry.SourceReference, Source, TC.StandardsDerived);
             Hash128? textId = EmitSurface(b, sentence.Text, Source);
             if (sentenceId is { } sid && textId is { } tid)
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     sid, WordNetSource.CorrespondsToTypeId, tid, Source,
-                    null, SourceTrust.StandardsDerived));
+                    null, TC.StandardsDerived));
         }
 
         protected override IAsyncEnumerable<WnVerbSentence> ExtractRecordsAsync(
@@ -297,18 +295,14 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
-        ConceptAnchor.AttestSynsetCategory(b, synId, Source, SourceTrust.StandardsDerived);
+        ConceptAnchor.AttestSynsetCategory(b, synId, Source, TC.StandardsDerived);
 
         foreach (var lemma in syn.Lemmas)
         {
             var lemmaId = RootSurface(lemma);
             if (lemmaId is null) continue;
-            // Synset membership is carried by index.sense at its exact lexical grain:
-            // lemma -> HAS_SENSE -> sense -> IS_SENSE_OF -> synset. Repeating that same
-            // source observation here as lemma -> IS_SYNONYM_OF -> synset made one WordNet
-            // fact look like two independent witnesses and discarded the sense identity.
             PosReference.Attest(b, lemmaId.Value, syn.SsType.ToString(),
-                PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
+                PosReference.PosTagset.WordNet, Source, null, TC.StandardsDerived,
                 _vocabularyNames);
         }
 
@@ -318,14 +312,14 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             var defId = RootSurface(d);
             if (defId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.StandardsDerived));
+                    synId, "HAS_DEFINITION", defId.Value, Source, TC.StandardsDerived));
         }
         foreach (var ex in examples)
         {
             var exId = RootSurface(ex);
             if (exId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    synId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
+                    synId, "HAS_EXAMPLE", exId.Value, Source, TC.StandardsDerived));
         }
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
@@ -335,7 +329,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             if (lexId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     synId, "HAS_LEX_CATEGORY", lexId.Value,
-                    Source, SourceTrust.StandardsDerived));
+                    Source, TC.StandardsDerived));
         }
 
         foreach (var (frame, wordNum) in syn.Frames)
@@ -352,7 +346,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
                 if (lemmaId is { } lid) subject = lid;
             }
             b.AddAttestation(NativeAttestation.Categorical(
-                subject, "HAS_VERB_FRAME", frameId.Value, Source, SourceTrust.StandardsDerived));
+                subject, "HAS_VERB_FRAME", frameId.Value, Source, TC.StandardsDerived));
         }
 
         foreach (var ptr in syn.Pointers)
@@ -372,7 +366,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
                 if (srcId is { } sid) subject = sid;
             }
             b.AddAttestation(NativeAttestation.Categorical(
-                subject, typeName, tgt.Value, Source, SourceTrust.StandardsDerived));
+                subject, typeName, tgt.Value, Source, TC.StandardsDerived));
         }
     }
 
@@ -381,49 +375,38 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         EmitSurface(b, s.Lemma, Source);
 
         var senseId = SenseAnchor.EmitExact(
-            b, s.SenseKey, Source, SourceTrust.StandardsDerived);
+            b, s.SenseKey, Source, TC.StandardsDerived);
         var compatibilityId = SenseAnchor.Emit(
-            b, s.SenseKey, Source, SourceTrust.StandardsDerived);
+            b, s.SenseKey, Source, TC.StandardsDerived);
         if (senseId is null) return;
 
-        // Older bridges frequently retain only lemma%ss_type:lex_filenum:lex_id. That
-        // serialization is not unique for adjective satellites, so keep it as an explicit
-        // compatibility hub and connect it to every exact source sense instead of using it
-        // as identity. The two real PWN senses remain distinct on HAS_SENSE/IS_SENSE_OF.
         if (compatibilityId is { } alias && alias != senseId.Value)
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 alias, WordNetSource.CorrespondsToTypeId, senseId.Value, Source,
-                null, SourceTrust.StandardsDerived));
+                null, TC.StandardsDerived));
 
         var lemmaId = RootSurface(s.Lemma);
         var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
         if (lemmaId is null || synAnchor is null) return;
 
-        // The source's declared language scope, recorded rather than inferred. Emitted on
-        // the LEMMA and the SENSE and deliberately not on the synset: a synset is
-        // ILI-shared across every wordnet, so it is language-neutral and this source does
-        // not assert otherwise. lexical.senses() returns sense_id, and that is the id the elector
-        // compares against the prompt's language, so the sense edge is the load-bearing one.
-        // Null context, matching OMW: the object IS the language, so a language context
-        // would be circular.
         if (LanguageScopeId is { } langId)
         {
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, EtlSource.LanguageScopeRelation, langId, Source,
-                SourceTrust.StandardsDerived));
+                TC.StandardsDerived));
             b.AddAttestation(NativeAttestation.Categorical(
                 senseId.Value, EtlSource.LanguageScopeRelation, langId, Source,
-                SourceTrust.StandardsDerived));
+                TC.StandardsDerived));
         }
         b.AddAttestation(NativeAttestation.Categorical(
-            lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
+            lemmaId.Value, "HAS_SENSE", senseId.Value, Source, TC.StandardsDerived,
             magnitude: s.WitnessedMagnitude, arenaScale: 1.0));
         b.AddAttestation(NativeAttestation.Categorical(
-            senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
+            senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, TC.StandardsDerived));
         b.AddAttestation(NativeAttestation.Categorical(
-            senseId.Value, "HAS_NAME_ALIAS", lemmaId.Value, Source, SourceTrust.StandardsDerived));
+            senseId.Value, "HAS_NAME_ALIAS", lemmaId.Value, Source, TC.StandardsDerived));
         PosReference.Attest(b, senseId.Value, s.Pos.ToString(),
-            PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
+            PosReference.PosTagset.WordNet, Source, null, TC.StandardsDerived,
             _vocabularyNames);
         int lexFilenum = ParseLexFilenum(s.SenseKey);
         if (lexFilenum >= 0 && lexFilenum < Lexnames.Length)
@@ -432,7 +415,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             var lexId = RootSurface(Lexnames[lexFilenum]);
             if (lexId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    senseId.Value, "HAS_LEX_CATEGORY", lexId.Value, Source, SourceTrust.StandardsDerived));
+                    senseId.Value, "HAS_LEX_CATEGORY", lexId.Value, Source, TC.StandardsDerived));
         }
     }
 
@@ -517,7 +500,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             var baseId = EmitSurface(b, baseStr, Source);
             if (baseId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    baseId.Value, "IS_LEMMA_OF", infId.Value, Source, SourceTrust.StandardsDerived));
+                    baseId.Value, "IS_LEMMA_OF", infId.Value, Source, TC.StandardsDerived));
         }
     }
 
@@ -577,7 +560,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
     private static void ComposeVerbSentEntry(WnVerbSentEntry entry, SubstrateChangeBuilder b)
     {
         Hash128? senseId = SenseAnchor.EmitExact(
-            b, entry.SenseKey, Source, SourceTrust.StandardsDerived);
+            b, entry.SenseKey, Source, TC.StandardsDerived);
         if (senseId is null) return;
         foreach (int sentenceNumber in entry.SentenceNumbers)
         {
@@ -588,12 +571,10 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             if (sentenceId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     senseId.Value, "HAS_EXAMPLE", sentenceId.Value,
-                    Source, SourceTrust.StandardsDerived));
+                    Source, TC.StandardsDerived));
         }
     }
 
-    // internal, not private: the gloss/example split is the thing that shredded one
-    // WordNet definition into several facts, so it needs a test that can call it.
     internal static (List<string> Defs, List<string> Examples) ParseGloss(string gloss)
     {
         var examples = new List<string>();
@@ -613,23 +594,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             else { def.Append(gloss[i]); i++; }
         }
 
-        // ONE SYNSET, ONE GLOSS. The quote walk above already lifted every example out of
-        // `def`; what remains is the definition, and it is a single string. Splitting it on
-        // ';' was reading a separator that is not there: in WordNet's data files ';'
-        // separates the definition from the QUOTED examples, and those are gone by now — so
-        // the only semicolons left are INSIDE the definition.
-        //
-        // MEASURED 2026-08-16 on synset f59f0970 (cat). Gloss:
-        //   "feline mammal usually having thick soft fur and no ability to roar:
-        //    domestic cats; wildcats"
-        // deposited as THREE HAS_DEFINITION facts — the whole string (via OMW/CILI, which
-        // do not split), plus "...domestic cats" and "wildcats" from this line. Consensus
-        // then divides across them: the real gloss and the fragment "wildcats" both landed
-        // at eff_mu 1319.9, so which one a read returns as the top definition was a
-        // tie-break, not a rating. A fragment is not a competing claim about meaning; it is
-        // the same claim cut in half, and it cannot lose to the whole.
-        // Removing the quoted examples leaves their separators behind — "definition; ; " —
-        // so trim ';' and whitespace together until stable rather than in one pass.
         string definition = def.ToString().TrimEnd(' ', '\t', ';').TrimStart();
         return (definition.Length == 0 ? new List<string>() : new List<string> { definition },
                 examples);
@@ -721,15 +685,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             if (offEnd < 0) continue;
             if (!long.TryParse(System.Text.Encoding.UTF8.GetString(line.Slice(idx, offEnd)), out long offset)) continue;
             idx += offEnd + 1;
-            // index.sense is `sense_key synset_offset sense_number tag_cnt`. sense_number
-            // is WordNet's own frequency ordering within the lemma (1 = most common) and
-            // was being STEPPED OVER. It is the discriminator 82% of senses have: measured
-            // on WordNet-3.0, 171,463 of 206,941 senses carry tag_cnt = 0, so their
-            // HAS_SENSE magnitude was 0 -> score exactly 0.5 -> a DRAW, and every sense of
-            // a lemma folded to an identical rating. That is why a token's senses carry no
-            // information for any reader that ranks on the fold (W4 §2.2 measured the
-            // 5-way tie on `a` at 994.8; `what` and `the` still measure eff_mu spread 0.0
-            // on the live substrate, while chess/pawn/dog measure 95.9/80.4/77.5).
             int senseNumStart = line[idx..].IndexOf((byte)' ');
             if (senseNumStart < 0) continue;
             if (!int.TryParse(
@@ -768,15 +723,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
     private sealed record WnSense(
         string SenseKey, long Offset, char Pos, string Lemma, int TagCount, int SenseNumber)
     {
-        /// <summary>
-        /// Witnessed strength of this lemma->sense claim, from the TWO frequency signals
-        /// index.sense ships. tag_cnt (semantic-concordance occurrences) stays dominant
-        /// where it exists; sense_number (WordNet's editorial ordering, 1 = most common)
-        /// contributes a bounded 1/n term that separates the 82% of senses whose tag_cnt
-        /// is 0 and which therefore all folded to the same draw. Both come from the same
-        /// witnessed line -- this reads evidence the corpus already shipped, it does not
-        /// invent a prior.
-        /// </summary>
         public double WitnessedMagnitude =>
             TagCount + (SenseNumber > 0 ? 1.0 / SenseNumber : 0.0);
     };
