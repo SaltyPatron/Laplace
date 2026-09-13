@@ -48,6 +48,15 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _vocabularyNames;
 
     private static readonly string[] PosFiles = ["data.noun", "data.verb", "data.adj", "data.adv"];
+    private static readonly string[] ExcFiles = ["noun.exc", "verb.exc", "adj.exc", "adv.exc"];
+    private static readonly string[] PhysicalFiles =
+    [
+        "frames.vrb",
+        "data.noun", "data.verb", "data.adj", "data.adv",
+        "index.sense",
+        "noun.exc", "verb.exc", "adj.exc", "adv.exc",
+        "sents.vrb", "sentidx.vrb",
+    ];
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
@@ -60,30 +69,61 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.WordNet, options);
-        var frames = await LoadVerbFramesAsync(dictDir, ct);
 
-        await foreach (var c in RunPhaseAsync(new DataPhase(frames, batch), context, options, ct))
-            yield return c;
+        string framesPath = Path.Combine(dictDir, "frames.vrb");
+        if (File.Exists(framesPath))
+        {
+            await foreach (var c in RunPhaseAsync(
+                new FramePhase(batch), context, options, "frames.vrb", framesPath, ct))
+                yield return c;
+        }
 
-        if (options.MaxInputUnits > 0) yield break;
+        foreach (string posFile in PosFiles)
+        {
+            string path = Path.Combine(dictDir, posFile);
+            if (!File.Exists(path)) continue;
+            await foreach (var c in RunPhaseAsync(
+                new DataPhase(posFile, batch), context, options, posFile, path, ct))
+                yield return c;
+        }
 
-        var uncapped = options with { MaxInputUnits = 0 };
+        string sensePath = Path.Combine(dictDir, "index.sense");
+        if (File.Exists(sensePath))
+        {
+            await foreach (var c in RunPhaseAsync(
+                new SensePhase(batch), context, options, "index.sense", sensePath, ct))
+                yield return c;
+        }
 
-        await foreach (var c in RunPhaseAsync(new SensePhase(batch), context, uncapped, ct))
-            yield return c;
+        foreach (string excFile in ExcFiles)
+        {
+            string path = Path.Combine(dictDir, excFile);
+            if (!File.Exists(path)) continue;
+            await foreach (var c in RunPhaseAsync(
+                new ExcPhase(excFile, batch), context, options, excFile, path, ct))
+                yield return c;
+        }
 
-        await foreach (var c in RunPhaseAsync(new ExcPhase(batch), context, uncapped, ct))
-            yield return c;
+        string sentsPath = Path.Combine(dictDir, "sents.vrb");
+        if (File.Exists(sentsPath))
+        {
+            await foreach (var c in RunPhaseAsync(
+                new SentenceTextPhase(batch), context, options, "sents.vrb", sentsPath, ct))
+                yield return c;
+        }
 
-        await foreach (var c in RunPhaseAsync(new SentsPhase(batch), context, uncapped, ct))
-            yield return c;
+        string sentIdxPath = Path.Combine(dictDir, "sentidx.vrb");
+        if (File.Exists(sentIdxPath))
+        {
+            await foreach (var c in RunPhaseAsync(
+                new SentenceIndexPhase(batch), context, options, "sentidx.vrb", sentIdxPath, ct))
+                yield return c;
+        }
     }
 
     private abstract class WnComposePhase<T> : ComposeDecomposerPhase<T>
     {
-        private readonly int _batch;
-
-        protected WnComposePhase(int batch) => _batch = batch;
+        protected WnComposePhase(int batch) { }
 
         public override Hash128 SourceId => Source;
         public override string SourceName => "WordNetDecomposer";
@@ -106,102 +146,130 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
                 options);
     }
 
+    private sealed class FramePhase : WnComposePhase<WnVerbFrame>
+    {
+        public FramePhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "frames.vrb";
+
+        protected override void Compose(WnVerbFrame frame, SubstrateChangeBuilder b)
+        {
+            Hash128? frameId = ReferenceAnchor.Emit(
+                b, ReferenceIdentityKind.WordNetVerbFrame,
+                frame.Number.ToString(CultureInfo.InvariantCulture),
+                EntityTypeRegistry.SourceReference, Source, SourceTrust.StandardsDerived);
+            Hash128? templateId = EmitSurface(b, frame.Template, Source);
+            if (frameId is { } fid && templateId is { } tid)
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    fid, WordNetSource.CorrespondsToTypeId, tid, Source,
+                    null, SourceTrust.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<WnVerbFrame> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            ParseVerbFramesAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "frames.vrb"), ct);
+    }
+
     private sealed class DataPhase : WnComposePhase<WnSynset>
     {
-        private readonly string?[] _frames;
+        private readonly string _fileName;
 
-        public DataPhase(string?[] frames, int batch) : base(batch) => _frames = frames;
+        public DataPhase(string fileName, int batch) : base(batch) => _fileName = fileName;
 
-        protected override string PhaseLabel => "data";
+        protected override string PhaseLabel => _fileName;
 
         protected override void Compose(WnSynset syn, SubstrateChangeBuilder b)
         {
-            EmitSynsetEntities(b, syn, _frames);
-            EmitSynsetAttestations(b, syn, _frames);
+            EmitSynsetEntities(b, syn);
+            EmitSynsetAttestations(b, syn);
         }
 
-        protected override async IAsyncEnumerable<WnSynset> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            string dictDir = Path.Combine(ecosystemPath, "WordNet-3.0", "dict");
-            await foreach (var syn in ParseAllSynsetsAsync(dictDir, ct))
-                yield return syn;
-        }
+        protected override IAsyncEnumerable<WnSynset> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            ParseDataAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", _fileName), ct);
     }
 
     private sealed class SensePhase : WnComposePhase<WnSense>
     {
         public SensePhase(int batch) : base(batch) { }
-        protected override string PhaseLabel => "sense";
+        protected override string PhaseLabel => "index.sense";
         protected override void Compose(WnSense s, SubstrateChangeBuilder b) => ComposeSense(s, b);
-        protected override async IAsyncEnumerable<WnSense> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            string path = Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "index.sense");
-            await foreach (var s in ParseSensesAsync(path, ct))
-                yield return s;
-        }
+        protected override IAsyncEnumerable<WnSense> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            ParseSensesAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "index.sense"), ct);
     }
 
     private sealed class ExcPhase : WnComposePhase<WnExcLine>
     {
-        public ExcPhase(int batch) : base(batch) { }
-        protected override string PhaseLabel => "exc";
+        private readonly string _fileName;
+        public ExcPhase(string fileName, int batch) : base(batch) => _fileName = fileName;
+        protected override string PhaseLabel => _fileName;
         protected override void Compose(WnExcLine exc, SubstrateChangeBuilder b) => ComposeExcLine(exc, b);
-        protected override async IAsyncEnumerable<WnExcLine> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            string dictDir = Path.Combine(ecosystemPath, "WordNet-3.0", "dict");
-            await foreach (var exc in ParseExceptionsAsync(dictDir, ct))
-                yield return exc;
-        }
+        protected override IAsyncEnumerable<WnExcLine> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            ParseExceptionFileAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", _fileName), ct);
     }
 
-    private sealed class SentsPhase : WnComposePhase<WnVerbSentEntry>
+    private sealed class SentenceTextPhase : WnComposePhase<WnVerbSentence>
     {
-        public SentsPhase(int batch) : base(batch) { }
-        protected override string PhaseLabel => "sents";
+        public SentenceTextPhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "sents.vrb";
+
+        protected override void Compose(WnVerbSentence sentence, SubstrateChangeBuilder b)
+        {
+            Hash128? sentenceId = ReferenceAnchor.Emit(
+                b, ReferenceIdentityKind.WordNetVerbSentence,
+                sentence.Number.ToString(CultureInfo.InvariantCulture),
+                EntityTypeRegistry.SourceReference, Source, SourceTrust.StandardsDerived);
+            Hash128? textId = EmitSurface(b, sentence.Text, Source);
+            if (sentenceId is { } sid && textId is { } tid)
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    sid, WordNetSource.CorrespondsToTypeId, tid, Source,
+                    null, SourceTrust.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<WnVerbSentence> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            ParseVerbSentenceTextsAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "sents.vrb"), ct);
+    }
+
+    private sealed class SentenceIndexPhase : WnComposePhase<WnVerbSentEntry>
+    {
+        public SentenceIndexPhase(int batch) : base(batch) { }
+        protected override string PhaseLabel => "sentidx.vrb";
         protected override void Compose(WnVerbSentEntry entry, SubstrateChangeBuilder b) =>
             ComposeVerbSentEntry(entry, b);
-        protected override async IAsyncEnumerable<WnVerbSentEntry> ExtractRecordsAsync(
-            string ecosystemPath, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            string dictDir = Path.Combine(ecosystemPath, "WordNet-3.0", "dict");
-            await foreach (var entry in ParseVerbSentencesAsync(dictDir, ct))
-                yield return entry;
-        }
+        protected override IAsyncEnumerable<WnVerbSentEntry> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            ParseVerbSentenceIndexAsync(Path.Combine(ecosystemPath, "WordNet-3.0", "dict", "sentidx.vrb"), ct);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
-        var paths = PosFiles
-            .Select(pos => Path.Combine(dictDir, pos))
-            .Where(File.Exists)
-            .ToList();
-        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        if (options.MaxInputUnits > 0)
-            return Task.FromResult(IngestInventory.FromFiles("synsets", paths, options.MaxInputUnits, ct));
-        var files = paths.Select(p => new IngestFileSpec(
-            Path.GetFileName(p), p, EtlInventory.EstimateNewlineCount(p, ct))).ToList();
-        // Decompose runs four streams (synsets, index.sense, *.exc,
-        // sentidx.vrb) against one consumed-units counter — a synsets-only
-        // total made progress read ~284%. Uncapped inventory counts them all;
-        // the capped path stays synsets-only because DecomposeAsync skips the
-        // other streams entirely when MaxInputUnits > 0.
-        foreach (var extra in new[] { "index.sense", "noun.exc", "verb.exc", "adj.exc", "adv.exc", "sentidx.vrb" })
+        List<IngestFileSpec> files;
+        if (context.HasArtifactGraph)
         {
-            string ep = Path.Combine(dictDir, extra);
-            if (File.Exists(ep))
-                files.Add(new IngestFileSpec(extra, ep, EtlInventory.EstimateNewlineCount(ep, ct)));
+            files = context.SelectedArtifacts
+                .Select(artifact => new IngestFileSpec(
+                    artifact.FileLabel, artifact.Path,
+                    EtlInventory.EstimateNewlineCount(artifact.Path, ct)))
+                .ToList();
         }
-        long total = files.Sum(f => f.InputUnits);
-        return Task.FromResult<IngestInventory?>(new IngestInventory("records", total, files));
+        else
+        {
+            string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
+            files = PhysicalFiles
+                .Select(name => (Name: name, Path: Path.Combine(dictDir, name)))
+                .Where(static file => File.Exists(file.Path))
+                .Select(file => new IngestFileSpec(
+                    file.Name, file.Path, EtlInventory.EstimateNewlineCount(file.Path, ct)))
+                .ToList();
+        }
+
+        if (files.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        long total = files.Sum(static file => file.InputUnits);
+        long effective = options.MaxInputUnits > 0 ? Math.Min(total, options.MaxInputUnits) : total;
+        return Task.FromResult<IngestInventory?>(new IngestInventory("records", effective, files));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -210,23 +278,8 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         return inv?.TotalInputUnits ?? EstimatedSynsets;
     }
 
-    private static async IAsyncEnumerable<WnSynset> ParseAllSynsetsAsync(
-        string dictDir, [EnumeratorCancellation] CancellationToken ct)
+    private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn)
     {
-        foreach (var posFile in PosFiles)
-        {
-            string filePath = Path.Combine(dictDir, posFile);
-            if (!File.Exists(filePath)) continue;
-            await foreach (var syn in ParseDataAsync(filePath, ct))
-                yield return syn;
-        }
-    }
-
-    private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
-    {
-
-
-
         ConceptAnchor.EmitAnchor(b, syn.Offset, syn.SsType, Source);
         foreach (var lemma in syn.Lemmas)
             EmitSurface(b, lemma, Source);
@@ -237,16 +290,10 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         if (syn.LexFilenum >= 0 && syn.LexFilenum < Lexnames.Length)
             EmitSurface(b, Lexnames[syn.LexFilenum], Source);
-
-        foreach (var (frame, _) in syn.Frames)
-            if (frame > 0 && frame < frameTemplates.Length && frameTemplates[frame] is { } tpl)
-                EmitSurface(b, tpl, Source);
     }
 
-    private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn, string?[] frameTemplates)
+    private static void EmitSynsetAttestations(SubstrateChangeBuilder b, WnSynset syn)
     {
-
-
         Hash128? synAnchor = ConceptAnchor.SynsetId(syn.Offset, syn.SsType);
         if (synAnchor is null) return;
         Hash128 synId = synAnchor.Value;
@@ -293,9 +340,11 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         foreach (var (frame, wordNum) in syn.Frames)
         {
-            if (frame <= 0 || frame >= frameTemplates.Length || frameTemplates[frame] is not { } tpl) continue;
-            var tplId = RootSurface(tpl);
-            if (tplId is null) continue;
+            if (frame <= 0) continue;
+            Hash128? frameId = ReferenceAnchor.Id(
+                ReferenceIdentityKind.WordNetVerbFrame,
+                frame.ToString(CultureInfo.InvariantCulture));
+            if (frameId is null) continue;
             Hash128 subject = synId;
             if (wordNum > 0 && wordNum <= syn.Lemmas.Count)
             {
@@ -303,20 +352,18 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
                 if (lemmaId is { } lid) subject = lid;
             }
             b.AddAttestation(NativeAttestation.Categorical(
-                subject, "HAS_VERB_FRAME", tplId.Value, Source, SourceTrust.StandardsDerived));
+                subject, "HAS_VERB_FRAME", frameId.Value, Source, SourceTrust.StandardsDerived));
         }
 
         foreach (var ptr in syn.Pointers)
         {
             if (!PointerTypes.TryGetValue(ptr.Symbol, out var typeName)) continue;
 
-
             if (syn.SsType == 'v' && ptr.Symbol == "@")
                 typeName = "MANNER_OF";
 
             Hash128? tgt = ConceptAnchor.SynsetId(ptr.TargetOffset, ptr.TargetPos);
             if (tgt is null) continue;
-
 
             Hash128 subject = synId;
             if (ptr.SrcWord > 0 && ptr.SrcWord <= syn.Lemmas.Count)
@@ -391,7 +438,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
     private static string Surface(string lemma) => lemma.Replace('_', ' ');
 
-
     private static int ParseLexFilenum(string senseKey)
     {
         int pct = senseKey.IndexOf('%');
@@ -416,52 +462,49 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         return ContentTierSpine.ResolveRoot(System.Text.Encoding.UTF8.GetBytes(canonical));
     }
 
-    private static async Task<string?[]> LoadVerbFramesAsync(string dictDir, CancellationToken ct)
+    private readonly record struct WnVerbFrame(int Number, string Template);
+
+    private static async IAsyncEnumerable<WnVerbFrame> ParseVerbFramesAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        var templates = new string?[40];
-        string path = Path.Combine(dictDir, "frames.vrb");
-        if (!File.Exists(path)) return templates;
+        if (!File.Exists(path)) yield break;
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
             ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
             int sp = line.IndexOf((byte)' ');
             if (sp <= 0) continue;
             if (!int.TryParse(System.Text.Encoding.UTF8.GetString(line[..sp]), out int num)) continue;
-            if (num > 0 && num < templates.Length)
-                templates[num] = System.Text.Encoding.UTF8.GetString(line[(sp + 1)..]).Trim();
+            string template = System.Text.Encoding.UTF8.GetString(line[(sp + 1)..]).Trim();
+            if (num > 0 && template.Length > 0)
+                yield return new WnVerbFrame(num, template);
         }
-        return templates;
     }
 
     private readonly record struct WnExcLine(string Inflected, List<string> Bases);
 
-    private static async IAsyncEnumerable<WnExcLine> ParseExceptionsAsync(
-        string dictDir, [EnumeratorCancellation] CancellationToken ct)
+    private static async IAsyncEnumerable<WnExcLine> ParseExceptionFileAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        foreach (var excFile in new[] { "noun.exc", "verb.exc", "adj.exc", "adv.exc" })
+        if (!File.Exists(path)) yield break;
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
-            string path = Path.Combine(dictDir, excFile);
-            if (!File.Exists(path)) continue;
-            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+            ReadOnlySpan<byte> line = lineMem.Span;
+            int sp = line.IndexOf((byte)' ');
+            if (sp <= 0) continue;
+            string inf = System.Text.Encoding.UTF8.GetString(line[..sp]);
+            if (inf.Length == 0) continue;
+            var bases = new List<string>();
+            int idx = sp + 1;
+            while (idx < line.Length)
             {
-                ReadOnlySpan<byte> line = lineMem.Span;
-                int sp = line.IndexOf((byte)' ');
-                if (sp <= 0) continue;
-                string inf = System.Text.Encoding.UTF8.GetString(line[..sp]);
-                if (inf.Length == 0) continue;
-                var bases = new List<string>();
-                int idx = sp + 1;
-                while (idx < line.Length)
-                {
-                    int next = line[idx..].IndexOf((byte)' ');
-                    ReadOnlySpan<byte> part = next < 0 ? line[idx..] : line.Slice(idx, next);
-                    if (!part.IsEmpty)
-                        bases.Add(System.Text.Encoding.UTF8.GetString(part));
-                    if (next < 0) break;
-                    idx += next + 1;
-                }
-                if (bases.Count > 0) yield return new WnExcLine(inf, bases);
+                int next = line[idx..].IndexOf((byte)' ');
+                ReadOnlySpan<byte> part = next < 0 ? line[idx..] : line.Slice(idx, next);
+                if (!part.IsEmpty)
+                    bases.Add(System.Text.Encoding.UTF8.GetString(part));
+                if (next < 0) break;
+                idx += next + 1;
             }
+            if (bases.Count > 0) yield return new WnExcLine(inf, bases);
         }
     }
 
@@ -478,67 +521,13 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         }
     }
 
-    private readonly record struct WnVerbSentEntry(Hash128 SynId, List<string> SentTexts);
+    private readonly record struct WnVerbSentence(int Number, string Text);
+    private readonly record struct WnVerbSentEntry(string SenseKey, List<int> SentenceNumbers);
 
-    private static async IAsyncEnumerable<WnVerbSentEntry> ParseVerbSentencesAsync(
-        string dictDir, [EnumeratorCancellation] CancellationToken ct)
+    private static async IAsyncEnumerable<WnVerbSentence> ParseVerbSentenceTextsAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        string idxPath = Path.Combine(dictDir, "sentidx.vrb");
-        string sentsPath = Path.Combine(dictDir, "sents.vrb");
-        if (!File.Exists(idxPath) || !File.Exists(sentsPath)) yield break;
-
-        var sentences = await LoadVerbSentencesAsync(sentsPath, ct);
-        if (sentences.Count == 0) yield break;
-        var senseIndex = await LoadSenseKeyIndexAsync(Path.Combine(dictDir, "index.sense"), ct);
-        if (senseIndex.Count == 0) yield break;
-
-        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(idxPath, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
-            if (line.IsEmpty) continue;
-            int sp = line.IndexOf((byte)' ');
-            if (sp <= 0) continue;
-
-            string senseKey = System.Text.Encoding.UTF8.GetString(line[..sp]);
-            string? exactKey = SourceEntityIdConventions.NormalizeExactSenseKey(senseKey);
-            if (exactKey is null || !senseIndex.TryGetValue(exactKey, out var syn)) continue;
-
-            Hash128? synId = ConceptAnchor.SynsetId(syn.Offset, syn.Pos);
-            if (synId is null) continue;
-
-            ReadOnlySpan<byte> idList = line[(sp + 1)..];
-            var texts = new List<string>();
-            int idStart = 0;
-            for (int i = 0; i <= idList.Length; i++)
-            {
-                if (i < idList.Length && idList[i] != (byte)',') continue;
-                var idSpan = idList[idStart..i].Trim((byte)' ');
-                idStart = i + 1;
-                if (idSpan.IsEmpty) continue;
-                if (!int.TryParse(System.Text.Encoding.UTF8.GetString(idSpan), out int sentId)) continue;
-                if (sentences.TryGetValue(sentId, out string? text) && text.Length > 0)
-                    texts.Add(text);
-            }
-            if (texts.Count > 0) yield return new WnVerbSentEntry(synId.Value, texts);
-        }
-    }
-
-    private static void ComposeVerbSentEntry(WnVerbSentEntry entry, SubstrateChangeBuilder b)
-    {
-        foreach (var text in entry.SentTexts)
-        {
-            var exId = EmitSurface(b, text, Source);
-            if (exId is not null)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    entry.SynId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.StandardsDerived));
-        }
-    }
-
-    private static async Task<Dictionary<int, string>> LoadVerbSentencesAsync(
-        string path, CancellationToken ct)
-    {
-        var map = new Dictionary<int, string>();
+        if (!File.Exists(path)) yield break;
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
             ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
@@ -547,18 +536,60 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             if (sp <= 0) continue;
             if (!int.TryParse(System.Text.Encoding.UTF8.GetString(line[..sp]), out int id)) continue;
             string text = System.Text.Encoding.UTF8.GetString(line[(sp + 1)..]).Trim();
-            if (text.Length > 0) map[id] = text;
+            if (id > 0 && text.Length > 0)
+                yield return new WnVerbSentence(id, text);
         }
-        return map;
     }
 
-    private static async Task<Dictionary<string, (long Offset, char Pos)>> LoadSenseKeyIndexAsync(
-        string path, CancellationToken ct)
+    private static async IAsyncEnumerable<WnVerbSentEntry> ParseVerbSentenceIndexAsync(
+        string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        var map = new Dictionary<string, (long, char)>(StringComparer.Ordinal);
-        await foreach (var s in ParseSensesAsync(path, ct))
-            map.TryAdd(s.SenseKey, (s.Offset, s.Pos));
-        return map;
+        if (!File.Exists(path)) yield break;
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            ReadOnlySpan<byte> line = lineMem.Span.Trim((byte)' ');
+            if (line.IsEmpty) continue;
+            int sp = line.IndexOf((byte)' ');
+            if (sp <= 0) continue;
+
+            string rawSenseKey = System.Text.Encoding.UTF8.GetString(line[..sp]);
+            string? exactKey = SourceEntityIdConventions.NormalizeExactSenseKey(rawSenseKey);
+            if (exactKey is null) continue;
+
+            ReadOnlySpan<byte> idList = line[(sp + 1)..];
+            var sentenceNumbers = new List<int>();
+            int idStart = 0;
+            for (int i = 0; i <= idList.Length; i++)
+            {
+                if (i < idList.Length && idList[i] != (byte)',') continue;
+                var idSpan = idList[idStart..i].Trim((byte)' ');
+                idStart = i + 1;
+                if (idSpan.IsEmpty) continue;
+                if (int.TryParse(System.Text.Encoding.UTF8.GetString(idSpan), out int sentId) && sentId > 0)
+                    sentenceNumbers.Add(sentId);
+            }
+            if (sentenceNumbers.Count > 0)
+                yield return new WnVerbSentEntry(exactKey, sentenceNumbers);
+        }
+    }
+
+    private static void ComposeVerbSentEntry(WnVerbSentEntry entry, SubstrateChangeBuilder b)
+    {
+        Hash128? senseId = SenseAnchor.EmitExact(
+            b, entry.SenseKey, Source, SourceTrust.StandardsDerived);
+        if (senseId is null) return;
+        foreach (int sentenceNumber in entry.SentenceNumbers)
+        {
+            Hash128? sentenceId = ReferenceAnchor.Declare(
+                b, ReferenceIdentityKind.WordNetVerbSentence,
+                sentenceNumber.ToString(CultureInfo.InvariantCulture),
+                EntityTypeRegistry.SourceReference, Source);
+            if (sentenceId is not null)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    senseId.Value, "HAS_EXAMPLE", sentenceId.Value,
+                    Source, SourceTrust.StandardsDerived));
+        }
     }
 
     // internal, not private: the gloss/example split is the thing that shredded one
@@ -581,8 +612,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             }
             else { def.Append(gloss[i]); i++; }
         }
-
-
 
         // ONE SYNSET, ONE GLOSS. The quote walk above already lifted every example out of
         // `def`; what remains is the definition, and it is a single string. Splitting it on
@@ -649,9 +678,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             string sym = parts[idx++];
             if (!long.TryParse(parts[idx++], out long tgtOffset)) { idx += 2; continue; }
             char tgtPos = parts[idx++][0];
-
-
-
             string srcTgt = parts[idx++];
             int srcWord = srcTgt.Length >= 4 && int.TryParse(srcTgt.AsSpan(0, 2), NumberStyles.HexNumber, null, out int sw) ? sw : 0;
             int tgtWord = srcTgt.Length >= 4 && int.TryParse(srcTgt.AsSpan(2, 2), NumberStyles.HexNumber, null, out int tw) ? tw : 0;
