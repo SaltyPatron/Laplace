@@ -151,10 +151,9 @@ test('Not-found decomposition keeps tier-2 word constituents visible', async ({ 
   });
 
   await page.goto('/explore/notfound/Sodium%20Chloride');
-  const decomposition = page.getByText('Decomposition').locator('..');
-  await expect(decomposition.getByRole('link', { name: 'Sodium', exact: true })).toHaveAttribute('href', `/explore/entity/${sodiumId}`);
-  await expect(decomposition.getByRole('link', { name: 'Chloride', exact: true })).toHaveAttribute('href', `/explore/entity/${chlorideId}`);
-  await expect(decomposition.getByRole('link', { name: 'Sodium Chloride', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Sodium', exact: true })).toHaveAttribute('href', `/explore/entity/${sodiumId}`);
+  await expect(page.getByRole('link', { name: 'Chloride', exact: true })).toHaveAttribute('href', `/explore/entity/${chlorideId}`);
+  await expect(page.getByRole('link', { name: 'Sodium Chloride', exact: true })).toHaveCount(0);
 });
 
 test('Glome canvas mounts after unlock', async ({ page }) => {
