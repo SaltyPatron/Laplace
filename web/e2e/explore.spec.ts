@@ -111,7 +111,7 @@ test('Browse exposes capacity truncation as an execution bound the user can expa
   await expect.poll(() => seenCapacity).toBe('4096');
 });
 
-test('Browse routes an unwitnessed surface to its geometric neighborhood', async ({ page }) => {
+test('Browse does not promote an absent surface to an entity result', async ({ page }) => {
   await page.route('**/v1/explore/browse?**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -119,11 +119,14 @@ test('Browse routes an unwitnessed surface to its geometric neighborhood', async
     });
   });
 
-  await page.goto('/explore');
-  await page.getByRole('textbox', { name: 'Find a starting point in the substrate' }).fill('unheld');
-  await page.getByRole('button', { name: 'Browse' }).click();
-  await page.getByRole('link', { name: 'Open its structural neighborhood ›' }).click();
-  await expect(page).toHaveURL('/explore/notfound/unheld');
+  await page.goto('/explore?q=unheld');
+  await expect(page.getByText('No admitted entity or containing structure was reached by this browse program.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open its structural neighborhood ›' })).toHaveCount(0);
+});
+
+test('legacy free-form resolve routes through Browse', async ({ page }) => {
+  await page.goto('/explore/resolve/Sodium%20Chloride');
+  await expect(page).toHaveURL('/explore?q=Sodium+Chloride');
 });
 
 test('Not-found decomposition keeps tier-2 word constituents visible', async ({ page }) => {
@@ -157,10 +160,8 @@ test('Not-found decomposition keeps tier-2 word constituents visible', async ({ 
 });
 
 test('Glome canvas mounts after unlock', async ({ page }) => {
-  await page.goto('/explore/resolve/whale');
+  await page.goto(`/explore/entity/${WHALE_ID}`);
   await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 15_000 });
-  // Under the dev billing bypass the entity auto-unlocks (no "Unlock (inspect)" step);
-  // the glome tab still gates the nearest-neighbor overlay behind its own prompt.
   await page.getByRole('button', { name: 'glome' }).click();
   await page.getByRole('button', { name: /Unlock \(nn\)/ }).click();
   const panes = page.locator('canvas');
@@ -170,10 +171,8 @@ test('Glome canvas mounts after unlock', async ({ page }) => {
 });
 
 test('Gated expand shows GatePrompt when billing bypass is off', async ({ page }) => {
-  // The inspect gate only fires when the endpoint runs with LAPLACE_BILLING_BYPASS=false;
-  // under the dev bypass the entity auto-unlocks and this UX is unreachable by design.
   test.skip(process.env.LAPLACE_BILLING_BYPASS !== 'false', 'requires an endpoint with LAPLACE_BILLING_BYPASS=false');
-  await page.goto('/explore/resolve/whale');
+  await page.goto(`/explore/entity/${WHALE_ID}`);
   await expect(page.getByRole('button', { name: /Unlock \(inspect\)/ })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/inspect/i)).toBeVisible();
 });

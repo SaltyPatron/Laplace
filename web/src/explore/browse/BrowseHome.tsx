@@ -26,13 +26,12 @@ function positiveInt(value: string | null, fallback: number) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
-function matchKindLabel(kind: string) {
+function matchKindLabel(kind: BrowseHit['match_kind']) {
   switch (kind) {
     case 'name': return 'name / alias evidence';
     case 'surface': return 'exact witnessed surface';
     case 'contains_all': return 'contains all query words';
     case 'constituent': return 'query constituent';
-    default: return kind.replaceAll('_', ' ');
   }
 }
 
@@ -146,9 +145,8 @@ export function BrowseHome() {
 
             {data.hits.length === 0 ? (
               <div className={styles.empty}>
-                <strong>No canonical entity was reached in this browse lane.</strong>
-                <Muted>The exact surface can still be explored geometrically if it has not been witnessed.</Muted>
-                <Link to={`/explore/notfound/${encodeURIComponent(data.query)}`}>Open its structural neighborhood ›</Link>
+                <strong>No admitted entity or containing structure was reached by this browse program.</strong>
+                <Muted>The input has a deterministic content identity, but Browse returns entity results only when the substrate contains them.</Muted>
               </div>
             ) : (
               <Table>
@@ -205,7 +203,7 @@ export function BrowseHome() {
             <dl className={styles.receipt}>
               <div><dt>Query root</dt><dd>{data.receipt.query_root_id_hex}</dd></div>
               <div><dt>Word identities</dt><dd>{data.receipt.query_member_ids_hex.length.toLocaleString()}</dd></div>
-              <div><dt>Name frontier</dt><dd>{data.receipt.candidate_names.toLocaleString()} / {data.receipt.candidate_capacity.toLocaleString()}</dd></div>
+              <div><dt>Containment frontier</dt><dd>{data.receipt.candidate_names.toLocaleString()} / {data.receipt.candidate_capacity.toLocaleString()}</dd></div>
               <div><dt>Frontier complete</dt><dd>{data.receipt.candidate_truncated ? 'no — capacity reached' : 'yes for this lane'}</dd></div>
               <div><dt>Returned</dt><dd>{data.receipt.returned.toLocaleString()}</dd></div>
               <div><dt>Substrate read</dt><dd>{data.receipt.elapsed_us.toLocaleString()} μs</dd></div>
