@@ -33,7 +33,11 @@ public sealed class ChessSearchProviderReceiptTests
             positionEvaluator: new PositionPlanes(),
             learnedSelected: true,
             learnedContributes: true,
-            learnedNonZeroCells: 42);
+            learnedNonZeroCells: 42,
+            positionAtomsLoaded: 12,
+            tacticSelected: true,
+            tacticContributes: true,
+            tacticPatternsLoaded: 7);
         var search = configured.BuildSearch(ttBits: 10);
 
         var result = search.Think(
@@ -46,11 +50,16 @@ public sealed class ChessSearchProviderReceiptTests
         Assert.True(receipt.RootMovesInfluenced > 0);
         Assert.True(receipt.PositionEvidenceReads > 0);
         Assert.True(receipt.PositionEvidenceContributions > 0);
+        Assert.Equal(12, receipt.PositionAtomsLoaded);
         Assert.True(receipt.LearnedPstReads > 0);
         Assert.True(receipt.LearnedPstContributions > 0);
         Assert.Equal(42, receipt.LearnedPstNonZeroCells);
+        Assert.True(receipt.TacticReads > 0);
+        Assert.True(receipt.TacticContributions > 0);
+        Assert.Equal(7, receipt.TacticPatternsLoaded);
         Assert.True(receipt.SyzygyProbes > 0);
         Assert.Contains("learned-pst=", receipt.Summary);
+        Assert.Contains("tactics=", receipt.Summary);
     }
 
     [Fact]
@@ -59,6 +68,7 @@ public sealed class ChessSearchProviderReceiptTests
         var receipt = ChessSearchProviderReceipt.Classical;
         Assert.False(receipt.SubstrateSelected);
         Assert.False(receipt.LearnedPstSelected);
+        Assert.False(receipt.TacticSelected);
         Assert.Equal(0, receipt.RootSteerReads);
         Assert.Equal(0, receipt.PositionEvidenceReads);
         Assert.Equal(0, receipt.SyzygyProbes);
