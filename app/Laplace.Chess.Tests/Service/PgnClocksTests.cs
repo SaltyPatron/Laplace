@@ -79,6 +79,10 @@ public sealed class PgnClocksTests
     }
 
     [Fact]
+    public void MedianSpent_EvenPopulationUsesMiddlePairMean()
+        => Assert.Equal(3d, PgnClocks.MedianSpent([1d, 5d, 1d, 5d]));
+
+    [Fact]
     public void ThinkFactorFromSpent_LongThinkUp_SnapMoveDown()
     {
         var spent = PgnClocks.SpentSeconds(CutechessMovetext, 6)!;
