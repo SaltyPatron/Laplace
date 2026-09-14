@@ -1,3 +1,4 @@
+using Laplace.Ingestion;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -62,5 +63,12 @@ public sealed class ChessSyzygyPackageInventoryTests
         {
             try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
+    }
+
+    [Fact]
+    public void ChessLayerCompletionMarkers_AreInsideTheConsensusExclusionEnvelope()
+    {
+        Assert.InRange(new ChessSyzygyDecomposer().LayerOrder, 0, LayerCompletion.MaxMarkedLayer);
+        Assert.InRange(new ChessTacticOutcomesDecomposer().LayerOrder, 0, LayerCompletion.MaxMarkedLayer);
     }
 }
