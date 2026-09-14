@@ -45,9 +45,9 @@ SET LOCAL ROLE laplace_bitmap_regress_reader;
 DO $$
 BEGIN
     IF laplace.physicalities_exist_bitmap(ARRAY[
-        laplace.word_id('physicality-probe-regression/1'), NULL,
+        laplace.word_id('physicality-probe-regression/1'), decode('', 'hex'),
         laplace.word_id('physicality-probe-regression/1')]) <> decode('05', 'hex') THEN
-        RAISE EXCEPTION 'parent-only identity grants changed duplicate or NULL membership';
+        RAISE EXCEPTION 'parent-only identity grants changed duplicate or malformed membership';
     END IF;
 END
 $$;
