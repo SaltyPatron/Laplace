@@ -45,17 +45,47 @@ Source identity is not execution identity until the receipt proves the binding.
 
 `scripts/bench-compose.py` measures the native core boundary only: UTF-8 input, Unicode/NFC handling, UAX #29 segmentation, content/Merkle identity construction, tier-tree composition, and geometric placement performed by the core path. It includes no PostgreSQL, COPY, network, API serving, or GPU work.
 
-It is a one-worker floor rather than a whole-machine claim.
+It is a **measured one-worker floor**, not a whole-machine claim. Multi-worker capacity is measured by scaling profiles; the single-thread rate must never be multiplied by a core/thread count and published as measured throughput.
+
+The 4-character BPE-equivalent value is only a familiar input-rate normalization. It is not the amount of structural work performed. Every accepted benchmark now emits exact machine-readable work lines:
+
+```text
+WORK_INPUT documents=<n> bytes=<n> codepoints=<n>
+WORK_SHAPE tier_tree_nodes=<n> nodes_per_codepoint=<x> nodes_per_tok4=<y> chars_per_tok4=4
+```
+
+The harness rejects a run if any document is rejected by native composition or if the exact tier-tree node count changes across repeats. `benchmark_suite.py` independently reconciles the reported work-amplification ratios against the exact node/codepoint counts before writing `suite-receipt.json`.
 
 Historical committed evidence from `0f8405938daf3ab2aa6c1b745823be9e991ce6e6` recorded roughly:
 
 ```text
 1.859M codepoints/s
-464.8k 4-char BPE-equivalent units/s
+464.8k 4-char BPE-equivalent input units/s
 4.555M tier-tree nodes/s
 ```
 
 single-threaded.
+
+Run `34823625126` later measured, before its unsafe 12-logical-CPU scale point:
+
+```text
+51,223,726 codepoints
+125,793,955 tier-tree nodes
+
+best single thread:
+1.7615M codepoints/s
+440.4k 4-char BPE-equivalent input units/s
+4.3259M tier-tree nodes/s
+```
+
+The exact structural expansion of that workload is:
+
+```text
+125,793,955 / 51,223,726 = 2.455775181... tier-tree nodes / codepoint
+                              9.823100724... tier-tree nodes / 4-char token-equivalent
+```
+
+That distinction matters. Reducing this run to `440.4k tokens/s` hides that the same measured interval is constructing about **4.33 million exact structural nodes/s**. The normalized token-equivalent is useful for scale intuition; the exact codepoint/node/work receipt is the benchmark authority.
 
 ## Scaling profiles
 
@@ -96,7 +126,7 @@ This distinction is required because **serviceable throughput and destructive sa
 
 Run `34823625126` is retained as an incomplete/failing counterexample from the prior design: its scale series admitted all 12 logical CPUs and no sealed evidence artifact was available afterward. The available evidence does not establish the exact terminal process failure, so no stronger causal claim is made.
 
-The headroom planner prevents that full-logical boundary from being selected accidentally. A future serviceable profile should additionally record explicit database/product/runner liveness during the measurement so headroom is proven sufficient rather than merely configured.
+The headroom planner prevents that full-logical boundary from being selected accidentally. The fixed source is now on `main`; a fresh managed-host serviceable run is still required to turn that policy into measured serviceable-capacity evidence. A future serviceable profile should additionally record explicit database/product/runner liveness during the measurement so headroom is proven sufficient rather than merely configured.
 
 ## Scale receipt
 
@@ -109,7 +139,7 @@ The evidence retains, as applicable:
 - complete corpus bytes/codepoints/documents per worker;
 - every repeat wall time;
 - aggregate codepoints/s;
-- aggregate 4-character BPE-equivalent units/s;
+- aggregate 4-character BPE-equivalent input units/s;
 - aggregate tier-tree nodes/s;
 - speedup versus measured one-worker point;
 - parallel efficiency;
@@ -134,6 +164,34 @@ selected useful work:       K
 ```
 
 Any benchmark claiming sparse complexity names what `N` and `K` count, the exact address provider/index, candidate reductions, actual rows/IDs/edges/physicalities touched, boundary crossings, and semantic parity. Superlinear work over `K` is recorded honestly.
+
+## Required query/cognition receipt
+
+The next database-backed/query/cognition benchmark must not collapse Laplace work into only output tokens or wall time. Its preflight and execution receipt should use the same explicit work coordinates that the product can eventually reserve/bill against.
+
+At minimum, where applicable, record:
+
+```text
+exact admitted root / prompt trajectory
+world / evidence / source / time scope
+hop budget H
+fanout/frontier ceiling F_h per hop
+actual responders/candidates per hop
+actual candidates admitted after each filter/fold
+relation/provider/operator families touched
+containment/trajectory expansions
+consensus/evidence cells resolved
+realized constituents/vertices/output units
+native/SPI/SQL/managed boundary-call counts and set sizes
+CPU / memory / I/O / DB work
+wall latency
+result / semantic-act fingerprint
+preflight estimated work and actual work
+```
+
+This is the benchmark form of the same execution law used by billing: **one knowledge world, explicit compute envelope**. A cheaper request changes hops/fanout/providers/resources, not the knowledge substrate it is allowed to know exists.
+
+A rich entity/web export produced in milliseconds is therefore not adequately characterized as “one token operation.” The useful performance question is how much indexed structural/evidence state was resolved and returned for the latency/resource cost. Exact field names belong to the eventual query/cognition profile after its concrete API boundary is selected; this document does not invent an unimplemented endpoint.
 
 ## Optional accelerator / GPU law
 
@@ -168,9 +226,9 @@ Each dispatch attempts to upload a run/attempt-specific artifact containing, whe
 - native linkage;
 - accelerator state before/after;
 - RAPL readings/deltas where available;
-- raw profile output;
+- raw profile output including `WORK_INPUT` / `WORK_SHAPE` structural amplification;
 - machine-readable scaling receipts;
-- `suite-receipt.json`;
+- `suite-receipt.json` with exact core-single work-amplification fields;
 - Moby reconstructed bytes/digests where selected;
 - manifest and file hashes.
 
