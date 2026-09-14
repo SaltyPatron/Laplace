@@ -109,6 +109,7 @@ public sealed record ChessPlayerModelExport(
 }
 
 internal readonly record struct ChessPlayerMoveEvidence(
+    Hash128 PlayerId,
     Hash128 NextPosition,
     long Games,
     double Score);
@@ -118,29 +119,33 @@ public sealed record ChessPlayerModelReceipt(
     string MemberSetId,
     int Members,
     long RootReads,
+    long BackendReads,
     long MemberReads,
     long MembersWithEvidence,
     long MovesInfluenced)
 {
     public string Summary =>
         $"player-model={ExportId[..Math.Min(12, ExportId.Length)]} " +
-        $"members={Members} roots={RootReads} member-reads={MemberReads} " +
-        $"evidence-members={MembersWithEvidence} moves={MovesInfluenced}";
+        $"members={Members} roots={RootReads} backend-reads={BackendReads} " +
+        $"member-reads={MemberReads} evidence-members={MembersWithEvidence} moves={MovesInfluenced}";
 }
 
 /// <summary>
-/// Root-only player-conditioned evidence plane. Each constituent player is read independently;
-/// disagreement remains disagreement instead of being erased at export time. A constituent's
-/// exact-position successor score is confidence-shrunk by its own game count, then the selected
-/// member set is combined with equal constituent prior. The result is capped to the same ±150cp
-/// steering envelope as the ordinary substrate root provider, so it cannot outrank proven mate.
+/// Root-only player-conditioned evidence plane. Each constituent player remains independently
+/// addressable inside one batched backend read; disagreement is retained instead of being erased
+/// at export time. A constituent's exact-position successor score is confidence-shrunk by its
+/// own game count, then the selected member set is combined with equal constituent prior. The
+/// result is capped to the same ±150cp steering envelope as the ordinary substrate root provider,
+/// so it cannot outrank proven mate.
 /// </summary>
 public sealed class ChessCompositePlayerBias : IRootBias
 {
     private readonly ChessPlayerModelExport _export;
-    private readonly Func<Hash128, Hash128, bool, int, IReadOnlyList<ChessPlayerMoveEvidence>> _read;
+    private readonly Func<Hash128, IReadOnlyList<Hash128>, bool, int,
+        IReadOnlyList<ChessPlayerMoveEvidence>> _read;
     private readonly int _capCp;
     private long _rootReads;
+    private long _backendReads;
     private long _memberReads;
     private long _membersWithEvidence;
     private long _movesInfluenced;
@@ -151,14 +156,20 @@ public sealed class ChessCompositePlayerBias : IRootBias
         int capCp = 150)
         : this(
             export,
-            (position, player, whiteToMove, limit) =>
-                NpgsqlSubstrateReads.ChessPlayerMovesAsync(
-                        ds, position.ToBytes(), player.ToBytes(), whiteToMove,
+            (position, players, whiteToMove, limit) =>
+            {
+                byte[][] ids = players.Select(static player => player.ToBytes()).ToArray();
+                return NpgsqlSubstrateReads.ChessPlayerModelMovesAsync(
+                        ds, position.ToBytes(), ids, whiteToMove,
                         limit, CancellationToken.None)
                     .GetAwaiter().GetResult()
                     .Select(static row => new ChessPlayerMoveEvidence(
-                        Hash128.FromBytes(row.NextPosition), row.Games, row.Score))
-                    .ToArray(),
+                        Hash128.FromBytes(row.PlayerId),
+                        Hash128.FromBytes(row.NextPosition),
+                        row.Games,
+                        row.Score))
+                    .ToArray();
+            },
             capCp)
     {
         ArgumentNullException.ThrowIfNull(ds);
@@ -166,7 +177,8 @@ public sealed class ChessCompositePlayerBias : IRootBias
 
     internal ChessCompositePlayerBias(
         ChessPlayerModelExport export,
-        Func<Hash128, Hash128, bool, int, IReadOnlyList<ChessPlayerMoveEvidence>> read,
+        Func<Hash128, IReadOnlyList<Hash128>, bool, int,
+            IReadOnlyList<ChessPlayerMoveEvidence>> read,
         int capCp = 150)
     {
         _export = export ?? throw new ArgumentNullException(nameof(export));
@@ -191,15 +203,29 @@ public sealed class ChessCompositePlayerBias : IRootBias
             moveByNext[ChessCompose.PositionId(next)] = i;
         }
 
+        // One query for the complete selected player set. Keeping player_id on every returned row
+        // preserves constituent disagreement while eliminating N round trips per searched root.
+        Interlocked.Increment(ref _backendReads);
+        var rows = _read(rootId, _export.Members, root.WhiteToMove, moves.Count);
+        var byMember = new Dictionary<Hash128, List<ChessPlayerMoveEvidence>>(_export.Members.Count);
+        foreach (var row in rows)
+        {
+            if (!byMember.TryGetValue(row.PlayerId, out var bucket))
+                byMember[row.PlayerId] = bucket = [];
+            bucket.Add(row);
+        }
+
         var sums = new double[moves.Count];
         var contributors = new int[moves.Count];
 
         foreach (Hash128 member in _export.Members)
         {
             Interlocked.Increment(ref _memberReads);
-            var rows = _read(rootId, member, root.WhiteToMove, moves.Count);
+            if (!byMember.TryGetValue(member, out var memberRows))
+                continue;
+
             bool memberContributed = false;
-            foreach (var row in rows)
+            foreach (var row in memberRows)
             {
                 if (row.Games <= 0 || !double.IsFinite(row.Score)
                     || !moveByNext.TryGetValue(row.NextPosition, out int moveIndex))
@@ -239,6 +265,7 @@ public sealed class ChessCompositePlayerBias : IRootBias
         ChessPlayerModelExport.Hex(_export.MemberSetId),
         _export.Members.Count,
         Volatile.Read(ref _rootReads),
+        Volatile.Read(ref _backendReads),
         Volatile.Read(ref _memberReads),
         Volatile.Read(ref _membersWithEvidence),
         Volatile.Read(ref _movesInfluenced));
