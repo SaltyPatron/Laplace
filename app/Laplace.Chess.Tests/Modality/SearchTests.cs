@@ -68,6 +68,34 @@ public sealed class SearchTests
         Assert.Equal(expected.Score, actual.Score);
     }
 
+    [Theory]
+    [InlineData(0, 0, 0)]
+    [InlineData(75, 0, 0)]
+    [InlineData(-75, 0, 0)]
+    [InlineData(175, 0, -50)]
+    [InlineData(-175, 0, 50)]
+    [InlineData(475, 0, -200)]
+    [InlineData(-475, 0, 200)]
+    [InlineData(475, 1, 200)]
+    [InlineData(-475, 1, -200)]
+    public void DrawUtility_IsContextual_NotUniversalContempt(
+        int rootAdvantageCp, int ply, int expected)
+        => Assert.Equal(expected, Search.ContextualDrawScore(rootAdvantageCp, ply));
+
+    [Fact]
+    public void ExactTablebaseDraw_NeutralizesApparentMaterialAdvantage()
+    {
+        // Deliberately give White a queen so classical evaluation says "winning", then make
+        // the selected exact provider say the root is a draw. Exact WDL must define the root's
+        // draw stance instead of static material manufacturing contempt for a proven draw.
+        var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
+        var search = new Search(tablebase: _ => new SearchTablebaseVerdict(Wdl: 2, Dtz: 0));
+        var result = search.Think(board, new Search.Limits(MaxDepth: 2));
+
+        Assert.NotNull(result.BestMove);
+        Assert.Equal(0, result.Score);
+    }
+
     private static Search.Result Think(string fen, int depth)
         => new Search().Think(Board.FromFen(fen), new Search.Limits(MaxDepth: depth));
 
