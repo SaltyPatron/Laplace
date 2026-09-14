@@ -35,6 +35,10 @@ class LiveRecursiveProofGateTests(unittest.TestCase):
         value = self.proof.parse_single_json_document('\n\t {"schema":"proof"} \r\n')
         self.assertEqual({"schema": "proof"}, value)
 
+    def test_json_parser_rejects_empty_output(self):
+        with self.assertRaisesRegex(RuntimeError, "returned no JSON"):
+            self.proof.parse_single_json_document(" \n\t ")
+
     def test_json_parser_rejects_a_second_document(self):
         with self.assertRaisesRegex(RuntimeError, "trailing output"):
             self.proof.parse_single_json_document('{"one":1}\n{"two":2}\n')
