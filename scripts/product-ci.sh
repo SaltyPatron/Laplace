@@ -7,7 +7,7 @@ cd "$ROOT"
 
 stage="${1:-all}"
 case "$stage" in
-  check|build|test|deploy|integrate|all|application-check|applications) ;;
+  reconcile|check|build|test|deploy|integrate|all|application-check|applications) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -54,6 +54,26 @@ run_install_and_db() (
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
 )
 
+ensure_product_foundation() {
+  if bash scripts/ensure-foundation.sh --check-only; then
+    echo "product foundation already complete — no ingest"
+    return 0
+  fi
+  echo "product foundation incomplete — reconciling only missing canonical layers"
+  bash scripts/ensure-foundation.sh
+  bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
+}
+
+reconcile_installed_product() {
+  # Fast recovery/CI path: prove the installed runtime, heal only a missing
+  # canonical foundation, then refresh the application readiness receipt. No
+  # configure, compile, install, extension replacement, or database recreation.
+  bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+  ensure_product_foundation
+  python3 scripts/verify-application-release.py --timeout-seconds 120
+  run_live
+}
+
 run_publish() {
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash scripts/publish-applications.sh deploy
@@ -81,6 +101,10 @@ run_perf() {
 }
 
 run_policy
+if [[ "$stage" == reconcile ]]; then
+  reconcile_installed_product
+  exit 0
+fi
 [[ "$stage" == check ]] && exit 0
 
 run_deps
@@ -106,6 +130,7 @@ if [[ "$stage" == application-check || "$stage" == applications ]]; then
 fi
 
 run_install_and_db
+ensure_product_foundation
 [[ "$stage" == deploy ]] && exit 0
 
 if [[ "$stage" == integrate ]]; then
