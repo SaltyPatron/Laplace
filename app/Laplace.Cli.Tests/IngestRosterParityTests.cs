@@ -24,6 +24,7 @@ public sealed class IngestRosterParityTests
             "chess-opening-match",
             "chess-position-outcomes",
             "chess-syzygy",
+            "chess-tactic-outcomes",
             "chess-transitions",
             "chess-trajectory",
             "code",
@@ -65,7 +66,11 @@ public sealed class IngestRosterParityTests
     // 22 -> 23 for model-corroborate: an operator-supplied analysis across two
     // already-deposited model snapshots. It consumes substrate/model state and is not
     // a seed-cadence source, so operational-only is the explicit classification.
-    private const int OperationalOnlyRouteCeiling = 23;
+    // 23 -> 24 for chess-tactic-outcomes: marker-gated historical backfill for the
+    // bounded fork/pin/skewer outcome provider. New/fused analysis writes the same lane;
+    // this route exists so already-recorded games can populate it without replaying the
+    // rest of ChessAnalyze testimony.
+    private const int OperationalOnlyRouteCeiling = 24;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
