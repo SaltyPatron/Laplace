@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "dog-h1-f4",
+      "prompt": "What is a dog?",
+      "steps": 24,
+      "max_stride": 5,
+      "spread": 0.0,
+      "top_k": 10,
+      "seed": 2026091401,
+      "hops": 1,
+      "fanout": 4
+    },
+    {
+      "id": "dog-h2-f8",
+      "prompt": "What is a dog?",
+      "steps": 24,
+      "max_stride": 5,
+      "spread": 0.0,
+      "top_k": 10,
+      "seed": 2026091401,
+      "hops": 2,
+      "fanout": 8
+    },
+    {
+      "id": "dog-h3-f16",
+      "prompt": "What is a dog?",
+      "steps": 24,
+      "max_stride": 5,
+      "spread": 0.0,
+      "top_k": 10,
+      "seed": 2026091401,
+      "hops": 3,
+      "fanout": 16
+    },
+    {
+      "id": "pawn-ambiguous-h2-f8",
+      "prompt": "What is a pawn?",
+      "steps": 24,
+      "max_stride": 5,
+      "spread": 0.0,
+      "top_k": 10,
+      "seed": 2026091402,
+      "hops": 2,
+      "fanout": 8
+    },
+    {
+      "id": "antonym-h2-f8",
+      "prompt": "The opposite of hot is",
+      "steps": 24,
+      "max_stride": 5,
+      "spread": 0.0,
+      "top_k": 10,
+      "seed": 2026091403,
+      "hops": 2,
+      "fanout": 8
+    }
+  ]
+}
