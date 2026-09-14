@@ -196,7 +196,7 @@ else:
 import os
 import sys
 
-if sys.argv[1:] == ["--print-source-version"]:
+if sys.argv[-1:] == ["--print-source-version"]:
     print(os.environ["FAKE_SOURCE_EXTENSION"])
     raise SystemExit(0)
 # The default checker path proves installed artifact parity. Tests model a current
