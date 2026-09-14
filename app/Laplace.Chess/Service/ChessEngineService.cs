@@ -133,10 +133,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         {
             if (_engine is not null) return _engine;
 
-            // Pure inference must not resolve ChessLiveGameHost. Production supplies the
-            // API process's existing server-enforced read-only serving datasource. The
-            // live-host fallback exists only for standalone/legacy callers that explicitly
-            // constructed this service around an already write-capable chess runtime.
             NpgsqlDataSource ds;
             if (_readOnlyDataSource is not null)
             {
@@ -184,15 +180,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         return (await LegalAsync(fen, ct)).Moves;
     }
 
-    /// <summary>
-    /// Opening explorer over the exact position --MOVE--&gt; position cells deposited for
-    /// every witnessed ply. These cells are the content-addressed transition index: one
-    /// deterministic state edge, independently witnessed by its playing contexts and rated
-    /// by consensus. Reading the same fact by unpacking every complete game trajectory made
-    /// the initial position inspect roughly 1.64 million containers (136.7 seconds measured),
-    /// so the request path must use the keyed transition relation directly.
-    /// Player repertoire remains a provenance-scoped projection through playing contexts.
-    /// </summary>
     public async Task<ChessExploreResponse> ExploreAsync(
         string fen, string? player = null, int limit = 12, CancellationToken ct = default)
     {
@@ -200,8 +187,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         var state = _modality!.FromFen(fen);
         var legal = _modality.LegalActions(state);
 
-        // Composed child ids → (uci, san): consensus returns next-position ids; the legal
-        // move set is the decoder ring back to human notation.
         var byChild = new Dictionary<Hash128, (string Uci, string San)>(legal.Count);
         Hash128 rootId;
         lock (ChessCompose.Gate)
@@ -245,8 +230,6 @@ public sealed class ChessEngineService : IAsyncDisposable
                 mr.Rd, mr.WitnessCount, ps.Games, ps.Games > 0 ? ps.Score : null));
         }
 
-        // Player-scoped rows whose continuation fell outside the consensus read's LIMIT
-        // still belong in a repertoire answer.
         var seen = new HashSet<string>(rows.Select(x => x.Uci));
         foreach (var (childId, s) in playerStats)
         {
@@ -264,12 +247,6 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)
     {
-        // The historical implementation selected directly from one-ply consensus and used
-        // reservoir randomness when every legal edge had the neutral prior.  That was the
-        // path behind the 0-200 substrate-lift result: it bypassed material, tactics, Syzygy,
-        // and deeper board trajectories.  There is one playing decision path now.  Keep this
-        // API shape for callers, but route it through the same full search used by HTTP, UCI,
-        // connected play, Lichess, and the lift experiment.
         _ = temperature;
         return await BestMoveSearchAsync(fen, depth: 4, substrate: true, moves: null, ct)
             .ConfigureAwait(false);
@@ -282,17 +259,6 @@ public sealed class ChessEngineService : IAsyncDisposable
     private Task? _learnedRefresh;
     private readonly object _learnedGate = new();
 
-    /// <summary>
-    /// The learned fold NEVER runs on a request thread. MEASURED live 2026-08-21:
-    /// /chess/learned-pst 7.28s and /chess/eval 7.43s on their first hits, and the
-    /// live host invalidates after EVERY recorded game, so play re-paid the fold per
-    /// game. Reads now return the current tables immediately (null = pure PeSTO until
-    /// the first fold lands, exactly the behavior a cold process already had) and the
-    /// fold runs once in the background -- primed at engine init, re-primed on
-    /// invalidation. When the move-outcome consensus cells exist (seed ladder's
-    /// move-outcomes stage), the fold itself is a millisecond lookup and this
-    /// machinery simply makes it invisible either way.
-    /// </summary>
     private (int[][]? Mg, int[][]? Eg) LearnedPstBlend(bool refresh = false)
     {
         if (refresh)
@@ -330,10 +296,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         }
     }
 
-    // Pool of Search instances: reuses the 32 MB transposition-table
-    // allocation across requests. Configuration (bias/PST) is reapplied at
-    // every rent, so a stale pooled instance can never serve old tables; an
-    // instance leaked by an exception between rent and return is simply GC'd.
     private readonly System.Collections.Concurrent.ConcurrentBag<Search> _searchPool = new();
 
     private Search BuildEngine(bool substrate, int ttBits = 20)
@@ -367,7 +329,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         }
 
         var search = BuildEngine(substrate);
-        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ReturnEngine(search);
         int score = state.Board.WhiteToMove ? result.Score : -result.Score;
         return new ChessPositionEval(score, result.Depth, result.Nodes, substrate, false, "ongoing");
@@ -383,12 +345,12 @@ public sealed class ChessEngineService : IAsyncDisposable
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
         var search = BuildEngine(substrate);
-        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ChessMove mv = result.BestMove!.Value;
 
         var next = _modality.Apply(state, mv);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
-        var pv = search.ExtractPv(state.Board);
+        var pv = search.ExtractPv(state);
         ReturnEngine(search);
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
         int whiteCp = state.Board.WhiteToMove ? result.Score : -result.Score;
@@ -398,9 +360,6 @@ public sealed class ChessEngineService : IAsyncDisposable
             Pv: pv, Motifs: motifs);
     }
 
-    /// <summary>
-    /// Rebuild modality state from UCI history when provided; FEN alone cannot detect threefold.
-    /// </summary>
     private ChessState StateFromHistory(string fen, IReadOnlyList<string>? moves)
     {
         if (moves is not { Count: > 0 })
@@ -441,7 +400,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                 var legal = _modality.LegalActions(state);
                 ChessMove mv = plies < openingPlies
                     ? legal[rng.Next(legal.Count)]
-                    : search.Think(state.Board, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
+                    : search.Think(state, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
                 int mover = _modality.SideToMove(state);
                 var next = _modality.Apply(state, mv);
                 subjectKeys.Add(_modality.StateKey(state));
@@ -570,14 +529,14 @@ public sealed class ChessEngineService : IAsyncDisposable
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
         var search = BuildEngine(substrate);
-        var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
+        var result = search.Think(state, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
         ChessMove mv = result.BestMove!.Value;
 
         string fromKey = _modality.StateKey(state);
         var next = _modality.Apply(state, mv);
         string toKey = _modality.StateKey(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
-        var pv = search.ExtractPv(state.Board);
+        var pv = search.ExtractPv(state);
         var motifs = ChessMotifs.DetectAtPly(state.Board, mv, next.Board).ToList();
         int whiteCp = state.Board.WhiteToMove ? result.Score : -result.Score;
 
@@ -633,21 +592,11 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     private IReadOnlyList<LearnedSquare>? _learnedCells;
 
-    /// <summary>
-    /// The learned table is a BOUNDED statistic -- 384 cells -- folded from unbounded
-    /// testimony, so it is computed once and reused, never per request. The fold replays
-    /// witnessed lines (chess rules live in managed code, not in the extension), which is
-    /// tens of seconds of work; serving that on every GET would be the row-by-row shape
-    /// this codebase pushes into C/SPI everywhere it can. Invalidated by the same
-    /// refresh path that drops the blended PeSTO tables.
-    /// </summary>
     public async Task<IReadOnlyList<LearnedSquare>> LearnedPstAsync(CancellationToken ct = default)
     {
         await EngineAsync(ct);
         if (_learnedCells is { } cells) return cells;
         ScheduleLearnedRefresh();
-        // First-ever call on a cold process: wait for the primed fold rather than
-        // duplicate it inline; every later call is the cached table in microseconds.
         if (_learnedRefresh is { } t) await t.WaitAsync(ct);
         return _learnedCells ?? [];
     }

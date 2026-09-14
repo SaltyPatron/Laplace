@@ -73,9 +73,6 @@ public sealed class LichessBot : IAsyncDisposable
     {
         var games = new Dictionary<string, Task>();
         using var gameLifetime = new CancellationTokenSource();
-        // Exponential backoff with jitter (GH #493): a lichess outage shouldn't be hammered
-        // every fixed 10s, and a one-off blip shouldn't wait a full 10s either. Resets to the
-        // floor once a stream delivers an event.
         var backoff = TimeSpan.FromSeconds(1);
         var backoffMax = TimeSpan.FromSeconds(60);
 
@@ -273,8 +270,6 @@ public sealed class LichessBot : IAsyncDisposable
                     trackedPlies++;
                 }
 
-                // wtime/btime is the clock AFTER the latest move in this state. It proves the
-                // latest ply's remaining clock and nothing about earlier plies after reconnect.
                 if (_record && uciMoves.Length > 0 && trackedPlies == uciMoves.Length)
                 {
                     int latestPly = uciMoves.Length;
@@ -313,12 +308,12 @@ public sealed class LichessBot : IAsyncDisposable
                 search ??= _host.BuildSearch(_substrate, maxDepth: _maxDepth);
                 _host.RefreshSearch(search, _substrate);
                 var result = search.Think(
-                    boardNow, new Search.Limits(MaxDepth: _maxDepth, MaxTimeMs: budgetMs), ct);
+                    trackState, new Search.Limits(MaxDepth: _maxDepth, MaxTimeMs: budgetMs), ct);
                 mv = result.BestMove!.Value;
                 scoreCp = result.Score;
                 searchedDepth = result.Depth;
                 searchedNodes = result.Nodes;
-                pv = search.ExtractPv(boardNow);
+                pv = search.ExtractPv(trackState);
 
                 _log.LogDebug(
                     "game {Id}: play {Move} ({Mode}, depth {D}, score {S}cp, budget {B}ms)",
@@ -514,9 +509,6 @@ public sealed class LichessBot : IAsyncDisposable
     {
         try
         {
-            // _http carries an infinite overall timeout because the SAME client serves the
-            // never-ending NDJSON streams; plain POSTs (accept/decline/move) must not inherit
-            // "wait forever" (GH #493) — a hung move POST would silently stall the game loop.
             using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             reqCts.CancelAfter(TimeSpan.FromSeconds(15));
             using var resp = await _http.PostAsync(url, content: null, reqCts.Token).ConfigureAwait(false);

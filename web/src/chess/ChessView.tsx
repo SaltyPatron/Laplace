@@ -492,7 +492,12 @@ export function ChessView() {
         r = await apiPost<PlayMoveResult>('/chess/play/move', { sessionId: sid, fen: liveFen, uci });
       }
 
-      if (!r.legal) { setErr(`illegal move: ${uci}`); return; }
+      if (!r.legal) {
+        setErr(inCheck
+          ? `illegal while in check: ${uci} does not resolve check`
+          : `illegal move: ${uci}`);
+        return;
+      }
 
       appendSnapshot(uci, r.fen, r.status);
 
@@ -508,7 +513,7 @@ export function ChessView() {
 
     finally { setBusy(false); }
 
-  }, [liveFen, autoReply, botMove, appendSnapshot, reviewing, ensurePlaySession, startPlaySession, recordToSubstrate]);
+  }, [liveFen, autoReply, botMove, appendSnapshot, reviewing, ensurePlaySession, startPlaySession, recordToSubstrate, inCheck]);
 
 
 
@@ -530,7 +535,7 @@ export function ChessView() {
 
     }
 
-    let uci = cands[0]?.uci;
+    const uci = cands[0]?.uci;
 
     if (!uci) {
 
@@ -542,13 +547,16 @@ export function ChessView() {
 
       }
 
-      uci = from + to;
+      setErr(inCheck
+        ? `Illegal while in check: ${from}${to} does not resolve check`
+        : `Illegal move: ${from}${to}`);
+      return;
 
     }
 
     await applyUci(uci);
 
-  }, [reviewing, busy, status, legal, legalFen, fen, legalLoading, applyUci]);
+  }, [reviewing, busy, status, legal, legalFen, fen, legalLoading, applyUci, inCheck]);
 
 
 

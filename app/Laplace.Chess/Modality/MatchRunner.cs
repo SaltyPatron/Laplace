@@ -141,7 +141,7 @@ public static class MatchRunner
     {
         var search = new Search(terms, bias);
         return (s, rng) => search.Think(
-            s.Board, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
+            s, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
     }
 
     public static Func<MoveChooser> SearcherFactory(
@@ -154,7 +154,7 @@ public static class MatchRunner
             var search = new Search(
                 terms, bias, ttBits, mgPst, egPst, positionEvaluator, tablebase);
             return (s, rng) => search.Think(
-                s.Board, new Search.Limits(MaxDepth: depth), ct).BestMove!.Value;
+                s, new Search.Limits(MaxDepth: depth), ct).BestMove!.Value;
         };
 
     public static MatchResult Play(

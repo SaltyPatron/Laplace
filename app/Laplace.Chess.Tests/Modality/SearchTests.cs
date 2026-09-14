@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using Laplace.Engine.Core;
 using Xunit;
 
 namespace Laplace.Modality.Chess.Tests;
@@ -66,6 +68,122 @@ public sealed class SearchTests
 
         Assert.Equal(expected.BestMove, actual.BestMove);
         Assert.Equal(expected.Score, actual.Score);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0)]
+    [InlineData(75, 0, 0)]
+    [InlineData(-75, 0, 0)]
+    [InlineData(175, 0, -50)]
+    [InlineData(-175, 0, 50)]
+    [InlineData(475, 0, -200)]
+    [InlineData(-475, 0, 200)]
+    [InlineData(475, 1, 200)]
+    [InlineData(-475, 1, -200)]
+    public void DrawUtility_IsContextual_NotUniversalContempt(
+        int rootAdvantageCp, int ply, int expected)
+        => Assert.Equal(expected, Search.ContextualDrawScore(rootAdvantageCp, ply));
+
+    [Fact]
+    public void ExactTablebaseDraw_NeutralizesApparentMaterialAdvantage()
+    {
+        // Deliberately give White a queen so classical evaluation says "winning", then make
+        // the selected exact provider say the root is a draw. Exact WDL must define the root's
+        // draw stance instead of static material manufacturing contempt for a proven draw.
+        var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
+        var search = new Search(tablebase: _ => new SearchTablebaseVerdict(Wdl: 2, Dtz: 0));
+        var result = search.Think(board, new Search.Limits(MaxDepth: 2));
+
+        Assert.NotNull(result.BestMove);
+        Assert.Equal(0, result.Score);
+    }
+
+    [Fact]
+    public void InsufficientMaterialRoot_IsAlreadyTerminalDraw()
+    {
+        // Classical material sees a bishop, but chess law has already closed K+B v K as a draw.
+        // Search must not manufacture a move or contempt score after the game is terminal.
+        var board = Board.FromFen("7k/8/8/8/8/8/5B2/4K3 w - - 0 1");
+        var result = new Search().Think(board, new Search.Limits(MaxDepth: 2));
+
+        Assert.Null(result.BestMove);
+        Assert.Equal(0, result.Score);
+    }
+
+    [Fact]
+    public void PreRootThreefold_IsTerminalBeforeMoveSelection()
+    {
+        var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
+        Hash128 root = ChessPositionIdentity.PositionId(board);
+        var state = new ChessState(board, ImmutableList.Create(root, root, root));
+
+        var result = new Search().Think(state, new Search.Limits(MaxDepth: 2));
+
+        Assert.Null(result.BestMove);
+        Assert.Equal(0, result.Score);
+    }
+
+    [Fact]
+    public void WinningSide_AvoidsMoveThatCreatesThirdOccurrence()
+    {
+        var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
+        var legal = MoveGen.Legal(board);
+        var repeat = Assert.Single(legal, static m => m.ToUci() == "f2f3");
+        Hash128 root = ChessPositionIdentity.PositionId(board);
+        Hash128 repeatedChild = NextId(board, repeat);
+        var state = new ChessState(
+            board,
+            ImmutableList.Create(repeatedChild, root, repeatedChild, root));
+
+        var result = new Search().Think(state, new Search.Limits(MaxDepth: 1));
+
+        Assert.NotNull(result.BestMove);
+        Assert.NotEqual(repeat, result.BestMove!.Value);
+        Assert.True(result.Score > 0, $"winning side should retain winning utility, score={result.Score}");
+    }
+
+    [Fact]
+    public void LosingSide_TakesAvailableThirdOccurrenceDraw()
+    {
+        var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 b - - 0 1");
+        var legal = MoveGen.Legal(board);
+        Assert.True(legal.Count > 1);
+        var repeat = legal[0];
+        Hash128 root = ChessPositionIdentity.PositionId(board);
+        Hash128 repeatedChild = NextId(board, repeat);
+        var state = new ChessState(
+            board,
+            ImmutableList.Create(repeatedChild, root, repeatedChild, root));
+
+        var result = new Search().Think(state, new Search.Limits(MaxDepth: 1));
+
+        Assert.Equal(repeat, result.BestMove);
+        Assert.True(result.Score > 0, $"draw rescue should be positive from losing root POV, score={result.Score}");
+    }
+
+    [Fact]
+    public void SecondOccurrence_IsOrdinaryPosition_NotFalseThreefold()
+    {
+        var board = Board.FromFen("7k/8/8/8/8/8/5Q2/4K3 w - - 0 1");
+        var repeat = Assert.Single(MoveGen.Legal(board), static m => m.ToUci() == "f2f3");
+        Hash128 root = ChessPositionIdentity.PositionId(board);
+        Hash128 child = NextId(board, repeat);
+        var withOnePriorOccurrence = new ChessState(board, ImmutableList.Create(child, root));
+
+        var historyAware = new Search().Think(
+            withOnePriorOccurrence, new Search.Limits(MaxDepth: 1));
+        var snapshotOnly = new Search().Think(
+            board, new Search.Limits(MaxDepth: 1));
+
+        Assert.Equal(snapshotOnly.BestMove, historyAware.BestMove);
+        Assert.Equal(snapshotOnly.Score, historyAware.Score);
+    }
+
+    private static Hash128 NextId(Board board, ChessMove move)
+    {
+        var next = board.Clone();
+        MoveApply.Make(next, move);
+        return ChessPositionIdentity.PositionId(next);
     }
 
     private static Search.Result Think(string fen, int depth)
