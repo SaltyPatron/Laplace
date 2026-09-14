@@ -35,9 +35,12 @@ A nominal batch that loops scalar DB/PInvoke/SPI operations is still RBAR. Postg
 - #1052 / #1008 — entity/storage uniqueness and tier/identity interaction;
 - #1132 — substrate cohesion/invariant campaign;
 - #959 — loud same-id/different-preimage collision handling;
-- #1443 / #1451 — semantic identity independent of physical parallel scheduling.
+- #1443 / #1451 — semantic identity independent of physical parallel scheduling;
+- #1562 — exhaustive live recursive physicality/trajectory/reference/reconstruction proof gate.
 
-Current governing correction: normal same-content convergence is not called a cryptographic collision. Multi-child native identity currently includes the declared tier in the Merkle recipe; single-child composition collapses to the child id. Exact ordered structure lives in trajectories/DAGs, not in one coordinate or hash alone.
+Current governing correction: normal same-content convergence is not called a cryptographic collision. In the current native implementation, `hash128_merkle` receives `tier` in its ABI but explicitly discards it with `(void)tier`; multi-child content identity is derived from the Merkle domain plus the **ordered child-id sequence**, and singleton composition collapses to the child id. Tier remains floor/altitude/storage/occurrence metadata rather than hash salt.
+
+Exact ordered structure lives in trajectories/DAGs, not in one coordinate or hash alone.
 
 Current geometry documentation must also preserve the distinction between real `coord`, mantissa-packed trajectory carrier and realized child-coordinate curve. Native centroid and managed Karcher parent-coordinate laws are presently divergent and must not be described as one rule.
 
@@ -76,6 +79,8 @@ RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
 
 Whole-observation coupling precedes unconstrained policy/provider selection. Hops/fanout are explicit sparse-compute axes over one knowledge world. A*, walk, continuation, containment and geometry are operators inside that program.
 
+#1561 owns the benchmark/proof obligation to expose query/cognition work in hops, fanout, responders, provider/operator families, structural/evidence work, resource use and preflight-vs-actual receipts rather than only output tokens or wall time.
+
 ## Current proof/status rule
 
 Do not reuse the old ledger's labels as current delivery claims.
@@ -86,7 +91,7 @@ A current status claim needs the evidence appropriate to the claim:
 mathematical invariant -> proof
 implementation invariant -> executable/property/conformance test
 live substrate invariant -> live readback/counterexample scan
-performance -> exact-revision/artifact/host/provider receipt
+performance -> exact-revision/artifact/host/provider/workload receipt
 product delivery -> installed/deployed operator-visible proof where required
 ```
 

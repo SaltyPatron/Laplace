@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +122,51 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn('env["LAPLACE_PERFCACHE_BIN"] = str(t0)', text)
         self.assertIn('env["LD_LIBRARY_PATH"]', text)
         self.assertIn("bench-compose-stream-scale.py", text)
+
+    def test_core_single_is_one_worker_floor_not_core_count_extrapolation(self):
+        text = (ROOT / "scripts/bench-compose.py").read_text(encoding="utf-8")
+        self.assertIn("measured one-worker floor", text)
+        self.assertIn("never derive it by multiplying", text)
+        self.assertIn("WORK_INPUT", text)
+        self.assertIn("WORK_SHAPE", text)
+        self.assertIn("nodes_per_codepoint", text)
+        self.assertIn("nodes_per_tok4", text)
+        self.assertNotIn("a core count multiplies this", text)
+
+    def test_core_single_parser_preserves_exact_work_amplification(self):
+        log = """corpus      : 1,158 documents, 51.2 MB, 51,223,726 codepoints
+core        : /tmp/liblaplace_core.so
+WORK_INPUT documents=1158 bytes=51200000 codepoints=51223726
+  run 1:  29.079 s      1761.5k codepoints/s      440.4k BPE-equiv tok/s   125,793,955 nodes
+BEST, single-threaded, no DB:
+  1,761.5k codepoints/s   440.4k BPE-equiv tokens/s
+  4,325.9k tier-tree nodes/s   (125,793,955 nodes built)
+  2.455775 tier-tree nodes/codepoint   9.823101 tier-tree nodes/4-char token-equivalent
+WORK_SHAPE tier_tree_nodes=125793955 nodes_per_codepoint=2.455775181212 nodes_per_tok4=9.823100724848 chars_per_tok4=4
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "core-single.log"
+            path.write_text(log, encoding="utf-8")
+            result = self.suite.parse_core_single(path)
+        self.assertEqual(1158, result["input_documents"])
+        self.assertEqual(51200000, result["input_bytes"])
+        self.assertEqual(51223726, result["input_codepoints"])
+        self.assertEqual(125793955, result["tier_tree_nodes"])
+        self.assertAlmostEqual(2.455775181212, result["tier_tree_nodes_per_codepoint"], places=12)
+        self.assertAlmostEqual(9.823100724848, result["tier_tree_nodes_per_bpe_equivalent_token_4chars"], places=12)
+
+    def test_core_single_parser_rejects_inconsistent_work_shape(self):
+        log = """WORK_INPUT documents=1 bytes=4 codepoints=4
+BEST, single-threaded, no DB:
+  1.0k codepoints/s   0.2k BPE-equiv tokens/s
+  2.0k tier-tree nodes/s   (8 nodes built)
+WORK_SHAPE tier_tree_nodes=8 nodes_per_codepoint=1.000000000000 nodes_per_tok4=4.000000000000 chars_per_tok4=4
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad.log"
+            path.write_text(log, encoding="utf-8")
+            with self.assertRaises(ValueError):
+                self.suite.parse_core_single(path)
 
     def test_makespan_scale_harness_does_not_extrapolate_single_thread_result(self):
         text = (ROOT / "scripts/bench-compose-scale.py").read_text(encoding="utf-8")

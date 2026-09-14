@@ -35,11 +35,11 @@ A direct definition lookup, containment query, A* path or nearest-neighbor calcu
 
 ## 2. Identity, sequence and occurrence
 
-Canonical executable identity is derived from declared content/recipe state rather than from a source-specific row id.
+Canonical executable identity is derived from content structure rather than from a source-specific row id.
 
-For native multi-child composition, `engine/core/src/hash_composer.c` calls `hash128_merkle(tier, ordered_child_ids, n)`; single-child composition preserves the child id. Source identity is not part of that canonical content recipe.
+For native multi-child composition, `engine/core/src/hash_composer.c` calls `hash128_merkle(tier, ordered_child_ids, n)`, but the current implementation in `engine/core/src/hash128.c` explicitly discards the `tier` argument with `(void)tier`. The current content id is the BLAKE3-derived Merkle domain plus the **ordered child-id sequence**. Single-child composition preserves the child id. Source, tier, ordinal and container identity are not current content-hash salt.
 
-Normal convergence of equal canonical content is **content-address convergence**, not a cryptographic “collision.”
+Normal convergence of equal canonical content is **content-address convergence**, not a cryptographic “collision.” The current 128-bit hash is an operational address, not a mathematical proof of injectivity over an unbounded composition domain.
 
 Sequence order lives in the exact trajectory/composition structure. Packed GeometryZM trajectory vertices carry complete constituent ids plus ordinal/run/flag metadata; they are not child positions. Geometric path reads resolve constituent ids to child physicality coordinates before measuring the realized curve.
 
@@ -266,6 +266,8 @@ This controls how far/broadly one request may pull the same knowledge world. It 
 
 Predicted wall time is calibrated from prior receipts; actual elapsed time still depends on cache state, scheduler contention, storage and concurrent work.
 
+#1561 owns the concrete database-backed query/cognition benchmark that must compare preflight H/F/provider/resource estimates to actual responders/frontier/evidence/boundary/resource work rather than billing only by output tokens.
+
 ---
 
 ## 10. Performance evidence
@@ -283,9 +285,9 @@ realized structures/bytes
 CPU / memory / I/O / DB calls / boundary crossings
 ```
 
-Token-equivalent rates are useful familiar normalizations for ingest/composition workloads but do not describe every read operation.
+Token-equivalent rates are useful familiar normalizations for ingest/composition workloads but do not describe every read operation. The core composition benchmark now also reports exact structural work amplification—tier-tree nodes per codepoint and per 4-character token-equivalent—so its familiar normalization cannot hide the work being performed.
 
-`docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md` governs benchmark receipts and now distinguishes serviceable host capacity from deliberate full-machine saturation.
+`docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md` governs benchmark receipts and distinguishes serviceable host capacity from deliberate full-machine saturation.
 
 ---
 
@@ -295,10 +297,11 @@ Current code/tests demonstrate important pieces of this architecture, including 
 
 Still-open proof/implementation obligations include:
 
-- exhaustive live recursive physicality/reference closure over the populated substrate;
+- #1562: exhaustive live recursive physicality/reference/trajectory/reconstruction closure over the populated substrate;
 - complete typed coupling-field coverage across all intended response planes;
 - removal of remaining RBAR/boundary-grain violations across every pipeline;
 - reconciliation of the native centroid versus current managed Karcher parent-coordinate laws;
-- serviceable-host resource reserve in the executable benchmark suite.
+- a fresh managed-host serviceable-capacity receipt under the now-enforced benchmark headroom policy;
+- #1561: query/cognition preflight-vs-actual work receipts in hops/fanout/responders/resources.
 
 These are implementation obligations. They do not redefine the invention downward.

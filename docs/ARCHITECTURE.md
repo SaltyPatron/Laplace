@@ -44,7 +44,7 @@ Therefore absence of FKs trades write-time FK overhead for stronger writer, test
 
 ## 2. Executable content identity and recursive composition
 
-The current native composition authority is `engine/core/src/hash_composer.c`.
+The current native composition authority is `engine/core/src/hash_composer.c`, with the Merkle hash law in `engine/core/src/hash128.c`.
 
 For a composed node:
 
@@ -54,14 +54,22 @@ n == 1 -> child identity is preserved
 n > 1  -> hash128_merkle(tier, ordered child ids, n)
 ```
 
-So two important facts coexist:
+The function signature carries `tier`, but **the current `hash128_merkle` implementation explicitly discards it with `(void)tier`**. The executable id is a BLAKE3-derived hash over the Merkle domain byte plus the ordered child-id sequence. Tier, source, ordinal and container identity are not mixed into that hash.
 
-1. source identity is not part of the canonical content hash, so the same canonical composition admitted from multiple sources converges; and
-2. for multi-child native composition, `tier` participates in the Merkle recipe/domain. It is therefore incorrect to state categorically that tier is never an input to executable identity.
+So the current native identity law is:
 
-Single-child promotion collapses to the child id under the current native rule.
+```text
+same ordered canonical child-id sequence
+-> same composite content id
+```
 
-The current executable hash is a BLAKE3-derived 128-bit value. That is a finite implementation address/window, not a mathematical proof of global injectivity over an unbounded family of finite structures. Normal same-content convergence is not called a “hash collision”; a true collision is a separate integrity event.
+regardless of the tier at which that same content is observed/used. Tier remains altitude/floor/storage/occurrence metadata rather than canonical content identity. Single-child promotion collapses to the child id under the current native rule.
+
+This behavior is pinned by `app/Laplace.Core.Tests/Core/ContentAddressingLawTests.cs`, which deliberately composes the same two-child sequence at several tiers so singleton collapse cannot hide a tier-salted hash regression.
+
+Source identity is likewise not part of the canonical content hash, so the same canonical composition admitted from multiple sources converges.
+
+The current executable hash is a BLAKE3-derived 128-bit value. That is a finite implementation address/window, not a mathematical proof of global injectivity over an unbounded family of finite structures. Normal same-content convergence is **content-address convergence**, not a “hash collision”; a true same-id/different-preimage collision is a separate integrity event.
 
 The recursive representation itself is larger than the id: exact ordered constituents are retained in the trajectory/composition structure.
 
@@ -366,9 +374,10 @@ On a live managed host it now distinguishes **serviceable capacity** from **abso
 This section exists so “architecture as built” does not hide contradictions behind polished prose.
 
 1. **Coordinate-law divergence.** Native composition uses Euclidean centroid; current managed `NgramTrajectory`/some domain paths use Karcher mean. One declared rule/meaning and reseed/migration proof is required if a universal coordinate law is claimed.
-2. **Live recursive closure/integrity proof gate.** Existing unit/reconstruction tests prove important pieces, but the exhaustive live-database gate that resolves every inspected packed constituent, checks bounds/reference closure/RLE counts and emits counterexamples/counts is not yet landed.
+2. **Live recursive closure/integrity proof gate.** Existing unit/reconstruction tests prove important pieces, but the exhaustive live-database gate that resolves every inspected packed constituent, checks bounds/reference closure/RLE counts and emits counterexamples/counts is not yet landed. #1562 owns that executable proof obligation.
 3. **Complete coupling-field acceptance.** A real canonical native forward program exists, but complete “tug every eligible strand and preserve typed response” coverage must be proved channel by channel rather than inferred from the function name.
 4. **Universal execution-grain enforcement.** Native hot operators exist, but legacy/decomposer/export/analysis/domain paths can still violate the coarse native/set law. Such violations are implementation debts, not evidence that the architecture requires RBAR.
-5. **Managed-host benchmark headroom.** The benchmark prose/issue now distinguishes serviceable throughput from saturation; the executable suite still needs to enforce/reserve that headroom before a future default `all` run can be called safe on the managed host.
+5. **Managed-host serviceable-capacity evidence.** The benchmark suite now enforces reserved default CPU headroom and explicit saturation opt-in; a fresh managed-host serviceable run still owes the empirical receipt proving that the configured reserve keeps required runner/database/product/control-plane health available.
+6. **Query/cognition work receipts.** #1561 owns the database-backed benchmark obligation to measure hops/fanout/responders/typed work and preflight-vs-actual cost instead of reducing rich indexed operations to output tokens alone.
 
 These are implementation obligations. None narrows the invention stated in `INVENTION.md`.

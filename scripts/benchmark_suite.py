@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -201,17 +202,61 @@ def parse_core_single(log_path: Path) -> dict[str, Any]:
         r"([0-9,.]+)k codepoints/s\s+([0-9,.]+)k BPE-equiv tokens/s", text
     ))
     nodes = list(re.finditer(r"([0-9,.]+)k tier-tree nodes/s\s+\(([0-9,]+) nodes built\)", text))
-    if not throughput or not nodes:
-        raise ValueError("could not parse core-single benchmark output")
+    work_input = re.search(
+        r"^WORK_INPUT documents=(\d+) bytes=(\d+) codepoints=(\d+)$",
+        text,
+        re.MULTILINE,
+    )
+    work_shape = re.search(
+        r"^WORK_SHAPE tier_tree_nodes=(\d+) "
+        r"nodes_per_codepoint=([0-9.]+) "
+        r"nodes_per_tok4=([0-9.]+) "
+        r"chars_per_tok4=(\d+)$",
+        text,
+        re.MULTILINE,
+    )
+    if not throughput or not nodes or work_input is None or work_shape is None:
+        raise ValueError("could not parse complete core-single benchmark evidence")
+
     rate = throughput[-1]
     node = nodes[-1]
+    input_documents = int(work_input.group(1))
+    input_bytes = int(work_input.group(2))
+    input_codepoints = int(work_input.group(3))
+    tier_tree_nodes = int(node.group(2).replace(",", ""))
+    work_shape_nodes = int(work_shape.group(1))
+    nodes_per_codepoint = float(work_shape.group(2))
+    nodes_per_tok4 = float(work_shape.group(3))
+    chars_per_tok4 = int(work_shape.group(4))
+
+    if input_documents <= 0 or input_bytes <= 0 or input_codepoints <= 0:
+        raise ValueError("core-single WORK_INPUT must be non-empty")
+    if work_shape_nodes != tier_tree_nodes:
+        raise ValueError(
+            f"core-single node-count receipt mismatch: {work_shape_nodes} != {tier_tree_nodes}"
+        )
+    if chars_per_tok4 != 4:
+        raise ValueError(f"core-single unexpected BPE equivalence width: {chars_per_tok4}")
+
+    expected_nodes_per_codepoint = tier_tree_nodes / input_codepoints
+    expected_nodes_per_tok4 = expected_nodes_per_codepoint * chars_per_tok4
+    if not math.isclose(nodes_per_codepoint, expected_nodes_per_codepoint, rel_tol=1e-10, abs_tol=1e-12):
+        raise ValueError("core-single nodes/codepoint receipt does not reconcile with exact counts")
+    if not math.isclose(nodes_per_tok4, expected_nodes_per_tok4, rel_tol=1e-10, abs_tol=1e-12):
+        raise ValueError("core-single nodes/tok4 receipt does not reconcile with exact counts")
+
     return {
         "schema": "laplace.benchmark.core-single/v1",
+        "input_documents": input_documents,
+        "input_bytes": input_bytes,
+        "input_codepoints": input_codepoints,
         "codepoints_per_second": parse_scaled_k(rate.group(1)),
         "bpe_equivalent_tokens_per_second_4chars": parse_scaled_k(rate.group(2)),
         "tier_tree_nodes_per_second": parse_scaled_k(node.group(1)),
-        "tier_tree_nodes": int(node.group(2).replace(",", "")),
-        "bpe_equivalence_chars_per_token": 4,
+        "tier_tree_nodes": tier_tree_nodes,
+        "tier_tree_nodes_per_codepoint": nodes_per_codepoint,
+        "tier_tree_nodes_per_bpe_equivalent_token_4chars": nodes_per_tok4,
+        "bpe_equivalence_chars_per_token": chars_per_tok4,
     }
 
 
