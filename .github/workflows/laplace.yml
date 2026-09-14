@@ -101,7 +101,7 @@ jobs:
             while IFS= read -r path; do
               [[ -z "$path" ]] && continue
               case "$path" in
-                docs/*|.github/*|scripts/test-*|scripts/check-*|scripts/ci-*|scripts/actions-audit.py|scripts/test-profiles.json|scripts/benchmark-profiles.json|scripts/product-ci.sh)
+                docs/*|.github/*|scripts/test-*|scripts/check-*|scripts/prove-*|scripts/ci-*|scripts/actions-audit.py|scripts/test-profiles.json|scripts/benchmark-profiles.json|scripts/product-ci.sh)
                   ;;
                 *)
                   fast=0
