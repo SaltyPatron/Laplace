@@ -263,16 +263,13 @@ public sealed class ChessCompositePlayerBias : IRootBias
     {
         if (_readContext is null) return 1d;
 
-        Span<string?> surfaces = stackalloc string?[2];
-        surfaces[0] = ChessCanonical.PhaseClass(root);
-        surfaces[1] = _thinkContext;
-
+        string phaseContext = ChessCanonical.PhaseClass(root);
         double signal = 0;
         int cells = 0;
         Hash128 priorId = default;
-        for (int i = 0; i < surfaces.Length; i++)
+        for (int i = 0; i < 2; i++)
         {
-            string? surface = surfaces[i];
+            string? surface = i == 0 ? phaseContext : _thinkContext;
             if (string.IsNullOrWhiteSpace(surface)) continue;
             if (ContentEmitter.RootId(surface) is not { } contextId) continue;
             if (i > 0 && contextId == priorId) continue;
