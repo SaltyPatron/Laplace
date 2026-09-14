@@ -258,8 +258,10 @@ public static class ChessAnalyze
             }
         }
 
-        // A motif is a property of the played line/window. Do not manufacture an exact-board
-        // occurrence edge in addition to the line classification.
+        // A motif is a property of the played line/window. Keep the descriptive line labels,
+        // but ALSO fold the reusable tactical geometry against the game's result. That bounded
+        // pattern->OUTCOME layer is what lets motif knowledge participate in future searches;
+        // the label alone is not learning.
         var motifs = ChessMotifs.DetectGame(
             new ChessMotifs.ReplayWindow(boards, played, evals, standardStart));
         for (int ply = 0; ply < played.Count; ply++)
@@ -267,6 +269,9 @@ public static class ChessAnalyze
             foreach (var tag in motifs[ply])
                 ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", tag, MoveWeight, src);
         }
+        ChessTacticOutcomes.AppendGame(
+            b, boards, result, eventId,
+            ChessTacticOutcomes.SourceId, witnessWeight: 0.9);
 
         // One linestring per LINE, deposited once the whole line is known. A game whose SAN
         // failed to resolve returned early above and deposits nothing — a partial line would
