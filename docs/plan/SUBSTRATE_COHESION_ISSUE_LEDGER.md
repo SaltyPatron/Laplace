@@ -1,127 +1,103 @@
 # Substrate cohesion issue ledger
 
-Status date: 2026-08-20
+Status: **historical campaign index; detailed 2026-08-20 matrix is preserved in Git history.**
 
-This ledger maps every outcome from the SQL/substrate campaign to merged evidence,
-an owning GitHub issue, and a falsifiable completion gate. It is the scheduling
-companion to [SUBSTRATE_COHESION_STATUS.md](SUBSTRATE_COHESION_STATUS.md).
+This file no longer assigns global scheduling priority or current completion percentages. The original ledger was valuable evidence from the SQL/substrate campaign around #1132, but its row-by-row status was tied to the 2026-08-20 source/database state and is unsafe as a current execution plan.
 
-## Status authority
+Current authority is:
 
-- Executable code, schema, tests, PostgreSQL plans, database measurements, and CI
-  traces decide implementation status.
-- A merged PR proves that code landed. It does not prove deployment, bounded
-  ingest, full reseed, performance, or product behavior.
-- [#1132](https://github.com/SaltyPatron/Laplace/issues/1132) is the campaign epic.
-  This ledger links its children and dependencies instead of replacing them.
-- [#1177](https://github.com/SaltyPatron/Laplace/issues/1177) owns the companion
-  decomposer-normalization campaign. Shared identity/reseed gates must pass once,
-  not independently under incompatible rules.
+1. current inventor instruction;
+2. `docs/INVENTION.md` / `docs/INVENTIONS.md`;
+3. binding specs and `AGENTS.md`;
+4. current decisions/plans;
+5. owning GitHub issues/PRs;
+6. current code/tests/live evidence.
 
-## SQL architecture and performance
+The issues below remain useful ownership/history references. Their present state and acceptance must be read from GitHub, not inferred from this dated ledger.
 
-| Outcome | Status | Landed evidence | Owning issue | Completion gate |
-| --- | --- | --- | --- | --- |
-| Whole-repository SQL scanner | Done | #1136; 550 files/26,292 lines/2,754 units on current main | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Scanner regression and high-severity CI remain green on a clean checkout. |
-| Stable exact/near-clone inventory | Done as measurement | #1136; current 12 exact and 14 near clusters | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135), [#951](https://github.com/SaltyPatron/Laplace/issues/951) | Every cluster has keep/fold/delete disposition and the production function/file count shrinks without reader drift. |
-| Shrink-only SQL finding budgets | Partial | New unbaselined high findings fail; medium/low totals are reported | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Every warning class has an explicit non-increasing budget and linked measured disposition. |
-| Canonical scalar/batch implementations | Partial | `lexical_peers`, `structural.cluster`, `attested_language`, and `bubble_up` now have one set core plus scalar adapters and parity fixtures | [#1047](https://github.com/SaltyPatron/Laplace/issues/1047), [#1181](https://github.com/SaltyPatron/Laplace/issues/1181) | Every published family declares cardinality; scalar/batch/reference parity passes; no caller or batch loops a scalar database operation. |
-| `structural.cluster` correctness | Implemented; live plan acceptance pending | Non-empty fixture proves scalar/batch parity, duplicate ordinals, unresolved/empty inputs, recurrence, and deterministic ordering; candidate work is bounded exactly by caller `p_limit` | [#1181](https://github.com/SaltyPatron/Laplace/issues/1181) | Seeded warm/cold plans prove candidate, curve, rendering, recurrence, buffer, and latency budgets on production-scale data. |
-| Early result reduction | Audit only | #1136 inventories late limits, joins, SRFs, and fences | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Each hot operation proves candidate reduction precedes expensive rendering/scoring/fanout. |
-| Honest top-k and truncation | Partial | `cluster`, `bubble_up`, and `surface_sample` obey exact caller bounds; angular KNN/locale is exact and indexed; shape reads expose their candidate budget; relation/band and evidence/salience heads are exact; vocabulary builders page the complete ranked population instead of guessing `2×`/`3×`/`4×`; read/foundry APIs preserve declared caps including zero; #1235 removes hidden 4,096/64/32/7/8 frontier truncation and sizes result storage from actual cardinality; #1236 removes A*'s silent 256-neighbor cutoff and implicit 7/20-hop defaults | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135), [#1047](https://github.com/SaltyPatron/Laplace/issues/1047) | Every remaining cap is classified as semantic top-k, work budget, transport cap, or explicit sample with deterministic ordering and underfill/truncation receipt. |
-| Partition-prunable large-table reads | Partial | #1141 removed one full-tier apply scan | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135), [#1008](https://github.com/SaltyPatron/Laplace/issues/1008) | Known `relation_canonical`/highway wrappers are removed from partition keys; plans prove bounded leaves and result parity. |
-| Cheap default health/discovery | Not done | Exact scan defects measured | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135), [#989](https://github.com/SaltyPatron/Laplace/issues/989) | Default health/catalog calls use estimates or maintained state; exact corpus scans are explicit offline operations with receipts. |
-| SRF cardinality/cost contracts | Not done | Current audit finds most SRFs at default `ROWS 1000` | [#1047](https://github.com/SaltyPatron/Laplace/issues/1047), [#811](https://github.com/SaltyPatron/Laplace/issues/811) | Public operations carry measured `ROWS`, `COST`, volatility, and parallel-safety declarations or planner support. |
-| Native set-sized prepared SPI | Partial | Native batch/probe code exists; no complete census/gate | [#1047](https://github.com/SaltyPatron/Laplace/issues/1047), [#588](https://github.com/SaltyPatron/Laplace/issues/588) | Hot native sites prove pinned prepared plans, bounded fetch/iteration, no per-row prepare, and plan/result parity. |
-| Managed plan reuse | Implemented for canonical typed reads and hot ingest cores | Heuristic `MaxAutoPrepare=50` / two-use promotion is disabled; fixed typed reads and set-sized probe/merge/upsert/mask commands explicitly prepare, and looped commands reuse one command per connection | [#588](https://github.com/SaltyPatron/Laplace/issues/588), [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | `pg_stat_statements` planning receipts show hot calls reuse plans; direct dynamic/DDL one-shots remain unprepared; no arbitrary statement-count LRU returns. |
-| Index/index-only workload audit | Partial | Several ingest probes and partition problems repaired | [#588](https://github.com/SaltyPatron/Laplace/issues/588), [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Declared serving/recovery workloads justify every large index; plans report index-only eligibility, heap fetches, bytes, and maintenance cost. |
-| SQL/C# thin adapters over shared cores | Partial | Many hot primitives are native; independent SQL/C# semantics remain | [#951](https://github.com/SaltyPatron/Laplace/issues/951), [#811](https://github.com/SaltyPatron/Laplace/issues/811) | ISA families terminate in one relational/native core; adapters contain only binding, transaction, orchestration, or transport logic. |
+## Cohesion issue families retained from the campaign
 
-## Identity, composition, modality, and media
+### SQL / operation-surface / execution grain
 
-| Outcome | Status | Landed evidence | Owning issue | Completion gate |
-| --- | --- | --- | --- | --- |
-| Same recovered content -> same hash | Partial | Native BLAKE3/Merkle and media numeric-floor parity tests | [#1132](https://github.com/SaltyPatron/Laplace/issues/1132), [#904](https://github.com/SaltyPatron/Laplace/issues/904) | Cross-language/native/SQL entry-order fixtures prove identical content ids while metadata/provenance changes only occurrence/testimony. |
-| Codepoints as universal floor | Core implemented, global gate missing | Text/image/audio use codepoint leaves; dense 0-255 cache matches text roots | [#1132](https://github.com/SaltyPatron/Laplace/issues/1132), [#1043](https://github.com/SaltyPatron/Laplace/issues/1043) | Every admitted content recipe descends to validated version-pinned codepoints; stale/invalid floor caches fail loudly. |
-| Recursive content composition | Partial | Tier trees, Merkle composition, and trajectories reuse constituent ids | [#1045](https://github.com/SaltyPatron/Laplace/issues/1045), [#1048](https://github.com/SaltyPatron/Laplace/issues/1048) | Fray census proves no unlawful nonphysical content, missing constituent, off-DAG identity, or content salted by source facts. |
-| One logical entity per id | Not done | None; schema still keys `(id, tier)` | [#1052](https://github.com/SaltyPatron/Laplace/issues/1052), [#1008](https://github.com/SaltyPatron/Laplace/issues/1008) | Database uniqueness and all ingest novelty/cache keys agree on one id; multi-tier duplicates are impossible. |
-| Tier as recipe-relative altitude, not identity | Not done in storage | Native collapse behavior exists; database partitions/key by tier | [#1008](https://github.com/SaltyPatron/Laplace/issues/1008), [#1132](https://github.com/SaltyPatron/Laplace/issues/1132) | Tier/role observations coexist independently of identity and never select the only surviving entity row. |
-| Recipe-specific structural realizations | Not done | Physicalities are globally keyed by opaque id but no governed recipe/realization contract exists | [#1052](https://github.com/SaltyPatron/Laplace/issues/1052), [#1134](https://github.com/SaltyPatron/Laplace/issues/1134) | Multiple lawful realizations coexist; their preimage/version/recipe is queryable and deterministic. |
-| Occurrence/interpretation separate from content | Partial | Several decomposers now preserve occurrences and typed references | [#1045](https://github.com/SaltyPatron/Laplace/issues/1045), [#1177](https://github.com/SaltyPatron/Laplace/issues/1177) | Every type/modality/role/tier/source claim has an occurrence/interpretation home without changing content identity. |
-| Canonical append-only modality registry | Not started | Incompatible media/model/grammar concepts remain | [#1133](https://github.com/SaltyPatron/Laplace/issues/1133) | Stable bits, aliases, tombstones, recipe families, generation, and capacity are generated identically in C/C#/SQL. |
-| Derived modality masks | Not started | Highway mask is a related but different accelerator | [#1133](https://github.com/SaltyPatron/Laplace/issues/1133), [#469](https://github.com/SaltyPatron/Laplace/issues/469), [#529](https://github.com/SaltyPatron/Laplace/issues/529) | Authoritative interpretation evidence rebuilds zero/one/many modality bits; removal/staleness affects speed only. |
-| Cross-modal trajectories | Not proven | Generic trajectories are type-agnostic | [#1133](https://github.com/SaltyPatron/Laplace/issues/1133) | Mixed text/image/audio/code constituents round-trip with unambiguous recipe/roles while geometry remains modality-agnostic. |
-| Image exact reconstruction | Not done | RGBA, width, and height reach the ingest record; only flattened values are witnessed | [#1134](https://github.com/SaltyPatron/Laplace/issues/1134) | Dimensions, channel order, values, recipe, and provenance round-trip; codec-equivalent recovery converges. |
-| Audio exact reconstruction | Not done | PCM and sample rate reach the ingest record; sample rate/channel layout are not witnessed | [#1134](https://github.com/SaltyPatron/Laplace/issues/1134) | PCM order, rate, channels/layout, recipe, and provenance round-trip; codec-equivalent recovery converges. |
-| Shared value `255` with independent roles | Partial | Modality-number cache and image tests converge on decimal content root | [#1134](https://github.com/SaltyPatron/Laplace/issues/1134), [#1052](https://github.com/SaltyPatron/Laplace/issues/1052) | Text/image/audio/network observations share one content id while every role/recipe/source claim survives every ingest order. |
-| OpenSubtitles content/occurrence split | Broken on main | #1163 removed pairwise semantic fanout but salted durable content with source/batch facts | [#1180](https://github.com/SaltyPatron/Laplace/issues/1180) | Rebatching/provenance changes preserve content ids and change only governed source occurrences; bounded reader/size parity passes. |
+- #1135 — repository SQL audit/remediation/non-regression;
+- #1047 / #1181 — canonical scalar/batch/set semantics and parity;
+- #588 — prepared native/SPI/managed plan reuse;
+- #951 / #811 — SQL/C#/native operation ownership and thin adapters;
+- #989 — health/discovery versus full census work.
 
-## Perfcaches and mask algebra
+Current governing correction: execution grain is a **repository-wide law**, not only a SQL-read optimization. Decomposition, ingestion, cognition, analysis/domain engines, reconstruction, synthesis and export all owe coarse native/set execution for repeated algorithmic work.
 
-| Outcome | Status | Landed evidence | Owning issue | Completion gate |
-| --- | --- | --- | --- | --- |
-| T0 codepoint perfcache | Implemented, enforcement incomplete | Dense Unicode cache is loaded by native and managed paths | [#1043](https://github.com/SaltyPatron/Laplace/issues/1043) | Loader enforces pinned UCD version, shared property mapping, sanity census, checksum, and native/managed parity. |
-| Dense modality-number cache | Implemented | 256 records; ids match decimal text content roots | [#1133](https://github.com/SaltyPatron/Laplace/issues/1133) | Cache is registered/versioned in the common bundle and fallback yields identical ids/coordinates. |
-| Highway perfcache/mask | Implemented as an accelerator, law incomplete | Native/C#/SQL operations and fallback paths exist | [#469](https://github.com/SaltyPatron/Laplace/issues/469), [#529](https://github.com/SaltyPatron/Laplace/issues/529) | One mask algebra, bit-identical parity, and tests proving no mask miss changes authoritative answers. |
-| Unified generated perfcache bundle | Not done | T0, highway, number, and chess caches have separate formats/loaders | [#1132](https://github.com/SaltyPatron/Laplace/issues/1132), [#1133](https://github.com/SaltyPatron/Laplace/issues/1133) | Registry declares generation/checksum/dependencies/capacity; deterministic build, atomic publish, load state, hit/miss/fallback, and parity are observable. |
-| Chess deterministic caches | Partial companion work | Position/transition blobs and atomic publication exist | [#838](https://github.com/SaltyPatron/Laplace/issues/838) | Live/PGN parity, history-sensitive state, cross-source identity, projection, and clean-seed proof pass. |
+A nominal batch that loops scalar DB/PInvoke/SPI operations is still RBAR. PostgreSQL owns durable indexed state/set access, SPI is the prepared set-sized bridge, and native C/C++ owns hot loops/recursion/frontier/reduction/format kernels where applicable.
 
-## Extension installation, staging, and reseed
+### Identity / recursive composition / physicality
 
-| Outcome | Status | Landed evidence | Owning issue | Completion gate |
-| --- | --- | --- | --- | --- |
-| Manifested extension modules | Mostly done | Completeness-gated install/upgrade manifests and generated SQL chains | [#1132](https://github.com/SaltyPatron/Laplace/issues/1132), [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Fresh install and every supported upgrade produce the same governed catalog and reproducible artifact hashes. |
-| Content-derived extension version | Done for SQL artifact | CMake hashes manifest-listed SQL inputs | [#1132](https://github.com/SaltyPatron/Laplace/issues/1132) | CI proves any shipped input changes version and unshipped/orphan files cannot affect or evade it. |
-| Seed population outside `CREATE EXTENSION` | Done structurally | Extension DDL and decomposer population are separate | [#1132](https://github.com/SaltyPatron/Laplace/issues/1132) | Install is quick/reproducible and never hides corpus population or long maintenance. |
-| Durable per-file resume | Implemented; production acceptance partial | #898 closed after generic journal/canonical fixes | [#1045](https://github.com/SaltyPatron/Laplace/issues/1045), [#1177](https://github.com/SaltyPatron/Laplace/issues/1177) | Real hard-kill campaigns across large sources prove durable-before-complete and no refolding of completed files. |
-| Deterministic stage/conform/global merge | Not done | Existing pipeline batches directly into substrate writes/folds | [#1045](https://github.com/SaltyPatron/Laplace/issues/1045), [#1132](https://github.com/SaltyPatron/Laplace/issues/1132) | Source stages are resumable; identity/testimony merge globally; collision disagreements fail loudly; fold/masks/indexes run once by phase. |
-| Loud identity collision handling | Not done | Known `ON CONFLICT DO NOTHING` path remains tracked | [#959](https://github.com/SaltyPatron/Laplace/issues/959) | Same id/different preimage or governed claim fails admission with a reproducible receipt. |
-| Fold throughput | Partial | #1203/#1206/#1209 replace double-probe, globally serialized, and fixed-width paths with routed set `MERGE`, disjoint mask lanes, and resource-derived fanout; #1234 removes unrelated row-count gates from CPU/connection scheduling and records separate consensus/mask backend work; #1239 removes redundant per-row routing arrays and native reslicing from first-party type lanes; #1240 removes the per-source-row record-returning `LATERAL` call by folding fresh cells in one native array pass; live post-change proof remains | [#964](https://github.com/SaltyPatron/Laplace/issues/964) | Every source meets declared cells/s and amplification budgets with exact fold parity. |
-| Folded confidence consumption | Implemented; live ranking proof pending | #1236 makes strength/path cost a direct Glicko expectation; #1237 removes the separate RD-decay and witness-saturation layer from native walks, steering, SQL planes, and managed Foundry reads; #1238 removes the remaining walk bonus sum, prompt seed-scale mass curve, and specificity/evidence product in favor of explicit ordered dimensions | [#588](https://github.com/SaltyPatron/Laplace/issues/588) | Seeded receipts prove rank/path parity and no first-party caller re-adjudicates folded evidence through a second confidence curve. |
-| Universal ingest throughput verdict | Not done | CI/scripts and journal metrics are not one enforcement surface | [#1080](https://github.com/SaltyPatron/Laplace/issues/1080) | CLI/API/MCP/UI/CI runs record and evaluate the same substrate-owned baseline/verdict. |
-| Bounded source admission | Not done after merge batch | Unit/integration suites pass; standing DB predates merge batch | [#433](https://github.com/SaltyPatron/Laplace/issues/433), [#1175](https://github.com/SaltyPatron/Laplace/issues/1175), [#1177](https://github.com/SaltyPatron/Laplace/issues/1177) | Foundation and every large lane publish rows, amplification, bytes, RSS, IO, WAL, temp, skew, restart, idempotency, and reader receipts. |
-| UD database acceptance | Not done | Representation/sizing merged; isolated canary completed ISO only | [#433](https://github.com/SaltyPatron/Laplace/issues/433), [#1177](https://github.com/SaltyPatron/Laplace/issues/1177) | EWT then full UD complete with bounded RSS/database growth, truthful journals, restart, and idempotency. |
-| <=2-hour clean full seed | Not done | Phase envelope documented; no qualifying run | [#1132](https://github.com/SaltyPatron/Laplace/issues/1132) | Parse/stage <=35m, consolidate <=20m, fold <=35m, indexes <=20m, analyze/validate <=10m on declared hardware. |
+- #1045 / #1048 — recursive content composition and trajectory integrity;
+- #1052 / #1008 — entity/storage uniqueness and tier/identity interaction;
+- #1132 — substrate cohesion/invariant campaign;
+- #959 — loud same-id/different-preimage collision handling;
+- #1443 / #1451 — semantic identity independent of physical parallel scheduling.
 
-## Operation publication, diagnostics, and product proof
+Current governing correction: normal same-content convergence is not called a cryptographic collision. Multi-child native identity currently includes the declared tier in the Merkle recipe; single-child composition collapses to the child id. Exact ordered structure lives in trajectories/DAGs, not in one coordinate or hash alone.
 
-| Outcome | Status | Landed evidence | Owning issue | Completion gate |
-| --- | --- | --- | --- | --- |
-| Explicit operation allow-list | Not done | `ops.api()` discovers broad schemas/functions | [#989](https://github.com/SaltyPatron/Laplace/issues/989), [#811](https://github.com/SaltyPatron/Laplace/issues/811) | Only registered operations are reachable; internal, destructive, aggregate, and maintenance shapes require explicit lifecycle/safety policy. |
-| Operation metadata contract | Partial | Catalog exposes name/args/result/kind only; adapters now preserve explicit row budgets without hidden 200/2,000 ceilings | [#811](https://github.com/SaltyPatron/Laplace/issues/811), [#1047](https://github.com/SaltyPatron/Laplace/issues/1047) | Registry declares cardinality, modalities, safety, cost, bounds, ordering, truncation, receipt, version, and parity. |
-| One typed dispatcher | Not done | MCP has an installed-op invoker; surface parity remains open | [#812](https://github.com/SaltyPatron/Laplace/issues/812) | MCP, OpenAI-compatible HTTP, internal API, CLI, and UI invoke the same operation id/program and emit equivalent receipts. |
-| Shared inspect/debug/coverage operations | Partial | SQL and admin diagnostics exist piecemeal | [#811](https://github.com/SaltyPatron/Laplace/issues/811), [#1153](https://github.com/SaltyPatron/Laplace/issues/1153), [#1175](https://github.com/SaltyPatron/Laplace/issues/1175) | Every source/operation exposes the same coverage, plan/work, provenance, amplification, and validation diagnostics through every surface. |
-| Normalized readers | Partial companion work | Several lexical/chess readers changed | [#1178](https://github.com/SaltyPatron/Laplace/issues/1178) | Readers traverse senses, occurrences, collections, and trajectories without compatibility testimony; parity fixtures pass. |
-| Stateful forward pass | Not done | Architecture and acceptance issues exist | [#921](https://github.com/SaltyPatron/Laplace/issues/921), [#924](https://github.com/SaltyPatron/Laplace/issues/924) | One program performs resolve -> orient -> route -> scan -> compose -> propose -> steer -> select -> realize -> witness and mutates frontier after each emitted constituent. |
-| Seeded behavioral product gate | Not done | Harness scaffolding exists; product acceptance remains open | [#755](https://github.com/SaltyPatron/Laplace/issues/755) | MCP and HTTP pass correction, anaphora, topic return, abstention, source ablation, code feedback, model consensus, and trace parity on the certified seed. |
+Current geometry documentation must also preserve the distinction between real `coord`, mantissa-packed trajectory carrier and realized child-coordinate curve. Native centroid and managed Karcher parent-coordinate laws are presently divergent and must not be described as one rule.
 
-## Session delivery and preservation ledger
+### Modality / media / occurrence
 
-| Artifact | State | Evidence/use | Required next action |
-| --- | --- | --- | --- |
-| #1136 SQL audit | Merged | `docs/sql-cohesion-audit-2026-08-18.md`, scanner, tests, CI | Keep measurements current and execute #1135 rather than treating the audit as completion. |
-| #1155 source-fidelity audit | Merged baseline | `docs/semantic-source-fidelity-audit-2026-08-19.md` | #1153/#1177 own implementation; preserve unpublished follow-up edits separately. |
-| #1164 lexical peer batch | Merged | Scalar/batch semantics and measured warm-buffer improvement | Use as one reference pattern; do not claim family-wide completion. |
-| #1180 OpenSubtitles identity | Open issue | Concrete merged violation of same-content law | Fix before full OpenSubtitles ingest. |
-| #1181 structural cluster | Set implementation prepared for publication | Canonical relational core, scalar adapter, non-empty parity/ordinality regression, exact caller-bound candidate admission | Deploy, capture seeded warm/cold plan/buffer receipts, and close only if the declared work budget holds. |
-| UD isolated canary | Incomplete experiment | ISO completed; UD never created a run/file journal | Rerun only after current main is installed in an isolated DB with full measurement. |
-| Discontinuous FrameNet local commit | Preserved, unpublished | `a57f620b` on `fix/framenet-occurrence-spans` | Return to #1177 ownership; validate/rebase before publication. |
-| Source-remediation sequence draft | Preserved, unpublished | Local `agent/source-fidelity-audit` edits | Reconcile with #1177 ledger and publish only non-duplicative content. |
+- #1133 — modality registry/masks;
+- #1134 — exact media reconstruction/physical recipes;
+- #1180 — source occurrence/provenance versus canonical content;
+- #1177 — decomposer normalization and source fidelity.
 
-## Release order
+Current governing correction: modality changes the typed decomposition grammar, not the underlying identity/evidence/cognition machine. Source/language/path/batch/worker facts do not silently salt canonical content unless the declared content recipe actually includes them.
 
-1. Correct #1180, deploy and measure #1181, and audit merged content preimages
-   for the same defect class.
-2. Complete #1052/#1008/#904/#1048 global identity and materialization law.
-3. Complete #1133/#1134 modality, masks, and exact media reconstruction.
-4. Complete #811/#812/#989/#1047 operation registry, cardinality, and dispatcher.
-5. Execute #1135's proven planner/full-scan queue, then its measured clone and
-   scalar/batch queue.
-6. Complete #1153/#1177/#1178 source fidelity and normalized readers.
-7. Complete #1175/#1080 amplification, convergence, skew, bytes, and throughput
-   gates.
-8. Implement #1045/#1132 staged global consolidation and fold/index phases.
-9. Run bounded sources, including a real UD acceptance run and corrected
-   OpenSubtitles benchmark.
-10. Run the <=2-hour clean full seed, publish the complete receipt, then run
-    #755/#921/#924.
+### Perfcache / derived accelerators
+
+- #1043 — T0 codepoint perfcache law;
+- #469 / #529 — highway/perfcache/mask algebra;
+- #838 — chess deterministic cache companion work.
+
+Current governing correction: perfcaches/indexes are derived accelerators. A miss cannot change canonical identity, evidence or authoritative answer semantics.
+
+### Fold / evidence / standing
+
+- #964 and related fold-throughput work;
+- #1303 / #1321 and later standing/evidence corrections where still open/relevant.
+
+Current governing correction: identity, attributed testimony, deterministic calculation, provenance/dependence and folded standing are distinct state classes. Glicko standing is queryable evidence/uncertainty state, not truth or universal relevance.
+
+### Query / cognition / serving
+
+The 2026-08-20 ledger predated the current canonical forward-program and the later coupling-field correction. Current authority is `docs/specs/36_Laplace_Forward_Pass.md` and `docs/specs/37_Substrate_Operation_ISA.md`:
+
+```text
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
+        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
+```
+
+Whole-observation coupling precedes unconstrained policy/provider selection. Hops/fanout are explicit sparse-compute axes over one knowledge world. A*, walk, continuation, containment and geometry are operators inside that program.
+
+## Current proof/status rule
+
+Do not reuse the old ledger's labels as current delivery claims.
+
+A current status claim needs the evidence appropriate to the claim:
+
+```text
+mathematical invariant -> proof
+implementation invariant -> executable/property/conformance test
+live substrate invariant -> live readback/counterexample scan
+performance -> exact-revision/artifact/host/provider receipt
+product delivery -> installed/deployed operator-visible proof where required
+```
+
+A merged PR proves landing, not deployment or product acceptance. An issue state proves administration, not runtime behavior.
+
+## Why the detailed matrix was retired from current view
+
+The original matrix embedded then-current row counts, implementation percentages, campaign ordering and “not done/partial/done” snapshots. Those values became stale while remaining visually authoritative. Keeping them in a live scheduling document risked three failures:
+
+1. implementing August priorities instead of the current accepted task;
+2. interpreting old partial mechanisms as the invention limit;
+3. using old implementation gaps to overwrite stronger later architecture/proof law.
+
+The detailed 2026-08-20 matrix remains recoverable from Git history for archaeology and regression investigation.
