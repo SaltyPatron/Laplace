@@ -6,12 +6,24 @@ namespace Laplace.Ingestion;
 
 public static class LayerCompletion
 {
-    /// <summary>Layers the marker relation is ever minted for; bounds the
-    /// consensus-fold exclusion set (markers are ops metadata, never testimony).</summary>
-    public const int MaxMarkedLayer = 8;
+    /// <summary>
+    /// Governance envelope for ingest-layer marker relation ids. These markers are operational
+    /// metadata, never rated testimony, so ConsensusAccumulatingWriter precomputes every id in
+    /// this range and excludes it from folding. The old ceiling of 8 predated the chess lanes
+    /// (20-24): their HasLayerCompleted markers therefore leaked into consensus even though the
+    /// comments and reader contract said they could not. Keep a deliberately bounded byte-wide
+    /// namespace and fail closed if a future lane attempts to escape it.
+    /// </summary>
+    public const int MaxMarkedLayer = byte.MaxValue;
 
-    public static Hash128 RelationTypeId(int layerOrder) =>
-        Hash128.OfCanonical($"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+    public static Hash128 RelationTypeId(int layerOrder)
+    {
+        if ((uint)layerOrder > MaxMarkedLayer)
+            throw new ArgumentOutOfRangeException(
+                nameof(layerOrder), layerOrder,
+                $"ingest layer must be in 0..{MaxMarkedLayer} so completion markers remain excluded from consensus");
+        return Hash128.OfCanonical($"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+    }
 
     /// <summary>
     /// Per-file completion marker (Pillar 0): subject/object/source are all the

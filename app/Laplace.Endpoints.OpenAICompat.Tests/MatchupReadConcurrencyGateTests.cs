@@ -5,7 +5,8 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
 /// Independent matchup operands must not be serialized through two successive
-/// datasource reads. This gate pins both the fast matchup and slow verdict route.
+/// datasource reads. Chess players additionally require their chess-owned comparator;
+/// generic consensus standing must never be rendered as source Elo.
 /// </summary>
 public sealed class MatchupReadConcurrencyGateTests
 {
@@ -22,6 +23,22 @@ public sealed class MatchupReadConcurrencyGateTests
         Assert.Contains("await Task.WhenAll(xTask, yTask)", method);
         Assert.DoesNotContain("var x = await ResolveTopicAsync", method);
         Assert.DoesNotContain("var y = await ResolveTopicAsync", method);
+    }
+
+    [Fact]
+    public void ChessPlayers_SelectChessComparator_AndKeepEloSeparateFromStanding()
+    {
+        var client = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs");
+        var web = Read("web/src/explore/matchup/MatchupView.tsx");
+
+        Assert.Contains("IsChessPlayerAsync", client);
+        Assert.Contains("ChessTapeAsync", client);
+        Assert.Contains("ChessPlayerRatingsAsync", client);
+        Assert.Contains("source_rating_peak", Read("app/Laplace.Endpoints.OpenAICompat/Contracts/Matchup.cs"));
+
+        Assert.Contains("peak source Elo", web);
+        Assert.Contains("top standing", web);
+        Assert.DoesNotContain(">top rating ·", web, StringComparison.Ordinal);
     }
 
     private static string ExtractMethod(string text, string signaturePrefix)

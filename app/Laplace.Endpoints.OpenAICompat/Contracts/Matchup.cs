@@ -41,7 +41,12 @@ public sealed record MatchupSide(
     [property: JsonPropertyName("id")] string IdHex,
     [property: JsonPropertyName("label")] string Label,
     [property: JsonPropertyName("record")] EntityRecordResponse Record,
-    [property: JsonPropertyName("top_facts")] IReadOnlyList<SalientFactRow> TopFacts);
+    [property: JsonPropertyName("top_facts")] IReadOnlyList<SalientFactRow> TopFacts,
+    // These coordinates are deliberately separate. Generic consensus standing is NOT a
+    // source chess Elo, and calling one the other produced the Spassky/Karpov mismatch.
+    [property: JsonPropertyName("entity_type")] string? EntityType = null,
+    [property: JsonPropertyName("source_rating_peak")] int? SourceRatingPeak = null,
+    [property: JsonPropertyName("source_rating_observations")] long SourceRatingObservations = 0);
 
 /// <summary>The fast half of a matchup: both sides' cards plus the tape.</summary>
 public sealed record MatchupResponse(

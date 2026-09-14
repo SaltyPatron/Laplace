@@ -84,7 +84,10 @@ internal static partial class PgnClocks
         var positive = spent.Where(s => s > 0).ToList();
         if (positive.Count == 0) return 0;
         positive.Sort();
-        return positive[positive.Count / 2];
+        int mid = positive.Count / 2;
+        return (positive.Count & 1) != 0
+            ? positive[mid]
+            : (positive[mid - 1] + positive[mid]) / 2d;
     }
 
     /// <summary>Same clamp semantics as ThinkFactor, but on directly-witnessed spent time.</summary>

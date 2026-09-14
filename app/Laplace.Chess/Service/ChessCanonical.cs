@@ -1,4 +1,5 @@
 using System.Globalization;
+using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
 
@@ -34,6 +35,37 @@ public static class ChessCanonical
         >= 1.25 => "deep",
         _ => "normal",
     };
+
+    /// <summary>
+    /// Board-state phase, not move-number folklore. This uses the same PeSTO phase material
+    /// weights as the evaluator (N/B=1, R=2, Q=4; starting total 24) and names a reusable
+    /// context content value. Because the class is derived from the board itself it works for
+    /// arbitrary FENs, transpositions and non-standard starts instead of assuming that move 12
+    /// must be "opening" or move 40 must be "endgame".
+    /// </summary>
+    public static string PhaseClass(Board board)
+    {
+        ArgumentNullException.ThrowIfNull(board);
+        int phase = 0;
+        for (int sq = 0; sq < 128; sq++)
+        {
+            if ((sq & 0x88) != 0) { sq += 7; continue; }
+            phase += Board.TypeOf(board.Squares[sq]) switch
+            {
+                Piece.WKnight or Piece.WBishop => 1,
+                Piece.WRook => 2,
+                Piece.WQueen => 4,
+                _ => 0,
+            };
+        }
+        phase = Math.Min(24, phase);
+        return phase switch
+        {
+            >= 17 => "phase:opening",
+            >= 9 => "phase:middlegame",
+            _ => "phase:endgame",
+        };
+    }
 
     /// <summary>
     /// Phase × clock × spent lens over one ply, refining <see cref="ThinkClass"/> with

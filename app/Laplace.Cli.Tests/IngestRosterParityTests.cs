@@ -22,6 +22,7 @@ public sealed class IngestRosterParityTests
             "chess-eval",
             "chess-move-outcomes",
             "chess-opening-match",
+            "chess-player-context-outcomes",
             "chess-position-outcomes",
             "chess-syzygy",
             "chess-tactic-outcomes",
@@ -70,7 +71,10 @@ public sealed class IngestRosterParityTests
     // bounded fork/pin/skewer outcome provider. New/fused analysis writes the same lane;
     // this route exists so already-recorded games can populate it without replaying the
     // rest of ChessAnalyze testimony.
-    private const int OperationalOnlyRouteCeiling = 24;
+    // 24 -> 25 for chess-player-context-outcomes: marker-gated A8 backfill over already
+    // witnessed playings. It folds player×phase/clock context cells without replaying the
+    // analyzer or entering the seed-cadence corpus ladder.
+    private const int OperationalOnlyRouteCeiling = 25;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
