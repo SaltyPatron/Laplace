@@ -39,6 +39,10 @@ class LiveRecursiveProofGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "trailing output"):
             self.proof.parse_single_json_document('{"one":1}\n{"two":2}\n')
 
+    def test_json_parser_rejects_non_object_root(self):
+        with self.assertRaisesRegex(RuntimeError, "root is not an object"):
+            self.proof.parse_single_json_document('[{"schema":"proof"}]')
+
     def test_recursive_proof_edits_use_fast_live_verification_lane(self):
         workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
         self.assertIn("scripts/prove-*|scripts/test-live-recursive-proof-gate.py", workflow)
