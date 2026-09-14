@@ -3,15 +3,16 @@ name: PR proof — source, build and DEV/BAT
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
 
 permissions:
   contents: read
 
-# PR proof is isolated from the persistent main workspace. GitHub concurrency keeps
-# only one pending run per group, so sharing main's group lets PR pushes cancel a
-# pending deployment before any job starts. Superseding the same PR is safe here:
-# this job owns only a temporary worktree and never mutates installed/runtime state.
+# PR proof is isolated from the persistent main workspace. Every event for one PR
+# shares a concurrency group; the `closed` event therefore cancels any queued or
+# in-progress proof after merge/close, while the expensive job itself is skipped.
+# Superseding the same open PR is also safe because proof uses only a temporary
+# worktree and never mutates installed/runtime state.
 concurrency:
   group: laplace-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   prove:
     name: Source policy, build, DEV/BAT and UI
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     env:
