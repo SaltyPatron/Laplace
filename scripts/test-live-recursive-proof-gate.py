@@ -23,6 +23,18 @@ class LiveRecursiveProofGateTests(unittest.TestCase):
     def setUpClass(cls):
         cls.proof = load_proof_module()
 
+    def test_json_parser_accepts_one_multiline_document(self):
+        payload = "{\n  \"schema\": \"proof\",\n  \"examples\": [\n" + \
+            ",\n".join(f"    {{\"n\": {n}}}" for n in range(20)) + \
+            "\n  ]\n}\n"
+        value = self.proof.parse_single_json_document(payload)
+        self.assertEqual("proof", value["schema"])
+        self.assertEqual(20, len(value["examples"]))
+
+    def test_json_parser_rejects_a_second_document(self):
+        with self.assertRaisesRegex(RuntimeError, "trailing output"):
+            self.proof.parse_single_json_document('{"one":1}\n{"two":2}\n')
+
     def test_storage_gate_checks_identity_duplicates_and_parent_bounds(self):
         sql = self.proof.storage_sql(1e-12, 20)
         self.assertIn("GROUP BY id HAVING count(*) > 1", sql)
