@@ -6,16 +6,20 @@ public static class PhysicalityId
 {
     // Physicality identity is CONTENT-derived, exactly like entity identity, and
     // must stay bit-identical to the native physicality_id_compute in
-    // engine/core/src/content_witness_batch.c. entityId is already
-    // Blake3-Merkle(tier, childIds) -- an exact, collision-resistant hash of the
-    // content -- and the geometry (centroid coord + trajectory) is a DERIVED,
-    // non-exact function of that same content (Substrate Invariant Rule #1:
-    // "Content-hash identity is exact. Centroid/hilbert identity is not" --
-    // centroids collide, e.g. cat/act share a centroid). So identity is
-    // (entityId, type) ONLY; coord/trajectory are stored as payload but never
-    // enter the id. Hashing the float geometry made identity fragile to sub-ULP
-    // float divergence across the compose paths and re-ingests, forging spurious
-    // duplicate physicalities (observed: 319 chess-move entities).
+    // engine/core/src/content_witness_batch.c. entityId is already the current
+    // BLAKE3-derived 128-bit content address: for multi-child composition,
+    // hash128_merkle's preimage is the Merkle domain plus the ORDERED child-id
+    // sequence. The retained tier argument is explicitly ignored by hash128.c;
+    // singleton composition preserves the child id. This is a finite executable
+    // address, not a theorem of global injectivity over the unbounded composition
+    // domain. Geometry (centroid coord + trajectory) is a DERIVED physical
+    // realization of that content and does not replace exact identity (Substrate
+    // Invariant Rule #1: content identity is exact under the current recipe;
+    // centroid/hilbert identity is not -- centroids can collide, e.g. cat/act).
+    // So physicality identity is (entityId, type) ONLY; coord/trajectory are stored
+    // as payload but never enter the id. Hashing float geometry made identity
+    // fragile to sub-ULP divergence across compose paths and re-ingests, forging
+    // spurious duplicate physicalities (observed: 319 chess-move entities).
     // LAYOUT IS LITTLE-ENDIAN BY SPECIFICATION, not by host accident (GH #904).
     // BitConverter writes the HOST's byte order, and the C twin
     // (laplace_physicality_id_compute) memcpy'd an int16_t, also host order: the
