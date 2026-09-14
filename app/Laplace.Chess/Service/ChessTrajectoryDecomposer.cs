@@ -172,12 +172,11 @@ public sealed class ChessTrajectoryDecomposer
     {
         if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
             return null;
-        long lines = await ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct)
-            .ConfigureAwait(false) ?? 0;
-        long players = await NpgsqlSubstrateReads.CountChessPlayersMissingPhysicalityAsync(
-                ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Content, ct)
-            .ConfigureAwait(false);
-        return lines + players;
+        var linesTask = ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct);
+        var playersTask = NpgsqlSubstrateReads.CountChessPlayersMissingPhysicalityAsync(
+            ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Content, ct);
+        await Task.WhenAll(linesTask, playersTask).ConfigureAwait(false);
+        return (linesTask.Result ?? 0) + playersTask.Result;
     }
 }
 
