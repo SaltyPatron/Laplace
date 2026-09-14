@@ -141,6 +141,13 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessTacticOutcomesDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
+        // A8 player-context fold. One playing contributes once per player/phase/think class, so
+        // a long game cannot manufacture extra authority merely by lasting longer. This lane is
+        // separately marker-gated and never bumps ChessAnalyze.Version or replays its testimony.
+        ("chess-player-context-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessPlayerContextOutcomesDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
         ("chess-eval", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
                 cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
