@@ -22,12 +22,16 @@ public sealed class TopicResolveArchitectureGateTests
     }
 
     [Fact]
-    public void CombinedResolveAndLabel_IsOneServerStatement()
+    public void CombinedResolveAndLabel_IsOneCatalogOwnedServerStatement()
     {
         var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.Resolve.cs");
-        Assert.Contains("SELECT converse.resolve_ref(@ref) AS id", text);
-        Assert.Contains("realize.render_text_fast(r.id, 8)", text);
-        Assert.Contains("converse.label_or_hex(r.id)", text);
+        var catalog = Read("engine/core/src/sql_catalog.def");
+        Assert.Contains("SqlCatalog.Get(\"conversation.resolve_ref_with_label\")", text);
+        Assert.DoesNotContain("SELECT ", text);
+        Assert.Contains("SQL_QUERY(\"conversation.resolve_ref_with_label\"", catalog);
+        Assert.Contains("SELECT converse.resolve_ref($1) AS id", catalog);
+        Assert.Contains("realize.render_text_fast(r.id,8)", catalog);
+        Assert.Contains("converse.label_or_hex(r.id)", catalog);
         Assert.DoesNotContain("OpenConnectionAsync", text);
     }
 
