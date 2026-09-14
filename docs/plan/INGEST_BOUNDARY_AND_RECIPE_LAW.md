@@ -1,18 +1,16 @@
 # Ingest boundary and recipe law
 
-Status: **current architectural correction / P0 admission authority**
+Status: **current architectural correction for world admission.** It does not assign a permanent global P0 order.
 
-Owners: #1045, #1177, #1132  
-Executable invariance gate: #1443  
-Clean-product counterpart: `SaltyPatron/Laplace-Refactor#115`, `#171`
+Representative owners: #1045, #1177, #1132. Physical-plan invariance gate: #1443. Related work in `Laplace-Refactor` may implement the same law; cross-repository issue links are coordination, not semantic authority.
 
 ## Why this exists
 
 Laplace has repeatedly fixed source ingestion one corpus at a time even though many failures have the same cause: source-specific code was allowed to own machinery that belongs to the universal substrate.
 
-The recurring failure is not that WordNet, PGN, UD, Tree-sitter, PNG, Wiktionary, FrameNet, models, etc. require different parsers or academic interpretation. They do. The failure is allowing those providers/adapters to become independent content-composition, identity, deduplication, scheduling, persistence, or semantic engines.
+WordNet, PGN, UD, Tree-sitter, PNG, Wiktionary, FrameNet, model formats and other sources legitimately require different parsers/codecs/academic mappings. They do **not** require independent content-composition, identity, deduplication, scheduling, persistence, evidence or cognition engines.
 
-`ContentTierSpine` already states the intended ownership for text/content: decomposers yield observations while the common spine owns composition, existence and staging. This document generalizes that rule across world admission.
+`ContentTierSpine` already expresses this split for text/content: decomposers recover observations/source structure while the common spine owns canonical composition, existence/reuse and staging. This document generalizes the law across world admission.
 
 ## Five boundaries that are not interchangeable
 
@@ -28,55 +26,55 @@ canonical content / composition / occurrence / testimony
 persistence / probe / COPY / apply batch
 ```
 
-No boundary in that list becomes another merely because they happen to have the same cardinality in one implementation.
+No boundary becomes another merely because two happen to have the same cardinality in one implementation.
 
 ### Artifact boundary
 
-A real selected file/member/object in the source estate. It owns artifact identity, provenance, journal/resume accounting, and complete-coverage disposition.
+A real selected file/member/object in the source estate. It owns artifact identity, provenance, journal/resume accounting and complete-coverage disposition.
 
-An artifact can contain zero, one, or many source-format objects. A corpus can contain many artifacts.
+An artifact can contain zero, one or many source-format objects. A corpus can contain many artifacts.
 
 ### Transport boundary
 
-A physical read/feed unit chosen for I/O, memory, parser APIs, or resource scheduling.
+A physical read/feed unit chosen for I/O, memory, parser APIs or resource scheduling.
 
-It is never canonical content identity. A UTF-8 scalar, quoted record, grammar token, AST construct, image sample, compressed block, or other semantic/source-format unit may cross a transport boundary. The reader/provider must carry enough state to recover the same source structure.
+It is never canonical content identity. A UTF-8 scalar, quoted record, grammar token, AST construct, image sample, compressed block or other semantic/source-format unit may cross a transport boundary. The reader/provider must carry enough state to recover the same source structure regardless of legal transport partitioning.
 
 ### Parser/codec source-object boundary
 
-A record, CST/AST node, field, row, game, sentence, frame, model tensor descriptor, codec element, etc. recovered according to the source/provider contract.
+A record, CST/AST node, field, row, game, sentence, frame, tensor descriptor, codec element, etc. recovered according to the source/provider contract.
 
-This is observation/source structure. It is **not automatically a canonical content composition**. The recipe decides which recovered values/structures become content, occurrence, reference, provenance, testimony, calculation, or packaging.
+This is observed/source structure. It is **not automatically canonical content**. The declared recipe decides which recovered values/structures become content, occurrence, reference, provenance, testimony, deterministic calculation, packaging or unresolved obligation.
 
 ### Canonical semantic boundary
 
-The universal substrate classes:
+Common substrate state includes:
 
 ```text
-content                         -> canonical composition / Merkle identity
-ordered occurrence             -> physicality / trajectory
-unordered multi-value state    -> collection composition
+content                         -> canonical recursive composition / executable identity
+ordered occurrence             -> trajectory / occurrence physicality
+unordered multi-value state    -> declared collection composition
 opaque external identity       -> typed reference
 source claim                    -> attributed testimony
 provenance                      -> context / occurrence metadata
-deterministic consequence      -> calculation / perfcache
+deterministic consequence      -> calculation / rebuildable accelerator state
 packaging/provider syntax      -> reconstruction/provider state unless declared otherwise
 unresolved field meaning       -> explicit unresolved obligation
 ```
 
-Canonical identity follows these laws, not physical execution grain.
+Canonical identity follows declared semantic recipes, not transport/batch/worker execution grain.
 
 ### Persistence boundary
 
-A probe batch, intent/staging batch, COPY page/buffer, transaction, merge set, partition task, fold batch, etc. selected by the physical plan.
+A probe batch, staging/intent batch, COPY buffer, transaction, merge set, partition task, fold batch or other physical persistence unit.
 
-It may change performance, WAL, memory, CPU occupancy and scheduling. It may not change canonical state.
+It may change performance, WAL, memory, CPU occupancy and scheduling. It may not change canonical world state.
 
 ## Source-provider ownership
 
-A source/provider may legitimately own:
+A source/provider may own:
 
-- enumeration of the source's physical artifact graph;
+- enumeration of the source's selected physical artifact graph;
 - exact decode/container unpacking;
 - grammar/codec/standards parsing;
 - source-specific field/span/ordinal extraction;
@@ -84,39 +82,85 @@ A source/provider may legitimately own:
 - provider identity/version/error/recovery evidence;
 - exact inverse/reconstruction support or explicit loss declaration.
 
-A source/provider must **not** own:
+A source/provider must not own:
 
 - a private canonical content hash/identity rule;
-- a private Unicode/content ladder when the universal content spine applies;
+- a private Unicode/content ladder where the universal ladder applies;
 - a private Merkle/dedup law;
 - a private scheduler/backpressure/resource policy;
 - a private persistence/COPY/apply protocol;
-- batch cardinality as semantic identity;
+- physical batch cardinality as semantic identity;
 - a source-specific cognition/search engine;
 - silent fallback from unknown field meaning to `content`.
 
-Source-specific semantic knowledge should be declarative recipe/profile data plus only the irreducible parser/codec/academic kernel required to recover that source.
+Source-specific semantic knowledge should be declarative profile/recipe data plus the irreducible parser/codec/academic kernel needed to recover that source faithfully.
 
 ## Whole working set versus streaming
 
-Laplace does not require a doctrinal `stream everything in tiny chunks` implementation.
+Laplace does not impose a doctrinal “stream everything in tiny chunks” rule.
 
-If an admitted physical plan has enough memory for a complete 70 MB document, its complete Merkle/tier tree, dedup working set, parser state and required scratch, using that complete working set is valid. On a host with ~128 GB RAM, a 70 MB text artifact is not intrinsically a memory problem.
+If the admitted physical plan has memory for a complete artifact plus its composition/parser/dedup scratch, a whole working set is valid. Streaming is valid when the source/provider/resource plan requires it. Streaming partitions remain physical only and disappear from canonical results.
 
-Streaming is appropriate when the source/provider or resource plan calls for it. When streaming is used, the stream partitions are physical only. They must disappear from the canonical result.
+The invariant is:
 
-The governing invariant is not `always stream` or `always load all`. It is:
+> **Choose a physical plan from actual topology/resources and source structure, then prove every legal equivalent plan produces the same canonical world.**
 
-> **Choose a physical plan from actual topology/resources and source structure, then prove that every legal equivalent plan produces the same canonical world.**
+## Universal execution-grain law applies to ingestion too
 
-## P0 physical-plan invariance
+Semantic correctness and physical execution grain are separate axes.
 
-For the same exact source artifact + recipe/profile/provider generation, vary legal physical execution settings such as:
+A parser may correctly recover one million semantic records and still implement them disastrously if the caller performs one SQL/SPI/PInvoke/persistence operation per record.
+
+The intended hot shape is:
+
+```text
+artifact / source stream
+-> parser/provider recovers source structure
+-> coarse native decomposition/composition over a working set or batch
+-> bulk identity/existence/reuse work
+-> set-sized/COPY persistence
+-> set-sized evidence/fold work
+-> receipt
+```
+
+PostgreSQL owns durable indexed state, transactions and set access. SPI is a prepared/set-sized bridge. Native C/C++ owns repeated parsing/composition/normalization/trajectory/reduction work where the common machine provides those semantics. C#/SQL orchestrate source/session/contracts/transport.
+
+These are architecture smells in repeated ingest work:
+
+```text
+one P/Invoke per scalar/token/AST node/record
+one existence SQL query per entity
+per-row SPI_prepare/SPI_execute
+one transaction/COPY invocation per semantic object
+batch API implemented by looping scalar write APIs
+source-private thread pools competing with the common resource scheduler
+source-private caches compensating for a missing common working set
+per-record consensus/fold calls when a set-sized fold is possible
+```
+
+The optimization goal is therefore two-dimensional:
+
+```text
+avoid work
+  canonical reuse / working-set dedup / direct identity / perfcache / indexed set probes
+
+x
+
+avoid boundary overhead
+  coarse native decomposition/composition + bulk/set persistence/fold
+```
+
+A wider SIMD ISA or GPU provider may add headroom later. It is not a substitute for getting this execution grain right.
+
+## Physical-plan invariance
+
+For the same exact source artifact + recipe/profile/provider generation, vary legal physical settings such as:
 
 ```text
 read buffer size
 parser feed chunk size
 record batch size
+native decomposition/composition batch size
 probe batch size
 worker count / CPU affinity
 scheduling order where source order is preserved
@@ -127,51 +171,42 @@ cache/perfcache warm/cold state where identity is unaffected
 The durable semantic fingerprint must remain identical for logically order-independent state:
 
 - canonical ids;
-- Merkle/universal-AST composition;
+- Merkle/recursive composition;
 - physicality trajectories, ordinals, gaps and multiplicity;
 - occurrences;
 - typed references;
 - testimony ids and observation cardinality;
 - provenance/source coordinates;
+- deterministic calculation identity/results under the same recipe;
 - reconstruction output or declared loss.
 
-Only physical receipts may differ: time, CPU, RSS, I/O, WAL, cache behavior, temporary staging and worker scheduling.
+Only physical receipts may differ: time, CPU, RSS, I/O, WAL, cache behavior, batch sizes, temporary staging and worker scheduling.
 
 #1443 owns the executable cross-source matrix.
 
 ## Measured counterexample: OpenSubtitles
 
-#1180 records a concrete violation: arbitrary 512-pair batching participates in durable content-object construction. Changing the physical batch therefore changes which content identities exist.
+#1180 records a concrete violation in which an arbitrary 512-pair batch participated in durable content-object construction. Changing the physical batch therefore changed which identities existed.
 
-That is not merely an OpenSubtitles bug. It is a failing instance of this generic law and must ultimately pass #1443's common rebatching gate rather than remain a bespoke source-local assertion.
+That is not merely an OpenSubtitles bug. It is one failing instance of the generic boundary-invariance law and belongs under the common rebatching gate rather than as a permanent source-local exception.
 
 ## Benchmark lesson: document grain is not universal work grain
 
-Benchmark run `33608791817` processed a 69.9 MB real corpus. One 41.6 MB document was 59.526% of the corpus, so the unique-corpus document-grain scheduler had a theoretical maximum makespan speedup of about 1.6799x. The measured best was about 1.6765x.
+A historical benchmark processed a real corpus dominated by one ~41.6 MB document. Under a whole-file unique-corpus scheduler that giant indivisible document mathematically dominated makespan, so the measured plateau primarily characterized the scheduler/workload grain rather than the native composition engine's aggregate concurrency ceiling.
 
-That result is valid evidence for finite unique-corpus makespan. It is **not** evidence that native composition only scales to two cores. It demonstrates why a convenient high-level object can become an accidental scheduling bottleneck when treated as indivisible physical work.
+The later independent-stream profile exists to measure aggregate concurrent headroom, and #1451 tracks true one-semantic-DAG internal frontier parallelism.
 
-The follow-up aggregate-stream benchmark keeps semantic documents intact while measuring actual independent concurrent streams. Future intra-document parallel work must use lawful source/content structure and prove identical root/topology/reconstruction; it may not manufacture arbitrary semantic chunks to improve a graph.
+The broader law is:
 
-## Current P0 priority
+> A file/document/source object can remain one exact semantic object while its internally independent physical work is scheduled at a finer dependency-aware grain.
 
-1. #1443 — generic physical-plan/boundary invariance.
-2. #1008 + #1052 — one canonical entity per id; storage uniqueness/FKs agree with identity.
-3. #1041 — complete field disposition: content/reference/occurrence/provenance/claim/calculation/packaging/unknown.
-4. #1180 — remove batching/provenance from OpenSubtitles content identity and prove rebatching parity.
-5. #1042 — make whitespace classification selected-UCD authority; multi-codepoint whitespace-word emission is already fixed.
-6. #1134 and related media identity/reconstruction defects.
+Transport/worker/chunk identity may not enter canonical semantics merely to make parallelism convenient.
 
-Historical text-lane blockers #1039 and #1040 are now closed after current-main implementation/test verification.
+## Resource ownership / serviceability
 
-After those correctness gates:
+One generic resource authority should admit reader/parser/native/persistence/fold concurrency rather than allowing every source to consume all visible CPUs/memory independently.
 
-- #1045 recipe/source-profile consolidation;
-- #1153 native source fidelity;
-- #1178 normalized readers;
-- #967 safe generic apply concurrency;
-- #1175/#1080 performance/amplification receipts;
-- final bounded/full reseed under #1132.
+On a managed host, “all logical CPUs exist” does not mean an ingest/benchmark should take all of them. Serviceable work reserves database/product/runner/control-plane headroom; full saturation is an explicitly selected isolated profile.
 
 ## Required source-profile fields
 
@@ -194,19 +229,41 @@ physical-plan invariance receipt
 coverage/amplification receipt
 ```
 
+## Current issue families, not a fixed global priority
+
+Issues historically central to this law include:
+
+- #1443 — generic physical-plan/boundary invariance;
+- #1008 / #1052 — canonical entity/storage uniqueness and identity alignment;
+- #1041 — complete field disposition;
+- #1180 — OpenSubtitles physical-batch identity defect;
+- #1042 — selected-UCD whitespace authority;
+- #1134 — media identity/reconstruction;
+- #1045 — recipe/source-profile consolidation;
+- #1153 — native source fidelity;
+- #1178 — normalized readers;
+- #967 — common safe apply concurrency;
+- #1175 / #1080 — performance/amplification receipts;
+- #1132 — broader substrate/reseed acceptance.
+
+This list is ownership/history, not an instruction to ignore a current user-accepted task until the numerically earlier item is finished.
+
 ## Non-success
 
 The following do not satisfy this architecture:
 
-- replacing sixteen decomposers with sixteen classes behind one interface while each still owns its semantics and execution;
-- using a file, line, row, AST node, parser callback, 512-row block or I/O buffer as content identity by default;
-- adding more per-source caches/batchers/thread pools to mask common-spine defects;
-- accepting a faster ingest when worker/batch settings change durable state;
-- declaring an opaque identifier to be content because it is UTF-8;
+- many decomposer classes behind one interface while each still owns private canonical/persistence/scheduler semantics;
+- using file, line, row, AST node, parser callback, fixed record block or I/O buffer as canonical content identity by default;
+- adding source-private caches/batchers/thread pools to mask common-spine defects;
+- accepting a faster ingest when worker/batch settings change durable semantic state;
+- accepting a semantically correct ingest whose physical path still performs avoidable per-element DB/native boundary crossings at scale;
+- declaring an opaque identifier to be content merely because it is UTF-8;
 - using parser success as truth/admission authority;
-- preserving source-specific compatibility readers forever rather than moving reads to normalized state;
-- letting benchmark design redefine product semantics.
+- preserving source-specific compatibility readers forever instead of normalized state;
+- allowing benchmark design or worker topology to redefine product semantics.
 
 ## Acceptance summary
 
-A new source is admitted by a selected artifact/profile plus a qualified provider and recipe. The generic machine performs canonical composition, presence/dedup, deposition, persistence and receipts. Equal canonical content converges across sources and physical plans. Source-specific structure and claims remain reconstructable and attributable. Physical execution can be optimized aggressively because its semantic equivalence is continuously proven.
+A source is admitted by a selected artifact/profile plus a qualified provider and recipe. The common machine performs canonical recursive composition/reuse, deposition, bulk persistence/fold and receipts. Equal canonical content under the same recipe converges across sources and legal physical plans. Source-specific structure/claims remain reconstructable and attributable. Physical execution can be optimized aggressively because semantic equivalence is continuously proved.
+
+Performance acceptance measures both useful semantic work and physical execution grain: native work, DB/SPI/PInvoke boundary counts, batch/set widths, CPU/memory/I/O/WAL and wall time appropriate to the source. Avoidable orchestration overhead is an implementation defect, not a permanent semantic cost.
