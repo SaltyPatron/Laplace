@@ -18,8 +18,14 @@ internal static class EvalCommands
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
-        var pos = (await NpgsqlSubstrateReads.IngestFidelityPositiveScoresAsync(ds, relation, gt, n)).ToList();
-        var neg = (await NpgsqlSubstrateReads.IngestFidelityNegativeScoresAsync(ds, relation, gt, n)).ToList();
+        // Positive and negative fidelity populations are independent reads over the
+        // same pinned evaluation boundary. Do not serialize two server scans through
+        // one caller await chain; the datasource owns their bounded connection leases.
+        var posTask = NpgsqlSubstrateReads.IngestFidelityPositiveScoresAsync(ds, relation, gt, n);
+        var negTask = NpgsqlSubstrateReads.IngestFidelityNegativeScoresAsync(ds, relation, gt, n);
+        await Task.WhenAll(posTask, negTask).ConfigureAwait(false);
+        var pos = posTask.Result.ToList();
+        var neg = negTask.Result.ToList();
 
         Console.WriteLine($"eval ingest-fidelity: relation={relation} ground-truth={gt} (two-hop synonym join)");
         if (pos.Count == 0)
