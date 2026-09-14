@@ -20,27 +20,3 @@ jobs:
           fetch-depth: 1
       - name: Enforce source-tree hygiene and strong secret signatures
         run: python3 scripts/repo-hygiene-gate.py
-
-  # ONE-TIME queue drain. These hosted no-op jobs enter the two retired/current
-  # concurrency groups with cancellation enabled, evicting already-created stale
-  # runs without consuming hart-server. Remove both jobs immediately after this
-  # push has scheduled them.
-  drain-retired-shared-workspace:
-    name: Drain retired shared-workspace queue
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    concurrency:
-      group: laplace-shared-workspace
-      cancel-in-progress: true
-    steps:
-      - run: echo "obsolete laplace-shared-workspace runs cancelled"
-
-  drain-stale-product-lifecycle:
-    name: Drain stale product-lifecycle queue
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    concurrency:
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: true
-    steps:
-      - run: echo "stale laplace-substrate-lifecycle runs cancelled"
