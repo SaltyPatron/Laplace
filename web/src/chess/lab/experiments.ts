@@ -8,7 +8,7 @@ export interface LabExperiment {
   expect: string[];
   tips: string[];
   category: LabCategory;
-  /** Games written to substrate during the run (LearnGameAsync path). */
+  /** Games written to substrate during the normal Lab UI run. */
   recordsLive: boolean;
   requires?: string[];
 }
@@ -38,17 +38,17 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     tagline: 'Real move-selection test: does witnessed substrate experience beat the control?',
     description:
       'MOVE-SELECTION PARTICIPATION: YES in transition mode. The Laplace side runs Search with witnessed root transition/move evidence, substrate leaf evaluation, learned PST/tactical residuals when populated, and exact Syzygy closure; the Off side is the conventional control. '
-      + 'LEARNING: YES. Completed games are witnessed back to substrate, so later games can consume newly folded state. The emitted provider metrics are the proof of actual reads/contributions — provider availability alone is not counted as use.',
+      + 'LEARNING: YES. Completed games are witnessed back to substrate, so later games can consume newly folded state. The run metrics prove combined substrate reads/signals; the standalone UCI provider receipt gives per-search learned-PST/tactical/Syzygy attribution.',
     expect: [
       'Live W-D-L score and Elo difference in the feed',
       'Final results table with Elo ± margin',
       'games_recorded metric — every game is witnessed to substrate during the run',
-      'provider-use metrics: root/transition reads, non-zero child-state contributions, learned/tactical coverage where present, Syzygy coverage, and substrate epoch',
+      'root/transition and child-state evidence metrics; use the UCI provider receipt for learned-PST/tactical/Syzygy per-search attribution',
       'games.pgn artifact for archival',
     ],
     tips: [
       'Transition mode is the actual substrate-enabled playing path; Off is the conventional sanity control.',
-      'A loaded provider with zero reads/non-zero contributions did not affect that search. Use the receipt metrics, not the label.',
+      'A loaded provider with zero reads/non-zero contributions did not affect that search. Use receipts/metrics, not the label.',
       'Concurrency 0 uses all performance cores; scale games before depth for stable Elo.',
     ],
     category: 'substrate',
@@ -60,12 +60,12 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     tagline: 'Classical ablation only — not proof that substrate learning participates.',
     description:
       'MOVE-SELECTION PARTICIPATION: CLASSICAL ONLY. For each deterministic eval term (material, PST, bishop pair, rook files, pawn structure, tempo), this job plays full classical eval vs classical eval-minus-that-term. It does NOT exercise the substrate provider stack, learned PST residual, learned tactic outcomes, player conditioning, or Syzygy as evidence that Laplace learned. '
-      + 'LEARNING: the optional recorded games become substrate evidence, but that is a recording side effect; it does not make this ablation a learned-policy test.',
+      + 'LEARNING: NO in the normal Lab UI. The runner defaults record=false and the UI exposes no record control, so these matches are read-only diagnostics unless an external caller explicitly supplies record=true.',
     expect: [
       'Six-term classical ablation table with W-D-L and Elo per row',
       'Parallel progress across terms in the job summary',
-      'Recorded games can extend the corpus, but provider participation is intentionally absent from these matches',
-      'games.pgn combining every term\'s games',
+      'games_recorded = 0 in the normal Lab UI; the completed summary reports read-only',
+      'Optional games.pgn only when artifact persistence is explicitly requested',
     ],
     tips: [
       'Use Substrate lift test or the UCI gauntlet provider receipt to test whether learned/substrate providers actually affect play.',
@@ -73,7 +73,7 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
       'Core budget splits across six terms; 0 = all performance cores.',
     ],
     category: 'substrate',
-    recordsLive: true,
+    recordsLive: false,
   },
   {
     kind: 'learned-pst',
