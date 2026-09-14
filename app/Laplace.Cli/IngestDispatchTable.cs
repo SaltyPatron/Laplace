@@ -133,6 +133,14 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessPositionOutcomesDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
+        // Color-normalized fork/pin/skewer outcome backfill. The fused analyzer writes these
+        // for newly analysed/live games; this marker-gated lane fills historical games without
+        // bumping ChessAnalyze.Version and therefore without double-counting the other analysis
+        // testimony. Search consumes the resulting bounded pattern census at leaf evaluation.
+        ("chess-tactic-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessTacticOutcomesDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
         ("chess-eval", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
                 cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
