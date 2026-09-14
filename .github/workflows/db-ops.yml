@@ -1,21 +1,12 @@
 name: DB — lifecycle ops
 
-# The database as its own lane: drop, repair, recreate, inspect — with no build,
-# no deploy, and no seeding. Those are separate workflows on purpose:
+# Explicit operator surface for the database inside the one Laplace product
+# lifecycle. It shares the product lifecycle lock with laplace.yml, so a manual
+# operation cannot overlap install/schema/publication mutation.
 #
-#   laplace.yml     build -> deploy -> db-ops -> test        (code changes)
-#   db-ops.yml      THIS  — the database's own lifecycle     (operator actions)
-#   seed-*.yml      corpus in                                (data)
-#
-# Every operation is a composition of primitives that already exist and are
-# already exercised by laplace.yml: `Laplace.Migrations` verbs (status/up/reset/
-# nuke) and `scripts/pipeline.sh` phases. Nothing here reimplements them, so a
-# fix to the pipeline is a fix here too.
-#
-# DESTRUCTIVE OPERATIONS REQUIRE TYPING THE DATABASE NAME. A workflow_dispatch
-# is a button, and `recreate` drops every entity, physicality and attestation in
-# the substrate. The confirm field is the difference between an operator
-# decision and a misclick.
+# `recreate` is destructive to existing substrate/corpus data, but it no longer
+# reports success with an empty broken product. After nuke+migrate+runtime repair
+# it restores the canonical foundation ladder and proves the live substrate floor.
 
 on:
   workflow_dispatch:
@@ -29,9 +20,9 @@ on:
           - status      # READ-ONLY. Migration state + extension version + substrate counts.
           - migrate     # `up` only. Idempotent; applies any pending migrations.
           - repair      # Re-sync extension SQL + re-tune + re-point perfcache/API env. NO DATA LOSS.
-          - reindex     # Rebuild INVALID indexes (interrupted DDL/legacy cycles). CONCURRENTLY; NO DATA LOSS.
+          - reindex     # Rebuild INVALID indexes. CONCURRENTLY; NO DATA LOSS.
           - remigrate   # `reset` + `up`: re-apply ALL migrations. Keeps substrate data.
-          - recreate    # DESTRUCTIVE. `nuke` + `up` + repair. Drops the database and rebuilds it EMPTY.
+          - recreate    # DESTRUCTIVE to existing data. Rebuild DB + canonical product foundation.
       confirm:
         description: "type the database name to authorize a destructive operation (recreate)"
         type: string
@@ -47,14 +38,6 @@ permissions:
   contents: read
 
 concurrency:
-  # One database, one lifecycle operation at a time. Queue rather than cancel:
-  # cancelling mid-nuke leaves the box without a database, which is worse than
-  # waiting.
-  #
-  # Widened from a db-ops-only group to the shared LIFECYCLE group: a nuke/migrate
-  # and a deploy both bounce the box, and they were previously mutually invisible.
-  # Exclusion against running SEEDS is the deploy job's ingest_run_journal preflight,
-  # not this group -- seeds must stay parallel with each other.
   group: laplace-substrate-lifecycle
   cancel-in-progress: false
 
@@ -62,9 +45,7 @@ jobs:
   db:
     name: "DB — ${{ inputs.operation }}"
     runs-on: [self-hosted, laplace]
-    # reindex rebuilds up to every index on billion-row partitioned tables — hours,
-    # not minutes. Every other operation keeps the 30-minute leash.
-    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || 30 }}
+    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || inputs.operation == 'recreate' && 480 || 30 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: { submodules: false, clean: false }
@@ -79,7 +60,7 @@ jobs:
                 echo "::error::'$op' is destructive — type '${{ inputs.database }}' in the confirm field to authorize."
                 exit 1
               fi
-              echo "::warning::'$op' authorized: dropping ${{ inputs.database }} and rebuilding it EMPTY. All substrate data is lost; re-seed with the seed-* workflows."
+              echo "::warning::'$op' authorized: dropping ${{ inputs.database }} and rebuilding the canonical Laplace foundation. Existing substrate/corpus data is lost."
               ;;
             remigrate)
               echo "::notice::'$op' re-applies all migrations; substrate data is preserved."
@@ -89,19 +70,13 @@ jobs:
               ;;
           esac
 
-      - name: Guard — refuse to drop the database out from under a running ingest
-        # Was an inline `pg_stat_activity ... query ILIKE 'COPY %'` probe, which only
-        # sees an ingest during its COPY bursts and reports "clear" through the minutes
-        # of in-memory compose between them. Same check as the deploy job now, and the
-        # sound one — see the script.
+      - name: Guard — refuse lifecycle mutation over a running ingest
         if: inputs.operation == 'recreate' || inputs.operation == 'remigrate' || inputs.operation == 'reindex'
         timeout-minutes: 305
         run: bash scripts/wait-for-quiet-substrate.sh "${{ inputs.database }}"
+
       - name: Status (read-only)
         if: inputs.operation == 'status'
-        # set +e so every section still prints when one fails; rc accumulates so
-        # the step FAILS afterward instead of reporting green over a broken build
-        # or unreachable database (Copilot, PR #778).
         run: |
           set +e
           rc=0
@@ -113,13 +88,13 @@ jobs:
           echo "----- substrate -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
             "SET search_path=laplace,public; SELECT * FROM substrate_health()" || rc=1
-          echo "----- index health (invalid = planner-invisible, run 'reindex') -----"
+          echo "----- index health -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
             "SELECT t.relname AS table, count(*) FILTER (WHERE NOT i.indisvalid) AS invalid, count(*) AS total
              FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_class t ON t.oid=i.indrelid
              JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='laplace'
              GROUP BY 1 HAVING count(*) FILTER (WHERE NOT i.indisvalid) > 0 ORDER BY 2 DESC" || rc=1
-          echo "----- what has been ingested -----"
+          echo "----- ingest journal -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
             "SET search_path=laplace,public; SELECT source_name, status, attestations, ended_at FROM ingest_run_journal ORDER BY started_at DESC LIMIT 20" || rc=1
           exit $rc
@@ -129,30 +104,13 @@ jobs:
         run: bash scripts/pipeline.sh migrate
 
       - name: Repair
-        # Everything that makes a live database correct without touching its
-        # data: extension SQL to the installed version, PG + Laplace tuning,
-        # the perfcache GUC, the API env. This is the fix for "the database is
-        # there but the extension or a GUC drifted".
         if: inputs.operation == 'repair'
         run: bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
 
       - name: Reindex — rebuild INVALID indexes
-        # Interrupted DDL or a database upgraded from the retired index-cycle loader can leave
-        # indexes marked indisvalid=false; the planner ignores them and every read
-        # seq-scans. 2026-08-14: 28 of them across attestations/consensus/entities/
-        # physicalities — every core query index — after the wiktionary-era kills.
-        # CONCURRENTLY: readers keep working while each rebuilds. `_ccnew` leftovers
-        # are half-built temp indexes from a died CREATE INDEX CONCURRENTLY — the
-        # real name still exists, so they drop rather than rebuild.
         if: inputs.operation == 'reindex'
         run: |
           P(){ psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -v ON_ERROR_STOP=1 -tAc "$1"; }
-          # Invalid partitioned PARENTS cannot be REINDEXed back to validity — the
-          # flag only flips when every child is attached — and pg_get_indexdef on a
-          # parent says ON ONLY, which recreates the same empty shell. So: capture
-          # the definition, strip ON ONLY, drop, recreate; CREATE INDEX on the
-          # parent then builds every missing child and attaches any that match.
-          # Consensus first: converse election reads block on those.
           list(){ P "SELECT n.nspname || '.' || c.relname || E'\t' || pg_get_indexdef(i.indexrelid)
                      FROM pg_index i
                      JOIN pg_class c ON c.oid=i.indexrelid
@@ -184,19 +142,18 @@ jobs:
           dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll reset --yes
           bash scripts/pipeline.sh migrate
 
-      - name: Recreate (nuke + up + repair)
-        # `pipeline.sh --fresh-db migrate` is `migrate nuke --yes` then `up`,
-        # the same path laplace.yml takes for its fresh_db dispatch input.
+      - name: Recreate product database and canonical foundation
         if: inputs.operation == 'recreate'
-        run: bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
+        run: |
+          bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
+          bash scripts/check-database-health.sh "${{ inputs.database }}"
+          bash scripts/ensure-foundation.sh --force
+          bash scripts/check-substrate-floor.sh "${{ inputs.database }}"
+          python3 scripts/verify-application-release.py --readiness-only --timeout-seconds 120
 
       - name: Verify structural database health
-        # Database lifecycle owns extension/schema/index/constraint/journal
-        # health. It does not ask seeded converse, generation, or chess
-        # behavior to prove that creation/repair succeeded.
         run: bash scripts/check-database-health.sh "${{ inputs.database }}"
 
-      - name: Next step
-        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate'
-        run: |
-          echo "::notice::Database is rebuilt and EMPTY. Seed it: run seed-foundation.yml, then seed-knowledge / seed-documents / seed-chess as needed."
+      - name: Verify preserved foundation after remigrate
+        if: inputs.operation == 'remigrate'
+        run: bash scripts/ensure-foundation.sh --check-only
