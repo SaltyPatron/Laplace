@@ -184,12 +184,13 @@ class EvalOperationLaneTests(unittest.TestCase):
             for token in forbidden:
                 self.assertNotIn(token, text, f"{relative} reintroduced {token!r}")
 
-        workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
-        eval_block = workflow[workflow.index("  eval:"):workflow.index("  restore-api:")]
-        self.assertNotIn("--" + "db", eval_block)
-        self.assertNotIn("verify-generation.py", eval_block)
-        self.assertNotIn("eval-generation.py", eval_block)
-        self.assertEqual(0, eval_block.count("--api http://127.0.0.1:8080"))
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        self.assertNotIn("--" + "db", product)
+        self.assertNotIn("verify-generation.py", product)
+        self.assertNotIn("eval-generation.py", product)
+        self.assertNotIn("--api http://127.0.0.1:8080", product)
+        self.assertEqual(1, product.count("test-parallel.sh --perf"))
+
         perf = next(s for s in _load_test_profiles() if s["id"] == "generation-perf")
         perf_command = " ".join(perf["command"])
         self.assertIn("verify-generation.py", perf_command)
@@ -211,15 +212,17 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertEqual("boolean", benchmark["type"])
         self.assertEqual("false", benchmark["default"])
 
-        eval_job = workflow["jobs"]["eval"]
-        self.assertIn("github.event_name == 'workflow_dispatch'", eval_job["if"])
-        self.assertIn("inputs.generation_benchmark == true", eval_job["if"])
-        benchmark_steps = [
-            step for step in eval_job["steps"]
-            if "test-parallel.sh --perf" in step.get("run", "")
-        ]
-        self.assertEqual(1, len(benchmark_steps))
-        self.assertNotIn("if", benchmark_steps[0])
+        workflow_text = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.generation_benchmark && '1' || ''",
+            workflow_text,
+        )
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        perf_guard = product.split("run_perf() {", 1)[1].split("}", 1)[0]
+        self.assertIn('[[ "${LAPLACE_GENERATION_BENCHMARK:-}" == 1 ]] || return 0', perf_guard)
+        self.assertIn("bash scripts/test-parallel.sh --perf", perf_guard)
+        self.assertEqual(1, product.count("test-parallel.sh --perf"))
+
         perf = next(s for s in _load_test_profiles() if s["id"] == "generation-perf")
         perf_command = " ".join(perf["command"])
         self.assertIn("verify-generation.py", perf_command)
