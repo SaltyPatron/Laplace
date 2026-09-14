@@ -1,266 +1,374 @@
 # Laplace — architecture as built
 
-Every statement here is traceable to a file in this tree, cited inline. Counts come
-from `docs/INVENTORY.md`, which `scripts/docs-inventory.py` regenerates and CI gates.
-Where the code and this document disagree, the code is right and this document is the
-thing to fix.
+This document describes the implementation that exists in this repository and names material divergences where two current paths do not obey one law.
+
+It is **not** the authority for narrowing the invention. The intended machine, mathematical construction and preservation laws are stated in [`INVENTION.md`](INVENTION.md) and [`INVENTIONS.md`](INVENTIONS.md). Active implementation/acceptance work belongs in GitHub issues. Generated inventories belong in `docs/INVENTORY.md`.
+
+When code and this document disagree, fix this document. When two current code paths disagree with each other or with the invention, record the divergence as an implementation obligation rather than declaring whichever path was inspected first to be the architecture.
 
 ---
 
-## 1. The record
+## 1. Persistent substrate
 
-One shape carries every fact from every source: a subject, a relation type, an object,
-who said it, and how it came out.
+The PostgreSQL extension persists four primary substrate families under `extension/laplace_substrate/sql/schema/tables/`:
 
-`AttestationRow` — `app/Laplace.Substrate/Crud/SubstrateChange.cs`:
+| Table | Primary role |
+|---|---|
+| `entities` | canonical executable content identities plus tier/type/source metadata |
+| `physicalities` | typed physical realization: coordinate, Hilbert address, optional packed trajectory and constituent metadata |
+| `attestations` | source-attributed typed testimony/observation |
+| `consensus` | folded proposition standing: rating, RD, volatility, witness count and related state |
 
-```csharp
-Hash128 SubjectId, TypeId, ObjectId?, SourceId, ContextId?
-AttestationOutcome Outcome          // Refute = 0, Draw = 1, Confirm = 2
-long ScoreFp1e9, OpponentRdFp1e9, SumScoreFp1e9?
-long ObservationCount
+Supporting tables/journals include canonical names, repair/dirty state and ingest/index progress. Exact generated counts and partition inventory are intentionally not duplicated here; `docs/INVENTORY.md` is regenerated and CI-gated.
+
+The high-level separation is deliberate:
+
+```text
+identity/content
+    != physical realization
+    != occurrence/provenance
+    != testimony
+    != folded standing
+    != deterministic calculation
 ```
 
-The outcome domain is three-valued and signed: a source can *refute* a triple, not only
-assert or omit it. `ScoreFp1e9` is a continuous fixed-point signal; `OpponentRdFp1e9`
-is how the source's own trust enters. Trust is an argument to the rating math, not a
-filter applied before or after it.
+A content identity does not become true merely because it exists, and testimony does not become content identity merely because many sources repeat it.
 
-## 2. Four tables
+### Referential integrity is an implementation obligation
 
-`extension/laplace_substrate/sql/schema/tables/`.
+The substrate intentionally avoids conventional per-row foreign keys across its large partitioned/hot write paths. Content addressing makes integrity cheap to check and reason about, but it does **not** make dangling references logically impossible: a buggy/partial writer can still emit an id whose target row is absent.
 
-| Table | Primary key | Partitioning | Role |
-|---|---|---|---|
-| `entities` | `(id, tier)` | LIST(`tier`) — 0…4 + DEFAULT; tiers 0, 2, 3 sub-partitioned HASH(`id`)×8 (#1008) | one row per distinct content |
-| `physicalities` | `(id)` | HASH(`id`) × 64 | geometry: `coord geometry(PointZM)`, `trajectory geometry(GeometryZM)` |
-| `attestations` | `(id, type_id, subject_id)` | LIST(`type_id`) | one row per assertion, with provenance |
-| `consensus` | `(id, type_id, subject_id)` | LIST(`type_id`) | the fold: `rating`, `rd`, `volatility`, `witness_count` |
+Therefore absence of FKs trades write-time FK overhead for stronger writer, test, audit and live-proof obligations. Documentation must not claim that a dangling reference is “not expressible.”
 
-Plus `canonical_names`, `highway_mask_dirty`, and four journals
-(`ingest_run_journal`, `ingest_flush_journal`, `ingest_file_journal`,
-`index_cycle_journal`). The file journal carries per-file resume (#898/#1019).
+---
 
-`highway_mask_dirty` is populated ONLY by the repair verbs (`ops.evict_source`),
-which need to CLEAR bits — something the OR-accumulate deposit the ingest uses
-(`consensus.highway_mask_deposit`) cannot express. It is empty on a substrate that
-has never evicted a source, and that is the correct reading, not a broken queue.
-`trajectory_pairs` and `trajectory_pairs_meta` are not part of the current schema;
-`drop_retired_content_lane.sql.in` defines the compatibility cleanup.
+## 2. Executable content identity and recursive composition
 
-Three properties do the structural work:
+The current native composition authority is `engine/core/src/hash_composer.c`.
 
-**Identity is content.** `entities.id` is a 16-byte hash of the content. `tier` is a
-separate column and is not an input to the hash — so identical content is one id no
-matter what tier it was reached at or which source produced it. Two decomposers that
-derive the same content produce the same row by collision, with no entity-resolution
-step anywhere.
+For a composed node:
 
-**The fold address is the triple.** `consensus.id = blake3(subject‖type‖object)`, stated
-in the header of `consensus.sql.in`. Every witness of a triple, from any source, in any
-modality, lands on exactly one consensus row. Because a triple has exactly one relation,
-LIST-partitioning by `type_id` files each triple under its relation without touching that
-merge invariant.
+```text
+n == 0 -> zero/empty result
+n == 1 -> child identity is preserved
+n > 1  -> hash128_merkle(tier, ordered child ids, n)
+```
 
-**Referential integrity is structural, so there are no foreign keys.** `consensus.sql.in`
-records the reason: a partitioned `entities` has no unique `(id)` to reference, and
-per-row FK validation on 100M-row `COPY`s was pure cost. Ids are content hashes, so a
-dangling reference is not expressible.
+So two important facts coexist:
 
-The partition layout is greenfield — `db-reset` plus reseed is the upgrade path, not
-`ALTER`. `IF NOT EXISTS` deliberately leaves a legacy plain table untouched.
+1. source identity is not part of the canonical content hash, so the same canonical composition admitted from multiple sources converges; and
+2. for multi-child native composition, `tier` participates in the Merkle recipe/domain. It is therefore incorrect to state categorically that tier is never an input to executable identity.
 
-## 3. The fold
+Single-child promotion collapses to the child id under the current native rule.
 
-`engine/core/src/glicko2.c` is Glicko-2 in `int64` fixed point at 1e9
-(`LAPLACE_FP_ONE`), with `LAPLACE_FP_RATING_SCALE = 173717800000` (the 173.7178 of the
-published algorithm) and `LAPLACE_FP_RD_MAX = 350000000000`. Fixed point is what makes
-the fold bit-reproducible across machines.
+The current executable hash is a BLAKE3-derived 128-bit value. That is a finite implementation address/window, not a mathematical proof of global injectivity over an unbounded family of finite structures. Normal same-content convergence is not called a “hash collision”; a true collision is a separate integrity event.
 
-Folding happens **inside the write**, not after it.
-`app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs`:
+The recursive representation itself is larger than the id: exact ordered constituents are retained in the trajectory/composition structure.
 
-- Each apply batch dedups its cell deltas in RAM, forwards evidence to the inner writer,
-  and dispatches the delta onto per-type fold lanes running `consensus_upsert` — the
-  native Glicko fold, server-side, inside each row's lock window.
-- **The Glicko rating period is the batch.**
-- Lanes are keyed by `type_id`. Consensus is LIST-partitioned by `type_id`, so two types
-  never share a row and their lanes run concurrently; a cell has exactly one type, so it
-  stays on exactly one FIFO lane. That is what keeps the non-commutative Glicko fold
-  deterministic under concurrency.
-- Highway-mask deposits are not serialized — OR-accumulate is commutative and idempotent.
-- In bulk runs the fold pipelines behind the apply lane (`FoldPipelineDepth = 2`) so
-  batch N's fold overlaps batch N+1's probe/COPY. Outside a bulk run the fold is awaited
-  inline, because online lanes need read-your-writes consensus.
-- Ingest completion is fold completion: no accumulator epochs, no staging tables, no
-  terminal fold pass.
+---
 
-There is no batch backfill or rebuild path, by construction.
+## 3. Physicality: coordinate, carrier and realized curve
 
-## 4. Ingest
+`physicalities` stores a 4D `coord`, a Hilbert address and, where the physicality is compositional, an exact packed constituent trajectory plus `n_constituents` and related metadata.
 
-A decomposer is a pure function from content to a stream of `SubstrateChange` records —
-`app/Laplace.Substrate/Abstractions/` (the decomposer roster and counts live in
-`docs/INVENTORY.md`, which is generated and CI-gated; counts written here go stale
-and then get used as gates — don't). It contains no SQL. The shared spine owns
-batching, dedup, the tier descent, the fold, and the COPY.
+These are different things.
 
-`SubstrateChange` (`Crud/SubstrateChange.cs`) carries `Entities`, `Physicalities`,
-`Attestations`, `IntentStages`, and `TestimonyWalks`.
+### 3.1 `coord` is the real geometric placement
 
-`Abstractions/IngestPipeline.cs` defines the streaming contract:
+The native composer in `engine/core/src/hash_composer.c` calls `math4d_centroid` over child coordinates and then derives the Hilbert address from that parent coordinate.
 
-- `IMultiFileRecordStream<T>.FilesAsync` yields *lazy* file handles. Enumeration reads
-  nothing; each worker opens and streams one file end to end, so parse cost is parallel
-  across files and no file is materialized.
-- `IIngestRecordHandler<T>` gives three hooks: `TryTrunkShortcircuitAsync` (skip a record
-  whose content-addressed root is already present), `CreateDeferredUnit`, and
-  `WalkWitness`.
-- `ITrunkRootRecord` lets the existence gate bulk-probe known roots and short-circuit
-  them without building a deferred unit at all.
-- Working-set mode keeps one builder across the record stream and runs an O(tiers)
-  existence probe every flush interval — at most five tier rounds per batch — emitting
-  one `SubstrateChange` per working set unless a memory valve splits it.
+For child points inside/on the unit 4-ball, the Euclidean centroid remains inside/on that same ball. This is the current native bounded-composition proof used in `INVENTION.md`.
 
-The sequence is: unpack → records → client-side dedup across the working set →
-client-side accumulation → one bulk tier descent → COPY of proven-novel rows.
+Tier-0 atom placement is implemented by `engine/core/src/super_fibonacci.c`; the finite Unicode generation is exhaustively exercised by `engine/core/tests/test_super_fibonacci.cpp` within its declared floating-point tolerance.
 
-## 5. Relations
+### 3.2 packed `trajectory` is an exact manifest, not a spatial path
 
-`engine/manifest/relation_types.toml` governs the canonical relations and their
-aliases (aliases resolve to a canonical and carry no bits of their own; live counts in
-`docs/INVENTORY.md`), across 13 salience bands: `mandate`, `definitional`, `taxonomic`,
-`equivalence`, `partitive`, `causal`, `oppositional`, `associative`,
-`tensor_calculation`, `lexical_glue`, `scalar_valued`, `standards_structural`,
-`probationary`.
+`engine/core/src/mantissa.c` and `engine/core/src/trajectory.c` encode constituent identity/order metadata into GeometryZM-compatible binary64 carrier values.
 
-`scripts/codegen-attestation-law.py` compiles the manifest into generated C, including
-the highway bit table. **Bits are an explicit append-only registry** (`bit = N` in the
-TOML; ADR 0001 / GH #551): codegen validates and never reassigns — adding a relation
-appends a bit, never renumbers peers, and owes **no** reseed. (This corrects an earlier
-claim here that bits were alphabetical and additions owed a reseed — the law that
-statement described was repealed.)
+Each binary64 component contributes 53 reversible payload bits when the exponent is held fixed and the sign plus mantissa are used as carrier state. Four components therefore provide 212 bits:
 
-Dynamic relation families (`DEP_*`, `FEAT_*`, `EDEP_*`) are not in the manifest and land
-in the DEFAULT partition.
+```text
+128  complete constituent entity id
+ 16  packed ordinal
+ 16  run length
+ 52  flags / typed metadata
+---
+212
+```
 
-## 6. Geometry
+The packed X/Y/Z/M numbers must **not** be treated as the child's real geometric coordinate.
 
-`physicalities` stores `coord geometry(PointZM)` — a point on S³ — plus a 16-byte
-`hilbert_index`, an optional `trajectory geometry(GeometryZM)`, `n_constituents`,
-`alignment_residual`, and `source_dim`. `radius_origin` is a generated stored column
-computed from the four coordinates.
+### 3.3 realized curve resolves live child coordinates
 
-`hilbert_index` equality lookups are served by an explicit
-`physicalities_hilbert_btree`, not by the HASH(`id`)-compatible `(id)` primary key.
-`anagrams_of()` proves the index requirement by joining
-`w2.hilbert_index = w1.hilbert_index`: anagrams share a letter multiset and therefore
-compose to the same coordinate.
+The geometric path is reconstructed by:
 
-Native support in `engine/core/src/`: `super_fibonacci.c` (S³ point placement),
-`hilbert4d.c`, `math4d.c`, `mantissa.c` (bit-packing ids/scores/counts through the ZM
-columns), `trajectory.c`, `tier_tree.c`, `merkle_dedup.c`, `hash128.c`.
+```text
+packed vertex
+-> unpack complete child entity id + metadata
+-> resolve child physicality
+-> use child coord
+-> order by logical ordinal
+-> ST_MakeLine / native equivalent
+```
 
-Geometry is an identity, ordering and serialization system. Point proximity is not the
-relatedness signal — the consensus rating is. `coord` is the real 4D placement (centroid
-of child coords at compose). Stored `trajectory` is a mantissa-packed constituent
-manifest (ids/ordinals/RLE), not a path of positions — path metrics
-(`laplace_frechet_4d`, Hausdorff) must run on `entity_curve` / `word_curve` (realized
-`ST_MakeLine(child.coord ORDER BY ordinal)`). Coordinate equality does not survive
-composition; shape lives on the realized curve.
+`extension/laplace_substrate/sql/functions/structural/entity_curve.sql.in` is one concrete realization surface. Fréchet/Hausdorff/shape operations belong on these realized coordinates, not on mantissa carriers.
 
-## 7. Read path
+The packed 16-bit ordinal/run fields are not global composition-size ceilings. `engine/core/src/trajectory.c` carries logical sequence position and run splitting beyond those local field widths; the native test `LaplaceCoreTrajectory.WiderThanTheOrdinalFieldRoundTrips` exercises a 70,000-constituent sequence.
 
-The extension ships its SQL function families and native sources
-(`extension/laplace_substrate/src/`; live counts in `docs/INVENTORY.md`). The hot
-paths are C:
+### 3.4 current centroid/Karcher divergence
 
-| Source | Entry points |
+The repository currently contains two different parent-coordinate laws:
+
+- native `hash_composer_compose_node` uses `math4d_centroid`, placing composites generally inside the 4-ball;
+- managed `app/Laplace.Substrate/Abstractions/NgramTrajectory.cs` uses `Math4d.KarcherMean`, explicitly intending to keep composed coordinates on S³. `app/Laplace.Chess/Service/ChessGraph.cs` and at least one model/tokenizer path also use Karcher mean.
+
+Both can obey the weaker bounded-domain invariant when inputs/outputs are valid, but they do **not** encode the same radial meaning and can produce different Hilbert addresses. This is a real as-built architecture divergence, not a documentation preference. Any claim that all composites are “on S³” or that all composites use centroid is currently too strong until the implementation is reconciled/reseeded under one declared rule.
+
+---
+
+## 4. Evidence and consensus fold
+
+`AttestationRow` in `app/Laplace.Substrate/Crud/SubstrateChange.cs` carries the typed proposition/witness state used by the write path. The outcome domain distinguishes refute/draw/confirm rather than treating omission as falsehood.
+
+`engine/core/src/glicko2.c` implements the Glicko-2 fold in fixed-point arithmetic. The write path in `app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs` coalesces batch deltas and dispatches relation/type-scoped fold work so a cell remains on one ordered lane while independent relation/type partitions can progress concurrently.
+
+The current architecture therefore has three distinct evidence stages:
+
+```text
+source observation / occurrence
+-> attributed attestation
+-> proposition-addressed fold
+-> consensus standing (rating, RD, volatility, witnesses, ...)
+```
+
+A read may use conservative standing such as `rating - 2*rd`, but that scalar does not erase the underlying provenance, contradiction or typed relation state.
+
+---
+
+## 5. Ingestion and decomposition
+
+Decomposers live primarily under `app/Laplace.Substrate/Abstractions/` and source/domain projects. The shared abstraction emits `SubstrateChange` state rather than giving each source its own SQL write semantics.
+
+The intended/common ingest shape is:
+
+```text
+physical artifact enumeration
+-> one-pass source stream
+-> typed decomposition
+-> working-set dedup / canonical reuse
+-> bulk existence / tier work
+-> set-sized persistence/COPY
+-> evidence fold
+-> receipt/journal completion
+```
+
+`app/Laplace.Substrate/Abstractions/IngestPipeline.cs` provides the generic streaming/worker contract, trunk short-circuiting and deferred/working-set behavior.
+
+This common spine is important, but “uses the shared pipeline somewhere” is not sufficient proof that every source obeys the execution-grain law. Source-specific caller loops, per-record probes, private commit loops or per-element managed/native/database crossings remain architecture defects where they exist.
+
+---
+
+## 6. Universal execution grain
+
+The physical split applies across **decomposition, ingestion, read/cognition, analysis/domain engines, reconstruction, synthesis and export**:
+
+```text
+PostgreSQL
+  persistence / MVCC / transactions / B-tree, GiST, GIN, HASH / selective set access
+        |
+        | prepared, bounded/set-sized SPI
+        v
+native C/C++
+  loops / recursion / parsing kernels / composition / trajectories /
+  graph-search/frontier work / reductions / deterministic math /
+  encoding / reconstruction / materialization
+        |
+        v
+bounded/set result + receipt
+```
+
+C# and SQL remain orchestration/contract/transport boundaries. They should not become alternate inner-loop runtimes.
+
+The architecture is therefore not “C is faster than SQL.” It changes the **grain** of execution. Patterns such as the following are defects when they sit in a hot/repeated loop:
+
+```text
+caller loop -> scalar SQL/native call
+per-row SPI_prepare/SPI_execute
+one P/Invoke per atom/node/candidate
+recursive CTE as the graph/cognition inner engine
+uncontrolled LATERAL fanout
+per-call temp table/materialization
+per-item transaction/COPY
+batch API implemented as scalar calls in a loop
+per-value high-level export/materialization
+```
+
+The intended performance gain has two independent factors:
+
+```text
+less work selected
+  via canonical identity, indexes, containment, perfcache, reuse, hops/fanout
+
+x
+
+less overhead per selected unit
+  via coarse native/set execution and fewer boundary crossings
+```
+
+Wider SIMD, AVX-512 and GPU providers are additional headroom, not the premise of the architecture.
+
+---
+
+## 7. Relation registry and indexed web
+
+`engine/manifest/relation_types.toml` governs canonical relation identities, aliases, bands/ranks and append-only highway bits. Generated native data is produced by `scripts/codegen-attestation-law.py`.
+
+The substrate is not merely a flat relation table. A canonical entity can simultaneously participate in:
+
+- recursive child/parent composition;
+- ordered trajectories and containment;
+- typed relations/consensus;
+- occurrences and sources/contexts;
+- physical/Hilbert neighborhoods;
+- deterministic calculations and domain-specific state.
+
+Those independent indexed structures overlap on canonical identities. This is the implementation basis of the “spider-colony web” model: a query can pull several planes around the same exact entity/trajectory and preserve which routes responded.
+
+---
+
+## 8. Query-relative forward execution
+
+The current repository no longer has only disconnected walk helpers. It contains a canonical forward-program surface.
+
+`extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in` defines `generation.forward_program(...)` as one C entry point (`pg_laplace_forward_trace`) whose declared contract includes:
+
+```text
+exact prompt admission
+query-relative routing
+candidate adjudication
+obligation closure
+selection
+semantic-act fingerprinting
+working-state extension
+terminal execution receipt
+```
+
+Its returned trace/receipt contains fields including root id, candidate/context/channel counts, occurrence coverage, relation families, opposition, support anchor/relation/rating/RD/witness/source/context state, routing round, program id, required/satisfied/remaining obligations, completion/disposition, output fingerprint and semantic-act id.
+
+`extension/laplace_substrate/sql/functions/generation/walk_text.sql.in` makes `generation.forward_text(...)` invoke that canonical program once and only realize output after a completed semantic act exists. `converse.forward_turn(...)` supplies prior session turn/content identities as prior frontier state rather than rendering a transcript and reparsing it. `converse.chat(...)` currently projects the canonical forward-turn surface for normal chat.
+
+This is materially stronger than the old “pick an n-gram then run a walk” description.
+
+### What is not yet proved by the existence of this entry point
+
+The invention requires the whole admitted observation to produce a typed **query-relative coupling/response field** before interpretation/provider policy is prematurely frozen. The current native program claims query-relative routing/adjudication and exposes many trace dimensions; that does not by itself prove that every eligible structural, occurrence, relation, evidence, geometry, discourse and obligation plane participates with the intended semantics.
+
+Therefore architecture documentation must distinguish:
+
+```text
+as built:
+  canonical native forward program with prompt admission, routed evidence,
+  adjudication, obligation closure, selection and receipts
+
+invention/acceptance:
+  complete typed coupling field over all eligible responding planes,
+  joint interpretation/ambiguity handling before unconstrained policy,
+  sparse execution compiled from that interpretation
+```
+
+Tests such as `scripts/test-forward-prompt-analysis.py`, extension regression coverage and OpenAI-compatible live-forward tests prove specific contracts. They do not magically prove every future coupling channel is complete.
+
+---
+
+## 9. Sparse star execution: hops and fanout
+
+After admission/orientation, the current program exposes explicit hop/fanout parameters. Native/read operators include graph walk, A*/Dijkstra, containment, geometry, continuation and realization surfaces under `extension/laplace_substrate/src/` and the generated SQL catalog.
+
+The useful compute shape is a sequence of indexed star expansions:
+
+```text
+active root/frontier
+-> indexed responders
+-> bounded admitted fanout
+-> selected responders become next centers
+-> convergent routes retained/ranked
+-> repeat to hop/resource boundary
+```
+
+A* or Dijkstra is therefore one operator for one cost/goal contract, not the definition of cognition. The same is true of strongest-walk, n-gram continuation or geometric proximity.
+
+Hops, fanout, candidate/frontier budgets and eligible operator/provider families are also the natural execution/billing dimensions because they bound explicit work over one shared knowledge world rather than selecting a deliberately smaller-knowledge model.
+
+---
+
+## 10. Read/operator surfaces
+
+The extension keeps purpose schemas such as `ops`, `consensus`, `converse`, `lexical`, `taxonomy`, `generation`, `structural`, `chess` and `realize` rather than exposing one giant untyped namespace.
+
+Representative native sources include:
+
+| Source/family | Role |
 |---|---|
-| `recall.c` | `recall_intent`, `recall`, `recall_session`, `define_fast`, `word_shape_peers_fast` |
-| `generate_walk.c` | `walk_branches` (batches natively against `consensus` with per-level capacity derived from frontier × caller breadth), `walk_strongest` (steps via `consensus_walk_edges`) |
-| `astar_path.c` | Dijkstra by default; opt-in admissible geometric A* heuristic |
-| `prompt_coherence.c` | joint sense/topic/relation election across a prompt's tokens |
-| `trajectory_generate.c`, `steered_walk.c` | n-gram descent and topic-steered walk |
-| `fold_route.c` | `consensus_upsert`, the server-side fold `ConsensusAccumulatingWriter` dispatches to (`consensus_fold_step.c` backs the `consensus_fold_result` aggregate) |
-| `highway_mask.c`, `perfcache.c` | perfcache-backed bit operations over mmap'd blobs |
-| `model_factor.c`, `graph_taxonomy/cascade/contrast.c`, `containers_of.c`, `realize_batch.c`, `geometry_successors.c` | model, graph and realization surfaces |
+| `recall.c` | indexed recall/definition/shape reads |
+| `generate_walk.c` | graph/frontier expansion and strongest-walk operators |
+| `astar_path.c` | Dijkstra / opt-in admissible geometric A* |
+| `prompt_coherence.c` | prompt-relative coherence/election support |
+| `trajectory_generate.c`, forward-program native code | continuation/routing/forward execution |
+| `fold_route.c`, `consensus_fold_step.c` | consensus fold |
+| `highway_mask.c`, `perfcache.c` | derived accelerator/highway operations |
+| graph/model/containers/realize/geometry native families | typed domain and realization operators |
 
-`walk_strongest` ranks by `relation_rank × eff_mu`. `walk_branches` ranks by a fuller
-signed weight that additionally uses RD decay, witness saturation and highway-mask
-gating; refuted edges carry negative weight. `eff_mu = rating − 2·rd` is the
-conservative estimate reads rank by.
+`SELECT * FROM ops.api('<substring>')` introspects the installed operation surface.
 
-`SELECT * FROM ops.api('<substring>')` introspects the installed surface. It MUST be
-schema-qualified: the SQL surface lives in nine purpose schemas (`ops`, `consensus`,
-`converse`, `lexical`, `taxonomy`, `generation`, `structural`, `chess`, `realize`) that
-are deliberately kept off `search_path` (`purpose_schemas.sql.in`), so the bare
-`api(...)` form fails on the current layout (#862/#957).
+Perfcaches are derived accelerators. They may make selected direct addresses effectively constant-time within their admitted window, but a miss cannot redefine identity or truth.
 
-Two mmap'd perfcache blobs are required at runtime — `laplace_t0_perfcache.bin` via
-the `laplace_substrate.perfcache_path` GUC and `laplace_highway_perfcache.bin` via
-`laplace_substrate.highway_perfcache_path` (`extension/laplace_substrate/src/perfcache.c`).
+---
 
-## 8. Model lane
+## 11. Model/checkpoint lane
 
-`engine/synthesis/` reads checkpoints: `safetensors_parser.h`, `sentencepiece_parser.h`,
-`bf16_decoder.h`, `tensor_dtype_codec.h`, `f32_gather.h`, `tensor_decompose.h`,
-`qk_project_cached.h`, `qk_pairs_threshold[_pruned].h`, `feature_extractor.h`.
+`engine/synthesis/` contains checkpoint/tokenizer/tensor readers and model-related native machinery. `engine/dynamics/` contains graph/spectral/algebra operators such as eigenmaps, Procrustes, Gram-Schmidt and related math. Foundry/export code materializes consumer formats such as GGUF under explicit recipes.
 
-`engine/dynamics/` holds the math: `eigenmaps.cpp` (normalized-Laplacian eigenmap of the
-consensus graph), `procrustes.cpp`, `gram_schmidt.cpp`, `bilinear_edges.cpp`,
-`ffn_edges.cpp`, `model_math.cpp`, `tbb_parallel.cpp`.
+A conventional checkpoint is treated as a source/witness/calculation boundary, not as the hidden authority of Laplace cognition. Consumer structures such as layers, heads, Q/K/V/O and FFN roles can be recorded, compared or used as export targets without making them the native ontology of the substrate.
 
-Export writes GGUF closed-form: `gguf_writer.h`, `format_writer.cpp`, `arch_template.h`,
-`recipe.h`; driven from `app/Laplace.Cli/FoundryCommands.cs` and `FoundryExport.cs`.
+Export/reconstruction remains subject to the same universal execution-grain law: format correctness does not excuse one-tensor-cell-at-a-time or one-constituent-at-a-time boundary crossings in a hot path.
 
-A checkpoint enters as a witness like any other source — its tensor cells become rated,
-provenanced attestations under governed relation types. It is not stored as weights and
-is not reproduced.
+---
 
-## 9. Build
+## 12. Build, install and runtime boundaries
 
-Two toolchains, not interchangeable.
+Linux delivery is driven by `.github/workflows/laplace.yml` and `scripts/pipeline.sh`; host reconciliation/bootstrap lives in `scripts/setup-host.sh`. Windows entry points live under `scripts/win/`.
 
-**Linux.** `sudo bash scripts/setup-host.sh` once (runner, PostgreSQL, nginx,
-chess-lab, migrations). Thereafter `scripts/pipeline.sh`, which
-`.github/workflows/laplace.yml` invokes. Build/install/test/regress are change-aware via
-content fingerprints in `build/.stamps/` (`scripts/lib/fp.sh`), and
-`scripts/affected-app.py` restricts dotnet work to the affected ProjectReference closure.
-Bypass with `pipeline.sh --force-all`. Vendored deps build through
-`scripts/build-system-deps.sh`.
+The PostgreSQL extension links engine code into the server-side extension build, so engine changes that affect extension behavior require the extension to be rebuilt/reinstalled before installed-regression/live proof is meaningful. `pg_regress` exercises the installed extension, not merely edited `.sql.in` source.
 
-**Windows.** `scripts/win/*.cmd`; `env.cmd` is the toolchain source of truth. Invoke
-through Bash (`cmd //c "scripts\\win\\test-all.cmd"`), not PowerShell.
+Protocol/product surfaces include the CLI, OpenAI-compatible endpoint, MCP endpoint, chess/UCI surfaces and the web product. These are adapters over the same substrate/operation laws, not separate intelligence implementations.
 
-| Task | Entry point |
-|---|---|
-| Rebuild modules | `rebuild-all.cmd` |
-| Engine / extension | `build-engine.cmd`, `build-extensions.cmd`, `install-extensions.cmd` |
-| Full gate | `test-all.cmd` |
-| dotnet / ctest / pg_regress | `test-app.cmd`, `test-engine.cmd`, `regress.cmd` |
-| Seed | `db-reset.cmd`, `seed-foundation.cmd`, `seed-step.cmd <source>` |
-| CLI | `cli.cmd` |
-| Publish to IIS | `publish-deploy.cmd` |
-| Regenerate inventory | `docs-inventory.cmd` (`--check` in CI) |
+---
 
-Two build facts that cause silent failures if ignored:
+## 13. Proof and benchmark boundaries
 
-- The extension links the engine **statically**. Engine freshness is not extension
-  freshness — after any engine rebuild, run `build-extensions` *and*
-  `install-extensions`. Extension SQL changes additionally need
-  `build-extensions.cmd --reconfigure` (the version hash is computed at configure time).
-- `pg_regress` tests the **installed** extension, not an edited `.sql.in`.
+Architecture claims are not all proved the same way.
 
-CI: `.github/workflows/laplace.yml` is the build/deploy/test pipeline; `seed-*.yml`
-(`foundation`, `knowledge`, `documents`, `code`, `models`, `chess`) drive seeding, with
-`_ingest.yml` as the shared callee.
+- Bounded centroid closure is a mathematical invariant of the current native composition rule.
+- Exact mantissa/trajectory round-trip is an executable serialization property.
+- The selected finite Tier-0/Unicode placement window can be exhaustively exercised.
+- Retained-database reconstruction tests prove exact reconstruction for their admitted fixtures/corpora.
+- A populated live substrate is implementation evidence at scale, not a replacement for the theorem.
+- Performance claims require exact revision/artifact/host/provider/workload receipts.
 
-## 10. Runtime
+The manual benchmark contract is documented in `docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`.
 
-PostgreSQL cluster lives at `/opt/laplace`. Connect with
-`psql -h localhost -U postgres -d laplace`, then `SET search_path = laplace, public;`.
+On a live managed host it now distinguishes **serviceable capacity** from **absolute saturation**. Consuming every schedulable logical CPU and making PostgreSQL/product/runner/control-plane operation unavailable is not a valid serviceable-capacity result. Full saturation belongs to an explicit isolated/saturation profile.
 
-Deployables: `Laplace.Cli`, `Laplace.Endpoints.OpenAICompat`, `Laplace.Endpoints.Mcp`
-(stdio MCP server), `Laplace.Chess.Uci`, `Laplace.Migrations`. `web/` is the Vite/React
-SPA.
+---
+
+## 14. Current architecture obligations exposed by this document
+
+This section exists so “architecture as built” does not hide contradictions behind polished prose.
+
+1. **Coordinate-law divergence.** Native composition uses Euclidean centroid; current managed `NgramTrajectory`/some domain paths use Karcher mean. One declared rule/meaning and reseed/migration proof is required if a universal coordinate law is claimed.
+2. **Live recursive closure/integrity proof gate.** Existing unit/reconstruction tests prove important pieces, but the exhaustive live-database gate that resolves every inspected packed constituent, checks bounds/reference closure/RLE counts and emits counterexamples/counts is not yet landed.
+3. **Complete coupling-field acceptance.** A real canonical native forward program exists, but complete “tug every eligible strand and preserve typed response” coverage must be proved channel by channel rather than inferred from the function name.
+4. **Universal execution-grain enforcement.** Native hot operators exist, but legacy/decomposer/export/analysis/domain paths can still violate the coarse native/set law. Such violations are implementation debts, not evidence that the architecture requires RBAR.
+5. **Managed-host benchmark headroom.** The benchmark prose/issue now distinguishes serviceable throughput from saturation; the executable suite still needs to enforce/reserve that headroom before a future default `all` run can be called safe on the managed host.
+
+These are implementation obligations. None narrows the invention stated in `INVENTION.md`.
