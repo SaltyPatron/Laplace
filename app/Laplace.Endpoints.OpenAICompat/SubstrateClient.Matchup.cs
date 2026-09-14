@@ -18,11 +18,18 @@ internal sealed partial class SubstrateClient
     /// <summary>Top consensus edges per salience band, fully labeled.</summary>
     public async Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
     {
-        var rows = await NpgsqlSubstrateReads.BandLeadersAsync(_dataSource, bands, perBand, ct, TranslateSubstrateError);
+        // Leader selection and immutable band naming are independent. Run both through
+        // the datasource concurrently, and never call converse.relation_bands() here:
+        // that function performs a full live consensus aggregate whose counts are not
+        // part of this response. relation_band_catalog() is the naming authority.
+        var rowsTask = NpgsqlSubstrateReads.BandLeadersAsync(
+            _dataSource, bands, perBand, ct, TranslateSubstrateError);
+        var catalogTask = NpgsqlSubstrateReads.RelationBandCatalogAsync(
+            _dataSource, ct, TranslateReadError);
+        await Task.WhenAll(rowsTask, catalogTask).ConfigureAwait(false);
 
-        var catalog = await RelationBandsAsync(ct);
-        var names = catalog.ToDictionary(b => b.Band, b => b.Name);
-        return rows.GroupBy(r => r.Band)
+        var names = catalogTask.Result.ToDictionary(b => b.Band, b => b.Name);
+        return rowsTask.Result.GroupBy(r => r.Band)
             .OrderBy(g => g.Key)
             .Select(g => new BandLeaders(g.Key, names.GetValueOrDefault(g.Key, $"band {g.Key}"),
                 [.. g.Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))]))
