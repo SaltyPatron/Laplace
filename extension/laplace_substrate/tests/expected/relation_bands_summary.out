@@ -1,0 +1,5 @@
+-- relation_bands() is an interactive catalog surface. Its exact live counts must be
+-- maintained transactionally by statement-wide consensus deltas; the read itself
+-- must never aggregate the partitioned consensus tree.
+\set ECHO none
+NOTICE:  relation bands summary: exact set-maintained counts and no consensus read scan pass
