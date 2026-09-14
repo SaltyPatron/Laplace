@@ -29,6 +29,7 @@ class ActionsAuthorityTests(unittest.TestCase):
         product = workflow["jobs"]["product"]
         command = commands(product)
         self.assertIn('bash scripts/product-ci.sh "$LAPLACE_STAGE"', command)
+        self.assertIn("bash scripts/product-ci.sh reconcile", command)
         for split_job in ("deploy", "db-ops", "publish", "restore-api", "smoke", "integration-test"):
             self.assertNotIn(split_job, workflow["jobs"])
 
@@ -48,15 +49,20 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertTrue(all(pos >= 0 for pos in positions), positions)
         self.assertEqual(sorted(positions), positions)
         self.assertIn('bash scripts/check-database-health.sh', text)
+        self.assertIn('bash scripts/ensure-foundation.sh --check-only', text)
+        self.assertIn('bash scripts/ensure-foundation.sh', text)
         self.assertIn('bash scripts/publish-applications.sh deploy', text)
         self.assertIn('bash scripts/publish-applications.sh recover', text)
 
-    def test_tooling_only_main_changes_skip_native_product_rebuild(self):
+    def test_tooling_only_main_changes_reconcile_without_native_rebuild(self):
         source = MAIN.read_text(encoding="utf-8")
         self.assertIn("LAPLACE_FAST_ONLY", source)
         self.assertIn("scripts/check-*", source)
-        self.assertIn("bash scripts/ci-policy.sh", source)
-        self.assertIn("check-database-health.sh", source)
+        self.assertIn("bash scripts/product-ci.sh reconcile", source)
+        self.assertNotIn("bash scripts/ci-policy.sh", source)
+        product = PRODUCT.read_text(encoding="utf-8")
+        reconcile_block = product.split('if [[ "$stage" == reconcile ]]', 1)[1].split('[[ "$stage" == check ]]', 1)[0]
+        self.assertIn("reconcile_installed_product", reconcile_block)
 
     def test_pr_proof_is_proportional_and_nonmutating(self):
         workflow = load(PR)
