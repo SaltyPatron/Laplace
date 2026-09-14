@@ -1,9 +1,4 @@
-name: Laplace — build, deploy, test
-
-# One registered self-hosted runner executes one GitHub job at a time. The order is
-# therefore the delivery contract, not a diagram: construction proof -> installed
-# lifecycle -> application activation -> environment/product QA. QA remains red when
-# broken but cannot withhold or roll back a payload whose own activation passed.
+name: Laplace — product lifecycle
 
 on:
   push:
@@ -11,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       stage:
-        description: "how far to run (cumulative; push to main is always all)"
+        description: "product lifecycle stage"
         type: choice
         required: true
         default: all
@@ -44,11 +39,11 @@ on:
 permissions:
   contents: read
 
-# The runner keeps one persistent untracked build tree. Do not allow another run to
-# replace it while a job consumes it. Mutating jobs additionally take the lifecycle
-# lock below and are never cancelled halfway through a transaction.
+# One mutable product, one lifecycle owner. Manual DB lifecycle uses this same
+# group, so it cannot splice itself between install, schema sync, publication,
+# and product proof. Queue rather than cancel: activation is transactional work.
 concurrency:
-  group: laplace-shared-workspace
+  group: laplace-substrate-lifecycle
   cancel-in-progress: false
 
 env:
@@ -61,360 +56,73 @@ env:
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
   LAPLACE_FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.force_all && '1' || '' }}
+  LAPLACE_STAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.stage || 'all' }}
+  LAPLACE_FULL_CLEAN: ${{ github.event_name == 'workflow_dispatch' && inputs.full_clean && '1' || '' }}
+  LAPLACE_FORCE_CODEGEN: ${{ github.event_name == 'workflow_dispatch' && inputs.force_codegen && '1' || '' }}
+  LAPLACE_FRESH_DB: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_db && '1' || '' }}
+  LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests && '1' || '' }}
+  LAPLACE_GENERATION_BENCHMARK: ${{ github.event_name == 'workflow_dispatch' && inputs.generation_benchmark && '1' || '' }}
+  LICHESS_API: ${{ secrets.LICHESS_API }}
+  LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
+  LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
+  STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
+  STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+  STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
 
 jobs:
-  policy:
-    name: Policy — source and architecture contracts
+  product:
+    name: Product — prove, activate and verify
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 15
+    timeout-minutes: 420
     steps:
-      - name: Checkout requested revision (preserve build tree)
+      - name: Checkout exact revision without discarding persistent build cache
         env:
           TARGET_SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
-      - name: Validate application-only options
-        if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["application-check", "applications"]'), inputs.stage)
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Classify source-only change
+        if: github.event_name == 'push'
         env:
-          FRESH_DB: ${{ inputs.fresh_db }}
-          FULL_CLEAN: ${{ inputs.full_clean }}
+          BEFORE_SHA: ${{ github.event.before }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
-          [[ "$FRESH_DB" != true && "$FULL_CLEAN" != true ]] || {
-            echo "::error::application releases cannot reset the DB or discard install receipts"
-            exit 1
-          }
-      - name: Run deterministic policy suite
+          set -euo pipefail
+          fast=1
+          verify_live=0
+          if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
+            fast=0
+          else
+            git fetch --no-tags --depth=1 origin "$BEFORE_SHA" || true
+            while IFS= read -r path; do
+              [[ -z "$path" ]] && continue
+              case "$path" in
+                docs/*|.github/*|scripts/test-*|scripts/ci-*|scripts/actions-audit.py|scripts/test-profiles.json|scripts/benchmark-profiles.json|scripts/product-ci.sh)
+                  ;;
+                scripts/check-*)
+                  verify_live=1
+                  ;;
+                *)
+                  fast=0
+                  ;;
+              esac
+            done < <(git diff --name-only "$BEFORE_SHA" "$TARGET_SHA")
+          fi
+          echo "LAPLACE_FAST_ONLY=$fast" >> "$GITHUB_ENV"
+          echo "LAPLACE_VERIFY_LIVE_ONLY=$verify_live" >> "$GITHUB_ENV"
+          echo "change classification: fast_only=$fast verify_live_only=$verify_live"
+
+      - name: Fast source/tooling proof
+        if: env.LAPLACE_FAST_ONLY == '1'
         run: bash scripts/ci-policy.sh
 
-  deps:
-    name: Runner capabilities + pinned system dependencies
-    needs: policy
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 120
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - name: Verify and build pinned host dependencies
-        run: bash scripts/ci-deps.sh
-
-  build:
-    name: Build — engine, extensions, app, perfcache
-    needs: deps
-    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["build", "test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 60
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Clean build tree
-        if: github.event_name == 'workflow_dispatch' && inputs.full_clean
-        run: |
-          find extension/laplace_substrate/sql/generated -name '[0-9]*_*.sql.in' -delete 2>/dev/null || true
-          bash scripts/pipeline.sh clean
-      - name: Build exact revision
-        run: |
-          args=()
-          [[ "${{ github.event_name }}" != workflow_dispatch || "${{ inputs.full_clean }}" != true ]] || args+=(--force-rebuild)
-          [[ "${{ github.event_name }}" != workflow_dispatch || "${{ inputs.force_codegen }}" != true ]] || args+=(--force-codegen)
-          bash scripts/pipeline.sh "${args[@]}" build
-
-  unit-test:
-    name: DEV/BAT — native, managed, ABI and application contracts
-    needs: build
-    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 30
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Execute DEV/BAT profile
-        env:
-          LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
-        run: |
-          [[ -d build ]] || { echo "::error::build/ absent at test start"; exit 1; }
-          chmod +x scripts/test-parallel.sh
-          if [[ "${LAPLACE_TEST_SERIAL:-}" == 1 ]]; then
-            bash scripts/test-parallel.sh --serial --engine
-          else
-            bash scripts/test-parallel.sh --engine
-          fi
-
-  application-release:
-    name: Applications — verified existing engine, independent transaction
-    needs: unit-test
-    if: >-
-      !cancelled() && needs.unit-test.result == 'success' &&
-      github.event_name == 'workflow_dispatch' &&
-      contains(fromJSON('["application-check", "applications"]'), inputs.stage)
-    runs-on: [self-hosted, laplace]
-    concurrency:
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: false
-    timeout-minutes: 20
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Refuse destructive application-release options
-        env:
-          FRESH_DB: ${{ inputs.fresh_db }}
-          FULL_CLEAN: ${{ inputs.full_clean }}
-        run: |
-          [[ "$FRESH_DB" != true && "$FULL_CLEAN" != true ]] || exit 1
-      - name: Read-only installed-runtime compatibility
-        run: bash scripts/publish-applications.sh check
-      - name: Publish and verify application-only transaction
-        if: inputs.stage == 'applications'
-        env:
-          LICHESS_API: ${{ secrets.LICHESS_API }}
-          LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
-          LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
-          STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
-          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-          STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
-        run: bash scripts/publish-applications.sh deploy
-      - name: Recover only this run's unfinished transaction
-        if: always() && inputs.stage == 'applications'
-        run: bash scripts/publish-applications.sh recover
-
-  deploy:
-    name: Install — engine and extension payload
-    needs: unit-test
-    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
-    runs-on: [self-hosted, laplace]
-    concurrency:
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: false
-    timeout-minutes: 315
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Wait for in-flight ingests
-        timeout-minutes: 305
-        run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
-      - name: Reconcile managed host desired state
-        run: bash deploy/linux/managed-publish.sh preflight
-      - name: Install exact build
-        run: bash scripts/pipeline.sh install
-      - name: Reconcile and prove managed host after install
-        run: bash deploy/linux/managed-publish.sh preflight
-
-  db-ops:
-    name: DB lifecycle — migrate, extension sync and runtime configuration
-    needs: deploy
-    if: github.event_name != 'workflow_dispatch' || contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
-    runs-on: [self-hosted, laplace]
-    concurrency:
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: false
-    timeout-minutes: 20
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Apply lifecycle transaction
-        run: |
-          api_was_active=0
-          if systemctl is-active --quiet laplace-api; then
-            api_was_active=1
-            sudo -n systemctl stop laplace-api
-          fi
-          restore_db_ops_api() {
-            [[ "$api_was_active" -eq 0 ]] || sudo -n systemctl start laplace-api || true
-          }
-          trap restore_db_ops_api EXIT
-          args=()
-          [[ "${{ github.event_name }}" != workflow_dispatch || "${{ inputs.fresh_db }}" != true ]] || args+=(--fresh-db)
-          bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
-
-      - name: Prove seed-independent database health before delivery
+      - name: Verify changed live checker against installed product
+        if: env.LAPLACE_FAST_ONLY == '1' && env.LAPLACE_VERIFY_LIVE_ONLY == '1'
         run: bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
 
-  publish:
-    name: Deliver — API, SPA, UCI and managed services
-    needs: db-ops
-    if: >-
-      !cancelled() && needs.db-ops.result == 'success' &&
-      (github.event_name != 'workflow_dispatch' || inputs.stage == 'all')
-    runs-on: [self-hosted, laplace]
-    concurrency:
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: false
-    timeout-minutes: 20
-    outputs:
-      has_data: ${{ steps.release.outputs.has_data }}
-      product_ready: ${{ steps.release.outputs.product_ready }}
-    env:
-      LICHESS_API: ${{ secrets.LICHESS_API }}
-      LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
-      LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
-      STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
-      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-      STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Publish, activate, verify and commit
-        id: release
-        run: |
-          bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
-          bash scripts/publish-applications.sh deploy
-          python3 - "$GITHUB_OUTPUT" <<'PY'
-          import json
-          import pathlib
-          import sys
-          state = json.loads(pathlib.Path("build/.application-release-state.json").read_text())
-          with open(sys.argv[1], "a", encoding="utf-8") as output:
-              for key in ("has_data", "product_ready"):
-                  value = state.get(key)
-                  if type(value) is not bool:
-                      raise SystemExit(f"application release state {key} is not boolean")
-                  output.write(f"{key}={'true' if value else 'false'}\n")
-          PY
-      - name: Recover only this run's unfinished transaction
-        if: always()
-        run: bash scripts/publish-applications.sh recover
-
-  integration-test:
-    name: QA — seed-independent PostgreSQL and managed DB fixtures
-    needs: [db-ops, publish]
-    if: >-
-      always() && !cancelled() && needs.db-ops.result == 'success' &&
-      (
-        (github.event_name == 'workflow_dispatch' && inputs.stage == 'integrate' && needs.publish.result == 'skipped') ||
-        (needs.publish.result == 'success' &&
-         (github.event_name != 'workflow_dispatch' || inputs.stage == 'all'))
-      )
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 60
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Clear stale pg_regress output
-        run: rm -rf build/extension/*/tests/regress_output
-      - name: Execute database QA profile
-        env:
-          LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
-        run: |
-          chmod +x scripts/test-parallel.sh
-          if [[ "${LAPLACE_TEST_SERIAL:-}" == 1 ]]; then
-            bash scripts/test-parallel.sh --serial --integration
-          else
-            bash scripts/test-parallel.sh --integration
-          fi
-      - name: Show pg_regress diffs on failure
-        if: failure()
-        run: |
-          for file in build/extension/*/tests/regress_output/regression.diffs; do
-            [[ -f "$file" ]] || continue
-            echo "::group::$file"
-            cat "$file"
-            echo "::endgroup::"
-          done
-
-  smoke:
-    name: Product proof — seeded live endpoints
-    needs: [publish, integration-test]
-    # Product evidence is ordered after post-delivery DB QA. `always()` plus the
-    # absence of any integration-success predicate means DB QA may stay red without
-    # suppressing the product-floor evidence or rolling the committed payload back.
-    if: >-
-      always() && !cancelled() && needs.publish.result == 'success'
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 20
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Execute live product profile
-        env:
-          LAPLACE_API_BASE: http://127.0.0.1:8080
-        run: bash scripts/test-parallel.sh --app-live
-
-  eval:
-    name: Optional performance proof — explicit generation benchmark
-    needs: [publish, smoke]
-    if: >-
-      always() && !cancelled() && github.event_name == 'workflow_dispatch' &&
-      inputs.generation_benchmark == true && needs.publish.result == 'success' &&
-      needs.publish.outputs.product_ready == 'true' && needs.smoke.result == 'success'
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 45
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-      - name: Execute explicit performance profile
-        run: bash scripts/test-parallel.sh --perf
-
-  restore-api:
-    name: Recovery — failed application activation only
-    needs: [deploy, publish]
-    if: >-
-      always() && needs.deploy.result != 'skipped' &&
-      needs.publish.result != 'success'
-    runs-on: [self-hosted, laplace]
-    concurrency:
-      group: laplace-substrate-lifecycle
-      cancel-in-progress: false
-    timeout-minutes: 10
-    steps:
-      - name: Recover only this run's unfinished application transaction
-        run: bash scripts/publish-applications.sh recover
-      - name: Ensure API is running
-        if: always()
-        run: |
-          sudo systemctl start laplace-api || true
-          sleep 3
-          curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
-            echo "::warning::laplace-api unhealthy after recovery"
-            journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
-              || sudo -n systemctl status laplace-api || true
-            exit 1
-          }
+      - name: Run product lifecycle
+        if: env.LAPLACE_FAST_ONLY != '1'
+        run: bash scripts/product-ci.sh "$LAPLACE_STAGE"
