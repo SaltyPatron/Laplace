@@ -36,11 +36,12 @@ internal sealed partial class SubstrateClient
         if (ChessPositionRef.TryComposeId(reference, out var posId))
             return (posId.ToBytes(), Convert.ToHexString(posId.ToBytes()).ToLowerInvariant());
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var id = await NpgsqlSubstrateReads.ResolveRefAsync(_dataSource, reference, ct);
-        if (id is null) return null;
-        var label = await NpgsqlSubstrateReads.LabelOrHexAsync(conn, id, ct) ?? "";
-        return (id, label);
+        // Identity resolution and display materialization are one server operation.
+        // Do not hold one idle connection while ResolveRefAsync leases another and
+        // then return to the first connection for LabelOrHexAsync.
+        var resolved = await NpgsqlSubstrateReads.ResolveRefWithLabelAsync(
+            _dataSource, reference, ct, TranslateReadError).ConfigureAwait(false);
+        return resolved is null ? null : (resolved.Id, resolved.Label);
     }
 
     /// <summary>
