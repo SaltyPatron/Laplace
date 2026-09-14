@@ -12,7 +12,8 @@ public sealed class UciEngine
     public const string Name = "Laplace";
     public const string Author = "Laplace";
 
-    private Board _board = Board.FromFen(ChessModality.StartFen);
+    private readonly ChessModality _modality = new();
+    private ChessState _state;
     private Search _search = new();
     private readonly object _outputLock = new();
     private CancellationTokenSource? _searchCts;
@@ -29,6 +30,8 @@ public sealed class UciEngine
     private string? _builtMode;
     private NpgsqlDataSource? _ds;
     private ChessSearchProviders? _providers;
+
+    public UciEngine() => _state = _modality.Initial();
 
     public bool Handle(string line, TextWriter output)
     {
@@ -60,7 +63,7 @@ public sealed class UciEngine
 
             case "ucinewgame":
                 StopSearch();
-                _board = Board.FromFen(ChessModality.StartFen);
+                _state = _modality.Initial();
                 // A prior game may have folded new move outcomes. Refresh the learned residual
                 // now, outside the next move clock. Failure invalidates readiness instead of
                 // silently running a different classical player under a substrate label.
@@ -220,7 +223,11 @@ public sealed class UciEngine
         StopSearch();
         var cts = new CancellationTokenSource();
         _searchCts = cts;
-        var board = Board.FromFen(_board.ToFen());
+        // Board is mutable; repetition history is immutable. Snapshot both so a later UCI
+        // "position" command cannot mutate the in-flight decision's game context.
+        var state = new ChessState(
+            Board.FromFen(_state.Board.ToFen()),
+            _state.RepetitionHistory);
         var search = _search;
         ChessSearchConfiguration? configured = null;
         if (_substrateMode != "off" && _providers is not null)
@@ -234,7 +241,7 @@ public sealed class UciEngine
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var result = search.Think(board, limits, cts.Token);
+                var result = search.Think(state, limits, cts.Token);
                 sw.Stop();
                 string best = result.BestMove?.ToUci() ?? "0000";
                 var receipt = configured?.Receipt() ?? ChessSearchProviderReceipt.Classical;
@@ -280,16 +287,18 @@ public sealed class UciEngine
         {
             int startIdx = Array.IndexOf(tok, "startpos");
             int fenIdx = Array.IndexOf(tok, "fen");
-            Board next = startIdx >= 0
-                ? Board.FromFen(ChessModality.StartFen)
-                : fenIdx >= 0 ? Board.FromFen(string.Join(' ', tok.Skip(fenIdx + 1).Take(6))) : _board;
+            ChessState next = startIdx >= 0
+                ? _modality.Initial()
+                : fenIdx >= 0
+                    ? _modality.FromFen(string.Join(' ', tok.Skip(fenIdx + 1).Take(6)))
+                    : _state;
 
             int movesIdx = Array.IndexOf(tok, "moves");
             if (movesIdx >= 0)
                 for (int k = movesIdx + 1; k < tok.Length; k++)
-                    ApplyUciMove(next, tok[k]);
+                    next = ApplyUciMove(next, tok[k]);
 
-            _board = next;
+            _state = next;
         }
         catch (FormatException)
         {
@@ -298,10 +307,12 @@ public sealed class UciEngine
         }
     }
 
-    private static void ApplyUciMove(Board board, string uci)
+    private ChessState ApplyUciMove(ChessState state, string uci)
     {
-        foreach (var m in MoveGen.Legal(board))
-            if (m.ToUci() == uci) { MoveApply.Make(board, m); return; }
+        foreach (var m in MoveGen.Legal(state.Board))
+            if (m.ToUci() == uci)
+                return _modality.Apply(state, m);
+        return state;
     }
 
     private static string ScoreStr(int score)
@@ -332,8 +343,8 @@ public sealed class UciEngine
         int wtime = Int("wtime", 0), btime = Int("btime", 0), winc = Int("winc", 0), binc = Int("binc", 0);
         if (wtime > 0 || btime > 0)
         {
-            int myTime = _board.WhiteToMove ? wtime : btime;
-            int myInc = _board.WhiteToMove ? winc : binc;
+            int myTime = _state.Board.WhiteToMove ? wtime : btime;
+            int myInc = _state.Board.WhiteToMove ? winc : binc;
             int budget = Math.Max(10, Math.Min(myTime - 30, myTime / 30 + (int)(myInc * 0.8)));
             return new Search.Limits(MaxDepth: 64, MaxTimeMs: budget);
         }
