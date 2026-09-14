@@ -86,6 +86,8 @@ if main_jobs:
     command = runs(main_jobs["product"])
     if 'bash scripts/product-ci.sh "$LAPLACE_STAGE"' not in command:
         fail("main product job bypasses scripts/product-ci.sh")
+    if "bash scripts/product-ci.sh reconcile" not in command:
+        fail("main fast path bypasses installed-product reconciliation")
     if "LAPLACE_FAST_ONLY" not in command:
         fail("main product job has no proportional source/tooling path")
     for forbidden in (
@@ -111,9 +113,12 @@ else:
         "pipeline.sh install",
         "migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
         "check-database-health.sh",
+        "ensure-foundation.sh --check-only",
+        "check-substrate-floor.sh",
         "publish-applications.sh deploy",
         "publish-applications.sh recover",
-        "test-parallel.sh --integration",
+        "local args=(--integration)",
+        'bash scripts/test-parallel.sh "${args[@]}"',
         "test-parallel.sh --app-live",
     ):
         if token not in product:
@@ -162,10 +167,15 @@ if (manual_db.get("concurrency") or {}).get("group") != "laplace-substrate-lifec
     fail("manual DB lifecycle does not share product lifecycle ownership")
 if triggers(manual_db) != {"workflow_dispatch"}:
     fail("manual DB lifecycle must be dispatch-only")
-if "check-database-health.sh" not in "\n".join(
-    runs(job) for job in (manual_db.get("jobs") or {}).values()
+manual_db_commands = "\n".join(runs(job) for job in (manual_db.get("jobs") or {}).values())
+for token in (
+    "check-database-health.sh",
+    "ensure-foundation.sh --force",
+    "check-substrate-floor.sh",
+    "verify-application-release.py --readiness-only",
 ):
-    fail("manual DB lifecycle lacks structural health verification")
+    if token not in manual_db_commands:
+        fail(f"manual DB recreate/product recovery missing {token}")
 
 for name, workflow in workflows.items():
     if name.startswith("seed-"):
