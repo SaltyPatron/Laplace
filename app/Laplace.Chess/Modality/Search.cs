@@ -60,6 +60,7 @@ public sealed class Search
     private readonly ulong _ttMask;
 
     private const int MaxPly = 128;
+    private readonly ChessMove[,] _killers = new ChessMove[MaxPly, 2];
 
     // Real game history and speculative descendant history use the SAME canonical position id
     // and the SAME irreversible-move reset law as ChessModality.Apply. This is not the TT/Zobrist
@@ -277,6 +278,7 @@ public sealed class Search
 
         for (int depth = 1; depth <= limits.MaxDepth; depth++)
         {
+            ClearKillers();
             int score = Negamax(
                 b, depth, -Inf, Inf, 0, repetitionStart, repetitionSignature);
             if (_aborted)
