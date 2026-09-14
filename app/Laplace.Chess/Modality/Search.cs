@@ -35,6 +35,14 @@ public sealed class Search
     private const int Mate = 30_000;
     private const int MateThreshold = Mate - 1_000;
 
+    // A draw is not globally good or bad. In a position already credibly winning for the root
+    // side, voluntarily collapsing the line to repetition/stalemate/50-move draw is a loss of
+    // utility; in a credibly losing position it is a rescue. Keep the preference deliberately
+    // bounded far below material/mate/tablebase scales, with a deadband around equality so a
+    // noisy +0.2 does not become artificial contempt.
+    private const int DrawPreferenceDeadbandCp = 75;
+    private const int DrawPreferenceCapCp = 200;
+
     private const byte FlagExact = 0, FlagLower = 1, FlagUpper = 2, FlagRootSteered = 3;
 
     private struct TtEntry
@@ -69,6 +77,7 @@ public sealed class Search
     private ChessMove _rootBestMove;
     private readonly Stopwatch _sw = new();
     private CancellationToken _ct;
+    private int _drawUtilityRootCp;
 
     private bool TimeUp()
     {
@@ -178,9 +187,32 @@ public sealed class Search
         _ct = ct;
         _sw.Restart();
         var b = board.Clone();
+
+        // Draw preference belongs to this decision root, not to chess ontology. Use exact
+        // tablebase WDL when the root is covered; otherwise use the same classical + selected
+        // substrate position state that evaluates descendant leaves. A change in this root-scoped
+        // utility invalidates TT scores because a repeated/drawn node's value is contextual.
+        int rootAdvantageCp = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
+                              + (_activePositionEvaluator?.Evaluate(b) ?? 0);
+        if (_tablebase?.Invoke(b) is { } rootTablebase)
+            rootAdvantageCp = rootTablebase.Wdl switch
+            {
+                0 or 1 => -20_000,
+                2 => 0,
+                3 or 4 => 20_000,
+                _ => rootAdvantageCp,
+            };
+        int nextDrawUtility = ContextualDrawScore(rootAdvantageCp, ply: 0);
+        if (nextDrawUtility != _drawUtilityRootCp)
+        {
+            Array.Clear(_tt, 0, _tt.Length);
+            _drawUtilityRootCp = nextDrawUtility;
+        }
+
         var rootMoves = MoveGen.Legal(b);
         if (rootMoves.Count == 0)
-            return new Result(null, MoveGen.InCheck(b, b.WhiteToMove) ? -Mate : 0, 0, 0);
+            return new Result(null,
+                MoveGen.InCheck(b, b.WhiteToMove) ? -Mate : DrawScoreAtPly(0), 0, 0);
 
         // A non-terminal search is total: interruption can shorten the completed depth,
         // but it cannot turn a legal position into "no move". Negamax replaces this seed
@@ -210,6 +242,23 @@ public sealed class Search
         }
         return new Result(best, bestScore, reached, _nodes);
     }
+
+    /// <summary>
+    /// Root-contextual draw utility. Positive root advantage makes a draw negative; negative root
+    /// advantage makes it positive. Negamax parity converts that root preference to the current
+    /// side-to-move point of view at the draw node.
+    /// </summary>
+    internal static int ContextualDrawScore(int rootAdvantageCp, int ply)
+    {
+        long magnitudeRaw = Math.Abs((long)rootAdvantageCp) - DrawPreferenceDeadbandCp;
+        if (magnitudeRaw <= 0) return 0;
+        int magnitude = (int)Math.Min(DrawPreferenceCapCp, Math.Max(1L, magnitudeRaw / 2));
+        int rootPov = rootAdvantageCp > 0 ? -magnitude : magnitude;
+        return (ply & 1) == 0 ? rootPov : -rootPov;
+    }
+
+    private int DrawScoreAtPly(int ply)
+        => (ply & 1) == 0 ? _drawUtilityRootCp : -_drawUtilityRootCp;
 
     /// Reconstruct the principal variation by walking transposition-table best moves from the
     /// root, validating each against the legal move list so a key collision can't emit an
@@ -241,10 +290,13 @@ public sealed class Search
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 
-        if (ply > 0 && (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b))) return 0;
+        if (ply > 0 && (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b)))
+            return DrawScoreAtPly(ply);
 
-        // Exact tablebase truth belongs inside the tree.  The root is intentionally searched:
-        // each child probe then determines which legal move preserves the best WDL result.
+        // Exact tablebase truth belongs inside the tree. The root is intentionally searched:
+        // each child probe then determines which legal move preserves the best WDL result. WDL
+        // draw remains exact truth, but its decision utility depends on whether the root was
+        // winning, equal or losing; exact wins/losses retain their much larger tablebase scale.
         if (ply > 0 && _tablebase?.Invoke(b) is { } tablebase)
         {
             int distance = Math.Min(Math.Abs(tablebase.Dtz), 1_000);
@@ -252,7 +304,7 @@ public sealed class Search
             {
                 0 => -20_000 + distance + ply,
                 1 => -10_000 + distance + ply,
-                2 => 0,
+                2 => DrawScoreAtPly(ply),
                 3 => 10_000 - distance - ply,
                 4 => 20_000 - distance - ply,
                 _ => 0,
@@ -260,7 +312,7 @@ public sealed class Search
         }
 
         ulong key = Zobrist.Hash(b);
-        if (ply > 0 && _path.Contains(key)) return 0;
+        if (ply > 0 && _path.Contains(key)) return DrawScoreAtPly(ply);
 
         int alphaOrig = alpha;
         ref TtEntry e = ref _tt[key & _ttMask];
@@ -281,7 +333,7 @@ public sealed class Search
 
         var moves = LegalAt(b, ply);
         if (moves.Count == 0)
-            return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : 0;
+            return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : DrawScoreAtPly(ply);
 
         if (ply == 0 && _rootBias is not null && _rootBonusByUci is null)
         {
@@ -359,6 +411,9 @@ public sealed class Search
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 
+        if (ply > 0 && (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b)))
+            return DrawScoreAtPly(ply);
+
         bool inCheck = MoveGen.InCheck(b, b.WhiteToMove);
         if (!inCheck)
         {
@@ -369,7 +424,7 @@ public sealed class Search
         }
 
         var moves = LegalAt(b, ply);
-        if (moves.Count == 0) return inCheck ? -(Mate - ply) : 0;
+        if (moves.Count == 0) return inCheck ? -(Mate - ply) : DrawScoreAtPly(ply);
 
         // In-place, order-preserving compaction — Quiesce runs at every
         // horizon node, and the old Where().ToList() allocated a closure, an
