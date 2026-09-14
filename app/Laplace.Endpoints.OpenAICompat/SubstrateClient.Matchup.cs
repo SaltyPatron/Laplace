@@ -18,13 +18,15 @@ internal sealed partial class SubstrateClient
     /// <summary>Top consensus edges per salience band, fully labeled.</summary>
     public async Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
     {
-        var rows = await NpgsqlSubstrateReads.BandLeadersAsync(_dataSource, bands, perBand, ct, TranslateSubstrateError);
+        // One bounded command returns both leader rows and immutable band names.
+        // converse.relation_bands() performs a full live consensus census and is not
+        // a dependency of this response.
+        var rows = await NpgsqlSubstrateReads.BandLeadersNamedAsync(
+            _dataSource, bands, perBand, ct, TranslateSubstrateError).ConfigureAwait(false);
 
-        var catalog = await RelationBandsAsync(ct);
-        var names = catalog.ToDictionary(b => b.Band, b => b.Name);
-        return rows.GroupBy(r => r.Band)
-            .OrderBy(g => g.Key)
-            .Select(g => new BandLeaders(g.Key, names.GetValueOrDefault(g.Key, $"band {g.Key}"),
+        return rows.GroupBy(r => new { r.Band, r.BandName })
+            .OrderBy(g => g.Key.Band)
+            .Select(g => new BandLeaders(g.Key.Band, g.Key.BandName,
                 [.. g.Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))]))
             .ToList();
     }
@@ -44,8 +46,13 @@ internal sealed partial class SubstrateClient
     /// <summary>The fast half of a matchup: both cards plus the tale of the tape.</summary>
     public async Task<MatchupResponse?> MatchupAsync(string xRef, string yRef, CancellationToken ct)
     {
-        var x = await ResolveTopicAsync(xRef, ct);
-        var y = await ResolveTopicAsync(yRef, ct);
+        // X and Y resolution are independent indexed reads. Do not serialize two
+        // connection leases and two server commands before the already-parallel side/tape work.
+        var xTask = ResolveTopicAsync(xRef, ct);
+        var yTask = ResolveTopicAsync(yRef, ct);
+        await Task.WhenAll(xTask, yTask).ConfigureAwait(false);
+        var x = xTask.Result;
+        var y = yTask.Result;
         if (x is null || y is null) return null;
 
         var xHex = Convert.ToHexString(x.Value.Id).ToLowerInvariant();
@@ -55,7 +62,7 @@ internal sealed partial class SubstrateClient
         var tapeTask = TapeAsync(x.Value.Id, y.Value.Id, ct);
         var xSideTask = SideAsync(xHex, x.Value.Id, x.Value.Label, ct);
         var ySideTask = SideAsync(yHex, y.Value.Id, y.Value.Label, ct);
-        await Task.WhenAll(tapeTask, xSideTask, ySideTask);
+        await Task.WhenAll(tapeTask, xSideTask, ySideTask).ConfigureAwait(false);
 
         return new MatchupResponse("matchup", xSideTask.Result, ySideTask.Result, tapeTask.Result);
     }
@@ -64,7 +71,7 @@ internal sealed partial class SubstrateClient
     {
         var recordTask = EntityRecordAsync(hex, ct);
         var factsTask = NpgsqlSubstrateReads.SalientFactsAsync(_dataSource, id, 6, ct, TranslateSubstrateError);
-        await Task.WhenAll(recordTask, factsTask);
+        await Task.WhenAll(recordTask, factsTask).ConfigureAwait(false);
         return new MatchupSide(hex, label,
             recordTask.Result ?? new EntityRecordResponse("entity.record", hex, 0, 0, 0, 0),
             [.. factsTask.Result.Select(f => new SalientFactRow(f.Type, f.Fact, f.EffMu, f.Witnesses))]);
@@ -82,8 +89,11 @@ internal sealed partial class SubstrateClient
     /// </summary>
     public async Task<MatchupVerdictResponse?> MatchupVerdictAsync(string xRef, string yRef, CancellationToken ct)
     {
-        var x = await ResolveTopicAsync(xRef, ct);
-        var y = await ResolveTopicAsync(yRef, ct);
+        var xTask = ResolveTopicAsync(xRef, ct);
+        var yTask = ResolveTopicAsync(yRef, ct);
+        await Task.WhenAll(xTask, yTask).ConfigureAwait(false);
+        var x = xTask.Result;
+        var y = yTask.Result;
         if (x is null || y is null) return null;
 
         var s = await NpgsqlSubstrateReads.RelationSummaryAsync(_dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError);

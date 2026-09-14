@@ -20,13 +20,29 @@ internal sealed partial class SubstrateClient
         var userArtifacts = UserArtifactContent.Resolve(tenant);
         var conversation = ConversationContent.Resolve(tenant);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        if (await NpgsqlSubstrateReads.HasConfirmedUserArtifactOccurrenceAsync(
-                conn, requested, userArtifacts.Source.ToBytes(), ct).ConfigureAwait(false))
+        IReadOnlyList<NpgsqlSubstrateReads.PackedTrajectoryVertexRow>? artifactVertices = null;
+        IReadOnlyList<string>? promptContexts = null;
+
+        // Membership/trajectory proof and prompt-context proof share one short-lived connection.
+        // Do not keep that backend leased while content reconstruction opens its own pooled reads.
+        await using (var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
         {
-            var vertices = await NpgsqlSubstrateReads.PackedTrajectoryVerticesAsync(
-                conn, requested, ct).ConfigureAwait(false);
-            var ordered = vertices.OrderBy(static v => v.Ordinal).ToArray();
+            if (await NpgsqlSubstrateReads.HasConfirmedUserArtifactOccurrenceAsync(
+                    conn, requested, userArtifacts.Source.ToBytes(), ct).ConfigureAwait(false))
+            {
+                artifactVertices = await NpgsqlSubstrateReads.PackedTrajectoryVerticesAsync(
+                    conn, requested, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                promptContexts = await NpgsqlSubstrateReads.ConfirmedPromptContextsAsync(
+                    conn, requested, conversation.PromptSource.ToBytes(), ct).ConfigureAwait(false);
+            }
+        }
+
+        if (artifactVertices is not null)
+        {
+            var ordered = artifactVertices.OrderBy(static v => v.Ordinal).ToArray();
             if (ordered.Length != 2) return null;
 
             byte[] contentIdBytes = Convert.FromHexString(ordered[0].ChildIdHex);
@@ -35,11 +51,11 @@ internal sealed partial class SubstrateClient
             Hash128 metadataId = ReadHash(metadataIdBytes);
             Hash128 documentId = contentId;
 
-            byte[] content;
+            byte[] metadata;
             FileMetadata fileMetadata;
             try
             {
-                byte[] metadata = await NpgsqlContentReconstructor.ReconstructUtf8Async(
+                metadata = await NpgsqlContentReconstructor.ReconstructUtf8Async(
                     _dataSource, metadataId, ct).ConfigureAwait(false);
                 fileMetadata = FileMetadata.ParseIdentityCanonicalUtf8(metadata);
                 if (fileMetadata.Modality is { Length: > 0 } modality
@@ -48,13 +64,22 @@ internal sealed partial class SubstrateClient
                         modality,
                         StringComparison.Ordinal))
                     return null;
-                content = await NpgsqlContentReconstructor.ReconstructUtf8Async(
-                    _dataSource, contentId, fileMetadata.Modality, ct).ConfigureAwait(false);
             }
             catch (InvalidDataException)
             {
                 return null;
             }
+
+            // Observation metadata is independent of reconstructing the already-validated
+            // content root. Run both through the datasource instead of serializing them or
+            // parking the membership connection above.
+            var contentTask = NpgsqlContentReconstructor.ReconstructUtf8Async(
+                _dataSource, contentId, fileMetadata.Modality, ct);
+            var observationTask = NpgsqlSubstrateReads.UserArtifactObservationAsync(
+                _dataSource, userArtifacts.SourceName, requested, ct);
+            await Task.WhenAll(contentTask, observationTask).ConfigureAwait(false);
+            byte[] content = contentTask.Result;
+            var observation = observationTask.Result;
 
             FileIdentity reconstructed;
             if (fileMetadata.Modality is { Length: > 0 } contentModality)
@@ -79,9 +104,6 @@ internal sealed partial class SubstrateClient
                 || reconstructed.MetadataRootId != metadataId)
                 return null;
 
-            var observation = await NpgsqlSubstrateReads.UserArtifactObservationAsync(
-                conn, userArtifacts.SourceName, requested, ct).ConfigureAwait(false);
-
             return new UserContentExportResponse(
                 Kind: fileMetadata.Modality is null ? "document" : "code",
                 RequestedId: idHex.ToLowerInvariant(),
@@ -101,9 +123,7 @@ internal sealed partial class SubstrateClient
                 ModifiedAt: observation?.ModifiedAt);
         }
 
-        var promptContexts = await NpgsqlSubstrateReads.ConfirmedPromptContextsAsync(
-            conn, requested, conversation.PromptSource.ToBytes(), ct).ConfigureAwait(false);
-        if (promptContexts.Count == 0) return null;
+        if (promptContexts is null || promptContexts.Count == 0) return null;
 
         Hash128 promptId = ReadHash(requested);
         byte[] prompt = await NpgsqlContentReconstructor.ReconstructUtf8Async(

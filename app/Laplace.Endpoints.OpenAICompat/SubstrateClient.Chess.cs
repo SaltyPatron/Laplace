@@ -156,30 +156,41 @@ internal sealed partial class SubstrateClient
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        var facet = await NpgsqlDisplayLabels.FacetAsync(conn, id, ct);
+        // Validation is ordered because the remaining reads are meaningful only for a player.
+        // Release that connection immediately after the type gate; do not hold it idle while
+        // independent datasource reads execute.
+        NpgsqlDisplayLabels.DisplayFacetRow? facet;
+        await using (var validation = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
+            facet = await NpgsqlDisplayLabels.FacetAsync(
+                validation, id, ct, TranslateReadError).ConfigureAwait(false);
         if (facet is not { Exists: true } playerFacet
             || !playerFacet.TypeId.AsSpan().SequenceEqual(ChessVocabulary.PlayerType.ToBytes()))
             return null;
 
-        var record = await NpgsqlSubstrateReads.ChessPlayerRecordAsync(
+        // The career record, source ratings, opponents, display surface and identity-profile
+        // evidence are independent once the player gate passes. Let the shared datasource own
+        // bounded connection allocation instead of forcing five request/response turns in series.
+        var recordTask = NpgsqlSubstrateReads.ChessPlayerRecordAsync(
             _dataSource, id, ct, TranslateReadError);
-        var overall = MapRecord(record.FirstOrDefault(x => x.AsWhite is null));
-
-        var ratings = await NpgsqlSubstrateReads.ChessPlayerRatingsAsync(
+        var ratingsTask = NpgsqlSubstrateReads.ChessPlayerRatingsAsync(
             _dataSource, id, ct, TranslateReadError);
-        var ratingRows = ratings.Select(static r => new ChessRatingRow(r.Rating, r.Games)).ToList();
-
-        var opponents = await NpgsqlSubstrateReads.ChessHeadToHeadAsync(
+        var opponentsTask = NpgsqlSubstrateReads.ChessHeadToHeadAsync(
             _dataSource, id, opponentLimit, ct, TranslateReadError);
-        var opponentRows = opponents.Select(static r => new ChessOpponentRow(
-            r.OpponentIdHex, r.Opponent, r.Games, r.Rating, r.Rd, r.EffMu)).ToList();
+        var displayTask = NpgsqlDisplayLabels.ReadOneAsync(
+            _dataSource, id, ct, TranslateReadError);
+        var profileTask = NpgsqlSubstrateReads.ChessPlayerProfileEdgesAsync(
+            _dataSource, id, ct, TranslateReadError);
+        await Task.WhenAll(recordTask, ratingsTask, opponentsTask, displayTask, profileTask)
+            .ConfigureAwait(false);
 
-        var display = await NpgsqlDisplayLabels.ReadOneAsync(conn, id, ct);
-        var name = display?.Label;
-        var profileEdges = await NpgsqlSubstrateReads.ChessPlayerProfileEdgesAsync(
-            conn, id, ct, TranslateReadError);
-        var profiles = MapChessProfiles(profileEdges);
+        var record = recordTask.Result;
+        var overall = MapRecord(record.FirstOrDefault(x => x.AsWhite is null));
+        var ratingRows = ratingsTask.Result
+            .Select(static r => new ChessRatingRow(r.Rating, r.Games)).ToList();
+        var opponentRows = opponentsTask.Result.Select(static r => new ChessOpponentRow(
+            r.OpponentIdHex, r.Opponent, r.Games, r.Rating, r.Rd, r.EffMu)).ToList();
+        var name = displayTask.Result?.Label;
+        var profiles = MapChessProfiles(profileTask.Result);
 
         return new ChessPlayerResponse("chess.player", idHex.ToLowerInvariant(), name ?? idHex,
             overall,
@@ -313,24 +324,32 @@ internal sealed partial class SubstrateClient
         byte[] playingId, CancellationToken ct)
     {
         byte[]? lineId = await NpgsqlSubstrateReads.ChessLineForPlayingAsync(
-            _dataSource, playingId, ct, TranslateReadError);
+            _dataSource, playingId, ct, TranslateReadError).ConfigureAwait(false);
         if (lineId is null)
             return Laplace.Chess.Service.ChessReplay.Replay(Array.Empty<Laplace.Engine.Core.Hash128>());
-        var rows = await NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
+
+        // Once the line identity is known, the line/playing trajectory fetch and setup-position
+        // lookup are independent. Start both before awaiting either; setup decoding remains
+        // ordered because it depends on the optional setup identity.
+        var rowsTask = NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
             _dataSource, [lineId, playingId],
             [PhysicalityType.Content, PhysicalityType.ChessComment],
             ct, TranslateReadError);
+        var setupIdTask = NpgsqlSubstrateReads.ChessSetupPositionIdAsync(
+            _dataSource, playingId, ct, TranslateReadError);
+        await Task.WhenAll(rowsTask, setupIdTask).ConfigureAwait(false);
+
+        var rows = rowsTask.Result;
         var moves = rows.Where(r => r.Type == PhysicalityType.Content
                                   && r.ParentId.AsSpan().SequenceEqual(lineId))
             .OrderBy(static r => r.Ordinal)
             .Select(static r => Laplace.Engine.Core.Hash128.FromBytes(r.EntityId)).ToArray();
-        byte[]? setupId = await NpgsqlSubstrateReads.ChessSetupPositionIdAsync(
-            _dataSource, playingId, ct, TranslateReadError);
+        byte[]? setupId = setupIdTask.Result;
         string? setup = null;
         if (setupId is not null)
         {
             var setupRows = await NpgsqlSubstrateReads.NestedTrajectoryConstituentsAsync(
-                _dataSource, [setupId], ct, TranslateReadError);
+                _dataSource, [setupId], ct, TranslateReadError).ConfigureAwait(false);
             var boards = Laplace.Chess.Service.ChessPositionTrajectory.Decode(setupRows);
             if (boards.TryGetValue(Laplace.Engine.Core.Hash128.FromBytes(setupId), out var board))
                 setup = board.ToFen();
@@ -343,7 +362,7 @@ internal sealed partial class SubstrateClient
         {
             var commentIds = commentRows.Select(static r => r.EntityId).ToArray();
             var rendered = await NpgsqlSubstrateReads.RenderTextBatchAsync(
-                _dataSource, commentIds, ct, TranslateReadError);
+                _dataSource, commentIds, ct, TranslateReadError).ConfigureAwait(false);
             if (rendered is not null && rendered.Length == commentRows.Length)
                 replay = Laplace.Chess.Service.ChessReplay.ApplyClockComments(replay, rendered);
         }

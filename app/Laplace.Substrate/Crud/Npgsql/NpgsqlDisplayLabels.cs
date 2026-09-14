@@ -20,17 +20,29 @@ public static class NpgsqlDisplayLabels
     public readonly record struct DisplayLabelRow(string IdHex, string Label, short? Tier);
     public readonly record struct DisplayFacetRow(short Tier, string Type, bool Exists, byte[] TypeId);
 
+    private static DisplayLabelRow MapDisplayLabel(NpgsqlDataReader r) => new(
+        r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetInt16(2));
+
+    private static void BindIds(NpgsqlParameterCollection parameters, byte[][] ids)
+    {
+        var param = parameters.AddWithValue("ids", ids);
+        param.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+    }
+
     public static Task<IReadOnlyList<DisplayLabelRow>> ReadAsync(
         NpgsqlConnection conn, byte[][] ids, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, SqlCatalog.Get("display.labels"),
-            static r => new DisplayLabelRow(
-                r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetInt16(2)),
-            p =>
-            {
-                var param = p.AddWithValue("ids", ids);
-                param.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-            },
+            MapDisplayLabel,
+            p => BindIds(p, ids),
+            timeoutSeconds: 30, ct: ct, label: "display_labels", onError: onError);
+
+    public static Task<IReadOnlyList<DisplayLabelRow>> ReadAsync(
+        NpgsqlDataSource dataSource, byte[][] ids, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("display.labels"),
+            MapDisplayLabel,
+            p => BindIds(p, ids),
             timeoutSeconds: 30, ct: ct, label: "display_labels", onError: onError);
 
     public static async Task<DisplayLabelRow?> ReadOneAsync(
@@ -38,6 +50,14 @@ public static class NpgsqlDisplayLabels
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await ReadAsync(conn, [id], ct, onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    public static async Task<DisplayLabelRow?> ReadOneAsync(
+        NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await ReadAsync(dataSource, [id], ct, onError).ConfigureAwait(false);
         return rows.Count == 0 ? null : rows[0];
     }
 

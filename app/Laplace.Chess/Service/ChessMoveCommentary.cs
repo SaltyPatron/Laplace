@@ -30,10 +30,20 @@ public static class ChessMoveCommentary
     {
         var parts = new List<string>(5);
 
+        // Historical and book evidence are independent substrate reads over the same
+        // exact position. Start both before awaiting either; presentation order remains
+        // history -> motif -> book after both evidence lanes complete.
+        var historyTask = input.PositionSurface is { } historySurface
+            ? HistoricalPositionLineAsync(ds, historySurface, input.PlayedSan, ct)
+            : Task.FromResult<string?>(null);
+        var bookTask = input.PositionSurface is { } bookSurface
+            ? BookLineAsync(ds, bookSurface, ct)
+            : Task.FromResult<string?>(null);
+        await Task.WhenAll(historyTask, bookTask).ConfigureAwait(false);
+
         // Position history is the most distinctive substrate observation, so give it the scarce
         // Lichess chat budget before generic engine telemetry.
-        if (input.PositionSurface is { } surface
-            && await HistoricalPositionLineAsync(ds, surface, input.PlayedSan, ct) is { } history)
+        if (historyTask.Result is { } history)
             parts.Add(history);
 
         if (input.Motifs.FirstOrDefault() is { } motif)
@@ -41,8 +51,7 @@ public static class ChessMoveCommentary
 
         // The chess literature's judgment of this exact position, if a book attested one —
         // (text, EXPLAINS, position) edges deposited by ChessBookDecomposer.
-        if (input.PositionSurface is { } bookSurface
-            && await BookLineAsync(ds, bookSurface, ct) is { } bookLine)
+        if (bookTask.Result is { } bookLine)
             parts.Add(bookLine);
 
         string evalLine = FormatEval(input.ScoreCp, input.Depth);
