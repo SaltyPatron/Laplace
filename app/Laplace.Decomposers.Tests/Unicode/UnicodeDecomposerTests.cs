@@ -35,6 +35,7 @@ public sealed class UnicodeDecomposerTests
         Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });
 
         var codepointEntities = new HashSet<Hash128>();
+        var highByteEntities = new HashSet<Hash128>();
         long codepointPhysicalities = 0, passThreeEntities = 0, inputUnits = 0;
         bool allTier0 = true, allFirstObserved = true;
         EntityRow? aEntity = null;
@@ -61,6 +62,8 @@ public sealed class UnicodeDecomposerTests
                 else
                 {
                     passThreeEntities++;
+                    if (e.TypeId == ByteAtoms.TypeId)
+                        highByteEntities.Add(e.Id);
                 }
             }
             foreach (var ph in change.Physicalities)
@@ -69,7 +72,12 @@ public sealed class UnicodeDecomposerTests
         }
 
         Assert.Equal(TotalCodepoints, codepointEntities.Count);
-        Assert.Equal(TotalCodepoints, inputUnits);
+        Assert.True(inputUnits > TotalCodepoints,
+            "whole-source accounting includes DUCET codepoints plus later admitted UCD/property rows");
+        Assert.Equal(ByteAtoms.Count, highByteEntities.Count);
+        for (int value = ByteAtoms.First; value <= byte.MaxValue; ++value)
+            Assert.Contains(ByteAtoms.Id((byte)value), highByteEntities);
+        Assert.DoesNotContain(ByteAtoms.Id(0x41), highByteEntities);
         Assert.True(codepointPhysicalities >= TotalCodepoints,
             "one CONTENT physicality per codepoint (pass-3 content adds more)");
         Assert.True(passThreeEntities > 0,
