@@ -218,7 +218,7 @@ class EvalOperationLaneTests(unittest.TestCase):
             workflow_text,
         )
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
-        perf_guard = product.split("run_perf() {", 1)[1].split("}", 1)[0]
+        perf_guard = product.split("run_perf() {", 1)[1].split("\n}\n\nrun_policy", 1)[0]
         self.assertIn('[[ "${LAPLACE_GENERATION_BENCHMARK:-}" == 1 ]] || return 0', perf_guard)
         self.assertIn("bash scripts/test-parallel.sh --perf", perf_guard)
         self.assertEqual(1, product.count("test-parallel.sh --perf"))
