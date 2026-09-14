@@ -344,7 +344,7 @@ public static class ChessPlayerModelMatch
 
             Search search = state.Board.WhiteToMove ? whiteSearch : blackSearch;
             var result = search.Think(
-                state.Board,
+                state,
                 new Search.Limits(MaxDepth: depth, MaxTimeMs: 120_000),
                 ct);
             if (result.BestMove is not { } move)
