@@ -36,7 +36,7 @@ This profile measures aggregate concurrent composition capacity. It is **not** p
 
 A managed host also runs PostgreSQL, the Actions runner, monitoring/control processes, and product services. Therefore the normal benchmark workflow does **not** silently consume every allowed logical CPU.
 
-The workflow now resolves a versioned scale plan before measurement:
+The workflow resolves a versioned scale plan before measurement:
 
 ```text
 managed-host default
@@ -59,7 +59,7 @@ On the known 6-core/12-thread i7-6850K runner with the default reserve of two lo
 
 The 12-worker point is no longer a default managed-host measurement. It requires explicit saturation opt-in.
 
-This distinction is not cosmetic. Actions run `34823625126` failed before a sealed benchmark artifact was produced during the previous scaling design that admitted the full logical-CPU boundary. The available evidence does not prove which final process failed, so the run must be recorded as an incomplete/failing receipt rather than assigned a fabricated terminal cause. It is nevertheless a valid counterexample to treating destructive host saturation as the default service-capacity experiment.
+This distinction is not cosmetic. Actions run `34823625126` failed before a sealed benchmark artifact was produced during the previous scaling design that admitted the full logical-CPU boundary. The available evidence does not prove which final process failed, so the run is recorded as an incomplete/failing receipt rather than assigned a fabricated terminal cause. It is nevertheless a valid counterexample to treating `all allowed CPUs` as the default service-capacity experiment on a live managed host.
 
 A larger throughput number from a point that starves the required service/control plane is a saturation result, not a normal customer/service capacity result.
 
