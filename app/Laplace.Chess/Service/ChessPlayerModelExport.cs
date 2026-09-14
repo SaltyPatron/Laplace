@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using global::Npgsql;
 using Laplace.Engine.Core;
@@ -38,7 +37,7 @@ public sealed record ChessPlayerModelExport(
         if (ordered.Length == 0)
             throw new ArgumentException("a player-model export needs at least one member", nameof(members));
 
-        string memberSurface = string.Join('/', ordered.Select(static id => Hex(id)));
+        string memberSurface = string.Join("/", ordered.Select(static id => Hex(id)));
         Hash128 memberSetId = Hash128.OfCanonical($"chess/player-model/set/v{CurrentVersion}/{memberSurface}");
         Hash128 id = Hash128.OfCanonical(
             $"{Recipe}/{Hex(memberSetId)}/{evidenceBoundary.Trim()}");
