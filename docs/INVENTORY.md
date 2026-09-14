@@ -34,7 +34,7 @@ Test projects:
 - `Laplace.Endpoints.OpenAICompat.Tests`
 - `Laplace.Substrate.Tests`
 
-## Decomposers — 29 in `Laplace.Decomposers`, 11 in `Laplace.Chess`
+## Decomposers — 29 in `Laplace.Decomposers`, 12 in `Laplace.Chess`
 
 - `AgentTraceDecomposer`
 - `Atomic2020Decomposer`
@@ -77,6 +77,7 @@ Chess:
 - `ChessPositionOutcomesDecomposer`
 - `ChessStockfishEvalDecomposer`
 - `ChessSyzygyDecomposer`
+- `ChessTacticOutcomesDecomposer`
 - `ChessTrajectoryDecomposer`
 - `ChessTransitionsDecomposer`
 
