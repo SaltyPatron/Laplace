@@ -32,7 +32,7 @@ run_dev() {
   bash scripts/test-parallel.sh "${args[@]}"
 }
 
-run_install_and_db() {
+run_install_and_db() (
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash deploy/linux/managed-publish.sh preflight
   bash scripts/pipeline.sh install
@@ -46,16 +46,13 @@ run_install_and_db() {
   restore_api_after_db() {
     [[ "$api_was_active" -eq 0 ]] || sudo -n systemctl start laplace-api || true
   }
-  trap restore_api_after_db RETURN
+  trap restore_api_after_db EXIT
 
   local args=()
   [[ "${LAPLACE_FRESH_DB:-}" != 1 ]] || args+=(--fresh-db)
   bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
-
-  restore_api_after_db
-  trap - RETURN
-}
+)
 
 run_publish() {
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
