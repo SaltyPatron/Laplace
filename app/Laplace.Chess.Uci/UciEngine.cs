@@ -18,17 +18,17 @@ public sealed class UciEngine
     private CancellationTokenSource? _searchCts;
     private Task? _searchTask;
 
-    // Substrate wiring. Guided modes keep the full chess search, add exact-transition root
-    // evidence and evaluate reusable board constituents throughout the tree. "off" is the
-    // same conventional search without those substrate inputs. Substrate mode fails visibly
-    // when its required data is unavailable; only an explicit "off" selects classical play.
+    // Substrate wiring. Guided mode keeps one conventional proposal tree but its configured
+    // provider set now includes exact transition evidence, board-constituent outcome evidence,
+    // the learned PST residual and exact Syzygy. "off" is the explicit classical control.
+    // Provider setup happens on isready/ucinewgame, never after a move clock starts.
     private string _substrateMode =
         NormalizeMode(Environment.GetEnvironmentVariable("LAPLACE_UCI_SUBSTRATE")) ?? "substrate";
     private bool _substrateTried;
     private bool _searchStale = true;
     private string? _builtMode;
     private NpgsqlDataSource? _ds;
-    private IRootBias? _bias;
+    private ChessSearchProviders? _providers;
 
     public bool Handle(string line, TextWriter output)
     {
@@ -61,7 +61,19 @@ public sealed class UciEngine
             case "ucinewgame":
                 StopSearch();
                 _board = Board.FromFen(ChessModality.StartFen);
-                // Learned PST comes from consensus that the previous game may have folded into.
+                // A prior game may have folded new move outcomes. Refresh the learned residual
+                // now, outside the next move clock. Failure invalidates readiness instead of
+                // silently running a different classical player under a substrate label.
+                if (_substrateMode != "off" && _providers is not null)
+                {
+                    try { _providers.RefreshLearnedPst(); }
+                    catch (Exception ex)
+                    {
+                        Info(output, $"learned PST refresh failed ({FirstLine(ex.Message)})");
+                        _providers = null;
+                        _substrateTried = false;
+                    }
+                }
                 _searchStale = true;
                 return true;
 
@@ -71,9 +83,9 @@ public sealed class UciEngine
                 return true;
 
             case "go":
-                // No first-time DB init on the move clock: every real driver sends isready
-                // before the first go (cutechess does). Missing required substrate state is
-                // an explicit failed move, never an unannounced classical player.
+                // No first-time DB/provider init on the move clock: every real driver sends
+                // isready before the first go. Missing required provider state is an explicit
+                // failed move, never an unannounced classical player.
                 if (!EnsureSearch(output, allowInit: false))
                 {
                     lock (_outputLock) output.WriteLine("bestmove 0000");
@@ -119,9 +131,8 @@ public sealed class UciEngine
         }
     }
 
-    // (Re)build the search to match the requested substrate mode. Cheap no-op when current.
-    // allowInit gates the one-time DB connection. False means the requested engine is not ready;
-    // it never authorizes a different player.
+    // (Re)build the search to match the requested mode. allowInit gates slow provider setup.
+    // False means the requested engine is not ready; it never authorizes a different player.
     private bool EnsureSearch(TextWriter? output, bool allowInit)
     {
         if (!_searchStale && _builtMode == _substrateMode) return true;
@@ -129,13 +140,12 @@ public sealed class UciEngine
         if (_substrateMode == "off")
         {
             _search = new Search();
-            _bias = null;
             _builtMode = "off";
             _searchStale = false;
             return true;
         }
 
-        if (!_substrateTried)
+        if (!_substrateTried || _providers is null)
         {
             if (!allowInit)
             {
@@ -146,51 +156,43 @@ public sealed class UciEngine
             try
             {
                 CodepointPerfcache.LoadDefault();
-                var basis = new NpgsqlConnectionStringBuilder(ChessEngineService.ResolveConnString())
+                if (_ds is null)
                 {
-                    Timeout = 3,
-                    CommandTimeout = 5,
-                }.ConnectionString;
-                var ds = LaplaceDataSource.Create(SubstrateAccess.Serving, basis);
-                using (ds.OpenConnection()) { } // fail fast while we can still report it
-                _ds = ds;
+                    var basis = new NpgsqlConnectionStringBuilder(ChessEngineService.ResolveConnString())
+                    {
+                        Timeout = 3,
+                        CommandTimeout = 5,
+                    }.ConnectionString;
+                    var ds = LaplaceDataSource.Create(SubstrateAccess.Serving, basis);
+                    using (ds.OpenConnection()) { } // fail fast while setup time is available
+                    _ds = ds;
+                }
+                _providers = new ChessSearchProviders(_ds);
             }
             catch (Exception ex)
             {
                 _substrateTried = false;
-                Info(output, $"substrate unavailable ({FirstLine(ex.Message)})");
+                _providers = null;
+                Info(output, $"substrate provider initialization failed ({FirstLine(ex.Message)})");
                 return false;
             }
         }
 
-        if (_ds is null)
+        if (_providers is null)
         {
-            Info(output, "substrate initialization did not produce a serving connection");
+            Info(output, "substrate initialization did not produce a provider stack");
             return false;
         }
 
-        SubstrateBoardEvaluator evaluator;
-        try
-        {
-            evaluator = new SubstrateBoardEvaluator(_ds);
-        }
-        catch (Exception ex)
-        {
-            _substrateTried = false;
-            Info(output, $"substrate position census unavailable ({FirstLine(ex.Message)})");
-            return false;
-        }
-
-        IRootBias inner = new SubstrateRootBias(_ds);
-        _bias = inner;
-        _search = new Search(
-            EvalTerm.All, _bias, ttBits: 20,
-            positionEvaluator: evaluator,
-            tablebase: ChessTablebaseRuntime.ProbeSearch);
+        var configured = _providers.Configure(substrate: true);
+        _search = configured.BuildSearch(ttBits: 20);
         _builtMode = _substrateMode;
         _searchStale = false;
+        var prepared = configured.Receipt();
         Info(output,
-            $"substrate-guided search active (mode {_substrateMode}, position atoms {evaluator.LoadedAtoms}, syzygy {ChessTablebaseRuntime.Largest}-men)");
+            $"substrate provider stack prepared (learned-pst " +
+            $"{(prepared.LearnedPstContributes ? $"active:{prepared.LearnedPstNonZeroCells}" : "selected:no-delta")}, " +
+            $"syzygy {prepared.SyzygyLargestMen}-men); per-search usage is receipted after go");
         return true;
     }
 
@@ -211,16 +213,22 @@ public sealed class UciEngine
     }
 
     // Runs the search on a background task so "stop" (and the next "position"/"quit") can be
-    // read from stdin immediately instead of blocking behind Think() — real UCI GUIs (including
-    // cutechess-cli, which drives this exact path with tc=inf/depth=N, i.e. no time control at
-    // all) expect "stop" to be honored promptly, not just accepted and ignored.
+    // read from stdin immediately instead of blocking behind Think(). Each substrate search gets
+    // a fresh counting configuration so the receipt belongs to THIS go, not process lifetime.
     private void StartSearch(Search.Limits limits, TextWriter output)
     {
-        _searchCts?.Cancel();
+        StopSearch();
         var cts = new CancellationTokenSource();
         _searchCts = cts;
-        var board = Board.FromFen(_board.ToFen()); // stable snapshot; _board may be reassigned by a later "position"
-        var search = _search; // stable snapshot; a later setoption may rebuild _search
+        var board = Board.FromFen(_board.ToFen());
+        var search = _search;
+        ChessSearchConfiguration? configured = null;
+        if (_substrateMode != "off" && _providers is not null)
+        {
+            configured = _providers.Configure(substrate: true);
+            configured.ApplyTo(search);
+        }
+
         _searchTask = Task.Run(() =>
         {
             try
@@ -229,11 +237,13 @@ public sealed class UciEngine
                 var result = search.Think(board, limits, cts.Token);
                 sw.Stop();
                 string best = result.BestMove?.ToUci() ?? "0000";
+                var receipt = configured?.Receipt() ?? ChessSearchProviderReceipt.Classical;
                 lock (_outputLock)
                 {
                     output.WriteLine(
                         $"info depth {result.Depth} score {ScoreStr(result.Score)} " +
                         $"nodes {result.Nodes} time {sw.ElapsedMilliseconds} pv {best}");
+                    output.WriteLine($"info string providers {receipt.Summary}");
                     output.WriteLine($"bestmove {best}");
                     output.Flush();
                 }
@@ -313,9 +323,7 @@ public sealed class UciEngine
 
         int depth = Int("depth", 0);
         // A bounded ceiling even for an explicit depth request — "go depth N" with no other time
-        // control (e.g. cutechess-cli's tc=inf/depth=N, the exact invocation this engine is
-        // actually driven by) previously left MaxTimeMs at Limits' int.MaxValue default, so a
-        // pathological position could hang the process indefinitely with no way to recover.
+        // control (e.g. cutechess-cli's tc=inf/depth=N) must still remain interruptible.
         if (depth > 0) return new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 64), MaxTimeMs: 120_000);
 
         int movetime = Int("movetime", 0);
