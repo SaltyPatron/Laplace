@@ -31,6 +31,10 @@ class LiveRecursiveProofGateTests(unittest.TestCase):
         self.assertEqual("proof", value["schema"])
         self.assertEqual(20, len(value["examples"]))
 
+    def test_json_parser_accepts_surrounding_whitespace_only(self):
+        value = self.proof.parse_single_json_document('\n\t {"schema":"proof"} \r\n')
+        self.assertEqual({"schema": "proof"}, value)
+
     def test_json_parser_rejects_a_second_document(self):
         with self.assertRaisesRegex(RuntimeError, "trailing output"):
             self.proof.parse_single_json_document('{"one":1}\n{"two":2}\n')
