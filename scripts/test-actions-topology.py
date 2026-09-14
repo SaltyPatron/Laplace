@@ -84,6 +84,15 @@ class ActionsAuthorityTests(unittest.TestCase):
         names = {trigger} if isinstance(trigger, str) else set(trigger)
         self.assertEqual({"workflow_dispatch"}, names)
 
+    def test_database_recreate_restores_base_product_before_success(self):
+        db = load(WORKFLOWS / "db-ops.yml")
+        command = commands(db["jobs"]["db"])
+        self.assertIn("--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env", command)
+        self.assertIn("ensure-foundation.sh --force", command)
+        self.assertIn("check-substrate-floor.sh", command)
+        self.assertIn("verify-application-release.py --readiness-only", command)
+        self.assertNotIn("rebuilds it EMPTY", (WORKFLOWS / "db-ops.yml").read_text(encoding="utf-8"))
+
     def test_seed_workflows_are_manual_or_reusable_not_source_triggered(self):
         for path in sorted(WORKFLOWS.glob("seed-*.yml")):
             trigger = load(path)["on"]
