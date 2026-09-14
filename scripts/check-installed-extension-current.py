@@ -23,11 +23,16 @@ laplace_substrate--<version>.sql answers the question mechanically.
 Exit 0 current, 1 stale, 2 cannot determine. Stale is a real answer, not an error: it means
 a regress result must not be read as evidence about the tree.
 """
-import argparse, hashlib, pathlib, re, subprocess, sys
+import argparse
+import hashlib
+import pathlib
+import re
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 EXT = ROOT / "extension" / "laplace_substrate"
 SQL = EXT / "sql"
+
 
 def manifest_files(manifest):
     """laplace_manifest_files: one relative path per non-comment, non-blank line."""
@@ -37,6 +42,7 @@ def manifest_files(manifest):
         if line:
             out.append(SQL / line)
     return out
+
 
 def source_version(module_pathname):
     inputs = manifest_files(SQL / "manifest.install") + manifest_files(SQL / "manifest.upgrade")
@@ -51,7 +57,8 @@ def source_version(module_pathname):
     for p in inputs:
         s = str(p)
         if s not in seen:
-            seen.add(s); ordered.append(p)
+            seen.add(s)
+            ordered.append(p)
     ordered.sort(key=str)
 
     acc = ""
@@ -66,29 +73,38 @@ def source_version(module_pathname):
     acc += f"module_pathname={module_pathname}"
     return hashlib.sha256(acc.encode()).hexdigest()[:16]
 
+
 def installed_versions():
     found = []
     for base in ("/opt/laplace/share/postgresql", "/opt/laplace/pgsql-18/share"):
         d = pathlib.Path(base)
-        if not d.exists(): continue
+        if not d.exists():
+            continue
         for p in d.rglob("laplace_substrate--*.sql"):
             m = re.fullmatch(r"laplace_substrate--([0-9a-fA-F]{16})\.sql", p.name)
-            if m: found.append((m.group(1), p))
+            if m:
+                found.append((m.group(1), p))
     return found
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--module-pathname", default="laplace_substrate",
                     help="EXT_MODULE_PATHNAME the install was configured with")
+    ap.add_argument("--print-source-version", action="store_true",
+                    help="print only the source-computed extension version")
     a = ap.parse_args()
+
+    want = source_version(a.module_pathname)
+    if want is None:
+        return 2
+    if a.print_source_version:
+        print(want)
+        return 0
 
     installed = installed_versions()
     if not installed:
         print("no installed laplace_substrate--<version>.sql found", file=sys.stderr)
-        return 2
-
-    want = source_version(a.module_pathname)
-    if want is None:
         return 2
 
     names = {v for v, _ in installed}
@@ -105,6 +121,7 @@ def main():
           "--reconfigure for SQL changes) before reading a regress result as evidence.",
           file=sys.stderr)
     return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

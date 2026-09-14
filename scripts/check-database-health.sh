@@ -8,6 +8,7 @@
 # belongs to Tier=live/eval/smoke.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DB="${1:-${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}}"
 PGHOST="${PGHOST:-/var/run/postgresql}"
 PGUSER="${PGUSER:-laplace_admin}"
@@ -32,6 +33,19 @@ ext=$("${PSQL[@]}" -d "$DB" -tAc \
   "SELECT extversion FROM pg_extension WHERE extname = 'laplace_substrate'" 2>/dev/null || true)
 [[ -n "$ext" ]] || fail "laplace_substrate extension is not installed in '$DB'"
 
+# Source, installed extension artifacts, and the database catalog must name the same
+# content-derived extension version. A green regression against a stale installed SQL
+# artifact or a successful source build cannot establish that the live database was
+# upgraded. This gate runs after sync-extension and therefore treats any mismatch as a
+# failed deployment, not as an informational warning.
+if ! "$SCRIPT_DIR/check-installed-extension-current.py" >/dev/null; then
+  fail "installed laplace_substrate artifacts do not match the current source"
+fi
+source_ext=$("$SCRIPT_DIR/check-installed-extension-current.py" --print-source-version)
+[[ -n "$source_ext" ]] || fail "could not determine the source laplace_substrate version"
+[[ "$ext" == "$source_ext" ]] || \
+  fail "live laplace_substrate version is stale: database=$ext source=$source_ext"
+
 missing=$("${PSQL[@]}" -d "$DB" -tAc "
 WITH required(name) AS (VALUES
   ('laplace.entities'),
@@ -45,6 +59,21 @@ SELECT string_agg(name, ', ' ORDER BY name)
 FROM required
 WHERE to_regclass(name) IS NULL;")
 [[ -z "$missing" ]] || fail "required substrate relations missing: $missing"
+
+# relation_bands() used to aggregate the complete consensus tree at read time. The
+# current implementation maintains exact counts transactionally in a compact catalog.
+# Verify the live function body and supporting relation after extension synchronization
+# so an old full-scan definition cannot continue serving traffic unnoticed.
+relation_band_counts=$("${PSQL[@]}" -d "$DB" -tAc \
+  "SELECT to_regclass('converse.relation_band_live_counts') IS NOT NULL;")
+[[ "$relation_band_counts" == "t" ]] || \
+  fail "relation-band live-count catalog is missing; extension upgrade is incomplete"
+relation_bands_def=$("${PSQL[@]}" -d "$DB" -tAc \
+  "SELECT pg_get_functiondef('converse.relation_bands()'::regprocedure);")
+[[ "$relation_bands_def" == *"relation_band_live_counts"* ]] || \
+  fail "converse.relation_bands() is stale and does not use maintained live counts"
+[[ "$relation_bands_def" != *"FROM laplace.consensus"* ]] || \
+  fail "converse.relation_bands() still performs a full consensus-tree read"
 
 # Bind the native attestation COPY surface without reading or writing evidence.
 # Table existence and an extension version alone do not prove an upgrade applied
@@ -117,4 +146,4 @@ if [[ "${op_invalid:-0}" != "0" ]]; then
   fail "ops.index_health reports $op_invalid invalid index(es)"
 fi
 
-echo "DB_HEALTH_OK database=$DB extension=$ext required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=0 seed_state=not_required"
+echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext relation_bands=maintained_counts required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=0 seed_state=not_required"

@@ -113,7 +113,15 @@ class PeerMapTests(unittest.TestCase):
 
 
 class DatabaseHealthScriptTests(unittest.TestCase):
-    def _run_health(self, *, connect_fail=False, missing_writer_column=False):
+    def _run_health(
+        self,
+        *,
+        connect_fail=False,
+        missing_writer_column=False,
+        database_extension="test-ext",
+        source_extension="test-ext",
+        stale_relation_bands=False,
+    ):
         with tempfile.TemporaryDirectory(prefix="laplace-db-health-test-") as temporary:
             temp = Path(temporary)
             fake_bin = temp / "bin"
@@ -150,9 +158,16 @@ if query == "SELECT 1":
         raise SystemExit(8)
     print("1")
 elif "SELECT extversion FROM pg_extension" in query:
-    print("test-ext")
+    print(os.environ["FAKE_DATABASE_EXTENSION"])
 elif "string_agg(name" in query:
     print("")
+elif "to_regclass('converse.relation_band_live_counts')" in query:
+    print("t")
+elif "pg_get_functiondef('converse.relation_bands()'::regprocedure)" in query:
+    if os.environ.get("FAKE_STALE_RELATION_BANDS") == "1":
+        print("CREATE FUNCTION converse.relation_bands() RETURNS SETOF record LANGUAGE sql AS $$ SELECT * FROM laplace.consensus $$;")
+    else:
+        print("CREATE FUNCTION converse.relation_bands() RETURNS SETOF record LANGUAGE sql AS $$ SELECT * FROM converse.relation_band_live_counts $$;")
 elif "FROM laplace.attestations WHERE false" in query:
     if os.environ.get("FAKE_PSQL_MISSING_WRITER_COLUMN") == "1":
         print('column "fold_replayable" does not exist', file=sys.stderr)
@@ -172,13 +187,36 @@ else:
             )
             psql.chmod(0o755)
 
+            # check-installed-extension-current.py uses /usr/bin/env python3. Intercept
+            # only that subprocess in the health-script environment; fake psql uses the
+            # absolute interpreter above and is therefore unaffected.
+            python3 = fake_bin / "python3"
+            python3.write_text(
+                f"""#!{sys.executable}
+import os
+import sys
+
+if sys.argv[1:] == ["--print-source-version"]:
+    print(os.environ["FAKE_SOURCE_EXTENSION"])
+    raise SystemExit(0)
+# The default checker path proves installed artifact parity. Tests model a current
+# installed artifact unless a dedicated checker test says otherwise.
+raise SystemExit(0)
+"""
+            )
+            python3.chmod(0o755)
+
             env = os.environ.copy()
             env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
             env["FAKE_PSQL_LOG"] = str(log)
+            env["FAKE_DATABASE_EXTENSION"] = database_extension
+            env["FAKE_SOURCE_EXTENSION"] = source_extension
             if connect_fail:
                 env["FAKE_PSQL_CONNECT_FAIL"] = "1"
             if missing_writer_column:
                 env["FAKE_PSQL_MISSING_WRITER_COLUMN"] = "1"
+            if stale_relation_bands:
+                env["FAKE_STALE_RELATION_BANDS"] = "1"
 
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/check-database-health.sh"), "laplace"],
@@ -194,8 +232,8 @@ else:
     def test_health_connects_to_target_database_without_psql_command_metasyntax(self):
         result, calls = self._run_health()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("DB_HEALTH_OK database=laplace extension=test-ext", result.stdout)
-        self.assertGreaterEqual(len(calls), 7)
+        self.assertIn("DB_HEALTH_OK database=laplace extension=test-ext source_extension=test-ext relation_bands=maintained_counts", result.stdout)
+        self.assertGreaterEqual(len(calls), 9)
         self.assertEqual("laplace", calls[0][calls[0].index("-d") + 1])
         self.assertEqual("SELECT 1", calls[0][-1])
         self.assertTrue(all(":'" not in call[-1] and ':"' not in call[-1] for call in calls))
@@ -211,6 +249,18 @@ else:
         result, calls = self._run_health(missing_writer_column=True)
         self.assertNotEqual(0, result.returncode)
         self.assertIn("attestation writer columns are missing", result.stderr)
+        self.assertNotIn("DB_HEALTH_OK", result.stdout)
+
+    def test_health_rejects_database_extension_version_that_differs_from_source(self):
+        result, _ = self._run_health(database_extension="old-ext", source_extension="new-ext")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("live laplace_substrate version is stale: database=old-ext source=new-ext", result.stderr)
+        self.assertNotIn("DB_HEALTH_OK", result.stdout)
+
+    def test_health_rejects_old_relation_bands_full_consensus_read(self):
+        result, _ = self._run_health(stale_relation_bands=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("converse.relation_bands() is stale", result.stderr)
         self.assertNotIn("DB_HEALTH_OK", result.stdout)
 
 
