@@ -134,6 +134,12 @@ SQL_QUERY("chess.roster_rd_desc", "bytea,bytea,bytea,int8",
 SQL_QUERY("leaders.page", "int4[],int4",
     "SELECT band,encode(subject_id,'hex'),subject,relation,encode(object_id,'hex'),object,eff_mu,witnesses "
     "FROM ops.band_leaders($1,$2)")
+SQL_QUERY("leaders.named", "int4[],int4",
+    "SELECT l.band,b.name,encode(l.subject_id,'hex'),l.subject,l.relation,"
+    "encode(l.object_id,'hex'),l.object,l.eff_mu,l.witnesses "
+    "FROM ops.band_leaders($1,$2) AS l "
+    "JOIN converse.relation_band_catalog() AS b ON b.band=l.band "
+    "ORDER BY l.band,l.eff_mu DESC,l.subject_id,l.object_id")
 SQL_QUERY("consensus.band_edges", "bytea[],int8,int8",
     "SELECT subject_id,type_id,object_id,rating,rd,witness_count,(rating - 2*rd) AS eff_mu "
     "FROM laplace.consensus WHERE type_id=ANY($1) AND object_id IS NOT NULL "
@@ -143,6 +149,10 @@ SQL_QUERY("consensus.band_edges", "bytea[],int8,int8",
 SQL_QUERY("leaders.arena", "int4,int8",
     "SELECT subject_id,type_id,object_id,rating,rd,witness_count FROM consensus.band_edges($1,NULL,$2)")
 
+SQL_QUERY("conversation.resolve_ref_with_label", "text",
+    "WITH resolved AS (SELECT converse.resolve_ref($1) AS id) "
+    "SELECT r.id,COALESCE(NULLIF(realize.render_text_fast(r.id,8),''),converse.label_or_hex(r.id)) AS label "
+    "FROM resolved AS r WHERE r.id IS NOT NULL")
 SQL_QUERY("conversation.forward_turn", "text,bytea,int4,int4,float8,int4",
     "SELECT step,entity,stride_used FROM converse.forward_turn($1,$2,$3,$4,$5,$6) ORDER BY step")
 SQL_QUERY("conversation.forward_trace", "text,int4,int4,float8,int4,int4,int4",
