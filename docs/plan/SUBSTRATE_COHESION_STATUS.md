@@ -40,9 +40,9 @@ Packed trajectory carrier values are not realized spatial positions.
 
 ### Current executable identity nuance
 
-For native multi-child composition, `tier` participates in the current Merkle recipe. Single-child composition collapses to the child id. Source/provenance facts are separate from canonical content identity.
+Current native multi-child identity is a BLAKE3-derived hash over the Merkle domain plus the **ordered child-id sequence**. Although `hash128_merkle` retains a `tier` parameter in its ABI, `engine/core/src/hash128.c` explicitly discards it with `(void)tier`; tier is not mixed into the current content id. Single-child composition collapses to the child id.
 
-Normal same-content convergence is not a cryptographic collision.
+Source/provenance/worker/batch/container facts are likewise separate from canonical content identity. Normal same-content convergence is content-address convergence, not a cryptographic collision.
 
 ### Query-relative coupling
 
@@ -79,11 +79,12 @@ See #1436 and `docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`.
 This list is intentionally architectural rather than a replacement issue backlog:
 
 1. reconcile current native centroid versus managed/domain Karcher parent-coordinate laws;
-2. land the exhaustive live recursive physicality/trajectory/reference closure proof gate;
+2. land the exhaustive live recursive physicality/trajectory/reference closure proof gate (#1562);
 3. prove complete typed query-relative coupling coverage channel by channel;
 4. continue replacing legacy RBAR/small-boundary execution across every pipeline with canonical coarse native/set operators;
-5. make benchmark defaults preserve managed-host service headroom while retaining an explicit saturation profile;
-6. prove claimed product/cognition quality and resource economics end to end with exact receipts.
+5. produce a fresh managed-host serviceable-capacity receipt under the now-enforced headroom policy;
+6. add query/cognition preflight-vs-actual work receipts in hops/fanout/responders/resources (#1561);
+7. prove claimed product/cognition quality and resource economics end to end with exact receipts.
 
 Each of those is an implementation obligation tracked by current issues/code/tests. None is permission to narrow the invention.
 
