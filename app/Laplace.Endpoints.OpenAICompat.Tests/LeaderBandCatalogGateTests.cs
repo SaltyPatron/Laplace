@@ -5,29 +5,31 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 
 /// <summary>
 /// The leaders page needs immutable band names, not the live relation-band census.
-/// Keep the bounded leaderboard query and the naming catalog independent and reject
-/// any regression that puts converse.relation_bands() back on the request path.
+/// Keep the bounded leaderboard and naming catalog in one set-wise database command
+/// and reject any regression that puts converse.relation_bands() back on the request path.
 /// </summary>
 public sealed class LeaderBandCatalogGateTests
 {
     [Fact]
-    public void Leaders_UsesImmutableBandCatalogWithoutLiveCountAggregate()
+    public void Leaders_UsesOneNamedSetWiseReadWithoutLiveCountAggregate()
     {
         var text = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs");
         var method = ExtractMethod(text, "public async Task<IReadOnlyList<BandLeaders>> LeadersAsync");
 
-        Assert.Contains("NpgsqlSubstrateReads.BandLeadersAsync(", method);
-        Assert.Contains("NpgsqlSubstrateReads.RelationBandCatalogAsync(", method);
-        Assert.Contains("Task.WhenAll(rowsTask, catalogTask)", method);
+        Assert.Contains("NpgsqlSubstrateReads.BandLeadersNamedAsync(", method);
+        Assert.DoesNotContain("NpgsqlSubstrateReads.BandLeadersAsync(", method);
         Assert.DoesNotContain("RelationBandsAsync(", method);
+        Assert.DoesNotContain("Task.WhenAll", method);
     }
 
     [Fact]
-    public void BandNamingRead_TargetsCatalogNotLiveCensus()
+    public void NamedLeaderRead_JoinsImmutableCatalogAndNeverLiveCensus()
     {
-        var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.RelationBands.cs");
-        Assert.Contains("FROM converse.relation_band_catalog()", text);
+        var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.BandLeaders.cs");
+        Assert.Contains("FROM ops.band_leaders(@bands, @per) AS l", text);
+        Assert.Contains("JOIN converse.relation_band_catalog() AS b", text);
         Assert.DoesNotContain("FROM converse.relation_bands()", text);
+        Assert.DoesNotContain("JOIN converse.relation_bands()", text);
     }
 
     private static string ExtractMethod(string text, string signaturePrefix)
