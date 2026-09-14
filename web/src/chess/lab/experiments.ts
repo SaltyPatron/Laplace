@@ -35,20 +35,20 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'substrate-test',
     title: 'Substrate lift test',
-    tagline: 'Does witnessed substrate experience beat classical search?',
+    tagline: 'Real move-selection test: does witnessed substrate experience beat the control?',
     description:
-      'Laplace fuses position transitions, reusable move physicality, and composed child-state structure while the control uses classical search. '
-      + 'Completed games advance substrate evidence, so later games in the same run consume the new state.',
+      'MOVE-SELECTION PARTICIPATION: YES in transition mode. The Laplace side runs Search with witnessed root transition/move evidence, substrate leaf evaluation, learned PST/tactical residuals when populated, and exact Syzygy closure; the Off side is the conventional control. '
+      + 'LEARNING: YES. Completed games are witnessed back to substrate, so later games can consume newly folded state. The emitted provider metrics are the proof of actual reads/contributions — provider availability alone is not counted as use.',
     expect: [
       'Live W-D-L score and Elo difference in the feed',
       'Final results table with Elo ± margin',
       'games_recorded metric — every game is witnessed to substrate during the run',
-      'bounded trunk reads plus exact-transition, move-physicality, child-structure, and substrate-epoch metrics',
+      'provider-use metrics: root/transition reads, non-zero child-state contributions, learned/tactical coverage where present, Syzygy coverage, and substrate epoch',
       'games.pgn artifact for archival',
     ],
     tips: [
-      'Transition mode is the Laplace path; Off is the conventional sanity control.',
-      'Use opening book when the corpus has ECO coverage — random starts need more games.',
+      'Transition mode is the actual substrate-enabled playing path; Off is the conventional sanity control.',
+      'A loaded provider with zero reads/non-zero contributions did not affect that search. Use the receipt metrics, not the label.',
       'Concurrency 0 uses all performance cores; scale games before depth for stable Elo.',
     ],
     category: 'substrate',
@@ -57,20 +57,20 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'ladder',
     title: 'Eval overlay ladder',
-    tagline: 'Which eval terms actually matter?',
+    tagline: 'Classical ablation only — not proof that substrate learning participates.',
     description:
-      'For each classical overlay (material, PST, bishop pair, …), plays full eval vs eval-minus-that-term. '
-      + 'Positive Elo on a row means removing that overlay weakens the engine — the overlay helps.',
+      'MOVE-SELECTION PARTICIPATION: CLASSICAL ONLY. For each deterministic eval term (material, PST, bishop pair, rook files, pawn structure, tempo), this job plays full classical eval vs classical eval-minus-that-term. It does NOT exercise the substrate provider stack, learned PST residual, learned tactic outcomes, player conditioning, or Syzygy as evidence that Laplace learned. '
+      + 'LEARNING: the optional recorded games become substrate evidence, but that is a recording side effect; it does not make this ablation a learned-policy test.',
     expect: [
-      'Six-term ablation table with W-D-L and Elo per row',
+      'Six-term classical ablation table with W-D-L and Elo per row',
       'Parallel progress across terms in the job summary',
-      'All games recorded to substrate (not throwaway ablation)',
+      'Recorded games can extend the corpus, but provider participation is intentionally absent from these matches',
       'games.pgn combining every term\'s games',
     ],
     tips: [
-      'This is in-process Search — not laplace-uci vs Stockfish.',
+      'Use Substrate lift test or the UCI gauntlet provider receipt to test whether learned/substrate providers actually affect play.',
+      'This is in-process classical Search — not laplace-uci vs Stockfish and not the complete Chess Forward Pass.',
       'Core budget splits across six terms; 0 = all performance cores.',
-      'Large game counts are fine — stop cancels in-flight parallel search.',
     ],
     category: 'substrate',
     recordsLive: true,
@@ -78,16 +78,16 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'learned-pst',
     title: 'Learned PST grid',
-    tagline: 'What the corpus learned about squares.',
+    tagline: 'Provider inspection: the same learned residual consumed by substrate-enabled Search.',
     description:
-      'Reads the data-driven piece-square table already folded into consensus — deviation from a draw baseline, '
-      + 'witness-weighted per square. Instant read; no games played.',
+      'MOVE-SELECTION PARTICIPATION: YES when the learned table has non-zero cells and substrate play is enabled. This job itself is read-only: it displays the data-driven piece-square residual folded from move OUTCOME consensus. Search consumes that residual as a distinct leaf-evaluation plane; the UCI provider receipt reports actual reads and non-zero contributions.',
     expect: [
       'Table of top squares by deviation for each piece type',
       'Coverage percentage per piece',
+      'This view performs no training; it inspects a provider that the playing path consumes separately',
     ],
     tips: [
-      'Run substrate-test or ladder first if the grid is sparse.',
+      'A populated grid proves learned state exists; only search receipts prove that a particular move search actually consumed and was changed by it.',
       'Positive deviation = good for the side to move from that square.',
     ],
     category: 'substrate',
@@ -96,16 +96,16 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'tactics',
     title: 'Tactics solve rate',
-    tagline: 'Can the engine find mates?',
+    tagline: 'Classical mate-finding diagnostic — separate from learned tactical-pattern evidence.',
     description:
-      'Runs the built-in mate-in-N EPD suite at your chosen depth. Reports solve rate and per-position hits/misses.',
+      'MOVE-SELECTION PARTICIPATION: this diagnostic constructs plain classical Search and checks whether it finds the built-in mate-in-N answers. It does NOT prove the learned fork/pin/skewer outcome provider participated. Learned tactical patterns are a separate substrate leaf plane in substrate-enabled play and are receipted there.',
     expect: [
       'solve_rate metric as a percentage',
       'Per-position table: id, ok/miss, engine move, expected move',
     ],
     tips: [
       'Depth 6+ for harder mates; depth 4 is a quick smoke test.',
-      'Does not write to substrate — pure engine diagnostic.',
+      'Does not write to substrate and does not exercise the learned tactical provider — pure classical engine diagnostic.',
     ],
     category: 'diagnostics',
     recordsLive: false,
@@ -113,10 +113,9 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'review',
     title: 'PGN review triage',
-    tagline: 'Find blunders and crazy wins.',
+    tagline: 'Offline analysis; it does not select Laplace moves.',
     description:
-      'Analyzes a server-side PGN file: centipawn loss per side, blunder counts, and flags wins where the winner was '
-      + 'down significant material (eval blind-spot candidates).',
+      'MOVE-SELECTION PARTICIPATION: NO. This reads a server-side PGN after games exist and computes centipawn-loss/blunder review data. It can identify candidate failures for later ingestion or inspection, but the review job itself is not a provider in the live Search path.',
     expect: [
       'Per-game table: players, result, ACPL, crazy-win flag',
       'Worst-move details logged for flagged games',
@@ -131,9 +130,9 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'lichess-fetch',
     title: 'Ingest player games',
-    tagline: 'Import a player’s complete Lichess or Chess.com archive and identity.',
+    tagline: 'Training/input acquisition — affects play only after evidence is folded into a selected provider.',
     description:
-      'Streams the requested archive, records and analyzes novel games, attributes them to the provider username, and imports provider/FIDE profile links.',
+      'MOVE-SELECTION PARTICIPATION: INDIRECT. This job streams a player archive, records/analyzes novel games, attributes them to the provider username, and imports identity/profile links. The importer never picks a move. Its data can affect later play only through providers Search actually selects (for example global transitions, learned move/PST evidence, learned tactical outcomes, and future player-conditioned providers).',
     expect: [
       'games_fetched count',
       'games_ingested and profiles_ingested counts',
@@ -141,7 +140,7 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     ],
     tips: [
       'Leave “Ingest all games” on for the complete available archive; turn it off to apply a cap.',
-      'Add a FIDE ID to connect the online account to an official real-world identity.',
+      'Imported does not mean used: verify later move searches with provider receipts.',
     ],
     category: 'import',
     recordsLive: false,
@@ -149,9 +148,9 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'fide-search',
     title: 'Find FIDE identity',
-    tagline: 'Resolve a real name to official FIDE candidates before associating an account.',
+    tagline: 'Identity lookup only — never a move-selection provider.',
     description:
-      'Searches the official FIDE ratings database and returns FIDE ID, name, title, federation, ratings, and birth year for disambiguation.',
+      'MOVE-SELECTION PARTICIPATION: NO. Searches the official FIDE ratings database and returns FIDE ID, name, title, federation, ratings, and birth year for disambiguation. Selecting/importing an identity can support future player-conditioned evidence, but this lookup does not alter Search.',
     expect: ['Ranked candidate table with official FIDE IDs', 'One-click profile import without downloading games'],
     tips: ['Search either “Magnus Carlsen” or “Carlsen, Magnus”, then import the selected official profile.'],
     category: 'import',
@@ -160,8 +159,8 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'fide-profile',
     title: 'Import one FIDE profile',
-    tagline: 'Write one selected official identity without downloading games.',
-    description: 'Loads the selected identity and all published rating planes from FIDE’s official rating-list estate, then writes it to Laplace.',
+    tagline: 'Profile evidence input — not automatically a playing-policy input.',
+    description: 'MOVE-SELECTION PARTICIPATION: INDIRECT. Loads one official identity and published rating planes into Laplace. The profile is durable evidence, but it affects move choice only when a selected player/opponent-conditioned provider consumes it; import success alone is not proof of use.',
     expect: ['One durable Chess_Player profile', 'Standard, rapid, and blitz source ratings where published'],
     tips: ['Usually use the Import profile button on a FIDE search result.'],
     category: 'import',
@@ -170,9 +169,9 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'player-profile',
     title: 'Associate player identities',
-    tagline: 'Acquire provider and FIDE profiles without redownloading games.',
+    tagline: 'Identity/provenance input — not a live move selector.',
     description:
-      'Fetches the selected Chess.com or Lichess profile and an optional official FIDE profile, then writes their metadata and identity link as one substrate operation. If no FIDE ID is supplied, it shows official candidates from the provider real name.',
+      'MOVE-SELECTION PARTICIPATION: INDIRECT. Fetches the selected Chess.com or Lichess profile and an optional official FIDE profile, then writes metadata and the explicit identity link. This makes player-conditioned evidence possible; it does not itself change candidate scores.',
     expect: ['Provider and official profile table', 'Downloadable profile JSON', 'identity_links receipt or FIDE candidates'],
     tips: ['Use Find FIDE identity when several people share the same name; only an explicitly selected FIDE ID is associated.'],
     category: 'import',
@@ -181,9 +180,9 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
   {
     kind: 'fide-roster',
     title: 'Ingest FIDE top players',
-    tagline: 'Acquire an official top-N cohort as player profiles.',
+    tagline: 'Cohort/profile input — not automatically part of live Search.',
     description:
-      'Reads FIDE’s official open, women, junior, or girls ranking for standard, rapid, or blitz; fetches each selected profile; and writes the cohort in one substrate operation.',
+      'MOVE-SELECTION PARTICIPATION: INDIRECT. Reads an official FIDE ranking cohort, fetches selected profiles, and writes them as substrate evidence. The job expands player/rating knowledge; move selection changes only when a selected context provider actually consumes that evidence.',
     expect: ['Official ranked player table', 'Profile acquisition progress', 'profiles_ingested receipt'],
     tips: ['Start with 25 to inspect the cohort; the official pages currently publish up to 100 per list.'],
     category: 'import',
