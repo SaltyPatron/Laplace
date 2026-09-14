@@ -3,6 +3,8 @@ name: Laplace — manual benchmark evidence
 # Dispatch-only by design. Long benchmarks are evidence/calibration inputs, not
 # commit/push/PR gates. The measured self-hosted host is shared with delivery, so
 # this workflow uses the same workspace concurrency authority and cannot overlap it.
+# Scaling defaults preserve host headroom; destructive all-logical-CPU saturation
+# requires an explicit opt-in.
 on:
   workflow_dispatch:
     inputs:
@@ -23,10 +25,20 @@ on:
         required: true
         default: "3"
       scale_workers:
-        description: "optional comma-separated scale points; blank derives physical-core/SMT points"
+        description: "optional comma-separated worker points; blank derives serviceable points with reserved host headroom"
         type: string
         required: false
         default: ""
+      reserve_logical_cpus:
+        description: "logical CPUs reserved from the default managed-host scaling ceiling"
+        type: string
+        required: true
+        default: "2"
+      allow_saturation:
+        description: "explicitly allow scale points through every allowed logical CPU; isolated/saturation evidence only"
+        type: boolean
+        required: true
+        default: false
       corpus_dir:
         description: "core benchmark corpus root (blank = repository)"
         type: string
@@ -93,6 +105,7 @@ jobs:
         shell: bash
         env:
           REPEATS: ${{ inputs.repeats }}
+          RESERVE_LOGICAL_CPUS: ${{ inputs.reserve_logical_cpus }}
         run: |
           set -euo pipefail
           python3 scripts/benchmark_suite.py validate
@@ -105,6 +118,28 @@ jobs:
             echo "::error::repeats must be <= 100"
             exit 2
           }
+          [[ "$RESERVE_LOGICAL_CPUS" =~ ^[0-9]+$ ]] || {
+            echo "::error::reserve_logical_cpus must be a non-negative integer"
+            exit 2
+          }
+
+      - name: Resolve serviceable scaling plan
+        shell: bash
+        env:
+          REQUESTED_SCALE_WORKERS: ${{ inputs.scale_workers }}
+          RESERVE_LOGICAL_CPUS: ${{ inputs.reserve_logical_cpus }}
+          ALLOW_SATURATION: ${{ inputs.allow_saturation }}
+        run: |
+          set -euo pipefail
+          args=(
+            --reserve-logical "$RESERVE_LOGICAL_CPUS"
+            --github-env "$GITHUB_ENV"
+            --json "$LAPLACE_BENCH_RECEIPT/scale-plan.json"
+          )
+          [[ -z "${REQUESTED_SCALE_WORKERS:-}" ]] || args+=(--workers "$REQUESTED_SCALE_WORKERS")
+          [[ "$ALLOW_SATURATION" != true ]] || args+=(--allow-saturation)
+          python3 scripts/benchmark_scale_plan.py "${args[@]}" \
+            | tee "$LAPLACE_BENCH_RECEIPT/scale-plan.txt"
 
       - name: Record source, runner, hardware and accelerator inventory
         shell: bash
@@ -118,6 +153,9 @@ jobs:
             printf 'run_id=%s\n' "$GITHUB_RUN_ID"
             printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
             printf 'suite=%s\n' "${{ inputs.suite }}"
+            printf 'scale_mode=%s\n' "${LAPLACE_BENCH_SCALE_MODE:-unknown}"
+            printf 'scale_workers=%s\n' "${LAPLACE_BENCH_SCALE_WORKERS:-unknown}"
+            printf 'scale_ceiling=%s\n' "${LAPLACE_BENCH_SCALE_CEILING:-unknown}"
             printf 'observed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'runner_name=%s\n' "$RUNNER_NAME"
             printf 'runner_os=%s\n' "$RUNNER_OS"
@@ -188,12 +226,12 @@ jobs:
         env:
           SUITE: ${{ inputs.suite }}
           REPEATS: ${{ inputs.repeats }}
-          SCALE_WORKERS: ${{ inputs.scale_workers }}
           CORPUS_DIR: ${{ inputs.corpus_dir }}
           MOBY_PATH: ${{ inputs.moby_path }}
         run: |
           set -euo pipefail
           corpus="${CORPUS_DIR:-$GITHUB_WORKSPACE}"
+          scale_workers="${LAPLACE_BENCH_SCALE_WORKERS:-}"
           args=(
             run
             --suite "$SUITE"
@@ -204,7 +242,7 @@ jobs:
             --core "$LAPLACE_CORE"
             --t0 "$LAPLACE_T0"
           )
-          [[ -z "${SCALE_WORKERS:-}" ]] || args+=(--scale-workers "$SCALE_WORKERS")
+          [[ -z "$scale_workers" ]] || args+=(--scale-workers "$scale_workers")
           python3 scripts/benchmark_suite.py "${args[@]}" 2>&1 \
             | tee "$LAPLACE_BENCH_RECEIPT/suite.log"
 
@@ -231,6 +269,8 @@ jobs:
             echo "- Commit: \`$sha\`"
             echo "- Runner: \`$RUNNER_NAME\`"
             echo "- Suite: \`${{ inputs.suite }}\`"
+            echo "- Scale profile: \`${LAPLACE_BENCH_SCALE_MODE:-unknown}\`"
+            echo "- Scale workers: \`${LAPLACE_BENCH_SCALE_WORKERS:-unknown}\`"
             echo "- Artifact: \`laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
             if [[ -f "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" ]]; then
               echo
@@ -246,8 +286,9 @@ jobs:
                   print(f"- codepoints/s: {result['codepoints_per_second']:,.0f}")
                   print(f"- 4-char BPE-equivalent/s: {result['bpe_equivalent_tokens_per_second_4chars']:,.0f}")
                   print(f"- tier-tree nodes/s: {result['tier_tree_nodes_per_second']:,.0f}")
-              elif profile == 'core-scale':
+              elif profile in {'core-scale', 'core-scale-streams'}:
                   best = max(result['points'], key=lambda p: p['bpe_equivalent_tokens_per_second_4chars'])
+                  print(f"- scaling mode: {result.get('scaling_mode', 'unknown')}")
                   print(f"- best measured workers: {best['workers']}")
                   print(f"- best 4-char BPE-equivalent/s: {best['bpe_equivalent_tokens_per_second_4chars']:,.0f}")
                   print(f"- speedup vs 1 worker: {best['speedup_vs_1_worker']:.3f}x")
