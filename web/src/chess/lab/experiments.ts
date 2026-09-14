@@ -38,17 +38,18 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     tagline: 'Real move-selection test: does witnessed substrate experience beat the control?',
     description:
       'MOVE-SELECTION PARTICIPATION: YES in transition mode. The Laplace side runs Search with witnessed root transition/move evidence, substrate leaf evaluation, learned PST/tactical residuals when populated, and exact Syzygy closure; the Off side is the conventional control. '
-      + 'LEARNING: YES. Completed games are witnessed back to substrate, so later games can consume newly folded state. The run metrics prove combined substrate reads/signals; the standalone UCI provider receipt gives per-search learned-PST/tactical/Syzygy attribution.',
+      + 'LEARNING BOUNDARY: measured games do not train one another. All plies are buffered while the match uses one frozen evidence generation; only after the measured batch closes are completed games written to substrate, so they can affect later runs but never sibling games in the same measurement. The run metrics prove combined substrate reads/signals; the standalone UCI provider receipt gives per-search learned-PST/tactical/Syzygy attribution.',
     expect: [
       'Live W-D-L score and Elo difference in the feed',
       'Final results table with Elo ± margin',
-      'games_recorded metric — every game is witnessed to substrate during the run',
+      'games_recorded metric — completed games are committed after the measured batch closes',
       'root/transition and child-state evidence metrics; use the UCI provider receipt for learned-PST/tactical/Syzygy per-search attribution',
       'games.pgn artifact for archival',
     ],
     tips: [
       'Transition mode is the actual substrate-enabled playing path; Off is the conventional sanity control.',
       'A loaded provider with zero reads/non-zero contributions did not affect that search. Use receipts/metrics, not the label.',
+      'The evidence epoch is frozen for the measured batch; newly recorded games participate only in later runs.',
       'Concurrency 0 uses all performance cores; scale games before depth for stable Elo.',
     ],
     category: 'substrate',
