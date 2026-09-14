@@ -37,6 +37,7 @@ for f in \
   scripts/test-dataset-estate-refresh.sh \
   scripts/test-forward-prompt-analysis.py \
   scripts/test-upgrade-drop-order.py \
+  scripts/test-installed-extension-current.py \
   docs/plan/DATASET_ESTATE_REFRESH_OPERATOR.md \
   scripts/ci-policy.sh \
   scripts/ci-policy-suite.sh \
@@ -90,6 +91,10 @@ python3 scripts/test-live-recursive-proof-gate.py
 # a synthetic manifest before the live-catalog checker uses that model.
 python3 scripts/test-upgrade-drop-order.py
 python3 scripts/test-sql-manifest-dependencies.py
+
+# EXT_VERSION includes the content-versioned execution module. The installed/source
+# parity checker must therefore hash the same configured execution identity as CMake.
+python3 scripts/test-installed-extension-current.py
 
 # Ingest interruption is diagnostic metadata, never successful completion.
 python3 scripts/test-ingest-source-exit.py
