@@ -324,24 +324,32 @@ internal sealed partial class SubstrateClient
         byte[] playingId, CancellationToken ct)
     {
         byte[]? lineId = await NpgsqlSubstrateReads.ChessLineForPlayingAsync(
-            _dataSource, playingId, ct, TranslateReadError);
+            _dataSource, playingId, ct, TranslateReadError).ConfigureAwait(false);
         if (lineId is null)
             return Laplace.Chess.Service.ChessReplay.Replay(Array.Empty<Laplace.Engine.Core.Hash128>());
-        var rows = await NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
+
+        // Once the line identity is known, the line/playing trajectory fetch and setup-position
+        // lookup are independent. Start both before awaiting either; setup decoding remains
+        // ordered because it depends on the optional setup identity.
+        var rowsTask = NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
             _dataSource, [lineId, playingId],
             [PhysicalityType.Content, PhysicalityType.ChessComment],
             ct, TranslateReadError);
+        var setupIdTask = NpgsqlSubstrateReads.ChessSetupPositionIdAsync(
+            _dataSource, playingId, ct, TranslateReadError);
+        await Task.WhenAll(rowsTask, setupIdTask).ConfigureAwait(false);
+
+        var rows = rowsTask.Result;
         var moves = rows.Where(r => r.Type == PhysicalityType.Content
                                   && r.ParentId.AsSpan().SequenceEqual(lineId))
             .OrderBy(static r => r.Ordinal)
             .Select(static r => Laplace.Engine.Core.Hash128.FromBytes(r.EntityId)).ToArray();
-        byte[]? setupId = await NpgsqlSubstrateReads.ChessSetupPositionIdAsync(
-            _dataSource, playingId, ct, TranslateReadError);
+        byte[]? setupId = setupIdTask.Result;
         string? setup = null;
         if (setupId is not null)
         {
             var setupRows = await NpgsqlSubstrateReads.NestedTrajectoryConstituentsAsync(
-                _dataSource, [setupId], ct, TranslateReadError);
+                _dataSource, [setupId], ct, TranslateReadError).ConfigureAwait(false);
             var boards = Laplace.Chess.Service.ChessPositionTrajectory.Decode(setupRows);
             if (boards.TryGetValue(Laplace.Engine.Core.Hash128.FromBytes(setupId), out var board))
                 setup = board.ToFen();
@@ -354,7 +362,7 @@ internal sealed partial class SubstrateClient
         {
             var commentIds = commentRows.Select(static r => r.EntityId).ToArray();
             var rendered = await NpgsqlSubstrateReads.RenderTextBatchAsync(
-                _dataSource, commentIds, ct, TranslateReadError);
+                _dataSource, commentIds, ct, TranslateReadError).ConfigureAwait(false);
             if (rendered is not null && rendered.Length == commentRows.Length)
                 replay = Laplace.Chess.Service.ChessReplay.ApplyClockComments(replay, rendered);
         }
