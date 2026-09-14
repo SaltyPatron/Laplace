@@ -39,7 +39,9 @@ test.describe('chess UI', () => {
     await expect(page.getByLabel('Operator token', { exact: true })).toHaveCount(0);
     await expect(page.getByText('Operator access', { exact: true })).toHaveCount(0);
     const startButton = page.getByRole('button', { name: 'Start gauntlet', exact: true });
+    const limitStrength = page.getByLabel('Limit Stockfish by UCI Elo', { exact: true });
     await expect(startButton).toBeEnabled();
+    await expect(limitStrength).toBeChecked();
 
     const elo = page.getByRole('spinbutton', { name: 'Stockfish Elo cap' });
     await expect(elo).toHaveValue('2000');
@@ -51,7 +53,8 @@ test.describe('chess UI', () => {
     expect(starts[0].config).toMatchObject({ elo: '2300', limitStrength: 'true' });
     expect(startOperatorHeaders[0]).toBeUndefined();
 
-    await page.getByLabel('Limit Stockfish strength', { exact: true }).click();
+    await limitStrength.click();
+    await expect(limitStrength).not.toBeChecked();
     await expect(elo).toBeDisabled();
     await expect.poll(() => previews.at(-1)?.searchParams.get('limitStrength')).toBe('false');
     await startButton.click();
@@ -59,7 +62,8 @@ test.describe('chess UI', () => {
     expect(starts[1].config).toMatchObject({ elo: '2300', limitStrength: 'false' });
     expect(startOperatorHeaders[1]).toBeUndefined();
 
-    await page.getByLabel('Limit Stockfish strength', { exact: true }).click();
+    await limitStrength.click();
+    await expect(limitStrength).toBeChecked();
     await expect(elo).toBeEnabled();
     await expect(elo).toHaveValue('2300');
   });
