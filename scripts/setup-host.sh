@@ -124,7 +124,7 @@ seed_billing_from_operator_files() {
 }
 
 layer1_clean_foreign_build_artifacts() {
-    local proj
+    local proj mutable
     for proj in "$REPO_DIR"/app/Laplace.*; do
         [ -d "$proj" ] || continue
         ls "$proj"/*.csproj >/dev/null 2>&1 || continue
@@ -139,6 +139,30 @@ layer1_clean_foreign_build_artifacts() {
             sudo find "$d" -xdev -type d -exec chmod g+rws {} +
             sudo find "$d" -xdev -type f -exec chmod g+rwX {} +
         done
+    done
+
+    # Code generation is also a shared mutable-output boundary. setup-host hands
+    # Layer 1 to laplace-runner, while the same checkout is routinely used by the
+    # human operator. A prior root/operator codegen left .attestation-law-stamp
+    # and generated sources unwritable by the runner, aborting setup after the
+    # generator itself succeeded. Reconcile only generated outputs, preserve file
+    # ownership, and make the directories setgid so every later writer retains the
+    # laplace-runner group instead of re-poisoning the checkout.
+    for mutable in \
+        "$REPO_DIR/engine/core/src/generated" \
+        "$REPO_DIR/extension/laplace_substrate/sql/generated"; do
+        sudo install -d -g "$RUNNER_USER" -m 2770 "$mutable"
+        sudo find "$mutable" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
+        sudo find "$mutable" -xdev -type d -exec chmod g+rws {} +
+        sudo find "$mutable" -xdev -type f -exec chmod g+rwX {} +
+    done
+    for mutable in \
+        "$REPO_DIR/engine/core/include/laplace/core/relation_law.h" \
+        "$REPO_DIR/engine/core/include/laplace/core/pos_law.h" \
+        "$REPO_DIR/engine/core/include/laplace/core/highway_manifest.h"; do
+        [ -e "$mutable" ] || continue
+        sudo chgrp "$RUNNER_USER" "$mutable"
+        sudo chmod g+rw "$mutable"
     done
     return 0
 }
@@ -185,6 +209,7 @@ layer1_build_install_extensions() {
     fi
     # Reconcile pre-existing mutable outputs once before handing build ownership
     # to the same account that runs CI. Never run the compiler/install phase as root.
+    layer1_clean_foreign_build_artifacts
     if [ -d "$REPO_DIR/build" ]; then
         sudo find -H "$REPO_DIR/build" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
         sudo find -H "$REPO_DIR/build" -xdev -type d -exec chmod g+rws {} +
@@ -253,9 +278,13 @@ do_setup() {
     # Billing is part of setup — not a separate human mode.
     seed_billing_from_operator_files
 
+    # Privileged host policy is Layer 0 state. Reconcile it before any unprivileged
+    # compilation so a Layer 1 source/build failure cannot leave CI pinned to an
+    # obsolete root helper and force the operator through another full bootstrap.
+    managed_services_setup
+
     layer1_build_install_extensions
     layer1_up
-    managed_services_setup
 
     say "DONE — host ready. CI owns deploys + runtime secrets."
     cat <<EOF
