@@ -94,6 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           fast=1
+          verify_recursive=0
           if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
             fast=0
           else
@@ -101,7 +102,10 @@ jobs:
             while IFS= read -r path; do
               [[ -z "$path" ]] && continue
               case "$path" in
-                docs/*|.github/*|scripts/test-*|scripts/check-*|scripts/prove-*|scripts/ci-*|scripts/actions-audit.py|scripts/test-profiles.json|scripts/benchmark-profiles.json|scripts/product-ci.sh)
+                scripts/prove-*)
+                  verify_recursive=1
+                  ;;
+                docs/*|.github/*|scripts/test-*|scripts/check-*|scripts/ci-*|scripts/actions-audit.py|scripts/test-profiles.json|scripts/benchmark-profiles.json|scripts/product-ci.sh)
                   ;;
                 *)
                   fast=0
@@ -110,11 +114,16 @@ jobs:
             done < <(git diff --name-only "$BEFORE_SHA" "$TARGET_SHA")
           fi
           echo "LAPLACE_FAST_ONLY=$fast" >> "$GITHUB_ENV"
-          echo "change classification: fast_only=$fast"
+          echo "LAPLACE_VERIFY_RECURSIVE_PROOF=$verify_recursive" >> "$GITHUB_ENV"
+          echo "change classification: fast_only=$fast verify_recursive=$verify_recursive"
 
       - name: Fast source/tooling proof and installed-product reconciliation
         if: env.LAPLACE_FAST_ONLY == '1'
         run: bash scripts/product-ci.sh reconcile
+
+      - name: Verify changed recursive proof against the live product
+        if: env.LAPLACE_FAST_ONLY == '1' && env.LAPLACE_VERIFY_RECURSIVE_PROOF == '1'
+        run: python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"
 
       - name: Run full product lifecycle
         if: env.LAPLACE_FAST_ONLY != '1'
