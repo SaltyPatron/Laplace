@@ -53,12 +53,35 @@ The useful mental primitive is: **tug a strand; enumerate what tugs back, by wha
 
 A*, Dijkstra, strongest-walk, trajectory continuation, containment and geometric search are operators inside this web. None of them alone is “the intelligence.”
 
+### Query-relative coupling precedes unconstrained cognition
+
+A prompt/request is first one admitted observation with exact constituent occurrences, discourse bindings, context and open obligations. Laplace must not silently assume one interpretation and then let that assumption decide which strands are visible.
+
+The intended semantic order is:
+
+```text
+admitted observation/root
+-> query-relative coupling / typed response field
+-> joint interpretation / ambiguity disposition
+-> derived goal + provider/relation admissibility + obligations
+-> compiled physical program
+-> sparse execution
+-> fold/update
+-> realization / witness
+-> updated response field
+```
+
+Caller-supplied goals, relation masks or provider sets are valid when the caller explicitly requests a constrained operation. They are not a substitute for inference when the task is for Laplace to determine what the observation means.
+
+Typed response dimensions are not one universal relevance scalar. Structure, role compatibility, relation identity, exact ordinal/gap state, evidence, contradiction, standing, source dependence, geometry and provenance retain separate semantics until the selected program declares how each participates.
+
 ### Sparse forward execution, not world-sized brute force
 
-The forward program begins from the exact prompt/request/session trajectory and expands the structures that actually respond. Hops and fanout are first-class compute coordinates. Conceptually:
+After coupling/orientation, the forward program expands the structures that actually respond. Hops and fanout are first-class compute coordinates. Conceptually:
 
 ```text
 exact request/root trajectory
+-> typed response/coupling
 -> indexed typed star expansion
 -> bounded hop/fanout frontier
 -> preserve routes + convergence + standing + uncertainty
@@ -69,7 +92,7 @@ exact request/root trajectory
 
 The architectural objective is not to make an all-world dense comparison slightly faster. It is to address the relevant workset through indexes/perfcaches/direct identities and spend computation on the admitted frontier.
 
-Conventional transformer vocabulary may be used for comparison, never to redefine the native ontology. Rough functional correspondences include deterministic decomposition for tokenization, canonical identity/physicality for address/embedding roles, indexed responders for Q/K relevance, typed relation/operator channels for heads, responding entities/evidence/frontiers for values, hop/operation rounds for layers, substrate/session/perfcache state for KV-like memory, witnessing + Glicko fold for online learning, and dynamic trajectory continuation/realization for decoding.
+Conventional transformer vocabulary may be used for comparison, never to redefine the native ontology. Rough functional correspondences include deterministic decomposition for tokenization, canonical identity/physicality for address/embedding roles, query-relative coupling for QK-like relevance, typed relation/operator channels for heads, responding entities/evidence/frontiers for values, repeated couple/expand/fold/update rounds for layers, substrate/session/perfcache state for KV-like memory, witnessing + Glicko fold for online learning, and dynamic trajectory continuation/realization for decoding.
 
 Laplace is not required to reproduce transformer mathematics in order to reproduce useful AI functions.
 
@@ -96,6 +119,63 @@ Do not collapse distinct kinds of evidence into status prose.
 - Performance claims require exact-revision, exact-artifact, host/provider-bound benchmark receipts.
 
 A passing toy fixture does not prove a live-world invariant. A live database witness does not replace a universal mathematical proof. Both may be valuable for different claims.
+
+## Universal execution-grain law
+
+The same physical execution law applies across **decomposition, ingestion, reads, cognition, analysis, domain engines, reconstruction, synthesis and export**. Do not preserve it in one subsystem and violate it in another.
+
+The intended split is:
+
+```text
+boundary/orchestrator
+  enumerate / frame / batch / declare resources
+        |
+        v
+indexed or set-sized handoff
+        |
+        v
+native C/C++ core
+  loops / recursion / parsing kernels / composition /
+  trajectory work / search / fanout / reductions /
+  calculation / encoding / materialization
+        |
+        v
+bulk/set result + receipt
+```
+
+PostgreSQL owns persistence, MVCC, indexes, transactions and selective set operations. SPI is a prepared/set-sized bridge into that state. C# and SQL own orchestration, contracts, transport and product/session boundaries. They do not become alternate inner-loop runtimes.
+
+This means, across every pipeline stage:
+
+- **Decomposition:** do not pay managed/native or parser setup per atom/token/node when one native stream/batch can recover the structure.
+- **Ingestion:** do not probe, dedup, fold, COPY or commit one row/intent at a time when working-set/set-sized operations can own the same semantics.
+- **Read/cognition:** do not implement graph recursion, frontier fanout, ranking, realization or repeated candidate work as RBAR SQL/scalar function chains when native set-sized operators own it.
+- **Analysis/domain engines:** do not cross P/Invoke/SPI/database boundaries per search node, move, feature, tensor cell or candidate when one coarse native operation can process the batch/frontier.
+- **Reconstruction/export/synthesis:** do not fetch/write/transform one constituent, token, tensor value or output record at a time when the operation can stream or materialize in bulk under one recipe.
+
+The following are architecture-smell patterns whenever they sit inside a repeated/hot operation rather than at an intentionally cold boundary:
+
+```text
+caller loop -> scalar DB/native call
+per-row SPI_prepare/SPI_execute
+one P/Invoke per element/node
+recursive CTE as the cognition/trajectory inner engine
+uncontrolled LATERAL fanout
+per-call temp table / materialization
+per-item transaction/COPY
+batch API whose body loops scalar APIs
+duplicate scalar and batch semantic bodies
+format/export writer emitting through high-level per-value calls
+```
+
+The problem is not that SQL, C# or SPI are “slow languages.” The problem is **execution grain**: repeating boundary/planner/marshalling/transaction work around every semantic unit can turn microsecond native work into millisecond orchestration.
+
+Performance work must therefore report both:
+
+1. **work avoided** by indexes, direct identity, dedup, perfcache, bounded hops/fanout and reuse; and
+2. **boundary overhead avoided** by coarse native/set execution.
+
+A faster CPU or wider SIMD is additional headroom, not a substitute for getting this grain right.
 
 ## Scope continuity and anti-substitution law
 
@@ -128,14 +208,15 @@ When a check fails, fix the cause and continue. Do not stop at a failure report.
 
 ## Architecture implementation law
 
-- C/C++ owns deterministic algorithms, graph/trajectory operations, reductions, math, routing mechanics, and reusable native computation.
-- PostgreSQL owns persistence, transactions, indexes, set operations, and server-side integration.
-- SQL is a fixed typed orchestration/query surface. Dynamic SQL, recursive query machinery, per-row loops, uncontrolled `LATERAL` fanout, temp-table-per-call patterns, and C-as-an-SPI-string-building-client are not the substrate execution model.
-- C# owns source/session/service orchestration and transport. It does not reimplement substrate algorithms.
-- One semantic operation has one canonical implementation. Scalar/single-item routes delegate to the same batch/set implementation.
-- Batch/bulk forms are primary. A method named `Batch` is insufficient if it loops through small SQL/SPI/scalar operations underneath.
+- C/C++ owns deterministic algorithms, graph/trajectory operations, reductions, math, routing mechanics, parsers/format kernels and reusable native computation.
+- PostgreSQL owns persistence, transactions, indexes, set operations and server-side integration.
+- SPI supplies prepared set-sized access between native operators and PostgreSQL; building dynamic SQL or issuing per-row SPI work from C is not a native architecture win.
+- SQL is a fixed typed orchestration/query surface. Dynamic SQL, recursive query machinery as a hot inner engine, per-row loops, uncontrolled `LATERAL` fanout and temp-table-per-call patterns are not the substrate execution model.
+- C# owns source/session/service orchestration and transport. It does not reimplement substrate algorithms or drive one native/database call per semantic element in hot paths.
+- One semantic operation has one canonical implementation. Scalar/single-item routes delegate to the same core semantics without forcing the batch core to become RBAR.
+- Batch/bulk forms are primary where repeated work exists. A method named `Batch` is insufficient if it loops through small SQL/SPI/PInvoke/scalar operations underneath.
 - Perfcache/indexes reuse deterministic work; they never become a second semantic authority.
-- All performance work is measured at the operator-visible boundary with CPU, memory, I/O, database calls, rows/bytes/cells, candidate/frontier work and durable output counts appropriate to the operation.
+- All performance work is measured at the operator-visible boundary with CPU, memory, I/O, database calls, boundary crossings, rows/bytes/cells, candidate/frontier work and durable output counts appropriate to the operation.
 
 ## Source ingestion law
 
