@@ -1,90 +1,103 @@
 # Laplace documentation map
 
-The `docs/` tree contains both current authority and historical evidence. Do not treat every Markdown file as an equal specification.
+This directory contains invention law, implementation architecture, binding design contracts, current evidence, product/domain guides, and historical material. Those categories are not interchangeable.
 
-## Read in this order
+## Read order
 
-1. [`../README.md`](../README.md) — technical introduction and capability map.
-2. [`INVENTION.md`](INVENTION.md) — the invention, mathematical construction, proof boundaries and intended machine.
-3. [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog.
-4. [`../AGENTS.md`](../AGENTS.md) — implementation-agent authority, execution-grain and delivery contract.
-5. [`ARCHITECTURE.md`](ARCHITECTURE.md) — architecture as currently built, including explicit divergences/unfinished proof obligations.
-6. Binding current specs, especially:
-   - [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md)
-   - [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md)
-   - the substrate/engineering/record-vs-calculate/perfcache/provenance specs named by `AGENTS.md`.
-7. Current decisions/plans/guides for a particular product or implementation area.
-8. Current GitHub issues/PRs for acceptance and execution tracking.
-9. [`archive/`](archive/) only for historical evidence, rejected designs, old measurements and chronology.
+1. [`../AGENTS.md`](../AGENTS.md) — repository execution/authority rules for implementation agents.
+2. [`INVENTION.md`](INVENTION.md) — canonical intended invention, theorem, recursive representation, coupling model, evidence model, execution model, and proof obligations.
+3. [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog. It summarizes the invention; it does not override `INVENTION.md`.
+4. [`ARCHITECTURE.md`](ARCHITECTURE.md) — current source/as-built architecture. A mismatch with the invention is an implementation gap unless higher authority changes the invention.
+5. [`specs/README.md`](specs/README.md) — binding component contracts interpreted under the invention.
+6. GitHub issues — bounded implementation/acceptance ownership, interpreted under the authority above.
+7. Current code, tests, CI, live receipts and measurements — evidence of what is actually implemented.
+8. Dated plans, campaign ledgers, audits, recovery notes and archived documents — historical evidence only unless explicitly reactivated.
 
-A current inventor correction outranks all derived documents.
+The latest prompt does not erase higher-level project scope. A status file, issue body, old plan or another repository cannot silently narrow the invention or replace an explicit current inventor correction.
 
-## What the current authority says in one page
+## Core invention / architecture
 
-Laplace is a deterministic, content-addressed, recursively compositional knowledge/cognition substrate.
+- [`INVENTION.md`](INVENTION.md) — head-to-tail invention definition and proof model.
+- [`INVENTIONS.md`](INVENTIONS.md) — concise mechanism catalog.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — current implementation architecture and known divergences.
+- [`INVENTORY.md`](INVENTORY.md) — generated repository inventory/counts.
 
-Exact finite structures are composed from already admitted structures and retain their exact ordered constituent trajectories. The current native centroid realization remains inside a fixed bounded 4D ball; the general recursive/countability/convex-closure argument is not tied to binary notation or exactly four dimensions.
+Important current distinctions include:
 
-The current four-component binary64 trajectory carrier has 212 reversible payload bits—enough for the complete 128-bit constituent id plus ordinal, run-length and typed flags. Packed carrier numbers are serialization, not child positions; realized geometry resolves those ids to live child coordinates.
+```text
+canonical content / recursive composition
+        !=
+coord              real geometric placement
+        !=
+packed trajectory  exact constituent manifest
+        !=
+realized curve     ordered child placements
+        !=
+occurrence / source / testimony / deterministic calculation
+```
 
-Canonical identities participate in many overlapping structures at once: recursive DAGs, containing trajectories, occurrences, typed relations, evidence/consensus, contexts/sources and geometric/index neighborhoods. This is the spider-colony web.
+The bounded-domain theorem is dimension/radix independent. Current 4D/binary64 is an executable carrier choice; the four components provide 212 reversible payload bits per packed trajectory vertex.
 
-The forward program therefore starts from the complete admitted observation and computes a query-relative typed response/coupling field before unconstrained policy is frozen:
+## Cognition / forward execution
+
+The governing contracts are:
+
+- [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md)
+- [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md)
+- GitHub issue #1401 for current implementation acceptance.
+
+The canonical program is:
 
 ```text
 RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
         → PROPOSE → STEER → SELECT → REALIZE → WITNESS
 ```
 
-A*, Dijkstra, walk, containment, continuation and geometry are operators inside that program. Hops and fanout are explicit sparse-compute axes over one knowledge world.
+`COUPLE` is the query-relative response field: the complete admitted observation tugs every eligible indexed plane before unconstrained interpretation/routing is frozen. A*, Dijkstra, walks, trajectory continuation, containment, geometry, chess search and other domain operators are tools inside the program rather than separate cognition definitions.
 
-The physical execution law applies everywhere:
+Functional Q/K/V/O correspondence is documented as a comparison of jobs, not an instruction to rebuild a transformer internally.
 
-```text
-indexed / set-sized boundary
--> native C/C++ repeated algorithmic work
--> bulk / set result + receipt
-```
+## Execution-grain law
 
-PostgreSQL owns durable indexed state and set access. SPI is the prepared/set-sized bridge. C#/SQL orchestrate contracts/transport. Decomposition, ingestion, cognition, analysis/domain engines, reconstruction, synthesis and export all obey the same execution-grain law.
+The physical execution unit is not automatically the semantic object.
 
-## Intended law versus current implementation
+Across ingest, decomposition, composition, cognition, domain search, analysis, reconstruction and export, repeated work should cross SQL/SPI/managed/native boundaries at the coarsest lawful set/batch frontier.
 
-Do not repair a mismatch by rewriting the invention around whichever implementation was easiest to find.
+Per-row/per-candidate/per-node calls, recursive SQL used as a hot inner engine, or scalar loops disguised as batches remain performance/architecture defects even when their semantic outputs are correct.
 
-`ARCHITECTURE.md` currently records material obligations including:
+See [`plan/INGEST_BOUNDARY_AND_RECIPE_LAW.md`](plan/INGEST_BOUNDARY_AND_RECIPE_LAW.md) and the forward-pass/ISA specs.
 
-- native centroid versus some managed/domain Karcher parent-coordinate paths;
-- exhaustive live recursive physicality/trajectory/reference closure proof not yet landed;
-- complete typed coupling-field coverage still needing channel-by-channel proof;
-- remaining legacy RBAR/small-boundary execution across pipelines;
-- benchmark service-headroom enforcement still needing executable protection.
+## Benchmarks / capacity evidence
 
-Those are implementation/proof obligations.
+- [`benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`](benchmarks/MANUAL_BENCHMARK_EVIDENCE.md) — benchmark suite and evidence law.
+- [`benchmarks/SCALING_MODES.md`](benchmarks/SCALING_MODES.md) — file-grain makespan vs independent-stream scaling vs single-DAG frontier scaling.
 
-## Evidence classes
+Managed-host capacity evidence distinguishes **serviceable throughput** from **explicit saturation**. The workflow now derives serviceable worker points with reserved CPU headroom; full logical-CPU saturation requires opt-in and is a different experiment.
 
-Use the right evidence for the claim:
+## Product / domain guides
 
-```text
-mathematical claim        -> mathematical proof
-serialization/invariant   -> executable/property/conformance test
-finite implementation set -> exhaustive finite check where feasible
-live substrate claim      -> live query/readback/counterexample scan
-performance claim         -> exact revision/artifact/host/provider/workload receipt
-product delivery          -> installed/deployed operator-visible proof where required
-```
+Guides under [`guides/`](guides/) consume the common machine. They do not define private intelligence stacks.
 
-See [`benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`](benchmarks/MANUAL_BENCHMARK_EVIDENCE.md) for benchmark evidence and serviceable-capacity versus saturation rules.
+Examples:
 
-## Status documents are not specifications
+- Knowledge Arena — pinned-world games exposing paths, evidence, hops/fanout and receipts.
+- Name Game — human-vs-Laplace resolution/identity/event latency proof.
+- Chess Forward Pass — chess as a cross-modal proving domain using the same coupling/ISA program.
 
-Dated status/plan files may contain excellent measurements and still be obsolete as current action ordering. Current-facing dated reports that became misleading have been demoted to historical snapshots; their original detail remains in Git history.
+Product examples do not limit the general invention.
 
-An issue/plan/status comment may describe missing implementation. It may not silently turn an MVP, fallback, lower-compute approximation, one search operator, a smaller model, or an old implementation limitation into the definition of Laplace.
+## Plans / status
+
+Files under [`plan/`](plan/) are decomposition, acceptance or historical campaign aids. No fixed order inside a plan outranks the current inventor request or `AGENTS.md` authority rules.
+
+Current-facing compatibility files such as `COMPLETION_PLAN.md`, `SESSION-AUDIT.md` and older dated remediation records have been reduced/demoted where necessary so they cannot masquerade as current global status.
+
+## Historical / archive
+
+[`archive/`](archive/) contains superseded specifications, reports, plans, status snapshots and old agent material. It is evidence/chronology only.
+
+If historical material conflicts with current invention/specs, the historical material does not win. If it exposes an unresolved implementation defect, the defect may still be real and should be re-verified against current source/runtime rather than dismissed.
 
 ## Cross-repository references
 
-`Laplace-Refactor` and other repositories may contain related implementations, counterexamples or coordination issues. They do not automatically own the meaning of the invention in this repository.
-
-Compare implementations against the current semantic laws above rather than treating one repository's schema/ABI/status as normative for the other.
+Other repositories, including `Laplace-Refactor`, may contain related implementations, issues and experiments. Those are coordination/comparison links unless the current user explicitly scopes work there. They do not own or narrow this repository's invention by default.
