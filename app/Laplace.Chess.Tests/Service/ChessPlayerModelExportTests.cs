@@ -41,7 +41,7 @@ public sealed class ChessPlayerModelExportTests
     }
 
     [Fact]
-    public void CompositeBias_PreservesConflict_AndRewardsCorroboration_InOneBackendRead()
+    public void CompositeBias_PreservesConflict_AndRewardsCorroboration()
     {
         var carlsen = ChessVocabulary.PlayerId("Magnus Carlsen");
         var karpov = ChessVocabulary.PlayerId("Anatoly Karpov");
@@ -52,24 +52,27 @@ public sealed class ChessPlayerModelExportTests
         var d4 = Assert.Single(legal, static m => m.ToUci() == "d2d4");
         Hash128 e4Next = NextId(board, e4);
         Hash128 d4Next = NextId(board, d4);
-        int calls = 0;
 
         var bias = new ChessCompositePlayerBias(
             export,
-            (position, players, white, limit) =>
+            (position, player, white, limit) =>
             {
-                calls++;
                 Assert.Equal(ChessCompose.PositionId(board), position);
                 Assert.True(white);
                 Assert.Equal(legal.Count, limit);
-                Assert.Equal(export.Members.ToArray(), players.ToArray());
-                return
-                [
-                    new ChessPlayerMoveEvidence(carlsen, e4Next, 100, 1.0),
-                    new ChessPlayerMoveEvidence(carlsen, d4Next, 100, 0.75),
-                    new ChessPlayerMoveEvidence(karpov, e4Next, 100, 0.0),
-                    new ChessPlayerMoveEvidence(karpov, d4Next, 100, 0.75),
-                ];
+                if (player == carlsen)
+                    return
+                    [
+                        new ChessPlayerMoveEvidence(e4Next, 100, 1.0),
+                        new ChessPlayerMoveEvidence(d4Next, 100, 0.75),
+                    ];
+                if (player == karpov)
+                    return
+                    [
+                        new ChessPlayerMoveEvidence(e4Next, 100, 0.0),
+                        new ChessPlayerMoveEvidence(d4Next, 100, 0.75),
+                    ];
+                return [];
             });
 
         var bonuses = bias.Bonus(board, legal);
@@ -80,12 +83,10 @@ public sealed class ChessPlayerModelExportTests
         Assert.Equal(0, bonuses[e4Index]);
         // Corroborating evidence from both members moves the shared composite policy.
         Assert.True(bonuses[d4Index] > 0);
-        Assert.Equal(1, calls);
 
         var receipt = bias.Receipt();
         Assert.Equal(2, receipt.Members);
         Assert.Equal(1, receipt.RootReads);
-        Assert.Equal(1, receipt.BackendReads);
         Assert.Equal(2, receipt.MemberReads);
         Assert.Equal(2, receipt.MembersWithEvidence);
         Assert.True(receipt.MovesInfluenced > 0);
@@ -102,7 +103,7 @@ public sealed class ChessPlayerModelExportTests
 
         var bias = new ChessCompositePlayerBias(
             export,
-            (_, _, _, _) => [new ChessPlayerMoveEvidence(player, target, 1_000_000, 1.0)],
+            (_, _, _, _) => [new ChessPlayerMoveEvidence(target, 1_000_000, 1.0)],
             capCp: 150);
         var bonuses = bias.Bonus(board, legal);
 
