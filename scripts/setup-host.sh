@@ -285,6 +285,11 @@ do_setup() {
 
     layer1_build_install_extensions
     layer1_up
+    # Reconcile once more after Layer 1 so full bootstrap exits with the same final
+    # host-policy convergence guarantee it historically provided, while the early
+    # reconciliation above ensures a compiler/migration failure cannot strand CI on
+    # obsolete privileged helpers.
+    managed_services_setup
 
     say "DONE — host ready. CI owns deploys + runtime secrets."
     cat <<EOF
