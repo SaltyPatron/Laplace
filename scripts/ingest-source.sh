@@ -13,7 +13,7 @@ USAGE=(tatoeba opensubtitles)
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
     echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
-    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-transitions safetensors" >&2
+    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-tactic-outcomes chess-transitions safetensors" >&2
     exit 2
 fi
 
@@ -133,23 +133,9 @@ case "$source" in
         done
         ;;
     chain)
-        # ONE process for N sources. `ingest chain` (IngestCommands.cs:181) loads the
-        # codepoint and highway perfcaches once, then dispatches each spec in-process
-        # through the same IngestDispatchTable every other path uses, stopping on the
-        # first non-zero rc. Every other branch here pays one CLI startup, one perfcache
-        # map and one native runtime init PER SOURCE — the tax scripts/win/seed-chain.cmd
-        # was written to avoid ("seed-step.cmd pays those 12x") and which no Linux caller
-        # had. Specs are the CLI's own form: "<source [path] [flags]>", quoted when they
-        # carry a path.
         build_cli
         shift
         [[ $# -gt 0 ]] || { echo "Usage: $0 chain \"<source [path]>\" ..." >&2; exit 2; }
-        # Do NOT emit `source=chain`: scripts/ingest-baseline.py:46 parses
-        # `INGEST_TIMING source=(\S+)` and would record a phantom source named
-        # "chain". Per-source rows/elapsed still come from the CLI's own
-        # INGEST_COMPLETE (IngestRunner.cs:701), one per dispatched source, which
-        # is COMPLETE_RE — the baseline's primary parse. This line is the chain's
-        # wall clock, which is genuinely one number for N sources.
         source="chain"
         TIMING_LABEL="chain_sources=$#"
         ingest chain "$@"
@@ -160,11 +146,6 @@ case "$source" in
         ingest safetensors "$path"
         ;;
     unicode|iso639|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
-        # Default-path sources: IngestDataPaths resolves a DATA_ROOT-relative default
-        # when no <path> is given (stack=stack-v2, tiny-codes=tiny-codes, document=text…).
-        # An explicit <path> (single file, bare dir, or ecosystem root) always wins via
-        # IngestInput.ResolveFiles — `ingest ud <one.conllu>` validates in seconds.
-        # Media lanes (generic): rgba-image, track-audio, frame-video — not corpus keys.
         build_cli
         if [[ "$source" == "document" && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
@@ -176,10 +157,6 @@ case "$source" in
         fi
         ;;
     agents)
-        # Agent session logs (Claude Code, Codex, Gemini, Antigravity, Copilot, Cursor,
-        # generic role-shaped JSON). Path optional: an explicit file/dir is the witness
-        # boundary; with none the decomposer discovers this user's provider roots
-        # (~/.claude/projects, ~/.codex/sessions, …).
         build_cli
         if [[ -n "$path" ]]; then
             ingest agents "$path"
@@ -188,36 +165,27 @@ case "$source" in
         fi
         ;;
     code|repo|tabular|recipe)
-        # Witness-unit code/data sources: the <path> IS the witness boundary (a file,
-        # a repository root, a table), so it is REQUIRED — no DATA_ROOT default. Same
-        # table-driven CLI dispatch as everything else (IngestCodeAsync / IngestRepoAsync
-        # / IngestTabularAsync / IngestRecipeAsync).
         build_cli
         [[ -n "$path" ]] || { echo "Usage: $0 $source <file-or-directory>" >&2; exit 2; }
         ingest "$source" "$path"
         ;;
     chess|openings|chess-books)
-        # Chess corpora are plain .NET decomposers (ChessPgn / ChessOpenings / ChessBook)
-        # like every other source — cross-platform, not a Windows-only thing. They just
-        # take an explicit corpus dir (no fixed default under DATA_ROOT).
         build_cli
         [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
         ingest "$source" "$path"
         ;;
     chess-move-outcomes)
-        # Move-outcome fold over recorded games (calculated layer). No path — the
-        # substrate is the source. Deposits aggregated OUTCOME testimony on the bounded
-        # MOVE vocabulary so learned reads are consensus lookups; per-line markers make
-        # re-runs skip-complete, and a db-reset + reseed re-derives it like every other
-        # calculated layer.
         build_cli
         ingest chess-move-outcomes
         ;;
+    chess-tactic-outcomes)
+        # Historical backfill for the learned fork/pin/skewer provider. New PGN/live
+        # games deposit these bounded pattern OUTCOME cells inline; this route fills
+        # only pre-existing playings and is marker-gated/idempotent.
+        build_cli
+        ingest chess-tactic-outcomes
+        ;;
     chess-eval)
-        # Stockfish eval pass over recorded games (calculated layer, GH #573). No path —
-        # the substrate is the source. Part of the seed ladder so a db-reset + reseed
-        # re-derives the census like every other calculated layer; per-game markers make
-        # re-runs skip-complete. Needs a stockfish binary (env, chess-lab bootstrap, PATH).
         build_cli
         if [[ -z "${LAPLACE_STOCKFISH:-}" && -x /usr/games/stockfish ]]; then
             export LAPLACE_STOCKFISH=/usr/games/stockfish
@@ -225,8 +193,6 @@ case "$source" in
         ingest chess-eval
         ;;
     chess-syzygy)
-        # Tablebase packaging dir → position-grain WDL/DTZ records (Fathom = unpack codec).
-        # Path optional: falls back to LAPLACE_SYZYGY / data-root Games/Chess/syzygy/….
         build_cli
         if [[ -n "$path" ]]; then
             ingest chess-syzygy "$path"
@@ -235,7 +201,6 @@ case "$source" in
         fi
         ;;
     chess-analyze|chess-transitions|chess-trajectory|chess-opening-match)
-        # Substrate-sourced calculated passes: no path, marker-gated, safe to re-run.
         build_cli
         ingest "$source"
         ;;
@@ -243,7 +208,7 @@ case "$source" in
         echo "Unknown source: $source" >&2
         echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
         echo "         chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy \\" >&2
-    echo "         chess-opening-match \\" >&2
+        echo "         chess-opening-match chess-move-outcomes chess-tactic-outcomes \\" >&2
         echo "         code repo stack tiny-codes tabular recipe agents all safetensors" >&2
         exit 2
         ;;
