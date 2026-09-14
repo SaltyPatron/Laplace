@@ -98,7 +98,6 @@ class HostTests(unittest.TestCase):
             if self.fail_nginx:
                 raise subprocess.CalledProcessError(1, "test nginx validation")
         elif argv[0] == "/usr/sbin/visudo":
-            # The real parser validates only the explicitly supplied temp file.
             return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         elif argv[0] == "/usr/bin/systemctl":
             if argv[1] == "show":
@@ -190,15 +189,12 @@ class HostTests(unittest.TestCase):
         self.nginx_active = False
         self.assertIn("nginx_inactive", self.host.host_status()["issues"])
         self.calls.clear()
-
         self.reconcile()
-
         self.assertIn(("/usr/bin/systemctl", "start", "nginx"), self.calls)
         self.assertTrue(self.host.host_status()["healthy"])
 
     def test_managed_tls_listener_cannot_take_down_primary_web_during_dhcp(self):
         config = self.host.nginx_config("192.168.1.2", "192.168.1.0/24", "hart-server")
-
         self.assertIn("listen 8443 ssl;", config)
         self.assertNotIn("listen 192.168.1.2:8443", config)
         self.assertIn("allow 192.168.1.0/24;", config)
@@ -210,9 +206,7 @@ class HostTests(unittest.TestCase):
         expected = authority.read_bytes()
         public.write_text("stale public certificate\n")
         self.assertIn("public_ca_copy_drift", self.host.host_status()["issues"])
-
         self.reconcile()
-
         self.assertEqual(expected, public.read_bytes())
         self.assertTrue(self.host.host_status()["healthy"])
 
@@ -367,14 +361,18 @@ class EntryPointTests(unittest.TestCase):
 
     def test_ci_repairs_host_before_live_install_and_never_installs_root_code(self):
         workflow = (ROOT / ".github/workflows/laplace.yml").read_text()
+        product = (ROOT / "scripts/product-ci.sh").read_text()
         policy = (ROOT / "scripts/ci-policy.sh").read_text()
         registry = json.loads((ROOT / "scripts/test-profiles.json").read_text())
-        self.assertIn("run: bash scripts/ci-policy.sh", workflow)
+
+        self.assertIn('run: bash scripts/product-ci.sh reconcile', workflow)
+        self.assertIn('run: bash scripts/product-ci.sh "$LAPLACE_STAGE"', workflow)
         self.assertIn("test-profile-registry.py run --profile policy", policy)
         self.assertNotIn("python3 scripts/test-managed-host.py", policy)
         managed_host = [suite for suite in registry["suites"] if suite["id"] == "policy-managed-host"]
         self.assertEqual(1, len(managed_host))
         self.assertEqual(["python3", "scripts/test-managed-host.py"], managed_host[0]["command"])
+
         publish = (ROOT / "deploy/linux/managed-publish.sh").read_text()
         self.assertIn('sudo -n "$HELPER" reconcile-host', publish)
         self.assertIn('sudo -n "$HELPER" host-status', publish)
@@ -384,11 +382,12 @@ class EntryPointTests(unittest.TestCase):
         self.assertIn("application_managed preflight", host_check)
         self.assertNotIn("laplace-managed-deploy host-status", host_check)
         self.assertNotIn('sudo python3 deploy/linux/laplace-managed-deploy bootstrap', publish)
-        deploy = workflow.split("  deploy:\n", 1)[1].split("  db-ops:\n", 1)[0]
-        reconciliations = [match.start() for match in re.finditer("managed-publish.sh preflight", deploy)]
-        install = deploy.index("pipeline.sh install")
+        self.assertNotIn('sudo python3 deploy/linux/laplace-managed-deploy bootstrap', workflow)
+
+        reconciliations = [match.start() for match in re.finditer("managed-publish.sh preflight", product)]
+        install = product.index("pipeline.sh install")
         self.assertEqual(2, len(reconciliations))
-        self.assertLess(deploy.index("wait-for-quiet-substrate.sh"), reconciliations[0])
+        self.assertLess(product.index("wait-for-quiet-substrate.sh"), reconciliations[0])
         self.assertLess(reconciliations[0], install)
         self.assertLess(install, reconciliations[1])
 
