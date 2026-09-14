@@ -71,8 +71,9 @@ public sealed class UnicodeDecomposer
 
         foreach (ArtifactJob job in jobs)
         {
-            await foreach (SubstrateChange change in RunArtifactAsync(
-                job, context, options, batch, ct))
+            IDecomposer phase = BuildArtifactPhase(job, batch);
+            await foreach (SubstrateChange change in RunPhaseAsync(
+                phase, context, options, job.Label, job.Path, ct))
             {
                 yield return change;
             }
@@ -175,14 +176,8 @@ public sealed class UnicodeDecomposer
             EntityTypeRegistry.OrdinalContext, Source));
     }
 
-    private async IAsyncEnumerable<SubstrateChange> RunArtifactAsync(
-        ArtifactJob job,
-        IDecomposerContext context,
-        DecomposerOptions options,
-        int batch,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        IDecomposer phase = job.Kind switch
+    private IDecomposer BuildArtifactPhase(ArtifactJob job, int batch) =>
+        job.Kind switch
         {
             ArtifactKind.Ducet => new DucetTier0Phase(job.Path, batch),
             ArtifactKind.UcdXml => new UcdXmlValidationPhase(job.Path, batch),
@@ -218,13 +213,6 @@ public sealed class UnicodeDecomposer
             ArtifactKind.DerivedNormalization => new NormalizationPhase(this, job.Path, batch),
             _ => throw new InvalidOperationException($"Unsupported Unicode artifact kind {job.Kind}."),
         };
-
-        await foreach (SubstrateChange change in RunPhaseAsync(
-            phase, context, options, job.Label, job.Path, ct))
-        {
-            yield return change;
-        }
-    }
 
     private IReadOnlyList<ArtifactJob> ResolveArtifactJobs(IDecomposerContext context)
     {
@@ -443,7 +431,8 @@ public sealed class UnicodeDecomposer
                 ObservedAtUnixUs: 0));
 
             if (cp == 0) EmitByteCatalog(builder);
-            if (cp <= 0xFF) EmitByte(builder, (byte)cp);
+            if (cp >= ByteAtoms.First && cp <= byte.MaxValue)
+                EmitByte(builder, (byte)cp);
         }
 
         protected override async IAsyncEnumerable<int> ExtractRecordsAsync(

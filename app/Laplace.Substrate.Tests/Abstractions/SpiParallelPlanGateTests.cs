@@ -40,6 +40,13 @@ public sealed class SpiParallelPlanGateTests
         @"(?<!""|_cursor)\bSPI_prepare\s*\(",
         RegexOptions.Compiled);
 
+    // The read_only argument can follow a nested expression (for example a helper that
+    // returns the SPI plan). Match one level of balanced call arguments rather than
+    // stopping at the helper's closing parenthesis.
+    private static readonly Regex ReadWriteExecute = new(
+        @"\bSPI_(?:execute_plan|execute_with_args|cursor_open)\s*\((?:[^()]|\([^()]*\))*?,\s*false\s*[,)]",
+        RegexOptions.Compiled | RegexOptions.Singleline);
+
     [Fact]
     public void ReadOnlySpiPlans_ArePreparedParallelEligible()
     {
@@ -83,9 +90,7 @@ public sealed class SpiParallelPlanGateTests
         {
             var path = Path.Combine(srcRoot, name);
             Assert.True(File.Exists(path), $"exempt file does not exist: {name}");
-            Assert.Matches(
-                new Regex(@"SPI_(?:execute_plan|execute_with_args|cursor_open)\([^)]*,\s*false\s*[,)]", RegexOptions.Singleline),
-                File.ReadAllText(path));
+            Assert.Matches(ReadWriteExecute, File.ReadAllText(path));
         }
     }
 }
