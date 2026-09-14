@@ -24,6 +24,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         cls.suite = load_module("benchmark_suite", "scripts/benchmark_suite.py")
         cls.scale = load_module("bench_compose_scale", "scripts/bench-compose-scale.py")
         cls.stream = load_module("bench_compose_stream_scale", "scripts/bench-compose-stream-scale.py")
+        cls.scale_plan = load_module("benchmark_scale_plan", "scripts/benchmark_scale_plan.py")
         cls.registry = json.loads((ROOT / "scripts/benchmark-profiles.json").read_text(encoding="utf-8"))
 
     def test_registry_validates_and_every_suite_resolves(self):
@@ -45,7 +46,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn("core-scale", suites["all"]["profiles"])
         self.assertEqual({"quick", "throughput", "core", "scale", "moby", "all"}, set(suites))
 
-    def test_scaling_points_include_physical_and_logical_boundaries(self):
+    def test_raw_harness_scaling_points_still_expose_full_topology_for_explicit_use(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))
         self.assertEqual([1, 2, 3, 4, 8], self.scale.default_worker_counts(8, 8))
 
@@ -53,6 +54,27 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual([1, 6, 12], self.scale.parse_worker_counts("12,1,6,6", 6, 12))
         with self.assertRaises(ValueError):
             self.scale.parse_worker_counts("13", 6, 12)
+
+    def test_managed_host_default_reserves_headroom_on_6c12t(self):
+        points, cap, source = self.scale_plan.resolve_points(6, 12, None, 2, False)
+        self.assertEqual([1, 2, 3, 4, 6, 8, 10], points)
+        self.assertEqual(10, cap)
+        self.assertEqual("derived", source)
+        self.assertNotIn(12, points)
+
+    def test_saturation_requires_explicit_opt_in(self):
+        with self.assertRaises(ValueError):
+            self.scale_plan.resolve_points(6, 12, "1,6,12", 2, False)
+        points, cap, source = self.scale_plan.resolve_points(6, 12, "1,6,12", 2, True)
+        self.assertEqual([1, 6, 12], points)
+        self.assertEqual(12, cap)
+        self.assertEqual("explicit", source)
+
+    def test_saturation_default_can_include_full_logical_boundary(self):
+        points, cap, source = self.scale_plan.resolve_points(6, 12, None, 2, True)
+        self.assertEqual([1, 2, 3, 4, 6, 9, 12], points)
+        self.assertEqual(12, cap)
+        self.assertEqual("derived", source)
 
     def test_workflow_is_dispatch_only_and_routes_through_suite_runner(self):
         import yaml
@@ -64,12 +86,25 @@ class BenchmarkSuiteTests(unittest.TestCase):
         job = workflow["jobs"]["benchmark"]
         commands = "\n".join(step.get("run", "") for step in job["steps"] if isinstance(step, dict))
         self.assertIn("python3 scripts/benchmark_suite.py validate", commands)
+        self.assertIn("python3 scripts/benchmark_scale_plan.py", commands)
         self.assertIn("python3 scripts/benchmark_suite.py \"${args[@]}\"", commands)
         self.assertNotIn("python3 scripts/bench-compose.py", commands)
         self.assertNotIn("python3 scripts/bench-compose-scale.py", commands)
         self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", commands)
         self.assertEqual("laplace-shared-workspace", workflow["concurrency"]["group"])
         self.assertEqual("false", workflow["concurrency"]["cancel-in-progress"])
+
+    def test_workflow_requires_explicit_saturation_and_records_scale_plan(self):
+        import yaml
+        path = ROOT / ".github/workflows/benchmark-evidence.yml"
+        workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+        self.assertIn("allow_saturation", inputs)
+        self.assertEqual("false", inputs["allow_saturation"]["default"])
+        self.assertEqual("2", inputs["reserve_logical_cpus"]["default"])
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("scale-plan.json", text)
+        self.assertIn("LAPLACE_BENCH_SCALE_WORKERS", text)
 
     def test_workflow_binds_built_core_and_t0_explicitly(self):
         text = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
