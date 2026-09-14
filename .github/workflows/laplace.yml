@@ -20,7 +20,11 @@ on:
         type: boolean
         default: false
       fresh_db:
-        description: "recreate DB, then restore the canonical product foundation"
+        description: "recreate DB structure/runtime; does not seed by itself"
+        type: boolean
+        default: false
+      restore_foundation:
+        description: "after database work, restore missing canonical foundation (can take hours)"
         type: boolean
         default: false
       serial_tests:
@@ -39,8 +43,6 @@ on:
 permissions:
   contents: read
 
-# One mutable product, one lifecycle owner. Manual DB lifecycle uses this same
-# group, so it cannot overlap install/schema/publication/product-state mutation.
 concurrency:
   group: laplace-substrate-lifecycle
   cancel-in-progress: false
@@ -59,6 +61,7 @@ env:
   LAPLACE_FULL_CLEAN: ${{ github.event_name == 'workflow_dispatch' && inputs.full_clean && '1' || '' }}
   LAPLACE_FORCE_CODEGEN: ${{ github.event_name == 'workflow_dispatch' && inputs.force_codegen && '1' || '' }}
   LAPLACE_FRESH_DB: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_db && '1' || '' }}
+  LAPLACE_RESTORE_FOUNDATION: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_foundation && '1' || '' }}
   LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests && '1' || '' }}
   LAPLACE_GENERATION_BENCHMARK: ${{ github.event_name == 'workflow_dispatch' && inputs.generation_benchmark && '1' || '' }}
   LICHESS_API: ${{ secrets.LICHESS_API }}

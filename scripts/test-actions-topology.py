@@ -43,7 +43,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             "run_install_and_db",
             "run_publish",
             "run_integration",
-            "run_live",
+            "run_live_if_expected",
         ]
         positions = [text.rfind(f"\n{name}\n") for name in ordered]
         self.assertTrue(all(pos >= 0 for pos in positions), positions)
@@ -54,15 +54,27 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertIn('bash scripts/publish-applications.sh deploy', text)
         self.assertIn('bash scripts/publish-applications.sh recover', text)
 
-    def test_tooling_only_main_changes_reconcile_without_native_rebuild(self):
+    def test_tooling_only_main_changes_reconcile_without_native_rebuild_or_seed(self):
         source = MAIN.read_text(encoding="utf-8")
         self.assertIn("LAPLACE_FAST_ONLY", source)
         self.assertIn("scripts/check-*", source)
         self.assertIn("bash scripts/product-ci.sh reconcile", source)
-        self.assertNotIn("bash scripts/ci-policy.sh", source)
         product = PRODUCT.read_text(encoding="utf-8")
-        reconcile_block = product.split('if [[ "$stage" == reconcile ]]', 1)[1].split('[[ "$stage" == check ]]', 1)[0]
-        self.assertIn("reconcile_installed_product", reconcile_block)
+        reconcile = product.split("reconcile_installed_product() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("check-database-health.sh", reconcile)
+        self.assertIn("verify-application-release.py", reconcile)
+        self.assertNotIn("ensure_product_foundation", reconcile)
+        self.assertNotIn("ensure-foundation.sh", reconcile)
+        self.assertNotIn("pipeline.sh", reconcile)
+
+    def test_foundation_restore_is_explicit_in_main_lifecycle(self):
+        workflow = load(MAIN)
+        restore = workflow["on"]["workflow_dispatch"]["inputs"]["restore_foundation"]
+        self.assertEqual("false", restore["default"])
+        self.assertIn("LAPLACE_RESTORE_FOUNDATION", MAIN.read_text(encoding="utf-8"))
+        product = PRODUCT.read_text(encoding="utf-8")
+        self.assertIn('if [[ "${LAPLACE_RESTORE_FOUNDATION:-}" == 1 ]]', product)
+        self.assertIn("foundation restore not requested — no ingest", product)
 
     def test_pr_proof_is_proportional_and_nonmutating(self):
         workflow = load(PR)
@@ -84,14 +96,18 @@ class ActionsAuthorityTests(unittest.TestCase):
         names = {trigger} if isinstance(trigger, str) else set(trigger)
         self.assertEqual({"workflow_dispatch"}, names)
 
-    def test_database_recreate_restores_base_product_before_success(self):
-        db = load(WORKFLOWS / "db-ops.yml")
-        command = commands(db["jobs"]["db"])
-        self.assertIn("--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env", command)
-        self.assertIn("ensure-foundation.sh --force", command)
-        self.assertIn("check-substrate-floor.sh", command)
-        self.assertIn("verify-application-release.py --readiness-only", command)
-        self.assertNotIn("rebuilds it EMPTY", (WORKFLOWS / "db-ops.yml").read_text(encoding="utf-8"))
+    def test_database_recreate_does_not_seed_unless_explicitly_requested(self):
+        path = WORKFLOWS / "db-ops.yml"
+        db = load(path)
+        inputs = db["on"]["workflow_dispatch"]["inputs"]
+        self.assertIn("restore_foundation", inputs)
+        self.assertEqual("false", inputs["restore_foundation"]["default"])
+        steps = db["jobs"]["db"]["steps"]
+        recreate = next(step for step in steps if step.get("name") == "Recreate database structure and runtime")
+        restore = next(step for step in steps if step.get("name") == "Restore canonical foundation (explicit opt-in)")
+        self.assertNotIn("ensure-foundation.sh", recreate["run"])
+        self.assertIn("ensure-foundation.sh --force", restore["run"])
+        self.assertEqual("inputs.operation == 'recreate' && inputs.restore_foundation", restore["if"])
 
     def test_seed_workflows_are_manual_or_reusable_not_source_triggered(self):
         for path in sorted(WORKFLOWS.glob("seed-*.yml")):

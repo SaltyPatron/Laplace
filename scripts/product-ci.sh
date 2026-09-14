@@ -59,19 +59,24 @@ ensure_product_foundation() {
     echo "product foundation already complete — no ingest"
     return 0
   fi
-  echo "product foundation incomplete — reconciling only missing canonical layers"
+  echo "product foundation incomplete — explicit restore requested"
   bash scripts/ensure-foundation.sh
   bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
 }
 
+restore_foundation_if_requested() {
+  if [[ "${LAPLACE_RESTORE_FOUNDATION:-}" == 1 ]]; then
+    ensure_product_foundation
+  else
+    echo "foundation restore not requested — no ingest"
+  fi
+}
+
 reconcile_installed_product() {
-  # Fast recovery/CI path: prove the installed runtime, heal only a missing
-  # canonical foundation, then refresh the application readiness receipt. No
-  # configure, compile, install, extension replacement, or database recreation.
+  # Fast source/tooling path: prove installed structure and application health only.
+  # Never build and never seed. Corpus restoration is an explicit operator choice.
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
-  ensure_product_foundation
   python3 scripts/verify-application-release.py --timeout-seconds 120
-  run_live
 }
 
 run_publish() {
@@ -91,8 +96,6 @@ ensure_api_running() {
 }
 
 recover_publish() {
-  # Recovery may itself fail. The API safety net is independent and always runs,
-  # so an application transaction cannot strand the serving process stopped.
   local recovery_rc=0 health_rc=0
   bash scripts/publish-applications.sh recover || recovery_rc=$?
   ensure_api_running || health_rc=$?
@@ -109,6 +112,14 @@ run_integration() {
 run_live() {
   LAPLACE_API_BASE="${LAPLACE_API_BASE:-http://127.0.0.1:8080}" \
     bash scripts/test-parallel.sh --app-live
+}
+
+run_live_if_expected() {
+  if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+    echo "fresh DB intentionally left unseeded — seeded live product proof skipped"
+    return 0
+  fi
+  run_live
 }
 
 run_perf() {
@@ -146,7 +157,7 @@ if [[ "$stage" == application-check || "$stage" == applications ]]; then
 fi
 
 run_install_and_db
-ensure_product_foundation
+restore_foundation_if_requested
 [[ "$stage" == deploy ]] && exit 0
 
 if [[ "$stage" == integrate ]]; then
@@ -157,7 +168,7 @@ fi
 trap recover_publish EXIT
 run_publish
 run_integration
-run_live
+run_live_if_expected
 run_perf
 recover_publish
 trap - EXIT

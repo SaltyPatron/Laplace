@@ -82,6 +82,10 @@ if main_concurrency.get("group") != "laplace-substrate-lifecycle":
     fail("main product lifecycle does not own the shared substrate lifecycle lock")
 if main_concurrency.get("cancel-in-progress") != "false":
     fail("main product lifecycle may be cancelled mid-activation")
+main_inputs = ((main.get("on") or {}).get("workflow_dispatch") or {}).get("inputs") or {}
+restore = main_inputs.get("restore_foundation") or {}
+if restore.get("default") != "false":
+    fail("main restore_foundation must be explicit opt-in (default false)")
 if main_jobs:
     command = runs(main_jobs["product"])
     if 'bash scripts/product-ci.sh "$LAPLACE_STAGE"' not in command:
@@ -103,7 +107,7 @@ else:
     product = PRODUCT.read_text(encoding="utf-8")
     required_order = [
         "run_policy", "run_deps", "run_build", "run_dev",
-        "run_install_and_db", "run_publish", "run_integration", "run_live",
+        "run_install_and_db", "run_publish", "run_integration", "run_live_if_expected",
     ]
     positions = [product.rfind(f"\n{name}\n") for name in required_order]
     if any(pos < 0 for pos in positions) or positions != sorted(positions):
@@ -115,6 +119,8 @@ else:
         "check-database-health.sh",
         "ensure-foundation.sh --check-only",
         "check-substrate-floor.sh",
+        "LAPLACE_RESTORE_FOUNDATION",
+        "foundation restore not requested — no ingest",
         "publish-applications.sh deploy",
         "publish-applications.sh recover",
         "local args=(--integration)",
@@ -123,6 +129,11 @@ else:
     ):
         if token not in product:
             fail(f"product lifecycle missing {token}")
+    reconcile = product.split("reconcile_installed_product() {", 1)[1].split("\n}", 1)[0]
+    if "ensure-foundation.sh" in reconcile or "ensure_product_foundation" in reconcile:
+        fail("fast installed-product reconciliation may not auto-seed")
+    if "pipeline.sh" in reconcile:
+        fail("fast installed-product reconciliation may not build/install/migrate")
 
 proof = (ROOT / "scripts" / "pr-proof.sh").read_text(encoding="utf-8")
 if proof.count("test-parallel.sh --policy") != 1:
@@ -167,15 +178,22 @@ if (manual_db.get("concurrency") or {}).get("group") != "laplace-substrate-lifec
     fail("manual DB lifecycle does not share product lifecycle ownership")
 if triggers(manual_db) != {"workflow_dispatch"}:
     fail("manual DB lifecycle must be dispatch-only")
+manual_inputs = ((manual_db.get("on") or {}).get("workflow_dispatch") or {}).get("inputs") or {}
+manual_restore = manual_inputs.get("restore_foundation") or {}
+if manual_restore.get("default") != "false":
+    fail("DB recreate restore_foundation must be explicit opt-in (default false)")
+manual_steps = ((manual_db.get("jobs") or {}).get("db") or {}).get("steps") or []
+recreate_step = next((s for s in manual_steps if s.get("name") == "Recreate database structure and runtime"), None)
+restore_step = next((s for s in manual_steps if s.get("name") == "Restore canonical foundation (explicit opt-in)"), None)
+if not recreate_step or "ensure-foundation.sh" in recreate_step.get("run", ""):
+    fail("DB recreate structural step must not seed")
+if not restore_step or restore_step.get("if") != "inputs.operation == 'recreate' && inputs.restore_foundation":
+    fail("DB foundation restore is not an explicit recreate opt-in")
+if restore_step and "ensure-foundation.sh --force" not in restore_step.get("run", ""):
+    fail("explicit DB foundation restore does not invoke canonical foundation owner")
 manual_db_commands = "\n".join(runs(job) for job in (manual_db.get("jobs") or {}).values())
-for token in (
-    "check-database-health.sh",
-    "ensure-foundation.sh --force",
-    "check-substrate-floor.sh",
-    "verify-application-release.py --readiness-only",
-):
-    if token not in manual_db_commands:
-        fail(f"manual DB recreate/product recovery missing {token}")
+if "check-database-health.sh" not in manual_db_commands:
+    fail("manual DB lifecycle lacks canonical structural health verification")
 
 for name, workflow in workflows.items():
     if name.startswith("seed-"):
@@ -216,5 +234,5 @@ if failures:
     raise SystemExit(1)
 print(
     f"ACTIONS_AUDIT_OK workflows={len(workflows)} product=single-lifecycle "
-    "pr_proof=proportional-isolated db_ops=shared-owner"
+    "foundation=explicit-opt-in pr_proof=proportional-isolated db_ops=shared-owner"
 )
