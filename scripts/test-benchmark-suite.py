@@ -141,8 +141,8 @@ WORK_INPUT documents=1158 bytes=51200000 codepoints=51223726
 BEST, single-threaded, no DB:
   1,761.5k codepoints/s   440.4k BPE-equiv tokens/s
   4,325.9k tier-tree nodes/s   (125,793,955 nodes built)
-  2.455778 tier-tree nodes/codepoint   9.823113 tier-tree nodes/4-char token-equivalent
-WORK_SHAPE tier_tree_nodes=125793955 nodes_per_codepoint=2.455778321676 nodes_per_tok4=9.823113286704 chars_per_tok4=4
+  2.455775 tier-tree nodes/codepoint   9.823101 tier-tree nodes/4-char token-equivalent
+WORK_SHAPE tier_tree_nodes=125793955 nodes_per_codepoint=2.455775181212 nodes_per_tok4=9.823100724848 chars_per_tok4=4
 """
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "core-single.log"
@@ -152,8 +152,8 @@ WORK_SHAPE tier_tree_nodes=125793955 nodes_per_codepoint=2.455778321676 nodes_pe
         self.assertEqual(51200000, result["input_bytes"])
         self.assertEqual(51223726, result["input_codepoints"])
         self.assertEqual(125793955, result["tier_tree_nodes"])
-        self.assertAlmostEqual(2.455778321676, result["tier_tree_nodes_per_codepoint"], places=12)
-        self.assertAlmostEqual(9.823113286704, result["tier_tree_nodes_per_bpe_equivalent_token_4chars"], places=12)
+        self.assertAlmostEqual(2.455775181212, result["tier_tree_nodes_per_codepoint"], places=12)
+        self.assertAlmostEqual(9.823100724848, result["tier_tree_nodes_per_bpe_equivalent_token_4chars"], places=12)
 
     def test_core_single_parser_rejects_inconsistent_work_shape(self):
         log = """WORK_INPUT documents=1 bytes=4 codepoints=4
