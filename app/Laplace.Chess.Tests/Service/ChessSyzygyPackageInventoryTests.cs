@@ -21,8 +21,8 @@ public sealed class ChessSyzygyPackageInventoryTests
         var scheduled = ChessSyzygyDecomposer.SchedulePackages(paths);
 
         Assert.Equal(paths.Length, scheduled.Count);
-        Assert.Equal(paths.OrderBy(static p => p).ToHashSet(),
-            scheduled.Select(static p => p.Path).ToHashSet());
+        Assert.True(paths.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(scheduled.Select(static p => p.Path)));
         Assert.Equal(scheduled.Count,
             scheduled.Select(static p => p.Label).Distinct(StringComparer.Ordinal).Count());
         Assert.Contains(scheduled, static p => p.Label == "KQvK.rtbw");
