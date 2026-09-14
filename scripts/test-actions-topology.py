@@ -193,13 +193,16 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertIn("python3 scripts/benchmark_suite.py \"${args[@]}\"", command)
         self.assertNotIn("python3 scripts/bench-compose.py", command)
         self.assertNotIn("python3 scripts/bench-compose-scale.py", command)
+        self.assertNotIn("python3 scripts/bench-forward-program.py", command)
         self.assertIn("build/engine/core/liblaplace_core.so", command)
         self.assertIn("build/engine/core/perfcache/laplace_t0_perfcache.bin", command)
+        self.assertIn("build/extension/laplace_substrate/laplace_substrate.control", command)
+        self.assertIn("build/extension/laplace_substrate/laplace_execution_module.txt", command)
         module = benchmark_module()
         registry = json.loads(BENCHMARK_REGISTRY.read_text(encoding="utf-8"))
         module.validate_registry(registry)
         suite_ids = {suite["id"] for suite in registry["suites"]}
-        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "all"}, suite_ids)
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "all"}, suite_ids)
 
     def test_all_external_actions_are_commit_pinned(self):
         import re

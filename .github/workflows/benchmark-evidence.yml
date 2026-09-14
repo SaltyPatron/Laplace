@@ -4,7 +4,9 @@ name: Laplace — manual benchmark evidence
 # commit/push/PR gates. The measured self-hosted host is shared with delivery, so
 # this workflow uses the same workspace concurrency authority and cannot overlap it.
 # Scaling defaults preserve host headroom; destructive all-logical-CPU saturation
-# requires an explicit opt-in.
+# requires an explicit opt-in. The query suite is read-only but additionally
+# requires the installed content-versioned extension/execution binding to match
+# the exact source revision built by this run.
 on:
   workflow_dispatch:
     inputs:
@@ -18,9 +20,9 @@ on:
         type: choice
         required: true
         default: quick
-        options: [quick, throughput, core, scale, moby, all]
+        options: [quick, throughput, core, scale, moby, query, all]
       repeats:
-        description: "repeats per core/scaling point; all runs retained, best reported"
+        description: "repeats per selected benchmark case/scaling point; all runs retained"
         type: string
         required: true
         default: "3"
@@ -202,13 +204,20 @@ jobs:
           set -euo pipefail
           core="$GITHUB_WORKSPACE/build/engine/core/liblaplace_core.so"
           t0="$GITHUB_WORKSPACE/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+          control="$GITHUB_WORKSPACE/build/extension/laplace_substrate/laplace_substrate.control"
+          execution_id="$GITHUB_WORKSPACE/build/extension/laplace_substrate/laplace_execution_module.txt"
           [[ -f "$core" ]] || { echo "::error::built core missing: $core"; exit 1; }
           [[ -f "$t0" ]] || { echo "::error::built T0 perfcache missing: $t0"; exit 1; }
+          [[ -f "$control" ]] || { echo "::error::built substrate control missing: $control"; exit 1; }
+          [[ -f "$execution_id" ]] || { echo "::error::built execution-module identity missing: $execution_id"; exit 1; }
           printf 'LAPLACE_CORE=%s\n' "$core" >> "$GITHUB_ENV"
           printf 'LAPLACE_T0=%s\n' "$t0" >> "$GITHUB_ENV"
           printf 'LAPLACE_PERFCACHE_BIN=%s\n' "$t0" >> "$GITHUB_ENV"
           {
-            sha256sum "$core" "$t0"
+            sha256sum "$core" "$t0" "$control" "$execution_id"
+            printf '\n== substrate build identity ==\n'
+            grep '^default_version' "$control"
+            cat "$execution_id"
             printf '\n== core linkage ==\n'
             ldd "$core" || true
           } > "$LAPLACE_BENCH_RECEIPT/built-artifacts.txt"
@@ -239,6 +248,7 @@ jobs:
             --repeats "$REPEATS"
             --corpus-dir "$corpus"
             --moby-path "$MOBY_PATH"
+            --database "$PGDATABASE"
             --core "$LAPLACE_CORE"
             --t0 "$LAPLACE_T0"
           )
@@ -286,6 +296,8 @@ jobs:
                   print(f"- codepoints/s: {result['codepoints_per_second']:,.0f}")
                   print(f"- 4-char BPE-equivalent/s: {result['bpe_equivalent_tokens_per_second_4chars']:,.0f}")
                   print(f"- tier-tree nodes/s: {result['tier_tree_nodes_per_second']:,.0f}")
+                  print(f"- tier-tree nodes/codepoint: {result['tier_tree_nodes_per_codepoint']:.6f}")
+                  print(f"- tier-tree nodes/4-char token-equivalent: {result['tier_tree_nodes_per_bpe_equivalent_token_4chars']:.6f}")
               elif profile in {'core-scale', 'core-scale-streams'}:
                   best = max(result['points'], key=lambda p: p['bpe_equivalent_tokens_per_second_4chars'])
                   print(f"- scaling mode: {result.get('scaling_mode', 'unknown')}")
@@ -298,6 +310,25 @@ jobs:
                   print(f"- ingest: {result['ingest_milliseconds']:.1f} ms")
                   print(f"- export: {result['export_milliseconds']:.1f} ms")
                   print(f"- bit-perfect: {result['bit_perfect']}")
+              elif profile == 'query-forward':
+                  binding = result['expected_runtime_binding']
+                  print(f"- installed extension matched built version: {binding['extension_version']}")
+                  print(f"- execution module: {binding['execution_module']}")
+                  print(f"- cases: {len(result['results'])}")
+                  for case in result['results']:
+                      runs = case['runs']
+                      best = min(runs, key=lambda r: r['measured_execution'].get('execution_time', float('inf')))
+                      measured = best['measured_execution']
+                      trace = best['semantic_receipt_replay']
+                      fp = trace['semantic_fingerprint']
+                      max_candidates = max((x['max_candidates'] for x in trace['routing_rounds']), default=0)
+                      print(
+                          f"- {case['case']['id']}: "
+                          f"h={case['case']['hops']} f={case['case']['fanout']} "
+                          f"server={float(measured.get('execution_time') or 0):.3f} ms "
+                          f"trace_rows={trace['trace_rows']} max_candidates={max_candidates} "
+                          f"output_count={fp.get('output_count')} disposition={fp.get('disposition')}"
+                      )
               if item.get('rapl_energy'):
                   energy = sum(x['energy_uj'] for x in item['rapl_energy']) / 1e6
                   print(f"- summed RAPL-domain energy: {energy:.3f} J (not wall energy; domains may overlap)")

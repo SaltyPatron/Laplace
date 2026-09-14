@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "scripts/benchmark-profiles.json"
 DEFAULT_CORE = ROOT / "build/engine/core/liblaplace_core.so"
 DEFAULT_T0 = ROOT / "build/engine/core/perfcache/laplace_t0_perfcache.bin"
-VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip"}
+VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward"}
 
 
 def sha256(path: Path) -> str:
@@ -92,6 +92,7 @@ def validate_registry(registry: dict[str, Any]) -> None:
         "core-single": ROOT / "scripts/bench-compose.py",
         "core-scale": ROOT / "scripts/bench-compose-scale.py",
         "core-scale-streams": ROOT / "scripts/bench-compose-stream-scale.py",
+        "query-forward": ROOT / "scripts/bench-forward-program.py",
     }
     for name, path in harnesses.items():
         if not path.is_file():
@@ -217,7 +218,6 @@ def parse_core_single(log_path: Path) -> dict[str, Any]:
     )
     if not throughput or not nodes or work_input is None or work_shape is None:
         raise ValueError("could not parse complete core-single benchmark evidence")
-
     rate = throughput[-1]
     node = nodes[-1]
     input_documents = int(work_input.group(1))
@@ -313,6 +313,7 @@ def run_profile(
     corpus_dir: Path,
     moby_path: Path,
     scale_workers: str | None,
+    database: str,
 ) -> dict[str, Any]:
     profile_id = profile["id"]
     kind = profile["kind"]
@@ -332,6 +333,14 @@ def run_profile(
             "dotnet", "run", "--project", "app/Laplace.Cli/Laplace.Cli.csproj",
             "-c", "Release", "--no-build", "--", "roundtrip", str(moby_path), str(output),
         ]
+    elif kind == "query-forward":
+        result_json = receipt_dir / "query-forward.json"
+        command = [
+            sys.executable, "scripts/bench-forward-program.py",
+            "--database", database,
+            "--repeats", str(repeats),
+            "--json", str(result_json),
+        ]
     else:
         raise ValueError(f"unsupported benchmark kind {kind}")
 
@@ -343,7 +352,7 @@ def run_profile(
 
     if kind == "core-single":
         result = parse_core_single(log_path)
-    elif kind in {"core-scale", "core-scale-streams"}:
+    elif kind in {"core-scale", "core-scale-streams", "query-forward"}:
         assert result_json is not None
         result = json.loads(result_json.read_text(encoding="utf-8"))
         if kind == "core-scale":
@@ -401,7 +410,8 @@ def run_suite(args: argparse.Namespace) -> int:
     for profile_id in selected["profiles"]:
         results.append(run_profile(
             profiles[profile_id], receipt_dir, env, args.repeats,
-            Path(args.corpus_dir).resolve(), Path(args.moby_path).resolve(), args.scale_workers,
+            Path(args.corpus_dir).resolve(), Path(args.moby_path).resolve(),
+            args.scale_workers, args.database,
         ))
     finished = time.time_ns()
 
@@ -435,6 +445,7 @@ def main() -> int:
     run.add_argument("--repeats", type=int, default=3)
     run.add_argument("--corpus-dir", default=str(ROOT))
     run.add_argument("--moby-path", default="/vault/Data/test-data/text/moby_dick.txt")
+    run.add_argument("--database", default=os.environ.get("PGDATABASE", "laplace"))
     run.add_argument("--core")
     run.add_argument("--t0")
     run.add_argument("--scale-workers", help="optional comma-separated scaling points")
