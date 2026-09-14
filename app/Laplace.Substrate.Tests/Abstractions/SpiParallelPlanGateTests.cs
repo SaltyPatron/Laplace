@@ -40,13 +40,6 @@ public sealed class SpiParallelPlanGateTests
         @"(?<!""|_cursor)\bSPI_prepare\s*\(",
         RegexOptions.Compiled);
 
-    // The read_only argument can follow a nested expression (for example a helper that
-    // returns the SPI plan). Match one level of balanced call arguments rather than
-    // stopping at the helper's closing parenthesis.
-    private static readonly Regex ReadWriteExecute = new(
-        @"\bSPI_(?:execute_plan|execute_with_args|cursor_open)\s*\((?:[^()]|\([^()]*\))*?,\s*false\s*[,)]",
-        RegexOptions.Compiled | RegexOptions.Singleline);
-
     [Fact]
     public void ReadOnlySpiPlans_ArePreparedParallelEligible()
     {
@@ -79,6 +72,9 @@ public sealed class SpiParallelPlanGateTests
 
     /// <summary>
     /// The exemption must stay a real, checkable claim rather than a way to opt out.
+    /// Parse the SPI call's top-level arguments instead of using a flat regex: production
+    /// callers may obtain their plan through a helper such as matched_leaf_plan(...), and
+    /// that nested ')' must not hide the later read_only=false argument from the gate.
     /// </summary>
     [Fact]
     public void ReadWriteExemptions_ActuallyExecuteReadWrite()
@@ -90,7 +86,62 @@ public sealed class SpiParallelPlanGateTests
         {
             var path = Path.Combine(srcRoot, name);
             Assert.True(File.Exists(path), $"exempt file does not exist: {name}");
-            Assert.Matches(ReadWriteExecute, File.ReadAllText(path));
+            Assert.True(ContainsReadWriteSpiCall(File.ReadAllText(path)),
+                $"exempt file has no SPI call with read_only=false: {name}");
         }
+    }
+
+    private static bool ContainsReadWriteSpiCall(string text)
+    {
+        foreach ((string name, int readOnlyIndex) in new[]
+        {
+            ("SPI_execute_plan", 3),
+            ("SPI_execute_with_args", 5),
+            ("SPI_cursor_open", 4),
+        })
+        {
+            int search = 0;
+            while ((search = text.IndexOf(name + "(", search, StringComparison.Ordinal)) >= 0)
+            {
+                int open = search + name.Length;
+                var arguments = new List<string>();
+                int depth = 0;
+                int argumentStart = open + 1;
+                bool complete = false;
+
+                for (int i = argumentStart; i < text.Length; ++i)
+                {
+                    switch (text[i])
+                    {
+                        case '(':
+                            depth++;
+                            break;
+                        case ')' when depth > 0:
+                            depth--;
+                            break;
+                        case ',' when depth == 0:
+                            arguments.Add(text[argumentStart..i].Trim());
+                            argumentStart = i + 1;
+                            break;
+                        case ')' when depth == 0:
+                            arguments.Add(text[argumentStart..i].Trim());
+                            search = i + 1;
+                            complete = true;
+                            break;
+                    }
+                    if (complete) break;
+                }
+
+                if (!complete)
+                {
+                    search = open + 1;
+                    continue;
+                }
+                if (arguments.Count > readOnlyIndex
+                    && string.Equals(arguments[readOnlyIndex], "false", StringComparison.Ordinal))
+                    return true;
+            }
+        }
+        return false;
     }
 }
