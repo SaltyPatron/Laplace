@@ -44,6 +44,32 @@ def psql_argv(database: str) -> list[str]:
     ]
 
 
+def parse_single_json_document(output: str) -> dict[str, Any]:
+    """Parse exactly one JSON document regardless of physical line wrapping.
+
+    PostgreSQL's textual JSON aggregates may span multiple stdout lines while still
+    being one SQL value.  Line count is therefore not row count.  Decode one complete
+    JSON document and fail closed if any second value or other non-whitespace output
+    follows it.
+    """
+    payload = output.strip()
+    if not payload:
+        raise RuntimeError("proof SQL returned no JSON")
+    decoder = json.JSONDecoder()
+    try:
+        value, end = decoder.raw_decode(payload)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"proof SQL returned invalid JSON: {payload[:500]!r}") from exc
+    trailing = payload[end:].strip()
+    if trailing:
+        raise RuntimeError(
+            f"proof SQL returned trailing output after one JSON document: {trailing[:500]!r}"
+        )
+    if not isinstance(value, dict):
+        raise RuntimeError("proof SQL JSON root is not an object")
+    return value
+
+
 def query_json(database: str, sql: str, timeout_seconds: int) -> dict[str, Any]:
     wrapped = (
         "SET default_transaction_read_only=on;\n"
@@ -64,15 +90,7 @@ def query_json(database: str, sql: str, timeout_seconds: int) -> dict[str, Any]:
         raise RuntimeError(
             f"proof SQL failed\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
-    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if len(lines) != 1:
-        raise RuntimeError(f"proof SQL returned {len(lines)} rows; expected one JSON row")
-    try:
-        value = json.loads(lines[0])
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"proof SQL returned invalid JSON: {lines[0][:500]!r}") from exc
-    if not isinstance(value, dict):
-        raise RuntimeError("proof SQL JSON root is not an object")
+    value = parse_single_json_document(proc.stdout)
     value["wall_milliseconds"] = int(elapsed_ms)
     return value
 
