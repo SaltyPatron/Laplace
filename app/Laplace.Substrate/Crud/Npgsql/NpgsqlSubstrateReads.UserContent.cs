@@ -48,6 +48,27 @@ public static partial class NpgsqlSubstrateReads
         return exists is true;
     }
 
+    private const string UserArtifactObservationSql = """
+        SELECT bytes, modified_at
+        FROM laplace.ingest_file_journal
+        WHERE source_name = @source_name
+          AND file_id = @file
+          AND status = 'ok'
+        ORDER BY ended_at DESC NULLS LAST, run_id DESC
+        LIMIT 1
+        """;
+
+    private static UserArtifactObservation MapUserArtifactObservation(NpgsqlDataReader reader) => new(
+        reader.GetInt64(0),
+        reader.IsDBNull(1) ? null : reader.GetFieldValue<DateTimeOffset>(1));
+
+    private static void BindUserArtifactObservation(
+        NpgsqlParameterCollection parameters, string sourceName, byte[] fileId)
+    {
+        parameters.Add("source_name", NpgsqlDbType.Text).Value = sourceName;
+        parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
+    }
+
     /// <summary>The newest successful physical observation of a source-owned file.</summary>
     public static async Task<UserArtifactObservation?> UserArtifactObservationAsync(
         NpgsqlConnection connection,
@@ -55,23 +76,24 @@ public static partial class NpgsqlSubstrateReads
         byte[] fileId,
         CancellationToken ct)
     {
-        var rows = await NpgsqlRead.ReadRowsAsync(connection, """
-            SELECT bytes, modified_at
-            FROM laplace.ingest_file_journal
-            WHERE source_name = @source_name
-              AND file_id = @file
-              AND status = 'ok'
-            ORDER BY ended_at DESC NULLS LAST, run_id DESC
-            LIMIT 1
-            """,
-            static reader => new UserArtifactObservation(
-                reader.GetInt64(0),
-                reader.IsDBNull(1) ? null : reader.GetFieldValue<DateTimeOffset>(1)),
-            parameters =>
-            {
-                parameters.Add("source_name", NpgsqlDbType.Text).Value = sourceName;
-                parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
-            },
+        var rows = await NpgsqlRead.ReadRowsAsync(connection, UserArtifactObservationSql,
+            MapUserArtifactObservation,
+            parameters => BindUserArtifactObservation(parameters, sourceName, fileId),
+            ct: ct,
+            label: "user_artifact_observation").ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary>The newest successful physical observation of a source-owned file.</summary>
+    public static async Task<UserArtifactObservation?> UserArtifactObservationAsync(
+        NpgsqlDataSource dataSource,
+        string sourceName,
+        byte[] fileId,
+        CancellationToken ct)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, UserArtifactObservationSql,
+            MapUserArtifactObservation,
+            parameters => BindUserArtifactObservation(parameters, sourceName, fileId),
             ct: ct,
             label: "user_artifact_observation").ConfigureAwait(false);
         return rows.Count == 0 ? null : rows[0];
