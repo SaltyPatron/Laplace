@@ -23,13 +23,17 @@ public sealed class LeaderBandCatalogGateTests
     }
 
     [Fact]
-    public void NamedLeaderRead_JoinsImmutableCatalogAndNeverLiveCensus()
+    public void NamedLeaderRead_UsesNativeCatalogAndNeverLiveCensus()
     {
         var text = Read("app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.BandLeaders.cs");
-        Assert.Contains("FROM ops.band_leaders(@bands, @per) AS l", text);
-        Assert.Contains("JOIN converse.relation_band_catalog() AS b", text);
-        Assert.DoesNotContain("FROM converse.relation_bands()", text);
-        Assert.DoesNotContain("JOIN converse.relation_bands()", text);
+        var catalog = Read("engine/core/src/sql_catalog.def");
+        Assert.Contains("SqlCatalog.Get(\"leaders.named\")", text);
+        Assert.DoesNotContain("SELECT ", text);
+        Assert.Contains("SQL_QUERY(\"leaders.named\"", catalog);
+        Assert.Contains("FROM ops.band_leaders($1,$2) AS l", catalog);
+        Assert.Contains("JOIN converse.relation_band_catalog() AS b", catalog);
+        Assert.DoesNotContain("FROM converse.relation_bands()", catalog);
+        Assert.DoesNotContain("JOIN converse.relation_bands()", catalog);
     }
 
     private static string ExtractMethod(string text, string signaturePrefix)
