@@ -1,5 +1,6 @@
 using System.Text.Json;
 using global::Npgsql;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -120,61 +121,83 @@ public sealed record ChessPlayerModelReceipt(
     long RootReads,
     long MemberReads,
     long MembersWithEvidence,
-    long MovesInfluenced)
+    long MovesInfluenced,
+    long ContextReads = 0,
+    long ContextCells = 0)
 {
     public string Summary =>
         $"player-model={ExportId[..Math.Min(12, ExportId.Length)]} " +
         $"members={Members} roots={RootReads} member-reads={MemberReads} " +
-        $"evidence-members={MembersWithEvidence} moves={MovesInfluenced}";
+        $"evidence-members={MembersWithEvidence} moves={MovesInfluenced} " +
+        $"context-reads={ContextReads} context-cells={ContextCells}";
 }
 
 /// <summary>
 /// Root-only player-conditioned evidence plane. Each constituent player is read independently;
-/// disagreement remains disagreement instead of being erased at export time. A constituent's
-/// exact-position successor score is confidence-shrunk by its own game count, then the selected
-/// member set is combined with equal constituent prior. The result is capped to the same ±150cp
-/// steering envelope as the ordinary substrate root provider, so it cannot outrank proven mate.
+/// disagreement remains disagreement instead of being erased at export time. Exact-position
+/// successor evidence is confidence-shrunk by its own game count. A8 context evidence then
+/// adjusts that constituent's authority: board phase is always selected from the current board;
+/// an optional witnessed clock/think class can be supplied by a live driver. The context cannot
+/// invent a move by itself — it can only strengthen or weaken the constituent's actual move
+/// evidence — and the final result remains inside the same ±150cp steering envelope.
 /// </summary>
 public sealed class ChessCompositePlayerBias : IRootBias
 {
     private readonly ChessPlayerModelExport _export;
     private readonly Func<Hash128, Hash128, bool, int, IReadOnlyList<ChessPlayerMoveEvidence>> _read;
+    private readonly Func<Hash128, Hash128, NpgsqlConsensusCell.Row?>? _readContext;
     private readonly int _capCp;
+    private string? _thinkContext;
     private long _rootReads;
     private long _memberReads;
     private long _membersWithEvidence;
     private long _movesInfluenced;
+    private long _contextReads;
+    private long _contextCells;
 
     public ChessCompositePlayerBias(
         NpgsqlDataSource ds,
         ChessPlayerModelExport export,
         int capCp = 150)
-        : this(
-            export,
-            (position, player, whiteToMove, limit) =>
-                NpgsqlSubstrateReads.ChessPlayerMovesAsync(
-                        ds, position.ToBytes(), player.ToBytes(), whiteToMove,
-                        limit, CancellationToken.None)
-                    .GetAwaiter().GetResult()
-                    .Select(static row => new ChessPlayerMoveEvidence(
-                        Hash128.FromBytes(row.NextPosition), row.Games, row.Score))
-                    .ToArray(),
-            capCp)
     {
         ArgumentNullException.ThrowIfNull(ds);
+        _export = export ?? throw new ArgumentNullException(nameof(export));
+        _capCp = Math.Clamp(capCp, 0, 150);
+        _read = (position, player, whiteToMove, limit) =>
+            NpgsqlSubstrateReads.ChessPlayerMovesAsync(
+                    ds, position.ToBytes(), player.ToBytes(), whiteToMove,
+                    limit, CancellationToken.None)
+                .GetAwaiter().GetResult()
+                .Select(static row => new ChessPlayerMoveEvidence(
+                    Hash128.FromBytes(row.NextPosition), row.Games, row.Score))
+                .ToArray();
+        _readContext = (player, context) =>
+            NpgsqlConsensusCell.ReadAsync(
+                    ds, player, ChessVocabulary.OutcomeType, context, CancellationToken.None)
+                .GetAwaiter().GetResult();
     }
 
     internal ChessCompositePlayerBias(
         ChessPlayerModelExport export,
         Func<Hash128, Hash128, bool, int, IReadOnlyList<ChessPlayerMoveEvidence>> read,
-        int capCp = 150)
+        int capCp = 150,
+        Func<Hash128, Hash128, NpgsqlConsensusCell.Row?>? readContext = null)
     {
         _export = export ?? throw new ArgumentNullException(nameof(export));
         _read = read ?? throw new ArgumentNullException(nameof(read));
+        _readContext = readContext;
         _capCp = Math.Clamp(capCp, 0, 150);
     }
 
     public ChessPlayerModelExport Export => _export;
+
+    /// <summary>
+    /// Optional live clock/think lens (rushed, deep, planned_quick, pressed_think, flagging).
+    /// Phase is always derived from the board. Null means no witnessed clock context is available;
+    /// unknown is never rewritten as normal.
+    /// </summary>
+    public void SetThinkContext(string? context)
+        => _thinkContext = string.IsNullOrWhiteSpace(context) ? null : context.Trim();
 
     public int[] Bonus(Board root, IReadOnlyList<ChessMove> moves)
     {
@@ -198,6 +221,7 @@ public sealed class ChessCompositePlayerBias : IRootBias
         {
             Interlocked.Increment(ref _memberReads);
             var rows = _read(rootId, member, root.WhiteToMove, moves.Count);
+            double contextAuthority = ContextAuthority(root, member);
             bool memberContributed = false;
             foreach (var row in rows)
             {
@@ -209,7 +233,7 @@ public sealed class ChessCompositePlayerBias : IRootBias
                 // Shrink sparse exact-position evidence toward neutral before combining members.
                 double centered = Math.Clamp((row.Score - 0.5d) * 2d, -1d, 1d);
                 double confidence = 1d - 1d / Math.Sqrt(row.Games + 1d);
-                sums[moveIndex] += centered * confidence;
+                sums[moveIndex] += centered * confidence * contextAuthority;
                 contributors[moveIndex]++;
                 memberContributed = true;
             }
@@ -221,8 +245,9 @@ public sealed class ChessCompositePlayerBias : IRootBias
         for (int i = 0; i < bonus.Length; i++)
         {
             if (contributors[i] == 0) continue;
-            // Equal member prior: a prolific player contributes stronger confidence within a
-            // cell, but cannot dominate the composite merely by having more games in the corpus.
+            // Equal member prior before context: a prolific player contributes stronger confidence
+            // within a cell but cannot dominate merely by corpus size. A8 context can then alter
+            // constituent authority by at most ±50%; it never bypasses the final ±cap envelope.
             double signal = sums[i] / contributors[i];
             bonus[i] = Math.Clamp(
                 (int)Math.Round(signal * _capCp, MidpointRounding.AwayFromZero),
@@ -234,6 +259,46 @@ public sealed class ChessCompositePlayerBias : IRootBias
         return bonus;
     }
 
+    private double ContextAuthority(Board root, Hash128 member)
+    {
+        if (_readContext is null) return 1d;
+
+        Span<string?> surfaces = stackalloc string?[2];
+        surfaces[0] = ChessCanonical.PhaseClass(root);
+        surfaces[1] = _thinkContext;
+
+        double signal = 0;
+        int cells = 0;
+        Hash128 priorId = default;
+        for (int i = 0; i < surfaces.Length; i++)
+        {
+            string? surface = surfaces[i];
+            if (string.IsNullOrWhiteSpace(surface)) continue;
+            if (ContentEmitter.RootId(surface) is not { } contextId) continue;
+            if (i > 0 && contextId == priorId) continue;
+            priorId = contextId;
+
+            Interlocked.Increment(ref _contextReads);
+            if (_readContext(member, contextId) is not { } row || row.WitnessCount <= 0)
+                continue;
+            Interlocked.Increment(ref _contextCells);
+
+            // Compare conservative standing to the neutral-prior conservative standing, not
+            // raw 1500. That keeps a sparse context from looking bad merely because its RD is
+            // still wide. Witness saturation damps one-game extremes.
+            double baseline = GlickoPriors.NeutralMu - 2d * GlickoPriors.InitialRd;
+            double effective = row.Rating - 2d * row.Rd;
+            double normalized = Math.Clamp(
+                (effective - baseline) / (2d * GlickoPriors.InitialRd), -1d, 1d);
+            double confidence = 1d - 1d / Math.Sqrt(row.WitnessCount + 1d);
+            signal += normalized * confidence;
+            cells++;
+        }
+
+        if (cells == 0) return 1d;
+        return Math.Clamp(1d + 0.5d * (signal / cells), 0.5d, 1.5d);
+    }
+
     public ChessPlayerModelReceipt Receipt() => new(
         ChessPlayerModelExport.Hex(_export.Id),
         ChessPlayerModelExport.Hex(_export.MemberSetId),
@@ -241,7 +306,9 @@ public sealed class ChessCompositePlayerBias : IRootBias
         Volatile.Read(ref _rootReads),
         Volatile.Read(ref _memberReads),
         Volatile.Read(ref _membersWithEvidence),
-        Volatile.Read(ref _movesInfluenced));
+        Volatile.Read(ref _movesInfluenced),
+        Volatile.Read(ref _contextReads),
+        Volatile.Read(ref _contextCells));
 }
 
 /// <summary>
@@ -284,6 +351,9 @@ public sealed class ChessPlayerModelRuntime
 
     public ChessPlayerModelExport Export => _playerBias.Export;
     public ChessPlayerModelReceipt Receipt => _playerBias.Receipt();
+
+    /// <summary>Pass a witnessed live clock lens into the player policy; null preserves unknown.</summary>
+    public void SetThinkContext(string? context) => _playerBias.SetThinkContext(context);
 
     public Search BuildSearch(int ttBits = 20) => new(
         EvalTerm.All,
