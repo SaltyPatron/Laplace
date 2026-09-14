@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Named fail-loud gate for empty / thin / mid-ingest substrate (#792).
+# Named fail-loud gate for empty / thin / mid-ingest / structurally-invalid substrate.
 #
 # Fail modes (exact strings — grep these in CI logs / agent claims):
 #   INVALID_INDEXES             — installed index-health operation reports an invalid index
 #   INGEST_JOURNAL_NONTERMINAL  — status='running' row(s) in ingest_run_journal
 #   THIN_SUBSTRATE              — foundation HasLayerCompleted markers incomplete
 #                                 (or database missing)
+#   RECURSIVE_SUBSTRATE_PROOF_* — exhaustive current content physicality/trajectory
+#                                 contract proof failed; receipt has counterexamples
 #
-# Heal path: dispatch seed-foundation (or wait for the in-flight ingest). This
-# script NEVER reseeds. Push/deploy must stay red until the floor is real —
-# silent skip / greenwash of conversational claims is the defect.
+# Heal path depends on the failed coordinate. This script NEVER reseeds or repairs.
+# Push/deploy/product proof must stay red until the selected live state is real.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -52,5 +53,16 @@ if ! bash "$ROOT/scripts/ensure-foundation.sh" --check-only; then
   exit 1
 fi
 
-echo "substrate floor OK on ${DB} (journal quiet + foundation layers complete)"
+# The foundation marker proves expected source layers reached terminal admission. It
+# does not prove that the recursively stored physicalities are internally sound.
+# Run the read-only exhaustive finite-state proof after the journal is quiet so the
+# receipt describes one stable estate rather than a moving ingest frontier.
+proof_receipt="${LAPLACE_RECURSIVE_PROOF_RECEIPT:-$ROOT/build/test-receipts/live-recursive-substrate.json}"
+if ! python3 "$ROOT/scripts/prove-live-recursive-substrate.py" "$DB" --receipt "$proof_receipt"; then
+  echo "::error::RECURSIVE_SUBSTRATE_PROOF_FAIL: live recursive physicality/trajectory contract failed on ${DB}"
+  echo "Receipt: $proof_receipt"
+  exit 1
+fi
+
+echo "substrate floor OK on ${DB} (journal quiet + foundation layers complete + recursive proof green)"
 exit 0

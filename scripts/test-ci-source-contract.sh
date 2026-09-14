@@ -47,6 +47,9 @@ for f in \
   scripts/model-payload-gate-check.py \
   scripts/model-payload-gate-baseline.json \
   scripts/ensure-foundation.sh \
+  scripts/check-substrate-floor.sh \
+  scripts/prove-live-recursive-substrate.py \
+  scripts/test-live-recursive-proof-gate.py \
   scripts/laplace_api.py \
   scripts/eval-generation.py \
   scripts/verify-generation.py \
@@ -76,6 +79,11 @@ bash scripts/test-dataset-estate-refresh.sh
 # The dynamic forward pass may optimize duplicate orchestration work, but it may
 # not shorten the requested walk or introduce a second route/crawl definition.
 python3 scripts/test-forward-prompt-analysis.py
+
+# The live recursive proof runs only on the seeded/shared profile, but its SQL
+# construction and floor wiring are source contracts and must fail before build if
+# an edit starts measuring packed carrier coordinates or drops a hard invariant.
+python3 scripts/test-live-recursive-proof-gate.py
 
 # BEGIN ATOMIC pg_depend release is part of live extension-upgrade safety. Prove
 # both legal release forms (drop/rebind) and the unsafe rebind/ordering cases with
