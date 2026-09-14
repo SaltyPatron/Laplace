@@ -96,6 +96,18 @@ public sealed class SearchTests
         Assert.Equal(0, result.Score);
     }
 
+    [Fact]
+    public void InsufficientMaterialRoot_IsAlreadyDrawn_NotAContemptPosition()
+    {
+        // Classical material sees a bishop, but chess law has already closed K+B v K as a draw.
+        // The root stance must therefore be neutral rather than penalizing the only possible result.
+        var board = Board.FromFen("7k/8/8/8/8/8/5B2/4K3 w - - 0 1");
+        var result = new Search().Think(board, new Search.Limits(MaxDepth: 2));
+
+        Assert.NotNull(result.BestMove);
+        Assert.Equal(0, result.Score);
+    }
+
     private static Search.Result Think(string fen, int depth)
         => new Search().Think(Board.FromFen(fen), new Search.Limits(MaxDepth: depth));
 
