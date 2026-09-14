@@ -40,6 +40,15 @@ public sealed class SpiParallelPlanGateTests
         @"(?<!""|_cursor)\bSPI_prepare\s*\(",
         RegexOptions.Compiled);
 
+    // Read-write exemptions sometimes pass a helper call as the first SPI argument
+    // (for example matched_leaf_plan(...)).  The old `[^)]*` check stopped at that
+    // nested close-paren and falsely claimed the file never executed read-write.  Bound
+    // the scan instead: this still requires an actual SPI call followed shortly by the
+    // explicit `false` read_only argument, while allowing ordinary nested expressions.
+    private static readonly Regex ReadWriteExecute = new(
+        @"SPI_(?:execute_plan|execute_with_args|cursor_open)\s*\([\s\S]{0,1200}?\bfalse\s*[,)]",
+        RegexOptions.Compiled);
+
     [Fact]
     public void ReadOnlySpiPlans_ArePreparedParallelEligible()
     {
@@ -58,7 +67,8 @@ public sealed class SpiParallelPlanGateTests
             {
                 // Ignore matches inside a string literal on the same line (elog messages).
                 var lineStart = text.LastIndexOf('\n', m.Index) + 1;
-                var line = text[lineStart..text.IndexOf('\n', m.Index)];
+                var lineEnd = text.IndexOf('\n', m.Index);
+                var line = text[lineStart..(lineEnd >= 0 ? lineEnd : text.Length)];
                 if (line.TrimStart().StartsWith("*") || line.Contains("failed")) continue;
                 var lineNo = text.Take(m.Index).Count(c => c == '\n') + 1;
                 offenders.Add($"{name}:{lineNo}");
@@ -83,9 +93,7 @@ public sealed class SpiParallelPlanGateTests
         {
             var path = Path.Combine(srcRoot, name);
             Assert.True(File.Exists(path), $"exempt file does not exist: {name}");
-            Assert.Matches(
-                new Regex(@"SPI_(?:execute_plan|execute_with_args|cursor_open)\([^)]*,\s*false\s*[,)]", RegexOptions.Singleline),
-                File.ReadAllText(path));
+            Assert.Matches(ReadWriteExecute, File.ReadAllText(path));
         }
     }
 }
