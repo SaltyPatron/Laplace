@@ -1,208 +1,169 @@
-## Recovery implementation — current evidence, 2026-09-05
+# Laplace — current task/status index
 
-- Worktree `/tmp/laplace-content-recovery`, existing PR #1496. Not yet on main or
-  installed in original production. Historical checkpoints below are superseded.
-- Native full-source composition preserves exact Python bytes, grammar structure,
-  dynamic tier floors, and RLE flags. File trunk owns content and identity metadata;
-  path/bytes/mtime observations persist separately. Generic CodeDecomposer worker tested.
-- Native constituent closure replaces recursive SQL. Florence: 8,420 edges, zero
-  differences; HTTP exact 15,119-byte reads after DB reload 856/176/192 ms.
-- Shared journaled writer now commits evidence, consensus fold, and replay receipt in
-  one transaction. Native semantic digest covers admitted payload, independent of row
-  order/stage partition/clocks. Injected merge/fold failures roll back; retry/replay tested.
-- Fresh public upload repeated across process restart: evidence and consensus unchanged;
-  only file observations advance. Verified legacy bootstrap can receive a reconciled
-  receipt without recounting; partial/mismatched/artifact history returns 409 unchanged.
-- Morse source from `/vault/Data/test-data/electronics/international-morse-code.txt`:
-  exact 2,594-byte HTTP POST/GET, file db25a4eb16c82b3c5d81e505b32b9902 has two children,
-  existing content ef5e41c6013c481cdf2af28096678cf5 and metadata
-  da8bba849715df83965c2e822a2360b9. Original database remains untouched.
-- OMW 2.0: all 32 lexicons parsed and inventoried against raw XML (570 MB), 18 tests
-  passed. Italian artifact set was ingested into retained recovery DB; dependency omw-en
-  remains unresolved. Canonical relation alias/direction fixes now under verification;
-  prior row-count proof does not establish corrected relation semantics.
-- Reverse native containment now selects indexed physical candidates before entity
-  hydration and retains its typed SPI plan. Morse content→file: 70.38 ms cold,
-  8.83 ms warm / 1,806 buffers, versus 563 ms / 1.15M buffers; exact parent verified.
-  Two-hop Morse word traversal: four containers, 24.24 ms. Cycle test also passed.
-- Native logical trajectory equivalence replaces per-row SQL expansion in historical
-  reconciliation. Disjoint historical artifact cells are accepted without recounting;
-  overlapping/incomplete/mismatched bootstrap evidence remains a nonmutating conflict.
-- Gutenberg format metadata and shared work composition implemented; actual 195-file
-  inventory and 28 document tests passed. Final recognition/native-normalization review
-  and retained generic-worker ingestion are active, not delivered.
-- Existing SafeTensors codec repaired for exact scalar/empty/Unicode-name output,
-  bounded export memory, and write-error propagation. Native 3/3 and independent
-  safetensors.numpy readback passed. Full model export route remains unconnected.
-- Model work active: replace checkpoint-only hash attestations with native ordered
-  structural trajectories and inspect real MiniLM tensor ingestion. No model ingestion,
-  export, code generation, or full conversation delivery claimed.
-- Retained runtime: localhost:18081, laplace_recovery_demo on isolated socket
-  `/tmp/laplace-content-pg/socket`; hosted services skipped. Evidence files under
-  `/tmp/laplace-content-recovery-proof`.
-- Acceptance: combined managed/database 27/27; native closure affected DB 7/7;
-  native core 43/43; intent stage 23/23; atomic writer 2/2; bootstrap reconciliation
-  3/3; singleton replay compatibility 3/3. Full integration/CI/deployment outstanding.
+This file is a **navigation/status index**, not an authority over the invention and not a permanent global priority list.
 
-# Active recovery — 2026-09-05
+Historical recovery diaries, temporary-worktree paths, old database counts, old CI state and fixed session priorities previously stored here are preserved in Git history. They are not current requirements merely because they once appeared in `TASKS.md`.
 
-The acceptance boundary is the connected Laplace product defined by the invention,
-current inventor corrections, and both repositories' applicable issue history.
-Component results and the historical notes below are not current delivery claims.
+## Authority
 
-| Work | Existing owners | Current obligation / demonstrable result |
-|---|---|---|
-| Reconcile invention and implementation | Laplace invention/specs; Refactor #184 | Active. Resolve documented answers before asking the inventor; distinguish superseded descriptions from current requirements. |
-| Production digital-content ingestion | Laplace #1049, #799, #802, #806, #1010; PR #1496; Refactor #53, #57, #195 | Active implementation on PR #1496. Finish one shared file/content/metadata/provenance route, dynamic grammar-fed tier floors, exact reconstruction and bidirectional traversal. Preserve existing reusable content. |
-| Selected source estate and ETL | Laplace #1403, #967, #1153; Refactor #171, #195, #223 | Reconcile selected releases/artifacts in /vault/Data and /vault/models; shared native composition and bulk apply; complete artifact dispositions and metadata; physical batching must not change identity. |
-| Standing and evidence | Laplace #1303, #1321; Refactor #16, #110 | Preserve observations, derivations, independent evidence and contextual standing as distinct state; demonstrate actual outcome-driven updates through their consumers. |
-| Cognition and language realization | Laplace #1401, #1478, #921; Refactor #17, #18, #60, #132, #182 | Whole-input interpretation through shared typed native operations to a completed semantic act and language realization; no rank-one topic, regex, substring or template substitute. |
-| Gödel / procedural learning | Refactor #19, #169, #218, #221, #222 | Persistent successes/failures, validated skills, contextual habits and equivalent acceleration; demonstrate changed subsequent execution without self-corroboration. |
-| Optional model ingestion and model synthesis | Laplace #927, #928; Refactor #20, #61, #71, #129, #223 | Exact reusable model structure and calibrated behavioral evidence; same substrate operators drive scoped target generation; demonstrate external-runtime behavior, not merely a loadable file. |
-| Unified product navigation / UX | Laplace #1404; Refactor #21, #68 | Deferred presentation work per inventor. Shared search/rank/entity/structure/evidence traversal; Hikaru player-name resolution and king/substring distinction remain required. |
-| Integration and installed behavior | Existing owning PRs; Refactor #22, #23 | Preserve valid work, avoid overlapping PRs, verify actual installed native/public behavior. No destructive reseed inferred from stale notes. |
+For any implementation session, use this order:
 
-## Verified baseline and limits
+1. current inventor instruction/correction;
+2. [`docs/INVENTION.md`](docs/INVENTION.md) and [`docs/INVENTIONS.md`](docs/INVENTIONS.md);
+3. binding specs, especially the forward-pass and operation-ISA contracts;
+4. current decisions/plans;
+5. GitHub issues/PRs as execution tracking;
+6. code/tests/live runtime as implementation evidence;
+7. archived/historical material only as evidence/counterexamples.
 
-- Original database is populated. SQL, MCP and HTTP reproduced the same defective
-  continuation for “The opposite of hot is”; callable adapters do not prove cognition.
-- International Morse Code has canonical content root
-  `ef5e41c6013c481cdf2af28096678cf5`, currently stored at floor 4. Native-backed SQL
-  reconstruction reproduced the source's 2,594 bytes exactly; a sentence child
-  ascended to that root. This does **not** establish a proper file entity trunk.
-- Current `FileEntity.SourceId()` aliases content identity; metadata is attached by
-  a relation. PR #1496 owns the unfinished content/file/document/work correction.
-- Ingest journal `file_id` is a separate resume fingerprint, not a navigable content
-  identity. Journal completion and staged counts cannot certify artifact structure.
-- Tier is compositional floor, never a universal category number. “Hello” does not
-  gain another content identity merely by serving as a title or document. Actual
-  multi-child compositions, including a file's content and metadata, have their own
-  identities. Segmentation/roles are modality- and grammar-specific.
-- Refactor's existing interrupted rebase is preserved; its deployment state does
-  not establish the state of the original populated database.
+See [`AGENTS.md`](AGENTS.md) for the complete execution contract.
 
-## Current bounded assignments
+No entry here may narrow that authority stack. A user-directed task may also legitimately outrank unrelated repository backlog work.
 
-- Primary: integrated artifact callers, endpoint integration, review and combined acceptance.
-- `content_contract` (Sol/high): authority review complete; real HTTP/database tenant
-  occurrence checks passed (2/2). Public IDs are canonical lowercase hex; POST → GET uses
-  the returned ID. File → [content, metadata] and content → file assertions passed.
-- `native_content_path` (Terra/high): generic ordered native composition/staging
-  implemented; six focused native checks and managed builds passed.
-- `artifact_pr_review` (Sol/high): native-backed canonical reconstruction implemented;
-  three isolated PostgreSQL checks passed against the final static SQL definition.
+## Current documentation/source-of-truth reconciliation
 
-Implementation is in `/tmp/laplace-content-recovery`, extending the existing PR branch.
-These local results are not merged, installed, or delivered product behavior.
+Active branch: `docs/canonical-invention-contract-20260914`.
 
-## Integration findings — not delivery claims
+The current documentation pass is correcting the repository so future agents do not reinterpret Laplace as a small graph demo, generic PostgreSQL knowledge base, nearest-neighbor system, “walk = intelligence,” transformer clone, or MVP substitute.
 
-- The existing PR branch is available in `/tmp/laplace-content-recovery`, based on
-  `1e5d628b44820b6dafcec6235a65e42faf17dcca`; the original working tree and the
-  Refactor rebase remain undisturbed.
-- The original PR `DocumentEntity.Resolve` bypassed `hash_composer_compose_node` and hashed a
-  singleton through raw `Hash128.Merkle`, reminting a wrapper. The generic native
-  composer already collapses singletons. Its fixed document category/floor and
-  tests requiring content/document inequality must be reconciled together.
-- The original PR `FileEntity.Emit` used a fixed document floor and Karcher mean instead of
-  deriving the parent floor and consuming the canonical composition calculation.
-  The correction belongs to the shared native composition boundary.
-- Recipe-declared name/path may participate in the file's metadata composition
-  under #1049 without salting the underlying content identity. Mtime/transfer size
-  remain observational. No new inventor decision is needed on this distinction.
-- #799 already defines canonical work descriptor content from title/author;
-  attributed claims and referential interpretation remain separate. Do not reopen
-  this as an unanswered invention question without conflicting higher authority.
-- Preserve useful native text/grammar compose, bulk drain, trajectory decode and
-  batched containment implementations. Verify existing bindings before adding an
-  ABI; do not create another file-specific composition engine.
-- Implemented locally: removed the plain-text document reminting wrapper; native
-  ordered composition now derives file floor, identity, coordinates and trajectory.
-  Five artifact identity/staging checks passed, including the singleton “Hello”.
-- Artifact export checks the tenant's recorded admission, not global
-  `first_observed_by`. An isolated HTTP/database check confirms that two admitting
-  tenants share one artifact while an unrelated tenant cannot export it.
-- Reconstruction uses the existing native renderer through fixed SQL and verifies
-  canonical identity before returning UTF-8. Three database checks passed for
-  normalization, missing constituents and cycles; the endpoint builds cleanly.
-- Export requires a confirmed tenant occurrence, SourceFile type, exactly two
-  constituents and a matching recomputed file identity. Prompt contexts require
-  confirmed outcomes. Isolated actual-writer tests reject false-type membership,
-  refuted file membership and refuted prompt membership with HTTP 404.
-- Metadata identity now uses fixed-field escaped JSON: embedded newlines cannot
-  alias distinct name/path pairs. Both pairs round-trip in the collision regression.
-  Admission preserves leading/trailing name/path characters instead of trimming them.
-- Existing reusable structured path confirmed: `laplace_grammar_compose` produces
-  native roots/tiers/trajectories; `laplace_compose_drain_into_stage` is its bulk drain.
-  `GrammarRowComposer` already owns that result and borrowed containment tree. The
-  next content integration is a root-component accessor plus FileEntity overload
-  accepting that prepared root, rather than another format-specific file engine.
-- Remaining: original encoding/BOM/format-byte reconstruction; reusable modality/
-  format grammars including paragraph/page/section structure; observational metadata
-  persistence; multi-document artifact envelopes; complete physical source inventory
-  and coverage; shared prepared composition to eliminate repeated tree construction;
-  flag-preserving trajectory RLE; installed integration and operator measurements.
-  The current ordered native trajectory preserves repetitions and atom flags exactly,
-  but its flagged codec does not yet provide run-length encoding.
+Completed on the branch during this pass include:
 
----
+- `README.md` — technical-marketing statement of the real invention/capabilities;
+- `AGENTS.md` — authority, anti-substitution, universal execution-grain and delivery law;
+- `docs/INVENTION.md` — complete invention, bounded-composition proof, exact trajectory carrier, spider-colony web, coupling field, execution/billing/proof boundaries;
+- `docs/INVENTIONS.md` — aligned mechanism catalog;
+- `docs/ARCHITECTURE.md` — as-built architecture plus explicit implementation divergences;
+- `docs/specs/36_Laplace_Forward_Pass.md` — `RESOLVE → COUPLE → ORIENT → ROUTE → ...` contract;
+- `docs/specs/37_Substrate_Operation_ISA.md` — appended `OP10 COUPLE` while retaining stable historical opcode ids;
+- `docs/read-path.md` — current execution/read contract replacing the stale August phased repair plan;
+- `docs/decisions/0004-language-highway-master-detail.md` — UI navigation decision no longer demotes glome/walk/constellation/trajectory primitives;
+- `docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md` — exact artifact, serviceable-capacity versus saturation and execution-grain benchmark law;
+- `docs/INVENTION_PRESERVATION_2026-09-02.md` — marked as an intermediate historical reconciliation, not a competing authority.
 
-# Historical reconstructed task state — 2026-08-24
+Relevant issue prose has also been corrected where discovered, including benchmark/service-headroom tracking and earlier identity/trajectory/prototype framing issues.
 
-The following is retained as historical evidence. Its database counts, branch/CI
-state, priority declarations and assertion that the seed must be discarded are not
-current findings or authorization.
+## Current invention-preservation checkpoints
 
-Status vocabulary: DONE = landed AND verified against the running artifact.
-PARTIAL = landed, some part unverified. OPEN = not started or not finished.
+These are not “future ideas.” They are the architectural laws against which implementation status is judged.
 
-## The four original tasks (from session start, 2026-08-22 21:03)
+### Recursive exact representation
 
-| # | Task | Status | Evidence / what is missing |
-|---|---|---|---|
-| 1 | Universal agent-log decomposer — every provider, batched, parallel, no reinvented wheels | **OPEN** | Landed at `34195736`. **Never run through a single ingest.** No journal row, no gate, no verification of any kind. |
-| 2 | Get CI green | **OPEN** | 4 blockers found and fixed tonight (#1322, #1323, #1326, #1327). Last main run still **failed** on `Eval — generation / election correctness`, `election 1/6 exact`. Root cause identified (#1328) but the seed that would clear it is unfinished. |
-| 3 | Recover lost work | **OPEN** | Orphan count corrected from 400 → 98 candidates across 63 branches, then shown to over-report. **5 verified, 1 landed** (#1325). **189 SQL functions still string-bodied** that orphaned `3999680f` converted to BEGIN ATOMIC — aborted, 34 conflicts. |
-| 4 | Does Laplace converse properly | **ANSWERED, NOT FIXED** | No. Proven live: three-turn water-cycle test returns isolated dictionary glosses, no carried topic, no chain. Non-English returns `null`. Root cause is #1321 + unseeded knowledge layer. |
+- canonical admitted content/composition has one executable identity under its declared recipe;
+- larger structures retain exact ordered constituent trajectories/DAGs;
+- packed trajectory vertices carry complete constituent ids + metadata and are not real spatial coordinates;
+- realized curves resolve child physicality coordinates in logical order;
+- current 4D binary64 trajectory vertex carries exactly 212 reversible bits: 128 id + 16 ordinal + 16 run + 52 flags;
+- current finite machine widths are implementation windows, not mathematical limits.
 
-## Landed tonight
+### Bounded geometric realization
 
-| PR | What | Verified? |
-|---|---|---|
-| #1322 | Symmetric relations reachable from only one endpoint — `generate_walk.c`, `prompt_coherence.c`, `consensus.gaps` | **PARTIAL.** `generate_walk` proven RED→GREEN live on `avant/après J.-C.`, 26/26 regress. `prompt_coherence` rel_mass and `consensus.gaps` **never measured** — shipped on "it compiled". |
-| #1323 | `rating_spread` gate premise: constant is forced when `max(witness_count) <= 1` | **UNPROVEN.** atomic2020 gate has not re-run. |
-| #1324 | ARCHITECTURE: entities hash-sharded at tiers 0, 2, 3 | DONE. Verified against `ops.partition_pressure` — 27 partitions. |
-| #1325 | Recovered joint-edge election + `LAPLACE_XYZM_MAX_POINTS` allocator guard | PARTIAL. Broke main; repaired by #1326. |
-| #1326 | Two recovered SPI plans were planned serial | DONE. `SpiParallelPlanGateTests` 2/2. |
-| #1327 | 3 db-tier classes raced `ContentLadderLedger` static state | DONE. 797/798 with db tier enabled. |
+For the current native centroid composer, child placements inside the closed unit 4-ball imply their parent centroid and realized line segments remain inside the same bounded domain. This theorem is separate from the finite binary64/hash/Unicode implementation.
 
-## Open defects filed, not fixed
+Current code contains a real implementation divergence: native composition uses Euclidean centroid while `NgramTrajectory` and some managed/domain paths use Karcher mean/on-S³ placement. That is an implementation obligation, not a reason for prose to pretend both laws are identical.
 
-- **#1321 — the fold has no opponent.** `consensus_fold_math.h:38` and three sites in `fold_route.c` pass `CONSENSUS_FOLD_NEUTRAL_MU` as the opponent rating on every fold. Every rating in the substrate is a witness counter. Simulation reproduces the live distribution to 0.4%. **This is the core defect. Nothing else matters until it is fixed.**
-- **#1328 — cancelled ingests fold partial evidence.** Wiktionary 12,076,118 / UD 181,814 / OMW 2,204,303 attestations from truncated corpora, `evidence_persisted = t`. Cancellation is not transactional at the semantic level.
-- **#1303** — source trust asserted by literals, never earned. Measurement added: one extra witness ≈ 690× the entire trust ladder.
+### Spider-colony web / cognition
 
-## Started and abandoned tonight
+One entity may participate simultaneously in recursive composition, containment, ordered occurrences, typed relations, evidence/consensus, source/context and geometric/index planes.
 
-- **Fold opponent fix** (`fix/fold-real-opponent`): engine core edited only —
-  `laplace_attestation_witness_opponent_rating()` + staged struct field. Does
-  nothing on its own. Still needs C# marshalling, `attestations.opponent_rating_fp1e9`,
-  three `fold_route.c` sites, `consensus_fold_math.h`, rebuild, install, regress,
-  and a full reseed.
-- **BEGIN ATOMIC recovery** (189 functions): cherry-pick applies 167 files clean,
-  34 conflicts. Aborted.
+The cognition center is the **query-relative coupling/response field**:
 
-## Database state
+```text
+exact admitted observation/root
+-> tug every eligible indexed plane under hard scope/resource bounds
+-> preserve typed responses/routes
+-> joint interpretation / ambiguity disposition
+-> derive providers/operators/hops/fanout
+-> sparse star execution
+-> fold/select/realize/witness
+-> update active state and repeat
+```
 
-- Recreated empty 2026-08-24 06:24 (`db-ops recreate`).
-- Foundation ladder seeded: 10/10 sources ok, 1595s. 3,650,808 entities /
-  7,490,474 attestations / 7,099,321 consensus.
-- Documents: seeded.
-- Knowledge / code / models: **never seeded.**
-- **The entire seed is worthless** — it encodes the constant-opponent fold. It
-  must be discarded and redone after #1321.
+A*, Dijkstra, strongest-walk, trajectory continuation, containment and geometry are operators inside this program, not substitutes for the whole program.
 
-## Left on disk
+### Universal execution grain
 
-- `laplace_d_iso639`, `laplace_d_propbank`, `laplace_d_unicode` — ~9 GB of
-  isolate DBs from before tonight.
+The physical execution law applies to every high-volume lane:
+
+```text
+boundary/orchestrator
+-> batched/set-sized/indexed handoff
+-> native C/C++ repeated algorithmic work
+-> bulk/set result + receipt
+```
+
+PostgreSQL owns durable indexed state and set access; SPI is the prepared set-sized bridge; C#/SQL orchestrate contracts/transport.
+
+This applies to decomposition, ingestion, read/cognition, analysis/domain engines, reconstruction, synthesis and export. Caller loops, per-row SPI/PInvoke/SQL, recursive CTE inner engines, per-item commits/COPY and nominal batches implemented as scalar loops are defects when coarse native/set execution can own the same semantics.
+
+### One knowledge world, variable compute
+
+Resource/product tiers control explicit work such as hops, fanout, candidate/frontier limits, providers/operators, memory/I/O/concurrency and output. They do not point lower-cost requests at intentionally knowledge-reduced Laplace variants.
+
+Preflight/`EXPLAIN`, compute-credit reservation, hard execution counters, actual receipts and reconciliation should all refer to the same physical work dimensions.
+
+## Current proof boundary
+
+Do not replace proof with status prose.
+
+Already existing evidence includes native Super-Fibonacci/trajectory/mantissa/composer tests, retained-database exact reconstruction and revision-bound benchmark tooling.
+
+Still-open proof/implementation obligations include:
+
+- exhaustive live recursive physicality/reference/trajectory closure over the populated substrate;
+- complete typed coupling-field coverage across intended planes;
+- systematic enforcement of the universal execution-grain law across legacy lanes;
+- reconciliation of native centroid versus managed Karcher placement;
+- managed-host benchmark resource reserve so default capacity tests cannot starve the database/product/runner/control plane.
+
+## Benchmark status
+
+The current native `core-single` benchmark family has demonstrated on the project's Intel i7-6850K host, single-threaded and without PostgreSQL/GPU in that profile, roughly:
+
+```text
+~1.76–1.86 million codepoints/s
+~440k–465k four-character BPE-equivalent input units/s
+~4.33–4.56 million exact tier-tree nodes/s
+```
+
+These are construction/composition measurements; the token-equivalent number is only a familiar normalization and must not erase the much larger number of structural nodes actually constructed.
+
+Actions run `34823625126` entered replicated-independent-stream scaling with worker points through all 12 allowed logical CPUs and ultimately failed without a sealed final evidence artifact available through the inspected Actions interface. The exact terminal cause must not be invented. The benchmark contract now distinguishes:
+
+```text
+serviceable capacity — reserves host/database/product/runner/control-plane headroom
+saturation capacity  — explicit isolated/full-resource experiment
+```
+
+On the current 6C/12T managed host, a normal series such as `1,2,3,4,6,8,10` is a safer serviceable-capacity shape than automatically consuming all 12 logical CPUs. See #1436 and `docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`.
+
+## Issue/status law
+
+An issue body may record a defect and acceptance test. It may not redefine the invention because a smaller path is easier.
+
+Do not treat these as delivery:
+
+```text
+branch exists
+PR exists
+review completed
+unit test exists
+status comment says done
+partial lane works
+fallback/demo/MVP works
+```
+
+unless that artifact itself was the requested deliverable.
+
+Where delivery requires code/product behavior, the finish line is the accepted implementation on the intended branch/main state with required CI, deployment/install/readback and operator-visible proof.
+
+## Historical material
+
+Old recovery/task notes in prior revisions of this file are useful chronology. They include old `/tmp` worktrees, isolated databases, old seed counts, then-current CI failures and session-specific priority assertions.
+
+They are **not** current repository instructions. In particular:
+
+- do not recreate worktrees/build scratch under `/tmp` or `/var/tmp`; follow the permanent-storage rules in `AGENTS.md`;
+- do not infer that a historic destructive reseed remains authorized;
+- do not let another repository's issue list silently become this repository's authority stack;
+- do not reuse “nothing else matters until X” historical ordering as a current priority unless current authority explicitly says so;
+- do not report old database/CI/deployment state as current evidence without remeasurement.
