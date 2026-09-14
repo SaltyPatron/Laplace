@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Linq;
+using Laplace.Engine.Core;
 
 namespace Laplace.Modality.Chess;
 
@@ -59,8 +60,11 @@ public sealed class Search
     private readonly ulong _ttMask;
 
     private const int MaxPly = 128;
-    private readonly ChessMove[,] _killers = new ChessMove[MaxPly, 2];
-    private readonly List<ulong> _path = new(MaxPly);
+
+    // Real game history and speculative descendant history use the SAME canonical position id
+    // and the SAME irreversible-move reset law as ChessModality.Apply. This is not the TT/Zobrist
+    // path: a second occurrence is an ordinary transposition, while the third is a chess draw.
+    private readonly List<Hash128> _repetitionHistory = new(MaxPly + 128);
 
     // Per-ply reusable move buffers — the fix for the allocation-bound hot path
     // (GH #607: MoveGen.Legal allocated 2 lists per node, ~484 bytes/node,
@@ -168,7 +172,31 @@ public sealed class Search
         if (changed) Array.Clear(_tt, 0, _tt.Length);
     }
 
+    /// <summary>
+    /// Snapshot-only entry point. With no played trajectory available the current canonical
+    /// position is the whole repetition segment. Live/connected callers should pass ChessState.
+    /// </summary>
     public Result Think(Board board, Limits limits, CancellationToken ct = default)
+    {
+        var current = ChessPositionIdentity.PositionId(board);
+        return ThinkCore(board, limits, [current], ct);
+    }
+
+    /// <summary>
+    /// History-bearing entry point. Search consumes the exact repetition segment already carried
+    /// by ChessState and extends it under the same pawn/capture reset law for every descendant.
+    /// </summary>
+    public Result Think(ChessState state, Limits limits, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return ThinkCore(state.Board, limits, state.RepetitionHistory, ct);
+    }
+
+    private Result ThinkCore(
+        Board board,
+        Limits limits,
+        IReadOnlyList<Hash128> rootHistory,
+        CancellationToken ct)
     {
         // One immutable substrate generation for the entire tree. A completed live game can
         // advance the persistent evidence between moves, but must never change scores halfway
@@ -188,13 +216,24 @@ public sealed class Search
         _sw.Restart();
         var b = board.Clone();
 
+        _repetitionHistory.Clear();
+        if (rootHistory.Count > 0)
+            _repetitionHistory.AddRange(rootHistory);
+        else
+            _repetitionHistory.Add(ChessPositionIdentity.PositionId(b));
+        int repetitionStart = 0;
+        ulong repetitionSignature = RepetitionSignature(_repetitionHistory, repetitionStart);
+
         // Draw preference belongs to this decision root, not to chess ontology. Use exact
         // tablebase WDL when the root is covered; otherwise use the same classical + selected
         // substrate position state that evaluates descendant leaves. A change in this root-scoped
         // utility invalidates TT scores because a repeated/drawn node's value is contextual.
         int rootAdvantageCp = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
                               + (_activePositionEvaluator?.Evaluate(b) ?? 0);
-        if (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b))
+        bool rootRuleDraw = b.HalfmoveClock >= 100
+                            || IsInsufficientMaterial(b)
+                            || IsThreefoldCurrent(repetitionStart);
+        if (rootRuleDraw)
         {
             // Already-forced draw at the root: static material (e.g. K+B vs K) must not invent
             // contempt for an outcome chess law has already closed as a draw.
@@ -217,6 +256,11 @@ public sealed class Search
             _drawUtilityRootCp = nextDrawUtility;
         }
 
+        // These are already terminal under the exact game history. Search must not manufacture a
+        // move after the game has ended merely because the Board snapshot still has legal moves.
+        if (rootRuleDraw)
+            return new Result(null, 0, 0, 0);
+
         var rootMoves = MoveGen.Legal(b);
         if (rootMoves.Count == 0)
             return new Result(null,
@@ -233,9 +277,8 @@ public sealed class Search
 
         for (int depth = 1; depth <= limits.MaxDepth; depth++)
         {
-            ClearKillers();
-            _path.Clear();
-            int score = Negamax(b, depth, -Inf, Inf, 0);
+            int score = Negamax(
+                b, depth, -Inf, Inf, 0, repetitionStart, repetitionSignature);
             if (_aborted)
             {
                 best = _rootBestMove;
@@ -270,35 +313,77 @@ public sealed class Search
 
     /// Reconstruct the principal variation by walking transposition-table best moves from the
     /// root, validating each against the legal move list so a key collision can't emit an
-    /// illegal move. Call immediately after Think on the same root board.
+    /// illegal move. Call immediately after Think on the same root state.
     public IReadOnlyList<string> ExtractPv(Board board, int maxLen = 12)
+    {
+        var current = ChessPositionIdentity.PositionId(board);
+        return ExtractPvCore(board, [current], maxLen);
+    }
+
+    public IReadOnlyList<string> ExtractPv(ChessState state, int maxLen = 12)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return ExtractPvCore(state.Board, state.RepetitionHistory, maxLen);
+    }
+
+    private IReadOnlyList<string> ExtractPvCore(
+        Board board,
+        IReadOnlyList<Hash128> rootHistory,
+        int maxLen)
     {
         var pv = new List<string>(maxLen);
         var b = board.Clone();
-        var seen = new HashSet<ulong>();
+        var history = rootHistory.Count > 0
+            ? new List<Hash128>(rootHistory)
+            : [ChessPositionIdentity.PositionId(b)];
+        int repetitionStart = 0;
+        ulong repetitionSignature = RepetitionSignature(history, repetitionStart);
+
         for (int i = 0; i < maxLen; i++)
         {
-            ulong key = Zobrist.Hash(b);
-            if (!seen.Add(key)) break;
+            ulong key = TtKey(b, repetitionSignature);
             ref TtEntry e = ref _tt[key & _ttMask];
             if (!e.Valid || e.Key != key || e.Move == default) break;
             var mv = e.Move;
             bool legal = false;
             foreach (var lm in MoveGen.Legal(b)) if (lm == mv) { legal = true; break; }
             if (!legal) break;
+
+            bool reset = ResetsRepetition(b, mv);
             pv.Add(mv.ToUci());
-            MoveApply.MakeWithUndo(b, mv);
+            MoveApply.Make(b, mv);
+            var childId = ChessPositionIdentity.PositionId(b);
+            history.Add(childId);
+            if (reset)
+            {
+                repetitionStart = history.Count - 1;
+                repetitionSignature = RepetitionAppend(0, childId);
+            }
+            else
+            {
+                repetitionSignature = RepetitionAppend(repetitionSignature, childId);
+            }
+            if (CountCurrent(history, repetitionStart) >= 3) break;
         }
         return pv;
     }
 
-    private int Negamax(Board b, int depth, int alpha, int beta, int ply)
+    private int Negamax(
+        Board b,
+        int depth,
+        int alpha,
+        int beta,
+        int ply,
+        int repetitionStart,
+        ulong repetitionSignature)
     {
         if (_ct.IsCancellationRequested) { _aborted = true; return 0; }
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 
-        if (ply > 0 && (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b)))
+        if (ply > 0 && (b.HalfmoveClock >= 100
+                        || IsInsufficientMaterial(b)
+                        || IsThreefoldCurrent(repetitionStart)))
             return DrawScoreAtPly(ply);
 
         // Exact tablebase truth belongs inside the tree. The root is intentionally searched:
@@ -319,9 +404,7 @@ public sealed class Search
             };
         }
 
-        ulong key = Zobrist.Hash(b);
-        if (ply > 0 && _path.Contains(key)) return DrawScoreAtPly(ply);
-
+        ulong key = TtKey(b, repetitionSignature);
         int alphaOrig = alpha;
         ref TtEntry e = ref _tt[key & _ttMask];
         ChessMove ttMove = default;
@@ -337,7 +420,9 @@ public sealed class Search
             }
         }
 
-        if (depth <= 0) return Quiesce(b, alpha, beta, ply);
+        if (depth <= 0)
+            return Quiesce(
+                b, alpha, beta, ply, repetitionStart, repetitionSignature);
 
         var moves = LegalAt(b, ply);
         if (moves.Count == 0)
@@ -352,21 +437,33 @@ public sealed class Search
         }
         Order(b, moves, ttMove, ply);
 
-        _path.Add(key);
         int best = -Inf;
         ChessMove bestMove = moves[0];
         if (ply == 0) _rootBestMove = bestMove;
         for (int mi = 0; mi < moves.Count; mi++)
         {
             var m = moves[mi];
+            bool resetRepetition = ResetsRepetition(b, m);
             var undo = MoveApply.MakeWithUndo(b, m);
+            Hash128 childId = ChessPositionIdentity.PositionId(b);
+            _repetitionHistory.Add(childId);
+            int childRepetitionStart = resetRepetition
+                ? _repetitionHistory.Count - 1
+                : repetitionStart;
+            ulong childRepetitionSignature = resetRepetition
+                ? RepetitionAppend(0, childId)
+                : RepetitionAppend(repetitionSignature, childId);
+
             int windowAlpha = ply == 0 && _rootBonusByUci is not null ? alpha - RootBiasMargin : alpha;
-            int score = -Negamax(b, depth - 1, -beta, -windowAlpha, ply + 1);
+            int score = -Negamax(
+                b, depth - 1, -beta, -windowAlpha, ply + 1,
+                childRepetitionStart, childRepetitionSignature);
+
+            _repetitionHistory.RemoveAt(_repetitionHistory.Count - 1);
             MoveApply.Unmake(b, m, undo);
             if (_aborted)
             {
                 if (ply == 0) _rootBestMove = bestMove;
-                _path.RemoveAt(_path.Count - 1);
                 return best == -Inf ? 0 : best;
             }
 
@@ -383,7 +480,6 @@ public sealed class Search
             if (best > alpha) alpha = best;
             if (alpha >= beta) { RecordKiller(b, m, ply); break; }
         }
-        _path.RemoveAt(_path.Count - 1);
 
         if (ply == 0) _rootBestMove = bestMove;
 
@@ -413,13 +509,21 @@ public sealed class Search
         _ => score,
     };
 
-    private int Quiesce(Board b, int alpha, int beta, int ply)
+    private int Quiesce(
+        Board b,
+        int alpha,
+        int beta,
+        int ply,
+        int repetitionStart,
+        ulong repetitionSignature)
     {
         if (_ct.IsCancellationRequested) { _aborted = true; return 0; }
         if (_nodes >= _maxNodes || TimeUp()) { _aborted = true; return 0; }
         _nodes++;
 
-        if (ply > 0 && (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b)))
+        if (ply > 0 && (b.HalfmoveClock >= 100
+                        || IsInsufficientMaterial(b)
+                        || IsThreefoldCurrent(repetitionStart)))
             return DrawScoreAtPly(ply);
 
         bool inCheck = MoveGen.InCheck(b, b.WhiteToMove);
@@ -451,8 +555,22 @@ public sealed class Search
         OrderCaptures(b, considered);
         foreach (var m in considered)
         {
+            bool resetRepetition = ResetsRepetition(b, m);
             var undo = MoveApply.MakeWithUndo(b, m);
-            int score = -Quiesce(b, -beta, -alpha, ply + 1);
+            Hash128 childId = ChessPositionIdentity.PositionId(b);
+            _repetitionHistory.Add(childId);
+            int childRepetitionStart = resetRepetition
+                ? _repetitionHistory.Count - 1
+                : repetitionStart;
+            ulong childRepetitionSignature = resetRepetition
+                ? RepetitionAppend(0, childId)
+                : RepetitionAppend(repetitionSignature, childId);
+
+            int score = -Quiesce(
+                b, -beta, -alpha, ply + 1,
+                childRepetitionStart, childRepetitionSignature);
+
+            _repetitionHistory.RemoveAt(_repetitionHistory.Count - 1);
             MoveApply.Unmake(b, m, undo);
             if (_aborted) return 0;
             if (score >= beta) return beta;
@@ -460,6 +578,56 @@ public sealed class Search
         }
         return alpha;
     }
+
+    private bool IsThreefoldCurrent(int repetitionStart)
+        => CountCurrent(_repetitionHistory, repetitionStart) >= 3;
+
+    private static int CountCurrent(IReadOnlyList<Hash128> history, int repetitionStart)
+    {
+        if (history.Count == 0) return 0;
+        Hash128 current = history[^1];
+        int count = 0;
+        for (int i = Math.Max(0, repetitionStart); i < history.Count; i++)
+            if (history[i] == current && ++count >= 3) return count;
+        return count;
+    }
+
+    private static bool ResetsRepetition(Board b, ChessMove move)
+    {
+        Piece moving = b.Squares[move.From];
+        bool pawn = Board.TypeOf(moving) == Piece.WPawn;
+        bool capture = b.Squares[move.To] != Piece.Empty
+                       || (move.Flags & MoveFlags.EnPassant) != 0;
+        return pawn || capture;
+    }
+
+    // The TT value of a board can depend on how many times repetition-relevant positions have
+    // already occurred. Fold the ordered reversible-history segment into the TT key instead of
+    // reusing one board score across incompatible played histories.
+    private static ulong RepetitionSignature(IReadOnlyList<Hash128> history, int start)
+    {
+        ulong sig = 0;
+        for (int i = Math.Max(0, start); i < history.Count; i++)
+            sig = RepetitionAppend(sig, history[i]);
+        return sig;
+    }
+
+    private static ulong RepetitionAppend(ulong sig, Hash128 id)
+    {
+        ulong x = id.Hi ^ RotateLeft(id.Lo, 23) ^ 0x9E3779B97F4A7C15UL;
+        x ^= x >> 30;
+        x *= 0xBF58476D1CE4E5B9UL;
+        x ^= x >> 27;
+        x *= 0x94D049BB133111EBUL;
+        x ^= x >> 31;
+        return RotateLeft(sig, 11) ^ x;
+    }
+
+    private static ulong TtKey(Board b, ulong repetitionSignature)
+        => Zobrist.Hash(b) ^ RotateLeft(repetitionSignature, 17);
+
+    private static ulong RotateLeft(ulong value, int count)
+        => (value << count) | (value >> (64 - count));
 
     // Internal: See (static exchange evaluation) and the motif detectors read this same
     // table — the engine's one piece-value fact (one implementation per fact).
@@ -520,16 +688,53 @@ public sealed class Search
 
     private static bool IsInsufficientMaterial(Board b)
     {
-        int minors = 0;
+        int whiteKnights = 0, whiteBishops = 0, blackKnights = 0, blackBishops = 0;
+        bool whiteBishopOnLight = false, whiteBishopOnDark = false;
+        bool blackBishopOnLight = false, blackBishopOnDark = false;
+
         for (int sq = 0; sq < 128; sq++)
         {
             if ((sq & 0x88) != 0) { sq += 7; continue; }
-            switch (Board.TypeOf(b.Squares[sq]))
+            Piece p = b.Squares[sq];
+            if (p == Piece.Empty) continue;
+            switch (Board.TypeOf(p))
             {
-                case Piece.WPawn: case Piece.WRook: case Piece.WQueen: return false;
-                case Piece.WKnight: case Piece.WBishop: minors++; break;
+                case Piece.WPawn:
+                case Piece.WRook:
+                case Piece.WQueen:
+                    return false;
+                case Piece.WKnight:
+                    if (Board.IsWhite(p)) whiteKnights++; else blackKnights++;
+                    break;
+                case Piece.WBishop:
+                    bool light = ((Board.FileOf(sq) + Board.RankOf(sq)) & 1) == 1;
+                    if (Board.IsWhite(p))
+                    {
+                        whiteBishops++;
+                        if (light) whiteBishopOnLight = true; else whiteBishopOnDark = true;
+                    }
+                    else
+                    {
+                        blackBishops++;
+                        if (light) blackBishopOnLight = true; else blackBishopOnDark = true;
+                    }
+                    break;
+                case Piece.WKing:
+                    break;
             }
         }
-        return minors <= 1;
+
+        int whiteMinors = whiteKnights + whiteBishops;
+        int blackMinors = blackKnights + blackBishops;
+        if (whiteMinors == 0 && blackMinors == 0) return true;
+        if (whiteMinors == 1 && blackMinors == 0) return true;
+        if (blackMinors == 1 && whiteMinors == 0) return true;
+        if (whiteKnights == 0 && blackKnights == 0 && whiteBishops >= 1 && blackBishops >= 1)
+        {
+            bool anyLight = whiteBishopOnLight || blackBishopOnLight;
+            bool anyDark = whiteBishopOnDark || blackBishopOnDark;
+            if (!(anyLight && anyDark)) return true;
+        }
+        return false;
     }
 }
