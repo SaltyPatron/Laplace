@@ -1,95 +1,217 @@
-# Billing placeholder migration and refactor handoff
+# Billing / compute-envelope migration
 
 Tracking: #1425
-Normative replacement: `SaltyPatron/Laplace-Refactor#140`
 
-## Status
+Status: **the old hard-coded pricing/credit UI is placeholder history; the replacement law is part of the Laplace architecture in this repository.** Related work may also be tracked in `Laplace-Refactor`, but another repository/issue does not supersede `INVENTION.md`, `AGENTS.md`, the forward-pass spec, or this repository's current accepted work.
 
-The current Billing UI and credit schedule in this repository are historical/prototype scaffolding. They are useful for discovering routes, account/API-key plumbing, UX needs, and operations that eventually require commercial policy, but their plan names, thresholds, credit conversion, and per-operation debit values are **not product authority**.
+## What is being retired
 
-Do not carry them into the refactor as requirements merely because they already exist in code/UI.
+Historical Billing UI/code has presented placeholder concepts such as:
 
-## Placeholder semantics to retire
+- arbitrary Free / Supporter / Pro request/concurrency/storage/export limits;
+- generic credits disconnected from actual work;
+- fixed money-to-credit conversion;
+- hard-coded action costs for chat/query/explore/ingest/model export/forge;
+- HTTP 402 behavior tied directly to those placeholder values.
 
-The existing surface currently presents concepts including:
+Those values were not derived from the physical Laplace program, measured host capacity, estimator error, accepted quality/resource envelopes or actual workload receipts. They are not product authority.
 
-- arbitrary Free / Supporter / Pro plan limits;
-- arbitrary request/concurrency/storage/export values;
-- generic `credits` as the canonical consumption unit;
-- `$0.10 = 100 credits`;
-- hard-coded action costs such as chat/query/explore/ingest/model-export/model-forge credits;
-- HTTP 402 behavior tied directly to insufficient placeholder credits.
+Reusable account/auth/payment/UI mechanics may be preserved independently of placeholder pricing semantics.
 
-These values were not derived from measured Laplace resource plans, infrastructure cost, estimator confidence, accepted benchmark work, or actual supported throughput.
+## Governing product law: one knowledge world, variable compute
 
-## What is worth preserving
+Laplace does not create commercial tiers by pointing cheaper requests at deliberately less knowledgeable models.
 
-Inventory and preserve reusable implementation mechanics independently of pricing semantics:
+Entitled requests address the same admitted knowledge world. What changes is the **execution envelope** the request is allowed to activate.
 
-- authentication and principal/account association;
-- API-key creation/revocation/scoping mechanisms;
-- billing-page/product-surface layout patterns;
-- any subscription/payment-provider abstraction that is not coupled to placeholder credit math;
-- job identifiers and idempotency primitives;
-- HTTP error/response translation patterns;
-- model export / forge / ingest operation entry points;
-- usage/activity/history UI patterns;
-- any durable event/webhook processing primitives;
-- tests that prove authentication, authorization, replay safety, or concurrency behavior without asserting arbitrary credit values.
-
-Anything reusable should be lifted only after separating it from private hard-coded plan/pricing tables.
-
-## Replacement model
+Primary semantic/work dimensions include, as applicable:
 
 ```text
-Patreon / Stripe / enterprise / grant / future provider
-   -> authenticated external assertion
-   -> canonical Laplace membership/additive grant
-   -> native entitlement calculation
-   -> logical program
-   -> physical resource plan
-   -> preflight cost envelope
-   -> run / queue / deny / a-la-carte disposition
-   -> atomic allowance/resource reservation
-   -> bounded execution
-   -> execution receipt
-   -> reconciliation / payment settlement
+admitted roots / active observation size
+coupling channels / provider families
+hop depth
+fanout / candidate / frontier widths
+relation/operator families
+containment / trajectory expansion
+geometry / graph / deterministic-calculation work
+standing/evidence cells
+source/world/time scope when entitlement constrains scope
+realization / output work
 ```
 
-Patreon is a subscription source, not a separate class of user. Stripe direct subscriptions map to the same canonical membership model. Stripe may additionally sell additive throttles/limits and true a-la-carte high-cost work such as model export.
+These are then translated by the physical plan into machine resources:
 
-Normal calls do not generate a card transaction. Included work reserves and consumes internal Laplace allowance. Separately charged work gets an explicit quote and hard ceiling before expensive execution.
+```text
+CPU/core time
+memory / working-set bytes
+PostgreSQL/SPI calls and rows/cells
+I/O
+network
+storage / retention
+concurrency / worker grants
+optional accelerator/provider work
+external tool/provider charges
+artifact/output bytes
+```
 
-## Resource economics
+The billing model therefore follows the cognition/execution program instead of inventing a second unit of work.
 
-The replacement system must cost the actual Laplace physical plan. Relevant dimensions include CPU/core-time, memory/byte-seconds, I/O, storage/retention, network, PostgreSQL workers/connections, nested libraries, external tool/provider costs, artifact size, topology/provider class, and cache/world-state reuse.
+## Hops and fanout are first-class commercial controls
 
-A token count is not the Laplace unit of work. Competitor token pricing is external comparison evidence only.
+A simple product vocabulary may eventually present user-friendly modes, but underneath them the system should be able to state the actual work envelope.
 
-## Existing performance evidence
+For example, two requests can have the same knowledge access while receiving different admitted search budgets:
 
-A current Operator run provides a useful workload observation for future calibration:
+```text
+request A: H = 2, fanout <= 8
+request B: H = 6, adaptive fanout <= 128
+```
 
-- `UDDecomposer` complete;
-- `6021/6021` units;
-- `2,177,867/2,177,867` input;
-- `686/686` files;
-- displayed staged E/P/A `14,253,943 / 12,011,828 / 4,324,744`;
-- displayed throughput `16,458 rows/s`;
-- displayed wall time `30m 58s`.
+This does **not** mean those literal values are product plans. It illustrates the law: charge/control the amount of web Laplace is allowed to tug, not the amount of knowledge the system is allowed to possess.
 
-The future estimator must capture full machine-readable resource receipts for comparable runs. Wall time alone is not cost. ConceptNet churn/failure visible in the same Operator session is explicitly unrelated and handled elsewhere.
+The real plan can also constrain provider/operator families, trajectory/geometry/calculation work, concurrency, output and other typed resources.
 
-## Refactor issue map
+## Preflight must cost the same program that executes
 
-- `SaltyPatron/Laplace-Refactor#140` — parent architecture
-- `#141` — canonical membership and provider-neutral entitlement
-- `#142` — preflight physical-plan costing/reservation/reconciliation
-- `#143` — Patreon + Stripe adapters
-- `#144` — competitor pricing / tokens-per-penny evidence
-- `#145` — membership/quote/throttle UI and API
-- `#146` — real-workload estimator calibration
-- `#148` — a-la-carte high-cost jobs
-- `#149` — measured plan/throttle policy
+The intended flow is:
 
-This repository remains implementation/history evidence. The refactor issues and architecture document are the forward normative design.
+```text
+authenticated request
+-> entitlement / additive grant resolution
+-> exact request admission
+-> COUPLE / ORIENT / ROUTE planning boundary
+-> physical plan / EXPLAIN
+-> estimated work + calibrated runtime/cost envelope
+-> allowance/compute-credit availability check
+-> atomic reserve
+-> bounded execution under hard counters
+-> execution receipt
+-> reconcile/refund unused reserve
+-> optional external payment settlement for separately charged work
+```
+
+The estimator must not use a private pricing-only cost model unrelated to execution.
+
+The plan/receipt should expose the same dimensions before and after the run so calibration is possible:
+
+```text
+estimated vs actual hops
+estimated vs actual fanout/frontier/candidates
+estimated vs actual index/rows/cells
+provider/operator selection
+trajectory/containment/calculation work
+CPU / memory / I/O / DB / network / accelerator work
+output/artifact size
+wall time
+```
+
+## Exact budget versus predicted wall time
+
+Laplace can know an admitted work ceiling exactly when it is expressed as hard counters/resources.
+
+It can often estimate elapsed time very tightly from previous receipts on a controlled host, but wall time is not mathematically exact before execution because cache state, scheduler contention, database load, storage latency and concurrent work can change it.
+
+Therefore billing/admission distinguishes:
+
+```text
+exact declared maximum work / reserved allowance
+calibrated predicted runtime/resource use
+actual execution receipt
+```
+
+## Adaptive execution and refunds
+
+A request need not consume its entire authorized envelope.
+
+If query-relative coupling and standing converge early, obligations close, or uncertainty is already below the operation's declared threshold, execution may stop before the maximum hop/fanout/resource boundary.
+
+Unused reserved allowance is reconciled/refunded rather than being charged merely because it was available.
+
+Conversely, an execution that reaches its ceiling while required obligations remain open can return a resource-bounded disposition or request additional authorized compute instead of silently exceeding the user's balance.
+
+## Membership/payment providers are adapters
+
+Patreon, Stripe, enterprise contracts, grants or future providers supply authenticated external entitlement/payment assertions. They do not define separate classes of Laplace intelligence.
+
+A provider-neutral shape is:
+
+```text
+external membership/payment assertion
+-> canonical Laplace entitlement / additive allowance
+-> compute envelope / quote policy
+-> common execution program
+```
+
+Normal included calls need not produce a card transaction. High-cost separately charged work can receive an explicit quote/hard ceiling before execution.
+
+## Compute credits
+
+“Compute credit” is acceptable as an accounting abstraction **only if it is backed by the actual measured execution dimensions** above.
+
+It must not become a magic token-equivalent or arbitrary per-endpoint debit table.
+
+A credit schedule may normalize several physical dimensions for product simplicity, but the underlying receipt must remain available so pricing/allowance can be recalibrated without changing cognition semantics.
+
+## Token pricing is comparison evidence, not the native unit
+
+A conventional-model token count can be useful for competitor pricing/performance comparisons. It is not the native Laplace unit of work.
+
+One Laplace operation may resolve a large exact trajectory, many evidence/consensus cells and many convergent paths in one indexed/native operation. Conversely, a short textual request may deliberately authorize deep/high-fanout reasoning.
+
+Useful commercial/performance comparisons therefore include accepted-work quality, latency, machine resources and actual web/structural work—not only surface tokens.
+
+## Serviceable capacity constrains sellable capacity
+
+A host's theoretical saturation point is not automatically sellable capacity.
+
+Capacity admission must reserve the resources required for PostgreSQL, the product, control plane, monitoring and operator/runner health. A benchmark point that consumes every schedulable CPU and knocks over normal service is a saturation experiment, not the serviceable compute pool available for customer reservations.
+
+See #1436 and `docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`.
+
+## Execution-grain economics
+
+Billing must not normalize away avoidable implementation waste.
+
+The universal physical law is:
+
+```text
+indexed/set-sized handoff
+-> native C/C++ repeated work
+-> bulk/set result
+```
+
+If an implementation turns one logical operation into thousands of scalar SQL/SPI/PInvoke/parser/materialization crossings, those costs identify an implementation defect; they do not automatically become the permanent price of the semantic operation.
+
+Estimator calibration should therefore retain boundary-call/batch-size data where it matters so optimization can lower real cost without changing the user's semantic contract.
+
+## What should be preserved from the old billing surface
+
+Preserve reusable mechanics only after separating them from placeholder credit math, including where sound:
+
+- authentication and principal/account association;
+- API-key creation/revocation/scoping;
+- provider-neutral membership/subscription primitives;
+- payment webhook/event replay safety;
+- job ids/idempotency;
+- usage/activity/history UI patterns;
+- quote/reservation/receipt UI/API shapes;
+- error translation and explicit insufficient-resource dispositions;
+- high-cost job entry points such as ingest/export/forge where they remain valid operations.
+
+## Acceptance
+
+- [ ] no product tier is implemented as a deliberately knowledge-reduced Laplace model;
+- [ ] entitlement resolves to explicit operation/resource envelopes;
+- [ ] hop/fanout/frontier/provider/operator work is visible in plan/receipt where applicable;
+- [ ] preflight estimates the same physical program that executes;
+- [ ] allowance is reserved atomically before expensive work and hard ceilings are enforced;
+- [ ] actual work is receipted and unused reserve is reconciled/refunded;
+- [ ] estimator error is measured/calibrated from receipts rather than hidden;
+- [ ] serviceable capacity, not destructive saturation, determines normal host admission;
+- [ ] placeholder fixed per-endpoint credit prices are removed or explicitly labeled non-authoritative until calibrated;
+- [ ] payment-provider adapters do not redefine cognition or knowledge access;
+- [ ] execution-grain defects are tracked as optimization/architecture defects rather than silently normalized into permanent pricing.
+
+## Cross-repository tracking
+
+Related implementation work may exist in `Laplace-Refactor` issues such as the former billing/entitlement/costing series. Those references are coordination aids only. They are not the normative replacement for this repository's invention/product law.
