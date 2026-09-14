@@ -194,7 +194,14 @@ public sealed class Search
         // utility invalidates TT scores because a repeated/drawn node's value is contextual.
         int rootAdvantageCp = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
                               + (_activePositionEvaluator?.Evaluate(b) ?? 0);
-        if (_tablebase?.Invoke(b) is { } rootTablebase)
+        if (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b))
+        {
+            // Already-forced draw at the root: static material (e.g. K+B vs K) must not invent
+            // contempt for an outcome chess law has already closed as a draw.
+            rootAdvantageCp = 0;
+        }
+        else if (_tablebase?.Invoke(b) is { } rootTablebase)
+        {
             rootAdvantageCp = rootTablebase.Wdl switch
             {
                 0 or 1 => -20_000,
@@ -202,6 +209,7 @@ public sealed class Search
                 3 or 4 => 20_000,
                 _ => rootAdvantageCp,
             };
+        }
         int nextDrawUtility = ContextualDrawScore(rootAdvantageCp, ply: 0);
         if (nextDrawUtility != _drawUtilityRootCp)
         {
