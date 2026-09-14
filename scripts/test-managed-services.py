@@ -210,9 +210,13 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual([], self.calls)
 
     def test_api_restart_safety_net_runs_even_if_recovery_step_fails(self):
-        workflow = (ROOT / ".github/workflows/laplace.yml").read_text()
-        recovery = workflow.split("  restore-api:\n", 1)[1]
-        self.assertIn("- name: Ensure API is running\n        if: always()\n", recovery)
+        product = (ROOT / "scripts/product-ci.sh").read_text()
+        recovery = product.split("recover_publish() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("publish-applications.sh recover", recovery)
+        self.assertIn("ensure_api_running", recovery)
+        safety = product.split("ensure_api_running() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("sudo -n systemctl start laplace-api || true", safety)
+        self.assertIn("127.0.0.1:5187/health", safety)
 
 
 if __name__ == "__main__":

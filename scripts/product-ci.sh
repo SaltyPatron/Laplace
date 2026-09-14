@@ -79,8 +79,24 @@ run_publish() {
   bash scripts/publish-applications.sh deploy
 }
 
+ensure_api_running() {
+  sudo -n systemctl start laplace-api || true
+  sleep 3
+  curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
+    echo "::warning::laplace-api unhealthy after application recovery" >&2
+    journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
+      || sudo -n systemctl status laplace-api || true
+    return 1
+  }
+}
+
 recover_publish() {
-  bash scripts/publish-applications.sh recover || true
+  # Recovery may itself fail. The API safety net is independent and always runs,
+  # so an application transaction cannot strand the serving process stopped.
+  local recovery_rc=0 health_rc=0
+  bash scripts/publish-applications.sh recover || recovery_rc=$?
+  ensure_api_running || health_rc=$?
+  [[ "$recovery_rc" -eq 0 && "$health_rc" -eq 0 ]]
 }
 
 run_integration() {
