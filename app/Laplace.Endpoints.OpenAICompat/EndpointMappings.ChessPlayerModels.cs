@@ -32,10 +32,10 @@ internal static class ChessPlayerModelEndpoints
             var export = ChessPlayerModelExport.ForNames(req.Players, req.EvidenceBoundary);
             return Results.Json(new
             {
-                id = ChessPlayerModelExport.Hex(export.Id),
-                memberSetId = ChessPlayerModelExport.Hex(export.MemberSetId),
+                id = Hex(export.Id),
+                memberSetId = Hex(export.MemberSetId),
                 evidenceBoundary = export.EvidenceBoundary,
-                members = export.Members.Select(ChessPlayerModelExport.Hex).ToArray(),
+                members = export.Members.Select(Hex).ToArray(),
                 manifest = export.ToJson(),
             });
         }).WithTags("chess");
@@ -76,6 +76,9 @@ internal static class ChessPlayerModelEndpoints
             return Results.Json(result);
         }).WithTags("chess");
     }
+
+    private static string Hex(Laplace.Engine.Core.Hash128 id)
+        => Convert.ToHexStringLower(id.ToBytes());
 
     private static bool ValidPlayers(IReadOnlyList<string>? players, out string? error)
     {
