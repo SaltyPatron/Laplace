@@ -33,8 +33,11 @@ public sealed class ChessPlayerModelExportTests
 
         var restored = ChessPlayerModelExport.FromJson(export.ToJson());
 
-        Assert.Equal(export, restored);
-        Assert.Equal(export.Members, restored.Members);
+        Assert.Equal(export.Version, restored.Version);
+        Assert.Equal(export.Id, restored.Id);
+        Assert.Equal(export.MemberSetId, restored.MemberSetId);
+        Assert.Equal(export.EvidenceBoundary, restored.EvidenceBoundary);
+        Assert.Equal(export.Members.ToArray(), restored.Members.ToArray());
     }
 
     [Fact]
