@@ -8,11 +8,15 @@ every node). No database, no COPY, no network. That is the operation the
 repo had no harness for it -- `just --list | grep bench` and
 `ninja -t targets all | grep bench` both come back empty.
 
-Reports codepoints/s because that is what the core consumes, and a
-BPE-equivalent at 4 chars/token so the figure is comparable to how model
-throughput is quoted. Single-threaded by construction: content_tree_build is
-lock-free and per-call, so a core count multiplies this, and saying "per core"
-keeps the number honest.
+Reports codepoints/s because that is what the core consumes, plus a 4-character
+BPE-equivalent input-rate normalization so the scale is familiar next to model
+throughput. The normalization is not the work unit: the benchmark also reports
+exact tier-tree nodes/s and structural work amplification (nodes/codepoint and
+nodes/4-char-token-equivalent).
+
+Single-threaded by construction. This is a measured one-worker floor. Multi-worker
+capacity is measured by the scaling profiles; never derive it by multiplying this
+number by a core/thread count.
 
 Usage: python3 scripts/bench-compose.py [corpus_dir] [--repeats N]
 """
@@ -36,6 +40,7 @@ lib.tier_tree_node_count.restype = ctypes.c_size_t
 
 SKIP_DIRS = ("/build/", "/.git/", "/external/", "/node_modules/", "/bin/", "/obj/")
 CORPUS_CAP_BYTES = 48 << 20   # 48 MB
+BPE_EQUIVALENCE_CHARS_PER_TOKEN = 4
 
 
 def load_corpus(root, cap=CORPUS_CAP_BYTES):
@@ -176,8 +181,10 @@ def main():
     print(f"corpus      : {len(docs):,} documents, {total_bytes/1e6:.1f} MB, "
           f"{total_cps:,} codepoints")
     print(f"core        : {CORE}")
+    print(f"WORK_INPUT documents={len(docs)} bytes={total_bytes} codepoints={total_cps}")
 
     best = None
+    expected_nodes = None
     for r in range(repeats):
         nodes = 0
         failed = 0
@@ -190,18 +197,40 @@ def main():
             nodes += lib.tier_tree_node_count(tree)
             lib.tier_tree_free(tree)
         el = time.perf_counter() - t0
+        if failed:
+            sys.exit(
+                f"bench-compose: native composition rejected {failed} document(s); "
+                "partial-work throughput is not evidence")
+        if expected_nodes is None:
+            expected_nodes = nodes
+        elif nodes != expected_nodes:
+            sys.exit(
+                f"bench-compose: tier-tree node-count drift across repeats: "
+                f"expected {expected_nodes}, got {nodes} on run {r + 1}")
         cps = total_cps / el
         print(f"  run {r+1}: {el:7.3f} s   {cps/1e3:9.1f}k codepoints/s   "
-              f"{cps/4/1e3:8.1f}k BPE-equiv tok/s   {nodes:,} nodes"
-              + (f"   [{failed} rejected]" if failed else ""))
+              f"{cps/BPE_EQUIVALENCE_CHARS_PER_TOKEN/1e3:8.1f}k BPE-equiv tok/s   {nodes:,} nodes")
         if best is None or el < best[0]:
             best = (el, cps, nodes)
 
     el, cps, nodes = best
+    nodes_per_codepoint = nodes / total_cps
+    token_equivalents = total_cps / BPE_EQUIVALENCE_CHARS_PER_TOKEN
+    nodes_per_tok4 = nodes / token_equivalents
+
     print()
-    print(f"BEST, single-threaded, no DB:")
-    print(f"  {cps/1e3:,.1f}k codepoints/s   {cps/4/1e3:,.1f}k BPE-equiv tokens/s")
+    print("BEST, single-threaded, no DB:")
+    print(f"  {cps/1e3:,.1f}k codepoints/s   "
+          f"{cps/BPE_EQUIVALENCE_CHARS_PER_TOKEN/1e3:,.1f}k BPE-equiv tokens/s")
     print(f"  {nodes/el/1e3:,.1f}k tier-tree nodes/s   ({nodes:,} nodes built)")
+    print(f"  {nodes_per_codepoint:.6f} tier-tree nodes/codepoint   "
+          f"{nodes_per_tok4:.6f} tier-tree nodes/4-char token-equivalent")
+    print(
+        "WORK_SHAPE "
+        f"tier_tree_nodes={nodes} "
+        f"nodes_per_codepoint={nodes_per_codepoint:.12f} "
+        f"nodes_per_tok4={nodes_per_tok4:.12f} "
+        f"chars_per_tok4={BPE_EQUIVALENCE_CHARS_PER_TOKEN}")
 
 
 if __name__ == "__main__":
