@@ -1,111 +1,102 @@
 # Language highway — master/detail surfaces
 
-Status: **direction captured, not yet built.** Recorded 2026-08-10 during the UI
-session on `feat/ui-user-surfaces`.
+Status: **UI/product navigation decision.** Originally recorded 2026-08-10 during the `feat/ui-user-surfaces` session.
+
+This decision governs how the language-highway product surface should be navigated. It does **not** rank the importance of substrate mechanisms and does not redefine Laplace cognition. The glome/bounded physicality, trajectories, containment, walk/search operators, coupling/response field and constellation/web views are computational or inspection primitives; calling any of them “just a visual” is incorrect.
 
 ## The ask
 
-Master/detail pages for each layer of the language highway — one page per piece,
-each with a standardized, known, optimized way to query it:
+Provide master/detail product pages for each major language-highway layer with standardized, named and optimized reads, including surfaces such as:
 
-- highway mask
-- ISO 639 (the language axis)
-- ILI (Collaborative Interlingual Index — the concept anchors)
-- synsets
-- frames (FrameNet)
-- POS
-- sense
-- deprel
-- (and the rest of the mesh: VerbNet class, PropBank roleset, roles)
+- highway mask / relation bands;
+- ISO 639 / language axis;
+- ILI concept anchors;
+- synsets;
+- frames;
+- POS;
+- senses;
+- dependency relations;
+- VerbNet classes;
+- PropBank rolesets/roles;
+- other governed mesh layers as they are admitted.
 
-## Why — the actual requirement
+## Product purpose
 
-Not a browser for its own sake. The purpose is **to prove that each
-instruction/step of the "firmware" really moves toward inference / generation /
-prediction.** Each layer is a step in the pipeline; the surface has to make it
-checkable that the step does work — that it contributes signal — rather than
-merely existing in the database.
+The surface should make each layer inspectable as part of the complete inference/generation machine rather than presenting a database inventory with no indication of how the layer participates.
 
-So each detail page has to answer, per layer:
+For each layer the product should answer:
 
-1. **What is in it** — counts, coverage, residency, what seeded it.
-2. **How it is queried** — the one standardized, optimized read for this layer,
-   named and stable, not an ad-hoc query per page.
-3. **What it contributes** — the evidence that this step advances
-   inference/generation/prediction, not just structure.
+1. **What is here?** Coverage/residency/sources/generations.
+2. **How is it addressed?** The canonical optimized operation/index/read rather than page-specific ad-hoc SQL.
+3. **How can it respond?** Which typed coupling/search/evidence operations this layer participates in.
+4. **What did it contribute to this operation?** Query-relative trace/receipt evidence, not merely a global popularity score.
 
-Point 3 is the one that distinguishes this from the existing warehouse/mesh
-browsing, which shows structure but does not demonstrate contribution.
+The fourth point matters because contribution is query-relative. A layer can be structurally rich yet irrelevant to one request, decisive to another, or contradictory to a third.
 
-## The shape it should take: a league site, not a lab
+## Navigation shape: familiar master/detail first
 
-Clarified in the same session. The warehouse, walk, glome and constellation are
-"cool tools and visuals" — but they are not the thing. The model is an
-**MLB/NBA/NFL website**:
+The product-navigation analogy remains useful:
 
-    league → division → team → position → player → roster → schedule
+```text
+league → division → team → position → player → roster → schedule/results
+```
 
-Plain resource hierarchy, master/detail at every level, a URL for every
-resource — **what MVC was made for.** Navigation by drilling down a known
-structure, not by flying a camera through a graph.
+The point of the analogy is not that Laplace itself is a hierarchy. The substrate is an overlapping recursive/relational web. The product needs a familiar **entry/navigation grammar** so users can browse a known layer without first operating a 3D/4D visualization.
 
-The mesh landing already speaks this language ("a concept is a hub whose roster
-is its members; a word is a player whose teams are the hubs it plays for") — but
-it hands you a 3-D web instead of a standings table. The highway layers are the
-league structure:
+A rough language-highway mapping is:
 
 | League site | Language highway |
-| --- | --- |
-| league | the highway itself |
-| division / conference | layer (ISO, ILI, synset, frame, POS, sense, deprel) |
-| team | a hub — synset / frame / class / roleset |
-| position | relation type / role |
-| player | a surface, sense, or lemma |
-| roster | the hub's members |
-| schedule / results | the witnessed edges and their ratings |
-| standings | ranked by consensus μ and witness count |
+|---|---|
+| league | highway / knowledge family |
+| division/conference | layer (ISO, ILI, synset, frame, POS, sense, deprel, …) |
+| team | hub such as synset/frame/class/roleset |
+| position | relation/role type |
+| player | surface/sense/lemma/entity |
+| roster | hub members / contained structures |
+| schedule/results | witnessed occurrences/relations and their outcomes |
+| standings | declared ranked arena using consensus/other typed measures |
 
-Implication for the build: **tables, rosters, standings and record pages first.**
-The existing visualizations stay — they are not being removed — but they become
-a tab on a detail page rather than the primary way in.
+Tables, rosters, standings and record pages are therefore a primary **browse surface**. They do not replace trajectories, glome/geometry, web/constellation views, traces or walk/coupling inspection. Those remain available as alternate views of the same canonical state.
 
-## How this relates to what exists today
+## Relationship to cognition
 
-Already built and working (verified live this session):
+This decision must not create one semantic pipeline stage per UI page.
 
-- `/explore/mesh` — the mesh landing already names the layer chain
-  `surface → lemma → sense → concept → frame / class / roleset → roles` and has
-  per-layer cards with residency. This is the closest existing surface and the
-  natural host for the master list.
-- `/explore/entity/:idHex` — the detail view for a single entity, with
-  overview / graph / glome / structure / links / provenance / export tabs.
-- `/topic/:ref` — the best "everything at once" read: definition, IS_A ladder,
-  translations, strongest facts by band, mesh position.
-- `/v1/query` with `shape` — the standardized read vocabulary already exists
-  (`define`, `what_is`, `related`, `is_a`, `band_facts`, `beam`, `path`,
-  `neighbors`, `languages`, `translate`, …), catalogued at `/v1/query/shapes`.
-- `/v1/explore/entities/{idHex}/mesh`, `/taxonomy`, `/members`, `/containers`,
-  `/peers`, `/neighbors` — per-entity structural reads.
+The actual cognition law is governed by `docs/specs/36_Laplace_Forward_Pass.md`:
 
-What is missing is the **per-layer master page** — there is no
-`/explore/highway/ili` or `/explore/highway/deprel` that treats a *layer* as the
-subject, with its own standardized query and its own contribution evidence.
+```text
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE → PROPOSE → STEER → SELECT → REALIZE → WITNESS
+```
 
-## Open questions to settle before building
+A request may cause several highway layers to respond simultaneously. The query-relative coupling field preserves those typed responses before joint interpretation/routing. The product can then show which layers/relations/occurrences/evidence actually tugged back.
 
-- Is there a per-layer catalog endpoint, or does this need new API surface?
-  `/v1/explore/catalog` returns stages and sources, not highway layers.
-- Where does "highway mask" live in the substrate, and what is its read?
-  (`docs/decisions/0001-highway-bit-order.md` is the existing reference.)
-- What is the concrete contribution metric per layer? Candidates: edges
-  contributed to consensus, effect on a beam/walk with the layer's band masked
-  out, coverage of a probe set.
-- Deprel and POS are lexical-glue/structural bands; their contribution is likely
-  measured differently from ILI/synset concept anchors.
+That is stronger than an ablation-only notion of “which pipeline stage mattered.”
 
-## Note on data state
+## Product requirements
 
-Chess modality is empty (`modalities.chess: 0`) and the DB is being repeatedly
-reseeded, so any per-layer counts must read live and degrade honestly when a
-layer has not been seeded yet — the existing surfaces already do this
-("I hold X but no translation consensus yet").
+A conforming layer master/detail surface should reuse the common entity/world operation model:
+
+- stable URLs/identities for resources;
+- paginated/streamed complete selected sets rather than arbitrary UI top-K ceilings;
+- canonical operation/API surfaces shared with CLI/MCP/other product fronts;
+- declared ranking arena/measure/context/epoch;
+- provenance and source coverage;
+- relation/containment/trajectory navigation;
+- per-operation coupling/trace contribution where available;
+- glome/graph/trajectory/constellation visualizations as additional views, not disconnected tools.
+
+## Historical implementation notes
+
+The original decision recorded then-live routes such as `/explore/mesh`, entity/topic detail surfaces and query shapes. Those observations are historical evidence from 2026-08-10, not a perpetual statement that those exact routes remain the current product contract.
+
+Current implementation status must be read from the repository/product tests and owning issues rather than inferred from this decision record.
+
+## Open acceptance questions
+
+- What current canonical operation enumerates each highway layer and its members?
+- How does the UI expose a layer's indexed/provider participation in the coupling field?
+- Which query-relative contribution/ablation metrics are meaningful for each typed layer without collapsing unlike evidence into one score?
+- How are large layer sets paged/streamed while retaining deterministic ordering and complete-set semantics?
+- Which current product route owns this surface, and which historical routes have been superseded?
+
+This decision answers the **navigation/product shape**. It does not demote the physicality, trajectory, web, walk/search or coupling mechanisms that make the data useful.

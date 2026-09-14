@@ -1,20 +1,14 @@
-# The Name Game — human-vs-Laplace performance, identity, realization, and event proof
+# The Name Game — human-vs-Laplace identity, realization and latency proof
 
-This guide records a concrete Knowledge Arena proving surface discovered during product brainstorming.
-It is intentionally **not** a declaration of the limits of Laplace or even of the game family. The
-named games in `knowledge-arena.md` are examples that exercise reusable machine laws. They should be
-read as one small visible pixel in a much larger design space, not as an exhaustive feature list.
+The Name Game is one small Knowledge Arena surface that makes several Laplace laws visible to a human without first explaining the entire substrate.
 
-Active product ownership remains `#1421` (Knowledge Arena), with common entity-world/search behavior
-owned by `#1404/#1401`. The clean counterpart is `Laplace-Refactor#138` over the common
-`#17/#18/#60/#68/#132` machine.
+It is deliberately **not** a declaration of Laplace's limits or a private game intelligence stack. Active ownership remains in the current Knowledge Arena/entity-world/forward issues; related work in other repositories is coordination only.
 
 ## Product hook
 
-A useful response to the claim that Laplace is "slow" is not only a synthetic latency number. Give
-Laplace and a human the same deterministic semantic task and let them race.
+A useful answer to “is Laplace slow?” is not only a synthetic benchmark. Give a human and Laplace the same deterministic semantic task and race them while retaining an exact operation/resource receipt.
 
-The Name Game is deliberately understandable without explaining the architecture first:
+A simple chain looks like:
 
 ```text
 Bobby Fischer
@@ -26,7 +20,7 @@ Sandy Koufax
 ...
 ```
 
-The ordinary forward rule is:
+One possible challenge rule is:
 
 ```text
 family-name initial(current)
@@ -34,325 +28,187 @@ family-name initial(current)
 given-name initial(next)
 ```
 
-The game may admit famous real people, fictional characters, or another explicitly declared entity
-set. Eligibility is installation/challenge state; it must not silently become one universal
-"famousness" score.
+The playable entity estate, realization/language law, no-repeat rule, world epoch, timing law and resource envelope are challenge state—not one universal notion of fame or naming.
 
-## Why this is a Laplace benchmark rather than a string game
+## Why this is a Laplace benchmark instead of a string game
 
-A submitted answer should execute approximately:
+A submission should exercise something like:
 
 ```text
 submitted Unicode text
--> canonical decomposition
--> resolve candidate entity
--> select eligible identity/name evidence
--> realize structured playable name endpoints
--> validate required initial/orientation
--> verify entity has not already occurred in this event
--> accept/reject with reason
--> append the accepted occurrence to event physicality
--> advance firmware state / next required letter
+-> exact decomposition/admission
+-> query-relative identity/name coupling
+-> resolve candidate canonical entity under challenge scope
+-> select governed structured name realization
+-> validate required endpoint/initial orientation
+-> verify event-trajectory no-repeat state
+-> accept/reject with typed reason
+-> append accepted occurrence to event trajectory
+-> advance next challenge state
 ```
 
-The benchmark therefore exercises resolution, Unicode handling, alias/reference identity, realization,
-entity typing, event state, duplicate detection, deterministic validation, search/selection and
-physical execution timing through one small game.
+That touches Unicode/grapheme handling, canonical identity, aliases/references, structured realization, event occurrence state, exact duplicate detection, indexed retrieval and deterministic validation.
 
 It must not be implemented as `split(' ')` plus a private celebrity dictionary.
 
-## Identity is not display order
+## Identity is not a display string
 
-Human-facing name order cannot define canonical identity or the playable endpoints.
+The same person/character/entity can have several names, aliases, transliterations and presentation orders. Those are contextual realization/reference state, not new canonical game pieces.
 
-For example, a selected identity can expose structured state equivalent to:
+For example:
 
 ```text
 entity: Itachi Uchiha
-
-given_name:  Itachi
-family_name: Uchiha
+structured realization:
+  given_name:  Itachi
+  family_name: Uchiha
 ```
 
-A realization may display `Itachi Uchiha` or `Uchiha Itachi` according to language/cultural/context
-policy. That does not swap the semantic roles merely because the visible token order changed.
+A UI may display `Itachi Uchiha` or `Uchiha Itachi` according to a selected cultural/language policy. That does not swap semantic roles merely because visible order changes.
 
-This closes a real cheese class:
+Submitting both strings cannot manufacture two different playable entities under a no-repeat rule if they resolve to the same canonical referent.
 
-```text
-Uchiha Itachi
-Uchiha Sasuke
-```
+Likewise provider handles, titles, nicknames, external identifiers and transliterations remain evidence/references used by resolution/realization; they do not mint extra game pieces simply because their surface strings differ.
 
-A naive first-token/last-token parser can incorrectly treat both as `U -> ...`. A conforming validator
-resolves the entities and validates their governed naming roles. Reversing the visible rendering is
-not a legal way to manufacture another initial transition.
-
-Likewise, submitting both:
-
-```text
-Itachi Uchiha
-Uchiha Itachi
-```
-
-cannot produce two playable entities under a no-repeat rule. They resolve to the same canonical
-referent for the event.
-
-Provider handles, aliases, real names, transliterations and external references remain evidence used
-by the identity/realization machinery; they do not mint extra game pieces merely because the strings
-differ.
+Current executable ids are finite Hash128/BLAKE3-derived addresses under declared recipes, not the human label and not the abstract content itself.
 
 ## Unicode endpoint law
 
-Initials must be derived from the selected structured name components through the Unicode/grapheme
-policy selected by the challenge, not ASCII byte indexing.
+Initials come from the selected structured name components under the challenge's Unicode/grapheme/normalization law, not ASCII byte indexing.
 
-At minimum the receipt should preserve:
+A receipt preserves enough state to reproduce the decision:
 
 ```text
 submitted text
 resolved canonical entity
-selected playable realization
-structured given/family endpoints
-normalized initial values used by the rule
-challenge language/realization policy
+selected name/alias evidence
+structured playable components
+normalized grapheme/initial values used by the rule
+language/realization policy
+challenge generation / event prefix
 ```
 
-This makes cultural order, punctuation, diacritics, transliteration and multi-codepoint graphemes
-explicit test cases rather than undefined behavior.
+Diacritics, punctuation, transliteration and multi-codepoint graphemes are therefore explicit fixtures rather than accidental edge cases.
 
 ## Mononyms, particles, titles and character names
 
-The base two-endpoint mode should fail closed when the selected realization cannot supply the two
-required naming roles. Examples discussed during design:
+The challenge declares its playable-name policy.
 
-- `Cher` is invalid in the strict two-endpoint mode unless another explicitly named mode defines a
-  mononym rule.
-- `Malcolm X` is valid when the governed realization supplies `Malcolm` as the first endpoint and
-  `X` as the terminal naming endpoint.
-- `Howard the Duck` must be decided from structured character-name realization rather than blindly
-  treating the first and last whitespace tokens as given/family names.
-- `Dr. Doom`, `Pope Francis`, `The Rock`, `Dwayne "The Rock" Johnson`, `Monkey D. Luffy`,
-  `Ludwig van Beethoven`, `Leonardo da Vinci`, `Martin Luther King Jr.` and similar shapes are
-  adversarial fixtures for the realization contract, not exceptions to be patched into the game.
+A strict two-role mode may reject a mononym when no governed second endpoint exists. Another explicitly named mode may allow it. Names such as `Malcolm X`, `Ludwig van Beethoven`, `Leonardo da Vinci`, `Martin Luther King Jr.`, `Dwayne "The Rock" Johnson`, `Monkey D. Luffy`, `Pope Francis` or fictional/title-heavy forms are resolved through structured realization rather than patched first/last-token heuristics.
 
-A challenge recipe must state its playable-name policy. Ambiguity produces a typed invalid/why-not
-result rather than a guessed endpoint.
+Ambiguity produces a typed ambiguous/invalid/why-not disposition instead of silently guessing an endpoint.
 
-## Doubles and direction reversal
+## Event occurrence is not canonical identity
 
-The current brainstorm includes a special **double** mechanic for answers whose playable endpoints
-share the same initial:
+The player/event trajectory records which canonical entities have already occurred in **this match**.
 
 ```text
-Dom DeLuise
-Donny Darko
-Darkwing Duck
+canonical entity E
+  can occur in many games/challenges globally
+  but may be forbidden from occurring twice in this event by firmware
 ```
 
-The proposed game effect is that a double reverses the endpoint/orientation rule for subsequent
-play. The exact transition must be encoded in firmware and receipt state; it must not live in UI
-special cases.
+No-repeat detection therefore uses exact event occurrence/trajectory state; it does not remint `E` with an event id or store a fake global “already used” property on the entity.
 
-Conceptually:
+## Query-relative coupling
+
+If a submitted surface has several possible referents/name senses, the game should not choose the first globally popular label and search only around it.
+
+The exact submission plus challenge estate, language/realization law, prior event trajectory and current required initial constrain the eligible responses jointly. The canonical cognition order remains:
 
 ```text
-normal orientation:
-  current FAMILY -> next GIVEN
-
-double encountered:
-  flip orientation
-
-reverse orientation:
-  current GIVEN -> next FAMILY
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
+        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
 ```
 
-A later double may flip the orientation again if that is the selected recipe. Because this was
-brainstormed as a game rule rather than a substrate invariant, the exact recipe remains explicit and
-versioned instead of becoming universal identity semantics.
+A simple deterministic game may compile much of that into one coarse native operation, but the semantic receipt still distinguishes what was resolved, what responded, what constraints eliminated candidates and why one entity was selected/rejected.
 
-## No repeats in the same event
+## Performance law
 
-Accepted entities form another event physicality trajectory:
+The game is especially useful because its semantic work is small enough that orchestration overhead becomes obvious.
+
+A conforming hot operation should look like:
 
 ```text
-Bobby Fischer
--> Frank Sinatra
--> Sandy Koufax
+one bounded request/event state
+-> prepared indexed/set-sized lookup
+-> native C/C++ resolution/validation/event checks
+-> bounded answer + receipt
+```
+
+It should **not** look like:
+
+```text
+split token
+-> SQL lookup
+-> managed loop
+-> SQL alias lookup
+-> SQL name-part lookup
+-> SQL event duplicate lookup
+-> SQL next-letter lookup
 -> ...
 ```
 
-A common mode requires a self-avoiding trajectory:
+When the meaningful native/indexed work is microseconds but per-step SQL/PInvoke/SPI/client orchestration turns the operation into milliseconds, that is an execution-grain defect—not the inherent cost of the Name Game or Laplace.
+
+This is the same law used by decomposition, ingestion, cognition, analysis, reconstruction and export.
+
+## Human-vs-Laplace measurement
+
+A match can report both human and machine timing without confusing them.
+
+Useful machine receipt fields include:
 
 ```text
-next canonical entity NOT IN current event trajectory
-```
-
-Aliases, alternate renderings, handle spellings or name-order changes cannot bypass this because the
-repeat check is on canonical entity identity.
-
-As with the other Arena games, no-repeat is firmware, not a global substrate law.
-
-## Race modes
-
-### Alternating duel
-
-Human and Laplace share one trajectory. Each accepted answer determines the next state for the other
-contestant:
-
-```text
-human:   Bobby Fischer
-Laplace: Frank Sinatra
-human:   Sandy Koufax
-Laplace: ...
-```
-
-This rewards both response speed and adversarial choice. A player can choose a valid answer whose
-outgoing letter leaves the opponent a smaller legal frontier.
-
-### Parallel sprint
-
-Both contestants receive the exact same start entity, world/eligibility boundary, name policy and
-clock. They independently build the longest valid chain during a fixed interval.
-
-### Trap / frontier strategy
-
-The best move need not be the most obvious valid name. A strategic player can optimize approximately:
-
-```text
-valid answer
-+ preserve own future options
-+ minimize opponent's next eligible frontier
-```
-
-`Malcolm X` is a useful example because a terminal `X` may be much harder to answer than a common
-letter under a given admitted world.
-
-Difficulty levels should change search/selection firmware rather than inserting artificial sleep:
-
-- easy: any valid eligible continuation;
-- stronger: prefer well-supported/recognizable continuations;
-- adversarial: minimize opponent frontier under the same declared rules;
-- deeper strategy: account for orientation flips/no-repeat/future escape options.
-
-## Performance receipt
-
-The race can expose performance humans understand while retaining machine-level measurements.
-
-For every turn, record at least:
-
-```text
-contestant
-server receive timestamp
-resolution duration
-identity/realization duration
-validation duration
-search/selection duration where Laplace chooses
+submission bytes/codepoints/graphemes
+resolved candidate count
+indexed probes / rows/cells touched
+alias/name evidence inspected
+coupling/constraint eliminations
+native/DB boundary-call count
+CPU time / wall time
 accepted/rejected disposition
-canonical entity id when resolved
-required initial + orientation before/after
-frontier size/work when measured
+selected entity / next-state fingerprint
 ```
 
-A match summary may report:
+The goal is not to manufacture a favorable “tokens/s” number. It is to show how much exact semantic/state work one bounded operation actually performs and how little of the world it needs to touch.
+
+## Challenge fairness
+
+A ranked generation pins:
 
 ```text
-valid answers
-invalid answers
-median / p95 decision latency
-total wall time
-entities/frontier candidates examined
-name-order/alias cheese attempts rejected
-rarest terminal initial reached
-longest double chain
-unique domains/entity classes crossed
-```
-
-This is a **behavioral performance proof**, not a replacement for low-level composition, database,
-energy or throughput benchmarks. Synthetic and interactive benchmarks answer different questions and
-should coexist.
-
-## Same Tetris fairness law
-
-Ranked play pins the same state for every contestant:
-
-```text
-world/evidence epoch
-eligible entity/type/source boundary
-starting entity or ordered starting queue
-language/name-realization policy
-normal/reverse endpoint rule
-double behavior
-no-repeat policy
-clock/scoring law
+eligible entity estate / world epoch
+name/reference/realization providers
+grapheme/normalization law
+starting entity/letter/queue
+no-repeat/event firmware
+ambiguity policy
+resource envelope
 server timing law
 ```
 
-A later ingest or identity repair creates a new challenge generation rather than changing an already
-published match.
+A later ingest/alias correction creates a new challenge generation rather than silently changing a completed ranked match.
 
-Practice mode may intentionally use the live installation.
+## Witnessing
 
-## Post-game facts
+Accepted/rejected submissions and match results may be recorded as event observations/receipts. They do not become world truth simply because the game generated them.
 
-Because every move is receipted, the game can expose useful, inspectable tidbits:
+A player's submitted alias can be evidence about usage; it is not automatically admitted as a canonical name without the normal source/evidence law.
 
-- fastest valid human and Laplace responses;
-- letters with the smallest/largest eligible frontiers;
-- answers that most reduced the opponent's frontier;
-- aliases/name-order substitutions that resolved to an already-used entity;
-- attempted cultural-order cheese blocked by structured naming roles;
-- longest valid chain under the pinned world;
-- alternate routes/chains neither contestant used;
-- entity classes/domains traversed;
-- answers valid in one installation/epoch but absent in another.
+## Acceptance
 
-These are facts about the named match/world boundary, not universal claims about all possible data.
+The Name Game proves the intended machine only if:
 
-## Acceptance fixtures
+- aliases/display order cannot create duplicate canonical game pieces;
+- structured name roles, not raw first/last whitespace tokens, determine endpoints;
+- Unicode/grapheme normalization is explicit and replayable;
+- ambiguous surfaces remain ambiguous/rejected when the challenge cannot resolve them lawfully;
+- no-repeat uses event trajectory occurrence state without salting canonical identity;
+- equivalent UI/API/CLI game operations share semantic behavior;
+- the hot path uses coarse indexed/native execution rather than per-field/per-candidate RBAR;
+- operation receipts expose enough work to distinguish useful semantic latency from boundary overhead;
+- ranked challenge generations remain replayable after the live substrate changes;
+- game outcomes can be witnessed without self-certifying new world facts.
 
-A conforming implementation should include adversarial cases rather than only easy Western names:
-
-- [ ] `Bobby Fischer -> Frank Sinatra -> Sandy Koufax` validates the ordinary rule.
-- [ ] submitted display order cannot change the given/family role used for validation.
-- [ ] `Uchiha Itachi` / `Itachi Uchiha` resolve to the same entity where identity evidence says so.
-- [ ] `Uchiha Itachi -> Uchiha Sasuke` cannot cheese the first-token initial rule.
-- [ ] alias/name-order resubmission of one entity fails no-repeat.
-- [ ] strict mode handles `Cher` as non-playable rather than inventing a family name.
-- [ ] `Malcolm X` follows the declared endpoint policy.
-- [ ] particles/titles/suffixes/character names use structured realization, not whitespace position.
-- [ ] multi-codepoint/Unicode initials use the declared grapheme/codepoint policy.
-- [ ] doubles change orientation only through the selected versioned firmware.
-- [ ] alternating and parallel races use server-side timing and identical challenge generations.
-- [ ] a human may beat Laplace despite slower mean response time by producing harder frontier states;
-      the receipt must make that outcome explainable.
-- [ ] all accepted answers append to event physicality without manufacturing permanent PRECEDES
-      testimony for game order.
-
-## Non-success
-
-- first-token/last-token string slicing presented as identity;
-- separate celebrity/name database disconnected from entity-world semantics;
-- alias or cultural name-order change creating a second playable identity;
-- ASCII-only initial extraction;
-- hardcoded `Uchiha`, `van`, `Jr.`, mononym, title, or fictional-character exceptions as the
-  governing algorithm;
-- client-side clocks deciding ranked outcomes;
-- random/stochastic opponent state giving contestants different semantic boards;
-- artificial sleep presented as difficulty;
-- accepting a new game-specific search/identity/realization engine when the common Laplace machine
-  already owns those operations.
-
-## Non-exhaustive design-space rule
-
-Knowledge Golf, Highway Race, relays, Collision/CTF, Constraint Crossing, Witness Hunt, Graphle,
-COMBINE, chess-map hybrids, Choose Your Own Adventure and The Name Game are **proving fixtures**.
-They demonstrate that different products can be firmware/programs over common canonical identity,
-physicality, evidence, search, realization, effect and witness machinery.
-
-New ideas should normally extend the set of proving surfaces rather than redefine the previous ones.
-A later brainstorm is additional design evidence unless an explicit decision supersedes an earlier
-contract.
-
-The product should therefore optimize for reusable machine primitives and receipts, not for closing a
-finite checklist of game names.
+The game is intentionally tiny. Its value is that identity, realization, event state, query-relative selection, sparse addressability and execution-grain performance become easy to falsify in front of a person.

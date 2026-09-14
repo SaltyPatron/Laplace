@@ -1,494 +1,284 @@
 # Knowledge Arena — games over the Laplace world
 
-This guide records the product/game family discovered from the existing Laplace entity-world,
-Matchup, graph, trajectory, evidence, and chess surfaces. It is deliberately a **consumer of the
-Laplace machine**, not a second game-specific intelligence stack.
+Knowledge Arena turns the existing Laplace entity-world, trajectory, evidence, search and domain surfaces into deterministic/replayable games over the **same canonical substrate**.
 
-Active implementation ownership is in GitHub issues, especially #1401, #1404, #1420, and #1421.
-The clean implementation counterparts are tracked in `Laplace-Refactor` #17/#18/#60/#68/#132/
-#137/#138.
+It is deliberately a consumer/proving surface of Laplace, not a second game-specific intelligence stack. Active implementation ownership lives in current GitHub issues such as #1401, #1404, #1420 and #1421. Related work in other repositories is coordination, not semantic authority.
 
-## One machine, several verbs
+## One machine, several game verbs
 
-The product-level operations are useful because they name different obligations over the same
-canonical substrate:
+Useful product verbs name different obligations over one substrate:
 
 ```text
-MATCH      A vs B      compare/shared/different/current evidence
+MATCH      A vs B      compare shared/different evidence/state
 CONNECT    A -> B      find an admissible typed path
-COMBINE    A + B       satisfy a composition/novelty obligation from both worlds
-EXPLORE    A -> ?       materialize a bounded entity world
-PLAY       program + rules + event trajectory over the same operations
+COMBINE    A + B       satisfy a composition/bridge obligation from both worlds
+EXPLORE    A -> ?       materialize a bounded query-relative world
+PLAY       challenge + rules + event trajectory over the same operations
 ```
 
-None of these owns private identity, graph truth, KNN, embeddings, language meaning, scoring, or
-search. They compile into the same ISA/forward machinery that conversation, chess, model
-compilation, and other modalities use.
+None owns private identity, embeddings, graph truth, language meaning, scoring or search. They compile into the same operation/coupling machinery used by conversation, chess, model analysis and other domains.
 
-The game layer therefore demonstrates the invention rather than covering it with game-specific
-logic.
+## Entity worlds are views of the spider-colony web
 
-## Entity worlds are the board
+A canonical entity participates in many overlapping structures: recursive composition, containing trajectories, occurrences, typed relations, evidence/consensus, sources/contexts, geometry/locality and domain/calculation planes.
 
-A Laplace entity world is a bounded, query-relative materialization around a canonical entity.
-The old Warehouse and chess-player webs are the behavioral proof: a player such as Magnus can be
-rendered as a web of games, opponents, outcomes, sources, and neighboring entities, then any node
-can become the center of its own world.
+An entity world is one **bounded query-relative materialization** of those responders around a selected root/state. It is not a stored universal adjacency list and it is not semantic authority.
 
-A game may pin:
+A game can pin:
 
 ```text
-root/start/target entities
+root / start / target entities or structures
 world/evidence epoch
-relation/provider families
-source/context/time/domain/sense scopes
-hop/search boundary
-fanout/frontier/resource budget
-standing/evidence threshold
-visibility policy
-firmware/rules/scoring
+relation / provider / operator families
+source / context / time / domain / sense scopes
+hop depth
+fanout / candidate / frontier budget
+evidence / standing constraints
+visibility law
+resource envelope
+firmware / rules / scoring
 ```
 
-The rendered graph is a view over that selected world, not a stored universal adjacency and not
-semantic authority.
+## Identity is not the label
 
-### Identity is not the label
+Game pieces are canonical executable entities under declared recipes. Current Hash128/BLAKE3-derived ids are the implementation address, not the abstract content itself.
 
-Raw BLAKE3/content-addressed ids remain the canonical node identity. Human names, handles,
-notations, and translations are realization state. A node rendered as a shortened hash means the
-selected realization is unresolved; the node is not missing and must not be reminted to make the
-UI pretty.
+Human names, handles, translations, notations and aliases are realization/reference state. Missing pretty text does not make an entity missing and must not remint it.
 
-Human-readable and raw-id/debug modes may render the same game board differently while preserving
-byte-identical node/edge identity.
+Different renderings of the same canonical entity remain the same game piece where the challenge law says repetition is forbidden.
 
 ## Ranked fairness: the Tetris property
 
-A ranked match should give every contestant the equivalent of the **same Tetris piece sequence**.
-It pins one challenge generation:
+A ranked challenge generation gives every contestant mechanically comparable state:
 
 ```text
 challenge_set_id + ordered queue
 closed world/evidence epoch
 provider/relation/calculation rules
-sense/domain/source/time scopes
-semantic radius/path boundary
-anti-hub/specificity law
-visibility policy
-resource limits
+source/domain/time/sense scope
+hop/fanout/resource boundaries
+anti-hub/specificity constraints
+visibility law
 scoring/tie law
-server timing/event ordering
+server timing/event-order law
 ```
 
-Two contestants can then be compared mechanically because the semantic world and challenge order
-are the same. A later ingest produces a new challenge generation rather than silently changing the
-old course.
+Later substrate growth produces a new challenge generation instead of silently changing yesterday's board.
 
-Practice mode may intentionally use the live current installation.
+Practice may deliberately target the live current world; ranked play binds a closed/replayable epoch.
 
-## Games are physicality trajectories
+## Games are witnessed trajectories
 
-A completed game is naturally another ordered event:
+A completed game is an ordered event/physicality trajectory:
 
 ```text
 challenge
-  -> selected entity/state
-  -> selected relation/action
-  -> selected entity/state
-  -> ...
-  -> completion / failure / timeout
+-> selected state/entity
+-> selected relation/action
+-> selected state/entity
+-> ...
+-> completion / failure / timeout
 ```
 
-The canonical content is shared globally; each occurrence in the player's event retains its own
-ordinal/physical position and event context. There is no need to manufacture permanent
-`PRECEDES` testimony for every move through the game: the ordering is already present in the
-physicality trajectory.
+Canonical content is reused globally while each game occurrence retains event/player/time/rule/provenance/ordinal context.
 
-### No repeats in the same event
+Ordering that already exists in the exact trajectory does not need to be re-minted as permanent `PRECEDES` testimony merely to make a game sequence visible.
 
-Many traversal games can select a self-avoiding rule:
+A no-repeat/self-avoiding rule can forbid selecting an entity already present in the current event trajectory. That is game firmware, not universal ontology.
+
+## Query-relative game cognition
+
+A game action can use the same canonical program:
 
 ```text
-next entity/state must not already occur in this event trajectory
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
+        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
 ```
 
-This prevents cycle farming and makes each step consume navigation options. It is **firmware**, not
-a universal substrate law. Narrative, temporal, or resource puzzles may legitimately revisit the
-same canonical state under different event/time/resource context.
+The current challenge/trajectory tugs the eligible web. COUPLE preserves which typed routes answer—relation, containment, trajectory, evidence, source, geometry, domain calculation, etc.—before the game program/routing collapses the problem into one path/action choice.
 
-## Knowledge Golf
+CONNECT/Golf may route A*/Dijkstra/best-first path operators. Witness Hunt may route evidence/provenance operators. COMBINE may route composition/bridge operators. None of those operators becomes the universal cognition law merely because one game uses it.
 
-Knowledge Golf is the cleanest flagship game.
+## Hops and fanout are gameplay and compute coordinates
+
+Knowledge Arena makes Laplace's explicit compute model visible.
+
+A challenge can declare:
+
+```text
+max hops H
+fanout/frontier ceiling F_h
+typed relation/provider families
+candidate/evidence work
+geometry/calculation operators
+wall/resource ceiling
+```
+
+So a player/agent is not only judged on whether it reached the answer; the receipt can show how much of the web it pulled and how efficiently it navigated it.
+
+This also gives direct product intuition for compute credits: deeper/wider play spends a larger execution envelope over the same knowledge world rather than switching to a deliberately dumber/less-informed model.
+
+## Flagship modes
+
+### Knowledge Golf
 
 ```text
 start entity  = tee
 target entity = hole
 transition    = stroke
-best admitted path under the rules = par
+best admitted path under the pinned rule = par
 ```
 
-A course can constrain relation families, minimum evidence, domain crossings, historical cutoff,
-maximum radius, source types, or generic-hub use.
+Courses may constrain relation families, minimum evidence, domain crossings, time/source boundaries, hop limits, fanout, anti-hub rules or visibility.
 
-Example:
+Possible modes include Daily 9, Speed Golf, Evidence Golf, Historic Golf, Blind Golf, Tier Golf, Multimodal Golf and constrained tournament courses.
+
+A direct admissible relation is a hole in one under that rule.
+
+### Highway Race / Knowledge Sprint
+
+Every contestant receives the same ordered start→target challenge queue. Players advance independently as soon as they complete the current round.
+
+Score can retain validity, server time, transitions, typed path cost, evidence constraints and actual work. A fast invalid path does not beat a valid one.
+
+### Laplace Degree
+
+A Bacon/Erdős-style degree can be calculated between any addressable entities **under a declared rule/epoch**:
 
 ```text
-Magnus Carlsen -> Apollo 11
-Par: 6
-No universal taxonomy hubs
-Must cross >= 3 domains
-At least one edge >= 100 witnesses
-At least one admitted book/document witness
+raw degree          minimum admitted transitions
+witnessed degree    every edge passes an evidence floor
+typed degree        selected relation families only
+temporal degree     historical world boundary
+source/domain degree restricted provider/source families
+cross-domain degree required domain/modal transitions
 ```
 
-Useful modes include:
+There is no one context-free universal “distance” whose scalar silently means everything.
 
-- **Daily 9** — nine immutable holes for one pinned generation;
-- **Speed Golf** — validity/strokes first, time as a tie breaker or combined declared score;
-- **Evidence Golf** — optimize typed path cost/evidence quality instead of raw hops;
-- **Historic Golf** — only evidence valid/admitted before a time boundary;
-- **Blind Golf** — no global graph preview;
-- **Tier Golf** — required structural-altitude changes;
-- **Multimodal Golf** — required domain/modality crossings;
-- **Masters** — heavily constrained tournament courses.
+### Blind Relay / Distance Relay
 
-A direct admissible relation is literally a **hole in one**.
+Relays reuse the event trajectory while changing visibility and route obligations. Blind mode exposes only locally eligible exits; Distance Relay imposes per-leg hop/radius/work budgets.
 
-## Highway Race / Knowledge Sprint
+### Bridge Builder / Constraint Gauntlet
 
-This is the strongest competitive-Tetris analogy.
+Connect A/B while satisfying typed obligations such as required relation families, evidence sources, domain crossings or forbidden taxonomy hubs. Constraint Gauntlet changes the rules across a deterministic challenge sequence.
 
-Every contestant receives the same ordered queue:
+### Witness Hunt / Contradiction Duel
 
-```text
-1. gecko -> telephone
-2. Mozart -> Saturn
-3. Magnus -> Alan Turing
-4. fork -> Linux
-5. sodium -> Napoleon
-...
-```
+Given a proposition/entity/relation, find the strongest admissible supporting/refuting evidence under the declared provenance/dependence law.
 
-Each player advances to the next challenge immediately after completing the current one. They do
-not wait for the opponent. Server time, legal transitions, path cost, and penalties come from the
-same challenge/trajectory receipt.
+Copied/dependent sources do not become independent corroboration merely because several paths point at them.
 
-This rewards throughput and navigation skill rather than stochastic model output.
+### Graphle / Hidden Entity
 
-## Laplace Degree — Bacon/Erdos generalized
+Guess a target using declared typed feedback such as hop bounds, relation-family overlap, containing structures, domain/sense hints or standing bands without leaking the target.
 
-Laplace can generalize Bacon/Erdos-style degrees to any two addressable entities, but there is no
-single context-free universal distance.
+### COMBINE / Craft
 
-A degree card must name its rule and epoch, for example:
+Both contestants receive the same A+B input and operation recipe. Validity/obligation closure comes before novelty/style. Multiple valid compositions remain possible; the game must not hide one hard-coded intended pun/result.
+
+### Name Game
+
+The Name Game resolves submitted Unicode text to actual canonical entities and structured name-role realization, validates challenge-specific endpoint rules, checks event-trajectory repetition and appends accepted occurrences. It is not `split(' ')` plus a private celebrity dictionary.
+
+See `name-game-performance-proof.md`.
+
+## Scoring law
+
+No universal one-number game score is required.
+
+A challenge recipe may compare components lexicographically or by declared weights, but retains the components in the receipt:
 
 ```text
-raw degree                 minimum admissible transitions
-witnessed degree           every edge passes an evidence floor
-typed degree               selected relation families only
-temporal degree            world restricted to a historical boundary
-source/domain degree       restricted provider/source families
-cross-domain degree        path must cross selected domains/modalities
-```
-
-The scalar is always accompanied by the path/rule/epoch receipt.
-
-Entity pages can expose connection fingerprints against familiar anchors:
-
-```text
-"gambit"
-  Magnus       2
-  Erdos        5
-  Shakespeare  3
-  Linux        6
-  Apollo 11    5
-```
-
-Those are product facts only under the displayed degree law, not a universal importance metric.
-
-## Relay family
-
-Relays use the same trajectory engine with different visibility/transition obligations.
-
-### Blind Relay
-
-Show only the current entity and the permitted local exits. The target of round N can become the
-start of round N+1.
-
-### Distance Relay
-
-Each leg has a declared maximum semantic radius/path depth.
-
-### Tier Relay
-
-Require altitude transitions, for example:
-
-```text
-word -> sentence -> document -> person -> organization
-```
-
-or the reverse.
-
-### Source Relay
-
-Require source/provider changes on successive steps, such as lexical -> book -> PGN -> encyclopedia
--> repository.
-
-### Modality Relay
-
-Require materially different domain/modality state, such as word -> image -> location -> audio ->
-person -> chess game.
-
-### Relation Relay / Stack
-
-Give every contestant the same deterministic relation sequence, much like falling Tetris pieces:
-
-```text
-IS_A
-PART_OF
-USED_BY
-AUTHORED_BY
-LOCATED_IN
-...
-```
-
-Every move must satisfy the next relation obligation. A locally valid choice can make the next
-piece impossible, turning the game into planning rather than raw speed.
-
-## Collision / Capture the Flag
-
-Two players or teams start in different parts of one bounded entity world and navigate toward each
-other, a shared objective, or an opposing flag/base.
-
-Possible firmware includes:
-
-- first valid path intersection wins;
-- lowest combined path cost wins;
-- capture enemy flag then return to home through a legal path;
-- visited nodes become unavailable to that player;
-- team-visible explored state / fog of war;
-- controlled nodes become relay/spawn points;
-- different player roles expose different provider families.
-
-The outbound shortest route can be a poor capture-and-return route when no-repeat rules consume the
-bridge required to escape.
-
-## Choose Your Own Adventure / world games
-
-The substrate can be the world while firmware defines what kind of adventure is being played.
-Prior choices remain part of the active event trajectory and can constrain later actions:
-
-```text
-visited entities/places
-objects acquired
-claims learned
-people encountered
-actions performed
-time/resource state
-relationships formed
-```
-
-Possible genres include historical adventure, science exploration, literary worlds, code/cyber
-worlds, roguelikes, mysteries, and D&D-like sessions. Revisit behavior is genre/program specific.
-
-A save is principally the pinned world/program identity plus the event trajectory and any declared
-session/effect state.
-
-## Constraint Crossing / Constraint Gauntlet
-
-The wolf/sheep/hay ferry, bridge-and-torch, missionaries/cannibals, scheduling, routing,
-inventory, sliding, and similar puzzles are state-transition programs over the same machine.
-
-Example:
-
-```text
-state = { wolf:left, sheep:left, hay:left, boat:left }
-operation = move boat with <= 1 passenger
-constraints:
-  wolf + sheep unsupervised => invalid
-  sheep + hay unsupervised  => invalid
-goal = all:right
-```
-
-Each legal state is a canonical composition; each action is a transition; the solution is an
-ordered state/physicality trajectory. The puzzle tests guidance/search/effect/witness behavior,
-not a puzzle-only solver.
-
-## Graphle / Hidden Entity
-
-Graphle must be sequence-aware. A 4D centroid alone is insufficient.
-
-`act`, `cat`, and `tac` are the canonical counterexample: the same constituent multiset can share a
-centroid while ordered physicality trajectories differ.
-
-A Graphle hint may independently reveal:
-
-- centroid proximity;
-- Frechet/trajectory distance;
-- ordinal/gap similarity;
-- constituent/set overlap;
-- tier/altitude;
-- typed relation degree;
-- containment/domain/sense overlap.
-
-The UI should say which channel a hint represents rather than collapsing everything into one opaque
-"distance". A centroid-only implementation must fail the order-sensitive fixture.
-
-This enables a useful subgame: **Same Place, Different Path**.
-
-## Witness Hunt — installation-relative by design
-
-Witness Hunt should not be discarded because answers change as data changes. The installation/data
-boundary is part of the query.
-
-### Live Hunt
-
-Intentionally query the current admitted world:
-
-- earliest/latest witnessed occurrence currently present;
-- strongest independent support or refutation;
-- first source connecting A and B;
-- exact book/game/document containing a displayed claim;
-- strongest provenance chain currently admitted.
-
-Dynamic results are the point.
-
-### Ranked/Pinned Hunt
-
-Bind exact installation/data manifest + closed evidence epoch + source/time/world scope. Publish
-only challenges whose answerability/completeness obligations are satisfied for that boundary.
-Replay remains deterministic after the live installation advances.
-
-### Forensic/Operator Hunt
-
-Turn the same mechanic into substrate/data-quality work:
-
-- find the witness that changed a result between epochs;
-- find duplicated dependence masquerading as independent support;
-- locate a contradiction;
-- locate a missing expected source;
-- find the exact evidence responsible for a surprising standing;
-- diagnose a deliberately damaged fixture.
-
-Different Laplace installations can therefore be different courses rather than defective copies of
-one supposedly universal trivia database.
-
-## Red / Blue / White adversarial orchestration
-
-The serious form of Contradiction Duel is the intended cybersecurity firmware split, not an LLM
-argument.
-
-- **Red** executes authorized offensive/discovery/evasion programs inside a declared environment.
-- **Blue** detects, prevents, contains, attributes, and repairs.
-- **White** owns environment authority, rules, effect boundaries, telemetry, timing, resets, and
-  adjudication.
-
-Red/Blue statements remain attributable testimony. White-observed process/network/filesystem/tool/
-effect state is independent physicality/effect evidence.
-
-```text
-Red: "I escaped."
-White trajectory:
-  process -> syscall -> socket attempt -> policy denial
-```
-
-The self-report is not the effect. Conversely, if the authoritative effect trajectory proves a
-boundary was actually crossed, White records that rather than trusting Blue's "blocked" claim.
-
-Scoring can include effect achieved/prevented, detection latency, containment, persistence, false
-positives, resource use, and evidence quality. Ranked cyber games must remain in explicitly
-authorized/sandboxed challenge environments.
-
-## Chess-map hybrids
-
-Chess can use the same game machinery without replacing ordinary chess rules.
-
-One mode can make the board transition deterministic while the player must navigate the admitted
-chess world to justify/discover a candidate move:
-
-```text
-current position
-  -> structure/motif/opening/player/book/game world
-  -> prior trajectory/analogue
-  -> candidate move
-  -> legal chess transition
-```
-
-A King's Road / Capture-the-King mode can treat the current king/home as a base and historical
-positions, games, motifs, books, and players as terrain. Stockfish/tablebase/classical calculation
-still acts only under its declared provider role; the route itself is a Laplace knowledge
-trajectory.
-
-This is a visualization/game form of the same Chess Forward Pass, not a separate chess engine.
-
-## COMBINE / Craft
-
-COMBINE is distinct from Matchup. It searches both entity worlds for admissible bridges,
-transformations, analogies, or compositions, then realizes a result with derivation provenance.
-
-`gecko + telephone` is the proving fixture. The answer is not hardcoded; a finite world can honestly
-produce no admissible result at one radius and a valid result at a larger radius.
-
-Semantic radius and physical cost remain separate:
-
-```text
-smaller allowed radius -> semantically harder to connect
-larger allowed radius  -> easier to find some connection
-larger search frontier -> generally more computation
-```
-
-Raw shortest path is not automatically the best semantic bridge. Universal hubs such as `entity`
-or `object` can be rejected/dominated by a specificity-requiring firmware.
-
-Generated compositions retain generation ancestry and do not self-certify as observed truth.
-
-## Post-round facts and spectator value
-
-Because every route is receipted, the product can derive useful facts without inventing a global
-importance score:
-
-- par / best admitted path under identical rules;
-- player's excess path cost or strokes;
-- rarest bridge used in challenge history;
-- strongest/weakest-supported edge on the route;
-- oldest/newest witness traversed;
-- source/domain/language boundaries crossed;
-- most disputed edge;
-- equal-cost alternate routes;
-- route valid in one historical epoch but not another;
-- first challenge-history use of a route/bridge;
-- average semantic radius, search work, and decision time;
-- "N degrees from X" cards under a named degree law.
-
-Challenge-history novelty is social/game state, not evidence that a relation is globally novel.
-
-## Scoring
-
-No universal score is required. A challenge recipe can compare components lexicographically or by
-declared weights, but the receipt preserves the raw components:
-
-```text
-valid completion / obligations satisfied
+validity / obligations satisfied
 server elapsed time
-transition count / typed path cost
-specificity/evidence compliance
-physical resource work
+transition count
+path/search cost
+standing/evidence constraints
+actual hops/fanout/candidate/frontier work
+machine/resource work where measured
 penalties
-optional declared novelty/diversity
+optional novelty/diversity component
 ```
 
-Validity and hard constraints precede speed/style. Every ranked score must be recomputable from the
-challenge identity plus the event/path receipts.
+Validity and hard rule satisfaction come before style/novelty unless the challenge explicitly defines otherwise.
 
-## Implementation ownership
+## Post-round derivations
 
-- #1401 — one forward-pass/operator mechanism across observation, fact, calculation, and standing;
-- #1404 — generic entity-world materialization and realization;
-- #1420 — COMBINE semantic act;
-- #1421 — Knowledge Arena competitive/product family;
-- #833/#1419/#1424 — chess cross-modal proof and comparator ladder;
-- Refactor #137/#138 — clean COMBINE and Arena consumers.
+Interesting cards can be derived without inventing a universal importance score:
 
-The implementation criterion is not the number of game modes. The criterion is that materially
-different games reuse the same identity, trajectory, evidence, query/search, realization, effect,
-and witness machinery.
+- best-known/optimal path under the same pinned rule and how far the player was from it;
+- strongest/weakest-supported edge used;
+- oldest/newest witness encountered;
+- source/domain/language crossings;
+- most disputed edge;
+- equal-cost alternative paths;
+- bridge not previously used in the **challenge history** (a social/event fact, not world truth);
+- path that existed in one evidence epoch but not another;
+- average hops/fanout/candidates/native work/time over a match.
+
+Every card states the rule/epoch that makes it meaningful.
+
+## Native execution grain
+
+A real-time game must not turn each candidate/hop into a separate high-level database call.
+
+The hot path obeys the common physical law:
+
+```text
+prepared/indexed set-sized access
+-> coarse native C/C++ search/trajectory/evidence operator
+-> native loops / expansion / reductions
+-> bounded result + receipt
+```
+
+Per-candidate SQL/SPI/PInvoke, recursive CTE search and scalar-call loops disguised as batches are architecture defects even if the game still returns the right path.
+
+## Ranked-state mutation law
+
+A ranked match does not mutate the pinned shared world while contestants are being compared.
+
+Paths/compositions/results may be recorded as match artifacts and admitted/witnessed into a **later** evidence epoch after the frozen comparison closes.
+
+This avoids measuring a benchmark that trains/adapts its own reference world mid-match unless an adaptive-learning experiment is explicitly what is being measured.
+
+## Replay receipt
+
+A replayable challenge/run binds at least:
+
+```text
+challenge generation / ordered queue
+substrate/evidence epoch
+exact start/target/input structures
+rule/firmware identity
+provider/relation/operator scope
+source/context/time/domain scope
+hop/fanout/resource envelope
+visibility policy
+selected transitions / routes / evidence roots
+standing/uncertainty state used
+actual work + timing
+completion/failure disposition
+output/event trajectory fingerprint
+```
+
+Equivalent product fronts should validate/replay against the same semantic receipt rather than duplicating game logic in UI code.
+
+## Acceptance
+
+Knowledge Arena succeeds when:
+
+- every game operates on canonical shared substrate state rather than a private copy/ontology;
+- two contestants on one ranked generation receive equivalent world/rules/challenge state;
+- later ingest cannot silently rewrite a completed ranked challenge;
+- route/evidence/COMBINE games use the same underlying coupling/search/evidence/entity semantics;
+- game UI does not establish truth/identity/scoring independently of the operation program;
+- challenge receipts make scores mechanically recomputable;
+- no-repeat rules use event occurrence/trajectory state without reminting canonical content;
+- multiple routes and their typed evidence remain inspectable;
+- hop/fanout/resource budgets bound actual work and appear in receipts;
+- native/set execution avoids RBAR-per-hop/candidate overhead;
+- match output can be witnessed later without self-certifying generated artifacts as world truth.
+
+The value of the Arena is not merely entertainment. It makes exact identity, sparse traversal, evidence provenance, resource accounting, replayability and deterministic experiment boundaries visible enough that humans can challenge the machine directly.

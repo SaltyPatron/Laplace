@@ -1,212 +1,172 @@
-# Laplace execution to finish
+# Laplace execution / acceptance workstreams
 
-This is the forward execution plan for the current repository. It turns the invention, specifications, audits and issue ledgers into one ordered implementation path. It is an execution projection, not a replacement for `docs/INVENTION.md` or the binding specifications.
+This file is a compatibility/workstream index, not a permanent global execution order.
+
+The previous revision arranged the repository into numbered “finish lines” and told agents to pick the earliest unfinished one. That was useful for one campaign, but it could override a later explicit user task and make a historical backlog sequence look like part of the invention. The detailed prior order remains available in Git history.
 
 ## Authority
 
-Implementation decisions must trace to:
+Active work follows:
 
-1. current inventor instructions/corrections;
+1. current inventor instruction/correction;
 2. `docs/INVENTION.md` and `docs/INVENTIONS.md`;
-3. `docs/specs/05_Substrate_Invariants.txt`;
-4. `docs/specs/06_Engineering_Ruleset.txt`;
-5. `docs/specs/08_Record_vs_Calculate_Spec.txt`;
-6. `docs/specs/09_Substrate_LM_Synthesis.txt`;
-7. `docs/specs/11_Chess_Provenance_Consensus_Spec.txt`;
-8. `docs/specs/33_Perfcache_Blob_Law.md`;
-9. `docs/specs/34_Conversational_Provenance.md`;
-10. `docs/specs/36_Laplace_Forward_Pass.md`;
-11. `docs/specs/37_Substrate_Operation_ISA.md`;
-12. current decision records and the decomposer/substrate issue ledgers;
-13. GitHub issues/PRs as execution ownership;
-14. current code/runtime/CI as implementation evidence.
+3. binding specs and `AGENTS.md`;
+4. current scoped decisions/plans;
+5. current GitHub issues/PRs;
+6. current code/tests/CI/live evidence.
 
-When a lower-level artifact contradicts a higher authority, correct the lower artifact.
+A plan may organize work. It may not reduce the intended behavior to an MVP, fallback, cheapest path, smallest model, shortest search, one operator, or the first implementation that happens to pass a narrow test.
 
-## Delivery state
+## Delivery states
 
-Every accepted work item is one of:
+Use the repository-wide states from `AGENTS.md`:
 
-- **implementation obligation** — code/product work the agent must finish;
-- **external prerequisite** — a proven condition outside repository/agent control with evidence, owner and satisfaction action;
-- **failed acceptance** — the implementation exists but the required executable behavior fails;
-- **delivered** — authoritative `main`, required CI, required deployment/readback and the requested operator-visible result all agree.
+- **implementation obligation** — accepted repository/product work still owed;
+- **external prerequisite** — genuinely outside repository/agent control, with evidence and required action;
+- **failed acceptance** — implementation exists but the requested/proved behavior fails;
+- **delivered** — accepted code is on the intended authoritative branch/main state and required CI/install/deploy/readback/operator-visible proof agrees.
 
-The next action for an implementation obligation or failed acceptance is code/test/deploy work, not another failure narrative.
+A branch, PR, issue comment, plan, test declaration or review is not delivery unless that artifact itself was the requested deliverable.
 
-## Finish line 1 — complete source estates and generic ingest
+## Workstream A — source estates and canonical ingest
 
-Owners: #1403, #967, #1153, parent #1177.
+Representative owners historically include #1403, #967, #1153 and #1177.
 
-### Required result
+Required outcome:
 
-Every selected source release exposes the complete physical artifact graph and every independent artifact enters one generic bounded read → parse → compose → bulk-apply pipeline.
+```text
+complete selected physical artifact graph
+-> explicit disposition for every artifact
+-> one-pass/bounded source streaming
+-> typed source recovery/decomposition
+-> canonical recursive composition / reuse
+-> set-sized persistence + evidence fold
+-> truthful per-artifact and aggregate receipts
+```
 
-### Source acceptance set
+Source-specific parsing/grammar remains source-specific. Identity/composition/persistence/fold law remains common.
 
-At minimum audit and execute the complete selected physical inputs for:
+The same universal execution-grain rule applies here: avoid caller loops around per-atom/per-record DB or native calls when one coarse native/set operation can own the repeated work.
 
-- Unicode/UCD/UCA: UCD XML, DUCET and all selected UCD property/auxiliary files;
-- ISO registries;
-- CILI;
-- WordNet: all selected `dict` data/index/sense/exception/sentence/frame/support files;
-- VerbNet: explicitly select and account for 3.4, `verbnet-test`, `vn-gl` and any other observed release trees rather than hard-wiring one directory;
-- FrameNet: frame, LU, fulltext and selected supporting files;
-- UD Treebanks: every selected `.conllu` file across treebank directories;
-- Atomic2020: train/dev/test and any selected release sidecars;
-- OMW, PropBank, SemLink, MapNet, WordFrameNet/XWFN, Predicate Matrix and other foundation sources;
-- single-file controls such as ConceptNet/Wiktionary where applicable.
+## Workstream B — native/static execution grain
 
-### Required implementation
+Representative owners historically include #588, #429, #951, #1047 and related operation-ISA work.
 
-- One source-estate enumerator/profile contract.
-- Inventory set equals execution set after explicit dispositions/filtering.
-- File/artifact identity owns resume/journal/file progress.
-- Semantic unit counts remain separate from file counts.
-- Generic scheduler owns concurrency/backpressure/memory.
-- Source adapters only enumerate, parse and compose source-specific structure.
-- Shared apply owns database transaction/coalescing behavior.
-- Coverage receipt accounts for selected files, bytes, records, accepted/rejected records, fields/relations emitted and unresolved references.
+Required outcome:
 
-### Acceptance
+```text
+PostgreSQL = durable indexed state / MVCC / transactions / set access
+SPI        = prepared, set-sized bridge
+C/C++      = repeated algorithms / loops / recursion / parsing / composition /
+             trajectories / search / reductions / encoding/materialization
+C#/SQL     = orchestration / contracts / transport
+```
 
-Run complete-source fixtures plus real selected estate inventory; hidden-file and alternate-directory mutants must fail. A clean run must show the same physical file set in inventory, journal, execution telemetry and final receipt.
+This law is universal across decomposition, ingestion, reads/cognition, analysis/domain engines, reconstruction, synthesis and export.
 
-## Finish line 2 — native/static substrate execution
+Patterns to remove from hot paths include per-row SPI, per-element P/Invoke, scalar SQL in caller loops, recursive CTEs as cognition/search inner engines, uncontrolled `LATERAL`, per-call temp tables, per-item transactions/COPY and “batch” APIs implemented as scalar loops.
 
-Owners: #588, #429 and the static-substrate ISA work merged from #1394.
+## Workstream C — deterministic evidence, chronology and standing
 
-### Required result
+Representative owners include evidence/fold issues such as #1395, #1397 and current governing specs/issues.
 
-C/C++ owns reusable deterministic computation; PostgreSQL owns persistence/set operations; SQL and C# orchestrate fixed typed operations.
+Required outcome:
 
-### Remove the class of defect
+- observed event/source chronology remains distinct from ingest/worker/batch order;
+- deterministic calculations remain distinct from attributed testimony;
+- evidence dependence/provenance remains queryable;
+- standing/replay uses declared recipe-owned periods/order;
+- Glicko/fold math fails closed on invalid state and preserves rating/RD/volatility semantics;
+- retry/replay is idempotent and batch/thread partitioning cannot change semantic results.
 
-- dynamic SQL/SPI string-building as an algorithm;
-- recursive/CTE/LATERAL graph execution where a native bulk operation owns the semantics;
-- loops around `SPI_execute*` or scalar SQL calls;
-- per-call temp tables/indexes;
-- duplicated SQL and native implementations of one semantic fact;
-- batch APIs that decompose into repeated small database calls;
-- nested PostgreSQL parallelism underneath caller-owned parallelism unless explicitly planned by one resource authority.
+## Workstream D — deployment, reseed and live readback
 
-### Acceptance
+Representative owners historically include #433, #761, #1132 and source/substrate owners.
 
-ISA/source gates reject regression of retired execution shapes. Hot operations expose measured batch width, calls, rows/cells, CPU, WAL/I/O and wall time. Single-item parity delegates to the same batch implementation.
+Required outcome is not “a seed script ran.” It is an exact source/artifact/generation being installed, populated and read back through production paths with truthful receipts.
 
-## Finish line 3 — deterministic evidence, time and standing
+Useful receipts identify code/package/native artifact, selected source artifacts, phase timings/work, DB/I/O/resource state, resume/restart behavior, final state and representative reads.
 
-Owners include #1395, #1397 and the governing chess/evidence specifications.
+## Workstream E — navigable product/world surfaces
 
-### Required result
+Representative owners include #1404 and current product-navigation issues.
 
-Historical evidence carries source-observed event time and order-sensitive standing/replay consumes oldest → newest event order. Batch boundaries may not change rating history.
+The product exposes the same canonical substrate through reusable browse/rank/profile/evidence/trajectory/world views rather than inventing private UI semantics or arbitrary top-K ceilings.
 
-### Required implementation
+A UI hierarchy is a navigation grammar, not proof that the substrate itself is a tree.
 
-- Source event timestamp enters the canonical attestation/evidence boundary.
-- Ingest wall-clock remains ingestion/provenance metadata, not historical event time.
-- Glicko periods are explicit event/time periods, not dictionary groups keyed by opponent state or arbitrary commit batches.
-- Fixed-point/native math fails closed on impossible states and preserves rating/RD/volatility invariants.
-- Repair/refold paths use the same chronological implementation as live admission.
+## Workstream F — query/cognition/forward program
 
-### Acceptance
+Authority is `docs/specs/36_Laplace_Forward_Pass.md` and `docs/specs/37_Substrate_Operation_ISA.md`.
 
-Known game histories reproduce stable ratings independent of file/batch/thread partitioning. Reverse-order and batch-size mutants must fail. No consensus row can reach invalid volatility/rating state.
+Current canonical semantic order:
 
-## Finish line 4 — clean reseed, deployment and readback
+```text
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
+        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
+```
 
-Owners: #433, #761, #1132 plus source/substrate owners above.
+The whole admitted observation/root, constituent occurrences, prior discourse bindings and open obligations produce a query-relative typed coupling/response field before unconstrained interpretation/provider policy is frozen.
 
-### Required result
+A*, Dijkstra, strongest-walk, trajectory continuation, containment and geometry are routed operators—not cognition by themselves.
 
-A clean database ingests the configured foundation through the production path, publishes truthful progress, completes maintenance/fold work, deploys the exact code tested, and serves read paths against that state.
+Hops, fanout/frontier, provider/operator families and other explicit resources bound sparse work over one shared knowledge world.
 
-### Acceptance receipt
+## Workstream G — proving domains and export/consumer products
 
-Record:
+Chess, code, model analysis/export and future domains are proving/consumer surfaces of the common machine rather than permission to grow private intelligence stacks.
 
-- exact commit/package/loaded native object;
-- selected source artifacts and counts;
-- per-source elapsed time and throughput;
-- read/parse/compose/apply/fold/drain/maintenance timing;
-- database calls, rows/bytes/cells, WAL and I/O;
-- final entity/physicality/attestation/consensus counts;
-- resume/restart proof;
-- representative reader results.
+Domain acceptance should exercise common identity, recursive trajectories, occurrence/provenance, evidence/standing, coupling/search, realization, witnessing and resource receipts while preserving domain-specific rules/grammars.
 
-Do not tune around a source until the generic execution measurements identify its actual dominant operation.
+Export/synthesis is also subject to the native execution-grain law; correctness of a file format does not excuse per-value high-level boundary overhead.
 
-## Finish line 5 — reusable product navigation and readers
+## Proof workstream
 
-Owners: #1404, #1175, #1080 plus normalized reader work.
+Proof is cross-cutting, not “finish line N.”
 
-### Required result
+Different claims require different evidence:
 
-The product exposes the substrate as a navigable entity world rather than isolated diagnostic top-K panels.
+```text
+bounded recursive geometry        -> mathematical proof + executable implementation tests
+exact carrier/trajectory           -> round-trip/property tests
+finite atom generation             -> exhaustive finite checks where feasible
+live referential/recursive closure -> live counterexample scan + counts
+conversation/cognition             -> semantic traces + adversarial end-to-end acceptance
+performance                        -> exact revision/artifact/host/provider/workload receipts
+product delivery                   -> install/deploy/readback/operator-visible proof
+```
 
-### Required surface
+The exhaustive live recursive physicality/trajectory/reference closure gate remains an implementation obligation; existing unit/reconstruction tests do not silently stand in for it.
 
-- tier/altitude navigation: codepoints → graphemes → words → sentences → documents → higher compositions;
-- typed entity/relation/domain navigation;
-- sortable/filterable/paginated leaderboards over declared arenas/measures;
-- stable epoch/cursor URL state;
-- rank → profile → evidence/relations/trajectory → neighboring/ranked-set drill-down;
-- common query/ranking/paging semantics across SQL/API/CLI/web;
-- reusable components for board/profile/table/navigation/domain views.
+## Resource/billing workstream
 
-Representative proof: Unicode, lexical words, sentence/composition, relation/entity type and chess/player-style ranking.
+Product tiers change the admitted execution envelope, not the amount of knowledge Laplace possesses.
 
-## Finish line 6 — query, conversation and forward pass
+The same physical program should support:
 
-Authority: `docs/specs/34_Conversational_Provenance.md`, `36_Laplace_Forward_Pass.md`, `37_Substrate_Operation_ISA.md`, and `plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md`.
+```text
+EXPLAIN / preflight
+-> estimate hops/fanout/providers/index/calculation/resource work
+-> reserve allowed compute
+-> execute under hard counters
+-> emit actual receipt
+-> reconcile/refund unused reserve
+```
 
-### Required result
+Serviceable host capacity reserves database/product/runner/control-plane headroom. Full-machine saturation is a separate explicit experiment.
 
-Queries execute real typed forward/cognition programs over admitted structure/evidence/geometry/standing/context rather than lookup/hop/top-k substitutes.
+## How an agent chooses the next action
 
-### Required implementation
+Do **not** choose the numerically earliest workstream above.
 
-- UAX29/grammar decomposition feeds exact composition/trajectory state.
-- Query-relative typed connection/search programs use declared relation/time/dependence/resource semantics.
-- Perfcache/indexed operations accelerate deterministic calculations.
-- Observation planes and seeded semantic fact planes remain distinct and combine at execution time.
-- Generated Q/K/V/O or equivalent operator programs derive from the active witnessed/calculated planes rather than a permanent flattened embedding.
-- Conversation retains prompt/session/source/provenance occurrence state and writes new observations through the same substrate laws.
+Instead:
 
-### Acceptance
+1. load the accepted user outcome and current authority;
+2. identify every workstream touched by that outcome;
+3. repair source-of-truth drift first when it would otherwise cause implementation toward the wrong machine;
+4. implement/verify the actual accepted behavior rather than a smaller substitute;
+5. land/deploy/read back where the accepted finish line requires it;
+6. correct dependent issues/status/docs so stale prose does not reintroduce the defect;
+7. continue until the accepted scope is delivered or the user explicitly changes/stops it.
 
-Whole-route prompts/questions must demonstrate structure-sensitive continuation/reasoning that changes when relevant witnessed state changes, survives restart, and can explain the supporting path/receipt without falling back to hard-coded domain routes.
-
-## Finish line 7 — domain product acceptance
-
-Chess is a representative downstream product, not a private engine.
-
-Required chess result includes:
-
-- exact player identity handling with witnessed aliases rather than destructive folding;
-- oldest→newest game/event admission;
-- correct ratings/standings;
-- performant substrate-aware search/perfcache use;
-- Lab evaluation isolated from recording/write runtime unless recording is explicitly requested;
-- reusable full board/replay/profile components;
-- player/game leaderboards and drill-down through generic product surfaces;
-- Lichess production defaults that meet interactive latency while deeper search uses substrate acceleration rather than only raising conventional alpha-beta depth.
-
-Use the same acceptance discipline for future domains.
-
-## Agent course
-
-For every work session:
-
-1. load `AGENTS.md` and this plan;
-2. identify the earliest unfinished finish-line obligation affected by the user's request;
-3. inspect the owning issue/current `main`/runtime before changing code;
-4. implement the smallest coherent slice that ends in operator-visible behavior;
-5. update tests/contracts/generated artifacts in the same change;
-6. merge to `main` when acceptance passes;
-7. deploy/read back where the behavior requires it;
-8. update the owning issue with the demonstrated result and the next executable obligation;
-9. continue until the accepted scope is delivered or the user changes/stops it.
-
-Do not replace implementation with additional plans, PR accumulation, status prose or new local exceptions.
+The workstream letters are organization only. They are not priority.

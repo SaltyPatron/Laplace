@@ -1,168 +1,118 @@
 # Core composition scaling modes
 
-Tracking: #1441 and #1451. First discriminating receipt: Actions run `33608791817`, job `100178833249`, source `262731f6b80584ed61c6d5b5ca3423c8e4e00005`.
+Tracking: #1441, #1451, #1436. The scaling suite answers several different questions. They must not share one ambiguous headline number.
 
-The first real scaling run exposed **three** different performance questions. They must never share one ambiguous headline number.
+## 1. Unique-corpus, file-grain makespan
 
-## 1. Unique-corpus, file-grain makespan — diagnostic lower bound
+Profile: `core-scale`.
 
-Profile: `core-scale`
+This asks how quickly the current harness can finish one finite heterogeneous corpus when each complete input file is assigned to one worker and processed once.
 
-This mode asks:
+That is a benchmark scheduling constraint, not a Laplace semantic law and not the intended final parallel architecture. A document is a high-level composition/DAG; it is not inherently one CPU task.
 
-> How quickly can this harness finish one finite heterogeneous corpus when the harness assigns each complete input file to exactly one worker and processes each file once?
+The first discriminating run (`33608791817`) contained one 41,601,961-byte document that was 59.526% of the measured corpus. Because that harness would not distribute work inside the document, its theoretical makespan speedup ceiling was about 1.68x, and the measured result approached that ceiling.
 
-That is a **benchmark scheduling constraint**, not a Laplace semantic law and not the intended final parallel architecture. A document is a high-level composition/DAG; it is not inherently one CPU task.
+That run therefore proved the coarse file-grain scheduler was the bottleneck. It did **not** prove a native two-core ceiling, a whole-machine throughput ceiling, or that files are lawful production worker atoms.
 
-The first run contained 1,054 documents / 69.9 MB / 69,867,473 codepoints. The machine-readable shard receipt showed:
+`core-scale` remains useful as negative evidence about physical work grain.
 
-```text
-2 workers
-  41,601,961 bytes   1 document
-  28,286,542 bytes   1,053 documents
+## 2. Replicated independent-stream scaling
 
-3 workers
-  41,601,961 bytes   1 document
-  19,606,932 bytes   1 document
-   8,679,610 bytes   1,052 documents
+Profile: `core-scale-streams`. Suites: `throughput`, `scale`, `all`.
 
-6 workers
-  41,601,961 bytes   1 document
-  19,606,932 bytes   1 document
-  ~2.17 MB each      remaining workers
-```
-
-The largest input is 59.526% of all corpus bytes. With the harness refusing to distribute work *inside* that document, the theoretical makespan speedup ceiling is approximately:
+Every worker executes one complete copy of the same real corpus. The measured work therefore grows with worker count:
 
 ```text
-69,888,503 / 41,601,961 = 1.67993x
+1 worker -> 1 corpus stream
+2 workers -> 2 corpus streams
+N workers -> N corpus streams
 ```
 
-The measured best was about 1.676x. The run therefore nearly saturated the **coarse file-grain scheduler it was given**.
+Every reported codepoint and tier-tree node is actually processed by the native composition path. This is not `single-thread result × N` arithmetic.
 
-It does **not** establish:
+This profile measures aggregate concurrent composition capacity. It is **not** proof that one semantic object is internally parallel.
 
-- a native two-core ceiling;
-- a whole-machine Laplace throughput ceiling;
-- that files/documents are correct worker atoms;
-- that a 41.6 MB document cannot use multiple cores;
-- that production ingest should schedule one file per worker.
+## Serviceable capacity and saturation are different experiments
 
-It is retained because it is useful negative evidence: file-grain scheduling can impose a floor on top of the already single-thread primitive floor.
+A managed host also runs PostgreSQL, the Actions runner, monitoring/control processes, and product services. Therefore the normal benchmark workflow does **not** silently consume every allowed logical CPU.
 
-## 2. Replicated independent-stream throughput — machine saturation
-
-Profile: `core-scale-streams`
-Suites: `throughput`, `scale`
-
-This mode asks:
-
-> How much aggregate native composition work can the host execute when multiple independent semantic streams are available concurrently?
-
-For every scaling point, each pinned worker executes one complete copy of the same real corpus. The amount of work actually executed grows with worker count:
+The workflow resolves a versioned scale plan before measurement:
 
 ```text
-1 worker   -> 1 corpus stream
-2 workers  -> 2 corpus streams
-6 workers  -> 6 corpus streams
-12 workers -> 12 corpus streams
+managed-host default
+  -> reserve declared logical-CPU headroom
+  -> derive serviceable scaling points
+  -> pass those exact points to the scaling harness
+  -> record scale-plan.json
+
+explicit saturation
+  -> operator sets allow_saturation=true
+  -> full logical-CPU boundary may be admitted
+  -> receipt labels the run saturation-allowed
 ```
 
-Every reported codepoint and tier-tree node is actually passed through `content_witness_tree_build`; this is not `single-thread rate × workers` arithmetic.
+On the known 6-core/12-thread i7-6850K runner with the default reserve of two logical CPUs, the serviceable default resolves to:
 
-This profile is useful for measuring CPU/cache/memory-system saturation and service capacity across independent requests. It is **not** proof that one large semantic object is internally parallel. Replicating the whole corpus per worker deliberately avoids the file-grain straggler so the host can be saturated; it does not solve the architectural scheduling defect exposed by mode 1.
+```text
+1, 2, 3, 4, 6, 8, 10
+```
 
-The receipt records:
+The 12-worker point is no longer a default managed-host measurement. It requires explicit saturation opt-in.
 
-- exact physical/logical CPU topology and affinity;
-- complete corpus bytes/codepoints/documents per worker;
-- actual total bytes/codepoints/documents executed at each point;
-- nodes per worker and aggregate nodes;
-- every repeat and measured wall interval;
-- codepoints/s;
-- 4-character BPE-equivalent units/s;
-- tier-tree nodes/s;
-- measured speedup against the 1-worker stream point;
-- parallel efficiency.
+This distinction is not cosmetic. Actions run `34823625126` failed before a sealed benchmark artifact was produced during the previous scaling design that admitted the full logical-CPU boundary. The available evidence does not prove which final process failed, so the run is recorded as an incomplete/failing receipt rather than assigned a fabricated terminal cause. It is nevertheless a valid counterexample to treating `all allowed CPUs` as the default service-capacity experiment on a live managed host.
 
-Physical cores are populated before SMT siblings.
+A larger throughput number from a point that starves the required service/control plane is a saturation result, not a normal customer/service capacity result.
 
-## 3. Single-semantic-DAG frontier scaling — required architecture proof
+## 3. Single-semantic-DAG frontier scaling
 
 Tracking: #1451.
 
-This is the measurement the first benchmark suite still lacks.
+This is the stronger architecture proof:
 
-It asks:
-
-> Can the same single large canonical content object use multiple workers internally while producing the exact same semantic result as scalar execution?
+> Can one exact large semantic object use multiple workers internally while producing the same canonical result as scalar execution?
 
 The intended physical shape is:
 
 ```text
 complete canonical input
-  -> exact UAX / structural scaffold
-  -> dependency frontiers
-       leaves / independent low-tier nodes
-       -> grapheme frontier
-       -> word frontier
-       -> sentence frontier
-       -> document/root
-  -> same exact canonical root and structural fingerprint
+  -> exact structural/dependency scaffold
+  -> independent dependency frontiers execute concurrently
+  -> barriers only where parent dependencies require them
+  -> identical ids / coordinates / Hilbert / trajectories / root
 ```
 
-The worker count, scheduling order, thread/task identity and transport partitioning are physical-plan state only. They may change timing and resource receipts; they may not change canonical ids, geometry, trajectories, reconstruction or root identity.
+Worker count, task identity, scheduling order and transport partitioning are physical-plan state only. They may change timing and receipts; they may not change canonical semantics.
 
-A valid benchmark for this mode must run the **same single giant document** at worker grants 1, 2, 3, 4, physical-core count and selected SMT points. It must verify scalar/parallel semantic parity before reporting speedup.
+A valid single-DAG benchmark runs the same large object under multiple admitted worker grants and verifies semantic parity before reporting speedup.
 
-Until #1451 is implemented, no result from modes 1 or 2 may be cited as proof of intra-document or intra-DAG parallelism.
+Until that implementation lands, neither file-grain makespan nor replicated independent streams may be cited as proof of intra-object parallelism.
 
 ## Why all three meanings matter
 
 | Profile / target | Work held fixed? | Physical grain | Primary question |
 | --- | --- | --- | --- |
-| `core-scale` | yes: one unique corpus | whole input files | how badly does coarse file scheduling constrain this finite batch? |
-| `core-scale-streams` | no: one full corpus per worker | independent streams | how much aggregate core work can the host sustain? |
-| #1451 single-DAG scale | yes: one exact semantic object | dependency frontier / DAG nodes | can one semantic object use the machine without changing meaning? |
+| `core-scale` | yes | whole input files | how badly does coarse file scheduling constrain one finite batch? |
+| `core-scale-streams` | no; one full stream per worker | independent streams | how much aggregate work can the admitted host resource envelope sustain? |
+| #1451 single-DAG scale | yes; one exact object | dependency frontier / DAG nodes | can one semantic object use several workers without changing meaning? |
 
-The first run showed that `core-scale` is a **lower-bound diagnostic**, not an architecture target. The 41.6 MB straggler is evidence that the harness's physical grain is wrong for measuring machine capability; it is not a product requirement that one document remain bound to one worker.
+For managed-host scaling, every published curve additionally names whether it is **serviceable** or **saturation** evidence.
 
-## The measured floor hierarchy
+## Receipt law
 
-The current legacy evidence should be stated explicitly:
-
-```text
-~465k BPE-equivalent/s
-  = real single-thread primitive composition floor
-
-~748k BPE-equivalent/s in the first `core-scale` run
-  = real finite-corpus throughput under a file-grain scheduler
-  = nearly the mathematical ceiling of that coarse scheduler
-  = NOT a whole-machine ceiling
-
-aggregate independent-stream capacity
-  = pending #1442 measurement
-
-single-semantic-object parallel capacity
-  = pending #1451 implementation and measurement
-```
-
-That makes the first multi-worker result a **floor imposed on a floor**, not a failed proof of a low machine ceiling.
-
-## Historical ~3.4M equivalent/s
-
-The remembered historical multi-million 4-character-equivalent result is not reconstructed by multiplying the committed ~465k single-thread floor. `core-scale-streams` exists to recover, reject, or supersede aggregate host throughput with an executable receipt. #1451 separately owns the stronger claim that one exact semantic DAG can exploit the host internally.
-
-## Comparison law
-
-When publishing a curve, always name:
+A scaling receipt names at least:
 
 - benchmark mode;
+- exact source revision and built artifact identities;
 - exact semantic workload;
 - physical scheduling grain;
-- worker topology/resource grant;
-- whether total work is fixed or replicated;
-- semantic parity gate;
-- measured physical work.
+- physical/logical CPU topology;
+- resolved worker points and CPU affinity;
+- reserved headroom and whether saturation was explicitly allowed;
+- whether total semantic work is fixed or replicated;
+- semantic parity gate where applicable;
+- all measured repeats;
+- codepoints/s, BPE-equivalent comparison units/s and tier-tree nodes/s;
+- speedup and parallel efficiency;
+- host/product/database health evidence needed for any serviceable-capacity claim.
 
-Never reduce the three modes to one unlabeled `tokens/sec` scalar and never call file-grain or replicated-stream parallelism proof of internal semantic-DAG parallelism.
+Never collapse these modes into one unlabeled `tokens/sec` scalar. Never call replicated-stream or file-grain parallelism proof of single-object parallelism. Never call a point that knocks required host services offline normal service capacity.

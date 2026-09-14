@@ -1,100 +1,117 @@
 # Stable workstream contracts
 
-This file defines durable workstream boundaries. It contains no implementation status.
-GitHub issues own current evidence, dependencies, and completion.
+This file groups durable areas of implementation responsibility. It contains no current completion status and it does **not** define a global execution order. GitHub issues own current evidence/acceptance; active user scope and the authority order in `AGENTS.md` determine priority.
 
-## W1 — Speaking loop
+Every workstream is read under the same canonical cognition program:
 
-Route conversational generation through the canonical stateful forward pass. Template,
-gloss, and recall-only responses are non-success. Owner: #751, integrated by #921.
+```text
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
+        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
+```
+
+and the same physical execution law:
+
+```text
+indexed / set-sized boundary
+-> native C/C++ repeated algorithmic work
+-> bulk/set result + receipt
+```
+
+## W1 — Conversation / speaking loop
+
+Route conversational behavior through the canonical stateful forward program. Template, gloss, recall-only and endpoint-private response paths are non-success when the task requires cognition. Each emitted act/constituent updates the next coupling/frontier state. Historical owners include #751/#921.
 
 ## W2 — Document lane
 
-Represent work, edition, document/package, content, titles, authorship, licensing, and
-translation as distinct content-addressed entities and typed relations. Owner: #754;
-seed integration: #761.
+Represent work, edition, document/package, content, titles, authorship, licensing, translation and source occurrence as distinct canonical/typed state under declared recipes. Preserve exact reconstruction/provenance without source packaging becoming identity accidentally. Historical owner lineage includes #754/#761.
 
-## W3 — Self-ingest call graph
+## W3 — Self-ingest / code call graph
 
-Witness repository definitions and calls through the ordinary ingest spine so code
-structure becomes queryable evidence rather than filename/text coincidence. Owner: #765.
+Witness repository definitions, AST/code structure and calls through the ordinary ingest/composition/evidence spine so code becomes queryable canonical structure rather than filename/text coincidence. Repeated parsing/composition runs obey the same coarse native/set execution law. Historical owner: #765.
 
-## W4 — Election ground
+## W4 — Query-relative interpretation ground
 
-Preserve tier/identity law and provide evidence-bearing sense priors so prompt routing
-does not rely on tied or arbitrary candidates. Owners: #752 and #753.
+Provide the typed response planes needed for whole-observation coupling: candidate senses/bindings, exact occurrence/order state, relation evidence, source/context/dependence, standing/uncertainty, geometry and other eligible channels.
+
+Do **not** collapse each surface token to one prior sense before the rest of the observation can tug the competing candidates. Priors may be one typed signal; they are not the interpretation mechanism. Historical owners include #752/#753 and later prompt/coupling work.
 
 ## W5 — Product evaluation
 
-Run seeded HTTP, MCP, OpenAI, conversation, code, model-consensus, and export acceptance
-with held-out behavior and semantic trace parity. Owner: #755.
+Run HTTP/MCP/OpenAI/CLI/conversation/code/model/export acceptance against equivalent semantic operations with held-out behavior, restart state, trace/receipt parity and operator-visible product proof. Do not count adapter-level success as cognition success. Historical owner: #755.
 
-## W6 — Architecture gates
+## W6 — Architecture / anti-drift gates
 
-Enforce one implementation per fact, typed operation placement, deterministic identity,
-planner-visible reads, and reference/native parity. Owner lineage starts at #758; active
-successor issues must name the specific gate.
+Enforce one implementation per semantic fact, typed operation placement, deterministic recipe identity, packed-carrier-versus-realized-geometry separation, planner-visible/set-sized access, native/reference parity and universal execution-grain rules. Active successor issues name the concrete gate; old issue lineage includes #758.
 
-## W7 — Typed question routing
+## W7 — Joint task/orientation and routing
 
-Resolve question/prompt intent into governed relation families and operation shapes
-without surface-string special cases. Owner: #756.
+Turn the **query-relative coupling field** plus discourse/obligation state into a joint interpretation/ambiguity disposition, then compile the eligible relation/provider/operator families and work envelope.
 
-## W8 — Native multi-hop inference
+Surface-string dispatch, regex/topic/noun roots, convenience relation masks or source popularity may not choose the interpretation before COUPLE unless the caller explicitly requested a constrained operation. Historical owner lineage includes #756 and later forward-program issues.
 
-Execute both-direction, n-hop, A*/fan-out, uncertainty-aware traversal through a bounded
-native operation with traceable intermediate evidence. Owner: #757.
+## W8 — Native sparse frontier execution
 
-## W9 — Discourse memory
+Execute bounded indexed star expansion and typed multi-hop/frontier operations in native/set-sized form. A*, Dijkstra, strongest-first walk, containment, trajectory continuation, geometry and domain operators are selectable tools under the routed program—not the definition of cognition by themselves.
 
-Reconstruct orientation from the witnessed session trajectory, dependencies, feedback,
-and source/context scope. Topic caches are derived only. Owners: #759 and #360.
+Hops, fanout/candidate/frontier widths, providers and resources appear in both preflight and actual receipts. Historical owner lineage includes #757.
 
-## W10 — Enforced SQL dependencies
+## W9 — Discourse/session memory
 
-Make canonical SQL dependencies visible to PostgreSQL/static gates so dead or duplicate
-operation bodies cannot survive as untracked private implementations. Owner: #764.
+Reconstruct active bindings, prior turns/content, dependencies, feedback, source/context/world scope and open obligations from witnessed session state. Topic summaries/caches are derived aids only. Historical owners include #759/#360.
+
+## W10 — Enforced SQL/native dependencies
+
+Make canonical operation dependencies visible to PostgreSQL/static gates so dead/duplicate/private implementations cannot survive invisibly. Prevent SQL/plpgsql/C# wrappers from becoming alternate inner-loop engines. Historical owner: #764.
 
 ## W11 — Seeded capability profiles
 
-Seed declared foundation, linguistic, conversational, code, model, and domain profiles
-through finished lanes, proving each with its own acceptance operation. Owner: #761.
+Seed declared foundation, linguistic, conversational, code, model and domain profiles through the common admission/evidence machinery and prove each with representative acceptance operations. Capability profiles describe admitted evidence/providers, not separate knowledge-reduced “models.” Historical owner: #761.
 
-## W12 — Source roster semantics
+## W12 — Source roster / coverage semantics
 
-Distinguish source registration/capability from ingested content/completeness. Operational
-reads report both without treating a bootstrap row as a successful seed. Owner: #760.
+Distinguish source registration/capability from selected artifact estate, admitted content, observed completeness and current generation. Operational reads/receipts expose those separately rather than treating a bootstrap roster row as a successful seed. Historical owner: #760.
 
-## W13 — Convergent identity
+## W13 — Convergent recursive identity
 
-Prove that equivalent content from independent corpora, tokenizers, models, and modalities
-converges while every source witness remains attributable. Owner: #574.
+Prove that equal canonical structures under the same declared recipe converge across independent corpora/tokenizers/models/modalities while occurrence/source/provenance/testimony remain attributable. True cryptographic collision handling stays separate from ordinary content convergence. Historical owner lineage includes #574.
 
-## W14 — Machine model
+## W14 — Machine model / one execution substrate
 
-Treat PostgreSQL/substrate state as memory, the typed operation ISA as instructions, and
-the stateful forward pass as the cycling operator. Owners: #811 and #924.
+Treat persistent/indexed substrate state as reusable world/memory, the typed ISA as program vocabulary, query-relative coupling as relevance discovery, and the stateful couple/expand/fold/update loop as the cycling cognition operator. Do not reduce this to “database lookup” or “walk = AI.” Historical owners include #811/#924.
 
-## W15 — Election fan-out axes
+## W15 — Explicit coupling/fanout axes
 
-Keep source, relation, tier, band, hop, geometry, trajectory ordinal, confidence,
-modality, circuit, and task axes explicit. Do not collapse independent axes into one
-rank or fixed attention-head analogy. Owners: #861 and #864–#866.
+Keep source, relation, tier, band, hop, fanout/frontier, geometry, trajectory ordinal/gap, standing/RD/volatility, contradiction, dependence, modality, circuit/provider, discourse/task and obligation axes explicit until the selected operation declares how each participates.
 
-## W16 — Operation consolidation
+Do not flatten independent dimensions into one universal score or fixed attention-head analogy. Historical owners include #861/#864–#866.
 
-Inventory and converge duplicated SQL, C#, plpgsql, and native calculations onto the
-typed ISA. Preserve deliberate reference/native pairs with parity tests. Owner: #811;
-engine-orchestration campaign: #259.
+## W16 — Operation and execution-grain consolidation
 
-## W17 — Full-surface placement audit
+Inventory and converge duplicated SQL, C#, plpgsql and native calculations onto the typed ISA and one canonical semantic core. Preserve deliberate reference/native/accelerated pairs with parity tests.
 
-Verify that every public and internal operation has one owner, correct layer placement,
-declared type/shape, and API reachability. Findings become bounded GitHub issues rather
-than another prose status ledger. Owner: #811.
+Apply this beyond reads: decomposition, ingestion, analysis/domain engines, reconstruction, synthesis and export all owe coarse native/set execution for repeated work. A batch wrapper that loops scalar DB/PInvoke/SPI calls is still RBAR. Historical owner lineage includes #811/#259.
+
+## W17 — Full-surface placement / proof audit
+
+Verify every public/internal operation has one semantic owner, correct layer placement, declared input/output/resource shape, API reachability and appropriate proof class. Findings become bounded GitHub issues/tests rather than another permanent prose status ledger.
+
+The proof class must match the claim: theorem, executable invariant, finite exhaustive check, live-substrate counterexample scan, benchmark receipt or deployed product proof.
+
+## Cross-cutting resource/capacity law
+
+Every workstream that performs expensive work participates in the same plan/admission/receipt model:
+
+```text
+plan / EXPLAIN
+-> estimate actual semantic + physical work
+-> reserve admitted compute ceiling
+-> execute under hard counters
+-> receipt actual work
+-> reconcile/refund unused reserve
+```
+
+Commercial/resource tiers vary compute envelope over the same entitled knowledge world. On a managed host, serviceable capacity reserves database/product/runner/control-plane headroom; full saturation is a separately selected experiment.
 
 ## Historical analyses
 
-The detailed measured analyses that formerly occupied individual `W*.md` files are
-preserved under `docs/archive/plans/workstreams-v1/`. They are evidence, not status or
-current requirements.
+Detailed measured analyses formerly stored in individual `W*.md` files are preserved under `docs/archive/plans/workstreams-v1/`. They are historical evidence/counterexamples, not current status or authority.

@@ -1,297 +1,202 @@
 # Real conversation and heterogeneous-model consensus
 
-**Written 2026-08-08, last revised 2026-08-09.** This is a contract, not a status
-report — the acceptance criteria below are durable. Anything read from it as *current
-state* must be re-verified against HEAD and GitHub, which own delivery state (see
-"Delivery ownership"). Re-verify before citing.
+Status: **scoped product acceptance contract, not the definition of Laplace as a whole and not a current-status report.**
 
-This contract defines the product Laplace must expose through its MCP and
-OpenAI-compatible surfaces. The running deployment and executable code own observed
-behavior. Normative substrate law lives in `docs/specs/`; GitHub issues own delivery
-state.
+The original 2026-08-08/09 contract established durable requirements for MCP/OpenAI-compatible conversation, code/tool feedback, heterogeneous-model participation and deterministic realization/export. Its old forward-stage sequence and several implementation assumptions became stale; the canonical cognition law now lives in `docs/specs/36_Laplace_Forward_Pass.md` and `37_Substrate_Operation_ISA.md`.
+
+Delivery state must be re-verified against current issues, code, CI, installed artifacts and live behavior.
 
 ## Product claim
 
-Laplace is a content-addressed, provenance-bearing execution substrate in which
-corpora, conversations, code, games, and model circuits testify about shared entities
-and relations. It is not a checkpoint merger, answer ensemble, retrieval wrapper, or
-post-hoc judge.
+Laplace serves one substrate-native program over the selected witnessed/calculated world. It is not a checkpoint merger, answer ensemble, retrieval wrapper, hidden judge or endpoint-specific inference stack.
 
-The served result is one substrate-native forward pass over all sources selected for
-the request. Source testimony converges before realization while remaining auditable,
-separable, and reversible.
+Corpora, conversations, code, games, tools, conventional models and generated outputs participate as explicit content/sources/witnesses/calculation providers over shared canonical structures. Their evidence can converge while provenance, disagreement, dependence and uncertainty remain inspectable.
 
-## Substrate primitives used by inference
+## Representation laws used by conversation
 
-The forward pass must use the same primitives as ingest and inspection:
+Conversation uses the same representation as every other domain:
 
-- Unicode scalar identity at tier 0, with grapheme, lexical, phrase, sentence,
-  document, conversation, and modality-specific composition above it;
-- Unicode and DUCET ordering where text ordering is required, without reducing
-  identity to UTF-8 bytes or one language's tokenizer;
-- content hashes as entity identity, independent of source, tier, packaging, or
-  tokenizer-local integer;
-- S³/Super-Fibonacci placement, Hilbert ordering, and mantissa-packed trajectories as
-  exact structural coordinates and occurrence manifests;
-- `containers_of` and perfcache-backed point lookup for exact occurrence discovery
-  across every containing trajectory;
-- typed attestations with subject, relation, object, source, context, polarity,
-  score, count, rating, deviation, and volatility;
-- witnessing as the write path from observations and outcomes into evidence;
-- consensus as the fold of compatible and conflicting testimony, never a provenance
-  eraser;
-- relation bands, A* pathing, hops, fan-outs, Glicko-derived confidence, and geometry
-  as explicit routing dimensions;
-- tiers as compositional scale, not one fixed universal notion of token.
+- admitted atomic/typed structure composes recursively into exact finite higher structures;
+- canonical executable identity is derived under a declared recipe; source/provenance/worker/batch facts do not silently remint equal content;
+- current native multi-child Merkle composition includes its declared tier in the executable recipe; single-child composition preserves the child id;
+- current Tier-0 text generation uses deterministic S³/Super-Fibonacci placement inside the common 4D frame;
+- parent physicality `coord`, packed trajectory carrier and realized child-coordinate curve are different state;
+- a packed GeometryZM trajectory vertex carries the complete 128-bit constituent id plus ordinal/run/typed flags and is not a child spatial position;
+- containment/trajectory/order/occurrence remain addressable without duplicating canonical content;
+- observations/testimony, deterministic calculations and folded consensus standing remain different state classes.
 
-Point distance alone is not relatedness, and approximate nearest-neighbor selection is
-not the inference law. Structural coordinates identify and order substrate objects;
-typed, source-bearing evidence steers the decision.
+The bounded-composition proof and carrier details live in `docs/INVENTION.md`.
 
-### Physicality and trajectory are different fields with different laws
+## Conversation is an ordered witnessed trajectory
 
-A physicality's `coord` is its real PointZM placement in the shared four-dimensional
-frame. A composed content entity is placed from the real PointZM placements of its
-selected children, normally their centroid, and its `hilbert_index` is encoded from
-that result. The `trajectory` is a lossless ordered manifest: constituent identities,
-ordinals, flags, and specialized testimony may be mantissa-packed into its vertices.
+A conversation/session is an ordered content/occurrence structure. Each turn has exact content plus role/source/context/tool/calculation/witness state as applicable.
 
-Packed trajectory vertices are valid doubles by construction but are not child
-placements. They must never be copied into `coord`, averaged to place a parent, or
-presented as spatial coordinates. Every modality or model lane that emits a
-physicality must preserve this separation, and tests must independently assert the
-PointZM/Hilbert placement and the trajectory's identity/order payload.
+Appending a turn creates new current state without destroying the prior prefix. Summaries/caches may accelerate navigation but do not replace the underlying turn/content trajectory.
 
-## Conversation is a trajectory
+Conversation state includes more than prior rendered text. The forward program can retain exact prior turn/content identities, bindings, source/world/time scope, tool/calculation outcomes and open obligations.
 
-A conversation is a content-addressed container analogous to a game trajectory. Each
-turn is its own entity, with role, content, tool activity, source, context, and witness
-metadata. Appending a turn creates the next conversation trajectory point without
-destroying the prior prefix.
+## Canonical cognition program
 
-Every response is conditioned on the ordered turn trajectory and the active evidence
-frontier. Topic summaries may be derived aids; they are not substitutes for the turn
-record. A receipt must identify the session, prefix, resolved entities, traversed
-relations, source scope, candidate frontier, selection evidence, and realized output.
+The current semantic program is:
 
-The canonical forward-pass program is:
+```text
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
+        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
+```
 
-`RESOLVE → ORIENT → ROUTE → SCAN → COMPOSE → PROPOSE → STEER → SELECT → REALIZE → WITNESS`
+These are semantic stages and may be fused inside one coarse native operator; they do not imply one SQL/client boundary per stage.
 
-- **RESOLVE** maps request content and references to substrate identities.
-- **ORIENT** establishes language, modality, conversation prefix, source scope, and
-  requested operation.
-- **ROUTE** chooses relation bands, hop budgets, fan-outs, and admissible operations.
-- **SCAN** gathers exact occurrences, trajectories, source circuits, and supporting or
-  conflicting evidence.
-- **COMPOSE** builds a bounded dynamic frontier from the current request and state.
-- **PROPOSE** emits candidate continuations, actions, tool calls, or code edits.
-- **STEER** applies typed testimony, geometry, confidence, source scope, and
-  domain/tool feedback.
-- **SELECT** makes one deterministic decision under the declared seed and profile.
-- **REALIZE** renders the selected substrate objects into the requested protocol.
-- **WITNESS** records the turn, action, result, and feedback through the governed lane.
+### RESOLVE
 
-No serving surface may replace this program with a separate recall template, static
-candidate list, or endpoint-specific inference implementation.
+Admit the exact current request/root, constituent occurrences/order, prior discourse bindings, world/time/source scope, hard caller constraints and open obligations.
 
-## Model ingestion and circuit identity
+### COUPLE
 
-Each ingested model remains an exact source. Its recipe, tokenizer, tensors, tensor
-slices, layers, heads, experts, factors, modalities, and derived circuit testimony are
-content-addressed and source-scoped.
+Compute the query-relative typed response field of the whole admitted observation against every eligible indexed plane under the hard scope/resource boundary.
 
-Functional identity does not converge at `(plane, layer ordinal, head ordinal)`.
-Ordinals are source-local addresses. Cross-model alignment is derived from the
-circuit's token/entity coverage, ranked trajectory, relations, factor behavior,
-geometry, and witnessed outcomes. Consequently:
+Eligible responses may include recursive composition/containment, ordered occurrence/continuation, typed semantic relations, evidence/contradiction/standing, source/context/dependence, geometry/locality, deterministic tools/calculations, model testimony and prior session/frontier state.
 
-- `King` from different tokenizers resolves through shared Unicode/content identity;
-- a layer/head in one architecture may correlate with a differently numbered head,
-  expert, factor, or non-attention circuit in another;
-- TinyLlama, MiniLM, rerankers, embedding models, multimodal encoders, diffusion
-  models, and other architectures do not require equal dimensions or matching layer
-  layouts;
-- source evidence is never collapsed merely because two local ordinals match.
+The response is not prematurely collapsed into one scalar. Relation identity, role compatibility, ordinal/gap state, support/refutation, rating/RD/volatility/witness breadth, source dependence, geometry and provenance stay typed.
 
-Inspection must answer, with provenance:
+### ORIENT
 
-- which layers, heads, experts, factors, and source slices touch an entity;
-- how the same entity is represented across models;
-- how one source circuit differs from or correlates with another;
-- which source evidence supported, opposed, or abstained from a result;
-- whether a pooled answer depends materially on any one source.
+Jointly surviving senses/bindings/tasks/obligations constrain one another through the entire observation. The result may be unique enough to execute, ambiguous, inconsistent/impossible, or resource-bounded.
 
-## Pooled heterogeneous-model consensus
+Ambiguity is allowed to remain ambiguity.
 
-Selecting sources A and B produces one forward pass, not two answers followed by a
-vote, judge, concatenation, or weighted average. The pass gathers source-scoped circuit
-testimony into the shared frontier, preserves contradictions, folds confidence at the
-fact/circuit/action level, and realizes one answer.
+### ROUTE
 
-The implementation must prove the distinction with A-only, B-only, and A+B ablations.
-The pooled trace must contain identifiable contributions from both sources and may
-produce a result not obtainable by choosing one source's completed answer. Removing a
-source must remove its evidence rather than leave an unexplained cached influence.
+Compile the oriented state into eligible provider/relation/operator families plus explicit hop/fanout/frontier/calculation/resource bounds.
 
-No architecture-similarity precondition is allowed. Model compatibility is established
-through shared substrate identity and functional testimony.
+Caller-supplied masks are valid when the caller explicitly requests a constrained operation. A default provider/relation mask must not secretly decide interpretation before COUPLE/ORIENT.
 
-## Deterministic model construction and export
+### SCAN / COMPOSE / PROPOSE / STEER / SELECT
 
-Export is a deterministic construction over selected substrate evidence. A request may
-select one source exactly, a bounded source slice, or a pooled source set. Layer, head,
-expert, factor, vocabulary, and output structures derive from attestation bands,
-relation types, tiers, content, trajectories, modalities, and the declared target
-recipe.
+Use indexed star expansion and typed folds over the responding frontier. A*, Dijkstra, strongest-walk, containment, continuation, geometry, model/circuit providers and tools are operators inside the routed program.
 
-Each SafeTensors or GGUF export must carry a provenance receipt containing:
+Multiple compatible routes converging on the same candidate remain visible and may be evidence under the declared dependence law.
 
-- selected sources and source slices;
-- tokenizer and Unicode/content mapping;
-- circuit-to-target placement and functional-alignment evidence;
-- relation/band/tier inputs;
-- deterministic seed and construction parameters;
-- omitted or unsupported material;
-- content hashes for inputs, artifact, and receipt.
+### REALIZE / WITNESS
 
-Re-exporting the same substrate snapshot and recipe is byte-deterministic. Importing an
-exported artifact must recover its source selection and construction receipt. The
-earlier `embed=I`/lookup experiment remains evidence that substrate data can be encoded
-into a conventional artifact; it is not a general architecture law or proof of
-faithful conversation.
+Only a selected semantic act/entity/action is rendered to the requested protocol. Realization must not turn an unresolved frontier into answer content merely because some ids have labels.
 
-## MCP contract
+When the operation calls for it, the resulting turn/action/tool outcome and its receipt are witnessed through the governed write lane. The new observation changes the next coupling/frontier state.
 
-The deployed MCP must:
+## Stateful generation
 
-- start through the repository launcher in a clean supported host environment;
-- complete protocol initialization and tool discovery;
-- expose governed reads for recall, typed query, facts, taxonomy, walks, source/model
-  inspection, conversation traces, and export receipts;
-- expose `witness`, `feedback`, and `ingest` only through their governed write lane;
-- enforce the one-ingest-at-a-time law;
-- provide one conversation operation backed by the canonical forward pass;
-- return structured errors when prerequisites or capability profiles are absent;
-- report the active seed/capability manifest without claiming unavailable behavior.
+Each emitted constituent/semantic act updates active state before the next one is selected:
 
-Tool usefulness is measured by completed workflows, not tool count. A client must be
-able to inspect evidence, converse over multiple turns, generate and validate code,
-compare model circuits, run pooled consensus, and retrieve receipts without bypassing
-the MCP for private SQL.
+```text
+state_t
+-> couple/orient
+-> bounded hop/fanout execution
+-> select/realize/witness
+-> state_t+1
+-> recompute affected coupling/frontier
+```
 
-## OpenAI-compatible contract
+Building one global candidate list and draining it without feedback is not the intended conversation machine.
 
-The compatibility endpoint must preserve OpenAI message roles, ordered content parts,
-tool calls/results, stop conditions, streaming semantics, and supported generation
-controls. Unsupported parameters return explicit errors or are omitted from declared
-capabilities; they are never silently accepted.
+## Heterogeneous models are participants, not a judge panel
 
-`/v1/chat/completions` and any `/v1/responses` surface invoke the same canonical
-forward pass as MCP. The protocol adapter may translate shapes but may not implement a
-second inference path. Responses identify the effective model/source scope, seed
-profile, finish reason, usage accounting, and trace/receipt handle.
+An admitted checkpoint remains an exact source/calculation boundary. Tokenizers, tensors, layers, heads, experts, factors, Q/K/V/O/FFN roles and measured executions can remain source-scoped and queryable.
 
-Performance receipts distinguish substrate execution, first-result latency, and total
-adapter latency. They also identify the measured unit. A `walk_text` trajectory step
-rate may be reported as generated trajectory tokens per second; it is not an
-autoregressive checkpoint tokenizer rate and must not be compared to one without an
-explicit equivalence experiment. Read operations report rows per second, while text
-readouts also report UTF-8 bytes, Unicode code points, and words so cross-surface
-comparisons do not silently change units.
+Cross-model alignment is not established merely because two local layer/head ordinals match. Shared entity/trajectory coverage, structural/functional behavior, relations, geometry and witnessed outcomes may provide explicit comparison evidence.
 
-## Code generation as an executed conversation
+Pooled operation means the routed program can consume evidence from several selected sources/providers under one substrate law. It does not mean N answer strings are generated and a hidden LLM/judge votes on them.
 
-Code generation uses the same turn trajectory and evidence program, with repository,
-language, symbol, build, test, diagnostic, and tool-result entities added to the
-frontier. A conforming loop can:
+Ablation must be possible: source A only, source B only, pooled A+B, etc. The receipt identifies the selected scope/providers and how they affected the active state.
 
-1. resolve a request against repository state and constraints;
-2. propose a bounded patch or command;
-3. execute authorized tools;
-4. ingest compiler, test, and review outcomes as testimony;
-5. revise the trajectory from that evidence;
-6. return the final artifact and receipt.
+## Code/tool feedback uses the same loop
 
-Static text completion without execution feedback is not the finished code lane.
+Code generation is not a private model path.
 
-## Dataset capability manifests
+```text
+generate/select code structure
+-> stage exact content
+-> run declared toolchain/test/calculation provider
+-> witness/record the result with provenance/recipe
+-> next cognition round sees the changed evidence state
+```
 
-Every seedable dataset declares, in machine-readable form:
+Compile/test failure is a typed outcome, not reason to delete/remint the code entity.
 
-- source identity, version, license, and integrity inputs;
-- modalities and languages;
-- emitted tiers and composition boundaries;
-- emitted relation types and polarity/outcome behavior;
-- trajectory/container contribution;
-- attestation and witnessing behavior;
-- product capabilities it enables;
-- verification operations and minimum evidence expectations;
-- whether it is foundational, conversational, coding, model, evaluation, or optional.
+## No architectural fixed context window
 
-Seed profiles are capability contracts. A foundation profile must never imply real
-conversation merely because Unicode and lexical sources exist. Conversation, code,
-model-consensus, and export acceptance each name the profile that supplies their
-required evidence.
+Conversation history is addressable substrate state rather than a transformer-only fixed token buffer.
 
-## Behavioral acceptance
+That does not mean every request scans unlimited history. Routing/hops/fanout/provider/source/time/resource bounds control the work explicitly. The difference is that older admitted state does not become structurally unreachable solely because it fell out of a fixed model context window.
 
-The product finish line requires all of the following:
+## Realization/export
 
-1. A clean client initializes MCP and discovers the documented governed surface.
-2. A multi-turn conversation demonstrates reference to earlier turns through the
-   stored conversation trajectory, not a hand-built topic string.
-3. Two identical requests under the same snapshot, source scope, profile, and seed
-   produce identical decisions and receipts.
-4. Changed conversation evidence or tool feedback can change the next frontier and
-   result with an explainable trace.
-5. MCP and OpenAI adapters produce semantically equivalent traces for the same request.
-6. A code task performs at least one authorized build/test feedback cycle before its
-   accepted result.
-7. Source A, source B, and pooled A+B runs prove one pooled consensus pass and preserve
-   source ablation.
-8. Cross-architecture inspection correlates functional circuits without assuming equal
-   ordinals or dimensions.
-9. Source-scoped and pooled exports are deterministic and carry reversible provenance
-   receipts.
-10. Unicode and non-English acceptance proves identity and realization are not UTF-8-
-    token or English-specific.
-11. Every result exposes enough evidence to reproduce the source scope, routing,
-    selection, and realization decision.
-12. Evaluation rejects echo, seed-insensitive replay, source erasure, template fallback,
-    and unsupported-parameter theater.
+Human text, tool JSON, code, chess notation and model/export files are realizations/consumer artifacts of selected canonical state.
 
-## Non-success criteria
+They do not own identity. Rendering/export must preserve source/recipe/receipt state and obey the same universal execution-grain law as ingestion and cognition: bulk/stream/coarse native materialization instead of avoidable per-token/per-cell/per-constituent boundary calls.
 
-The product is not finished when any of these substitutions is used:
+## Native physical execution
 
-- nearest-point selection as the sole relation or answer law;
-- N complete model answers followed by voting or adjudication;
-- checkpoint concatenation, weight averaging, or architecture-matched merging described
-  as pooled consensus;
-- conversation memory reduced to the latest prompt or a topic summary;
-- fixed candidate frontiers unaffected by new evidence;
-- a GGUF that emits plausible tokens without traceable construction and behavioral
-  acceptance;
-- endpoint parameters accepted but ignored;
-- MCP tools that only expose diagnostics while the product path bypasses them;
-- one-language or UTF-8 packaging treated as universal identity;
-- foundation seed success presented as proof of conversation, code, or model consensus.
+The serving/product path inherits the repository-wide physical law:
 
-## Delivery ownership
+```text
+PostgreSQL = durable indexed state / set access
+SPI        = prepared, set-sized bridge
+native C/C++ = repeated coupling/search/trajectory/reduction/realization work
+C#/SQL     = orchestration / contracts / transport
+```
 
-GitHub epic [#924](https://github.com/SaltyPatron/Laplace/issues/924) owns the dependency
-graph. Its work is partitioned into:
+The semantic stage diagram does not authorize RBAR SQL, recursive CTE cognition, per-candidate SPI/PInvoke or endpoint-private inference implementations.
 
-- [#920](https://github.com/SaltyPatron/Laplace/issues/920) — deployed MCP protocol proof;
-- [#921](https://github.com/SaltyPatron/Laplace/issues/921) — canonical stateful dynamic-frontier forward pass;
-- [#922](https://github.com/SaltyPatron/Laplace/issues/922) — OpenAI and code-lane contract;
-- [#923](https://github.com/SaltyPatron/Laplace/issues/923) — source-scoped circuit comparison cube;
-- [#927](https://github.com/SaltyPatron/Laplace/issues/927) — pooled heterogeneous-source consensus and ablation;
-- [#928](https://github.com/SaltyPatron/Laplace/issues/928) — deterministic source-scoped and pooled export;
-- [#929](https://github.com/SaltyPatron/Laplace/issues/929) — dataset capability manifests;
-- [#755](https://github.com/SaltyPatron/Laplace/issues/755) — seeded end-to-end behavioral acceptance;
-- [#926](https://github.com/SaltyPatron/Laplace/issues/926) — documentation and instruction authority governance.
+## Resource tiers / billing
 
-Issue state is read from GitHub. This document defines acceptance and does not carry a
-progress ledger.
+All entitled tiers query the same knowledge world. Product/resource levels differ by explicit execution envelope, not by pointing cheaper users at an intentionally less knowledgeable Laplace model.
+
+Possible controls include hops, fanout/frontier/candidates, provider/operator families, calculations, memory/I/O/concurrency and output.
+
+The product should support plan/`EXPLAIN` → estimated work → allowance reservation → bounded execution → actual receipt → reconciliation/refund. Predicted wall time is calibrated from historical receipts rather than promised mathematically exact before execution.
+
+## Receipts / WHY / WHY_NOT
+
+A completed operation should be able to expose bounded typed evidence such as:
+
+```text
+resolved root + constituent occurrences
+active scope / hard caller constraints
+coupling channels / responding route families
+surviving interpretation / ambiguity disposition
+compiled provider/operator program
+hops / fanout / candidates / frontier
+standing / contradiction / uncertainty / dependence roots
+obligation state
+selected semantic act/entity
+action/tool/calculation outcomes
+realization/output fingerprint
+writes/witnesses
+estimated/reserved/actual work
+```
+
+`WHY_NOT` is a typed failure/resource/ambiguity receipt, not a generic apology string.
+
+## Acceptance
+
+A conforming conversation/model-consensus product demonstrates at least:
+
+- real multi-turn state survives restart and affects later selection;
+- whole-prompt/ordered-context changes interpretation; constituent order and discourse matter;
+- competing senses/providers remain eligible through COUPLE until joint evidence or explicit caller constraint resolves them;
+- ambiguous prompts can remain ambiguous rather than forcing one label;
+- source A/B/pooled ablation changes evidence/state in a receipted way without a hidden judge;
+- tool/code outcomes feed later cognition through governed state;
+- each emitted constituent/act updates the next coupling/frontier;
+- OpenAI-compatible, MCP, CLI/SQL and other equivalent semantic fronts execute the same underlying operation program;
+- realization occurs after semantic selection;
+- no endpoint-private lookup/template/LLM path substitutes for the canonical program;
+- hop/fanout/resource limits appear in both preflight and actual receipts;
+- lower resource tiers preserve knowledge access and vary compute envelope instead;
+- hot repeated execution remains coarse native/set work rather than per-stage/per-candidate RBAR;
+- exact source/artifact/session/output identities make the result reproducible/auditable within its declared deterministic boundary.
+
+## Status / ownership
+
+This contract does not claim all acceptance above is currently delivered. Current ownership/state lives in GitHub issues plus current source/CI/live proof.
+
+A related `Laplace-Refactor` implementation may pursue the same contract. It is coordination/evidence, not a separate definition of what this product must mean.
