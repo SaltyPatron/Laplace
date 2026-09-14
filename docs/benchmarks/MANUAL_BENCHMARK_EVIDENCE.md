@@ -96,6 +96,8 @@ This distinction is required because **serviceable throughput and destructive sa
 
 Run `34823625126` is retained as an incomplete/failing counterexample from the prior design: its scale series admitted all 12 logical CPUs and no sealed evidence artifact was available afterward. The available evidence does not establish the exact terminal process failure, so no stronger causal claim is made.
 
+The headroom planner prevents that full-logical boundary from being selected accidentally. A future serviceable profile should additionally record explicit database/product/runner liveness during the measurement so headroom is proven sufficient rather than merely configured.
+
 ## Scale receipt
 
 The evidence retains, as applicable:
