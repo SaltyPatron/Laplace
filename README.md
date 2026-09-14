@@ -31,7 +31,7 @@ Laplace is not a transformer implementation. It reconstructs many of the jobs fo
 
 ## What is different
 
-- **Exact recursive identity.** Same canonical content means the same entity. Repetition does not mint another copy of `king`, the same chess line, the same AST subtree or the same document fragment; new occurrences add provenance and evidence around reusable structure.
+- **Exact recursive identity.** Same canonical content under the same declared recipe means the same executable entity. Repetition does not mint another copy of `king`, the same chess line, the same AST subtree or the same document fragment; new occurrences add provenance and evidence around reusable structure.
 - **Bounded geometric realization.** Current Tier-0 atoms are deterministically placed on the unit 3-sphere. Native composition derives parent coordinates from child coordinates; centroid closure keeps the result on or inside the bounded 4D ball. The theorem is not tied to radix 2 or to four dimensions; 4D is the current executable realization.
 - **Lossless trajectories.** A content trajectory stores the exact ordered constituent identities. Packed trajectory vertices are reversible manifests, not fake spatial positions; realized curves resolve those identities back to child coordinates in ordinal order.
 - **A web, not a flat graph.** Canonical entities simultaneously participate in recursive compositions, containing trajectories, occurrences, typed relations, contexts, sources and geometric neighborhoods. Pull one strand and many independently indexed structures can answer; routes that converge on the same entity are themselves signal.
@@ -45,9 +45,9 @@ Laplace is not a transformer implementation. It reconstructs many of the jobs fo
 
 ## PostgreSQL stores the world; native code executes it
 
-Laplace does not put cognition inside a tower of per-row SQL calls.
+Laplace does not put cognition—or any other repeated high-volume algorithm—inside a tower of per-row orchestration calls.
 
-PostgreSQL owns durable state, MVCC, B-tree/GiST/GIN/HASH indexes, set selection and server-side integration. Native C/C++ owns the hot recursive and repeated work: decomposition, trajectory operations, frontier expansion, graph/search mechanics, reductions, deterministic math and other inner loops.
+PostgreSQL owns durable state, MVCC, B-tree/GiST/GIN/HASH indexes, set selection and server-side integration. Native C/C++ owns the hot recursive and repeated work: decomposition, composition, trajectory operations, frontier expansion, graph/search mechanics, reductions, deterministic math, reconstruction, encoding/materialization and other inner loops.
 
 SPI is the bridge, not the cognition engine. Hot paths are shaped around prepared, set-sized fetches and bounded native execution rather than repeatedly crossing SQL/function boundaries for every candidate.
 
@@ -63,7 +63,7 @@ native arrays + state
 bounded result + receipt
 ```
 
-That execution grain is deliberate. RBAR loops, recursive SQL used as an inner engine, repeated scalar calls, uncontrolled `LATERAL` fanout, per-call temp-table machinery and duplicated scalar/batch bodies are treated as architecture defects when they move repeated algorithmic work out of the native core.
+That execution grain is deliberate across **decomposition, ingestion, reads, cognition, analysis/domain engines, reconstruction, synthesis and export**. RBAR loops, recursive SQL used as an inner engine, repeated scalar calls, uncontrolled `LATERAL` fanout, per-element P/Invoke/SPI, per-call temp-table machinery, per-item transaction/COPY and duplicated scalar/batch bodies are architecture defects when they move repeated algorithmic work out of the coarse native/set core.
 
 The speedup is therefore not merely “C++ is faster than SQL.” Laplace tries to do **less work** by addressing only the responding frontier, and to pay **less overhead per selected unit** by keeping the inner loop native.
 
@@ -155,6 +155,7 @@ docs/         invention, architecture, specs, evidence, plans and generated inve
 
 Start with:
 
+- [`docs/README.md`](docs/README.md) — documentation authority map
 - [`docs/INVENTION.md`](docs/INVENTION.md) — the intended invention, head to tail
 - [`docs/INVENTIONS.md`](docs/INVENTIONS.md) — mechanism/capability catalog
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture as currently built
