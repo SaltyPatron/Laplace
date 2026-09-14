@@ -35,6 +35,13 @@ class LiveRecursiveProofGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "trailing output"):
             self.proof.parse_single_json_document('{"one":1}\n{"two":2}\n')
 
+    def test_recursive_proof_edits_use_fast_live_verification_lane(self):
+        workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("scripts/prove-*|scripts/test-live-recursive-proof-gate.py", workflow)
+        self.assertIn("LAPLACE_VERIFY_RECURSIVE_PROOF", workflow)
+        self.assertIn("Verify changed recursive proof against the live product", workflow)
+        self.assertIn('python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"', workflow)
+
     def test_storage_gate_checks_identity_duplicates_and_parent_bounds(self):
         sql = self.proof.storage_sql(1e-12, 20)
         self.assertIn("GROUP BY id HAVING count(*) > 1", sql)
