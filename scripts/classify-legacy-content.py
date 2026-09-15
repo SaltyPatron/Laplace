@@ -203,7 +203,8 @@ entity_metadata AS MATERIALIZED (
          min(e.created_at) AS first_created_at,max(e.created_at) AS last_created_at,
          COALESCE(jsonb_agg(to_jsonb(e) ORDER BY e.tier)
              FILTER (WHERE e.id IS NOT NULL),'[]'::jsonb) AS entity_records
-  FROM failed f LEFT JOIN laplace.entities e ON e.id=f.parent_id
+  FROM (SELECT DISTINCT parent_id FROM failed) f
+  LEFT JOIN laplace.entities e ON e.id=f.parent_id
   GROUP BY f.parent_id
 ),
 classified AS MATERIALIZED (
