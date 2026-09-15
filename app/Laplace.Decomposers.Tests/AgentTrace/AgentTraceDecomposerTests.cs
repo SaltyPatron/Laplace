@@ -9,11 +9,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.AgentTrace.Tests;
 
-/// <summary>
-/// End-to-end: fixture log file → DecomposeAsync → substrate rows. Asserts the spec-34
-/// identity hierarchy (session trajectory ORDER, turn composition, tool graph, usage
-/// scalars) and event-time retention.
-/// </summary>
 public sealed class AgentTraceDecomposerTests
 {
     static AgentTraceDecomposerTests()
@@ -54,7 +49,7 @@ public sealed class AgentTraceDecomposerTests
     }
 
     [Fact]
-    public async Task ClaudeLog_Emits_Session_Trajectory_Turn_Graph_And_Event_Times()
+    public async Task ClaudeLog_Emits_Session_Projection_Turn_Graph_And_Event_Times()
     {
         string dir = Path.Combine(Path.GetTempPath(), "laplace-agents-e2e-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, ".claude", "projects", "proj"));
@@ -76,19 +71,18 @@ public sealed class AgentTraceDecomposerTests
             Hash128 hasInputTokens = RelationTypeRegistry.Resolve("HAS_INPUT_TOKENS").Id;
             Hash128 precedes = RelationTypeRegistry.Resolve("PRECEDES").Id;
 
-            // Session entity + its ordered trajectory over exactly the 3 composed turns
-            // (the tool_result-only record is plumbing, not a turn).
             Assert.Contains(entities, e =>
                 e.Id == sessionId && e.TypeId == EntityTypeRegistry.ConversationSession);
             var sessionPhys = Assert.Single(physicalities, p => p.EntityId == sessionId);
-            Assert.Equal(PhysicalityType.Content, sessionPhys.Type);
+            Assert.Equal(PhysicalityType.Projection, sessionPhys.Type);
+            Assert.Equal(
+                PhysicalityId.Compute(sessionId, PhysicalityType.Projection), sessionPhys.Id);
             Assert.Equal(3, sessionPhys.NConstituents);
             Assert.NotNull(sessionPhys.TrajectoryXyzm);
             var orderedTurnIds = Trajectory.Constituents(sessionPhys.TrajectoryXyzm!);
             Assert.Equal(3, orderedTurnIds.Length);
+            Assert.NotEqual(sessionId, Hash128.Merkle(EntityTier.Document, orderedTurnIds));
 
-            // Membership: every composed turn APPEARS_IN the session with the session as
-            // context; the trajectory order and membership set agree.
             var memberIds = attestations
                 .Where(a => a.TypeId == appearsIn && a.ObjectId == sessionId
                             && a.ContextId == sessionId)
@@ -96,8 +90,6 @@ public sealed class AgentTraceDecomposerTests
                 .ToHashSet();
             foreach (var turnId in orderedTurnIds) Assert.Contains(turnId, memberIds);
 
-            // Turn 1 collapses to its text root ("run the tests" IS the turn — tier-floor
-            // law); its event time rides the attestation, not the ingest clock.
             Hash128? promptRoot = ContentTierSpine.ResolveRoot("run the tests");
             Assert.NotNull(promptRoot);
             Assert.Equal(promptRoot!.Value, orderedTurnIds[0]);
@@ -107,14 +99,14 @@ public sealed class AgentTraceDecomposerTests
                 a.TypeId == appearsIn && a.SubjectId == promptRoot.Value
                 && a.ObjectId == sessionId && a.LastObservedAtUnixUs == promptUs);
 
-            // Turn 2 is a REAL composition (thinking + text + tool io) with its own
-            // ordered trajectory.
             var turn2 = Assert.Single(physicalities, p => p.EntityId == orderedTurnIds[1]);
+            Assert.Equal(PhysicalityType.Content, turn2.Type);
             Assert.True(turn2.NConstituents >= 3);
+            var turn2Children = Trajectory.Constituents(turn2.TrajectoryXyzm!);
+            Assert.Equal(orderedTurnIds[1], Hash128.Merkle(EntityTier.Document, turn2Children));
             Assert.Contains(entities, e =>
                 e.Id == orderedTurnIds[1] && e.TypeId == EntityTypeRegistry.ConversationTurn);
 
-            // Role, model, tool graph, usage scalars.
             Assert.Contains(attestations, a =>
                 a.TypeId == hasRole && a.SubjectId == orderedTurnIds[1]
                 && a.ObjectId == Hash128.OfCanonical("agent/role/assistant/v1"));
@@ -135,8 +127,6 @@ public sealed class AgentTraceDecomposerTests
                 a.TypeId == hasInputTokens && a.SubjectId == orderedTurnIds[1]
                 && a.ObjectId == tokens120!.Value);
 
-            // Live and imported turns retain occurrence order in the physicality
-            // above, without manufacturing a separate PRECEDES consensus cell.
             Hash128? replyRoot = ContentTierSpine.ResolveRoot("Running the gate now.");
             Assert.NotNull(replyRoot);
             Assert.DoesNotContain(attestations, a =>
@@ -165,7 +155,7 @@ public sealed class AgentTraceDecomposerTests
 
             Hash128 sessionId = ConversationContent.SessionId("claude-code", SessionKey);
             Hash128 hasInputTokens = RelationTypeRegistry.Resolve("HAS_INPUT_TOKENS").Id;
-            Hash128? total = ContentTierSpine.ResolveRoot("320"); // 120 + 200
+            Hash128? total = ContentTierSpine.ResolveRoot("320");
             Assert.NotNull(total);
             Assert.Contains(attestations, a =>
                 a.TypeId == hasInputTokens && a.SubjectId == sessionId
