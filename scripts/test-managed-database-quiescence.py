@@ -588,34 +588,43 @@ class ProducerGenerationTests(unittest.TestCase):
             Q.published_application_generation(root=self.root,retained=generation,verification_receipt=archived)
 
 
-class ProductRepairResumeOrderTests(unittest.TestCase):
-    def test_product_retry_resumes_before_native_install_and_stops_on_ambiguity(self):
+class ProductMaintenanceOrderTests(unittest.TestCase):
+    def test_product_deploy_preserves_preflight_without_automatic_repair(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR","/build/laplace/work")) as temp:
             root=Path(temp);scripts=root / "scripts";scripts.mkdir()
             deploy=root / "deploy/linux";deploy.mkdir(parents=True)
             (scripts / "product-ci.sh").write_bytes((ROOT / "scripts/product-ci.sh").read_bytes())
             for relative,label in (("scripts/ci-policy.sh","policy"),("scripts/ci-deps.sh","deps"),
                 ("scripts/pipeline.sh","pipeline"),("scripts/test-parallel.sh","tests"),
-                ("scripts/wait-for-quiet-substrate.sh","quiet"),("deploy/linux/managed-publish.sh","managed")):
+                ("scripts/wait-for-quiet-substrate.sh","quiet")):
                 (root / relative).write_text('printf "%s\\n" "'+label+':$*" >> "$TRACE"\n')
+            (deploy / "managed-publish.sh").write_text(
+                'printf "%s\\n" "managed:$*" >> "$TRACE"\n'
+                'exit "${PREFLIGHT_FAILURE:-0}"\n')
             (scripts / "quiesce-managed-database.py").write_text(
                 'import os,sys\n'
-                'resuming="--resume-if-needed" in sys.argv\n'
-                'with open(os.environ["TRACE"],"a") as f:f.write("resume\\n" if resuming else "quiesce\\n")\n'
-                'sys.exit(int(os.environ.get("RESUME_FAILURE","0")) if resuming else 0)\n')
+                'with open(os.environ["TRACE"],"a") as f:f.write("quiesce:"+" ".join(sys.argv[1:])+"\\n")\n'
+                'sys.exit(91 if "--resume-if-needed" in sys.argv else 0)\n')
             for fail in (False,True):
                 trace=root / ("failure.log" if fail else "success.log")
                 result=subprocess.run(["bash",str(scripts / "product-ci.sh"),"deploy"],capture_output=True,text=True,
-                    env={**os.environ,"TRACE":str(trace),"RESUME_FAILURE":"1" if fail else "0",
+                    env={**os.environ,"TRACE":str(trace),"PREFLIGHT_FAILURE":"37" if fail else "0",
+                         "LAPLACE_OPERATIONAL_PROOF_DIRECTORY":str(root / "operational-proof"),
+                         "LAPLACE_CI_SESSION_DIRECTORY":"",
                          "PGDATABASE":"laplace","LAPLACE_FRESH_DB":"1","LAPLACE_RESTORE_FOUNDATION":"0"})
                 events=trace.read_text().splitlines()
+                self.assertNotIn("--resume-if-needed", "\n".join(events))
+                self.assertNotIn("repair-legacy-content", "\n".join(events))
                 if fail:
-                    self.assertNotEqual(0,result.returncode)
-                    self.assertEqual(["policy:","resume"],events)
+                    self.assertEqual(37,result.returncode,result.stderr)
+                    self.assertEqual("managed:preflight",events[-1])
+                    self.assertNotIn("pipeline:install",events)
+                    self.assertFalse(any(event.startswith("quiesce:") for event in events))
                 else:
                     self.assertEqual(0,result.returncode,result.stderr)
-                    self.assertLess(events.index("resume"),events.index("pipeline:install"))
-                    self.assertLess(events.index("resume"),events.index("managed:preflight"))
+                    self.assertEqual(["managed:preflight","pipeline:install","managed:preflight",
+                        "quiesce:--database laplace -- bash scripts/maintain-installed-database.sh"],
+                        events[events.index("managed:preflight"):])
 
 
 if __name__ == "__main__":unittest.main()
