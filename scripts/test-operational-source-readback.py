@@ -2,13 +2,14 @@
 """Protocol/resource and native ABI checks for the read-only source diagnostic."""
 import ctypes
 import importlib.util
+import io
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("read_operational_source", ROOT / "scripts/read-operational-source.py")
@@ -40,12 +41,41 @@ class SourceReadbackTests(unittest.TestCase):
         self.assertIn("'opponent_rating_fp1e9'", sql)
         self.assertIn("'context_id',encode(a.context_id,'hex')", sql)
 
+    def test_zero_candidate_diagnostics_distinguish_schema_source_and_cue(self):
+        sql = self.sql()
+        self.assertIn("'ud_schema_type8_present',EXISTS", sql)
+        self.assertIn("a.source_id=(SELECT ud_source FROM roster)\n LIMIT 5", sql)
+        self.assertIn("'ud_has_parse_sample_more'", sql)
+        self.assertIn("'cue_type8_sample_more'", sql)
+        self.assertIn("'source_parse_samples'", sql)
+        self.assertIn("'cue_structure_samples'", sql)
+        self.assertIn("'trajectory_ewkb_hex',encode(public.st_asewkb(p.trajectory),'hex')", sql)
+        self.assertIn("'canonical_type8_present',EXISTS", sql)
+
     def test_exact_unicode_lookup_cannot_inject_sql(self):
         surface = "défine'); DELETE FROM laplace.entities; --"
         escaped = module.text_sql(surface)
         self.assertNotIn("DELETE", escaped)
         self.assertIn(surface.encode("utf-8").hex(), escaped)
         self.assertNotIn("lower(", self.sql())
+
+    def test_native_library_hash_is_bounded_without_python311_file_digest(self):
+        payload = b"native artifact\x00" * 10000
+        requests = []
+        class Stream(io.BytesIO):
+            def read(self, size=-1):
+                requests.append(size)
+                return super().read(size)
+        path = Mock()
+        path.open.return_value = Stream(payload)
+        # Older runner Python has no usable file_digest. The replacement must
+        # consume the complete artifact through bounded reads on those runners.
+        with patch.object(module.hashlib, "file_digest", None, create=True):
+            result = module.file_sha256(path)
+        self.assertEqual(result, module.hashlib.sha256(payload).hexdigest())
+        self.assertGreater(len(requests), 2)
+        self.assertTrue(all(0 < n <= 64 << 10 for n in requests))
+        path.open.assert_called_once_with("rb")
 
     def test_native_binding_layout_matches_checked_in_c_header(self):
         # The helper marshals existing native structures; it has no Python UD

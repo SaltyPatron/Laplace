@@ -49,21 +49,34 @@ def identity(value: Id) -> str:
     return C.string_at(C.byref(value), 16).hex()
 
 
+def file_sha256(path: Path) -> str:
+    """Bounded hashing compatible with the installed runner's Python version."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(64 << 10)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def decode_candidates(report: dict, core_path: Path) -> None:
     core = C.CDLL(str(core_path.resolve()))
     core.laplace_ud_parse_decode.argtypes = [C.POINTER(Id), C.c_size_t, C.POINTER(Parse)]
     core.laplace_ud_parse_decode.restype = C.c_int
     core.laplace_ud_parse_free.argtypes = [C.POINTER(Parse)]
     core.laplace_ud_parse_free.restype = None
-    with core_path.open("rb") as stream:
-        report["decoder_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
+    report["decoder_sha256"] = file_sha256(core_path)
     report["decoder_path"] = str(core_path.resolve())
 
     def pairs(value: Pairs) -> list[list[str]]:
         return [[identity(value.items[2*i]), identity(value.items[2*i+1])]
                 for i in range(value.count)]
 
-    for candidate in report["parse_candidates"]:
+    records = (report["parse_candidates"] + report.get("source_parse_samples", [])
+               + report.get("cue_structure_samples", []))
+    for candidate in records:
         flat = candidate["constituent_ids"]
         candidate["complete_native_decode"] = False
         if not candidate["canonical_identity"] or len(flat) != candidate["n_constituents"]:
@@ -120,6 +133,7 @@ roster AS MATERIALIZED (
         laplace.relation_type_id('HAS_SENSE') AS has_sense,
         laplace.relation_type_id('IS_SENSE_OF') AS sense_of,
         laplace.relation_type_id('HAS_DEFINITION') AS definition,
+        realize.canonical_id('ud/parse/schema/v1') AS ud_schema,
         laplace.source_id('UDDecomposer') AS ud_source,
         laplace.source_id('WordNetDecomposer') AS wordnet_source
 ),
@@ -133,8 +147,28 @@ nominated AS MATERIALIZED (
        && ARRAY(SELECT id FROM cue_ids)
  ORDER BY p.n_constituents,p.entity_id,p.id LIMIT {candidates+1}
 ),
-selected AS MATERIALIZED (
+cue_selected AS MATERIALIZED (
  SELECT * FROM nominated ORDER BY n_constituents,entity_id,id LIMIT {candidates}
+),
+source_sample_witnesses AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a
+ WHERE a.type_id=(SELECT has_parse FROM roster) AND a.source_id=(SELECT ud_source FROM roster)
+ LIMIT 5
+),
+source_sample_ids AS MATERIALIZED (
+ SELECT DISTINCT public.laplace_hash128_blake3(object_id||decode('0800','hex')) AS id
+ FROM (SELECT object_id FROM source_sample_witnesses LIMIT 4) a
+),
+cue_sample_nominated AS MATERIALIZED (
+ SELECT p.id FROM laplace.physicalities p WHERE p.type=8 AND p.trajectory IS NOT NULL
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY(SELECT id FROM cue_ids)
+ ORDER BY p.n_constituents,p.entity_id,p.id LIMIT 5
+),
+cue_sample_ids AS MATERIALIZED (SELECT id FROM cue_sample_nominated LIMIT 4),
+selected AS MATERIALIZED (
+ SELECT p.id,p.entity_id,p.n_constituents,p.trajectory,p.coord,p.hilbert_index
+ FROM laplace.physicalities p WHERE p.type=8 AND p.id=ANY(ARRAY(
+   SELECT id FROM cue_selected UNION SELECT id FROM source_sample_ids UNION SELECT id FROM cue_sample_ids))
 ),
 packed_sizes AS MATERIALIZED (
  SELECT p.id,sum(u.run_length)::bigint AS logical_count
@@ -150,6 +184,18 @@ expanded AS MATERIALIZED (
    public.laplace_trajectory_expanded_constituents(p.trajectory) u
  WHERE z.logical_count=p.n_constituents AND z.logical_count BETWEEN 1 AND {constituents}
  GROUP BY p.id,p.entity_id,p.n_constituents
+),
+structure_records AS MATERIALIZED (
+ SELECT p.id,jsonb_build_object(
+    'parse_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex'),
+    'physicality_type',8,'n_constituents',p.n_constituents,
+    'coordinate_ewkb_hex',encode(public.st_asewkb(p.coord),'hex'),
+    'hilbert_index',encode(p.hilbert_index,'hex'),
+    'trajectory_ewkb_hex',encode(public.st_asewkb(p.trajectory),'hex'),
+    'canonical_identity',p.entity_id=public.laplace_hash128_merkle(4::smallint,e.ids)
+       AND p.id=public.laplace_hash128_blake3(p.entity_id||decode('0800','hex')),
+    'constituent_ids',(SELECT jsonb_agg(encode(x,'hex')) FROM unnest(e.ids) x)) AS record
+ FROM selected p JOIN expanded e ON e.id=p.id
 ),
 parse_witnesses AS MATERIALIZED (
  SELECT a.* FROM laplace.attestations a
@@ -230,7 +276,25 @@ SELECT jsonb_build_object(
  'roster',(SELECT jsonb_build_object('has_parse',encode(has_parse,'hex'),
     'has_sense',encode(has_sense,'hex'),'is_sense_of',encode(sense_of,'hex'),
     'has_definition',encode(definition,'hex'),'ud_source',encode(ud_source,'hex'),
-    'wordnet_source',encode(wordnet_source,'hex')) FROM roster),
+    'wordnet_source',encode(wordnet_source,'hex'),'ud_schema',encode(ud_schema,'hex')) FROM roster),
+ 'source_diagnostics',jsonb_build_object(
+    'ud_schema_type8_present',EXISTS(SELECT 1 FROM laplace.physicalities p
+      WHERE p.type=8 AND p.trajectory IS NOT NULL
+        AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[(SELECT ud_schema FROM roster)]),
+    'ud_has_parse_sample_more',(SELECT count(*)>4 FROM source_sample_witnesses),
+    'source_sample_order','first indexed source/relation witnesses; diagnostic sample, not exhaustive',
+    'ud_has_parse_samples',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+      'id',encode(a.id,'hex'),'subject_id',encode(a.subject_id,'hex'),
+      'object_id',encode(a.object_id,'hex'),'type_id',encode(a.type_id,'hex'),
+      'source_id',encode(a.source_id,'hex'),'context_id',encode(a.context_id,'hex'),
+      'outcome',a.outcome,'observation_count',a.observation_count,
+      'last_observed_at',a.last_observed_at,'sum_score_fp1e9',a.sum_score_fp1e9,
+      'opponent_rd_fp1e9',a.opponent_rd_fp1e9,'opponent_rating_fp1e9',a.opponent_rating_fp1e9,
+      'fold_replayable',a.fold_replayable,
+      'canonical_type8_present',EXISTS(SELECT 1 FROM selected p WHERE p.id=
+        public.laplace_hash128_blake3(a.object_id||decode('0800','hex')))))
+      FROM (SELECT * FROM source_sample_witnesses LIMIT 4) a),'[]'),
+    'cue_type8_sample_more',(SELECT count(*)>4 FROM cue_sample_nominated)),
  'limits',jsonb_build_object('candidate_overflow',(SELECT count(*)>{candidates} FROM nominated),
    'excluded_parse_records',COALESCE((SELECT jsonb_agg(jsonb_build_object(
        'parse_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex'),
@@ -243,13 +307,12 @@ SELECT jsonb_build_object(
    'has_sense_witness_overflow',(SELECT count(*)>{witnesses} FROM senses),
    'is_sense_of_witness_overflow',(SELECT count(*)>{witnesses} FROM synsets),
    'has_definition_witness_overflow',(SELECT count(*)>{witnesses} FROM definitions)),
- 'parse_candidates',COALESCE((SELECT jsonb_agg(jsonb_build_object(
-    'parse_id',encode(entity_id,'hex'),'physicality_id',encode(id,'hex'),
-    'n_constituents',n_constituents,
-    'canonical_identity',entity_id=public.laplace_hash128_merkle(4::smallint,ids)
-       AND id=public.laplace_hash128_blake3(entity_id||decode('0800','hex')),
-    'constituent_ids',(SELECT jsonb_agg(encode(x,'hex')) FROM unnest(ids) x))
-    ORDER BY entity_id,id) FROM expanded),'[]'),
+ 'parse_candidates',COALESCE((SELECT jsonb_agg(r.record ORDER BY r.id)
+    FROM structure_records r WHERE r.id IN (SELECT id FROM cue_selected)),'[]'),
+ 'source_parse_samples',COALESCE((SELECT jsonb_agg(r.record ORDER BY r.id)
+    FROM structure_records r WHERE r.id IN (SELECT id FROM source_sample_ids)),'[]'),
+ 'cue_structure_samples',COALESCE((SELECT jsonb_agg(r.record ORDER BY r.id)
+    FROM structure_records r WHERE r.id IN (SELECT id FROM cue_sample_ids)),'[]'),
  'witnesses',COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'route',a.route,'id',encode(a.id,'hex'),'subject_id',encode(a.subject_id,'hex'),
     'type_id',encode(a.type_id,'hex'),'object_id',encode(a.object_id,'hex'),

@@ -72,7 +72,7 @@ jobs:
           receipt="$evidence/classification.json"
           echo "LAPLACE_LEGACY_CONTENT_RECEIPT=$receipt" >> "$GITHUB_ENV"
           export PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=laplace_admin
-          flock /build/laplace/work/host-resource.lock \
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
             python3 scripts/classify-legacy-content.py "$PGDATABASE" \
               --examples-per-stratum 10 --timeout-seconds 1800 --receipt "$receipt"
 
@@ -87,6 +87,12 @@ jobs:
 
       - name: Prove merge candidate without production mutation
         run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          # Share the deployment host lock without leaking its descriptor to children.
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            bash -e -o pipefail <<'PR_PROOF'
           set -euo pipefail
           cd "$LAPLACE_PR_WORKTREE"
           if [[ "$LAPLACE_PR_FULL_PROOF" == 0 ]]; then
@@ -105,6 +111,7 @@ jobs:
           export CTEST_PARALLEL_LEVEL="${CTEST_PARALLEL_LEVEL:-$nproc_n}"
           export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
           bash scripts/pr-proof.sh
+          PR_PROOF
 
       - name: Read source exemplars when the operational diagnostic changes
         if: always() && env.LAPLACE_PR_FULL_PROOF == '1' && env.LAPLACE_PR_WORKTREE != ''
