@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
+from argparse import Namespace
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,7 +35,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.suite.validate_registry(self.registry)
         profiles = {item["id"] for item in self.registry["profiles"]}
         self.assertEqual(
-            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward"},
+            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment"},
             profiles,
         )
         for suite in self.registry["suites"]:
@@ -48,7 +50,34 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn("core-scale", suites["all"]["profiles"])
         self.assertEqual(["query-forward"], suites["query"]["profiles"])
         self.assertNotIn("query-forward", suites["all"]["profiles"])
-        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "all"}, set(suites))
+        self.assertEqual(["chess-environment"], suites["chess"]["profiles"])
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "chess", "all"}, set(suites))
+
+    def test_chess_suite_does_not_require_unrelated_native_artifacts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = Namespace(suite="chess", repeats=2, receipt_dir=folder,
+                             core="/missing/core", t0="/missing/t0", corpus_dir=folder,
+                             moby_path="/missing/book", scale_workers=None, database="unused",
+                             chess_stockfish="/selected/source/src/stockfish",
+                             chess_cutechess="/selected/build/cutechess-cli", chess_cpu_budget=4,
+                             chess_memory_mib=1024, chess_laplace_uci=None, chess_reserve_cpus=1)
+            with mock.patch.object(self.suite, "git_sha", return_value="source-revision"), \
+                 mock.patch.object(self.suite, "exact_env", side_effect=AssertionError("core must not be required")), \
+                 mock.patch.object(self.suite, "run_profile", return_value={"profile":"chess-environment"}) as run:
+                self.assertEqual(0, self.suite.run_suite(args))
+            forwarded = run.call_args.args[-1]
+            self.assertEqual(["--stockfish", args.chess_stockfish, "--cutechess", args.chess_cutechess,
+                              "--cpu-budget", "4", "--memory-mib", "1024", "--reserve-cpus", "1"], forwarded)
+            receipt = json.loads((Path(folder) / "suite-receipt.json").read_text())
+            self.assertEqual({"repository_sha":"source-revision"}, receipt["artifact_identity"])
+
+    def test_core_suite_still_rejects_missing_native_artifact(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = Namespace(suite="core", repeats=2, receipt_dir=folder,
+                             core=str(Path(folder) / "missing-core"), t0=str(Path(folder) / "missing-t0"))
+            with mock.patch.object(self.suite, "git_sha", return_value="source-revision"):
+                with self.assertRaisesRegex(SystemExit, "built core library not found"):
+                    self.suite.run_suite(args)
 
     def test_raw_harness_scaling_points_still_expose_full_topology_for_explicit_use(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))
@@ -80,15 +109,17 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(12, cap)
         self.assertEqual("derived", source)
 
-    def test_workflow_is_dispatch_only_and_routes_through_suite_runner(self):
+    def test_workflow_is_manual_or_post_deploy_and_routes_through_suite_runner(self):
         import yaml
         path = ROOT / ".github/workflows/benchmark-evidence.yml"
         workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         triggers = workflow["on"]
         names = {triggers} if isinstance(triggers, str) else set(triggers)
-        self.assertEqual({"workflow_dispatch"}, names)
+        self.assertEqual({"workflow_dispatch", "workflow_call"}, names)
         inputs = workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("query", inputs["suite"]["options"])
+        self.assertIn("chess", inputs["suite"]["options"])
+        self.assertEqual("chess", workflow["on"]["workflow_call"]["inputs"]["suite"]["default"])
         job = workflow["jobs"]["benchmark"]
         commands = "\n".join(step.get("run", "") for step in job["steps"] if isinstance(step, dict))
         self.assertIn("python3 scripts/benchmark_suite.py validate", commands)
@@ -273,7 +304,7 @@ WORK_SHAPE tier_tree_nodes=8 nodes_per_codepoint=1.000000000000 nodes_per_tok4=4
         text = (ROOT / "docs/benchmarks/SCALING_MODES.md").read_text(encoding="utf-8")
         self.assertIn("33608791817", text)
         self.assertIn("41,601,961", text)
-        self.assertIn("unique-corpus makespan", text.lower())
+        self.assertRegex(text.lower(), r"unique-corpus(?:, file-grain)? makespan")
         self.assertIn("independent-stream", text.lower())
 
 

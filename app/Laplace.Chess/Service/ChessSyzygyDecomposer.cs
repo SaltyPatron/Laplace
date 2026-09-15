@@ -74,7 +74,7 @@ public sealed class ChessSyzygyDecomposer
             return;
         }
 
-        int largest = SyzygyNative.Init(_resolvedDir);
+        int largest = SyzygyNative.Init(ChessInput.SyzygyProbePath(_resolvedDir));
         if (largest <= 0)
         {
             _initFailed = true;
@@ -99,11 +99,11 @@ public sealed class ChessSyzygyDecomposer
         try
         {
             var all = ChessInput.Resolve(
-                _resolvedDir, SearchOption.TopDirectoryOnly,
+                _resolvedDir, SearchOption.AllDirectories,
                 PackageExtensions, "chess-syzygy");
             int maxMen = SyzygyTableUnpack.ResolveMaxMen();
             LogPackagePlanOnce(all, maxMen);
-            return SchedulePackages(all);
+            return SchedulePackages(all, _resolvedDir);
         }
         catch (ChessInputException) when (_packagingMissing || _initFailed)
         {
@@ -113,17 +113,24 @@ public sealed class ChessSyzygyDecomposer
 
     /// <summary>
     /// Stable package scheduler. Nothing is removed here. Labels include the extension because
-    /// <c>KQvK.rtbw</c> and <c>KQvK.rtbz</c> are distinct physical package inputs and the generic
-    /// multi-file journal requires unique labels.
+    /// <c>KQvK.rtbw</c> and <c>KQvK.rtbz</c> are distinct physical package inputs. Repeated
+    /// basenames across nested directories retain their relative path for unique file labels.
     /// </summary>
     internal static IReadOnlyList<(string Path, string Label)> SchedulePackages(
-        IReadOnlyList<string> paths) =>
-        paths
+        IReadOnlyList<string> paths, string? packageRoot = null)
+    {
+        var repeatedNames = paths.GroupBy(static p => Path.GetFileName(p), StringComparer.Ordinal)
+            .Where(static g => g.Count() > 1)
+            .Select(static g => g.Key).ToHashSet(StringComparer.Ordinal);
+        return paths
             .OrderBy(p => SyzygyTableUnpack.ParseMen(Path.GetFileNameWithoutExtension(p)!))
             .ThenBy(p => Path.GetExtension(p).Equals(".rtbw", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
             .ThenBy(p => p, StringComparer.Ordinal)
-            .Select(p => (p, Path.GetFileName(p)))
+            .Select(p => (p, repeatedNames.Contains(Path.GetFileName(p))
+                ? packageRoot is null ? p : Path.GetRelativePath(packageRoot, p)
+                : Path.GetFileName(p)))
             .ToArray();
+    }
 
     /// <summary>
     /// Whether this physical package should be exhaustively converted to the compact
@@ -289,7 +296,7 @@ public sealed class ChessSyzygyDecomposer
         try
         {
             all = ChessInput.Resolve(
-                resolvedDir, SearchOption.TopDirectoryOnly,
+                resolvedDir, SearchOption.AllDirectories,
                 PackageExtensions, "chess-syzygy");
         }
         catch (ChessInputException)
@@ -321,7 +328,7 @@ public sealed class ChessSyzygyDecomposer
             prober = _proberFactory();
             return true;
         }
-        if (SyzygyNative.Init(dir) <= 0) return false;
+        if (SyzygyNative.Init(ChessInput.SyzygyProbePath(dir)) <= 0) return false;
         prober = new SyzygyNativeProber();
         return true;
     }

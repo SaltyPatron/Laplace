@@ -37,25 +37,37 @@ internal static class ChessInput
     internal static readonly string[] SyzygyExtensions = [".rtbw"];
 
     /// <summary>
-    /// Packaging directory for <c>chess-syzygy</c>: explicit path with tables, else
+    /// Package root for <c>chess-syzygy</c>: explicit path with nested tables, else
     /// <see cref="ChessLabPaths.SyzygyDir"/>. Null when nothing is resolvable (documented no-op).
     /// </summary>
     internal static string? ResolveSyzygyPackagingDir(string? ecosystemPath)
     {
-        if (!string.IsNullOrWhiteSpace(ecosystemPath) && Directory.Exists(ecosystemPath))
+        if (!string.IsNullOrWhiteSpace(ecosystemPath))
         {
             string full = Path.GetFullPath(ecosystemPath);
-            if (Directory.EnumerateFiles(full, "*.rtbw").Any())
-                return full;
-            string nested = Path.Combine(full, "3-4-5");
-            if (Directory.Exists(nested)
-                && Directory.EnumerateFiles(nested, "*.rtbw").Any())
-                return nested;
+            if (!Directory.Exists(full)
+                || !Directory.EnumerateFiles(full, "*.rtbw", SearchOption.AllDirectories).Any())
+                throw new ChessInputException(
+                    $"chess-syzygy: selected package root '{full}' contains no .rtbw tables. "
+                    + "Select the installed Syzygy root containing its WDL/DTZ directories.");
+            return full;
         }
 
         var probe = ChessLabPaths.SyzygyDir;
         return probe.Found ? probe.Path : null;
     }
+
+    /// <summary>
+    /// Fathom searches immediate files in each path component; it never descends into
+    /// directories. Include every package directory, including separate DTZ-only folders.
+    /// </summary>
+    internal static string SyzygyProbePath(string packageRoot)
+        => string.Join(Path.PathSeparator,
+            Resolve(packageRoot, SearchOption.AllDirectories,
+                    ChessSyzygyDecomposer.PackageExtensions, "chess-syzygy")
+                .Select(static p => Path.GetDirectoryName(p)!)
+                .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+                .OrderBy(static p => p, StringComparer.Ordinal));
 
     /// <summary>
     /// Archive formats a chess corpus ships in that the BCL cannot open in-process.

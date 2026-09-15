@@ -1,27 +1,79 @@
 #!/usr/bin/env python3
-"""Install the checksum-pinned upstream Stockfish release through setup/CI.
+"""Update the official Stockfish checkout, build it, and use its executable directly.
 
-Keeps previous releases and distro binaries. Only the managed launch symlink is
-switched, after immutable-release validation and a real UCI handshake. A caller
-may name another managed prefix as a reuse source: the exact lock/version/archive
-and binary digest are reverified before its binary is materialized into the new
-prefix. Missing reusable state may fall back to upstream; drifted reusable state
-fails closed rather than being bypassed. No service restart.
+Stockfish participates in Laplace's existing external source tree and PINS.tsv.
+Local edits and existing branch tips are preserved. Upstream make downloads and
+validates its selected NNUE network; no binary release packages are installed.
 """
 import argparse
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import platform
+import queue
 import shutil
 import subprocess
-import tarfile
 import tempfile
-from urllib.request import urlopen
+import threading
+import time
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
-MAX_ARCHIVE = 256 * 1024 * 1024
+LATEST_RELEASE = "https://api.github.com/repos/official-stockfish/Stockfish/releases/latest"
+
+
+def load_lock():
+    return json.loads((ROOT / "deploy/linux/stockfish-release.json").read_text())
+
+
+def external_root():
+    default = ROOT / "external" if platform.system() == "Windows" else Path("/build/external")
+    return Path(os.environ.get("LAPLACE_EXTERNAL", str(default))).absolute()
+
+
+def source_root():
+    return Path(os.environ.get("LAPLACE_STOCKFISH_SOURCE", str(external_root() / "stockfish"))).absolute()
+
+
+def binary_path(source=None):
+    return (source or source_root()) / "src" / ("stockfish.exe" if platform.system() == "Windows" else "stockfish")
+
+
+def configured_binary(prefix=None):
+    explicit = os.environ.get("LAPLACE_STOCKFISH")
+    if explicit:
+        return Path(explicit)
+    if prefix is not None:
+        config = Path(prefix) / "app/laplace-api.env"
+        if config.is_file():
+            selected = None
+            for line in config.read_text().splitlines():
+                if line.startswith("LAPLACE_STOCKFISH="):
+                    selected = line.split("=", 1)[1].strip().strip("\"'")
+            if selected:
+                return Path(selected)
+    return binary_path()
+
+
+def github_json(url):
+    request = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "Laplace-dependency-check"})
+    with urlopen(request, timeout=30) as response:
+        return json.load(response)
+
+
+def check_latest():
+    lock = load_lock()
+    upstream = github_json(LATEST_RELEASE)
+    tag = upstream.get("tag_name")
+    if upstream.get("draft") or upstream.get("prerelease") or tag != lock["tag"]:
+        raise ValueError(f"Stockfish source pin is stale: pinned {lock['tag']}, upstream {tag}. "
+                         "Update deploy/linux/stockfish-release.json to the official stable tag and commit, "
+                         "then run scripts/install-stockfish.py to update and rebuild the external checkout.")
+    commit = github_json("https://api.github.com/repos/official-stockfish/Stockfish/commits/" + tag)["sha"]
+    if commit != lock["commit"]:
+        raise ValueError("Stockfish official release commit differs from the source pin")
+    print(f"Stockfish {lock['version']} is the latest stable official release; source commit {commit} matches")
 
 
 def snapshot(prefix, state):
@@ -81,170 +133,239 @@ def digest(path):
     return value.hexdigest()
 
 
-def extract(archive, destination, expected):
-    if digest(archive) != expected:
-        raise ValueError("Stockfish archive checksum mismatch; installed engine unchanged")
-    with tarfile.open(archive) as source:
-        members = source.getmembers()
-        names = set()
-        total = 0
-        for member in members:
-            path = PurePosixPath(member.name)
-            if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != "stockfish":
-                raise ValueError("unsafe Stockfish archive path")
-            if member.name in names or not (member.isdir() or member.isfile()):
-                raise ValueError("duplicate or unsupported Stockfish archive member")
-            names.add(member.name)
-            total += member.size
-            if total > MAX_ARCHIVE:
-                raise ValueError("Stockfish extracted size exceeds installation limit")
-        for member in members:
-            target = destination / member.name
-            target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-            if member.isdir():
-                target.mkdir(exist_ok=True, mode=0o755)
-            else:
-                with source.extractfile(member) as data, target.open("xb") as output:
-                    shutil.copyfileobj(data, output)
-                target.chmod(0o755 if member.mode & 0o111 else 0o644)
-
-
 def probe(binary, version):
-    completed = subprocess.run([str(binary)], input="uci\nquit\n", text=True,
-                               capture_output=True, timeout=15, check=True)
-    lines = completed.stdout.splitlines()
-    if "id name Stockfish " + version not in lines or "uciok" not in lines:
-        raise ValueError("Stockfish version/UCI handshake did not match the release lock")
-    return next((line for line in lines if line.startswith("option name UCI_Elo ")), "UCI_Elo not advertised")
+    """Require readiness and legal search, including usable embedded NNUE data."""
+    process = subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, bufsize=1)
+    received = queue.Queue()
+
+    def read_output():
+        try:
+            for line in process.stdout:
+                received.put(line.rstrip())
+        finally:
+            received.put(None)
+
+    reader = threading.Thread(target=read_output, daemon=True)
+    reader.start()
+
+    def send(command):
+        process.stdin.write(command + "\n")
+        process.stdin.flush()
+
+    def until(predicate):
+        lines = []
+        deadline = time.monotonic() + 30
+        while len(lines) < 10000:
+            try:
+                line = received.get(timeout=max(0, deadline - time.monotonic()))
+            except queue.Empty as error:
+                raise ValueError("Stockfish UCI readiness/search timed out") from error
+            if line is None:
+                code = process.wait(timeout=5)
+                if code:
+                    raise subprocess.CalledProcessError(code, [str(binary)], "\n".join(lines))
+                raise ValueError("Stockfish exited before completing the UCI readiness/search check")
+            lines.append(line)
+            if predicate(line):
+                return lines
+        raise ValueError("Stockfish UCI output exceeded the verification limit")
+
+    try:
+        send("uci")
+        handshake = until(lambda line: line == "uciok")
+        if "id name Stockfish " + version not in handshake:
+            raise ValueError("Stockfish version/UCI handshake did not match the release lock")
+        for option in ("Threads", "Hash", "UCI_LimitStrength", "UCI_Elo"):
+            if not any(line.startswith("option name " + option + " type ") for line in handshake):
+                raise ValueError(f"Stockfish required UCI option is absent: {option}")
+        send("setoption name Threads value 1")
+        send("setoption name Hash value 16")
+        send("isready")
+        until(lambda line: line == "readyok")
+        send("ucinewgame")
+        send("position startpos")
+        send("go depth 1")
+        search = until(lambda line: line.startswith("bestmove "))
+        legal = {file + "2" + file + rank for file in "abcdefgh" for rank in "34"}
+        legal.update(("b1a3", "b1c3", "g1f3", "g1h3"))
+        if search[-1].split()[1] not in legal:
+            raise ValueError("Stockfish did not return a legal move from the initial position")
+        send("quit")
+        if process.wait(timeout=10):
+            raise subprocess.CalledProcessError(process.returncode, [str(binary)])
+        return next(line for line in handshake if line.startswith("option name UCI_Elo "))
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=10)
+        reader.join(timeout=5)
+        process.stdin.close()
+        process.stdout.close()
 
 
-def release_paths(prefix, lock, variant):
-    release = lock[variant]
-    destination = prefix / "stockfish" / (
-        lock["version"] + "-" + variant + "-" + release["sha256"][:12])
-    return destination, destination / release["binary"], destination / "receipt.json"
+def git(source, *arguments):
+    return subprocess.run(["git", "-c", "safe.directory=" + str(source), "-C", str(source), *arguments], text=True,
+                          capture_output=True, check=True).stdout.strip()
 
 
-def verify_release(prefix, lock, variant, *, missing_ok=False):
-    """Return an exact managed release or fail on any declared-state drift."""
-    release = lock[variant]
-    destination, binary, receipt = release_paths(prefix, lock, variant)
-    if not destination.exists():
-        if missing_ok:
-            return None
-        raise ValueError("managed Stockfish release is absent")
-    if not destination.is_dir() or not receipt.is_file() or not binary.is_file():
-        raise ValueError("installed Stockfish release is incomplete; no files overwritten")
-    saved = json.loads(receipt.read_text())
-    if (saved.get("archive_sha256") != release["sha256"]
-            or saved.get("version") != lock["version"]
-            or saved.get("source") != release["url"]
-            or saved.get("binary_sha256") != digest(binary)):
-        raise ValueError("installed Stockfish release drift; no files overwritten")
-    capabilities = probe(binary, lock["version"])
-    return destination, binary, saved, capabilities
+def update_source(source, lock):
+    """Fetch the stable source pin without resetting local edits or branch history."""
+    if not source.exists():
+        source.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "--branch", lock["tag"], "--depth", "1",
+                        lock["repository"], str(source)], check=True)
+    if Path(git(source, "rev-parse", "--show-toplevel")).resolve() != source.resolve():
+        raise ValueError(f"Stockfish source is not a repository root: {source}")
+    origin = git(source, "config", "--get", "remote.origin.url").rstrip("/")
+    if origin.removesuffix(".git") not in (
+            "https://github.com/official-stockfish/Stockfish",
+            "git@github.com:official-stockfish/Stockfish"):
+        raise ValueError(f"Stockfish source origin is not the official repository: {source}")
+    if git(source, "status", "--porcelain", "--untracked-files=all"):
+        raise ValueError(f"Stockfish source has local changes; preserved without checkout or rebuild: {source}")
+    try:
+        selected = git(source, "rev-parse", "--verify", "refs/tags/" + lock["tag"] + "^{commit}")
+    except subprocess.CalledProcessError:
+        git(source, "fetch", "origin", "refs/tags/" + lock["tag"] + ":refs/tags/" + lock["tag"])
+        selected = git(source, "rev-parse", "refs/tags/" + lock["tag"] + "^{commit}")
+    if selected != lock["commit"]:
+        raise ValueError("Stockfish release tag does not match the pinned official source commit")
+    previous = git(source, "rev-parse", "HEAD")
+    if previous != selected:
+        git(source, "update-ref", "refs/laplace/stockfish-before-update/" + previous, previous)
+        git(source, "checkout", "--detach", selected)
+    return selected
 
 
-def materialize_reuse(payload, source_binary, source_receipt, release, version, reuse_prefix):
-    """Copy only the verified executable needed by an isolated test/runtime prefix."""
-    target = payload / release["binary"]
-    target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-    shutil.copy2(source_binary, target)
-    target.chmod(0o755)
-    # Re-probe the materialized bytes, not only the source path. The receipt keeps
-    # upstream provenance and records the local acceleration as transport metadata.
-    probe(target, version)
-    copied_sha = digest(target)
-    if copied_sha != source_receipt["binary_sha256"]:
-        raise ValueError("reused Stockfish binary changed during materialization")
-    (payload / "receipt.json").write_text(json.dumps({
-        "archive_sha256": release["sha256"],
-        "binary_sha256": copied_sha,
-        "version": version,
-        "source": release["url"],
-        "reused_from": str(reuse_prefix),
-    }) + "\n")
-
-
-def install(prefix, variant, archive=None, reuse_prefix=None):
-    lock = json.loads((ROOT / "deploy/linux/stockfish-release.json").read_text())
-    release = lock[variant]
-    base = prefix / "stockfish"
-    base.mkdir(parents=True, exist_ok=True, mode=0o755)
-    destination, binary, receipt = release_paths(prefix, lock, variant)
-    if not destination.exists():
-        reusable = None
-        if archive is None and reuse_prefix is not None:
-            # Absence permits normal acquisition. Any present-but-invalid managed
-            # release is corruption and must fail closed rather than being hidden by
-            # a network fallback.
-            reusable = verify_release(reuse_prefix, lock, variant, missing_ok=True)
-        with tempfile.TemporaryDirectory(prefix=".install-", dir=base) as temporary:
-            temporary = Path(temporary)
-            payload = temporary / "payload"
-            payload.mkdir(mode=0o755)
-            if reusable is not None:
-                _, source_binary, source_receipt, _ = reusable
-                materialize_reuse(
-                    payload, source_binary, source_receipt, release,
-                    lock["version"], reuse_prefix)
+def record_external_pin(source, lock):
+    # An explicit source override remains outside the default external roster.
+    if source.resolve() != (external_root() / "stockfish").resolve():
+        return
+    pins = external_root() / "PINS.tsv"
+    # Preserve the operator-owned inode: shared group write does not permit a
+    # runner to chown a replacement back to another owner. Serialize with the
+    # CuteChess source updater before reading and rewriting the shared roster.
+    descriptor = os.open(pins, os.O_RDWR | os.O_CREAT, 0o664)
+    with os.fdopen(descriptor, "r+", encoding="utf-8", newline="") as output:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(output.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(output.fileno(), fcntl.LOCK_EX)
+        try:
+            original = output.read()
+            lines = [line for line in original.splitlines()
+                     if line.split("\t", 1)[0] != "external/stockfish"]
+            lines.append("\t".join(("external/stockfish", lock["repository"], lock["commit"])))
+            text = "\n".join(lines) + "\n"
+            if text != original:
+                output.seek(0)
+                output.write(text)
+                output.truncate()
+                output.flush()
+                os.fsync(output.fileno())
+        finally:
+            if os.name == "nt":
+                output.seek(0)
+                msvcrt.locking(output.fileno(), msvcrt.LK_UNLCK, 1)
             else:
-                if archive is None:
-                    archive = temporary / "download.tar"
-                    size = 0
-                    with urlopen(release["url"], timeout=30) as source, archive.open("xb") as output:
-                        while block := source.read(1024 * 1024):
-                            size += len(block)
-                            if size > MAX_ARCHIVE:
-                                raise ValueError("Stockfish download exceeds installation limit")
-                            output.write(block)
-                extract(archive, payload, release["sha256"])
-                probe(payload / release["binary"], lock["version"])
-                (payload / "receipt.json").write_text(json.dumps({
-                    "archive_sha256": release["sha256"],
-                    "binary_sha256": digest(payload / release["binary"]),
-                    "version": lock["version"],
-                    "source": release["url"]}) + "\n")
-            os.rename(payload, destination)
-    verified = verify_release(prefix, lock, variant)
-    assert verified is not None
-    _, binary, _, capabilities = verified
-    bin_dir = prefix / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
-    link = bin_dir / "stockfish"
-    if link.exists() or link.is_symlink():
-        if not link.is_symlink() or not link.resolve().is_relative_to(base.resolve()):
-            raise ValueError("unmanaged Stockfish path exists; preserved without replacement")
-    if not link.is_symlink() or link.resolve() != binary.resolve():
-        with tempfile.TemporaryDirectory(prefix=".stockfish-link-", dir=bin_dir) as temporary:
-            candidate = Path(temporary) / "stockfish"
-            candidate.symlink_to(binary)
-            os.replace(candidate, link)
-    print("Stockfish " + lock["version"] + " verified at " + str(link))
+                fcntl.flock(output.fileno(), fcntl.LOCK_UN)
+
+
+def build(source=None, jobs=None, make=None, compiler=None, rebuild=False):
+    source = (source or source_root()).absolute()
+    lock = load_lock()
+    for tool in ("git", "sh"):
+        if not shutil.which(tool):
+            raise ValueError(f"Stockfish source build requires {tool} on PATH")
+    make = make or os.environ.get("LAPLACE_STOCKFISH_MAKE", "make")
+    compiler = compiler or os.environ.get("LAPLACE_STOCKFISH_COMP", "gcc")
+    if compiler not in ("gcc", "clang", "mingw", "icx"):
+        raise ValueError("Stockfish compiler must be gcc, clang, mingw or icx")
+    if not shutil.which(make):
+        raise ValueError(f"Stockfish source build requires GNU make ({make}); on Windows use the MSYS2 UCRT64 toolchain")
+    if not (shutil.which("curl") or shutil.which("wget")):
+        raise ValueError("Stockfish NNUE acquisition requires curl or wget")
+    if not (shutil.which("sha256sum") or shutil.which("shasum")):
+        raise ValueError("Stockfish NNUE validation requires sha256sum or shasum")
+    commit = update_source(source, lock)
+    cpu = subprocess.run(["sh", str(source / "scripts/get_native_properties.sh")],
+                         cwd=source / "src", capture_output=True, text=True, check=True).stdout.strip()
+    compiler_executable = os.environ.get("CXX", {"gcc": "g++", "mingw": "g++", "clang": "clang++", "icx": "icpx"}[compiler])
+    compiler_version = subprocess.run([compiler_executable, "--version"], capture_output=True,
+                                      text=True, check=True).stdout.splitlines()[0]
+    recipe = {"commit": commit, "arch": "native", "cpu": cpu,
+              "compiler": compiler, "compiler_version": compiler_version}
+    state = Path(git(source, "rev-parse", "--git-path", "laplace-stockfish-build.json"))
+    if not state.is_absolute():
+        state = source / state
+    binary = binary_path(source)
+    previous = json.loads(state.read_text()) if state.exists() else {}
+    if rebuild or previous.get("recipe") != recipe or not binary.is_file() or previous.get("binary_sha256") != digest(binary):
+        count = jobs if jobs is not None else int(
+            os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") or os.environ.get("LAPLACE_BUILD_JOBS")
+            or os.cpu_count() or 1)
+        if count < 1:
+            raise ValueError("Stockfish build jobs must be positive")
+        # Use upstream's EXE build variable for a sibling candidate. Active
+        # launches keep the previous direct executable until the new native
+        # build has completed a real search.
+        with tempfile.TemporaryDirectory(prefix="laplace-stockfish-previous-", dir=state.parent) as temporary:
+            previous_binary = Path(temporary) / binary.name
+            candidate = binary.with_name("stockfish.pending.exe" if platform.system() == "Windows" else "stockfish.pending")
+            if candidate.exists():
+                raise ValueError(f"Stockfish build candidate already exists; preserved: {candidate}")
+            if binary.is_file():
+                shutil.copy2(binary, previous_binary)
+            activated = False
+            try:
+                subprocess.run([make, "-C", str(source / "src"), "-j", str(count),
+                                "profile-build", "ARCH=native", "COMP=" + compiler,
+                                "CXX=" + compiler_executable, "EXE=" + candidate.name], check=True)
+                capabilities = probe(candidate, lock["version"])
+                os.replace(candidate, binary)
+                activated = True
+                state.write_text(json.dumps({"recipe": recipe, "binary_sha256": digest(binary)}) + "\n")
+            except BaseException:
+                if activated and previous_binary.exists():
+                    os.replace(previous_binary, binary)
+                elif activated and binary.exists():
+                    binary.unlink()
+                raise
+            finally:
+                if candidate.exists():
+                    candidate.unlink()
+    else:
+        capabilities = probe(binary, lock["version"])
+    record_external_pin(source, lock)
+    print(f"Stockfish {lock['version']} source {commit} verified at {binary}")
     print(capabilities)
+    return binary
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--prefix", type=Path, default=Path("/opt/laplace"))
-    parser.add_argument("--archive", type=Path, help="Optional offline archive; still checksum verified")
-    parser.add_argument(
-        "--reuse-prefix", type=Path,
-        help="Optional managed prefix containing the exact pinned immutable release to reuse before network acquisition")
+    parser.add_argument("--source-dir", type=Path, help="Official source checkout; defaults to the existing external/stockfish dependency")
+    parser.add_argument("--jobs", type=int, help="Parallel compiler jobs; honors CMAKE_BUILD_PARALLEL_LEVEL/LAPLACE_BUILD_JOBS before available CPUs")
+    parser.add_argument("--make", help="GNU make executable")
+    parser.add_argument("--compiler", choices=("gcc", "clang", "mingw", "icx"))
+    parser.add_argument("--rebuild", action="store_true", help="Rebuild even when source, compiler, CPU and executable match")
+    parser.add_argument("--prefix", type=Path, default=Path("/opt/laplace"), help="Application prefix for snapshot/restore only")
     action = parser.add_mutually_exclusive_group()
-    action.add_argument("--snapshot", type=Path, help="Save the prior launch contract for CI rollback")
-    action.add_argument("--restore", type=Path, help="Restore the prior CI launch contract")
+    action.add_argument("--snapshot", type=Path, help="Save the previous application launch configuration for CI rollback")
+    action.add_argument("--restore", type=Path, help="Restore the previous CI launch configuration")
+    action.add_argument("--check-latest", action="store_true", help="Check the official latest stable tag and source commit")
+    action.add_argument("--print-path", "--print-binary", action="store_true", help="Print the direct source-build executable path without installing")
     args = parser.parse_args()
-    if args.snapshot or args.restore:
-        if args.snapshot:
-            snapshot(args.prefix.absolute(), args.snapshot)
-        else:
-            restore(args.prefix.absolute(), args.restore)
-        raise SystemExit(0)
-    if platform.system() != "Linux" or platform.machine() not in ("x86_64", "AMD64"):
-        parser.error("this Linux host installer currently has verified x86-64 release artifacts only")
-    cpu = Path("/proc/cpuinfo").read_text()
-    variant = "linux-x86_64-avx2" if "avx2" in cpu.split() else "linux-x86_64"
-    install(
-        args.prefix.absolute(), variant, args.archive,
-        args.reuse_prefix.absolute() if args.reuse_prefix is not None else None)
+    if args.check_latest:
+        check_latest()
+    elif args.print_path:
+        print(binary_path(args.source_dir))
+    elif args.snapshot:
+        snapshot(args.prefix.absolute(), args.snapshot)
+    elif args.restore:
+        restore(args.prefix.absolute(), args.restore)
+    else:
+        build(args.source_dir, args.jobs, args.make, args.compiler, args.rebuild)

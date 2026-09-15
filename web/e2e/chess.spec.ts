@@ -57,9 +57,19 @@ test.describe('chess UI', () => {
     await expect(limitStrength).not.toBeChecked();
     await expect(elo).toBeDisabled();
     await expect.poll(() => previews.at(-1)?.searchParams.get('limitStrength')).toBe('false');
+    await page.getByRole('spinbutton', { name: 'Stockfish threads', exact: true }).fill('4');
+    await page.getByRole('spinbutton', { name: 'Stockfish hash (MiB)', exact: true }).fill('256');
+    await page.getByRole('textbox', { name: 'Stockfish NUMA policy', exact: true }).fill('system');
+    await page.getByRole('textbox', { name: 'Stockfish tablebase paths', exact: true }).fill('/tables/3-5:/tables/6');
+    await expect.poll(() => previews.at(-1)?.searchParams.get('stockfishThreads')).toBe('4');
+    await expect.poll(() => previews.at(-1)?.searchParams.get('stockfishHashMb')).toBe('256');
+    await expect.poll(() => previews.at(-1)?.searchParams.get('stockfishNumaPolicy')).toBe('system');
+    await expect.poll(() => previews.at(-1)?.searchParams.get('stockfishSyzygyPath')).toBe('/tables/3-5:/tables/6');
     await startButton.click();
     await expect.poll(() => starts.length).toBe(2);
-    expect(starts[1].config).toMatchObject({ elo: '2300', limitStrength: 'false' });
+    expect(starts[1].config).toMatchObject({ elo: '2300', limitStrength: 'false',
+      stockfishThreads: '4', stockfishHashMb: '256', stockfishNumaPolicy: 'system',
+      stockfishSyzygyPath: '/tables/3-5:/tables/6' });
     expect(startOperatorHeaders[1]).toBeUndefined();
 
     await limitStrength.click();

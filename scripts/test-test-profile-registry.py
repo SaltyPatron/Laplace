@@ -22,6 +22,7 @@ POLICY_IDS = {
     "policy-source-contract", "policy-registry", "policy-sql-catalog", "policy-actions-topology",
     "policy-actions-audit", "policy-shellcheck-gate", "policy-deploy-payload-sync",
     "policy-pipeline-install", "policy-application-runtime", "policy-stockfish-release",
+    "policy-chess-dependencies", "policy-cutechess-release", "policy-chess-environment-benchmark",
     "policy-managed-services", "policy-managed-host", "policy-managed-tls",
     "policy-pg-access", "policy-managed-publish-shellcheck", "policy-pipeline",
     "policy-eval-op-lane", "policy-sql-audit-tests", "policy-sql-audit",

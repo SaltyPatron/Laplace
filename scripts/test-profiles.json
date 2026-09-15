@@ -132,6 +132,45 @@
       "required": true
     },
     {
+      "id": "policy-chess-environment-benchmark",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-chess-environment-benchmark.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-chess-dependencies",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-chess-dependencies.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-cutechess-release",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-cutechess-release.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-managed-services",
       "profile": "policy",
       "owner": "services",
@@ -373,7 +412,7 @@
       "runner": "script",
       "command": [
         "bash", "-lc",
-        "runtime=$(mktemp -d); trap 'rm -rf \"$runtime\"' EXIT; dotnet publish app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj -c Release --no-self-contained -o \"$runtime\" && python3 scripts/test-uci-publish.py \"$runtime\" && python3 scripts/install-stockfish.py --prefix \"$runtime/chess-tools\" && python3 scripts/test-cutechess-runtime.py /opt/laplace/bin/cutechess-cli \"$runtime/laplace-uci\" \"$runtime/chess-tools/bin/stockfish\""
+        "runtime=$(mktemp -d); trap 'rm -rf \"$runtime\"' EXIT; dotnet publish app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj -c Release --no-self-contained -o \"$runtime\" && python3 scripts/test-uci-publish.py \"$runtime\" && python3 scripts/install-stockfish.py && stockfish=$(python3 scripts/install-stockfish.py --print-path) && python3 scripts/test-cutechess-runtime.py /opt/laplace/bin/cutechess-cli \"$runtime/laplace-uci\" \"$stockfish\""
       ],
       "environment": "built-tree",
       "mutability": "none",

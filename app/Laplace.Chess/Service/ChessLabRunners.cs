@@ -243,7 +243,13 @@ public static class ChessLabRunners
             Concurrency = Math.Max(1, int.Parse(Config(cfg, "concurrency", "1"))),
             PgnOut = pgnOut,
             Event = $"chess-lab/cutechess/{slot.Job.Id}",
-        };
+        }.WithStockfishConfiguration(cfg);
+
+        // PGN Event already carries this stable experiment id. Keep its original description;
+        // the same id addresses the exact configuration/artifact receipt after PGN cleanup.
+        var receipt = new CutechessExperimentReceipt(slot.Job.Id, options, cfg);
+        string receiptPath = Path.Combine(spoolDir, "experiment.json");
+        string? persistedReceiptPath = null;
 
         var final = ChessLabJobState.Completed;
         string? finalMessage = null;
@@ -261,6 +267,8 @@ public static class ChessLabRunners
         {
             await foreach (var evt in CutechessRunner.RunAsync(options, ct))
             {
+                await receipt.ObserveAsync(evt, ct);
+                if (evt is ChessLabCommandEvent) await receipt.WriteAsync(receiptPath);
                 switch (evt)
                 {
                     case ChessLabTerminalEvent terminal:
@@ -282,6 +290,23 @@ public static class ChessLabRunners
                         break;
                 }
             }
+            if (!await receipt.VerifyArtifactsAsync(ct))
+            {
+                final = ChessLabJobState.Failed;
+                finalMessage = "experiment artifacts changed during the match; configuration identity could not be verified";
+                receipt.Complete(final, finalMessage);
+                lab.Publish(slot, new ChessLabLogEvent("error", finalMessage));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            receipt.Complete(ChessLabJobState.Cancelled, "cancelled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            receipt.Complete(ChessLabJobState.Failed, ex.Message);
+            throw;
         }
         finally
         {
@@ -291,48 +316,71 @@ public static class ChessLabRunners
                 await transcript.DisposeAsync();
                 lab.AddArtifact(slot, "transcript.log", transcriptPath!);
             }
+            await receipt.WriteAsync(receiptPath);
+            persistedReceiptPath = ChessLabStorage.PersistArtifact(receiptPath, LabDir, slot.Job.Id, "experiment.json");
+            lab.AddArtifact(slot, "experiment.json", persistedReceiptPath);
+            if ((receipt.MatchState is ChessLabJobState.Failed or ChessLabJobState.Cancelled) && File.Exists(pgnOut))
+                lab.AddArtifact(slot, "games.pgn", pgnOut);
         }
 
         bool ingestSucceeded = !ingest;
-        if (final == ChessLabJobState.Completed && ingest && File.Exists(pgnOut))
+        try
         {
-            try
-            {
-                lab.Publish(slot, new ChessLabLogEvent("info", "ingesting temporary games.pgn into substrate…"));
-                var liveHost = await lab.GetLiveHostAsync(ct);
-                await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-                var r = await ingestor.IngestFileAsync(
-                    pgnOut, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
-                lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
-                ingestSucceeded = true;
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
+            if (final == ChessLabJobState.Completed && !File.Exists(pgnOut))
             {
                 final = ChessLabJobState.Failed;
-                finalMessage = $"substrate ingest failed: {ex.Message}";
-                lab.Publish(slot, new ChessLabLogEvent("error",
-                    $"substrate ingest failed ({ex.Message}) — PGN remains only in temporary spool for retry"));
+                finalMessage = "completed gauntlet did not produce games.pgn";
+                lab.Publish(slot, new ChessLabLogEvent("error", finalMessage));
+            }
+            if (final == ChessLabJobState.Completed && ingest)
+            {
+                try
+                {
+                    lab.Publish(slot, new ChessLabLogEvent("info", "ingesting temporary games.pgn into substrate…"));
+                    var liveHost = await lab.GetLiveHostAsync(ct);
+                    await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
+                    var r = await ingestor.IngestFileAsync(
+                        pgnOut, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
+                        experimentReceiptJson: await File.ReadAllTextAsync(persistedReceiptPath!, ct));
+                    if (r.Parsed != options.Rounds)
+                        throw new InvalidDataException($"expected {options.Rounds} PGN games but parsed {r.Parsed}");
+                    lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
+                    ingestSucceeded = true;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    final = ChessLabJobState.Failed;
+                    finalMessage = $"substrate ingest failed: {ex.Message}";
+                    lab.Publish(slot, new ChessLabLogEvent("error",
+                        $"substrate ingest failed ({ex.Message}) — PGN remains only in temporary spool for retry"));
+                }
             }
         }
-
-        if (File.Exists(pgnOut))
+        finally
         {
-            if (persistPgn)
+            // Cancellation can arrive after some chunks were admitted. Keep the PGN
+            // addressable for an idempotent retry and finish receipt bookkeeping anyway.
+            if (File.Exists(pgnOut))
             {
-                var artifact = ChessLabStorage.PersistArtifact(pgnOut, LabDir, slot.Job.Id, "games.pgn");
-                lab.AddArtifact(slot, "games.pgn", artifact);
+                if (persistPgn)
+                {
+                    var artifact = ChessLabStorage.PersistArtifact(pgnOut, LabDir, slot.Job.Id, "games.pgn");
+                    lab.AddArtifact(slot, "games.pgn", artifact);
+                }
+                else if (ingestSucceeded && final == ChessLabJobState.Completed)
+                {
+                    ChessLabStorage.DeleteFile(pgnOut);
+                }
+                else
+                {
+                    lab.AddArtifact(slot, "games.pgn", pgnOut);
+                }
             }
-            else if (ingestSucceeded)
-            {
-                ChessLabStorage.DeleteFile(pgnOut);
-            }
-            else
-            {
-                lab.AddArtifact(slot, "games.pgn", pgnOut);
-            }
+            ChessLabStorage.DeleteDirectoryIfEmpty(spoolDir);
+            receipt.Ingested = ingest ? ingestSucceeded : null;
+            await receipt.WriteAsync(persistedReceiptPath!);
         }
-        ChessLabStorage.DeleteDirectoryIfEmpty(spoolDir);
 
         Finish(lab, slot, final, finalMessage);
     }

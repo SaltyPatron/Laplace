@@ -45,43 +45,78 @@
       "mutability": "read-only; fails if the substrate write epoch or estate counts move during the suite",
       "resource_shape": "one canonical forward-program invocation per measured case/repeat; explicit steps/hops/fanout/top-k ceilings; serviceable managed host only",
       "receipt_schema": "laplace.benchmark.forward-program/v1"
+    },
+    {
+      "id": "chess-environment",
+      "kind": "chess-environment",
+      "description": "Measured Stockfish source-build search and CuteChess match concurrency with exact executable identities, actual host resource limits, and configuration candidates.",
+      "execution_boundary": "configured source-built external executables on the measured host",
+      "mutability": "benchmark receipts and PGN only; no substrate writes or configuration changes",
+      "resource_shape": "explicit thread/hash/concurrency sweep within effective CPU and memory budgets",
+      "receipt_schema": "laplace.benchmark.chess-environment/v1"
     }
   ],
   "suites": [
     {
       "id": "quick",
       "description": "Conservative reproducible floor: single-thread core plus bit-perfect Moby roundtrip.",
-      "profiles": ["core-single", "moby-roundtrip"]
+      "profiles": [
+        "core-single",
+        "moby-roundtrip"
+      ]
     },
     {
       "id": "throughput",
       "description": "Single-thread floor plus measured aggregate independent-stream physical-core/SMT scaling; managed-host workflow measures serviceable capacity by default and does not claim single-DAG parallelism.",
-      "profiles": ["core-single", "core-scale-streams"]
+      "profiles": [
+        "core-single",
+        "core-scale-streams"
+      ]
     },
     {
       "id": "core",
       "description": "Single-thread core composition only.",
-      "profiles": ["core-single"]
+      "profiles": [
+        "core-single"
+      ]
     },
     {
       "id": "scale",
       "description": "Aggregate independent-stream host scaling; serviceable capacity by default in the managed workflow, saturation only by explicit opt-in; fixed-work single-DAG scaling remains #1451.",
-      "profiles": ["core-scale-streams"]
+      "profiles": [
+        "core-scale-streams"
+      ]
     },
     {
       "id": "moby",
       "description": "Bit-perfect Moby Dick roundtrip only.",
-      "profiles": ["moby-roundtrip"]
+      "profiles": [
+        "moby-roundtrip"
+      ]
     },
     {
       "id": "query",
       "description": "Installed seeded canonical forward-program work receipt benchmark. The suite refuses to run unless the installed laplace_substrate extension version and content-versioned execution module exactly match the selected source build.",
-      "profiles": ["query-forward"]
+      "profiles": [
+        "query-forward"
+      ]
+    },
+    {
+      "id": "chess",
+      "description": "Stockfish/CuteChess environment calibration and capability report; independent of Laplace native core build artifacts.",
+      "profiles": [
+        "chess-environment"
+      ]
     },
     {
       "id": "all",
       "description": "All source/core profiles that do not require an already-installed matching runtime: scalar floor, aggregate stream scaling, file-grain diagnostic, and Moby roundtrip. The database-backed query suite remains explicit because arbitrary target refs are not silently installed by this workflow.",
-      "profiles": ["core-single", "core-scale-streams", "core-scale", "moby-roundtrip"]
+      "profiles": [
+        "core-single",
+        "core-scale-streams",
+        "core-scale",
+        "moby-roundtrip"
+      ]
     }
   ]
 }

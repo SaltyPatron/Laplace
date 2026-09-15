@@ -227,7 +227,8 @@ bootstrap_build_environment() {
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build autoconf automake libtool pkg-config \
-        bison flex perl \
+        bison flex perl python3 python3-venv ca-certificates git \
+        libgl-dev libegl-dev libopengl-dev libxkbcommon-dev libxcb-cursor0 \
         sqlite3 \
         shellcheck \
         libssl-dev zlib1g-dev libreadline-dev uuid-dev \
@@ -237,12 +238,8 @@ bootstrap_build_environment() {
         libpcre2-dev libgeotiff-dev libpng-dev libwebp-dev \
         libjpeg-turbo8-dev libnetcdf-dev libhdf5-dev libexpat1-dev \
         nginx \
-        stockfish \
-        qt6-base-dev qt6-base-dev-tools \
-        libqt6svg6-dev libqt6core5compat6-dev \
-        libqt6svg6 libqt6core5compat6 \
         >/dev/null
-    green "✓ Build-deps + nginx + chess-lab apt packages present"
+    green "✓ Build-deps + nginx present (chess tools built from official source releases)"
 
     mkdir -p /opt/laplace
     chgrp "$RUNNER_GROUP" /opt/laplace

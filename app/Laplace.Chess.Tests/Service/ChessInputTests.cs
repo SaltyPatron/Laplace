@@ -160,6 +160,42 @@ public sealed class ChessInputTests : IDisposable
             () => ChessInput.Resolve(dir, SearchOption.TopDirectoryOnly, ChessInput.BookExtensions, "chess-books"));
     }
 
+    [Fact]
+    public void SyzygyRoot_KeepsEveryMenBracketAndSeparateDtzDirectories()
+    {
+        var root = Dir("tablebases");
+        string[] directories =
+        [
+            Path.Combine(root, "3-4-5", "WDL"),
+            Path.Combine(root, "3-4-5", "DTZ"),
+            Path.Combine(root, "6", "WDL"),
+            Path.Combine(root, "6", "DTZ"),
+        ];
+        string[] names = ["KQvK.rtbw", "KQvK.rtbz", "KPPvKPP.rtbw", "KPPvKPP.rtbz"];
+        for (int i = 0; i < directories.Length; i++)
+        {
+            Directory.CreateDirectory(directories[i]);
+            File.WriteAllBytes(Path.Combine(directories[i], names[i]), [0]);
+        }
+
+        Assert.Equal(root, ChessInput.ResolveSyzygyPackagingDir(root));
+        Assert.Equal(directories.OrderBy(static p => p, StringComparer.Ordinal),
+            ChessInput.SyzygyProbePath(root).Split(Path.PathSeparator));
+        var files = ChessInput.Resolve(root, SearchOption.AllDirectories,
+            ChessSyzygyDecomposer.PackageExtensions, "chess-syzygy");
+        Assert.Equal(4, files.Count);
+        Assert.Null(ChessSyzygyDecomposer.ExplainEmptyDirectory(root, 3));
+    }
+
+    [Fact]
+    public void SyzygyExplicitMissingOrEmptyRoot_IsNotReplacedByAnotherCorpus()
+    {
+        var empty = Dir("empty-tablebases");
+        Assert.Throws<ChessInputException>(() => ChessInput.ResolveSyzygyPackagingDir(empty));
+        Assert.Throws<ChessInputException>(() =>
+            ChessInput.ResolveSyzygyPackagingDir(Path.Combine(_root, "missing-tablebases")));
+    }
+
     [Theory]
     [InlineData("a.PGN", true)]
     [InlineData("a.pgn.gz", true)]

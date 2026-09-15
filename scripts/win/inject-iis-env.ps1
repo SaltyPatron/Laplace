@@ -34,7 +34,7 @@ $skip = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordi
 foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv, $stripeEnv)) {
   if (-not (Test-Path -LiteralPath $file)) {
     if ($file -eq $chessLabEnv) {
-      Write-Warning "No $chessLabEnv — run build-cutechess.cmd and copy deploy/windows/chess-lab.env.example"
+      Write-Verbose "No custom chess-lab.env; using the managed chess runtime"
     }
     if ($file -eq $lichessEnv) {
       Write-Warning "No $lichessEnv — put LICHESS_API in repo .env (publish-deploy syncs it)"
@@ -53,6 +53,19 @@ foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv, $stripeEnv)) {
       if (-not $envVars.Contains($k)) { $envVars[$k] = $v.Trim() }
     }
   }
+}
+
+# Explicit deployment configuration takes precedence over shared source/build paths.
+$external = if ($env:LAPLACE_EXTERNAL) { $env:LAPLACE_EXTERNAL } else { Join-Path $RepoRoot 'external' }
+$cuteBuild = if ($env:LAPLACE_CUTECHESS_BUILD) { $env:LAPLACE_CUTECHESS_BUILD } else { 'D:\Data\Laplace\build-cutechess' }
+$stockfishSource = if ($env:LAPLACE_STOCKFISH_SOURCE) { $env:LAPLACE_STOCKFISH_SOURCE } else { Join-Path $external 'stockfish' }
+$managedChess = [ordered]@{
+  LAPLACE_CUTECHESS = Join-Path $cuteBuild 'cutechess-cli.exe'
+  LAPLACE_STOCKFISH = Join-Path $stockfishSource 'src\stockfish.exe'
+  LAPLACE_QT_BIN = $cuteBuild
+}
+foreach ($entry in $managedChess.GetEnumerator()) {
+  if (-not $envVars.Contains($entry.Key)) { $envVars[$entry.Key] = $entry.Value }
 }
 
 foreach ($entry in $envVars.GetEnumerator()) {

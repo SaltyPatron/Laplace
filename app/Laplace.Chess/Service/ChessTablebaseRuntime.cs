@@ -62,7 +62,7 @@ public static class ChessTablebaseRuntime
 
         var probe = ChessLabPaths.SyzygyDir;
         if (!probe.Found || probe.Path is not { Length: > 0 } path) return 0;
-        int largest = Math.Max(0, SyzygyNative.Init(path));
+        int largest = Math.Max(0, SyzygyNative.Init(ChessInput.SyzygyProbePath(path)));
         if (largest > 0)
             _loadedTableSet = Path.GetFullPath(path)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

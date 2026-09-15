@@ -58,7 +58,16 @@ jobs:
           echo "PR proof classification: full=$full"
 
       - name: Prove merge candidate without production mutation
+        id: proof
         run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          # PR builds share the deployment machine with both repositories.
+          # Hold the same host lock through the entire proof, without passing
+          # its descriptor into any long-lived child processes.
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            bash -e -o pipefail <<'PR_PROOF'
           set -euo pipefail
           cd "$LAPLACE_PR_WORKTREE"
           if [[ "$LAPLACE_PR_FULL_PROOF" == 0 ]]; then
@@ -77,6 +86,36 @@ jobs:
           export CTEST_PARALLEL_LEVEL="${CTEST_PARALLEL_LEVEL:-$nproc_n}"
           export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
           bash scripts/pr-proof.sh
+          PR_PROOF
+
+      - name: Retain bounded recursive proof counterexamples
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        env:
+          PROOF_OUTCOME: ${{ steps.proof.outcome }}
+        run: |
+          set -euo pipefail
+          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr"
+          args=(
+            --checkout "$LAPLACE_PR_WORKTREE"
+            --checkout "$GITHUB_WORKSPACE"
+            --output "$evidence"
+            --expected-source "$LAPLACE_PR_TARGET_SHA"
+            --proof-outcome "$PROOF_OUTCOME"
+          )
+          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
+            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
+          fi
+          python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
+
+      - name: Upload retained recursive proof diagnostics
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-pr
+          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Remove isolated pull-request worktree
         if: always()

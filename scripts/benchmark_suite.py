@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "scripts/benchmark-profiles.json"
 DEFAULT_CORE = ROOT / "build/engine/core/liblaplace_core.so"
 DEFAULT_T0 = ROOT / "build/engine/core/perfcache/laplace_t0_perfcache.bin"
-VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward"}
+VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment"}
 
 
 def sha256(path: Path) -> str:
@@ -93,6 +93,7 @@ def validate_registry(registry: dict[str, Any]) -> None:
         "core-scale": ROOT / "scripts/bench-compose-scale.py",
         "core-scale-streams": ROOT / "scripts/bench-compose-stream-scale.py",
         "query-forward": ROOT / "scripts/bench-forward-program.py",
+        "chess-environment": ROOT / "scripts/benchmark-chess-environment.py",
     }
     for name, path in harnesses.items():
         if not path.is_file():
@@ -314,6 +315,7 @@ def run_profile(
     moby_path: Path,
     scale_workers: str | None,
     database: str,
+    chess_args: list[str] | None = None,
 ) -> dict[str, Any]:
     profile_id = profile["id"]
     kind = profile["kind"]
@@ -341,6 +343,12 @@ def run_profile(
             "--repeats", str(repeats),
             "--json", str(result_json),
         ]
+    elif kind == "chess-environment":
+        output_dir = receipt_dir / "chess-environment"
+        result_json = output_dir / "report.json"
+        command = [sys.executable, "scripts/benchmark-chess-environment.py",
+                   "--output-dir", str(output_dir), "--repeats", str(repeats),
+                   *(chess_args or [])]
     else:
         raise ValueError(f"unsupported benchmark kind {kind}")
 
@@ -352,7 +360,7 @@ def run_profile(
 
     if kind == "core-single":
         result = parse_core_single(log_path)
-    elif kind in {"core-scale", "core-scale-streams", "query-forward"}:
+    elif kind in {"core-scale", "core-scale-streams", "query-forward", "chess-environment"}:
         assert result_json is not None
         result = json.loads(result_json.read_text(encoding="utf-8"))
         if kind == "core-scale":
@@ -384,34 +392,38 @@ def run_suite(args: argparse.Namespace) -> int:
 
     receipt_dir = Path(args.receipt_dir).resolve()
     receipt_dir.mkdir(parents=True, exist_ok=True)
-    core = Path(args.core or os.environ.get("LAPLACE_CORE", DEFAULT_CORE)).resolve()
-    t0 = Path(args.t0 or os.environ.get("LAPLACE_T0", DEFAULT_T0)).resolve()
-    if not core.is_file():
-        raise SystemExit(f"built core library not found: {core}")
-    if not t0.is_file():
-        raise SystemExit(f"built T0 perfcache not found: {t0}")
-
-    env = exact_env(core, t0)
     selected = suites[args.suite]
     source_sha = git_sha()
-    artifact_identity = {
-        "repository_sha": source_sha,
-        "core_library": str(core),
-        "core_sha256": sha256(core),
-        "t0_perfcache": str(t0),
-        "t0_sha256": sha256(t0),
-    }
+    artifact_identity: dict[str, Any] = {"repository_sha": source_sha}
+    needs_core = any(profiles[name]["kind"] != "chess-environment"
+                     for name in selected["profiles"])
+    env = dict(os.environ)
+    if needs_core:
+        core = Path(args.core or os.environ.get("LAPLACE_CORE", DEFAULT_CORE)).resolve()
+        t0 = Path(args.t0 or os.environ.get("LAPLACE_T0", DEFAULT_T0)).resolve()
+        if not core.is_file():
+            raise SystemExit(f"built core library not found: {core}")
+        if not t0.is_file():
+            raise SystemExit(f"built T0 perfcache not found: {t0}")
+        env = exact_env(core, t0)
+        artifact_identity.update({"core_library": str(core), "core_sha256": sha256(core),
+                                  "t0_perfcache": str(t0), "t0_sha256": sha256(t0)})
     (receipt_dir / "artifact-identities.json").write_text(
         json.dumps(artifact_identity, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
     results = []
+    chess_args = []
+    for name in ("stockfish", "cutechess", "cpu_budget", "memory_mib", "laplace_uci", "reserve_cpus", "max_seconds", "case_timeout"):
+        value = getattr(args, "chess_" + name, None)
+        if value is not None:
+            chess_args.extend(["--" + name.replace("_", "-"), str(value)])
     started = time.time_ns()
     for profile_id in selected["profiles"]:
         results.append(run_profile(
             profiles[profile_id], receipt_dir, env, args.repeats,
             Path(args.corpus_dir).resolve(), Path(args.moby_path).resolve(),
-            args.scale_workers, args.database,
+            args.scale_workers, args.database, chess_args,
         ))
     finished = time.time_ns()
 
@@ -449,6 +461,14 @@ def main() -> int:
     run.add_argument("--core")
     run.add_argument("--t0")
     run.add_argument("--scale-workers", help="optional comma-separated scaling points")
+    run.add_argument("--chess-stockfish", help="Exact Stockfish executable for the chess suite")
+    run.add_argument("--chess-cutechess", help="Exact CuteChess executable for the chess suite")
+    run.add_argument("--chess-laplace-uci", help="Optional real Laplace UCI executable for paired interoperability checks")
+    run.add_argument("--chess-cpu-budget", type=float, help="CPU budget within the measured affinity and quota")
+    run.add_argument("--chess-memory-mib", type=int, help="Memory budget for the chess benchmark processes")
+    run.add_argument("--chess-reserve-cpus", type=float, help="CPU capacity reserved for other work before admitting chess benchmark points")
+    run.add_argument("--chess-max-seconds", type=float, help="Overall wall-time ceiling for chess calibration")
+    run.add_argument("--chess-case-timeout", type=float, help="Wall-time ceiling for each chess measurement process")
     args = parser.parse_args()
 
     registry = load_registry()

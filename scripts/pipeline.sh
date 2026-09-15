@@ -372,7 +372,8 @@ phase_build() {
   # is an `if(LAPLACE_CHESS_OPENINGS ...)` whose else branch is only a message(STATUS).
   # That is why the blob in share/laplace was a hand copy (owner ahart:ahart) instead of an
   # install product (laplace-runner group, install perms) like t0 and highway.
-  local chess_openings="${LAPLACE_CHESS_OPENINGS:-$data_root/Games/Chess/openings}"
+  local chess_openings
+  chess_openings=$(fp_chess_openings_path)
   if [[ "$CLEAN_FIRST" -eq 0 && -d "$ROOT/build" ]] && fp_check build-native "$native_fp"; then
     echo "engine up-to-date — cmake configure/build skipped (fp ${native_fp:0:12})"
   else
@@ -979,11 +980,14 @@ phase_chess_lab() {
   # (Qt feature checks) dominates the cost. Skip the build only when
   # the fingerprint matches AND the installed binary actually exists — stamps
   # attest sources, never artifacts (the stale-.so lesson).
-  local fp bin="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess-cli"
-  fp=$(fp_compute external/cutechess scripts/bootstrap-chess-lab.sh scripts/install-stockfish.py deploy/linux/stockfish-release.json)
-  if fp_check chess-lab "$fp" && [[ -x "$bin" && -x "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/stockfish" ]]; then
-    python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" || return 1
-    echo "chess-lab inputs unchanged, Stockfish reverified and $bin present — skipping build"
+  local fp sf bin="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess-cli"
+  sf="$(python3 "$ROOT/scripts/install-stockfish.py" --print-path)" || return 1
+  fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json)
+  if fp_check chess-lab "$fp" && [[ -x "$bin" && -x "$sf" ]]; then
+    python3 "$ROOT/scripts/install-stockfish.py" || return 1
+    python3 "$ROOT/scripts/provision-cutechess.py" --source-dir "${LAPLACE_EXTERNAL:-/build/external}/cutechess" || return 1
+    python3 "$ROOT/scripts/provision-cutechess.py" --binary "$bin" || return 1
+    echo "chess-lab inputs unchanged; Stockfish, CuteChess and Qt reverified"
     return 0
   fi
   bash "$ROOT/scripts/bootstrap-chess-lab.sh" || return 1

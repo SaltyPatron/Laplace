@@ -493,7 +493,7 @@ internal static class ChessCommands
 
         Console.WriteLine($"lichess bot: depth {depth}, max {maxConcurrent} concurrent games, "
             + $"substrate {substrate}, speeds {(acceptSpeeds is null ? "all" : string.Join('+', acceptSpeeds))}");
-        Console.WriteLine($"  token: {token[..Math.Min(8, token.Length)]}…");
+        Console.WriteLine("  token configured; validating Lichess account and bot permissions.");
         Console.WriteLine("  Ctrl-C to stop (finishes in-flight games first).");
 
         var cts = new CancellationTokenSource();

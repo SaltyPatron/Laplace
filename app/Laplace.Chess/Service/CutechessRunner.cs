@@ -33,6 +33,56 @@ public sealed record CutechessOptions
     public int StockfishElo { get; init; } = 2000;
     public bool StockfishLimitStrength { get; init; } = true;
 
+    // Null deliberately delegates to the installed engine's advertised default.
+    // These apply only to Stockfish; Laplace's UCI surface does not advertise them.
+    public int? StockfishThreads { get; init; }
+    public int? StockfishHashMb { get; init; }
+    public string? StockfishNumaPolicy { get; init; }
+    public string? StockfishSyzygyPath { get; init; }
+
+    // Stockfish 19 src/engine.cpp and src/engine.h advertise these spin ranges.
+    public static int MaximumStockfishThreads => Math.Max(1024, 4 * Environment.ProcessorCount);
+    public static int MaximumStockfishHashMb => Environment.Is64BitProcess ? 33554432 : 2048;
+
+    public CutechessOptions WithStockfishConfiguration(IReadOnlyDictionary<string, string> config)
+    {
+        string? Text(string key) => config.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw)
+            ? raw.Trim() : null;
+        int? Number(string key)
+        {
+            var raw = Text(key);
+            if (raw is null) return null;
+            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+                throw new ArgumentException($"{key} must be a whole number.", key);
+            return value;
+        }
+        var result = this with
+        {
+            StockfishThreads = Number("stockfishThreads"),
+            StockfishHashMb = Number("stockfishHashMb"),
+            StockfishNumaPolicy = Text("stockfishNumaPolicy"),
+            StockfishSyzygyPath = Text("stockfishSyzygyPath"),
+        };
+        result.ValidateStockfishConfiguration();
+        return result;
+    }
+
+    public void ValidateStockfishConfiguration()
+    {
+        if (StockfishThreads is { } threads && (threads < 1 || threads > MaximumStockfishThreads))
+            throw new ArgumentOutOfRangeException(nameof(StockfishThreads),
+                $"Stockfish threads must be between 1 and {MaximumStockfishThreads} per game.");
+        if (StockfishHashMb is { } hash && (hash < 1 || hash > MaximumStockfishHashMb))
+            throw new ArgumentOutOfRangeException(nameof(StockfishHashMb),
+                $"Stockfish hash must be between 1 and {MaximumStockfishHashMb} MiB per game.");
+        if (!string.IsNullOrWhiteSpace(StockfishNumaPolicy)
+            && StockfishNumaPolicy.Trim() is not ("auto" or "system" or "hardware" or "none"))
+            throw new ArgumentException("Stockfish NUMA policy must be auto, system, hardware, or none.",
+                nameof(StockfishNumaPolicy));
+        if (StockfishSyzygyPath?.Any(char.IsControl) == true)
+            throw new ArgumentException("Stockfish Syzygy path cannot contain control characters.", nameof(StockfishSyzygyPath));
+    }
+
     /// <summary>
     /// Use a deterministic opening suite and play every opening twice with colours swapped.
     /// This is on by default because repeating startpos is not a meaningful multi-game gauntlet.
@@ -116,6 +166,7 @@ public static partial class CutechessRunner
     /// </summary>
     public static IReadOnlyList<string> BuildArguments(CutechessOptions o, string laplaceUci, string stockfish)
     {
+        o.ValidateStockfishConfiguration();
         // Every key=value MUST be its own argv token: the old single-token form
         // ("name=Stockfish cmd=... arg=\"setoption ...\"") reached cutechess-cli as ONE
         // engine parameter whose value was the rest of the string, so the engine never
@@ -130,6 +181,14 @@ public static partial class CutechessRunner
         };
         if (o.StockfishLimitStrength)
             args.Add($"option.UCI_Elo={o.StockfishElo}");
+        if (!string.IsNullOrWhiteSpace(o.StockfishNumaPolicy))
+            args.Add($"option.NumaPolicy={o.StockfishNumaPolicy.Trim()}");
+        if (o.StockfishThreads is { } threads)
+            args.Add($"option.Threads={threads.ToString(CultureInfo.InvariantCulture)}");
+        if (o.StockfishHashMb is { } hash)
+            args.Add($"option.Hash={hash.ToString(CultureInfo.InvariantCulture)}");
+        if (!string.IsNullOrWhiteSpace(o.StockfishSyzygyPath))
+            args.Add($"option.SyzygyPath={o.StockfishSyzygyPath.Trim()}");
         args.Add("-each");
 
         if (o.Depth > 0)
@@ -207,6 +266,7 @@ public static partial class CutechessRunner
     public static async IAsyncEnumerable<ChessLabEvent> RunAsync(
         CutechessOptions options, [EnumeratorCancellation] CancellationToken ct)
     {
+        options.ValidateStockfishConfiguration();
         if (options.PairOpenings && (options.Rounds < 2 || (options.Rounds & 1) != 0))
         {
             yield return new ChessLabLogEvent("error",
@@ -390,7 +450,10 @@ public static partial class CutechessRunner
             ? $"UCI_Elo capped at {o.StockfishElo}"
             : "UCI_Elo unrestricted (match depth/time still applies)";
         string schedule = o.PairOpenings ? ", paired colour-swapped openings" : ", repeated startpos schedule";
-        return $"cutechess: {o.Rounds} games, {clock}, Stockfish {strength}{schedule}{parallel}";
+        string resources = $", Stockfish per game: Threads={o.StockfishThreads?.ToString(CultureInfo.InvariantCulture) ?? "engine default"}"
+            + $", Hash={o.StockfishHashMb?.ToString(CultureInfo.InvariantCulture) ?? "engine default"} MiB"
+            + $", NumaPolicy={o.StockfishNumaPolicy ?? "engine default"}, SyzygyPath={o.StockfishSyzygyPath ?? "engine default"}";
+        return $"cutechess: {o.Rounds} games, {clock}, Stockfish {strength}{resources}{schedule}{parallel}";
     }
 
     /// <summary>

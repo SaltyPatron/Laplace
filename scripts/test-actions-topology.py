@@ -25,7 +25,12 @@ class ActionsAuthorityTests(unittest.TestCase):
     def test_main_has_one_product_job_and_one_mutation_authority(self):
         workflow = load(MAIN)
         self.assertEqual("laplace-substrate-lifecycle", workflow["concurrency"]["group"])
-        self.assertEqual(["product"], list(workflow["jobs"]))
+        self.assertEqual(["product", "chess_environment"], list(workflow["jobs"]))
+        calibration = workflow["jobs"]["chess_environment"]
+        self.assertEqual("product", calibration["needs"])
+        self.assertEqual("./.github/workflows/benchmark-evidence.yml", calibration["uses"])
+        self.assertIn("needs.product.outputs", calibration["if"])
+        self.assertEqual("chess", calibration["with"]["suite"])
         product = workflow["jobs"]["product"]
         command = commands(product)
         self.assertIn('bash scripts/product-ci.sh "$LAPLACE_STAGE"', command)

@@ -76,6 +76,14 @@ jobs:
     name: Product — prove, activate and verify
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
+    # This job releases the workspace before the dependent reusable benchmark
+    # acquires it. The workflow-level lifecycle lock remains a different group.
+    concurrency:
+      group: laplace-shared-workspace
+      cancel-in-progress: false
+    outputs:
+      chess_benchmark_ready: ${{ steps.chess_benchmark_gate.outputs.ready }}
+      activated_ref: ${{ steps.chess_benchmark_gate.outputs.source_sha }}
     steps:
       - name: Checkout exact revision without discarding persistent build cache
         env:
@@ -119,12 +127,81 @@ jobs:
 
       - name: Fast source/tooling proof and installed-product reconciliation
         if: env.LAPLACE_FAST_ONLY == '1'
-        run: bash scripts/product-ci.sh reconcile
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          # Both repositories deploy on this host; GitHub concurrency is scoped
+          # to one repository. Do not pass the lock descriptor to service children.
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            bash scripts/product-ci.sh reconcile
 
       - name: Verify changed recursive proof against the live product
         if: env.LAPLACE_FAST_ONLY == '1' && env.LAPLACE_VERIFY_RECURSIVE_PROOF == '1'
-        run: python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"
 
       - name: Run full product lifecycle
         if: env.LAPLACE_FAST_ONLY != '1'
-        run: bash scripts/product-ci.sh "$LAPLACE_STAGE"
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          # Hold the host lock through source builds, activation and verification;
+          # release it before the dependent chess measurement job can start.
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            bash scripts/product-ci.sh "$LAPLACE_STAGE"
+
+      - name: Record successful activation for installed chess measurement
+        id: chess_benchmark_gate
+        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'ready=true\n' >> "$GITHUB_OUTPUT"
+          printf 'source_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Retain bounded live recursive proof counterexamples
+        if: always()
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          PROOF_OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product"
+          args=(
+            --checkout "$GITHUB_WORKSPACE"
+            --output "$evidence"
+            --expected-source "$TARGET_SHA"
+            --proof-outcome "$PROOF_OUTCOME"
+          )
+          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
+            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
+          fi
+          python3 scripts/collect-recursive-proof-evidence.py "${args[@]}"
+
+      - name: Upload retained live recursive proof diagnostics
+        if: always()
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-product
+          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product/
+          if-no-files-found: error
+          retention-days: 30
+
+  chess_environment:
+    name: Activated host — chess capabilities and performance
+    needs: product
+    if: needs.product.result == 'success' && needs.product.outputs.chess_benchmark_ready == 'true'
+    uses: ./.github/workflows/benchmark-evidence.yml
+    with:
+      target_ref: ${{ needs.product.outputs.activated_ref }}
+      suite: chess
+      repeats: "3"
+      reserve_logical_cpus: "2"
+      allow_saturation: false

@@ -405,7 +405,7 @@ public sealed class ChessSyzygyTests
             File.WriteAllBytes(Path.Combine(tables, "KQvK.rtbw"), [0]);
             var probe = ChessLabPaths.SyzygyDir;
             Assert.True(probe.Found);
-            Assert.Equal(tables, probe.Path);
+            Assert.Equal(Path.Combine(root, "Games", "Chess", "syzygy"), probe.Path);
         }
         finally
         {

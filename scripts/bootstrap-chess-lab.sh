@@ -4,6 +4,7 @@
 # Humans: do not run this; run sudo bash scripts/setup-host.sh once, then CI.
 
 set -euo pipefail
+umask 0002
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -12,6 +13,9 @@ RUNNER_USER="${RUNNER_USER:-laplace-runner}"
 RUNNER_GROUP="${RUNNER_GROUP:-laplace-runner}"
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+QT_ROOT="${LAPLACE_QT_ROOT:-${LAPLACE_DEPS_PREFIX:-/opt/laplace}/qt}"
+WORK="${LAPLACE_WORK_ROOT:-/build/laplace/work}/chess-tools"
+export TMPDIR="$WORK" TMP="$WORK" TEMP="$WORK"
 # Build tree beside the source on /build, not under $PREFIX on the database device.
 # It defaulted to $PREFIX/build-cutechess (nvme1n1) and its CMakeCache pinned
 # CMAKE_HOME_DIRECTORY to the OLD source path, so the first run after the source
@@ -28,94 +32,61 @@ say()    { echo; echo "=== $1 ==="; }
 
 run_as_owner() {
   if [ "$(id -u)" -eq 0 ]; then
-    sudo -u "$RUNNER_USER" -H "$@"
+    local key
+    local -a build_env=("LAPLACE_EXTERNAL=$EXTERNAL" "TMPDIR=$WORK" "TMP=$WORK" "TEMP=$WORK")
+    for key in LAPLACE_STOCKFISH_SOURCE LAPLACE_STOCKFISH_COMP LAPLACE_STOCKFISH_ARCH \
+      LAPLACE_STOCKFISH_JOBS LAPLACE_BUILD_JOBS LAPLACE_DEPS_PREFIX CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS CC CXX; do
+      if [[ -v "$key" ]]; then build_env+=("$key=${!key}"); fi
+    done
+    sudo -u "$RUNNER_USER" -H env "${build_env[@]}" "$@"
   else
     "$@"
   fi
 }
 
-install_apt_deps() {
-  say "apt: Qt6 (Stockfish comes from the pinned upstream release)"
-  if [ "$(id -u)" -ne 0 ]; then
-    yellow "not root — skipping apt (installed by setup-host Layer 0)"
-    return 0
-  fi
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    qt6-base-dev qt6-base-dev-tools \
-    libqt6svg6-dev libqt6core5compat6-dev \
-    libqt6svg6 libqt6core5compat6 \
-    >/dev/null
-  green "✓ Qt6 present"
-}
-
 resolve_stockfish() {
-  test -x "$CC_BIN_DIR/stockfish" || return 1
-  echo "$CC_BIN_DIR/stockfish"
+  python3 "$SCRIPT_DIR/install-stockfish.py" --print-path
 }
 
 resolve_qt_bin() {
-  local p
-  for p in /usr/lib/qt6/bin /usr/lib/x86_64-linux-gnu/qt6/bin /usr/lib/x86_64-linux-gnu; do
-    if [ -d "$p" ]; then
-      echo "$p"
-      return 0
-    fi
-  done
-  return 1
-}
-
-resolve_cutechess_src() {
-  local p
-  for p in "$EXTERNAL/cutechess" "$REPO_ROOT/external/cutechess"; do
-    if [ -f "$p/CMakeLists.txt" ]; then
-      echo "$p"
-      return 0
-    fi
-  done
-  return 1
+  local version
+  version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["qt_version"])' "$REPO_ROOT/deploy/cutechess-release.json")"
+  [ -x "$QT_ROOT/$version/gcc_64/bin/qmake" ] || return 1
+  echo "$QT_ROOT/$version/gcc_64/bin"
 }
 
 ensure_dirs() {
   say "dirs under $PREFIX"
   if [ "$(id -u)" -eq 0 ]; then
-    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" \
-      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR" "$APP_DIR/logs"
-    install -d -m 2770 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$PREFIX/secrets"
+    install -d -m 2775 -g "$RUNNER_GROUP" \
+      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK"
+    install -d -m 2770 -g "$RUNNER_GROUP" "$PREFIX/secrets"
   else
-    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR/logs" "$PREFIX/secrets"
+    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK"
     chmod 2770 "$PREFIX/secrets" 2>/dev/null || true
   fi
 }
 
 build_cutechess() {
-  say "build cutechess-cli → $CC_BIN_DIR/cutechess-cli"
-  local src
-  if ! src="$(resolve_cutechess_src)"; then
-    red "cutechess source missing under $EXTERNAL/cutechess — sync-external / setup-host first"
-    return 1
-  fi
-  if ! resolve_qt_bin >/dev/null; then
-    red "Qt6 missing — re-run: sudo bash scripts/setup-host.sh"
-    return 1
-  fi
-
-  run_as_owner cmake -S "$src" -B "$CC_BUILD" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DWITH_TESTS=OFF
+  say "update and build CuteChess from $EXTERNAL/cutechess"
+  local src qt
+  src="$(run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --source-dir "$EXTERNAL/cutechess")"
+  qt="$(run_as_owner python3 "$SCRIPT_DIR/provision-chess-qt.py" --root "$QT_ROOT" --work "$WORK")"
+  # --fresh removes only generated CMake cache metadata, preserving source and
+  # build outputs while admitting a source path/Qt SDK changed since last run.
+  run_as_owner cmake --fresh -S "$src" -B "$CC_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF -DCMAKE_PREFIX_PATH="$qt" \
+    -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
   run_as_owner cmake --build "$CC_BUILD" --target cli
-
-  local built
-  built="$(find "$CC_BUILD" -type f -name cutechess-cli -perm -111 2>/dev/null | head -1 || true)"
-  if [ -z "$built" ]; then
-    red "cutechess-cli not produced under $CC_BUILD"
+  run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "$CC_BUILD/cutechess-cli"
+  local staged
+  staged="$(mktemp "$CC_BIN_DIR/.cutechess-cli.XXXXXX")"
+  if install -m 0755 "$CC_BUILD/cutechess-cli" "$staged"; then
+    mv -Tf "$staged" "$CC_BIN_DIR/cutechess-cli"
+  else
+    rm -f "$staged"
     return 1
   fi
-  if [ "$(id -u)" -eq 0 ]; then
-    install -m 0755 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$built" "$CC_BIN_DIR/cutechess-cli"
-  else
-    install -m 0755 "$built" "$CC_BIN_DIR/cutechess-cli"
-  fi
-  green "✓ $CC_BIN_DIR/cutechess-cli"
 }
 
 write_api_env() {
@@ -159,9 +130,9 @@ write_api_env() {
   } >> "$ENV_FILE"
 
   if [ "$(id -u)" -eq 0 ]; then
-    chown "$RUNNER_USER:$RUNNER_GROUP" "$ENV_FILE"
+    chgrp "$RUNNER_GROUP" "$ENV_FILE"
     chmod 0640 "$ENV_FILE"
-    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$PREFIX/chess-lab-work"
+    install -d -m 2775 -g "$RUNNER_GROUP" "$PREFIX/chess-lab-work"
   else
     mkdir -p "$PREFIX/chess-lab-work"
   fi
@@ -179,7 +150,7 @@ verify() {
   local fail=0 sf qt
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
-  [ -x "$CC_BIN_DIR/cutechess-cli" ] || { red "✗ cutechess-cli"; fail=1; }
+  python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "$CC_BIN_DIR/cutechess-cli" || { red "✗ cutechess-cli / Qt runtime"; fail=1; }
   [ -n "$sf" ] || { red "✗ stockfish"; fail=1; }
   [ -n "$qt" ] || { red "✗ Qt6"; fail=1; }
   [ "$fail" -eq 0 ] || return 1
@@ -187,10 +158,9 @@ verify() {
 }
 
 main() {
-  install_apt_deps
   ensure_dirs
   build_cutechess
-  run_as_owner python3 "$SCRIPT_DIR/install-stockfish.py" --prefix "$PREFIX"
+  run_as_owner python3 "$SCRIPT_DIR/install-stockfish.py"
   write_api_env
   verify
 }

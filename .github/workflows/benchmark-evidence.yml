@@ -1,13 +1,60 @@
-name: Laplace — manual benchmark evidence
+name: Laplace — benchmark evidence
 
-# Dispatch-only by design. Long benchmarks are evidence/calibration inputs, not
-# commit/push/PR gates. The measured self-hosted host is shared with delivery, so
-# this workflow uses the same workspace concurrency authority and cannot overlap it.
+# Benchmarks run on explicit dispatch or after a successful product activation
+# through workflow_call. The measured host is shared with delivery, so this
+# workflow uses the product job's workspace lock and cannot overlap activation.
 # Scaling defaults preserve host headroom; destructive all-logical-CPU saturation
 # requires an explicit opt-in. The query suite is read-only but additionally
 # requires the installed content-versioned extension/execution binding to match
 # the exact source revision built by this run.
 on:
+  workflow_call:
+    inputs:
+      target_ref:
+        description: "activated repository ref/SHA to measure"
+        type: string
+        required: false
+        default: ""
+      suite:
+        description: "versioned benchmark suite"
+        type: string
+        required: false
+        default: chess
+      repeats:
+        description: "retained measured repeats per case"
+        type: string
+        required: false
+        default: "3"
+      scale_workers:
+        description: "optional core-scaling worker points"
+        type: string
+        required: false
+        default: ""
+      reserve_logical_cpus:
+        description: "CPU capacity reserved from the affinity/quota bounded chess grant"
+        type: string
+        required: false
+        default: "2"
+      allow_saturation:
+        description: "explicitly remove reserved headroom while retaining affinity/quota limits"
+        type: boolean
+        required: false
+        default: false
+      corpus_dir:
+        description: "core benchmark corpus root"
+        type: string
+        required: false
+        default: ""
+      moby_path:
+        description: "Moby Dick fixture path on the measured host"
+        type: string
+        required: false
+        default: "/vault/Data/test-data/text/moby_dick.txt"
+      force_rebuild:
+        description: "rebuild source artifacts for suites requiring them"
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
     inputs:
       target_ref:
@@ -20,24 +67,24 @@ on:
         type: choice
         required: true
         default: quick
-        options: [quick, throughput, core, scale, moby, query, all]
+        options: [quick, throughput, core, scale, moby, query, chess, all]
       repeats:
         description: "repeats per selected benchmark case/scaling point; all runs retained"
         type: string
         required: true
         default: "3"
       scale_workers:
-        description: "optional comma-separated worker points; blank derives serviceable points with reserved host headroom"
+        description: "optional core-scaling worker points; blank derives serviceable points with reserved host headroom"
         type: string
         required: false
         default: ""
       reserve_logical_cpus:
-        description: "logical CPUs reserved from the default managed-host scaling ceiling"
+        description: "CPU capacity reserved from the available managed-host ceiling; chess also accounts for affinity and cgroup quotas"
         type: string
         required: true
         default: "2"
       allow_saturation:
-        description: "explicitly allow scale points through every allowed logical CPU; isolated/saturation evidence only"
+        description: "explicitly remove reserved CPU headroom; affinity and cgroup quotas still bound chess measurements"
         type: boolean
         required: true
         default: false
@@ -74,7 +121,7 @@ jobs:
   benchmark:
     name: Measured host — versioned benchmark suite
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 180
+    timeout-minutes: ${{ inputs.suite == 'chess' && 30 || 180 }}
     steps:
       - name: Create immutable evidence directory first
         shell: bash
@@ -102,6 +149,7 @@ jobs:
           printf 'resolved_sha=%s\n' "$resolved" >> "$LAPLACE_BENCH_RECEIPT/request.env"
 
       - uses: ./.github/actions/setup-laplace-env
+        if: inputs.suite != 'chess'
 
       - name: Validate benchmark registry and dispatch inputs
         shell: bash
@@ -126,6 +174,7 @@ jobs:
           }
 
       - name: Resolve serviceable scaling plan
+        if: inputs.suite != 'chess'
         shell: bash
         env:
           REQUESTED_SCALE_WORKERS: ${{ inputs.scale_workers }}
@@ -142,6 +191,65 @@ jobs:
           [[ "$ALLOW_SATURATION" != true ]] || args+=(--allow-saturation)
           python3 scripts/benchmark_scale_plan.py "${args[@]}" \
             | tee "$LAPLACE_BENCH_RECEIPT/scale-plan.txt"
+
+      - name: Resolve configured chess executables and resource grant
+        if: inputs.suite == 'chess'
+        shell: bash
+        env:
+          RESERVE_LOGICAL_CPUS: ${{ inputs.reserve_logical_cpus }}
+          ALLOW_SATURATION: ${{ inputs.allow_saturation }}
+        run: |
+          set -euo pipefail
+          # Resolution reads the same service configuration as the dependency
+          # doctor. It never updates sources, installs tools or builds runtimes.
+          python3 - <<'PY'
+          import hashlib, importlib.util, json, os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('chess_configuration', 'scripts/check-chess-dependencies.py')
+          doctor = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(doctor)
+          prefix = Path(os.environ['LAPLACE_INSTALL_PREFIX'])
+          config = doctor.configuration(prefix)
+          external = Path(config.get('LAPLACE_EXTERNAL', '/build/external'))
+          source = Path(config.get('LAPLACE_STOCKFISH_SOURCE', str(external / 'stockfish')))
+          cute_default = (Path(config['LAPLACE_CUTECHESS_BUILD']) / 'cutechess-cli'
+                          if config.get('LAPLACE_CUTECHESS_BUILD') else prefix / 'bin/cutechess-cli')
+          selected = {
+              'stockfish': Path(config.get('LAPLACE_STOCKFISH', str(source / 'src/stockfish'))),
+              'cutechess': Path(config.get('LAPLACE_CUTECHESS', str(cute_default))),
+          }
+          identities = {}
+          exports = {}
+          for name, configured in selected.items():
+              binary = configured.resolve()
+              if '\n' in str(binary) or '\r' in str(binary):
+                  raise SystemExit(f'{name}: executable path contains a newline')
+              if not binary.is_file() or not os.access(binary, os.X_OK):
+                  raise SystemExit(f'{name}: configured executable is unavailable: {binary}; provision it before benchmarking')
+              digest = hashlib.sha256()
+              with binary.open('rb') as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              identities[name] = {'configured_path': str(configured), 'path': str(binary), 'sha256': digest.hexdigest()}
+              exports['LAPLACE_BENCH_CHESS_' + name.upper()] = str(binary)
+          uci = Path(os.environ.get('LAPLACE_UCI', str(prefix / 'app/laplace-uci')))
+          if uci.is_file() and os.access(uci, os.X_OK):
+              exports['LAPLACE_BENCH_CHESS_UCI'] = str(uci.resolve())
+          reserve = 0 if os.environ['ALLOW_SATURATION'] == 'true' else int(os.environ['RESERVE_LOGICAL_CPUS'])
+          exports['LAPLACE_BENCH_CHESS_RESERVE_CPUS'] = str(reserve)
+          exports['LAPLACE_BENCH_SCALE_MODE'] = 'saturation-allowed' if reserve == 0 and os.environ['ALLOW_SATURATION'] == 'true' else 'serviceable-headroom'
+          # The benchmark helper derives its actual ceiling and thread points
+          # from the intersection of affinity, cgroup quota and this reservation.
+          identities['resource_request'] = {'reserve_cpus': reserve, 'allow_saturation': os.environ['ALLOW_SATURATION'] == 'true'}
+          receipt = Path(os.environ['LAPLACE_BENCH_RECEIPT'])
+          (receipt / 'chess-executable-identities.json').write_text(json.dumps(identities, indent=2) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for name, value in exports.items():
+                  if '\n' in value or '\r' in value:
+                      raise SystemExit(f'{name}: invalid multiline environment value')
+                  handle.write(f'{name}={value}\n')
+          print(json.dumps(identities, indent=2))
+          PY
 
       - name: Record source, runner, hardware and accelerator inventory
         shell: bash
@@ -188,17 +296,22 @@ jobs:
           fi
 
       - name: Build exact revision without installing or mutating substrate state
+        if: inputs.suite != 'chess'
         shell: bash
         env:
           FORCE_REBUILD: ${{ inputs.force_rebuild }}
         run: |
           set -o pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
           args=()
           [[ "$FORCE_REBUILD" != true ]] || args+=(--force-rebuild)
-          bash scripts/pipeline.sh "${args[@]}" build 2>&1 \
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            bash scripts/pipeline.sh "${args[@]}" build 2>&1 \
             | tee "$LAPLACE_BENCH_RECEIPT/build.log"
 
       - name: Bind the benchmark to exact built native artifacts
+        if: inputs.suite != 'chess'
         shell: bash
         run: |
           set -euo pipefail
@@ -227,7 +340,10 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
             | tee "$LAPLACE_BENCH_RECEIPT/cli-release-build.log"
 
       - name: Execute versioned benchmark suite
@@ -249,11 +365,26 @@ jobs:
             --corpus-dir "$corpus"
             --moby-path "$MOBY_PATH"
             --database "$PGDATABASE"
-            --core "$LAPLACE_CORE"
-            --t0 "$LAPLACE_T0"
           )
-          [[ -z "$scale_workers" ]] || args+=(--scale-workers "$scale_workers")
-          python3 scripts/benchmark_suite.py "${args[@]}" 2>&1 \
+          if [[ "$SUITE" == chess ]]; then
+            args+=(
+              --chess-stockfish "$LAPLACE_BENCH_CHESS_STOCKFISH"
+              --chess-cutechess "$LAPLACE_BENCH_CHESS_CUTECHESS"
+              --chess-reserve-cpus "$LAPLACE_BENCH_CHESS_RESERVE_CPUS"
+              --chess-max-seconds 900
+              --chess-case-timeout 120
+            )
+            [[ -z "${LAPLACE_BENCH_CHESS_UCI:-}" ]] || args+=(--chess-laplace-uci "$LAPLACE_BENCH_CHESS_UCI")
+          else
+            args+=(--core "$LAPLACE_CORE" --t0 "$LAPLACE_T0")
+            [[ -z "$scale_workers" ]] || args+=(--scale-workers "$scale_workers")
+          fi
+          umask 0002
+          mkdir -p /build/laplace/work
+          # Laplace and Laplace-Refactor share this measured host. Keep their
+          # builds/deployments/calibrations out of each other's timing interval.
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            python3 scripts/benchmark_suite.py "${args[@]}" 2>&1 \
             | tee "$LAPLACE_BENCH_RECEIPT/suite.log"
 
       - name: Record post-run accelerator state
@@ -280,7 +411,12 @@ jobs:
             echo "- Runner: \`$RUNNER_NAME\`"
             echo "- Suite: \`${{ inputs.suite }}\`"
             echo "- Scale profile: \`${LAPLACE_BENCH_SCALE_MODE:-unknown}\`"
-            echo "- Scale workers: \`${LAPLACE_BENCH_SCALE_WORKERS:-unknown}\`"
+            if [[ '${{ inputs.suite }}' == chess ]]; then
+              echo "- Reserved CPU capacity: \`${LAPLACE_BENCH_CHESS_RESERVE_CPUS:-unresolved}\`"
+              echo '- CPU affinity, quota, admitted thread points, runtime capabilities and measured results are recorded in the chess report.'
+            else
+              echo "- Scale workers: \`${LAPLACE_BENCH_SCALE_WORKERS:-unknown}\`"
+            fi
             echo "- Artifact: \`laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
             if [[ -f "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" ]]; then
               echo
@@ -329,11 +465,49 @@ jobs:
                           f"trace_rows={trace['trace_rows']} max_candidates={max_candidates} "
                           f"output_count={fp.get('output_count')} disposition={fp.get('disposition')}"
                       )
+              elif profile == 'chess-environment':
+                  print('- Capability and performance receipt: `chess-environment/report.json`')
+                  print('- Resolved executable hashes: `chess-executable-identities.json`')
+                  host = result.get('host', {})
+                  plan = result.get('plan', {})
+                  print(f"- Measured machine: {host.get('hostname', 'unreported')}")
+                  print(f"- CPU models: {', '.join(host.get('cpu_models', []))}")
+                  print(f"- Effective CPU capacity: {host.get('effective_cpu_capacity', 'unreported')}")
+                  print(f"- Cgroup CPU quota: {host.get('cgroup', {}).get('cpu_quota', 'unlimited or unavailable')}")
+                  print(f"- Admitted CPU budget: {plan.get('cpu_budget', 'unreported')}")
+                  print(f"- Thread points: {plan.get('threads', [])}")
+                  print(f"- Hash MiB / concurrency: {plan.get('hash_mib', 'unreported')} / {plan.get('concurrency', 'unreported')}")
+                  options = result.get('stockfish_identity', {}).get('uci_options', {})
+                  for option_name in ('Threads', 'Hash', 'UCI_Elo', 'SyzygyProbeLimit'):
+                      option = options.get(option_name)
+                      if option:
+                          print(f"- Stockfish {option_name} capability: {option.get('min')}–{option.get('max')}")
+                  cute_version = result.get('cutechess_identity', {}).get('version_text', '').splitlines()
+                  if cute_version:
+                      print(f"- CuteChess runtime: {'; '.join(cute_version[:2])}")
+                  nodes = [case.get('steady_nodes_per_second', {}).get('median')
+                           for case in result.get('stockfish_bench', []) if case.get('status') == 'complete']
+                  plies = [case.get('steady_plies_per_second', {}).get('median')
+                           for case in result.get('cutechess_matches', []) if case.get('status') == 'complete']
+                  nodes = [value for value in nodes if isinstance(value, (int, float))]
+                  plies = [value for value in plies if isinstance(value, (int, float))]
+                  if nodes:
+                      print(f"- Highest measured median Stockfish steady nodes/s: {max(nodes):,.0f}")
+                  if plies:
+                      print(f"- Highest measured median tournament steady plies/s: {max(plies):,.2f}")
+                  for goal in ('bench_suite_latency', 'search_node_throughput', 'bounded_tournament_throughput'):
+                      recommendation = result.get('recommendations', {}).get(goal)
+                      if recommendation:
+                          print(f"- {goal.replace('_', ' ')}: `{json.dumps(recommendation, sort_keys=True)}`")
               if item.get('rapl_energy'):
                   energy = sum(x['energy_uj'] for x in item['rapl_energy']) / 1e6
                   print(f"- summed RAPL-domain energy: {energy:.3f} J (not wall energy; domains may overlap)")
               print()
           PY
+            fi
+            if [[ -f "$LAPLACE_BENCH_RECEIPT/chess-environment/report.md" ]]; then
+              echo
+              cat "$LAPLACE_BENCH_RECEIPT/chess-environment/report.md"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
