@@ -126,7 +126,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             facts.AddAttestation(Fact(input, alternatePredicate, definition));
             await Apply(facts.Build());
             await AssertNoCurrentParseOrInvocation(promptRoot);
-            Receipt absent = await Forward(prompt);
+            Receipt absent = await Forward(prompt, throughWordNetSense);
             Assert.False(absent.Complete);
             Assert.Empty(absent.Emitted);
 
@@ -137,14 +137,14 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             {
                 // A witnessed surface sense and an existing typed synset are
                 // insufficient without the source-observed connecting relation.
-                Receipt disconnected = await Forward(prompt);
+                Receipt disconnected = await Forward(prompt, throughWordNetSense);
                 Assert.False(disconnected.Complete);
                 Assert.Empty(disconnected.Emitted);
                 await AssertNoCurrentParseOrInvocation(promptRoot);
                 await Apply(new SubstrateChangeBuilder(source, "operational-execution-sense-bridge/" + scope)
                     .AddAttestation(Fact(sense, isSenseOf, input)).Build());
             }
-            Receipt original = await Forward(prompt);
+            Receipt original = await Forward(prompt, throughWordNetSense);
             Assert.True(original.Complete, original.Disposition);
             Assert.Equal(answer, Assert.Single(original.Emitted));
             Assert.Equal(promptRoot, original.Root);
@@ -174,7 +174,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             }
             await Apply(new SubstrateChangeBuilder(source, "operational-execution-replacement/" + scope)
                 .AddAttestation(Fact(input, firstPredicate, changedAnswer)).Build());
-            Receipt changed = await Forward(prompt);
+            Receipt changed = await Forward(prompt, throughWordNetSense);
             Assert.True(changed.Complete, changed.Disposition);
             Assert.Equal(changedAnswer, Assert.Single(changed.Emitted));
 
@@ -184,7 +184,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             Assert.NotEqual(first.Shape.Id, second.Shape.Id);
             Assert.NotEqual(first.File, second.File);
             await AssertPersistedContract(second.Shape, second.File);
-            Receipt alternatives = await Forward(prompt);
+            Receipt alternatives = await Forward(prompt, throughWordNetSense);
             Assert.False(alternatives.Complete);
             Assert.Equal("ambiguous", alternatives.Disposition);
             Assert.Empty(alternatives.Emitted);
@@ -199,7 +199,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                 retract.Parameters.AddWithValue(first.File.ToBytes());
                 Assert.Equal(1, await retract.ExecuteNonQueryAsync());
             }
-            Receipt replacement = await Forward(prompt);
+            Receipt replacement = await Forward(prompt, throughWordNetSense);
             Assert.True(replacement.Complete, replacement.Disposition);
             Assert.Equal(definition, Assert.Single(replacement.Emitted));
             Assert.NotEqual(original.ProgramId, replacement.ProgramId);
@@ -214,6 +214,8 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                         schema = "laplace.operational-source-execution-proof/v1", disposition = "complete",
                         candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"),
                         prompt, root_id = Hex(promptRoot), input_surface_id = Hex(inputSurface),
+                        execution_defaults = new { steps = 128, max_stride = 5, spread = 0.6, top_k = 10,
+                            hops = 2, fanout = 8, seed_recipe = "hash128_lo(blake3(prompt UTF8))", prior_frontier = "NULL" },
                         sense_id = Hex(sense), synset_id = Hex(input),
                         exemplar_parse_id = Hex(parse), shape_id = Hex(first.Shape.Id),
                         shape_file_id = Hex(first.File), program_id = Hex(original.ProgramId),
@@ -447,11 +449,14 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     private sealed record Receipt(Hash128[] Emitted, bool Complete, string Disposition, Hash128 ProgramId,
         Hash128 Root, int Required, int Satisfied, int Remaining);
 
-    private async Task<Receipt> Forward(string prompt)
+    private async Task<Receipt> Forward(string prompt, bool ordinaryDefaults)
     {
         await using var command = pg.DataSource.CreateCommand(
             "SELECT event,entity,completion,disposition,program_id,root_id,required_obligations,satisfied_obligations,remaining_required "
-            + "FROM generation.forward_program($1,2,0,0.0,16,7,2,256,NULL,NULL) ORDER BY step");
+            + (ordinaryDefaults
+                ? "FROM generation.forward_program($1,128,5,0.6,10,"
+                    + "laplace.hash128_lo(public.laplace_hash128_blake3(convert_to($1,'UTF8'))),2,8,NULL,NULL) ORDER BY step"
+                : "FROM generation.forward_program($1,2,0,0.0,16,7,2,256,NULL,NULL) ORDER BY step"));
         command.Parameters.AddWithValue(prompt);
         await using var rows = await command.ExecuteReaderAsync();
         var emitted = new List<Hash128>();
