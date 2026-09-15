@@ -20,3 +20,45 @@ jobs:
           fetch-depth: 1
       - name: Enforce source-tree hygiene and strong secret signatures
         run: python3 scripts/repo-hygiene-gate.py
+
+  stop-superseded-lifecycle:
+    if: github.event_name == 'pull_request' && github.event.action == 'synchronize' && github.event.pull_request.number == 1590 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/shared-ci-phases-operational-delivery-20260915'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Stop the identified lifecycle superseded by this PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY_STOP'
+          import json, os, urllib.request
+          base = 'https://api.github.com/repos/SaltyPatron/Laplace'
+          run_id = 35010471795
+          def request(path, method='GET'):
+              req = urllib.request.Request(base + path, method=method, headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28'})
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  raw = response.read()
+                  return json.loads(raw) if raw else None
+          run = request(f'/actions/runs/{run_id}')
+          if run['status'] == 'completed':
+              print('Superseded lifecycle already completed.')
+              raise SystemExit(0)
+          if run['head_sha'] != '4da148f55608ec27b31d904044f5d543b76d6297':
+              raise SystemExit('Unexpected run source; no cancellation.')
+          jobs = request(f'/actions/runs/{run_id}/jobs?per_page=100')['jobs']
+          job = next((item for item in jobs if item['id'] == 104521376283), None)
+          if job is None:
+              raise SystemExit('Unexpected job; no cancellation.')
+          steps = {item['name']: item for item in job['steps']}
+          if steps.get('Run full product lifecycle', {}).get('status') != 'in_progress':
+              print('Superseded lifecycle is no longer active; preserve subsequent delivery.')
+              raise SystemExit(0)
+          request(f'/actions/runs/{run_id}/cancel', 'POST')
+          print(f'Cancellation requested for superseded lifecycle {run_id}; replacement is PR 1590.')
+          PY_STOP
