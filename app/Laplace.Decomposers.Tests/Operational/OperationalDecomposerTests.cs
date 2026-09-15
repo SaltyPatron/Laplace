@@ -160,6 +160,8 @@ public sealed class OperationalDecomposerTests
         var builder = new SubstrateChangeBuilder(OperationalSource.SourceId, "contract-file");
         Hash128 file = unit.DrainInto(builder, SourceTrust.SubstrateMandate, null);
         handler.WalkWitness(record, file, builder, unit);
-        return (file, builder.Build());
+        SubstrateChange change = builder.Build();
+        Assert.Equal(file, change.Metadata.FileId);
+        return (file, change);
     }
 }
