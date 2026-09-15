@@ -174,6 +174,8 @@ physical artifact enumeration
 
 This common spine is important, but “uses the shared pipeline somewhere” is not sufficient proof that every source obeys the execution-grain law. Source-specific caller loops, per-record probes, private commit loops or per-element managed/native/database crossings remain architecture defects where they exist.
 
+`OperationalDecomposer` admits the selected original invention and binding specification artifacts through the shared full-source native grammar/file pipeline under `SubstrateMandate` trust. The build copies their exact source bytes and preserves their repository paths beneath `seeds/operational/`; grammar, lexical composition and file provenance remain inspectable. This source does not replace the contracts with authored summaries or manufacture lexical instruction aliases. Source admission and execution of an ISA program are separate implementation requirements. See `seeds/operational/README.md` for the selected artifacts and ingestion command.
+
 ---
 
 ## 6. Universal execution grain
@@ -265,7 +267,11 @@ Its returned trace/receipt contains fields including root id, candidate/context/
 
 `extension/laplace_substrate/sql/functions/generation/walk_text.sql.in` makes `generation.forward_text(...)` invoke that canonical program once and only realize output after a completed semantic act exists. `converse.forward_turn(...)` supplies prior session turn/content identities as prior frontier state rather than rendering a transcript and reparsing it. `converse.chat(...)` currently projects the canonical forward-turn surface for normal chat.
 
-This is materially stronger than the old “pick an n-gram then run a walk” description.
+Naming, sense and frame connections in the active query evidence resolve candidate identities. They do not establish an instruction or assign request/operand roles. The initial query is constrained only by an explicit caller relation mask.
+
+The explicit bound relation-read reader in `prompt_intent.h` requires source-attributed `CALLS` and `HAS_INPUT` statements about the exact current request root, sharing one source and the invocation context explicitly supplied by the caller. The eleven-argument `generation.forward_program` overload takes that required context and delegates to the same native body as the existing ten-argument entry point. Here `CALLS` declares application of a predicate independently to each member of an input set; its object is a relation ID, not an ISA opcode. This contract does not encode ordered argument slots or repeated instructions. Declared input IDs can be semantic concepts reached through witnessed naming/sense bindings rather than literal surface constituents. The result is computed through the exact declared relation against those semantic IDs. Contract witnesses, source/context, predicate and input bindings participate in the program fingerprint. Competing contracts retain ambiguity, and completion requires the complete declared input identity set to be satisfied, including when distinct inputs share a surface occurrence.
+
+Ordinary chat does not obtain an invocation context from a matching content string, alias or historical lesson. Deriving an executable interpretation for a novel natural-language request still requires a native consumer of witnessed structural, semantic-role and discourse constraints. Unicode surfaces and rendered languages retain their own content identities while converging through typed evidence on language-independent concept, predicate and program identities. Preserving the original ISA documents makes that source available; it does not itself implement the missing interpretation machinery.
 
 ### What is not yet proved by the existence of this entry point
 

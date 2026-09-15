@@ -72,6 +72,17 @@ restore_foundation_if_requested() {
   fi
 }
 
+seed_operational_memory() {
+  # The versioned operational source ships with this executable generation.
+  # Its per-file content completion skips unchanged artifacts; do not use
+  # --force/ReObservePresent and turn a deployment into another witness.
+  if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+    return 0
+  fi
+  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+  bash scripts/ingest-source.sh operational
+}
+
 reconcile_installed_product() {
   # Fast source/tooling path: prove installed structure and application health only.
   # Never build and never seed. Corpus restoration is an explicit operator choice.
@@ -158,6 +169,7 @@ fi
 
 run_install_and_db
 restore_foundation_if_requested
+seed_operational_memory
 [[ "$stage" == deploy ]] && exit 0
 
 if [[ "$stage" == integrate ]]; then

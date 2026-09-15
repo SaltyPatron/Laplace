@@ -55,6 +55,7 @@ typedef struct Candidate
     EvidenceSummary query;
     EvidenceSummary query_traversal;
     EvidenceSummary projection;
+    bool intent_result;
 } Candidate;
 
 typedef struct CandidateIndex
@@ -323,19 +324,17 @@ propagate_candidate_origins(HTAB *origins, HTAB *candidate_index,
                             const LaplacePromptIntent *intent,
                             MemoryContext owner)
 {
+    (void) intent;
     for (int i = 0; i < count; ++i)
     {
         const LaplaceQueryChannel *channel = &channels[i];
         if (!hash_search(candidate_index, &channel->candidate, HASH_FIND, NULL))
             continue;
         if ((!channel->outbound && !relation_can_traverse_reverse(&channel->relation)) ||
-            !(walk_edge_score(channel->relation, channel->rating, channel->rd) > 0.0))
+            !(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0) ||
+            laplace_prompt_contract_relation(&channel->relation))
             continue;
         origin_merge(origins, &channel->candidate, &channel->anchor, owner);
-        if (intent && intent->operator_origins &&
-            laplace_prompt_intent_has_relation(intent, &channel->relation))
-            origin_add_occurrences(origins, &channel->candidate,
-                                   intent->operator_origins, owner);
     }
 }
 
@@ -484,7 +483,7 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
         if (!found)
             MemSet(&entry->summary, 0, sizeof(entry->summary));
 
-        sign = walk_edge_score(channel->relation, channel->rating, channel->rd);
+        sign = laplace_walk_edge_weight(channel->rating, channel->rd);
         if (sign > 0.0 && isfinite(sign))
         {
             cover_origins(coverage, origins, channel, 1,
@@ -670,9 +669,35 @@ static bool
 candidate_is_intent_result(const Candidate *candidate,
                            const LaplacePromptIntent *intent)
 {
-    return intent && candidate && candidate->query_traversal.has_positive &&
-           laplace_prompt_intent_has_relation(
-               intent, &candidate->query_traversal.positive.relation);
+    return intent && !intent->ambiguous && candidate && candidate->intent_result;
+}
+
+static bool
+candidate_can_output(const Candidate *candidate, const LaplacePromptIntent *intent)
+{
+    if (intent && intent->explicit_invocation)
+        return candidate_is_intent_result(candidate, intent);
+    return candidate->sequence_occurrences > 0 || candidate->projection.has_positive ||
+           candidate_is_intent_result(candidate, intent);
+}
+
+static bool
+relation_allowed_by_output_scope(const hash128_t *relation, ArrayType *scope)
+{
+    ArrayIterator iterator;
+    Datum value;
+    bool isnull, found = false;
+    if (!scope || ArrayGetNItems(ARR_NDIM(scope), ARR_DIMS(scope)) == 0) return true;
+    iterator = array_create_iterator(scope, 0, NULL);
+    while (array_iterate(iterator, &value, &isnull))
+    {
+        hash128_t id;
+        if (isnull) continue;
+        id = datum_to_hash128(value);
+        if (hash128_eq(&id, relation)) { found = true; break; }
+    }
+    array_free_iterator(iterator);
+    return found;
 }
 
 static int
@@ -832,7 +857,8 @@ emit_terminal(ReturnSetInfo *result, int32 step, const LaplacePromptInput *input
 static Datum
 walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                    int semantic_hop_limit, bool trace,
-                   const LaplacePromptIntent *intent)
+                   const LaplacePromptIntent *intent,
+                   const hash128_t *invocation_context)
 {
     ReturnSetInfo *result = (ReturnSetInfo *) fcinfo->resultinfo;
     ArrayType *context_array;
@@ -853,6 +879,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     LaplaceQueryState *query_state = NULL;
     LaplaceQueryState *output_state = NULL;
     LaplaceCognitionProgram *cognition = NULL;
+    LaplacePromptIntent coupled_intent = {0};
     HTAB *route_seen;
     HTAB *origins;
     int next_origin = 0;
@@ -873,8 +900,6 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         frontier_array = PG_GETARG_ARRAYTYPE_P(6);
     if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
         relation_types = PG_GETARG_ARRAYTYPE_P(7);
-    if (!relation_types && intent && intent->relations)
-        relation_types = intent->relations;
     fanout = PG_NARGS() > 8 && !PG_ARGISNULL(8) ? PG_GETARG_INT32(8) : 8;
     if (PG_NARGS() > 11 && !PG_ARGISNULL(11))
         output_relations = PG_GETARG_ARRAYTYPE_P(11);
@@ -944,10 +969,58 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
     if (input)
     {
-        /* The Merkle root denotes this complete exact observation. Its
-         * provenance is therefore the union of the admitted prompt occurrence
-         * coordinates, not a synthetic unrelated seed. This lets a declared
-         * root-result relation close obligations from the whole prompt. */
+        /* COUPLE is unmasked unless the caller supplied a hard relation scope.
+         * Naming paths remain semantic candidates. Only an explicit applicable
+         * whole-observation contract can bind an executable operation. */
+        coupled_intent = laplace_prompt_intent_begin(input, walk_context);
+        for (;;)
+        {
+            int channel_count = 0;
+            const LaplaceQueryChannel *channels =
+                laplace_query_state_channels(query_state, &channel_count);
+            ArrayType *changed = laplace_prompt_intent_couple(
+                &coupled_intent, channels, channel_count);
+            int changed_count = ArrayGetNItems(ARR_NDIM(changed), ARR_DIMS(changed));
+            if (changed_count == 0 || semantic_hops >= semantic_hop_limit)
+            {
+                pfree(changed);
+                break;
+            }
+            /* One additional interpretation frontier costs one declared hop.
+             * Naming can be read in reverse without making asymmetric result
+             * relations traversable in reverse. No per-candidate SPI call. */
+            ArrayBuildState *next = NULL;
+            ArrayIterator changed_iterator = array_create_iterator(changed, 0, NULL);
+            Datum changed_value;
+            bool changed_null;
+            while (array_iterate(changed_iterator, &changed_value, &changed_null))
+            {
+                hash128_t id = datum_to_hash128(changed_value);
+                bool found;
+                hash_search(route_seen, &id, HASH_ENTER, &found);
+                origin_add_occurrences(origins, &id,
+                    laplace_prompt_intent_origins(&coupled_intent, &id), walk_context);
+                if (!found)
+                    next = accumArrayResult(next, changed_value, false, BYTEAOID, walk_context);
+            }
+            array_free_iterator(changed_iterator);
+            pfree(changed);
+            ++semantic_hops;
+            if (next)
+            {
+                ArrayType *next_ids = DatumGetArrayTypeP(makeArrayResult(next, walk_context));
+                laplace_query_state_extend_batch(query_state, next_ids, NULL);
+                pfree(next_ids);
+            }
+        }
+        if (invocation_context)
+            laplace_prompt_intent_compile(&coupled_intent, invocation_context, fanout);
+        /* An explicit output projection already declares its operation. Natural
+         * language alternatives cannot override that caller-owned contract. */
+        if (invocation_context || !output_relations ||
+            ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0)
+            intent = &coupled_intent;
+
         OriginEntry *root_origin = origin_get(origins, &input->root, true);
         for (int i = 0; i < context_length; ++i)
             root_origin->occurrences = bms_add_member(root_origin->occurrences, i);
@@ -955,12 +1028,16 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         const LaplaceQueryChannel *initial_channels =
             laplace_query_state_channels(query_state, &initial_channel_count);
         cognition = laplace_cognition_program_create(
-            input, context_length, initial_channels, initial_channel_count,
-            intent ? intent->operator_origins : NULL,
-            intent ? intent->relations : NULL);
+            input, context_length, initial_channels, initial_channel_count, intent);
+        for (int i = 0; i < semantic_hops; ++i)
+            laplace_cognition_program_note_route(cognition);
+        if (intent && intent->ambiguous)
+            laplace_cognition_program_finalize(cognition, LAPLACE_COGNITION_AMBIGUOUS);
+        else if (intent && intent->budget_exhausted)
+            laplace_cognition_program_finalize(cognition, LAPLACE_COGNITION_BUDGET_EXHAUSTED);
     }
 
-    if (output_relations &&
+    if (!invocation_context && output_relations &&
         ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) > 0)
     {
         ArrayType *output_operands;
@@ -1009,7 +1086,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     step_context = AllocSetContextCreate(walk_context, "forward query election",
                                          ALLOCSET_DEFAULT_SIZES);
 
-    for (int32 step = 1; step <= steps;)
+    for (int32 step = 1; step <= steps &&
+         !(intent && (intent->ambiguous || intent->budget_exhausted ||
+                      (intent->explicit_invocation && intent->relation_count == 0)));)
     {
         Candidate *candidates = NULL;
         int candidate_count = 0, candidate_capacity = 0;
@@ -1061,7 +1140,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
          * candidate, but it is not the final evidence field used to elect it. */
         query_proposals = evidence_summaries(query_state, false, origins, step_context);
 
-        if (input && (semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
+        if (input && ((intent && intent->relation_count > 0) ||
+                      semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
         {
             query_traversal_proposals = evidence_summaries(query_state, true, origins, step_context);
             HASH_SEQ_STATUS sequence;
@@ -1121,6 +1201,21 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         query_traversal_table = evidence_summaries_from_channels(
             query_channels, query_channel_count, true, origins, step_context);
 
+        /* Eligibility must inspect every exact typed cell. The strongest
+         * unrelated relation in the evidence summary cannot hide a supported
+         * requested operation to the same result identity. */
+        for (int i = 0; intent && i < query_channel_count; ++i)
+        {
+            const LaplaceQueryChannel *channel = &query_channels[i];
+            CandidateIndex *candidate = hash_search(candidate_index,
+                &channel->candidate, HASH_FIND, NULL);
+            if (candidate && laplace_prompt_intent_bound_operation(intent, channel) &&
+                relation_allowed_by_output_scope(&channel->relation, output_relations) &&
+                (channel->outbound || relation_can_traverse_reverse(&channel->relation)) &&
+                laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0)
+                candidates[candidate->index].intent_result = true;
+        }
+
         if (output_state)
         {
             projection_channels = laplace_query_state_candidate_evidence(
@@ -1147,8 +1242,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         /* Bind candidate ancestry once, before either ROUTE or SELECT. Typed
          * relations and exact structural continuations therefore feed the same
          * trace/election provenance without becoming the semantic completion
-         * certificate above. A compiled prompt operator contributes its exact
-         * cue occurrence only to candidates reached through that named relation. */
+         * certificate above. Explicit predicate applications track selected
+         * results for exact semantic input identities independently of ancestry. */
         propagate_candidate_origins(origins, candidate_index,
                                     query_channels, query_channel_count,
                                     intent, walk_context);
@@ -1230,15 +1325,12 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         int retained_channel_count = 0;
         (void) laplace_query_state_channels(query_state, &retained_channel_count);
 
-        /* ROUTE and SELECT have different result types. A generic relation
-         * endpoint remains a route. A relation explicitly named by the admitted
-         * prompt is different: S3 has compiled it as the requested operation, so
-         * its witnessed endpoint is an output candidate and S7/S8 may select it. */
+        /* An explicit predicate application admits only actual results from
+         * its declared semantic inputs. Sequence/other semantic candidates stay
+         * in the coupled field and cannot substitute for that program result. */
         int output_count = 0;
         for (int i = 0; i < candidate_count; ++i)
-            if (candidates[i].sequence_occurrences > 0 ||
-                candidates[i].projection.has_positive ||
-                candidate_is_intent_result(&candidates[i], intent))
+            if (candidate_can_output(&candidates[i], intent))
                 output_count++;
         if (output_count == 0)
         {
@@ -1268,9 +1360,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         }
         kept = 0;
         for (int i = 0; i < candidate_count; ++i)
-            if (candidates[i].sequence_occurrences > 0 ||
-                candidates[i].projection.has_positive ||
-                candidate_is_intent_result(&candidates[i], intent))
+            if (candidate_can_output(&candidates[i], intent))
                 candidates[kept++] = candidates[i];
         candidate_count = kept;
         int limit = Min(candidate_count, top_k);
@@ -1359,7 +1449,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     {
         LaplaceCognitionProgramReceipt receipt;
         laplace_cognition_program_receipt(cognition, &receipt);
-        if (!receipt.complete)
+        if (!receipt.complete && receipt.disposition == LAPLACE_COGNITION_OPEN)
             laplace_cognition_program_finalize(
                 cognition,
                 !exhausted && receipt.output_count >= steps
@@ -1396,7 +1486,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
-    return walk_continuations(fcinfo, NULL, -1, false, NULL);
+    return walk_continuations(fcinfo, NULL, -1, false, NULL, NULL);
 }
 
 static Datum
@@ -1404,7 +1494,18 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
 {
     int hops;
     int fanout;
+    hash128_t active_invocation;
+    const hash128_t *invocation_context = NULL;
 
+    if (PG_NARGS() > 10)
+    {
+        if (PG_ARGISNULL(10))
+            ereport(ERROR, (errmsg("bound program: invocation context must not be NULL")));
+        if (VARSIZE_ANY_EXHDR(PG_GETARG_BYTEA_PP(10)) != sizeof(hash128_t))
+            ereport(ERROR, (errmsg("bound program: invocation context must be 16 bytes")));
+        active_invocation = datum_to_hash128(PG_GETARG_DATUM(10));
+        invocation_context = &active_invocation;
+    }
     if (PG_ARGISNULL(0) || VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_PP(0)) == 0)
     {
         InitMaterializedSRF(fcinfo, 0);
@@ -1418,8 +1519,6 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
                 (errmsg("forward prompt: hops and fanout must not be negative")));
 
     LaplacePromptInput *input = laplace_prompt_input(PG_GETARG_TEXT_PP(0));
-    LaplacePromptIntent intent =
-        laplace_prompt_intent_compile(input, CurrentMemoryContext);
     HASHCTL ctl = {0};
     ctl.keysize = ctl.entrysize = sizeof(hash128_t);
     ctl.hcxt = CurrentMemoryContext;
@@ -1470,8 +1569,7 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
     walk_call->args[11] = fcinfo->args[9];
 
     return walk_continuations(
-        walk_call, input, hops, trace,
-        intent.relation_count > 0 ? &intent : NULL);
+        walk_call, input, hops, trace, NULL, invocation_context);
 }
 
 Datum

@@ -6,7 +6,7 @@ source="${1:-}"
 path="${2:-}"
 DATA_ROOT="${LAPLACE_DATA_ROOT:-/vault/Data}"
 
-FLOOR=(unicode iso639 cili)
+FLOOR=(unicode iso639 operational cili)
 KNOWLEDGE=(wordnet omw verbnet propbank framenet mapnet wordframenet semlink conceptnet atomic2020 ud wiktionary)
 USAGE=(tatoeba opensubtitles)
 
@@ -46,9 +46,9 @@ source "$ROOT/scripts/lib/fp.sh"
 
 build_cli() {
     local fp
-    fp=$(fp_compute app)
+    fp=$(fp_compute app docs/INVENTION.md docs/INVENTIONS.md docs/specs)
     if fp_check cli-build "$fp" && [[ -f "$DLL" ]]; then
-        echo ">>> CLI build skipped — app/ unchanged since last successful build (fp ${fp:0:12})"
+        echo ">>> CLI build skipped — app/ and operational source unchanged since last successful build (fp ${fp:0:12})"
         return 0
     fi
     ( cd "$ROOT/app" && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q -clp:NoSummary >/dev/null )
@@ -159,7 +159,7 @@ case "$source" in
         build_cli
         ingest safetensors "$path"
         ;;
-    unicode|iso639|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
+    unicode|iso639|operational|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
         # Default-path sources: IngestDataPaths resolves a DATA_ROOT-relative default
         # when no <path> is given (stack=stack-v2, tiny-codes=tiny-codes, document=text…).
         # An explicit <path> (single file, bare dir, or ecosystem root) always wins via

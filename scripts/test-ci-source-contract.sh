@@ -28,6 +28,7 @@ for f in \
   scripts/pr-proof.sh \
   scripts/lib/fp.sh \
   scripts/affected-app.py \
+  scripts/test-app-fingerprints.py \
   scripts/setup-host.sh \
   scripts/bootstrap-laplace-runner.sh \
   scripts/ingest-source.sh \
@@ -98,3 +99,7 @@ python3 scripts/test-installed-extension-current.py
 
 # Ingest interruption is diagnostic metadata, never successful completion.
 python3 scripts/test-ingest-source-exit.py
+
+# An external seeded source edit must invalidate its real project consumers,
+# their tests, the ingest CLI build, and the application publish domain.
+python3 scripts/test-app-fingerprints.py

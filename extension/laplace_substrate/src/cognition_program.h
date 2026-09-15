@@ -15,7 +15,8 @@ typedef enum LaplaceCognitionDisposition
     LAPLACE_COGNITION_OPEN = 0,
     LAPLACE_COGNITION_COMPLETE = 1,
     LAPLACE_COGNITION_EXHAUSTED = 2,
-    LAPLACE_COGNITION_BUDGET_EXHAUSTED = 3
+    LAPLACE_COGNITION_BUDGET_EXHAUSTED = 3,
+    LAPLACE_COGNITION_AMBIGUOUS = 4
 } LaplaceCognitionDisposition;
 
 typedef struct LaplaceCognitionProgramReceipt
@@ -36,6 +37,7 @@ typedef struct LaplaceCognitionProgramReceipt
 } LaplaceCognitionProgramReceipt;
 
 typedef struct LaplaceCognitionProgram LaplaceCognitionProgram;
+struct LaplacePromptIntent;
 
 /* Compile the exact admitted prompt into a finite completion program. Prompt
  * occurrence ordinals are the obligation coordinates; the exact prompt trunk
@@ -43,20 +45,15 @@ typedef struct LaplaceCognitionProgram LaplaceCognitionProgram;
  * history/frontier operands remain usable evidence but never become obligations
  * for this turn.
  *
- * When native prompt admission has compiled a witnessed relation operator,
- * `operation_origins` identifies the exact prompt occurrences that name that
- * operator and `operation_relations` contains only the relation identities it
- * names. In that case the completion program contracts to the witnessed
- * operator + its prompt operands rather than treating grammatical scaffolding
- * as an answer obligation. No answer identity, prompt phrase switch, or prompt
- * keyword classifier is encoded here. */
+ * An applicable source-witnessed whole-root invocation supplies operation and
+ * exact input records. Naming evidence alone never supplies a request role.
+ * Competing invocation contracts retain their own provenance and ambiguity. */
 LaplaceCognitionProgram *laplace_cognition_program_create(
     const LaplacePromptInput *input,
     int prompt_origin_count,
     const LaplaceQueryChannel *initial_channels,
     int initial_channel_count,
-    const Bitmapset *operation_origins,
-    ArrayType *operation_relations);
+    const struct LaplacePromptIntent *intent);
 
 /* Fold exact positive typed transitions into semantic provenance. This is
  * separate from physical/trajectory ancestry: a structural successor never
