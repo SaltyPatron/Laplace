@@ -1,0 +1,129 @@
+name: Read instruction relation coverage
+on:
+  push:
+    branches: [ops/instruction-coverage-20260915]
+permissions:
+  contents: read
+jobs:
+  coverage:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 3
+    steps:
+      - name: Read bounded current relation and provenance coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0077
+          evidence="/build/laplace/work/instruction-coverage/${GITHUB_RUN_ID}"
+          mkdir -p "$evidence"
+          echo "INSTRUCTION_COVERAGE_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          cat > "$evidence/relation-coverage.sql" <<'SQL'
+          BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+          SET LOCAL statement_timeout='45s';
+          SET LOCAL lock_timeout='5s';
+          SET LOCAL bytea_output='hex';
+          WITH
+          surface(label,id) AS MATERIALIZED (
+           SELECT x,laplace.content_id(convert_to(x,'UTF8'))
+           FROM unnest(ARRAY['glacier','pawn','chess','water','Water']) x
+          ),
+          relations(label,id) AS MATERIALIZED (
+           SELECT x,laplace.relation_type_id(x) FROM unnest(ARRAY[
+           'HAS_SENSE','IS_SENSE_OF','IS_LEMMA_OF','HAS_NAME','HAS_NAME_ALIAS','IS_NAME_OF','IS_NAME_ALIAS_OF','CORRESPONDS_TO',
+           'HAS_DEFINITION','HAS_DOMAIN_TOPIC','HAS_CONTEXT','HAS_SUBSTANCE','MADE_UP_OF']) x
+          ),
+          naming_types AS MATERIALIZED (
+           SELECT DISTINCT id FROM relations WHERE label=ANY(ARRAY[
+           'HAS_SENSE','IS_SENSE_OF','IS_LEMMA_OF','HAS_NAME','HAS_NAME_ALIAS','IS_NAME_OF','IS_NAME_ALIAS_OF','CORRESPONDS_TO'])
+          ),
+          hop1 AS MATERIALIZED (
+           SELECT * FROM (
+            SELECT a.* FROM laplace.attestations a
+            WHERE a.subject_id=ANY(ARRAY(SELECT id FROM surface)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
+            UNION
+            SELECT a.* FROM laplace.attestations a
+            WHERE a.object_id=ANY(ARRAY(SELECT id FROM surface)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
+           ) x ORDER BY id LIMIT 513
+          ),
+          nodes1 AS MATERIALIZED (
+           SELECT id FROM surface UNION SELECT subject_id FROM hop1 UNION SELECT object_id FROM hop1 WHERE object_id IS NOT NULL
+          ),
+          hop2 AS MATERIALIZED (
+           SELECT * FROM (
+            SELECT a.* FROM laplace.attestations a
+            WHERE a.subject_id=ANY(ARRAY(SELECT id FROM nodes1)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
+            UNION
+            SELECT a.* FROM laplace.attestations a
+            WHERE a.object_id=ANY(ARRAY(SELECT id FROM nodes1)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
+           ) x ORDER BY id LIMIT 513
+          ),
+          nodes2 AS MATERIALIZED (
+           SELECT id FROM nodes1 UNION SELECT subject_id FROM hop2 UNION SELECT object_id FROM hop2 WHERE object_id IS NOT NULL
+          ),
+          hop3 AS MATERIALIZED (
+           SELECT * FROM (
+            SELECT a.* FROM laplace.attestations a
+            WHERE a.subject_id=ANY(ARRAY(SELECT id FROM nodes2)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
+            UNION
+            SELECT a.* FROM laplace.attestations a
+            WHERE a.object_id=ANY(ARRAY(SELECT id FROM nodes2)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
+           ) x ORDER BY id LIMIT 513
+          ),
+          nodes3 AS MATERIALIZED (
+           SELECT id FROM nodes2 UNION SELECT subject_id FROM hop3 UNION SELECT object_id FROM hop3 WHERE object_id IS NOT NULL
+          ),
+          facts AS MATERIALIZED (
+           SELECT a.* FROM laplace.attestations a
+           WHERE a.subject_id=ANY(ARRAY(SELECT id FROM nodes3))
+           AND a.type_id=ANY(ARRAY(SELECT id FROM relations WHERE label=ANY(ARRAY[
+            'HAS_DEFINITION','HAS_DOMAIN_TOPIC','HAS_CONTEXT','HAS_SUBSTANCE','MADE_UP_OF'])))
+           ORDER BY a.id LIMIT 513
+          ),
+          evidence AS MATERIALIZED (
+           SELECT 'naming1'::text AS lane,a.* FROM hop1 a
+           UNION ALL SELECT 'naming2',a.* FROM hop2 a
+           UNION ALL SELECT 'naming3',a.* FROM hop3 a
+           UNION ALL SELECT 'fact',a.* FROM facts a
+          ),
+          records AS MATERIALIZED (
+           SELECT e.*,to_jsonb(c) AS standing,consensus.walk_edge_weight(c.rating,c.rd)>0 AS positive_standing
+           FROM evidence e LEFT JOIN laplace.consensus c
+           ON c.subject_id=e.subject_id AND c.type_id=e.type_id AND c.object_id=e.object_id
+          ),
+          entities AS MATERIALIZED (
+           SELECT e.* FROM laplace.entities e WHERE e.id=ANY(ARRAY(
+           SELECT id FROM nodes3 UNION SELECT object_id FROM facts WHERE object_id IS NOT NULL))
+          ),
+          counts AS (
+           SELECT (SELECT count(*) FROM hop1) AS naming1,(SELECT count(*) FROM hop2) AS naming2,
+           (SELECT count(*) FROM hop3) AS naming3,(SELECT count(*) FROM facts) AS facts
+          )
+          SELECT jsonb_build_object(
+           'schema','laplace.instruction-relation-coverage/v1',
+           'surfaces',(SELECT jsonb_agg(to_jsonb(x)) FROM surface x),
+           'relations',(SELECT jsonb_agg(to_jsonb(x)) FROM relations x),
+           'counts',(SELECT to_jsonb(x) FROM counts x),
+           'complete',(SELECT naming1<=512 AND naming2<=512 AND naming3<=512 AND facts<=512 FROM counts),
+           'evidence',(SELECT jsonb_agg(to_jsonb(x) ORDER BY lane,id) FROM records x),
+           'entities',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM entities x));
+          ROLLBACK;
+          SQL
+          sha256sum "$evidence/relation-coverage.sql" > "$evidence/query.sha256"
+          /opt/laplace/pgsql-18/bin/psql --version > "$evidence/postgresql-version.txt"
+          /opt/laplace/pgsql-18/bin/psql -X -q -A -t -v ON_ERROR_STOP=1 \
+            -h /var/run/postgresql -p 5432 -U laplace_admin -d laplace \
+            -f "$evidence/relation-coverage.sql" > "$evidence/relation-coverage.json"
+          python3 - "$evidence/relation-coverage.json" <<'PY'
+          import json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]); d=json.loads(p.read_bytes())
+          print(json.dumps({"bytes":p.stat().st_size,"counts":d["counts"],"complete":d["complete"]}))
+          PY
+      - name: Retain actual read-only results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: instruction-coverage-${{ github.run_id }}
+          path: /build/laplace/work/instruction-coverage/${{ github.run_id }}/
+          if-no-files-found: warn
+          retention-days: 30
