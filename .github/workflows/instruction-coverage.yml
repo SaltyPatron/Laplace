@@ -27,62 +27,43 @@ jobs:
            SELECT x,laplace.content_id(convert_to(x,'UTF8'))
            FROM unnest(ARRAY['glacier','pawn','chess','water','Water']) x
           ),
-          relations(label,id) AS MATERIALIZED (
-           SELECT x,laplace.relation_type_id(x) FROM unnest(ARRAY[
-           'HAS_SENSE','IS_SENSE_OF','IS_LEMMA_OF','HAS_NAME','HAS_NAME_ALIAS','IS_NAME_OF','IS_NAME_ALIAS_OF','CORRESPONDS_TO',
-           'HAS_DEFINITION','HAS_DOMAIN_TOPIC','HAS_CONTEXT','HAS_SUBSTANCE','MADE_UP_OF']) x
+          roster AS MATERIALIZED (
+           SELECT laplace.source_id('WordNetDecomposer') AS wordnet,
+           laplace.relation_type_id('HAS_SENSE') AS has_sense,
+           laplace.relation_type_id('IS_SENSE_OF') AS sense_of,
+           ARRAY[laplace.relation_type_id('HAS_DEFINITION'),laplace.relation_type_id('HAS_DOMAIN_TOPIC'),
+           laplace.relation_type_id('HAS_CONTEXT'),laplace.relation_type_id('HAS_SUBSTANCE'),
+           laplace.relation_type_id('MADE_UP_OF')] AS fact_types
           ),
-          naming_types AS MATERIALIZED (
-           SELECT DISTINCT id FROM relations WHERE label=ANY(ARRAY[
-           'HAS_SENSE','IS_SENSE_OF','IS_LEMMA_OF','HAS_NAME','HAS_NAME_ALIAS','IS_NAME_OF','IS_NAME_ALIAS_OF','CORRESPONDS_TO'])
+          variants AS MATERIALIZED (
+           SELECT * FROM lexical.word_case_variants_batch(ARRAY(SELECT id FROM surface)) LIMIT 65
           ),
-          hop1 AS MATERIALIZED (
-           SELECT * FROM (
-            SELECT a.* FROM laplace.attestations a
-            WHERE a.subject_id=ANY(ARRAY(SELECT id FROM surface)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
-            UNION
-            SELECT a.* FROM laplace.attestations a
-            WHERE a.object_id=ANY(ARRAY(SELECT id FROM surface)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
-           ) x ORDER BY id LIMIT 513
+          roots AS MATERIALIZED (
+           SELECT id FROM surface UNION SELECT variant_id FROM variants
           ),
-          nodes1 AS MATERIALIZED (
-           SELECT id FROM surface UNION SELECT subject_id FROM hop1 UNION SELECT object_id FROM hop1 WHERE object_id IS NOT NULL
+          senses AS MATERIALIZED (
+           SELECT a.* FROM laplace.attestations a
+           WHERE a.subject_id=ANY(ARRAY(SELECT id FROM roots))
+           AND a.source_id=(SELECT wordnet FROM roster) AND a.type_id=(SELECT has_sense FROM roster)
+           ORDER BY id LIMIT 129
           ),
-          hop2 AS MATERIALIZED (
-           SELECT * FROM (
-            SELECT a.* FROM laplace.attestations a
-            WHERE a.subject_id=ANY(ARRAY(SELECT id FROM nodes1)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
-            UNION
-            SELECT a.* FROM laplace.attestations a
-            WHERE a.object_id=ANY(ARRAY(SELECT id FROM nodes1)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
-           ) x ORDER BY id LIMIT 513
+          synsets AS MATERIALIZED (
+           SELECT a.* FROM laplace.attestations a
+           WHERE a.subject_id=ANY(ARRAY(SELECT object_id FROM senses WHERE object_id IS NOT NULL))
+           AND a.source_id=(SELECT wordnet FROM roster) AND a.type_id=(SELECT sense_of FROM roster)
+           ORDER BY id LIMIT 129
           ),
-          nodes2 AS MATERIALIZED (
-           SELECT id FROM nodes1 UNION SELECT subject_id FROM hop2 UNION SELECT object_id FROM hop2 WHERE object_id IS NOT NULL
-          ),
-          hop3 AS MATERIALIZED (
-           SELECT * FROM (
-            SELECT a.* FROM laplace.attestations a
-            WHERE a.subject_id=ANY(ARRAY(SELECT id FROM nodes2)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
-            UNION
-            SELECT a.* FROM laplace.attestations a
-            WHERE a.object_id=ANY(ARRAY(SELECT id FROM nodes2)) AND a.type_id=ANY(ARRAY(SELECT id FROM naming_types))
-           ) x ORDER BY id LIMIT 513
-          ),
-          nodes3 AS MATERIALIZED (
-           SELECT id FROM nodes2 UNION SELECT subject_id FROM hop3 UNION SELECT object_id FROM hop3 WHERE object_id IS NOT NULL
+          inputs AS MATERIALIZED (
+           SELECT id FROM roots UNION SELECT object_id FROM senses WHERE object_id IS NOT NULL
+           UNION SELECT object_id FROM synsets WHERE object_id IS NOT NULL
           ),
           facts AS MATERIALIZED (
            SELECT a.* FROM laplace.attestations a
-           WHERE a.subject_id=ANY(ARRAY(SELECT id FROM nodes3))
-           AND a.type_id=ANY(ARRAY(SELECT id FROM relations WHERE label=ANY(ARRAY[
-            'HAS_DEFINITION','HAS_DOMAIN_TOPIC','HAS_CONTEXT','HAS_SUBSTANCE','MADE_UP_OF'])))
-           ORDER BY a.id LIMIT 513
+           WHERE a.subject_id=ANY(ARRAY(SELECT id FROM inputs)) AND a.type_id=ANY((SELECT fact_types FROM roster)::bytea[])
+           ORDER BY id LIMIT 257
           ),
           evidence AS MATERIALIZED (
-           SELECT 'naming1'::text AS lane,a.* FROM hop1 a
-           UNION ALL SELECT 'naming2',a.* FROM hop2 a
-           UNION ALL SELECT 'naming3',a.* FROM hop3 a
+           SELECT 'sense'::text AS lane,a.* FROM senses a UNION ALL SELECT 'synset',a.* FROM synsets a
            UNION ALL SELECT 'fact',a.* FROM facts a
           ),
           records AS MATERIALIZED (
@@ -90,22 +71,30 @@ jobs:
            FROM evidence e LEFT JOIN laplace.consensus c
            ON c.subject_id=e.subject_id AND c.type_id=e.type_id AND c.object_id=e.object_id
           ),
-          entities AS MATERIALIZED (
-           SELECT e.* FROM laplace.entities e WHERE e.id=ANY(ARRAY(
-           SELECT id FROM nodes3 UNION SELECT object_id FROM facts WHERE object_id IS NOT NULL))
+          ids AS MATERIALIZED (
+           SELECT array_agg(id ORDER BY id) AS ids FROM (
+           SELECT id FROM inputs UNION SELECT object_id FROM facts WHERE object_id IS NOT NULL) x
           ),
+          rendered AS MATERIALIZED (SELECT ids,realize.batch(ids) AS surfaces FROM ids),
           counts AS (
-           SELECT (SELECT count(*) FROM hop1) AS naming1,(SELECT count(*) FROM hop2) AS naming2,
-           (SELECT count(*) FROM hop3) AS naming3,(SELECT count(*) FROM facts) AS facts
+           SELECT (SELECT count(*) FROM variants) AS variants,(SELECT count(*) FROM senses) AS senses,
+           (SELECT count(*) FROM synsets) AS synsets,(SELECT count(*) FROM facts) AS facts
           )
           SELECT jsonb_build_object(
-           'schema','laplace.instruction-relation-coverage/v1',
+           'schema','laplace.lexical-instruction-coverage/v1','database',current_database(),
+           'linked_core_version',laplace.laplace_substrate_version(),
+           'server_version',current_setting('server_version'),
+           'snapshot',pg_current_snapshot()::text,'observed_at',transaction_timestamp(),
+           'read_only',current_setting('transaction_read_only'),
+           'extensions',(SELECT jsonb_object_agg(extname,extversion) FROM pg_extension WHERE extname IN ('laplace_geom','laplace_substrate')),
+           'roster',(SELECT to_jsonb(x) FROM roster x),
            'surfaces',(SELECT jsonb_agg(to_jsonb(x)) FROM surface x),
-           'relations',(SELECT jsonb_agg(to_jsonb(x)) FROM relations x),
+           'case_variants',(SELECT jsonb_agg(to_jsonb(x)) FROM variants x),
            'counts',(SELECT to_jsonb(x) FROM counts x),
-           'complete',(SELECT naming1<=512 AND naming2<=512 AND naming3<=512 AND facts<=512 FROM counts),
+           'complete',(SELECT variants<=64 AND senses<=128 AND synsets<=128 AND facts<=256 FROM counts),
            'evidence',(SELECT jsonb_agg(to_jsonb(x) ORDER BY lane,id) FROM records x),
-           'entities',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM entities x));
+           'entities',(SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM laplace.entities e WHERE e.id=ANY((SELECT ids FROM ids)::bytea[])),
+           'realization',(SELECT to_jsonb(x) FROM rendered x));
           ROLLBACK;
           SQL
           sha256sum "$evidence/relation-coverage.sql" > "$evidence/query.sha256"
