@@ -28,6 +28,11 @@ class QuiescenceTests(unittest.TestCase):
         for path in (self.state, self.proc, self.receipt): path.mkdir()
         self.repairs = self.base / "repairs"
         self.repairs.mkdir()
+        self.resources = Q.MaintenanceResources.create(self.receipt, repair_root=self.repairs,
+            max_bytes=Q.MAX_BYTES, max_line_bytes=Q.MAX_LINE_BYTES, max_prior_bytes=Q.MAX_BYTES,
+            max_current_readback_bytes=2 * Q.MAX_BYTES, timeout_seconds=Q.TIMEOUT_SECONDS)
+        environment = patch.dict(os.environ, {Q.RESOURCE_ENV: str(self.resources.path)})
+        environment.start(); self.addCleanup(environment.stop)
         self.states = {name: {"unit": "laplace-" + name + ".service", "load_state": "loaded",
             "active_state": "active" if name != "lichess" else "inactive", "main_pid": 100 + i if name != "lichess" else 0,
             "operator_stopped": False} for i, name in enumerate(("api", "mcp", "lichess"))}
@@ -35,7 +40,7 @@ class QuiescenceTests(unittest.TestCase):
         self.fail_stop = self.fail_start = None
         self.unknown_begin = self.change_transaction = False
         self.boundary = Q.Quiescence(self.receipt, state=self.state, proc=self.proc,
-                                     repair_root=self.repairs, execute=self.execute)
+                                     repair_root=self.repairs, resources=self.resources, execute=self.execute)
         # Fixtures use the current uid; production still requires a root-owned file.
         original = Q.transaction_identity
         def identity(state):
@@ -215,6 +220,56 @@ class QuiescenceTests(unittest.TestCase):
         self.assertTrue((self.receipt / "restored.json").exists())
         self.assertEqual(["active","active","inactive"], [self.states[name]["active_state"] for name in ("api","mcp","lichess")])
 
+    def test_current_receipt_closure_and_restore_share_readback_without_using_prior_allowance(self):
+        self.boundary.enter()
+        target = self.repairs / "large-current"
+        self.resources = Q.MaintenanceResources.create(self.receipt, repair_root=self.repairs,
+            max_bytes=Q.MAX_BYTES, max_line_bytes=Q.MAX_LINE_BYTES, max_prior_bytes=1,
+            max_current_readback_bytes=4096, timeout_seconds=Q.TIMEOUT_SECONDS)
+        self.resources.bind_current(target)
+        self.boundary.resources = self.resources
+        directory = self.repair_attempt(target.name, disposition="confirmed")
+        size = (directory / "plan.jsonl").stat().st_size
+        recipe = Q.repair_module()
+        child_resources = Q.MaintenanceResources(self.resources.path)
+        recipe.close_reconciled_submissions(self.repairs, directory, max_bytes=Q.MAX_BYTES,
+            budget=child_resources, current_budget=child_resources, deadline=child_resources.deadline)
+        self.assertEqual(size, self.resources.usage()["current_bytes_read"])
+        self.boundary.restore()
+        usage = self.resources.usage()
+        self.assertEqual(2 * size, usage["current_bytes_read"])
+        self.assertEqual(0, usage["prior_bytes_read"])
+        self.assertTrue((self.receipt / "restored.json").exists())
+
+    def test_wrapper_discovery_and_status_reauthentication_share_aggregate_history_budget(self):
+        self.boundary.enter()
+        old = self.repair_attempt("old")
+        size = (old / "plan.jsonl").stat().st_size
+        self.resources = Q.MaintenanceResources.create(self.receipt, repair_root=self.repairs,
+            max_bytes=Q.MAX_BYTES, max_line_bytes=Q.MAX_LINE_BYTES, max_prior_bytes=2 * size - 1,
+            max_current_readback_bytes=4096, timeout_seconds=Q.TIMEOUT_SECONDS)
+        self.boundary.resources = self.resources
+        # Discovery fits; full authentication for the native xid query does not.
+        # The query and managed commit must both remain unsubmitted.
+        with patch.object(Q.subprocess, "run") as database:
+            with self.assertRaisesRegex(ValueError, "prior repair receipts exceed aggregate"):
+                self.boundary.restore()
+        database.assert_not_called()
+        self.assertEqual(size, self.resources.usage()["prior_bytes_read"])
+        self.assertFalse(any(c[-1] in ("commit", "start") for c in self.calls))
+        self.assertTrue((self.state / "transaction.json").exists())
+
+    def test_expired_shared_deadline_holds_writers_before_any_journal_scan(self):
+        self.boundary.enter()
+        self.repair_attempt("committed", disposition="confirmed")
+        with patch.object(Q.time, "monotonic", return_value=self.resources.deadline), \
+                patch.object(Q, "repair_module") as recipe:
+            with self.assertRaisesRegex(TimeoutError, "maintenance deadline exceeded"):
+                self.boundary.restore()
+        recipe.assert_not_called()
+        self.assertFalse(any(c[-1] in ("commit", "start") for c in self.calls))
+        self.assertEqual(0, self.resources.usage()["prior_bytes_read"])
+
     def test_live_bound_repair_cannot_race_marker_absence_and_restart_writers(self):
         self.boundary.enter()
         self.repair_attempt("still-running", disposition="not-submitted")
@@ -230,7 +285,7 @@ class QuiescenceTests(unittest.TestCase):
             old = self.repair_attempt("unknown")
             with patch.object(Q,"database_submission_statuses",return_value=[self.transaction_status(old)]):
                 resumed = Q.Quiescence(self.receipt,state=self.state,proc=self.proc,
-                                       repair_root=self.repairs,execute=self.execute)
+                                       repair_root=self.repairs,resources=self.resources,execute=self.execute)
                 resumed.resume()
                 self.assertEqual(self.boundary.transaction,resumed.transaction)
                 with self.assertRaisesRegex(ValueError,"exact database reconciliation"):
@@ -341,6 +396,115 @@ class QuiescenceTests(unittest.TestCase):
                 patch.object(sys,"argv",["quiesce","--database","laplace","--resume-if-needed","--",*command]):
             self.assertEqual(0,Q.main())
         constructor.assert_not_called()
+
+class MaintenanceResourceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", "/build/laplace/work"))
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.repairs = self.base / "repairs"
+        self.repairs.mkdir()
+        self.resources = Q.MaintenanceResources.create(self.base, repair_root=self.repairs,
+            max_bytes=1000, max_line_bytes=1000, max_prior_bytes=300,
+            max_current_readback_bytes=200, timeout_seconds=180)
+        self.old = self.repairs / "old"
+        self.old.mkdir()
+        self.current = self.repairs / "current"
+
+    def test_independent_child_process_and_parent_share_durable_counters(self):
+        self.resources.bind_current(self.current)
+        self.current.mkdir()
+        self.resources.reserve(150, directory=self.old)
+        code = ("import importlib.util, pathlib, sys; "
+                "sys.path.insert(0, sys.argv[1]); "
+                "spec=importlib.util.spec_from_file_location('q', pathlib.Path(sys.argv[1])/'quiesce-managed-database.py'); "
+                "q=importlib.util.module_from_spec(spec); spec.loader.exec_module(q); "
+                "r=q.MaintenanceResources(pathlib.Path(sys.argv[2])); "
+                "r.reserve(100, directory=pathlib.Path(sys.argv[3])); "
+                "r.reserve(50, directory=pathlib.Path(sys.argv[4]))")
+        result = subprocess.run([sys.executable, "-c", code, str(ROOT / "scripts"),
+            str(self.resources.path), str(self.old), str(self.current)], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        usage = self.resources.usage()
+        self.assertEqual((250, 50, 3), (usage["prior_bytes_read"], usage["current_bytes_read"], usage["reservations"]))
+        with self.assertRaisesRegex(ValueError, "prior repair receipts exceed aggregate"):
+            self.resources.reserve(51, directory=self.old)
+        self.assertEqual(usage, self.resources.usage())
+        self.resources.reserve(150, directory=self.current)
+        with self.assertRaisesRegex(ValueError, "current receipt readback exceed aggregate"):
+            Q.MaintenanceResources(self.resources.path).reserve(1, directory=self.current)
+
+    def test_inherited_limits_and_original_deadline_must_match_without_refresh(self):
+        arguments = dict(receipt_root=self.repairs, max_bytes=1000, max_line_bytes=1000,
+                         max_prior_bytes=300, timeout_seconds=180)
+        with patch.dict(os.environ, {Q.RESOURCE_ENV: str(self.resources.path)}):
+            child = Q.inherited_repair_resources(self.base, **arguments)
+            self.assertEqual(self.resources.deadline, child.deadline)
+            for field in ("max_bytes", "max_line_bytes", "max_prior_bytes", "timeout_seconds"):
+                with self.subTest(field=field), self.assertRaisesRegex(ValueError, "bound differs"):
+                    Q.inherited_repair_resources(self.base, **(arguments | {field: arguments[field] + 1}))
+            with patch.object(Q.time, "monotonic", return_value=self.resources.deadline):
+                with self.assertRaisesRegex(TimeoutError, "maintenance deadline exceeded"):
+                    Q.inherited_repair_resources(self.base, **arguments)
+        self.assertEqual(0, self.resources.usage()["reservations"])
+
+    def test_old_or_different_directory_cannot_be_relabelled_as_current(self):
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.resources.bind_current(self.old)
+        self.resources.bind_current(self.current)
+        with self.assertRaisesRegex(ValueError, "different current"):
+            self.resources.bind_current(self.repairs / "second")
+        with self.assertRaisesRegex(ValueError, "admitted estate"):
+            self.resources.reserve(1, directory=self.base)
+        self.assertEqual(str(self.current), self.resources.usage()["current_receipt"])
+
+    def test_failed_durable_charge_cannot_grant_read_allowance(self):
+        before = self.resources.usage()
+        with patch.object(Q, "write_new_json", side_effect=OSError("durability unavailable")):
+            with self.assertRaises(OSError):
+                self.resources.reserve(100, directory=self.old)
+        self.assertEqual(before, self.resources.usage())
+        self.assertEqual([], list(self.base.glob("*-usage.json.*")))
+
+    def test_readback_admission_measures_every_future_current_authentication(self):
+        self.resources.bind_current(self.current)
+        self.resources.reserve(10, directory=self.current)
+        self.assertEqual(["complete current receipt readback exceeds aggregate byte bound"],
+            self.resources.readback_rejections(self.current, measured_bytes=96, reads=2))
+        receipt = Q.bounded_metadata(self.resources.path.with_name(
+            self.resources.path.stem + "-current-readback-admission.json"))
+        self.assertEqual((96, 2, 192, 10, 200), (receipt["measured_plan_bytes"], receipt["read_multiplicity"],
+            receipt["required_readback_bytes"], receipt["already_consumed_bytes"], receipt["max_current_readback_bytes"]))
+        self.assertEqual(10, self.resources.usage()["current_bytes_read"])
+        self.assertLess(self.resources.usage_path.stat().st_size, Q.MAX_METADATA_BYTES)
+
+    def test_readback_admission_accepts_exact_capacity_and_rejects_unbound_or_invalid_input(self):
+        for size, reads in ((True, 2), (100, 0), (100, 1.5)):
+            with self.subTest(size=size, reads=reads), self.assertRaises(ValueError):
+                self.resources.readback_rejections(self.current, size, reads)
+        with self.assertRaisesRegex(ValueError, "matching bound"):
+            self.resources.readback_rejections(self.current, 100, 2)
+        self.resources.bind_current(self.current)
+        self.assertEqual([], self.resources.readback_rejections(self.current, 100, 2))
+
+    def test_shared_resource_metadata_rejects_wrong_boot_symlinks_and_oversize(self):
+        with patch.object(Q, "boot_identity", return_value="different-boot"):
+            with self.assertRaisesRegex(ValueError, "boot identity"):
+                Q.MaintenanceResources(self.resources.path)
+        self.resources.usage_path.write_bytes(b" " * (Q.MAX_METADATA_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, "metadata exceeds byte bound"):
+            self.resources.reserve(1, directory=self.old)
+        self.resources.usage_path.unlink()
+        self.resources.usage_path.symlink_to(self.resources.path)
+        with self.assertRaisesRegex(ValueError, "cannot be a symlink"):
+            self.resources.usage()
+
+    def test_resource_metadata_rejects_fifo_without_waiting_for_a_writer(self):
+        path = self.base / "fifo.json"
+        os.mkfifo(path)
+        with self.assertRaisesRegex(ValueError, "must be a regular file"):
+            Q.bounded_metadata(path)
+
 
 class ProducerGenerationTests(unittest.TestCase):
     def setUp(self):

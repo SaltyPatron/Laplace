@@ -12,8 +12,10 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import time
@@ -27,6 +29,211 @@ STATE = Path("/var/lib/laplace-managed")
 PROC = Path("/proc")
 RECEIPTS = Path("/build/laplace/recovery/legacy-content-service-quiescence")
 REPAIR_RECEIPTS = Path("/build/laplace/recovery/legacy-content-repair")
+MAX_METADATA_BYTES = 64 * 1024
+MAX_BYTES = 512 * 1024 * 1024
+MAX_LINE_BYTES = 2 * 1024 * 1024
+TIMEOUT_SECONDS = 180
+RESOURCE_ENV = "LAPLACE_REPAIR_RESOURCE_RECEIPT"
+
+
+def positive_integer(value: object) -> int:
+    if type(value) is not int or value <= 0:
+        raise ValueError("maintenance resource bounds must be positive integers")
+    return value
+
+
+def positive_argument(value: str) -> int:
+    try:
+        return positive_integer(int(value))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def bounded_metadata(path: Path) -> dict:
+    if path.is_symlink():
+        raise ValueError("maintenance resource metadata cannot be a symlink")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValueError("maintenance resource metadata must be a regular file")
+        raw = source.read(MAX_METADATA_BYTES + 1)
+    if len(raw) > MAX_METADATA_BYTES:
+        raise ValueError("maintenance resource metadata exceeds byte bound")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("maintenance resource metadata must be an object")
+    return value
+
+
+def boot_identity() -> str:
+    return (PROC / "sys/kernel/random/boot_id").read_text().strip()
+
+
+class MaintenanceResources:
+    """One durable read budget shared by the wrapper and its repair child.
+
+    Every full-journal authentication reserves its entire declared byte count
+    before reading. A crash can overcharge that reservation, never erase it.
+    The current attempt has a separate explicit readback allowance; all other
+    journals, including earlier attempts in this service transaction, are prior
+    evidence. Resuming creates a new invocation with new explicit bounds.
+    """
+
+    def __init__(self, path: Path):
+        if not re.fullmatch(r"maintenance-resources-[0-9a-f]{32}\.json", path.name):
+            raise ValueError("maintenance resource receipt has an invalid identity")
+        self.path = path
+        self.config = bounded_metadata(path)
+        if self.config.get("schema") != "laplace.legacy-content-maintenance-resources/v1":
+            raise ValueError("unknown maintenance resource schema")
+        for key in ("max_bytes", "max_line_bytes", "max_prior_bytes", "max_current_readback_bytes", "timeout_seconds"):
+            positive_integer(self.config.get(key))
+        self.deadline = self.config.get("deadline_monotonic")
+        if type(self.deadline) not in (int, float) or not math.isfinite(self.deadline) \
+                or self.config.get("boot_id") != boot_identity():
+            raise ValueError("maintenance deadline has no current boot identity")
+        self.repair_root = Path(self.config["repair_root"])
+        if not self.repair_root.is_absolute() or self.repair_root.is_symlink() \
+                or str(self.repair_root.resolve()) != str(self.repair_root):
+            raise ValueError("maintenance resource estate has an invalid identity")
+        self.usage_path = path.with_name(path.stem + "-usage.json")
+        self.lock_path = path.with_name(path.stem + ".lock")
+        self.max_bytes = self.config["max_prior_bytes"]
+
+    @classmethod
+    def create(cls, directory: Path, *, repair_root: Path, max_bytes: int,
+               max_line_bytes: int, max_prior_bytes: int,
+               max_current_readback_bytes: int, timeout_seconds: int):
+        bounds = {"max_bytes": max_bytes, "max_line_bytes": max_line_bytes,
+                  "max_prior_bytes": max_prior_bytes,
+                  "max_current_readback_bytes": max_current_readback_bytes,
+                  "timeout_seconds": timeout_seconds}
+        for value in bounds.values():
+            positive_integer(value)
+        path = directory / ("maintenance-resources-" + uuid.uuid4().hex + ".json")
+        write_new_json(path, {"schema": "laplace.legacy-content-maintenance-resources/v1",
+            **bounds, "deadline_monotonic": time.monotonic() + timeout_seconds,
+            "boot_id": boot_identity(), "repair_root": str(repair_root.resolve())})
+        write_new_json(path.with_name(path.stem + "-usage.json"), {
+            "schema": "laplace.legacy-content-maintenance-usage/v1",
+            "resource_receipt": path.name, "current_receipt": None,
+            "prior_bytes_read": 0, "current_bytes_read": 0, "reservations": 0})
+        return cls(path)
+
+    def check_deadline(self) -> None:
+        if time.monotonic() >= self.deadline:
+            raise TimeoutError("legacy repair maintenance deadline exceeded")
+
+    def usage(self) -> dict:
+        value = bounded_metadata(self.usage_path)
+        if value.get("schema") != "laplace.legacy-content-maintenance-usage/v1" \
+                or value.get("resource_receipt") != self.path.name:
+            raise ValueError("maintenance usage does not identify its resource receipt")
+        for key in ("prior_bytes_read", "current_bytes_read", "reservations"):
+            if type(value.get(key)) is not int or value[key] < 0:
+                raise ValueError("maintenance usage counter is invalid")
+        if value["prior_bytes_read"] > self.config["max_prior_bytes"] \
+                or value["current_bytes_read"] > self.config["max_current_readback_bytes"]:
+            raise ValueError("maintenance usage exceeds its admitted byte bounds")
+        current = value.get("current_receipt")
+        if current is not None and (not isinstance(current, str) or self.receipt_path(Path(current)) != current):
+            raise ValueError("maintenance current receipt identity is invalid")
+        return value
+
+    def receipt_path(self, directory: Path) -> str:
+        if directory.is_symlink() or directory.resolve().parent != self.repair_root:
+            raise ValueError("maintenance receipt does not belong to the admitted estate")
+        return str(directory.resolve())
+
+    def change_usage(self, update) -> None:
+        self.check_deadline()
+        # The orchestration lock serializes wrapper invocations. This small lock
+        # also prevents an overlapping child from losing a charged reservation.
+        descriptor = os.open(self.lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o660)
+        with os.fdopen(descriptor, "r+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.check_deadline()
+            value = self.usage()
+            update(value)
+            temporary = self.usage_path.with_name(self.usage_path.name + "." + uuid.uuid4().hex)
+            try:
+                write_new_json(temporary, value)
+                os.replace(temporary, self.usage_path)
+                sync_directory(self.path.parent)
+            finally:
+                temporary.unlink(missing_ok=True)
+            self.check_deadline()
+
+    def bind_current(self, directory: Path) -> None:
+        current = self.receipt_path(directory)
+        def update(value):
+            if value["current_receipt"] not in (None, current):
+                raise ValueError("maintenance invocation already owns a different current receipt")
+            # Existing journals are historical; binding cannot relabel them to
+            # evade the aggregate prior-read budget.
+            if value["current_receipt"] is None and directory.exists():
+                raise ValueError("current repair receipt already exists")
+            value["current_receipt"] = current
+        self.change_usage(update)
+
+    def reserve(self, size: int, *, directory: Path | None = None) -> None:
+        positive_integer(size)
+        if size > self.config["max_bytes"]:
+            raise ValueError("maintenance receipt exceeds its individual byte bound")
+        if directory is None:
+            raise ValueError("maintenance authentication requires its receipt identity")
+        target = self.receipt_path(directory)
+        def update(value):
+            current = target == value["current_receipt"]
+            counter = "current_bytes_read" if current else "prior_bytes_read"
+            limit = self.config["max_current_readback_bytes" if current else "max_prior_bytes"]
+            if size > limit - value[counter]:
+                raise ValueError(("current receipt readback" if current else "prior repair receipts")
+                                 + " exceed aggregate byte bound")
+            value[counter] += size
+            value["reservations"] += 1
+        self.change_usage(update)
+
+    def readback_rejections(self, directory: Path, measured_bytes: int, reads: int) -> list[str]:
+        """Admit the complete current-journal read schedule before its APPLY."""
+        positive_integer(measured_bytes)
+        positive_integer(reads)
+        current = self.receipt_path(directory)
+        rejections = []
+        def update(value):
+            if value["current_receipt"] != current:
+                raise ValueError("current readback admission has no matching bound repair receipt")
+            required = measured_bytes * reads
+            limit = self.config["max_current_readback_bytes"]
+            if measured_bytes > self.config["max_bytes"]:
+                rejections.append("measured current receipt exceeds individual byte bound")
+            if required > limit - value["current_bytes_read"]:
+                rejections.append("complete current receipt readback exceeds aggregate byte bound")
+            write_new_json(self.path.with_name(self.path.stem + "-current-readback-admission.json"), {
+                "schema": "laplace.legacy-content-current-readback-admission/v1",
+                "resource_receipt": self.path.name, "current_receipt": current,
+                "measured_plan_bytes": measured_bytes, "read_multiplicity": reads,
+                "required_readback_bytes": required, "already_consumed_bytes": value["current_bytes_read"],
+                "max_current_readback_bytes": limit, "rejections": rejections})
+        self.change_usage(update)
+        return rejections
+
+
+def inherited_repair_resources(receipt: Path, *, receipt_root: Path, max_bytes: int,
+                              max_line_bytes: int, max_prior_bytes: int,
+                              timeout_seconds: int) -> MaintenanceResources:
+    path = Path(os.environ.get(RESOURCE_ENV, "/missing"))
+    if receipt.is_symlink() or path.is_symlink() or path.resolve().parent != receipt.resolve():
+        raise ValueError("repair has no resource receipt in its owned service transaction")
+    resources = MaintenanceResources(path)
+    if resources.repair_root != receipt_root.resolve():
+        raise ValueError("repair resource receipt identifies another journal estate")
+    for key, value in (("max_bytes", max_bytes), ("max_line_bytes", max_line_bytes),
+                       ("max_prior_bytes", max_prior_bytes), ("timeout_seconds", timeout_seconds)):
+        if resources.config[key] != value:
+            raise ValueError("repair resource bound differs from its maintenance invocation: " + key)
+    resources.check_deadline()
+    return resources
 
 
 def run(argv: list[str], *, timeout: int = 75) -> str:
@@ -193,14 +400,21 @@ def bind_repair_attempt(quiescence_directory: Path, repair_directory: Path, *,
     owner = process_identity(os.getpid(), proc)
     if owner is None:
         raise ValueError("repair process identity is unavailable")
+    resource_path = Path(os.environ.get(RESOURCE_ENV, "/missing"))
+    if resource_path.is_symlink() or resource_path.resolve().parent != quiescence_directory.resolve():
+        raise ValueError("repair ownership binding has no maintenance resource receipt")
+    resources = MaintenanceResources(resource_path)
+    resources.bind_current(repair_directory)
     write_new_json(quiescence_directory / ("repair-attempt-" + uuid.uuid4().hex + ".json"), {
         "schema": "laplace.quiescence-repair-attempt/v1", "transaction_identity": identity,
         "repair_directory": str(repair_directory.resolve()), "repair_process": owner,
+        "resource_receipt": str(resource_path.resolve()),
         "repair_source_sha": source_sha, "at_unix_nanoseconds": time.time_ns()})
 
 
 def database_submission_statuses(paths: list[Path], *, command: list[str] | None = None,
-                                deadline: float | None = None) -> list[dict]:
+                                deadline: float | None = None, max_bytes: int = MAX_BYTES,
+                                max_line_bytes: int = MAX_LINE_BYTES, budget=None) -> list[dict]:
     """Native outcome signal for unknown commits; exact row reconciliation follows.
 
     A committed/aborted xid permits reconciliation, never a blind replay or a
@@ -208,11 +422,14 @@ def database_submission_statuses(paths: list[Path], *, command: list[str] | None
     """
     if not paths:
         return []
-    deadline = time.monotonic() + 1800 if deadline is None else deadline
+    deadline = time.monotonic() + TIMEOUT_SECONDS if deadline is None else deadline
     repair = repair_module()
+    if budget is None:
+        budget = repair.PriorReceiptBudget(max_bytes)
     requests = []
     for path in paths:
-        manifest, context = repair.verified_plan(path.parent, deadline=deadline)
+        manifest, context = repair.verified_plan(path.parent, deadline=deadline,
+            max_bytes=max_bytes, max_line_bytes=max_line_bytes, budget=budget)
         xid = context.get("transaction")
         if not isinstance(xid, str) or not xid.isdecimal():
             raise ValueError("unknown repair has no native transaction identity")
@@ -268,13 +485,15 @@ def repair_lifecycle_command(command: list[str]) -> bool:
 
 class Quiescence:
     def __init__(self, directory: Path, *, state: Path = STATE, proc: Path = PROC,
-                 repair_root: Path = REPAIR_RECEIPTS, execute=run):
+                 repair_root: Path = REPAIR_RECEIPTS, resources: MaintenanceResources | None = None,
+                 execute=run):
         self.directory, self.state, self.proc, self.execute = directory, state, proc, execute
         self.prior: dict[str, dict] = {}
         self.stopped: set[str] = set()
         self.begin_submitted = self.begin_confirmed = False
         self.transaction = None
         self.repair_root = repair_root
+        self.resources = resources
 
     def record(self, name: str, value: dict) -> None:
         write_new_json(self.directory / (name + ".json"), value)
@@ -374,10 +593,18 @@ class Quiescence:
                 raise ValueError("repair ownership binding lacks process identity")
             if process_identity(owner["pid"], self.proc) == owner:
                 raise ValueError("bound repair process is still running; writers remain quiesced")
-        pending = repair_module().unresolved_submissions(self.repair_root) if self.repair_root.exists() else []
-        statuses = database_submission_statuses(pending)
+        if self.resources is None or self.resources.repair_root != self.repair_root.resolve():
+            raise ValueError("repair outcome verification has no admitted maintenance resources")
+        self.resources.check_deadline()
+        bounds = {"max_bytes": self.resources.config["max_bytes"],
+                  "max_line_bytes": self.resources.config["max_line_bytes"],
+                  "budget": self.resources, "deadline": self.resources.deadline}
+        pending = repair_module().unresolved_submissions(self.repair_root, **bounds) if self.repair_root.exists() else []
+        statuses = database_submission_statuses(pending, **bounds)
         self.record("database-status-" + uuid.uuid4().hex, {"transaction_identity": self.transaction,
-            "unknown_submissions": [str(path) for path in pending], "native_transaction_statuses": statuses})
+            "unknown_submissions": [str(path) for path in pending], "native_transaction_statuses": statuses,
+            "maintenance_resources": str(self.resources.path.resolve()), "maintenance_usage": self.resources.usage()})
+        self.resources.check_deadline()
         require_finished_database_submissions(statuses)
         if pending and not permit_finished_unknown:
             raise ValueError("repair submission outcome requires exact database reconciliation; writers remain quiesced")
@@ -459,6 +686,11 @@ def main() -> int:
     parser.add_argument("--database", required=True)
     parser.add_argument("--resume-receipt", type=Path)
     parser.add_argument("--resume-if-needed", action="store_true")
+    parser.add_argument("--max-bytes", type=positive_argument, default=MAX_BYTES)
+    parser.add_argument("--max-line-bytes", type=positive_argument, default=MAX_LINE_BYTES)
+    parser.add_argument("--max-prior-bytes", type=positive_argument, default=MAX_BYTES)
+    parser.add_argument("--max-current-readback-bytes", type=positive_argument, default=2 * MAX_BYTES)
+    parser.add_argument("--timeout-seconds", type=positive_argument, default=TIMEOUT_SECONDS)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -487,7 +719,10 @@ def main() -> int:
             if not repair_lifecycle_command(command) or invoked.get("repair_lifecycle") is not True \
                     or invoked.get("argv_sha256") != hashlib.sha256(json.dumps(command).encode()).hexdigest():
                 raise ValueError("held repair must resume through its original measurement-lane lifecycle command")
-            boundary = Quiescence(directory)
+            resources = MaintenanceResources.create(directory, repair_root=REPAIR_RECEIPTS,
+                max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes, max_prior_bytes=args.max_prior_bytes,
+                max_current_readback_bytes=args.max_current_readback_bytes, timeout_seconds=args.timeout_seconds)
+            boundary = Quiescence(directory, resources=resources)
             boundary.resume()  # A rejected resume must never enter restore().
         else:
             directory = RECEIPTS / (str(time.time_ns()) + "-" + uuid.uuid4().hex)
@@ -496,15 +731,25 @@ def main() -> int:
             write_new_json(directory / "maintenance-command.json", {
                 "repair_lifecycle": repair_lifecycle_command(command),
                 "argv_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest()})
-            boundary = Quiescence(directory)
+            resources = MaintenanceResources.create(directory, repair_root=REPAIR_RECEIPTS,
+                max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes, max_prior_bytes=args.max_prior_bytes,
+                max_current_readback_bytes=args.max_current_readback_bytes, timeout_seconds=args.timeout_seconds) \
+                if repair_lifecycle_command(command) else None
+            boundary = Quiescence(directory, resources=resources)
         try:
             if not pending:
                 boundary.enter()
                 if repair_lifecycle_command(command):
                     boundary.record("repair-estate", {"transaction_identity": boundary.transaction,
                         "repair_root": str(boundary.repair_root.resolve())})
-            return subprocess.run(command, check=False, env={**os.environ,
-                "LAPLACE_DATABASE_QUIESCENCE_RECEIPT": str(directory.resolve())}).returncode
+            environment = {**os.environ, "LAPLACE_DATABASE_QUIESCENCE_RECEIPT": str(directory.resolve())}
+            if resources is not None:
+                resources.check_deadline()
+                environment[RESOURCE_ENV] = str(resources.path.resolve())
+            else:
+                environment.pop(RESOURCE_ENV, None)
+            return subprocess.run(command, check=False, env=environment,
+                timeout=resources.deadline - time.monotonic() if resources is not None else None).returncode
         finally:
             boundary.restore()
 

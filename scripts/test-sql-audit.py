@@ -6,8 +6,10 @@ from __future__ import annotations
 import importlib.util
 import sys
 import tempfile
+import tokenize
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,7 +102,7 @@ q = ("SELECT id "
         source = 'q = f"UPDATE repair_plan SET proposed = {fail_if_called()}"\n'
         chunks = AUDIT.string_chunks(source, ".py")
         self.assertEqual(
-            [("UPDATE repair_plan SET proposed = {fail_if_called()}", 1, 1)],
+            [("UPDATE repair_plan SET proposed = @PYTHON_EXPR@", 1, 1)],
             chunks,
         )
         statement = AUDIT.make_statement(
@@ -112,11 +114,11 @@ q = ("SELECT id "
             {item.rule for item in AUDIT.query_findings(statement, AUDIT.AuditConfig())},
         )
 
-    def test_python_formatted_sql_keeps_nested_literals_in_the_outer_unit(self):
+    def test_python_formatted_sql_replaces_nested_expressions_with_opaque_values(self):
         source = '''q = f"SELECT id FROM {f'table_{suffix}'} WHERE x = {'value'}"\n'''
         chunks = AUDIT.string_chunks(source, ".py")
         self.assertEqual(
-            [("SELECT id FROM {f'table_{suffix}'} WHERE x = {'value'}", 1, 1)],
+            [("SELECT id FROM @PYTHON_EXPR@ WHERE x = @PYTHON_EXPR@", 1, 1)],
             chunks,
         )
 
@@ -131,22 +133,22 @@ r = (f"DELETE FROM {table} "
         chunks = AUDIT.string_chunks(source, ".py")
         self.assertEqual(2, len(chunks))
         self.assertEqual(
-            ("UPDATE repair_plan\nSET proposed = {value};\nSELECT id FROM repair_plan;", 2, 4),
+            ("UPDATE repair_plan\nSET proposed = @PYTHON_EXPR@;\nSELECT id FROM repair_plan;", 2, 4),
             chunks[0],
         )
-        self.assertEqual(("DELETE FROM {table} WHERE id = %s", 5, 6), chunks[1])
+        self.assertEqual(("DELETE FROM @PYTHON_EXPR@ WHERE id = %s", 5, 6), chunks[1])
 
     def test_python_outer_single_quotes_are_not_confused_with_expression_quotes(self):
         source = '''q = f'SELECT id FROM {"table"} WHERE x = {x}'\n'''
         self.assertEqual(
-            [('SELECT id FROM {"table"} WHERE x = {x}', 1, 1)],
+            [('SELECT id FROM @PYTHON_EXPR@ WHERE x = @PYTHON_EXPR@', 1, 1)],
             AUDIT.string_chunks(source, ".py"),
         )
 
     def test_python_raw_formatted_sql_preserves_backslashes(self):
         source = r'''q = fr"SELECT id FROM {table} WHERE pattern = '\n'"'''
         self.assertEqual(
-            [(r"SELECT id FROM {table} WHERE pattern = '\n'", 1, 1)],
+            [(r"SELECT id FROM @PYTHON_EXPR@ WHERE pattern = '\n'", 1, 1)],
             AUDIT.string_chunks(source, ".py"),
         )
 
@@ -156,6 +158,64 @@ r = (f"DELETE FROM {table} "
             [("DELETE FROM repair_plan", 1, 1)],
             AUDIT.string_chunks(source, ".py"),
         )
+
+    def test_python_multiline_fstring_preserves_high_severity_sql_visibility(self):
+        source = 'q = f"""UPDATE repair_plan\nSET proposed = {proposal};\n"""\n'
+        chunks = AUDIT.string_chunks(source, ".py")
+        self.assertEqual([("UPDATE repair_plan\nSET proposed = @PYTHON_EXPR@;\n", 1, 3)], chunks)
+        statement = AUDIT.make_statement("repair.py", "production", "embedded",
+            chunks[0][0], 1, 3, 1, forced_kind="query")
+        findings = AUDIT.query_findings(statement, AUDIT.AuditConfig())
+        self.assertTrue(any(item.rule == "LPSQL103" and item.severity == "high" for item in findings))
+
+    def test_python_fstring_and_ordinary_adjacent_literals_are_joined(self):
+        source = '''q = ("SELECT id "
+     f"FROM {schema}.{table} "
+     "WHERE id = %s")
+'''
+        self.assertEqual([("SELECT id FROM @PYTHON_EXPR@.@PYTHON_EXPR@ WHERE id = %s", 1, 3)],
+                         AUDIT.string_chunks(source, ".py"))
+
+    def test_python_fstring_decodes_raw_braces_without_evaluating_expressions(self):
+        source = '''q = rf"SELECT '{{}}', '\\n' FROM {1 / 0!r:{width}}"'''
+        self.assertEqual([("SELECT '{}', '\\n' FROM @PYTHON_EXPR@", 1, 1)],
+                         AUDIT.string_chunks(source, ".py"))
+
+    def test_python_nested_expression_strings_are_audited_independently(self):
+        source = '''q = f"SELECT id FROM {call('SELECT secret FROM hidden', f'other_{name}')}"'''
+        self.assertEqual([("SELECT id FROM @PYTHON_EXPR@", 1, 1),
+                          ("SELECT secret FROM hidden", 1, 1)],
+                         AUDIT.string_chunks(source, ".py"))
+
+    def test_python_fstring_token_layouts_produce_identical_chunks(self):
+        source = 'q = f"SELECT id FROM {table} WHERE ended = NULL"\n'
+        start, end = source.index('f"'), source.rindex('"') + 1
+        whole = [tokenize.TokenInfo(tokenize.STRING, source[start:end], (1, start), (1, end), source)]
+        split = [tokenize.TokenInfo(1001, 'f"', (1, start), (1, start + 2), source),
+                 tokenize.TokenInfo(1003, 'SELECT id FROM ', (1, start + 2), (1, start + 17), source),
+                 tokenize.TokenInfo(tokenize.NAME, 'table', (1, start + 18), (1, start + 23), source),
+                 tokenize.TokenInfo(1002, '"', (1, end - 1), (1, end), source)]
+        expected = [("SELECT id FROM @PYTHON_EXPR@ WHERE ended = NULL", 1, 1)]
+        with patch.object(AUDIT.tokenize, "generate_tokens", return_value=iter(whole)):
+            self.assertEqual(expected, AUDIT.string_chunks(source, ".py"))
+        with patch.object(AUDIT.tokenize, "FSTRING_START", 1001, create=True), \
+                patch.object(AUDIT.tokenize, "FSTRING_END", 1002, create=True), \
+                patch.object(AUDIT.tokenize, "generate_tokens", return_value=iter(split)):
+            self.assertEqual(expected, AUDIT.string_chunks(source, ".py"))
+
+    def test_python_fstring_does_not_join_literals_across_an_operator(self):
+        source = 'q = f"SELECT id FROM {table}" + "SELECT name FROM names"\n'
+        self.assertEqual([("SELECT id FROM @PYTHON_EXPR@", 1, 1), ("SELECT name FROM names", 1, 1)],
+                         AUDIT.string_chunks(source, ".py"))
+
+    def test_python_expression_where_text_cannot_hide_unrestricted_update(self):
+        source = '''q = f"UPDATE repair_plan SET proposed = {transform('WHERE id = 1')}"'''
+        chunks = AUDIT.string_chunks(source, ".py")
+        self.assertEqual([("UPDATE repair_plan SET proposed = @PYTHON_EXPR@", 1, 1)], chunks)
+        statement = AUDIT.make_statement("repair.py", "production", "embedded",
+            chunks[0][0], 1, 1, 1, forced_kind="query")
+        self.assertTrue(any(item.rule == "LPSQL103" and item.severity == "high"
+                            for item in AUDIT.query_findings(statement, AUDIT.AuditConfig())))
 
 
 class FindingTests(unittest.TestCase):

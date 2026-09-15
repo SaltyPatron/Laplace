@@ -223,6 +223,32 @@
       "required": true
     },
     {
+      "id": "policy-legacy-content-history",
+      "profile": "policy",
+      "owner": "substrate",
+      "runner": "script",
+      "command": ["python3", "scripts/test-legacy-content-history.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-legacy-repair-evidence",
+      "profile": "policy",
+      "owner": "substrate",
+      "runner": "script",
+      "command": ["python3", "scripts/test-legacy-repair-evidence.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-managed-host",
       "profile": "policy",
       "owner": "services",

@@ -402,7 +402,53 @@ def decode_quoted(literal: str) -> str | None:
 
 def python_string_chunks(text: str) -> list[tuple[str, int, int]]:
     chunks: list[tuple[str, int, int]] = []
+    nested_chunks: list[tuple[str, int, int]] = []
     pending: list[tuple[str, int, int]] = []
+    lines = text.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+
+    def literal_value(literal: str, start_line: int) -> str | None:
+        # AST parsing decodes escapes/raw prefixes and literal braces identically
+        # on both token layouts. Replacement expressions are never evaluated or
+        # misidentified as SQL text: their values remain opaque placeholders.
+        try:
+            node = ast.parse(literal, mode="eval").body
+        except (SyntaxError, ValueError):
+            return decode_quoted(literal)
+
+        def render(value: ast.AST) -> str | None:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                return value.value
+            if isinstance(value, ast.JoinedStr):
+                return "".join(item.value if isinstance(item, ast.Constant) else "@PYTHON_EXPR@"
+                               for item in value.values)
+            return None
+
+        def nested(value: ast.AST) -> None:
+            rendered = render(value)
+            if rendered is not None:
+                if len(rendered) >= 12 and SQL_LEADS.search(rendered):
+                    nested_chunks.append((rendered, start_line + value.lineno - 1,
+                                          start_line + value.end_lineno - 1))
+                if isinstance(value, ast.JoinedStr):
+                    for part in value.values:
+                        if isinstance(part, ast.FormattedValue):
+                            nested(part.value)
+                            if part.format_spec is not None:
+                                nested(part.format_spec)
+                return
+            for child in ast.iter_child_nodes(value):
+                nested(child)
+
+        if isinstance(node, ast.JoinedStr):
+            for part in node.values:
+                if isinstance(part, ast.FormattedValue):
+                    nested(part.value)
+                    if part.format_spec is not None:
+                        nested(part.format_spec)
+        return render(node)
 
     def flush() -> None:
         if not pending:
@@ -413,47 +459,26 @@ def python_string_chunks(text: str) -> list[tuple[str, int, int]]:
         pending.clear()
 
     try:
-        lines = text.splitlines(keepends=True)
         stream = tokenize.generate_tokens(iter(lines).__next__)
-        # Python 3.12 tokenizes formatted strings into separate start/middle/end
-        # tokens, including the Python expressions inside them. Recover the
-        # complete source literal so the audit sees the same SQL as Python 3.10
-        # and 3.11, without evaluating any interpolation or treating its nested
-        # string literals as separate SQL statements.
-        fstring_start = getattr(tokenize, "FSTRING_START", None)
-        fstring_end = getattr(tokenize, "FSTRING_END", None)
         for token in stream:
-            if token.type == fstring_start:
+            if token.type == getattr(tokenize, "FSTRING_START", -1):
+                # Python <=3.11 returns the whole f-string as STRING; >=3.12
+                # exposes its parts, including arbitrary nested expressions.
+                # Recover the exact outer source span without interpreting any
+                # replacement token as an independent adjacent SQL literal.
+                first = token
                 depth = 1
-                last = token
-                for last in stream:
-                    if last.type == fstring_start:
+                while depth:
+                    token = next(stream)
+                    if token.type == tokenize.FSTRING_START:
                         depth += 1
-                    elif last.type == fstring_end:
+                    elif token.type == tokenize.FSTRING_END:
                         depth -= 1
-                        if depth == 0:
-                            break
-                if depth:
-                    flush()
-                    break
-                start_line, start_column = token.start
-                end_line, end_column = last.end
-                if start_line == end_line:
-                    literal = lines[start_line - 1][start_column:end_column]
-                else:
-                    literal = (
-                        lines[start_line - 1][start_column:]
-                        + "".join(lines[start_line:end_line - 1])
-                        + lines[end_line - 1][:end_column]
-                    )
-                value = decode_quoted(literal)
-                if value is not None:
-                    pending.append((value, start_line, end_line))
-                else:
-                    flush()
-                continue
+                start = offsets[first.start[0] - 1] + first.start[1]
+                end = offsets[token.end[0] - 1] + token.end[1]
+                token = tokenize.TokenInfo(tokenize.STRING, text[start:end], first.start, token.end, first.line)
             if token.type == tokenize.STRING:
-                value = decode_quoted(token.string)
+                value = literal_value(token.string, token.start[0])
                 if value is not None:
                     pending.append((value, token.start[0], token.end[0]))
                 else:
@@ -464,9 +489,9 @@ def python_string_chunks(text: str) -> list[tuple[str, int, int]]:
             }:
                 flush()
         flush()
-    except (tokenize.TokenError, IndentationError):
+    except (tokenize.TokenError, IndentationError, StopIteration):
         flush()
-    return chunks
+    return sorted(chunks + nested_chunks, key=lambda item: item[1])
 
 
 def source_string_literals(text: str, suffix: str) -> list[tuple[str, int, int, int]]:

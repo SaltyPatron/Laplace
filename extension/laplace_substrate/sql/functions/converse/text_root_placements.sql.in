@@ -1,0 +1,16 @@
+-- Inspect canonical composition through the same native text/T0 recipe used
+-- by ContentEmitter and TextEntityBuilder. No lookup, election or writes.
+-- Positions and duplicate inputs survive. NULL/empty elements have no root;
+-- whitespace is content, with no trimming. coord is the exact four-component
+-- native point; ST_MakePoint(coord[1],coord[2],coord[3],coord[4]) serializes it.
+CREATE OR REPLACE FUNCTION converse.text_root_placements(p_texts text[])
+    RETURNS TABLE(ord integer, root_id bytea, tier smallint,
+                  coord double precision[], hilbert_index bytea,
+                  radius_origin double precision)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_text_root_placements'
+    LANGUAGE C STABLE PARALLEL SAFE;
+
+COMMENT ON FUNCTION converse.text_root_placements(text[]) IS
+    'Canonical native root ID, collapsed tier, exact point/Hilbert and radius for each complete input text. '
+    'One-based input positions preserve duplicates; null/empty inputs return null placement fields, '
+    'null/empty arrays return no rows. Nonempty text requires the authoritative T0 perfcache.';

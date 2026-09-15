@@ -208,6 +208,7 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
             (original.replace("\nrun_repair_installed_corpus\n", "\nrun_repair_installed_corpus || true\n"), "one unsuppressed lifecycle invocation"),
             (original.replace(repair, repair + " || true"), "post-publication corpus repair"),
             (original.replace('LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)"', 'LAPLACE_REPAIR_PUBLISHED_SOURCE="unknown"'), "post-publication corpus repair"),
+            (original.replace('--max-current-readback-bytes 8589934592', ''), "post-publication corpus repair"),
         )
         for mutation, diagnostic in mutations:
             with self.subTest(diagnostic=diagnostic):
