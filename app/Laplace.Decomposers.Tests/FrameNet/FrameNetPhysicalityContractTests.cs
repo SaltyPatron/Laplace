@@ -57,10 +57,11 @@ public sealed class FrameNetPhysicalityContractTests
 
             Hash128 sentence = ContentEmitter.RootId("fucking:antitrust")!.Value;
             Hash128 target = ContentEmitter.RootId("antitrust")!.Value;
-            Assert.Contains(changes.SelectMany(c => c.Physicalities),
-                p => p.EntityId == sentence && p.Type == PhysicalityType.Content);
-            Assert.Contains(changes.SelectMany(c => c.Physicalities),
-                p => p.EntityId == target && p.Type == PhysicalityType.Content);
+            int nativeContentPhysicalities = changes
+                .SelectMany(c => c.IntentStages)
+                .Sum(stage => stage.PhysicalityCount);
+            Assert.True(nativeContentPhysicalities >= 2,
+                "sentence and target content DAGs must be staged through the native content lane");
 
             Hash128[] members = Trajectory.Constituents(annotation.TrajectoryXyzm!);
             Assert.Equal(FrameNetDecomposer.AnnotationSchemaId, members[0]);

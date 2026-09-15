@@ -18,7 +18,9 @@ public sealed class ChessExpandUnexploredTests
 
         Assert.Equal(20, n); // standard start: 20 legal moves
         Assert.Equal(20, change.Entities.Count(e => e.TypeId == ChessVocabulary.GameType));
-        var lines = change.Physicalities.Where(p => p.NConstituents == 2).ToList();
+        var lines = change.Physicalities
+            .Where(p => p.Type == PhysicalityType.Content && p.NConstituents == 2)
+            .ToList();
         Assert.Equal(20, lines.Count);
         Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == ChessVocabulary.MoveType);

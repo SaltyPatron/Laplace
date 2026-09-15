@@ -8,7 +8,7 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessPlayerPhysicalityTests
 {
     [Fact]
-    public void PlayerIdentity_OwnsItsWitnessedNameTrajectory()
+    public void PlayerIdentity_ProjectsItsWitnessedNameTrajectory()
     {
         const string name = "MagnusCarlsen";
         var playerId = ChessVocabulary.PlayerId(name);
@@ -20,7 +20,7 @@ public sealed class ChessPlayerPhysicalityTests
         Assert.Contains(change.Entities,
             e => e.Id == playerId && e.TypeId == ChessVocabulary.PlayerType);
         var placement = Assert.Single(change.Physicalities,
-            p => p.EntityId == playerId && p.Type == PhysicalityType.Content);
+            p => p.EntityId == playerId && p.Type == PhysicalityType.Projection);
         Assert.Equal(1, placement.NConstituents);
         Assert.Equal(
             [ContentEmitter.RootId(name)!.Value],
@@ -41,7 +41,7 @@ public sealed class ChessPlayerPhysicalityTests
         var change = builder.Build();
 
         var placement = Assert.Single(change.Physicalities,
-            p => p.EntityId == playerId && p.Type == PhysicalityType.Content);
+            p => p.EntityId == playerId && p.Type == PhysicalityType.Projection);
         Assert.Equal(
             [ContentEmitter.RootId("MagnusCarlsen")!.Value],
             Trajectory.Constituents(placement.TrajectoryXyzm!));
@@ -63,9 +63,10 @@ public sealed class ChessPlayerPhysicalityTests
         var record = ChessTrajectoryRecord.ForPlayer(playerId, "MagnusCarlsen");
 
         Assert.Empty(change.Attestations);
-        Assert.Single(change.Physicalities, p => p.EntityId == playerId);
+        Assert.Single(change.Physicalities,
+            p => p.EntityId == playerId && p.Type == PhysicalityType.Projection);
         Assert.Equal(
-            PhysicalityId.Compute(playerId, PhysicalityType.Content),
+            PhysicalityId.Compute(playerId, PhysicalityType.Projection),
             record.TrunkRootId);
     }
 }
