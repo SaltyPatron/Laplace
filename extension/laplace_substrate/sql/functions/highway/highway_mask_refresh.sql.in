@@ -17,7 +17,11 @@ DECLARE
     updated bigint;
 BEGIN
     IF NOT consensus.highway_ready() THEN
-        RAISE LOG 'highway_mask_refresh: Highway registry unavailable — requested masks left unchanged';
+        INSERT INTO laplace.highway_mask_dirty(id)
+        SELECT DISTINCT u.id FROM unnest(p_ids) AS u(id)
+        WHERE u.id IS NOT NULL ORDER BY u.id
+        ON CONFLICT(id) DO NOTHING;
+        RAISE LOG 'highway_mask_refresh: registry unavailable; exact dirty identities retained';
         RETURN 0;
     END IF;
 

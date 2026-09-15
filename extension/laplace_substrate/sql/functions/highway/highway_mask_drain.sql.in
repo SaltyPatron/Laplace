@@ -1,63 +1,38 @@
--- Drain the mask refresh queue: recompute highway_mask for exactly the entities whose
--- consensus participation changed, then forget them. Narrower than
--- highway_mask_rebuild (full pass over every entity).
---
--- NOT ON THE INGEST PATH (2026-07-21). Ingest deposits masks inline via
--- highway_mask_deposit and neither queues nor drains. This is the REPAIR verb for the
--- one thing deposit cannot do: deposit only OR-accumulates bits ON, so a mutation that
--- must turn bits OFF -- per-source eviction removing an entity's last governed edge --
--- queues the affected entities into laplace.highway_mask_dirty and calls this, because
--- highway_mask_refresh recomputes from scratch and can therefore clear.
---
--- Batched with a COMMIT per batch so a long drain never holds one transaction open, and
--- so an interrupted drain keeps its progress. Crucially, an unavailable Highway registry
--- retains the dirty queue untouched; the previous implementation called refresh, got the
--- registry-missing no-op, then DELETED the queued ids and permanently lost the clear-work.
---
--- No SET clause: a PL/pgSQL procedure carrying one is barred from transaction control
--- (COMMIT), so references are schema-qualified instead.
-DROP PROCEDURE IF EXISTS highway_mask_drain(int);
-CREATE OR REPLACE PROCEDURE laplace.highway_mask_drain(p_batch int DEFAULT 100000)
+-- Drain bit-clearing repair work, never the ordinary ingest path. Each claim
+-- and refresh commits together. Concurrent producers can enqueue the same id
+-- after the claim rather than losing a new signal behind DELETE-after-refresh.
+CREATE OR REPLACE PROCEDURE laplace.highway_mask_drain(p_batch int DEFAULT 250000)
     LANGUAGE plpgsql AS $$
 DECLARE
-    ids     bytea[];
-    n       bigint;
-    total   bigint := 0;
-    drained bigint := 0;
-    queued  bigint;
-    t0      timestamptz := clock_timestamp();
+    ids bytea[];
+    n bigint;
+    total bigint := 0;
 BEGIN
     IF p_batch IS NULL OR p_batch < 1 THEN
         RAISE EXCEPTION 'highway_mask_drain: p_batch must be >= 1';
     END IF;
-
-    SELECT count(*) INTO queued FROM laplace.highway_mask_dirty;
-    IF queued = 0 THEN
-        RETURN;
-    END IF;
-    IF NOT consensus.highway_ready() THEN
-        RAISE LOG 'highway_mask_drain: Highway registry unavailable; % dirty entities retained', queued;
-        RETURN;
-    END IF;
-
-    RAISE LOG 'highway_mask_drain: start — % entities queued', queued;
     LOOP
-        SELECT array_agg(d.id) INTO ids
-        FROM (SELECT id FROM laplace.highway_mask_dirty ORDER BY id LIMIT p_batch) d;
+        IF NOT consensus.highway_ready() THEN
+            RAISE LOG 'highway_mask_drain: registry unavailable; dirty entities retained';
+            RETURN;
+        END IF;
+        WITH claimed AS MATERIALIZED (
+            SELECT id FROM laplace.highway_mask_dirty
+            ORDER BY id LIMIT p_batch FOR UPDATE SKIP LOCKED
+        ), taken AS (
+            DELETE FROM laplace.highway_mask_dirty d USING claimed q
+            WHERE d.id=q.id RETURNING d.id
+        )
+        SELECT array_agg(id ORDER BY id) INTO ids FROM taken;
         EXIT WHEN ids IS NULL;
 
         n := consensus.highway_mask_refresh(ids);
-        DELETE FROM laplace.highway_mask_dirty WHERE id = ANY(ids);
-
-        total   := total + n;
-        drained := drained + cardinality(ids);
-        RAISE LOG 'highway_mask_drain: % masks written / % of % drained (% percent) — %s elapsed',
-            total, drained, queued,
-            round(100.0 * drained / NULLIF(queued, 0), 1),
-            round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
         COMMIT;
+        IF NOT consensus.highway_ready() THEN
+            RAISE LOG 'highway_mask_drain: registry unavailable; refresh batch retained';
+            RETURN;
+        END IF;
+        total := total + n;
+        RAISE LOG 'highway_mask_drain: % masks refreshed', total;
     END LOOP;
-
-    RAISE LOG 'highway_mask_drain: done — % masks written / % entities in %s',
-        total, drained, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
 END $$;
