@@ -1,4 +1,6 @@
 #include "laplace/core/hash128.h"
+#include "laplace/core/trajectory.h"
+#include "laplace/core/mantissa.h"
 
 #include <string.h>
 
@@ -20,10 +22,8 @@ void hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t
      * CONTENT-ADDRESSING LAW: same content = same hash. The id is a function
      * of the child-id sequence and nothing else — no tier, no ordinal, no
      * container. Tier is a FLOOR, not identity: entities.tier records the
-     * lowest form of the content ('cat' is a tier-2 word that can stand as a
-     * sentence on its own — "How do you feel?" → "Fine" — same id at every
-     * tier above its floor; hash_composer collapses single-child nodes to the
-     * child id for exactly this reason).
+     * lowest form of the content; hash_composer collapses single-child nodes to
+     * the child id for exactly this reason.
      */
     (void)tier;
     blake3_hasher h;
@@ -67,6 +67,52 @@ int hash128_merkle_runs(size_t child_count, hash128_run_reader_t reader,
 
     blake3_hasher_finalize(&h, (uint8_t*)out, sizeof(*out));
     return 0;
+}
+
+typedef struct {
+    const double* xyzm;
+    size_t points;
+    size_t index;
+} trajectory_merkle_reader_t;
+
+static int trajectory_next_merkle_run(void* context, hash128_t* child, size_t* run) {
+    trajectory_merkle_reader_t* reader = (trajectory_merkle_reader_t*)context;
+    if (!reader || !child || !run) return -1;
+    if (reader->index >= reader->points) return 1;
+
+    mantissa_payload_t payload;
+    mantissa_unpack(&reader->xyzm[reader->index * 4], &payload);
+    reader->index++;
+    *child = payload.entity_id;
+    *run = payload.run_length ? (size_t)payload.run_length : (size_t)1;
+    return 0;
+}
+
+int trajectory_content_identity(const double* trajectory_xyzm,
+                                size_t n_points,
+                                hash128_t* out_id,
+                                size_t* out_count) {
+    if (!out_id || !out_count || !trajectory_xyzm || n_points == 0) return -1;
+
+    size_t count = 0;
+    if (trajectory_constituent_count(trajectory_xyzm, n_points, &count) != 0
+        || count == 0) return -1;
+    *out_count = count;
+
+    if (count == 1) {
+        if (n_points != 1) return -1;
+        mantissa_payload_t payload;
+        mantissa_unpack(trajectory_xyzm, &payload);
+        *out_id = payload.entity_id;
+        return 0;
+    }
+
+    trajectory_merkle_reader_t reader = {
+        .xyzm = trajectory_xyzm,
+        .points = n_points,
+        .index = 0,
+    };
+    return hash128_merkle_runs(count, trajectory_next_merkle_run, &reader, out_id);
 }
 
 int hash128_compare(const hash128_t* a, const hash128_t* b) {
