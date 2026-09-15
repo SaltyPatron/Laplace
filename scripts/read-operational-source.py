@@ -119,6 +119,41 @@ relation_requests(name) AS (VALUES {values}),
 relation_ids AS MATERIALIZED (
  SELECT DISTINCT laplace.relation_type_id(name) AS id FROM relation_requests
 ),
+raw_any_frontier AS MATERIALIZED (
+ SELECT p.id,p.entity_id,p.n_constituents FROM laplace.physicalities p
+ WHERE p.type=8 AND p.trajectory IS NOT NULL
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY(SELECT id FROM cue_ids)
+ LIMIT 11
+),
+raw_all_frontier AS MATERIALIZED (
+ SELECT p.id,p.entity_id,p.n_constituents FROM laplace.physicalities p
+ WHERE p.type=8 AND p.trajectory IS NOT NULL
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY(SELECT id FROM cue_ids)
+ LIMIT 11
+),
+schema_any_frontier AS MATERIALIZED (
+ SELECT p.id,p.entity_id,p.n_constituents FROM laplace.physicalities p
+ WHERE p.type=8 AND p.trajectory IS NOT NULL
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY(SELECT id FROM cue_ids)
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[(SELECT ud_schema FROM roster)]
+ LIMIT 11
+),
+frontier_rows AS MATERIALIZED (
+ SELECT 'raw_any'::text AS route,p.* FROM raw_any_frontier p
+ UNION ALL SELECT 'raw_all',p.* FROM raw_all_frontier p
+ UNION ALL SELECT 'schema_any',p.* FROM schema_any_frontier p
+),
+frontier_diagnostics AS MATERIALIZED (
+ SELECT route,jsonb_build_object('count_lower_bound',count(p.id),
+   'count_exact',count(p.id)<11,'limit',11,'limit_reached',count(p.id)=11,
+   'more_than_8',count(p.id)>8,'more_than_10',count(p.id)>10,
+   'rows',COALESCE(jsonb_agg(jsonb_build_object(
+      'entity_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex'),
+      'n_constituents',p.n_constituents) ORDER BY p.entity_id,p.id)
+      FILTER (WHERE p.id IS NOT NULL),'[]')) AS diagnostic
+ FROM (VALUES ('raw_any'),('raw_all'),('schema_any')) routes(route)
+ LEFT JOIN frontier_rows p USING(route) GROUP BY route
+),
 lookup_senses AS MATERIALIZED (
  SELECT a.* FROM laplace.attestations a
  WHERE a.type_id=(SELECT has_sense FROM roster)
@@ -237,6 +272,11 @@ def readback_sql(cues: list[str], operands: list[str], candidates: int,
    'target_inverse_has_sense_witness_overflow',(SELECT count(*)>{witnesses} FROM target_lemma_witnesses),
 """ if relations else ""
     relation_ids = " UNION SELECT id FROM relation_ids\n" if relations else ""
+    frontier_diagnostics = """
+    'type8_frontiers',(SELECT jsonb_object_agg(route,diagnostic) FROM frontier_diagnostics),
+    'type8_frontier_scope','exact cue IDs; membership count only; SQL LIMIT sample does not reproduce native bitmap visitation order',
+    'type8_frontier_predicates','raw_any: overlap; raw_all: contains all; schema_any: overlap plus UD schema; raw routes have no schema filter',
+""" if relations else ""
     labels = ",realize.label_batch(ids) AS labels,realize.batch(ids) AS realized_texts" if relations else ""
     surface = "left(r.surfaces[u.ord],1024)" if relations else "r.surfaces[u.ord]"
     surface_metadata = """,octet_length(r.surfaces[u.ord]) AS native_surface_bytes,
@@ -416,6 +456,7 @@ SELECT jsonb_build_object(
     'has_definition',encode(definition,'hex'),'ud_source',encode(ud_source,'hex'),
     'wordnet_source',encode(wordnet_source,'hex'),'ud_schema',encode(ud_schema,'hex')) FROM roster),
  'source_diagnostics',jsonb_build_object(
+    {frontier_diagnostics}
     'ud_schema_type8_present',EXISTS(SELECT 1 FROM laplace.physicalities p
       WHERE p.type=8 AND p.trajectory IS NOT NULL
         AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[(SELECT ud_schema FROM roster)]),

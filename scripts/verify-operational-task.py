@@ -53,7 +53,7 @@ def selected_files(shape_path: Path, exemplar_path: Path, root: Path = ROOT,
                    bundle: Path | None = None) -> tuple[dict, dict]:
     """Frame the exact authored selection; native code still owns schema/identity."""
     selected = SEED.authored_bundle(root, bundle or root / "app/Laplace.Cli/bin/Release/net10.0/seeds/operational")
-    require(SEED.EXPECTED_ARTIFACTS == 13, "the final thirteen-artifact operational bundle is not installed")
+    require(len(selected) == SEED.EXPECTED_ARTIFACTS, "the exact authored operational bundle is not installed")
     files = {}
     for kind, path in (("shape", shape_path), ("exemplar", exemplar_path)):
         path = path.resolve()
@@ -283,7 +283,7 @@ def validate_native(report: dict) -> str:
     run = report["seed_run"]
     require(run["source_name"] == "OperationalDecomposer" and run["source_id"] == roster["operational"]
             and run["layer"] == 2 and run["status"] == "ok" and run["evidence_persisted"] is True
-            and run["files_done"] == run["files_total"] == 13 and run["units_failed"] == 0
+            and run["files_done"] == run["files_total"] == SEED.EXPECTED_ARTIFACTS and run["units_failed"] == 0
             and run["ended_at"] and not run["error"], "the exact full operational seed run did not complete")
     require(task["predicate"] == roster["definition"] and slot["accepted_type"] == roster["synset_type"],
             "declaration does not request a definition of a typed WordNet synset")

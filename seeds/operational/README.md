@@ -11,7 +11,8 @@ The selected inputs are declared as literal `Content` items in
 - `docs/INVENTION.md` and `docs/INVENTIONS.md`.
 - Binding specifications 05, 06, 08, 09, 11, 33, 34, 36, and 37.
 - The explicitly authored annotation `seeds/operational/exemplars/en_define.conllu`.
-- Its explicit relation-read declaration `seeds/operational/tasks/en_define.json`.
+- The explicitly authored fragment annotation `seeds/operational/exemplars/en_antonym.conllu`.
+- The explicit definition relation-read declaration `seeds/operational/tasks/en_define.json`.
 
 After the Unicode and language foundation, admit the bundled source with:
 
@@ -99,7 +100,15 @@ declaration against the native admitted parse and token identities. It exercises
 a fresh request operand, witnessed WordNet relation paths, changed source facts
 and competing declarations through the existing forward program. Deployment
 completion still requires the exact file journal and native completion witnesses
-for all thirteen selected artifacts, followed by execution readback.
+for all fourteen selected artifacts, followed by execution readback.
+
+The additional `The opposite of empty is` annotation retains an intentionally
+unfinished five-token fragment. Its fourth token is the prospective variable;
+the other four forms are invariant source content. It contains no answer and
+has no task declaration. Native database acceptance admits the complete bundle
+and retains `antonym-exemplar.json` with the actual parse, token, file and
+occurrence identities. A later declaration must use those witnessed identities
+and independently verified relation and operand-type evidence.
 
 ## Declared relation-read task shapes
 

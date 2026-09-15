@@ -65,8 +65,8 @@ def receipt():
              "containment": 1, "sense": 1, "synset": 1, "definition": 1},
             "roster": roster, "task": task, "slot": slot, "files": files,
             "seed_run": {"source_name": "OperationalDecomposer", "source_id": roster["operational"],
-                "layer": 2, "status": "ok", "evidence_persisted": True, "files_done": 13,
-                "files_total": 13, "units_failed": 0, "ended_at": "2026-09-15", "error": None},
+                "layer": 2, "status": "ok", "evidence_persisted": True, "files_done": 14,
+                "files_total": 14, "units_failed": 0, "ended_at": "2026-09-15", "error": None},
             "witnesses": witnesses, "structures": structures, "execution": [emit, terminal],
             "synset_entities": [{"id": native_id(63), "type_id": roster["synset_type"]}],
             "realizations": {proof.id_hex(native_id(64)): "source supplied Unicode gloss: glaciér"}}
@@ -127,7 +127,7 @@ class OperationalTaskTests(unittest.TestCase):
     def test_exact_file_and_full_seed_receipts_are_required(self):
         for target, field, value in (("file", "resume_fingerprint", native_id(999)),
             ("file", "completed", False), ("file", "status", "failed"),
-            ("run", "files_total", 12), ("run", "evidence_persisted", False)):
+            ("run", "files_total", 12), ("run", "files_total", 13), ("run", "evidence_persisted", False)):
             report = receipt()
             (report["files"][0] if target == "file" else report["seed_run"])[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):

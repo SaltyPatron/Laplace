@@ -121,6 +121,31 @@ class SourceReadbackTests(unittest.TestCase):
         self.assertIn(name.encode("utf-8").hex(), sql)
         self.assertIn("'has_definition_witness_overflow'", sql)
 
+    def test_frontier_counts_probe_raw_membership_before_schema_acceptance(self):
+        sql = module.readback_sql(["The", "opposite", "of", "hot", "is"], ["hot"],
+                                  16, 2048, 512, 180, ["IS_ANTONYM_OF"])
+        for name, operation in (("raw_any_frontier", "&&"), ("raw_all_frontier", "@>"),
+                                ("schema_any_frontier", "&&")):
+            query = sql.split(name + " AS MATERIALIZED (", 1)[1].split("\n),", 1)[0]
+            self.assertIn("p.type=8 AND p.trajectory IS NOT NULL", query)
+            self.assertIn(operation + " ARRAY(SELECT id FROM cue_ids)", query)
+            self.assertIn("LIMIT 11", query)
+            self.assertNotIn("ORDER BY", query)
+            self.assertNotIn("laplace.attestations", query)
+            if name.startswith("raw_"):
+                self.assertNotIn("ud_schema", query)
+                self.assertEqual(query.count("laplace_trajectory_constituent_ids"), 1)
+            else:
+                self.assertIn("@> ARRAY[(SELECT ud_schema FROM roster)]", query)
+        self.assertIn("'count_lower_bound',count(p.id)", sql)
+        self.assertIn("'count_exact',count(p.id)<11", sql)
+        self.assertIn("'more_than_8',count(p.id)>8", sql)
+        self.assertIn("'more_than_10',count(p.id)>10", sql)
+        self.assertIn("'entity_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex')", sql)
+        self.assertIn("FILTER (WHERE p.id IS NOT NULL)", sql)
+        self.assertIn("LEFT JOIN frontier_rows p USING(route)", sql)
+        self.assertNotIn("raw_any_frontier", self.sql())
+
     def test_cli_retains_positive_opposed_scoped_rows_and_overflow_without_election(self):
         rows = [dict(route="requested_relation", id=str(i), subject_id="hot-id", type_id="antonym-id",
                      object_id="target-id", source_id="source-" + str(i), context_id=context,

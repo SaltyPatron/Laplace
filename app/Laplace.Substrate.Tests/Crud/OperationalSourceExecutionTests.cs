@@ -25,6 +25,163 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     public Task AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops() =>
         AssertSourceExecution(throughWordNetSense: true);
 
+    [Fact]
+    public async Task AuthoredAntonymExemplar_AdmitsCompleteSourceWithNativeParseProvenance()
+    {
+        CodepointPerfcache.LoadDefault();
+        LanguageReference.EnsureLoaded();
+        const string relative = "seeds/operational/exemplars/en_antonym.conllu";
+        const string text = "The opposite of empty is";
+        string directory = Path.Combine(Path.GetTempPath(), "laplace-antonym-exemplar-" + Guid.NewGuid().ToString("N"));
+        await using var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource, persistEvidence: true);
+        var runner = new IngestRunner(writer, new NpgsqlSubstrateReader(pg.DataSource),
+            NullLoggerFactory.Instance, new NpgsqlIngestObservability(pg.DataSource, evidencePersisted: true));
+        try
+        {
+            await CopyBundledSource(directory);
+            DateTime startedAt;
+            await using (var clock = pg.DataSource.CreateCommand("SELECT clock_timestamp()"))
+                startedAt = (DateTime)(await clock.ExecuteScalarAsync())!;
+            await IngestSource(runner, new OperationalDecomposer(), directory, 14, reobservePresent: true);
+            Hash128 root = ContentTierSpine.ResolveRoot(text)!.Value;
+            Hash128 parse;
+            await using (var query = pg.DataSource.CreateCommand(
+                "SELECT object_id FROM laplace.attestations "
+                + "WHERE subject_id=$1 AND type_id=$2 AND source_id=$3 AND outcome=2"))
+            {
+                query.Parameters.AddWithValue(root.ToBytes());
+                query.Parameters.AddWithValue(RelationTypeRegistry.Resolve("HAS_PARSE").Id.ToBytes());
+                query.Parameters.AddWithValue(OperationalSource.SourceId.ToBytes());
+                await using var row = await query.ExecuteReaderAsync();
+                Assert.True(await row.ReadAsync(), "The ordinary source admission must persist the authored fragment's parse.");
+                parse = Hash128.FromBytes(row.GetFieldValue<byte[]>(0));
+                Assert.False(await row.ReadAsync());
+            }
+            AuthoredExemplarEvidence evidence = await ReadAuthoredExemplar(
+                Path.Combine(directory, relative), relative, startedAt, root, parse);
+            await AssertFullBundleReceipt(directory, evidence.RunId, retainReceipt: false);
+            Hash128 physicalityId;
+            int count;
+            await using (var query = pg.DataSource.CreateCommand(
+                "SELECT id,n_constituents FROM laplace.physicalities WHERE entity_id=$1 AND type=8"))
+            {
+                query.Parameters.AddWithValue(parse.ToBytes());
+                await using var row = await query.ExecuteReaderAsync();
+                Assert.True(await row.ReadAsync());
+                physicalityId = Hash128.FromBytes(row.GetFieldValue<byte[]>(0));
+                Assert.Equal(PhysicalityId.Compute(parse, PhysicalityType.ParseStructure), physicalityId);
+                count = row.GetInt32(1);
+                Assert.False(await row.ReadAsync());
+            }
+            var flat = new List<Hash128>();
+            await using (var query = pg.DataSource.CreateCommand(
+                "SELECT entity_id FROM generation.trajectory_unpacked_points($1,8::smallint)"))
+            {
+                query.Parameters.AddWithValue(parse.ToBytes());
+                await using var row = await query.ExecuteReaderAsync();
+                while (await row.ReadAsync()) flat.Add(Hash128.FromBytes(row.GetFieldValue<byte[]>(0)));
+            }
+            Assert.Equal(count, flat.Count);
+            Assert.Equal(parse, Hash128.Merkle(EntityTier.Document, flat.ToArray()));
+            // Compare complete stored structure and occurrence to the same
+            // unchanged source's normal compositor output, including every
+            // feature value. This expected change is never written to the DB.
+            var record = await OperationalDecomposer.ReadContractAsync(Path.Combine(directory, relative), relative);
+            var handler = new GrammarComposeHandler(OperationalSource.SourceId, SourceTrust.SubstrateMandate, null);
+            using (var unit = handler.CreateDeferredUnit(record))
+            {
+                var builder = new SubstrateChangeBuilder(OperationalSource.SourceId, "antonym-source-readback");
+                Hash128 file = unit.DrainInto(builder, SourceTrust.SubstrateMandate, null);
+                handler.WalkWitness(record, file, builder, unit);
+                SubstrateChange expected = builder.Build();
+                try
+                {
+                    Assert.Equal(evidence.FileId, file);
+                    AttestationRow claim = Assert.Single(expected.Attestations, a => a.TypeId == RelationTypeRegistry.Resolve("HAS_PARSE").Id);
+                    Assert.Equal(root, claim.SubjectId);
+                    Assert.Equal(parse, claim.ObjectId);
+                    Assert.Equal(evidence.Occurrence, claim.ContextId);
+                    PhysicalityRow structure = Assert.Single(expected.Physicalities, p => p.Id == physicalityId);
+                    Assert.Equal(Trajectory.Constituents(structure.TrajectoryXyzm!), flat);
+                }
+                finally { foreach (var stage in expected.IntentStages) stage.Dispose(); }
+            }
+            Assert.True(UdParseStructure.TryDecode(flat.ToArray(), out var parsed));
+            Assert.NotNull(parsed);
+            Assert.Equal(root, parsed.SentenceId);
+            Assert.Equal(LanguageReference.Resolve("en"), parsed.LanguageId);
+            Assert.Empty(parsed.Mwts);
+            Assert.Equal(5, parsed.Tokens.Count);
+            string[] forms = ["The", "opposite", "of", "empty", "is"];
+            string[] lemmas = ["the", "opposite", "of", "empty", "be"];
+            string[] upos = ["DET", "NOUN", "ADP", "ADJ", "AUX"];
+            string[] deprels = ["det", "nsubj", "case", "nmod", "root"];
+            int[] heads = [2, 5, 4, 2, 0];
+            int[] featureCounts = [2, 1, 0, 1, 5];
+            for (int i = 0; i < parsed.Tokens.Count; i++)
+            {
+                var token = parsed.Tokens[i];
+                Assert.Equal(UdParseStructure.TokenRefId((i + 1).ToString()), token.RefId);
+                Assert.Equal(ContentTierSpine.ResolveRoot(forms[i]), token.FormId);
+                Assert.Equal(ContentTierSpine.ResolveRoot(lemmas[i]), token.LemmaId);
+                Assert.Equal(PosReference.Resolve(upos[i], PosReference.PosTagset.Upos), token.UposId);
+                Assert.Equal(UdParseStructure.NoneId, token.XposId);
+                Assert.Equal(heads[i] == 0 ? UdParseStructure.RootId : UdParseStructure.TokenRefId(heads[i].ToString()), token.HeadRefId);
+                Assert.Equal(RelationTypeRegistry.ResolveDeprel(deprels[i]).Id, token.DeprelId);
+                Assert.Equal(featureCounts[i], token.Features.Count);
+                Assert.Empty(token.Enhanced);
+                Assert.Empty(token.Misc);
+            }
+            Assert.Single(parsed.Tokens, t => t.HeadRefId == UdParseStructure.RootId);
+            Hash128 prospectiveToken = parsed.Tokens[3].RefId;
+            Assert.Equal(UdParseStructure.TokenRefId("4"), prospectiveToken);
+            await using (var query = pg.DataSource.CreateCommand(
+                "SELECT count(*) FROM laplace.attestations WHERE subject_id=$1 AND type_id=$2"))
+            {
+                query.Parameters.AddWithValue(parse.ToBytes());
+                query.Parameters.AddWithValue(OperationalSource.ExampleOfTypeId.ToBytes());
+                Assert.Equal(0L, (long)(await query.ExecuteScalarAsync())!);
+            }
+            string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
+            if (!string.IsNullOrWhiteSpace(receiptPath))
+            {
+                string receiptDirectory = Path.GetDirectoryName(Path.GetFullPath(receiptPath))!;
+                Directory.CreateDirectory(receiptDirectory);
+                byte[] receipt = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    schema = "laplace.operational-antonym-exemplar-proof/v1", disposition = "source-admitted",
+                    candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"),
+                    run_id = evidence.RunId, relative_path = relative, source_id = Hex(OperationalSource.SourceId),
+                    trust_class = Hex(OperationalSource.TrustClass), trust = "SubstrateMandate",
+                    utf8_base64 = Convert.ToBase64String(evidence.Bytes),
+                    bytes = evidence.Bytes.Length, sha256 = Convert.ToHexString(SHA256.HashData(evidence.Bytes)).ToLowerInvariant(),
+                    file_id = Hex(evidence.FileId), occurrence_context_id = Hex(evidence.Occurrence),
+                    resume_fingerprint = Hex(evidence.Fingerprint), source_root_id = Hex(root),
+                    exemplar_parse_id = Hex(parse), parse_physicality_id = Hex(physicalityId),
+                    language_id = Hex(parsed.LanguageId), prospective_variable_ordinal = 4,
+                    exemplar_token_ref_id = Hex(prospectiveToken), constituents = flat.Select(Hex).ToArray(),
+                    tokens = parsed.Tokens.Select((token, i) => new
+                    {
+                        ordinal = i + 1, token_ref_id = Hex(token.RefId), form_id = Hex(token.FormId),
+                        lemma_id = Hex(token.LemmaId), upos_id = Hex(token.UposId), xpos_id = Hex(token.XposId),
+                        head_ref_id = Hex(token.HeadRefId), deprel_id = Hex(token.DeprelId),
+                        features = token.Features.Select(pair => new { relation_id = Hex(pair.RelationId), value_id = Hex(pair.ValueId) }),
+                        enhanced = token.Enhanced.Select(pair => new { head_ref_id = Hex(pair.HeadRefId), relation_id = Hex(pair.RelationId) }),
+                        misc = token.Misc.Select(pair => new { key_id = Hex(pair.KeyId), value_id = Hex(pair.ValueId) }),
+                    }),
+                    canonical_parse_verified = true, file_occurrence_context_verified = true,
+                    source_trust_verified = true, completion_present = true, task_declaration_admitted = false,
+                    selected_files = 14, admitted_file_journals = 14, completion_markers = 14,
+                    parse_observation_count = 1, parse_consensus_witness_count = 1,
+                }, new JsonSerializerOptions { WriteIndented = true });
+                Assert.InRange(receipt.Length, 1, 64 * 1024);
+                await File.WriteAllBytesAsync(Path.Combine(receiptDirectory, "antonym-exemplar.json"), receipt);
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
     private async Task AssertSourceExecution(bool throughWordNetSense)
     {
         CodepointPerfcache.LoadDefault();
@@ -69,23 +226,13 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             Hash128 parseSource;
             if (throughWordNetSense)
             {
-                string[] bundledFiles = Directory.GetFiles(OperationalDecomposer.BundledPath, "*", SearchOption.AllDirectories);
-                Assert.Equal(13, bundledFiles.Length);
-                foreach (string bundled in bundledFiles)
-                {
-                    string relative = Path.GetRelativePath(OperationalDecomposer.BundledPath, bundled);
-                    string destination = Path.Combine(authoredRoot, relative);
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    byte[] bundledBytes = await File.ReadAllBytesAsync(bundled);
-                    await File.WriteAllBytesAsync(destination, bundledBytes);
-                    Assert.Equal(bundledBytes, await File.ReadAllBytesAsync(destination));
-                }
+                await CopyBundledSource(authoredRoot);
                 udPath = Path.Combine(authoredRoot, authoredRelative);
                 await using (var clock = pg.DataSource.CreateCommand("SELECT clock_timestamp()"))
                     authoredStartedAt = (DateTime)(await clock.ExecuteScalarAsync())!;
                 // One real generic source run owns the entire distributed bundle;
                 // parse/shape admission ordering is not arranged by the fixture.
-                await Ingest(new OperationalDecomposer(), authoredRoot, expectedFiles: 13);
+                await Ingest(new OperationalDecomposer(), authoredRoot, expectedFiles: 14, reobservePresent: true);
                 parseSource = OperationalSource.SourceId;
             }
             else
@@ -300,19 +447,8 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
         AttestationRow Fact(Hash128 subject, Hash128 predicate, Hash128 result) =>
             NativeAttestation.CategoricalResolved(subject, predicate, result, source, context, SourceTrust.SubstrateMandate);
 
-        async Task Ingest(IDecomposer decomposer, string path, int expectedFiles = 1)
-        {
-            IngestRunResult result = await runner.RunAsync(decomposer, IngestRunOptions.Default with
-            {
-                EcosystemPath = path,
-                SkipLayerOrderingCheck = true,
-                SkipSourceCompletion = true,
-            });
-            Assert.Empty(result.Failures);
-            Assert.Equal(0, result.UnitsFailed);
-            Assert.Equal(expectedFiles, result.FilesDone);
-            Assert.Equal(expectedFiles, result.InputUnitsDone);
-        }
+        Task Ingest(IDecomposer decomposer, string path, int expectedFiles = 1, bool reobservePresent = false) =>
+            IngestSource(runner, decomposer, path, expectedFiles, reobservePresent);
 
         async Task Apply(SubstrateChange change)
         {
@@ -321,7 +457,40 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
         }
     }
 
-    private async Task<Guid> RetainAuthoredExemplar(
+    private static async Task CopyBundledSource(string root)
+    {
+        string[] files = Directory.GetFiles(OperationalDecomposer.BundledPath, "*", SearchOption.AllDirectories);
+        Assert.Equal(14, files.Length);
+        foreach (string path in files)
+        {
+            string destination = Path.Combine(root, Path.GetRelativePath(OperationalDecomposer.BundledPath, path));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            byte[] bytes = await File.ReadAllBytesAsync(path);
+            await File.WriteAllBytesAsync(destination, bytes);
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(destination));
+        }
+    }
+
+    private static async Task IngestSource(IngestRunner runner, IDecomposer decomposer,
+        string path, int expectedFiles = 1, bool reobservePresent = false)
+    {
+        // Shared-db Facts need fresh file journals in either test order. The
+        // native writer still deduplicates the exact testimony: readback below
+        // requires one observation and one consensus witness for each parse.
+        IngestRunResult result = await runner.RunAsync(decomposer, IngestRunOptions.Default with
+        {
+            EcosystemPath = path,
+            SkipLayerOrderingCheck = true,
+            SkipSourceCompletion = true,
+            DecomposerOptions = DecomposerOptions.Default with { ReObservePresent = reobservePresent },
+        });
+        Assert.Empty(result.Failures);
+        Assert.Equal(0, result.UnitsFailed);
+        Assert.Equal(expectedFiles, result.FilesDone);
+        Assert.Equal(expectedFiles, result.InputUnitsDone);
+    }
+
+    private async Task<AuthoredExemplarEvidence> ReadAuthoredExemplar(
         string path, string relativePath, DateTime startedAt, Hash128 root, Hash128 parse)
     {
         byte[] bytes = await File.ReadAllBytesAsync(path);
@@ -355,7 +524,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
         Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;
         Hash128 occurrence;
         await using (var query = pg.DataSource.CreateCommand(
-            "SELECT a.context_id,a.outcome,a.observation_count,a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,c.rating "
+            "SELECT a.context_id,a.outcome,a.observation_count,a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,c.rating,c.witness_count "
             + "FROM laplace.attestations a JOIN laplace.consensus c "
             + "ON c.subject_id=a.subject_id AND c.type_id=a.type_id AND c.object_id=a.object_id "
             + "WHERE a.subject_id=$1 AND a.type_id=$2 AND a.object_id=$3 AND a.source_id=$4"))
@@ -375,11 +544,12 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             Assert.Equal(expected.OpponentRatingFp1e9, row.GetInt64(3));
             Assert.Equal(expected.OpponentRdFp1e9, row.GetInt64(4));
             Assert.True(row.GetInt64(5) > Glicko2.DefaultRatingFp1e9);
+            Assert.Equal(1, row.GetInt64(6));
             Assert.False(await row.ReadAsync());
         }
         await using (var query = pg.DataSource.CreateCommand(
             "SELECT count(*) FROM laplace.attestations WHERE subject_id=$1 AND type_id=$2 AND object_id=$3 "
-            + "AND source_id=$4 AND context_id=$1 AND outcome=2"))
+            + "AND source_id=$4 AND context_id=$1 AND outcome=2 AND observation_count=1"))
         {
             query.Parameters.AddWithValue(expectedFile.FileId.ToBytes());
             query.Parameters.AddWithValue(RelationTypeRegistry.Resolve("CONTAINS").Id.ToBytes());
@@ -404,6 +574,17 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             query.Parameters.AddWithValue(OperationalSource.SourceId.ToBytes());
             Assert.Equal(1L, (long)(await query.ExecuteScalarAsync())!);
         }
+        return new AuthoredExemplarEvidence(runId, expectedFile.FileId, occurrence, fingerprint, bytes);
+    }
+
+    private sealed record AuthoredExemplarEvidence(Guid RunId, Hash128 FileId,
+        Hash128 Occurrence, Hash128 Fingerprint, byte[] Bytes);
+
+    private async Task<Guid> RetainAuthoredExemplar(
+        string path, string relativePath, DateTime startedAt, Hash128 root, Hash128 parse)
+    {
+        var evidence = await ReadAuthoredExemplar(path, relativePath, startedAt, root, parse);
+        var (runId, fileId, occurrence, fingerprint, bytes) = evidence;
         string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
         if (!string.IsNullOrWhiteSpace(receiptPath))
         {
@@ -416,7 +597,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                 trust_class = Hex(OperationalSource.TrustClass), trust = "SubstrateMandate",
                 bytes = bytes.Length, bytes_base64 = Convert.ToBase64String(bytes),
                 sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
-                file_id = Hex(expectedFile.FileId), occurrence_context_id = Hex(occurrence),
+                file_id = Hex(fileId), occurrence_context_id = Hex(occurrence),
                 resume_fingerprint = Hex(fingerprint),
                 source_root_id = Hex(root), exemplar_parse_id = Hex(parse),
                 exemplar_token_ref_id = Hex(UdParseStructure.TokenRefId("2")),
@@ -429,10 +610,10 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
         return runId;
     }
 
-    private async Task AssertFullBundleReceipt(string root, Guid runId)
+    private async Task AssertFullBundleReceipt(string root, Guid runId, bool retainReceipt = true)
     {
         string[] files = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
-        Assert.Equal(13, files.Length);
+        Assert.Equal(14, files.Length);
         var expected = files.ToDictionary(path => Path.GetRelativePath(root, path).Replace('\\', '/'),
             path => (Path: path, Bytes: File.ReadAllBytes(path), Fingerprint: IngestBatchPipeline.TryResolveFileIdentity(path)!.Value),
             StringComparer.Ordinal);
@@ -466,12 +647,12 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
         }
         Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), seen.Order(StringComparer.Ordinal));
         string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
-        if (!string.IsNullOrWhiteSpace(receiptPath))
+        if (retainReceipt && !string.IsNullOrWhiteSpace(receiptPath))
             await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(receiptPath))!, "bundle.json"),
                 JsonSerializer.Serialize(new { schema = "laplace.operational-bundle-proof/v1",
                     candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"),
                     run_id = runId, source_id = Hex(OperationalSource.SourceId), files = manifest,
-                    selected = 13, admitted = 13, completions = 13,
+                    selected = 14, admitted = 14, completions = 14,
                 }, new JsonSerializerOptions { WriteIndented = true }) + "\n");
     }
 

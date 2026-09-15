@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "OperationalDecomposer"
-EXPECTED_ARTIFACTS = 13
+EXPECTED_ARTIFACTS = 14
 # This is the existing file-resume-fingerprint/v1 framing, not a tuning knob.
 # IngestBatchPipeline.TryResolveFileIdentity uses the same 4 MiB byte blocks.
 FINGERPRINT_BLOCK_BYTES = 4 << 20

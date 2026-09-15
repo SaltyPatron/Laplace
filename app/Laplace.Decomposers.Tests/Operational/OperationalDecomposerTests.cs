@@ -32,7 +32,8 @@ public sealed class OperationalDecomposerTests
         Assert.Contains(graph.Selected, a => a.RelativePath == "docs/specs/37_Substrate_Operation_ISA.md");
         Assert.Contains(graph.Selected, a => a.RelativePath == "docs/INVENTION.md");
         Assert.Contains(graph.Selected, a => a.RelativePath == "seeds/operational/tasks/en_define.json");
-        Assert.Equal(13, graph.Selected.Count);
+        Assert.Contains(graph.Selected, a => a.RelativePath == "seeds/operational/exemplars/en_antonym.conllu");
+        Assert.Equal(14, graph.Selected.Count);
         foreach (var artifact in graph.Selected)
         {
             byte[] original = await File.ReadAllBytesAsync(Path.Combine(repo, artifact.RelativePath));
@@ -46,10 +47,13 @@ public sealed class OperationalDecomposerTests
         }
     }
 
-    [Fact]
-    public async Task AuthoredConllu_RetainsBytesAndWitnessesOperationalFileOccurrence()
+    [Theory]
+    [InlineData("en_define", "define justice", 2, "2", "1", "obj")]
+    [InlineData("en_antonym", "The opposite of empty is", 5, "4", "2", "nmod")]
+    public async Task AuthoredConllu_RetainsBytesAndWitnessesOperationalFileOccurrence(
+        string stem, string text, int tokenCount, string tokenRef, string headRef, string deprel)
     {
-        const string relative = "seeds/operational/exemplars/en_define.conllu";
+        string relative = "seeds/operational/exemplars/" + stem + ".conllu";
         string path = Path.Combine(OperationalDecomposer.BundledPath, relative);
         byte[] original = await File.ReadAllBytesAsync(path);
         var record = await OperationalDecomposer.ReadContractAsync(path, relative);
@@ -61,7 +65,7 @@ public sealed class OperationalDecomposerTests
             AttestationRow claim = Assert.Single(change.Attestations.Where(a => a.TypeId == hasParse));
             Assert.Equal(OperationalSource.SourceId, claim.SourceId);
             Assert.NotEqual(UDSource.SourceId, claim.SourceId);
-            Assert.Equal(ContentTierSpine.ResolveRoot("define justice"), claim.SubjectId);
+            Assert.Equal(ContentTierSpine.ResolveRoot(text), claim.SubjectId);
             Assert.NotNull(claim.ContextId);
             Assert.Contains(change.Attestations, a => a.SubjectId == file
                 && a.TypeId == RelationTypeRegistry.Resolve("CONTAINS").Id
@@ -71,10 +75,11 @@ public sealed class OperationalDecomposerTests
                 p.EntityId == claim.ObjectId && p.Type == PhysicalityType.ParseStructure));
             Hash128[] flat = Trajectory.Constituents(physicality.TrajectoryXyzm!);
             Assert.True(UdParseStructure.TryDecode(flat, out var parsed));
-            Assert.Equal(2, parsed!.Tokens.Count);
-            Assert.Equal(UdParseStructure.TokenRefId("2"), parsed.Tokens[1].RefId);
-            Assert.Equal(UdParseStructure.TokenRefId("1"), parsed.Tokens[1].HeadRefId);
-            Assert.Equal(RelationTypeRegistry.ResolveDeprel("obj").Id, parsed.Tokens[1].DeprelId);
+            Assert.Equal(tokenCount, parsed!.Tokens.Count);
+            Assert.Equal(UdParseStructure.TokenRefId(tokenRef), parsed.Tokens[int.Parse(tokenRef) - 1].RefId);
+            var token = Assert.Single(parsed.Tokens, t => t.RefId == UdParseStructure.TokenRefId(tokenRef));
+            Assert.Equal(UdParseStructure.TokenRefId(headRef), token.HeadRefId);
+            Assert.Equal(RelationTypeRegistry.ResolveDeprel(deprel).Id, token.DeprelId);
             Assert.Empty(parsed.Mwts);
             Assert.DoesNotContain(change.Attestations, a => a.SourceId == UDSource.SourceId);
         }

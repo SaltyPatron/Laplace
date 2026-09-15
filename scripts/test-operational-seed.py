@@ -189,8 +189,9 @@ class OperationalSeedTests(unittest.TestCase):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(source.read_bytes())
             selected = SEED.authored_bundle(ROOT, bundle)
-            self.assertEqual(13, len(selected))
+            self.assertEqual(14, len(selected))
             for relative in ("seeds/operational/exemplars/en_define.conllu",
+                             "seeds/operational/exemplars/en_antonym.conllu",
                              "seeds/operational/tasks/en_define.json"):
                 self.assertEqual((ROOT / relative).read_bytes(), selected[relative])
             task = "seeds/operational/tasks/en_define.json"

@@ -148,6 +148,7 @@ class ActionsAuthorityTests(unittest.TestCase):
         methods = [
             prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold",
             prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops",
+            prefix + "OperationalSourceExecutionTests.AuthoredAntonymExemplar_AdmitsCompleteSourceWithNativeParseProvenance",
             prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent",
             prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
         ]
@@ -157,8 +158,8 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertIn('"$managed_results/operational-source-execution.trx"',
                       source.split('rm -f ', 1)[1].split('PATH="$PG_PREFIX/bin:', 1)[0])
         validator = source.split('python3 - "$managed_results/operational-source-execution.trx" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
-        names = [methods[0], methods[1], methods[2] + "(batchPrefix: False)",
-                 methods[2] + "(batchPrefix: True)", methods[3]]
+        names = [methods[0], methods[1], methods[2], methods[3] + "(batchPrefix: False)",
+                 methods[3] + "(batchPrefix: True)", methods[4]]
 
         def receipt():
             root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
@@ -166,7 +167,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             for name in names:
                 ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
             summary = ET.SubElement(root, "ResultSummary")
-            ET.SubElement(summary, "Counters", total="5", executed="5", passed="5",
+            ET.SubElement(summary, "Counters", total="6", executed="6", passed="6",
                           failed="0", notExecuted="0")
             return root
 
@@ -194,15 +195,15 @@ class ActionsAuthorityTests(unittest.TestCase):
                 root = receipt()
                 results = root.find("Results")
                 if corruption == "missing":
-                    results.remove(results[4])
+                    results.remove(results[5])
                 elif corruption == "repeated-theory":
-                    results[3].set("testName", names[2])
+                    results[4].set("testName", names[3])
                 elif corruption == "wrong-test":
-                    results[4].set("testName", prefix + "UnrelatedPassingTest")
+                    results[5].set("testName", prefix + "UnrelatedPassingTest")
                 elif corruption in ("skipped", "failed"):
                     results[2].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
                 else:
-                    root.find("ResultSummary/Counters").set("executed", "4")
+                    root.find("ResultSummary/Counters").set("executed", "5")
                 check(root, False)
 
     def test_manual_db_mutation_shares_product_lifecycle_lock(self):
