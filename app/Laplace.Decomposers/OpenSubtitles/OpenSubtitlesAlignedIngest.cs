@@ -142,7 +142,12 @@ internal sealed class OpenSubtitlesAlignedHandler
             leftSequenceCoord.CopyTo(pairCoords, 0);
             rightSequenceCoord.CopyTo(pairCoords, 4);
             double[] alignmentCoord = Math4d.KarcherMean(pairCoords);
-            StagePhysicality(builder, alignmentId, alignmentConstituents, alignmentCoord);
+            // This trajectory mixes exact sentence-sequence content with governed
+            // schema/language/source-ordinal references. It is an ordered structural
+            // record, not a recursively closed Content DAG.
+            StagePhysicality(
+                builder, alignmentId, alignmentConstituents, alignmentCoord,
+                PhysicalityType.ParseStructure);
             return alignmentId;
         }
 
@@ -159,18 +164,18 @@ internal sealed class OpenSubtitlesAlignedHandler
             builder.AddEntity(
                 id, EntityTier.Document, EntityTypeRegistry.OpenSubtitlesSequence, _source);
             double[] coord = Math4d.KarcherMean(sentenceCoords);
-            StagePhysicality(builder, id, constituents, coord);
+            StagePhysicality(builder, id, constituents, coord, PhysicalityType.Content);
             return (id, coord);
         }
 
         private void StagePhysicality(
             SubstrateChangeBuilder builder, Hash128 entityId,
-            Hash128[] constituents, double[] coord)
+            Hash128[] constituents, double[] coord, PhysicalityType type)
         {
-            Hash128 physicalityId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
+            Hash128 physicalityId = PhysicalityId.Compute(entityId, type);
             if (!builder.TrySeePhysicality(physicalityId)) return;
             builder.AddPhysicalityPreSeen(new PhysicalityRow(
-                physicalityId, entityId, _source, PhysicalityType.Content,
+                physicalityId, entityId, _source, type,
                 coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
                 Trajectory.Build(constituents), constituents.Length,
                 null, null, 0));
