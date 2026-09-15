@@ -16,6 +16,19 @@ internal static partial class IngestCommands
 
     private static NativeCorpusRuntime ObserveCorpusRuntime()
     {
+        string core = ObserveLoadedCorePath();
+        string cli = typeof(IngestCommands).Assembly.Location;
+        string managedCore = typeof(GrammarDecomposer).Assembly.Location;
+        return new(core, VerifiedGitRepository.HashFile(core), cli, VerifiedGitRepository.HashFile(cli),
+            managedCore, VerifiedGitRepository.HashFile(managedCore));
+    }
+
+    internal static string ObserveLoadedCorePath()
+    {
+        // Resolve the same native import used by admission before asking the OS
+        // which artifact backs it. Process.Modules on Linux describes contiguous
+        // executable mappings; multiple entries can refer to one library file.
+        _ = NativeInterop.LaplaceCoreVersion();
         using var process = Process.GetCurrentProcess();
         var modules = process.Modules.Cast<ProcessModule>().Where(module =>
         {
@@ -24,14 +37,13 @@ internal static partial class IngestCommands
                 || name.Equals("liblaplace_core.dylib", StringComparison.Ordinal)
                 || name.Equals("liblaplace_core.so", StringComparison.Ordinal)
                 || name.StartsWith("liblaplace_core.so.", StringComparison.Ordinal);
-        }).ToArray();
-        if (modules.Length != 1)
-            throw new InvalidDataException("The OS loader must identify exactly one loaded Laplace core for corpus provenance.");
-        string core = Path.GetFullPath(modules[0].FileName);
-        string cli = typeof(IngestCommands).Assembly.Location;
-        string managedCore = typeof(GrammarDecomposer).Assembly.Location;
-        return new(core, VerifiedGitRepository.HashFile(core), cli, VerifiedGitRepository.HashFile(cli),
-            managedCore, VerifiedGitRepository.HashFile(managedCore));
+        }).Select(module => Path.GetFullPath(module.FileName)).ToArray();
+        var paths = modules.Distinct(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
+        if (paths.Length != 1)
+            throw new InvalidDataException($"The OS loader must identify exactly one loaded Laplace core artifact for corpus provenance; "
+                + $"observed {paths.Length} paths in {modules.Length} executable mappings: {string.Join(", ", paths)}");
+        return paths[0];
     }
 
     private static void ValidateGitCorpusOutputPaths(string root, string selection, string receipt)

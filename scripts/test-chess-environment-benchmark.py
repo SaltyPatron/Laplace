@@ -23,6 +23,42 @@ spec.loader.exec_module(bench)
 
 
 class ChessEnvironmentTests(unittest.TestCase):
+    def test_dotnet_readiness_timestamps_preserve_ticks_on_supported_python(self):
+        # Exact ReadinessResponse/ChessPerfcacheObservation wire shape, including
+        # explicit zero counters and System.Text.Json's trimmed tick precision.
+        class Response(io.BytesIO):
+            code = 200
+        class Opener:
+            def __init__(self, payload): self.payload = payload
+            def open(self, request, timeout): return Response(json.dumps(self.payload).encode())
+        body = json.loads((ROOT / "scripts/fixtures/chess-readiness-response.json").read_text())
+        chess = body["chess_perfcache"]
+        for fraction in ("", ".1", ".12", ".123", ".1234", ".12345", ".123456", ".1234567"):
+            for offset in ("Z", "+00:00", "-05:30", "+14:00"):
+                with self.subTest(fraction=fraction, offset=offset):
+                    stamp = "2026-09-15T21:42:30" + fraction + offset
+                    chess["observed_utc"] = stamp
+                    before = bench.http_readiness(1, Opener(body))
+                    self.assertTrue(before["ready"])
+                    self.assertEqual(stamp, before["observed"]["chess_perfcache"]["observed_utc"])
+                    self.assertEqual(chess, before["observed"]["chess_perfcache"])
+                    after = copy.deepcopy(before)
+                    after["observed"]["chess_perfcache"]["position"]["lookup_hits"] = 3
+                    delta = bench.chess_lookup_deltas(before, after)
+                    self.assertEqual("observed", delta["status"])
+                    self.assertEqual(3, delta["deltas"]["position"]["lookup_hits"])
+                    self.assertEqual(0, delta["deltas"]["transition"]["persistent_hits"])
+
+    def test_chess_timestamp_validation_rejects_missing_or_invalid_calendar_and_offsets(self):
+        for stamp in (None, 123, "2026-09-15T21:42:30", "2026-09-15T21:42:30.12345678Z",
+                      "2026-09-15T21:42:30.Z", "2026-09-15T21:42:30+14:01",
+                      "2026-09-15T21:42:30-15:00", "2026-09-15T21:42:30+01:60",
+                      "2026-02-30T21:42:30.1234567Z", "2026-09-15T24:00:00Z",
+                      "2026-09-15T21:42:60Z", "2026-09-15 21:42:30Z",
+                      "2026-09-15T21:42:30Z\n"):
+            with self.subTest(stamp=stamp), self.assertRaises(ValueError):
+                bench.validate_chess_observation_timestamp(stamp)
+
     def test_chess_cache_observation_retains_map_sources_and_rejects_false_claims(self):
         value = {"process_id": 123, "observed_utc": "2026-09-15T10:00:00+00:00",
                  "counter_scope": "process-lifetime completed managed lookups; counters include earlier mappings",

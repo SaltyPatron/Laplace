@@ -66,6 +66,27 @@ def service_observations(text):
     return records
 
 
+def validate_chess_observation_timestamp(stamp):
+    """Validate DateTimeOffset JSON on Python 3.10 without changing its receipt bytes."""
+    if not isinstance(stamp, str):
+        raise ValueError("invalid chess observation timestamp")
+    match = re.fullmatch(r"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})"
+                         r"(?:\.([0-9]{1,7}))?(Z|[+-][0-9]{2}:[0-9]{2})", stamp)
+    if match is None:
+        raise ValueError("invalid chess observation timestamp")
+    calendar, fraction, offset = match.groups()
+    if offset == "Z":
+        offset = "+00:00"
+    hours, minutes = int(offset[1:3]), int(offset[4:6])
+    if hours > 14 or minutes > 59 or (hours == 14 and minutes != 0):
+        raise ValueError("invalid chess observation timestamp")
+    # System.Text.Json emits up to seven tick digits, trimming trailing zeroes.
+    # Python 3.10 accepts only three or six fractional digits. Normalize a local
+    # validation copy; the caller retains the exact original timestamp string.
+    validation_fraction = "." + fraction.ljust(6, "0")[:6] if fraction else ""
+    dt.datetime.fromisoformat(calendar + validation_fraction + offset)
+
+
 def chess_perfcache_observation(value):
     """Retain only typed process/map evidence; never retain arbitrary health detail."""
     if not isinstance(value, dict) or type(value.get("process_id")) is not int or value["process_id"] <= 0:
@@ -75,8 +96,7 @@ def chess_perfcache_observation(value):
     if type(value.get("ready")) is not bool:
         raise ValueError("invalid chess readiness status")
     stamp = value.get("observed_utc")
-    if not isinstance(stamp, str) or dt.datetime.fromisoformat(stamp.replace("Z", "+00:00")).tzinfo is None:
-        raise ValueError("invalid chess observation timestamp")
+    validate_chess_observation_timestamp(stamp)
     scope = "process-lifetime completed managed lookups; counters include earlier mappings"
     if value.get("counter_scope") != scope:
         raise ValueError("unknown chess counter scope")
