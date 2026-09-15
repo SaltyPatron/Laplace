@@ -36,6 +36,105 @@ public sealed class ChessPositionFloorTests
         return path;
     }
 
+    [DllImport("laplace_core", EntryPoint = "chess_position_table_lookup")]
+    private static extern IntPtr NativeLookup(in Hash128 id);
+
+    [Fact]
+    public void NativePointerHolderKeepsItsCopiedRecordAcrossOtherThreadRemapAndUnload()
+    {
+        string path = Blob();
+        try
+        {
+            ChessPositionFloor.Load(path);
+            Hash128 key = new(1, 2);
+            IntPtr retained = NativeLookup(in key);
+            Assert.NotEqual(IntPtr.Zero, retained);
+            var expected = new byte[80];
+            Marshal.Copy(retained, expected, 0, expected.Length);
+            Exception? failure = null;
+            var publisher = new Thread(() =>
+            {
+                try
+                {
+                    for (int i = 0; i < 64; i++)
+                    {
+                        NativeUnload();
+                        ChessPositionFloor.Load(path);
+                    }
+                    NativeUnload();
+                }
+                catch (Exception error) { failure = error; }
+            });
+            publisher.Start();
+            Assert.True(publisher.Join(TimeSpan.FromSeconds(30)));
+            Assert.Null(failure);
+            var actual = new byte[80];
+            Marshal.Copy(retained, actual, 0, actual.Length);
+            Assert.Equal(expected, actual);
+            Assert.False(ChessPositionFloor.IsLoaded);
+            Assert.Equal(0, ChessPositionFloor.RecordCount);
+            // The documented pointer contract ends at the next same-thread lookup.
+            // Consumers needing both records retain their own copy or use lookup_geom.
+            byte[] replacement = File.ReadAllBytes(path);
+            Hash128 secondKey = new(3, 4);
+            secondKey.WriteBytes(replacement.AsSpan(128));
+            SaveWithChecksum(path, replacement);
+            ChessPositionFloor.Load(path);
+            IntPtr second = NativeLookup(in secondKey);
+            Assert.Equal(retained, second);
+            var secondId = new byte[16];
+            Marshal.Copy(second, secondId, 0, 16);
+            Assert.Equal(secondKey.ToBytes(), secondId);
+            Assert.NotEqual(expected.AsSpan(0, 16).ToArray(), secondId);
+        }
+        finally { ChessPositionFloor.Unload(); File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task NativeConcurrentLookupAndMetadataRemainCoherentAcrossPublication()
+    {
+        string path = Blob();
+        using var start = new Barrier(5);
+        int stop = 0;
+        long reads = 0, hits = 0;
+        try
+        {
+            ChessPositionFloor.Load(path);
+            Task[] readers = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+            {
+                start.SignalAndWait();
+                while (Volatile.Read(ref stop) == 0)
+                {
+                    if (ChessPositionFloor.TryLookup(new(1, 2), out var x, out var y,
+                            out var z, out var m, out _, out var n, out var tier))
+                    {
+                        Assert.Equal(0.1, x); Assert.Equal(0.2, y);
+                        Assert.Equal(0.3, z); Assert.Equal(0.4, m);
+                        Assert.Equal(4u, n); Assert.Equal((byte)2, tier);
+                        Interlocked.Increment(ref hits);
+                    }
+                    Assert.InRange(ChessPositionFloor.Observe().RecordCount, 0, 1);
+                    Interlocked.Increment(ref reads);
+                }
+            })).ToArray();
+            start.SignalAndWait();
+            try
+            {
+                for (int i = 0; i < 512; i++)
+                {
+                    // Direct native unload intentionally bypasses the managed publication gate.
+                    NativeUnload();
+                    ChessPositionFloor.Load(path);
+                }
+            }
+            finally { Volatile.Write(ref stop, 1); }
+            await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(reads > 0);
+            Assert.True(hits > 0);
+        }
+        finally { Volatile.Write(ref stop, 1); ChessPositionFloor.Unload(); File.Delete(path); }
+    }
+
     [Fact]
     public void InstalledFileIsNotLoadedAndEmptyMapIsAnExplicitState()
     {

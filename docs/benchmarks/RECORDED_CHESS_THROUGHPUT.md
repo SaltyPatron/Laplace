@@ -66,3 +66,13 @@ An incomplete or failed case stays in the aggregate evidence. Only completed, va
 The ordinary retained-PGN ingestion route measures generation-free admission of an exact retained PGN and experiment. Its first/mixed/repair disposition and exact replay have separate receipts. Replaying an existing playing may demonstrate identity reuse and avoided writes, but it cannot be counted as newly generated-and-recorded throughput. A second generated match is also not a replay of the first experiment.
 
 Use the [PostgreSQL geometry baseline](POSTGRES_GEOMETRY_BASELINE.md) to compare exact storage rows, vertices and byte payloads under acknowledged synchronous commits. That baseline helps locate write cost; it does not replace complete-game throughput.
+
+## Cache reuse and reader lifetime
+
+The chess position map remains native. Its readers retain access through the complete geometry copy; publication blocks new entries, drains the fixed reader shards and then releases the old mapping. Readers search concurrently without the global managed native gate. The exported pointer lookup returns a thread-local copy that survives another thread's remap/unload, but the next lookup on the same thread reuses that slot. New consumers that need independent values should use the caller-owned geometry-copy API.
+
+The transition map publishes an immutable, fully validated replacement. Each reader holds a SafeHandle reference until its lookup completes, so retiring a mapping cannot invalidate a pointer in use. A rejected replacement preserves the previous valid map. Successful load/unload starts a fresh process-local derived-cache generation.
+
+That derived cache has exactly 65,536 slots. Hash collisions evict acceleration entries; complete keys are checked before reuse, and misses follow the existing canonical composition path. Repeating an existing key with a conflicting result, or conflicting with a mapped result, is rejected. Observations expose capacity, occupancy and collision evictions separately from persistent-map hits. These counters describe reuse, not new testimony or admitted games.
+
+Process-local novel transitions are not exported as a learned corpus. The transition v1 file has no source-generation or recipe identity, and its loader has no canonical rebuild/verification binding. The position header contains an emitter source hash, but the current load API does not take an expected source/recipe identity. Durable derived-cache reuse must establish those compatibility and rebuild links before accepting persisted computed entries; a dictionary dump would not establish them. PostgreSQL remains the system of record. File generation alone also does not establish installed lookup hits or cold-boot performance.

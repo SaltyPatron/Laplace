@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 
@@ -8,7 +7,7 @@ namespace Laplace.Engine.Core;
 /// Chess move/transition compose floor — (from_position, move) → to_position.
 /// Deterministic ROM for state→state dedupe (operator law / GH #822 companion).
 /// Not testimony. Not a ConcurrentDictionary presented as the ROM; the mmap blob is.
-/// Process-lifetime novel hits accumulate in a side map so a run saturates like O(tier).
+/// A bounded process-local derived cache reuses novel transitions; collisions evict cache entries only.
 /// </summary>
 public static unsafe class ChessTransitionFloor
 {
@@ -20,38 +19,131 @@ public static unsafe class ChessTransitionFloor
     public const int RecordSize = 32; // key16 + to16
     public const int TrailerBytes = 16;
 
-    private static MemoryMappedFile? _mmf;
-    private static MemoryMappedViewAccessor? _view;
-    private static byte* _base;
-    private static long _len;
-    private static long _count;
-    private static string? _loadedPath;
-    private static readonly ConcurrentDictionary<Hash128, Hash128> Novel = new();
+    // Publication is cold and serialized; lookup holds only a SafeHandle reference.
+    private static readonly object Publication = new();
+    private static State _state = new(null);
+    public const int NovelCapacity = 65_536;
+    private static long _novelEvictions;
+
+    private sealed class Entry(Hash128 key, Hash128 value)
+    {
+        public readonly Hash128 Key = key;
+        public readonly Hash128 Value = value;
+    }
+
+    private sealed class State(MappedFloor? map)
+    {
+        public readonly MappedFloor? Map = map;
+        public readonly Entry?[] Novel = new Entry[NovelCapacity];
+        public int Count;
+    }
+
+    private sealed class MappedFloor : IDisposable
+    {
+        private readonly MemoryMappedFile _file;
+        private readonly MemoryMappedViewAccessor _view;
+        public readonly byte* Base;
+        public readonly long Count;
+        public readonly string Path;
+
+        public MappedFloor(string path)
+        {
+            Path = System.IO.Path.GetFullPath(path);
+            using var source = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.Read | FileShare.Delete);
+            _file = MemoryMappedFile.CreateFromFile(source, null, 0,
+                MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: true);
+            try
+            {
+                _view = _file.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+                byte* pointer = null;
+                _view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+                Base = pointer;
+                try
+                {
+                    long length = _view.Capacity;
+                    if (length < HeaderSize + TrailerBytes)
+                        throw new InvalidOperationException("chess transition floor record layout mismatch");
+                    if (*(uint*)Base != Magic || *(uint*)(Base + 4) != Version)
+                        throw new InvalidOperationException("bad chess transition floor magic/version");
+                    long recordBytes = length - HeaderSize - TrailerBytes;
+                    ulong count = *(ulong*)(Base + 8);
+                    if (recordBytes % RecordSize != 0 || count != (ulong)(recordBytes / RecordSize))
+                        throw new InvalidOperationException("chess transition floor record layout mismatch");
+                    long body = length - TrailerBytes;
+                    if (BodyHash(Base, body) != *(Hash128*)(Base + body))
+                        throw new InvalidOperationException("chess transition floor body CRC mismatch");
+                    Count = checked((long)count);
+                    for (long i = 1; i < Count; i++)
+                    {
+                        var previous = (TransitionRec*)(Base + HeaderSize + (i - 1) * RecordSize);
+                        if (Compare(previous->Key, (previous + 1)->Key) >= 0)
+                            throw new InvalidOperationException("chess transition floor keys must be sorted and unique");
+                    }
+                }
+                catch
+                {
+                    _view.SafeMemoryMappedViewHandle.ReleasePointer();
+                    _view.Dispose();
+                    throw;
+                }
+            }
+            catch { _view?.Dispose(); _file.Dispose(); throw; }
+        }
+
+        public bool TryAcquire()
+        {
+            bool acquired = false;
+            try { _view.SafeMemoryMappedViewHandle.DangerousAddRef(ref acquired); }
+            catch (ObjectDisposedException) { return false; }
+            return acquired;
+        }
+        public void Release() => _view.SafeMemoryMappedViewHandle.DangerousRelease();
+        public void Dispose()
+        {
+            // Existing reader references defer the actual unmap until their copies finish.
+            _view.SafeMemoryMappedViewHandle.ReleasePointer();
+            _view.Dispose();
+            _file.Dispose();
+        }
+
+        public bool Lookup(Hash128 key, out Hash128 value)
+        {
+            long lo = 0, hi = Count - 1;
+            while (lo <= hi)
+            {
+                long mid = lo + ((hi - lo) >> 1);
+                var record = (TransitionRec*)(Base + HeaderSize + mid * RecordSize);
+                int comparison = Compare(record->Key, key);
+                if (comparison == 0) { value = record->To; return true; }
+                if (comparison < 0) lo = mid + 1;
+                else hi = mid - 1;
+            }
+            value = default;
+            return false;
+        }
+    }
+
     private static long _persistentHits;
     private static long _novelHits;
     private static long _lookupMisses;
 
     public readonly record struct Observation(bool IsLoaded, long RecordCount,
-        int NovelCount, long PersistentHits, long NovelHits, long LookupMisses);
+        int NovelCount, long PersistentHits, long NovelHits, long LookupMisses,
+        int NovelEntryCapacity = NovelCapacity, long NovelEvictions = 0);
 
     /// <summary>Map state and completed managed lookup counters. Counters cover this
     /// process lifetime, including earlier mappings; observation never loads a file.</summary>
-    public static Observation Observe() => new(IsLoaded, RecordCount, NovelCount,
-        Interlocked.Read(ref _persistentHits), Interlocked.Read(ref _novelHits),
-        Interlocked.Read(ref _lookupMisses));
+    public static Observation Observe()
+    {
+        State state = Volatile.Read(ref _state);
+        return new(state.Map is not null, state.Map?.Count ?? 0, Volatile.Read(ref state.Count),
+            Interlocked.Read(ref _persistentHits), Interlocked.Read(ref _novelHits),
+            Interlocked.Read(ref _lookupMisses), NovelCapacity, Interlocked.Read(ref _novelEvictions));
+    }
 
     static ChessTransitionFloor()
-    {
-        // Release the mapping before the runtime tears itself down. Load() holds an
-        // AcquirePointer for the life of the process and only ReleasePointer()s in
-        // Unload(), which the compose path never calls — it loads the ROM once and keeps
-        // it. That leaves the SafeMemoryMappedViewHandle to be finalized at exit with an
-        // outstanding pointer reference, which is not a supported state to finalize from.
-        // Defensive, not a diagnosed fix: the Chess.Tests host crash was traced to
-        // unsynchronized Fathom first-touch (fixed in #849), NOT to this. Unload() is
-        // idempotent, so running it here is safe whether or not a caller already did.
-        AppDomain.CurrentDomain.ProcessExit += static (_, _) => Unload();
-    }
+        => AppDomain.CurrentDomain.ProcessExit += static (_, _) => Unload();
 
     /// <summary>
     /// Hash the complete mapped body through the existing native size_t interface.
@@ -68,55 +160,24 @@ public static unsafe class ChessTransitionFloor
     public static void Load(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
-        Unload();
-        string fullPath = Path.GetFullPath(path);
-        var fi = new FileInfo(fullPath);
-        if (!fi.Exists || fi.Length < HeaderSize + TrailerBytes)
+        var file = new FileInfo(path);
+        if (!file.Exists || file.Length < HeaderSize + TrailerBytes)
             throw new InvalidOperationException($"chess transition floor missing/short: {path}");
-
-        try
+        // Fully validate privately. A rejected replacement must not discard a valid map.
+        var candidate = new MappedFloor(path);
+        State next;
+        try { next = new State(candidate); }
+        catch { candidate.Dispose(); throw; }
+        lock (Publication)
         {
-            _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
-            _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-            _len = _view.Capacity;
-            byte* ptr = null;
-            _view.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
-            _base = ptr;
-
-            if (_len < HeaderSize + TrailerBytes)
-                throw new InvalidOperationException("chess transition floor record layout mismatch");
-            if (ReadU32(0) != Magic || ReadU32(4) != Version)
-                throw new InvalidOperationException("bad chess transition floor magic/version");
-
-            // Derive the envelope from mapped bytes before trusting the count. This
-            // also rejects partial records and unchecksummed trailing data.
-            long recordBytes = _len - HeaderSize - TrailerBytes;
-            ulong count = ReadU64(8);
-            if (recordBytes % RecordSize != 0 || count != (ulong)(recordBytes / RecordSize))
-                throw new InvalidOperationException("chess transition floor record layout mismatch");
-            long body = _len - TrailerBytes;
-            if (BodyHash(_base, body) != *(Hash128*)(_base + body))
-                throw new InvalidOperationException("chess transition floor body CRC mismatch");
-            _count = checked((long)count);
-            for (long i = 1; i < _count; i++)
-            {
-                var previous = (TransitionRec*)(_base + HeaderSize + (i - 1) * RecordSize);
-                var current = previous + 1;
-                if (Compare(previous->Key, current->Key) >= 0)
-                    throw new InvalidOperationException("chess transition floor keys must be sorted and unique");
-            }
-            _loadedPath = fullPath;
-        }
-        catch
-        {
-            Unload();
-            throw;
+            State previous = Interlocked.Exchange(ref _state, next);
+            previous.Map?.Dispose();
         }
     }
 
     public static void LoadDefault()
     {
-        if (_base != null) return;
+        if (IsLoaded) return;
         string? path = Environment.GetEnvironmentVariable("LAPLACE_CHESS_TRANSITION_BIN");
         if (string.IsNullOrEmpty(path))
         {
@@ -139,24 +200,19 @@ public static unsafe class ChessTransitionFloor
 
     public static void Unload()
     {
-        if (_view != null && _base != null)
+        lock (Publication)
         {
-            _view.SafeMemoryMappedViewHandle.ReleasePointer();
-            _base = null;
+            State previous = Interlocked.Exchange(ref _state, new State(null));
+            previous.Map?.Dispose();
         }
-        _view?.Dispose();
-        _mmf?.Dispose();
-        _view = null;
-        _mmf = null;
-        _count = 0;
-        _len = 0;
-        _loadedPath = null;
-        Novel.Clear();
     }
 
-    public static bool IsLoaded => _base != null;
-    public static long RecordCount => _count;
-    public static int NovelCount => Novel.Count;
+    public static bool IsLoaded => Volatile.Read(ref _state).Map is not null;
+    public static long RecordCount => Volatile.Read(ref _state).Map?.Count ?? 0;
+    public static int NovelCount
+    {
+        get { State state = Volatile.Read(ref _state); return Volatile.Read(ref state.Count); }
+    }
 
     public static bool TryLookup(Hash128 key, out Hash128 toId)
         => TryLookup(key, out toId, out _);
@@ -169,46 +225,79 @@ public static unsafe class ChessTransitionFloor
     /// </summary>
     public static bool TryLookup(Hash128 key, out Hash128 toId, out LookupSource source)
     {
-        if (Novel.TryGetValue(key, out toId))
+        while (true)
         {
-            source = LookupSource.Novel;
-            Interlocked.Increment(ref _novelHits);
-            return true;
-        }
-        toId = default;
-        if (_base == null || _count == 0)
-        {
+            State state = Volatile.Read(ref _state);
+            Entry? entry = Volatile.Read(ref state.Novel[Bucket(key)]);
+            if (entry is not null && entry.Key == key)
+            {
+                toId = entry.Value;
+                source = LookupSource.Novel;
+                Interlocked.Increment(ref _novelHits);
+                return true;
+            }
+            MappedFloor? map = state.Map;
+            if (map is not null)
+            {
+                if (!map.TryAcquire()) continue; // The publication raced this acquisition.
+                try
+                {
+                    if (map.Lookup(key, out toId))
+                    {
+                        source = LookupSource.Persistent;
+                        Interlocked.Increment(ref _persistentHits);
+                        return true;
+                    }
+                }
+                finally { map.Release(); }
+            }
+            toId = default;
             source = LookupSource.None;
             Interlocked.Increment(ref _lookupMisses);
             return false;
         }
-        long lo = 0, hi = _count - 1;
-        while (lo <= hi)
-        {
-            long mid = lo + ((hi - lo) >> 1);
-            var rec = (TransitionRec*)(_base + HeaderSize + mid * RecordSize);
-            int cmp = Compare(rec->Key, key);
-            if (cmp == 0)
-            {
-                toId = rec->To;
-                source = LookupSource.Persistent;
-                Interlocked.Increment(ref _persistentHits);
-                return true;
-            }
-            if (cmp < 0) lo = mid + 1;
-            else
-            {
-                if (mid == 0) break;
-                hi = mid - 1;
-            }
-        }
-        source = LookupSource.None;
-        Interlocked.Increment(ref _lookupMisses);
-        return false;
     }
 
-    /// <summary>Remember a novel transition for the rest of this process (run saturation).</summary>
-    public static void Remember(Hash128 key, Hash128 toId) => Novel[key] = toId;
+    private static int Bucket(Hash128 key) => key.GetHashCode() & (NovelCapacity - 1);
+
+    /// <summary>Reuse an actually composed deterministic transition in this process.
+    /// The fixed-size derived cache may evict on collisions; misses recompute normally.
+    /// No file, PostgreSQL record, testimony or historical provenance is created.</summary>
+    public static void Remember(Hash128 key, Hash128 toId)
+    {
+        while (true)
+        {
+            State state = Volatile.Read(ref _state);
+            MappedFloor? map = state.Map;
+            if (map is not null)
+            {
+                if (!map.TryAcquire()) continue;
+                try
+                {
+                    if (map.Lookup(key, out Hash128 persisted))
+                    {
+                        if (persisted != toId)
+                            throw new InvalidOperationException("Derived transition conflicts with the mapped deterministic result.");
+                        return;
+                    }
+                }
+                finally { map.Release(); }
+            }
+            int index = Bucket(key);
+            Entry? previous = Volatile.Read(ref state.Novel[index]);
+            if (previous is not null && previous.Key == key)
+            {
+                if (previous.Value != toId)
+                    throw new InvalidOperationException("Derived transition conflicts with an existing deterministic result.");
+                return;
+            }
+            var entry = new Entry(key, toId);
+            if (Interlocked.CompareExchange(ref state.Novel[index], entry, previous) != previous) continue;
+            if (previous is null) Interlocked.Increment(ref state.Count);
+            else Interlocked.Increment(ref _novelEvictions);
+            return;
+        }
+    }
 
     public static void WriteBlob(string path, IReadOnlyList<(Hash128 Key, Hash128 To)> sortedUnique)
     {
@@ -227,8 +316,15 @@ public static unsafe class ChessTransitionFloor
         var pathComparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
-        if (_loadedPath is not null && string.Equals(_loadedPath, fullPath, pathComparison))
-            Unload();
+        lock (Publication)
+        {
+            State current = Volatile.Read(ref _state);
+            if (current.Map is not null && string.Equals(current.Map.Path, fullPath, pathComparison))
+            {
+                Interlocked.Exchange(ref _state, new State(null));
+                current.Map.Dispose();
+            }
+        }
 
         long count = sortedUnique.Count;
         long body = HeaderSize + count * RecordSize;
@@ -281,9 +377,6 @@ public static unsafe class ChessTransitionFloor
             File.Delete(temporary);
         }
     }
-
-    private static uint ReadU32(long off) => *(uint*)(_base + off);
-    private static ulong ReadU64(long off) => *(ulong*)(_base + off);
 
     private static int Compare(Hash128 a, Hash128 b) => a.CompareToBytewise(b);
 

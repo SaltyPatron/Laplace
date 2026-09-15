@@ -339,9 +339,12 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             novel++;
             novelIds.Add(game.PlayingId);
             ChessPgnDecomposer.RecordGame(game, record);
-            ChessAnalyze.DeriveFromParsed(analyze, game);
+            // Share the parsed board/position walk across the same calculated consumers
+            // as generic PGN composition; outcomes must not replay and compose it again.
+            var replay = ChessPgnDecomposer.MaterializeParsedReplay(game);
+            ChessAnalyze.DeriveFromParsed(analyze, game, replay);
             ChessTransitions.DepositFromParsed(analyze, game);
-            ChessPositionOutcomes.DepositFromParsed(analyze, game);
+            ChessPositionOutcomes.DepositFromParsed(analyze, game, replay);
             if (ChessTablebaseRuntime.Prober is { } prober)
                 ChessSyzygy.DeriveGame(analyze, ChessAnalyze.WitnessedFromParsed(game), prober);
             for (int i = 0; i + 1 < game.PositionIds.Length; i++)

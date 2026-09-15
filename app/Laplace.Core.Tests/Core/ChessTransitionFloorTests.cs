@@ -32,6 +32,110 @@ public sealed class ChessTransitionFloorTests
         Path.Combine(Path.GetTempPath(), $"chess-transition-{Guid.NewGuid():N}.bin");
 
     [Fact]
+    public void RejectedReplacementPreservesThePublishedMapAndNovelGeneration()
+    {
+        string valid = TempBlob(), invalid = TempBlob();
+        try
+        {
+            ChessTransitionFloor.WriteBlob(valid, Pairs("stable"));
+            ChessTransitionFloor.Load(valid);
+            ChessTransitionFloor.Remember(K("computed"), V("computed"));
+            File.WriteAllBytes(invalid, new byte[80]);
+            Assert.Throws<InvalidOperationException>(() => ChessTransitionFloor.Load(invalid));
+            Assert.True(ChessTransitionFloor.TryLookup(K("stable"), out var stable));
+            Assert.Equal(V("stable"), stable);
+            Assert.True(ChessTransitionFloor.TryLookup(K("computed"), out var computed));
+            Assert.Equal(V("computed"), computed);
+        }
+        finally { ChessTransitionFloor.Unload(); File.Delete(valid); File.Delete(invalid); }
+    }
+
+    [Fact]
+    public void DerivedCacheIsBoundedAndRejectsConflictingRepeatOrMappedResults()
+    {
+        string path = TempBlob();
+        try
+        {
+            ChessTransitionFloor.WriteBlob(path, Pairs("mapped"));
+            ChessTransitionFloor.Load(path);
+            Assert.Throws<InvalidOperationException>(() => ChessTransitionFloor.Remember(K("mapped"), V("wrong")));
+            var key = K("computed");
+            ChessTransitionFloor.Remember(key, V("computed"));
+            ChessTransitionFloor.Remember(key, V("computed"));
+            Assert.Throws<InvalidOperationException>(() => ChessTransitionFloor.Remember(key, V("wrong")));
+            Assert.True(ChessTransitionFloor.TryLookup(key, out var value));
+            Assert.Equal(V("computed"), value);
+            var before = ChessTransitionFloor.Observe();
+            Parallel.For(0, 4 * ChessTransitionFloor.NovelCapacity, i =>
+            {
+                Hash128 input = new((ulong)i + 1, 73);
+                ChessTransitionFloor.Remember(input, input);
+            });
+            var after = ChessTransitionFloor.Observe();
+            Assert.InRange(after.NovelCount, 1, ChessTransitionFloor.NovelCapacity);
+            Assert.True(after.NovelEvictions > before.NovelEvictions);
+            Assert.True(ChessTransitionFloor.TryLookup(K("mapped"), out value, out var source));
+            Assert.Equal(V("mapped"), value);
+            Assert.Equal(ChessTransitionFloor.LookupSource.Persistent, source);
+            // An evicted entry is recomputed by its real caller and may be remembered again.
+            ChessTransitionFloor.Remember(key, V("computed"));
+            Assert.True(ChessTransitionFloor.TryLookup(key, out value));
+            Assert.Equal(V("computed"), value);
+            ChessTransitionFloor.Unload();
+            Assert.Equal(0, ChessTransitionFloor.NovelCount);
+            Assert.False(ChessTransitionFloor.TryLookup(key, out _));
+        }
+        finally { ChessTransitionFloor.Unload(); File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task ParallelReadersRemainCoherentDuringRepeatedLoadUnloadAndReplacement()
+    {
+        string first = TempBlob(), second = TempBlob();
+        Hash128 key = K("shared"), firstValue = V("first"), secondValue = V("second");
+        using var start = new Barrier(5);
+        int stop = 0;
+        long reads = 0, hits = 0;
+        try
+        {
+            ChessTransitionFloor.WriteBlob(first, new[] { (key, firstValue) });
+            ChessTransitionFloor.WriteBlob(second, new[] { (key, secondValue) });
+            ChessTransitionFloor.Load(first);
+            Task[] readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+            {
+                start.SignalAndWait();
+                while (Volatile.Read(ref stop) == 0)
+                {
+                    if (ChessTransitionFloor.TryLookup(key, out var value))
+                    {
+                        Assert.True(value == firstValue || value == secondValue);
+                        Interlocked.Increment(ref hits);
+                    }
+                    Assert.InRange(ChessTransitionFloor.Observe().RecordCount, 0, 1);
+                    Interlocked.Increment(ref reads);
+                }
+            })).ToArray();
+            start.SignalAndWait();
+            try
+            {
+                for (int i = 0; i < 256; i++)
+                {
+                    ChessTransitionFloor.Load((i & 1) == 0 ? second : first);
+                    if (i % 3 == 0) ChessTransitionFloor.Unload();
+                }
+            }
+            finally { Volatile.Write(ref stop, 1); }
+            await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(reads > 0);
+            Assert.True(hits > 0);
+            ChessTransitionFloor.Load(second);
+            Assert.True(ChessTransitionFloor.TryLookup(key, out var final));
+            Assert.Equal(secondValue, final);
+        }
+        finally { Volatile.Write(ref stop, 1); ChessTransitionFloor.Unload(); File.Delete(first); File.Delete(second); }
+    }
+
+    [Fact]
     public void ObservationSeparatesParallelPersistentNovelAndMissingLookups()
     {
         ChessTransitionFloor.Unload();

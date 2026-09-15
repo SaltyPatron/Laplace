@@ -153,7 +153,10 @@ def relation_sql(name):
       'direct_partitions',(SELECT count(*) FROM pg_inherits WHERE inhparent=c.oid),
       'columns',(SELECT jsonb_agg(jsonb_build_object('name',a.attname,
           'type',format_type(a.atttypid,a.atttypmod),'not_null',a.attnotnull,
-          'generated',a.attgenerated) ORDER BY a.attnum)
+          'generated',a.attgenerated,
+          'generation_expression',CASE WHEN a.attgenerated<>'' THEN
+              (SELECT pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d
+               WHERE d.adrelid=a.attrelid AND d.adnum=a.attnum) END) ORDER BY a.attnum)
           FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),
       'indexes',(SELECT coalesce(jsonb_agg(jsonb_build_object('definition',pg_get_indexdef(i.indexrelid),
           'valid',i.indisvalid,'ready',i.indisready,'unique',i.indisunique,
@@ -187,6 +190,31 @@ def payload_sql(table):
 
 def copy_out(table, columns, where=""):
     return f"COPY (SELECT {columns} FROM {table} {where} ORDER BY id) TO STDOUT (FORMAT BINARY)"
+
+
+def column_layout(source):
+    columns = source["columns"]
+    require(bool(columns) and all(isinstance(c.get("name"), str) and c["name"]
+            and c.get("generated") in ("", "s", "v") for c in columns),
+            "source column names or generation kinds are invalid")
+    names = [c["name"] for c in columns]
+    require(len(set(names)) == len(names), "source column names are not unique")
+    writable = [c["name"] for c in columns if not c["generated"]]
+    require({"id", "coord", "trajectory"} <= set(writable),
+            "writable physicality geometry columns are missing")
+    require("baseline_ordinal" not in names, "source conflicts with the benchmark ordinal")
+    generated = [c["name"] for c in columns if c["generated"]]
+    require(all(isinstance(c.get("generation_expression"), str) and c["generation_expression"]
+                for c in columns if c["generated"]),
+            "generated column expression is missing")
+    return {"copy_columns": writable, "readback_columns": names, "generated_columns": generated}
+
+
+def verify_generated_columns(source, target):
+    fields = ("name", "type", "generated", "generation_expression")
+    expected = [tuple(c.get(k) for k in fields) for c in source["columns"]]
+    observed = [tuple(c.get(k) for k in fields) for c in target["columns"]]
+    require(observed == expected, "schema clone changed column order, type or generated expressions")
 
 
 def verify_readback(item, path):
@@ -318,12 +346,10 @@ def run(args):
         require(report["server"]["recovery"] is False, "baseline requires a writable primary")
         source = pg.json(relation_sql("laplace.physicalities"))
         report["source_schema"] = source
-        columns = [column["name"] for column in source["columns"] if not column["generated"]]
-        require(len(columns) == len(source["columns"]),
-                "full-row baseline requires explicit support for generated physicality columns")
-        require({"id", "coord", "trajectory"} <= set(columns), "physicality geometry columns are missing")
-        require("baseline_ordinal" not in columns, "source conflicts with the benchmark ordinal")
-        full = ",".join(ident(name) for name in columns)
+        layout = column_layout(source)
+        report["column_transport"] = layout
+        full = ",".join(ident(name) for name in layout["readback_columns"])
+        writable = ",".join(ident(name) for name in layout["copy_columns"])
         geometry = '"id","coord","trajectory"'
         report["schema_ownership_marker"] = marker
         save(args.output_dir / "receipt.json", report)
@@ -346,18 +372,22 @@ def run(args):
         chunks = ranges(selected["rows"], args.transaction_rows)
         fixtures = {"geometry_heap": [], "physicality_indexes": []}
         report["fixtures"] = fixtures
+        full_fixtures = []
+        report["full_row_readback_fixtures"] = full_fixtures
         total_bytes = 0
         for index, (low, high) in enumerate(chunks):
-            path = args.output_dir / f"physicality_indexes-input-{index:04d}.copy"
+            path = args.output_dir / f"full-row-expected-{index:04d}.copy"
             pg.export(copy_out("laplace.physicalities", full,
                 f"WHERE id IN (SELECT id FROM {selected_ids} WHERE baseline_ordinal BETWEEN {low} AND {high})"),
                 path, args.max_bytes - total_bytes)
             item = artifact(path)
             total_bytes += item["bytes"]
             item.update(rows=high-low+1, low=low, high=high)
-            fixtures["physicality_indexes"].append(item)
+            full_fixtures.append(item)
         pg.execute(f"CREATE TABLE {snapshot} AS SELECT {full} FROM laplace.physicalities WITH NO DATA")
-        for item in fixtures["physicality_indexes"]:
+        # CTAS deliberately materializes generated values as plain retained
+        # columns. Every target readback must equal these captured source bytes.
+        for item in full_fixtures:
             with Path(item["path"]).open("rb") as stream:
                 pg.execute(f"COPY {snapshot} ({full}) FROM STDIN (FORMAT BINARY)", source=stream)
         payload = pg.json(payload_sql(snapshot))
@@ -369,6 +399,17 @@ def run(args):
         require(payload["trajectory_dimensions"] == [4] and payload["coordinate_dimensions"] == [4],
                 "selected coordinates and trajectories must preserve GeometryZM dimensions")
         for index, (low, high) in enumerate(chunks):
+            if layout["generated_columns"]:
+                path = args.output_dir / f"physicality_indexes-input-{index:04d}.copy"
+                pg.export(copy_out(snapshot, writable,
+                    f"WHERE id IN (SELECT id FROM {selected_ids} WHERE baseline_ordinal BETWEEN {low} AND {high})"),
+                    path, args.max_bytes - total_bytes)
+                item = artifact(path)
+                total_bytes += item["bytes"]
+                item.update(rows=high-low+1, low=low, high=high)
+                fixtures["physicality_indexes"].append(item)
+            else:
+                fixtures["physicality_indexes"].append(full_fixtures[index])
             path = args.output_dir / f"geometry_heap-input-{index:04d}.copy"
             pg.export(copy_out(snapshot, geometry,
                 f"WHERE id IN (SELECT id FROM {selected_ids} WHERE baseline_ordinal BETWEEN {low} AND {high})"),
@@ -382,11 +423,12 @@ def run(args):
         pg.execute(f"CREATE TABLE {tables['geometry_heap']} AS SELECT {geometry} FROM {snapshot} WITH NO DATA")
         pg.execute(f"CREATE TABLE {tables['physicality_indexes']} (LIKE laplace.physicalities INCLUDING ALL)")
         report["target_schemas"] = {mode: pg.json(relation_sql(schema + '.' + mode)) for mode in tables}
+        verify_generated_columns(source, report["target_schemas"]["physicality_indexes"])
         require(all(info["persistence"] == "p" for info in report["target_schemas"].values()),
                 "all measured target tables must be LOGGED")
         require(len(report["target_schemas"]["physicality_indexes"]["indexes"]) == len(source["indexes"]),
                 "schema clone did not preserve the complete source index set")
-        report["schema_clone_limits"] = ("INCLUDING ALL copies columns/defaults/checks/indexes/storage, not foreign keys, "
+        report["schema_clone_limits"] = ("INCLUDING ALL copies columns/defaults/generated expressions/checks/indexes/storage, not foreign keys, "
             "user triggers, partition routing or existing-table/index occupancy; exact source and target definitions are retained")
         for concurrency in concurrencies:
             for repeat in range(args.repeats):
@@ -404,7 +446,7 @@ def run(args):
                     save(args.output_dir / "receipt.json", report)
                     pg.execute(f"TRUNCATE {target}")
                     before = pg.json("SELECT jsonb_build_object('insert',pg_current_wal_insert_lsn(),'flush',pg_current_wal_flush_lsn())")
-                    selected_columns = geometry if mode == "geometry_heap" else full
+                    selected_columns = geometry if mode == "geometry_heap" else writable
                     active_case["wal_before"] = before
                     write_seconds = copy_transactions(pg, target, selected_columns, fixtures[mode], concurrency,
                         active_case, lambda: save(args.output_dir / "receipt.json", report))
@@ -417,9 +459,11 @@ def run(args):
                     observed = pg.json(payload_sql(target))
                     require(observed == payload, "committed geometry payload counts differ")
                     readbacks = active_case["readbacks"]
-                    for index, item in enumerate(fixtures[mode]):
+                    expected_readback = fixtures[mode] if mode == "geometry_heap" else full_fixtures
+                    readback_columns = geometry if mode == "geometry_heap" else full
+                    for index, item in enumerate(expected_readback):
                         path = args.output_dir / f"{mode}-c{concurrency}-r{repeat+1}-readback-{index:04d}.copy"
-                        pg.export(copy_out(target, selected_columns, f"WHERE id IN (SELECT id FROM {selected_ids}"
+                        pg.export(copy_out(target, readback_columns, f"WHERE id IN (SELECT id FROM {selected_ids}"
                             f" WHERE baseline_ordinal BETWEEN {item['low']} AND {item['high']})"), path, item["bytes"])
                         readbacks.append(verify_readback(item, path))
                     read_seconds = time.monotonic() - read_started
@@ -430,7 +474,8 @@ def run(args):
                         "copy_bytes": sum(item["bytes"] for item in fixtures[mode]),
                         "wal": {**wal, "before": before, "after": after,
                             "scope": "cluster-wide LSN deltas; may include concurrent unrelated activity"},
-                        "exact_committed_readback": True})
+                        "exact_committed_readback": True,
+                        "generated_columns_verified": [] if mode == "geometry_heap" else layout["generated_columns"]})
                     save(args.output_dir / "receipt.json", report)
         report["timing"] = {"write": "concurrent psql process start, connect, binary COPY transport, index/check work and acknowledged synchronous COMMIT for every transaction",
             "readback": "new connections, committed aggregate query and complete binary export/byte comparison; measured separately",

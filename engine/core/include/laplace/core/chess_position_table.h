@@ -13,7 +13,9 @@ int chess_position_table_load(const char* path);
 void chess_position_table_unload(void);
 int chess_position_table_is_loaded(void);
 
-/* Binary search on sorted records. Returns NULL on miss / not loaded. */
+/* Binary search on sorted records. Returns NULL on miss / not loaded.
+ * A hit is a thread-local copy, valid until the next lookup on the same thread;
+ * it remains valid across concurrent load/unload. No mmap pointer escapes. */
 const laplace_chess_perfcache_record_t*
 chess_position_table_lookup(const hash128_t* id);
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded harness and actual subprocess controls; these do not simulate PG acceptance."""
 import argparse
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -109,6 +110,53 @@ class GeometryBaselineTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'readback differs'):
                     owner.verify_readback(owner.artifact(source), output)
                 self.assertTrue(output.exists())
+
+    def source_columns(self):
+        return {"columns": [
+            {"name": "id", "type": "bytea", "generated": "", "generation_expression": None},
+            {"name": "coord", "type": "geometry(PointZM)", "generated": "", "generation_expression": None},
+            {"name": "radius_origin", "type": "double precision", "generated": "s",
+             "generation_expression": "laplace_radius_origin(coord)"},
+            {"name": "trajectory", "type": "geometry(GeometryZM)", "generated": "", "generation_expression": None},
+        ]}
+
+    def test_generated_radius_is_computed_on_write_and_required_in_full_readback(self):
+        # This is the current production column law: generated radius occurs
+        # between writable columns, so a prefix/suffix or SELECT * COPY is wrong.
+        ddl = (ROOT / 'extension/laplace_substrate/sql/schema/tables/physicalities.sql.in').read_text()
+        self.assertIn('radius_origin      double precision GENERATED ALWAYS AS', ddl)
+        layout = owner.column_layout(self.source_columns())
+        self.assertEqual(['id', 'coord', 'trajectory'], layout['copy_columns'])
+        self.assertEqual(['id', 'coord', 'radius_origin', 'trajectory'], layout['readback_columns'])
+        self.assertEqual(['radius_origin'], layout['generated_columns'])
+        plain = self.source_columns()
+        plain['columns'][2].update(generated='', generation_expression=None)
+        ordinary = owner.column_layout(plain)
+        self.assertEqual(ordinary['copy_columns'], ordinary['readback_columns'])
+        self.assertEqual([], ordinary['generated_columns'])
+
+    def test_cloned_generation_expression_and_complete_column_order_must_match(self):
+        source = self.source_columns()
+        owner.verify_generated_columns(source, copy.deepcopy(source))
+        for change in ('expression', 'kind', 'type', 'missing', 'order'):
+            target = copy.deepcopy(source)
+            if change == 'expression': target['columns'][2]['generation_expression'] = '0.0'
+            elif change == 'kind': target['columns'][2]['generated'] = ''
+            elif change == 'type': target['columns'][2]['type'] = 'real'
+            elif change == 'missing': target['columns'].pop(2)
+            else: target['columns'].reverse()
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'schema clone changed'):
+                owner.verify_generated_columns(source, target)
+
+    def test_unknown_or_incomplete_generation_metadata_cannot_drop_readback_fields(self):
+        for change in ('unknown', 'expression', 'duplicate', 'geometry'):
+            source = self.source_columns()
+            if change == 'unknown': source['columns'][2]['generated'] = 'future'
+            elif change == 'expression': source['columns'][2]['generation_expression'] = None
+            elif change == 'duplicate': source['columns'].append(source['columns'][0].copy())
+            else: source['columns'][1].update(generated='s', generation_expression='some_geometry()')
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                owner.column_layout(source)
 
     def test_missing_psql_retains_a_failed_receipt(self):
         with tempfile.TemporaryDirectory() as directory, \
