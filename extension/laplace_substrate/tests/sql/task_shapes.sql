@@ -59,8 +59,8 @@ $projection$;
 
 CREATE FUNCTION pg_temp.shape_ref(p_ordinal int)
 RETURNS bytea LANGUAGE sql IMMUTABLE AS $ref$
-    SELECT public.laplace_hash128_blake3(
-        'ud/token-ref/' || upper(encode(convert_to(p_ordinal::text,'UTF8'),'hex')) || '/v1');
+    SELECT public.laplace_hash128_blake3(convert_to(
+        'ud/token-ref/' || upper(encode(convert_to(p_ordinal::text,'UTF8'),'hex')) || '/v1','UTF8'));
 $ref$;
 
 -- Authored UD annotations are serialized, never inferred by this fixture.
@@ -385,7 +385,7 @@ BEGIN
     SELECT value,2,v_concept,v_source FROM unnest(ARRAY[v_source,v_context,v_input,v_answer]) value;
     PERFORM pg_temp.shape_cell(v_input,v_predicate,v_answer,v_source,v_context);
     FOR i IN 1..2 LOOP
-        v_language := public.laplace_hash128_blake3('test/task-shapes/language-' || i);
+        v_language := public.laplace_hash128_blake3(convert_to('test/task-shapes/language-' || i,'UTF8'));
         v_cue := CASE i WHEN 1 THEN 'χέλκ' ELSE '觅' END;
         v_word := CASE i WHEN 1 THEN 'eau' ELSE '水' END;
         v_example_word := CASE i WHEN 1 THEN 'brume' ELSE '火' END;

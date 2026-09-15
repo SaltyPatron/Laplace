@@ -1,38 +1,57 @@
--- Full population of entities.highway_mask via highway_mask_refresh, batched with a
--- COMMIT per batch (10M+ entities in one tx would bloat and lock). This is the
--- REGENERATE tool: run after any highway bit renumbering (adding a relation reorders
--- the alphabetical codegen) or to populate a generation seeded before the fold-time
--- refresh existed. Idempotent; safe to re-run and to interrupt (committed batches
--- persist).
---
--- SCAN SET (2026-07-21): drive the batches from the CANDIDATE set, not from every
--- entity. highway_mask_refresh derives a mask purely from laplace.consensus participation, so
--- an entity that appears in no consensus row can only ever resolve to NULL -- which is
--- already its stored value. The old loop walked all ~9M entities, paying two indexed
--- consensus probes each, and the ~7M tier-3/4 content rows were guaranteed no-ops.
--- Candidates are therefore:
---   (a) consensus participants (subject or object)  -- may gain or change a mask
---   (b) entities with a non-NULL mask today         -- may need one CLEARED after a
---       per-source evict removed their last governed edge
--- (b) keeps the "recompute-not-accumulate: idempotent, self-healing, no drift"
--- guarantee that a participants-only scan would quietly break, and costs one
--- sequential pass instead of the previous ~18 batched join passes.
---
--- PROGRESS (2026-07-21): RAISE LOG, not RAISE NOTICE. NOTICE is client-only -- with
--- log_min_messages at its WARNING default the old NOTICEs reached the server log
--- never, and any client that discards notices (the ingest writer does) made a
--- multi-minute rebuild look like a dead stall. LOG is the substrate law for
--- long-running folds: always emit LOG progress.
---
--- No SET clause on the procedure: a PL/pgSQL procedure carrying a SET clause is
--- barred from transaction control (COMMIT), so references are schema-qualified
--- instead. Invoke with: CALL laplace.highway_mask_rebuild();
-DROP PROCEDURE IF EXISTS laplace.highway_mask_rebuild(int);
+-- SQL orchestrates recovery transactions; native C owns exact-pair mask work.
+-- No SET clause: both procedures commit completed batches and remain resumable.
+CREATE OR REPLACE PROCEDURE laplace.highway_mask_pending_drain(p_batch int DEFAULT 250000)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    entity_ids bytea[];
+    type_ids bytea[];
+    drained bigint := 0;
+BEGIN
+    IF p_batch IS NULL OR p_batch < 1 THEN
+        RAISE EXCEPTION 'highway_mask_pending_drain: p_batch must be >= 1';
+    END IF;
+    LOOP
+        IF NOT consensus.highway_ready() THEN
+            RAISE LOG 'highway_mask_pending_drain: registry unavailable; exact pairs retained';
+            RETURN;
+        END IF;
 
+        -- Claim/remove within the SAME transaction as the native replay. Any
+        -- error rolls the claim back. Removing first also permits native replay
+        -- to requeue the exact pairs if availability changes, without a later
+        -- DELETE erasing the newly retained work.
+        WITH claimed AS MATERIALIZED (
+            SELECT entity_id, type_id FROM laplace.highway_mask_pending
+            ORDER BY entity_id, type_id LIMIT p_batch
+            FOR UPDATE SKIP LOCKED
+        ), taken AS (
+            DELETE FROM laplace.highway_mask_pending p USING claimed q
+            WHERE p.entity_id=q.entity_id AND p.type_id=q.type_id
+            RETURNING p.entity_id, p.type_id
+        )
+        SELECT array_agg(entity_id ORDER BY entity_id,type_id),
+               array_agg(type_id ORDER BY entity_id,type_id)
+        INTO entity_ids, type_ids FROM taken;
+        EXIT WHEN entity_ids IS NULL;
+
+        PERFORM consensus.highway_mask_deposit(entity_ids, type_ids);
+        COMMIT;
+        IF NOT consensus.highway_ready() THEN
+            RAISE LOG 'highway_mask_pending_drain: registry unavailable; replay batch retained';
+            RETURN;
+        END IF;
+        drained := drained + cardinality(entity_ids);
+        RAISE LOG 'highway_mask_pending_drain: % exact pairs replayed', drained;
+    END LOOP;
+END $$;
+
+-- Full historical population. New ingest never invokes this scan: it already
+-- owns every exact pair. Include existing masks so removed relations can clear
+-- stale bits; include zero-valued identities rather than skipping the first key.
 CREATE OR REPLACE PROCEDURE laplace.highway_mask_rebuild(p_batch int DEFAULT 500000)
     LANGUAGE plpgsql AS $$
 DECLARE
-    last_id bytea := decode(repeat('00', 16), 'hex');
+    last_id bytea := NULL;
     ids bytea[];
     n bigint;
     total bigint := 0;
@@ -40,39 +59,55 @@ DECLARE
     candidates bigint;
     t0 timestamptz := clock_timestamp();
 BEGIN
-    -- Plain TEMP table (ON COMMIT PRESERVE ROWS): the per-batch COMMIT below would
-    -- drop an ON COMMIT DROP table out from under the loop.
-    DROP TABLE IF EXISTS _hmr_candidates;
-    CREATE TEMP TABLE _hmr_candidates (id bytea PRIMARY KEY);
+    IF p_batch IS NULL OR p_batch < 1 THEN
+        RAISE EXCEPTION 'highway_mask_rebuild: p_batch must be >= 1';
+    END IF;
+    IF NOT consensus.highway_ready() THEN
+        RAISE LOG 'highway_mask_rebuild: registry unavailable; population remains pending';
+        RETURN;
+    END IF;
 
-    INSERT INTO _hmr_candidates (id)
+    CALL laplace.highway_mask_pending_drain(p_batch);
+    UPDATE laplace.highway_mask_population_state
+       SET complete=false, completed_at=NULL WHERE singleton;
+
+    DROP TABLE IF EXISTS pg_temp._hmr_candidates;
+    CREATE TEMP TABLE _hmr_candidates (id bytea PRIMARY KEY);
+    INSERT INTO pg_temp._hmr_candidates(id)
     SELECT c.subject_id FROM laplace.consensus c
     UNION
-    SELECT c.object_id  FROM laplace.consensus c WHERE c.object_id IS NOT NULL
+    SELECT c.object_id FROM laplace.consensus c WHERE c.object_id IS NOT NULL
     UNION
     SELECT e.id FROM laplace.entities e WHERE e.highway_mask IS NOT NULL;
     GET DIAGNOSTICS candidates = ROW_COUNT;
-
-    RAISE LOG 'highway_mask_rebuild: start — % mask candidates (consensus participants + already-masked)',
-        candidates;
+    RAISE LOG 'highway_mask_rebuild: start — % mask candidates', candidates;
     COMMIT;
 
     LOOP
+        IF NOT consensus.highway_ready() THEN
+            RAISE LOG 'highway_mask_rebuild: registry unavailable; population remains pending';
+            DROP TABLE IF EXISTS pg_temp._hmr_candidates;
+            RETURN;
+        END IF;
         SELECT array_agg(s.id ORDER BY s.id) INTO ids FROM (
-            SELECT id FROM _hmr_candidates WHERE id > last_id ORDER BY id LIMIT p_batch) s;
+            SELECT id FROM pg_temp._hmr_candidates
+            WHERE last_id IS NULL OR id > last_id ORDER BY id LIMIT p_batch
+        ) s;
         EXIT WHEN ids IS NULL;
         n := consensus.highway_mask_refresh(ids);
         total := total + n;
         scanned := scanned + cardinality(ids);
         last_id := ids[cardinality(ids)];
-        RAISE LOG 'highway_mask_rebuild: % masks written / % of % candidates (% percent) — %s elapsed',
+        RAISE LOG 'highway_mask_rebuild: % masks written / % of % candidates — %s elapsed',
             total, scanned, candidates,
-            round(100.0 * scanned / NULLIF(candidates, 0), 1),
             round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
         COMMIT;
     END LOOP;
 
+    UPDATE laplace.highway_mask_population_state
+       SET complete=true, completed_at=clock_timestamp() WHERE singleton;
+    COMMIT;
     RAISE LOG 'highway_mask_rebuild: done — % masks written / % candidates in %s',
         total, scanned, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
-    DROP TABLE IF EXISTS _hmr_candidates;
+    DROP TABLE IF EXISTS pg_temp._hmr_candidates;
 END $$;

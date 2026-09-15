@@ -151,6 +151,24 @@ BEGIN
     END IF;
     first_program := r.program_id;
 
+    -- Optional output projections retain their public NULL/empty convention;
+    -- an explicit nonempty projection cannot change the witnessed predicate.
+    SELECT * INTO r FROM pg_temp.operation_receipt(
+        prompt,p_output=>ARRAY[]::bytea[],p_context=>context_id);
+    IF r.emitted IS DISTINCT FROM ARRAY[answer_id] OR r.complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'FAIL: empty optional output projection changed the bound program: %',r;
+    END IF;
+    SELECT * INTO r FROM pg_temp.operation_receipt(
+        prompt,p_output=>ARRAY[causes_id],p_context=>context_id);
+    IF r.emitted IS DISTINCT FROM ARRAY[answer_id] OR r.complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'FAIL: compatible output projection rejected the bound predicate: %',r;
+    END IF;
+    SELECT * INTO r FROM pg_temp.operation_receipt(
+        prompt,p_output=>ARRAY[defines_id],p_context=>context_id);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'FAIL: bound predicate escaped the explicit output projection: %',r;
+    END IF;
+
     -- Changing the current result cell changes the actual output, while the
     -- invocation testimony remains byte-for-byte unchanged.
     DELETE FROM laplace.consensus

@@ -10,6 +10,11 @@ SQL_QUERY("entities.mask_targets", "bytea[]",
     "SELECT id,tier,highway_mask,tableoid,ctid FROM laplace.entities WHERE id=ANY($1)")
 SQL_QUERY("entities.mask_families", "bytea[],bytea",
     "SELECT subject_id,object_id FROM laplace.consensus WHERE subject_id=ANY($1) AND type_id=$2")
+SQL_QUERY("entities.mask_pending", "bytea[],bytea[]",
+    "INSERT INTO laplace.highway_mask_pending(entity_id,type_id) "
+    "SELECT p.entity_id,p.type_id FROM unnest($1,$2) AS p(entity_id,type_id) "
+    "WHERE p.entity_id IS NOT NULL AND p.type_id IS NOT NULL "
+    "ORDER BY p.entity_id,p.type_id ON CONFLICT(entity_id,type_id) DO NOTHING")
 SQL_QUERY("browse.page", "bytea[],bytea,int4,int4,int4",
     "SELECT entity_id, tier, type_id, matched_name_id, match_kind, "
     "rating, rd, eff_mu, witness_count, candidate_name_count, candidate_truncated, matched_entity_count "

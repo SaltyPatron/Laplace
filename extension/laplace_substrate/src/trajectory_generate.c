@@ -787,8 +787,11 @@ emit_result(ReturnSetInfo *result, int32 step, const Candidate *candidate,
         values[7] = Int32GetDatum(query_channels);
         values[8] = Int32GetDatum(exact_channels);
         values[9] = Int64GetDatum(candidate->sequence_occurrences);
-        values[10] = Int32GetDatum(support->positive_covered_occurrences);
-        values[11] = Int32GetDatum(support->positive_relation_families);
+        /* Coupling coverage describes the complete exact query field. The
+         * selected output projection supplies the support witness below, but
+         * must not hide other responding relations or occurrences. */
+        values[10] = Int32GetDatum(candidate->query.positive_covered_occurrences);
+        values[11] = Int32GetDatum(candidate->query.positive_relation_families);
         values[12] = Int32GetDatum(candidate->query.negative_covered_occurrences);
         if (support->has_positive)
         {
@@ -1043,7 +1046,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             {
                 const LaplacePromptRelationRead *operation = &intent->operations[operation_index];
                 bool found;
-                if (!relation_allowed_by_output_scope(&operation->result_relation, relation_types) ||
+                if (!laplace_prompt_relation_allowed(intent, &operation->result_relation) ||
                     !relation_allowed_by_output_scope(&operation->result_relation, output_relations))
                     continue;
                 hash_search(selected_predicates, &operation->result_relation, HASH_ENTER, &found);

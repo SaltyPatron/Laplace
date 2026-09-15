@@ -63,6 +63,26 @@ typedef struct LaplacePromptIntent
     LaplacePromptStructure *structure;
 } LaplacePromptIntent;
 
+/* A hard relation scope differs from the optional output projection: NULL
+ * permits all relations, while an explicitly empty array permits none. */
+static inline bool
+laplace_prompt_relation_allowed(const LaplacePromptIntent *intent, const hash128_t *relation)
+{
+    if (!intent->hard_relation_types) return true;
+    bool allowed = false;
+    ArrayIterator iterator = array_create_iterator(intent->hard_relation_types, 0, NULL);
+    Datum value;
+    bool isnull;
+    while (array_iterate(iterator, &value, &isnull))
+    {
+        if (isnull) continue;
+        hash128_t candidate = datum_to_hash128(value);
+        if (hash128_eq(&candidate, relation)) { allowed = true; break; }
+    }
+    array_free_iterator(iterator);
+    return allowed;
+}
+
 static inline const Bitmapset *
 laplace_prompt_intent_origins(const LaplacePromptIntent *intent,
                               const hash128_t *id)
@@ -355,6 +375,16 @@ laplace_prompt_intent_compile(LaplacePromptIntent *intent,
             elog(ERROR, "prompt contract: governed relation identity is unavailable");
         if (laplace_prompt_contract_relation(&relation_id))
         {
+            /* A partial protocol read could silently omit a required input.
+             * Decline the invocation before any witness read if its complete
+             * declaration families fall outside the hard caller scope. */
+            if (!laplace_prompt_relation_allowed(intent, &relation_id))
+            {
+                hash_destroy(read.witnesses);
+                hash_destroy(read.cells);
+                MemoryContextSwitchTo(previous);
+                return;
+            }
             Datum id = hash128_to_datum(&relation_id);
             type_ids = accumArrayResult(type_ids, id, false, BYTEAOID, intent->owner);
             pfree(DatumGetPointer(id));

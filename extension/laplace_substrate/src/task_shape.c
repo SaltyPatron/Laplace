@@ -68,24 +68,6 @@ shape_release_parse(void *argument)
     laplace_ud_parse_free(&record->parse);
 }
 
-static bool
-shape_relation_allowed(const LaplacePromptIntent *intent, const hash128_t *relation)
-{
-    if (!intent->hard_relation_types) return true;
-    bool allowed = false;
-    ArrayIterator iterator = array_create_iterator(intent->hard_relation_types, 0, NULL);
-    Datum value;
-    bool isnull;
-    while (array_iterate(iterator, &value, &isnull))
-    {
-        if (isnull) continue;
-        hash128_t candidate = datum_to_hash128(value);
-        if (hash128_eq(&candidate, relation)) allowed = true;
-    }
-    array_free_iterator(iterator);
-    return allowed;
-}
-
 static void
 shape_receive_structure(Datum physicality, Datum entity, Datum geometry, void *opaque)
 {
@@ -546,7 +528,7 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
             laplace_relation_lookup(protocol_ids[i], &definition) != 0 || !definition ||
             strcmp(definition->canonical, protocol_relations[i]) != 0)
             elog(ERROR, "task shape: declared relation is absent from canonical registry");
-        if (!shape_relation_allowed(intent, protocol_ids[i])) goto done;
+        if (!laplace_prompt_relation_allowed(intent, protocol_ids[i])) goto done;
     }
     Oid physicalities = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
     Oid geometry = get_atttype(physicalities, get_attnum(physicalities, "trajectory"));
@@ -614,7 +596,7 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
         ShapeStructure *exemplar = hash_search(read.structures, &example->subject, HASH_FIND, NULL);
         if (!shape || !shape->is_shape || !exemplar || !exemplar->is_parse ||
             !hash128_eq(&shape->shape.exemplar_parse, &exemplar->id) ||
-            !shape_relation_allowed(intent, &shape->shape.predicate)) continue;
+            !laplace_prompt_relation_allowed(intent, &shape->shape.predicate)) continue;
         const LaplaceObservation *exemplar_witness = shape_parse_witness(&read, exemplar->id, rows, count);
         if (!exemplar_witness) continue;
         const LaplaceObservation *call;
