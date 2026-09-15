@@ -11,6 +11,7 @@ ADAPTER = ROOT / "extension/laplace_substrate/src/refactor_cognition.c"
 CMAKE = ROOT / "extension/laplace_substrate/CMakeLists.txt"
 SQL = ROOT / "extension/laplace_substrate/sql/functions/converse/chat_scaffold.sql.in"
 BUILD = ROOT / "scripts/build-refactor-engine.sh"
+CATALOG = ROOT / "engine/core/src/sql_catalog_refactor.def"
 
 
 def require(text: str, needle: str, label: str) -> None:
@@ -28,9 +29,11 @@ def main() -> None:
     cmake = CMAKE.read_text(encoding="utf-8")
     sql = SQL.read_text(encoding="utf-8")
     build = BUILD.read_text(encoding="utf-8")
+    catalog = CATALOG.read_text(encoding="utf-8")
 
-    # Legacy may enumerate durable observation candidates.  It may not carry a
-    # second search/cognition implementation or invoke lower semantic stages.
+    # Legacy may retrieve durable physicality manifests and adapt them to the
+    # candidate ABI. It may not carry a second search/cognition implementation or
+    # invoke lower semantic stages.
     require(
         adapter,
         "laplace_cognition_observation_request_execute_with_candidate_provider(",
@@ -44,20 +47,32 @@ def main() -> None:
     ):
         forbid(adapter, forbidden, "legacy semantic-owner call")
 
-    # The physicality adapter must preserve every canonical relation family
-    # instead of quietly reducing the common engine to adjacency-only lookup.
-    for relation in (1, 2, 4, 8, 16):
-        require(adapter, f"{relation}::int", f"relation family bit {relation}")
+    # SQL is storage retrieval only. Ordered relation crossings are derived from
+    # the exact expanded manifest in native code and all five canonical structural
+    # families remain available.
+    require(adapter, "decode_manifest_runs", "native ordered-manifest decoding")
+    require(adapter, "source_logical_ordinal", "source logical ordinal")
+    require(adapter, "target_logical_ordinal", "target logical ordinal")
+    require(adapter, "run_length", "packed-run multiplicity")
+    for relation in (
+        "LAPLACE_OBSERVATION_QUERY_CONTAINER",
+        "LAPLACE_OBSERVATION_QUERY_CONSTITUENT",
+        "LAPLACE_OBSERVATION_QUERY_PREDECESSOR",
+        "LAPLACE_OBSERVATION_QUERY_SUCCESSOR",
+        "LAPLACE_OBSERVATION_QUERY_COOCCUR",
+    ):
+        require(adapter, relation, f"relation family {relation}")
     require(
         adapter,
         "LAPLACE_OBSERVATION_QUERY_SOURCE_PHYSICALITY",
         "explicit physicality source layer",
     )
-    require(adapter, "run_length", "packed-run multiplicity")
-    require(adapter, "source_logical_ordinal", "source logical ordinal")
-    require(adapter, "target_logical_ordinal", "target logical ordinal")
+    require(adapter, 'laplace_sql_query_text("refactor_cognition.physicalities")',
+            "typed native storage query")
+    require(catalog, "laplace_trajectory_expanded_constituents", "canonical manifest decoder")
+    forbid(catalog, "LATERAL", "SQL-owned relation crossing")
 
-    # The normal extension build owns provisioning.  The user must not preload a
+    # The normal extension build owns provisioning. The user must not preload a
     # checkout/library or toggle a hidden mode to reach canonical cognition.
     require(cmake, "src/refactor_cognition.c", "legacy adapter source")
     require(cmake, "build-refactor-engine.sh", "automatic engine build dependency")
@@ -83,7 +98,7 @@ def main() -> None:
         forbid(build, moving, "moving Refactor dependency")
 
     # SQL is transport only: one C binding returning actual selected entity/path
-    # records and engine receipts.  It must not recreate cognition in PL/pgSQL.
+    # records and engine receipts. It must not recreate cognition in PL/pgSQL.
     require(sql, "converse.refactor_cognition(", "public SQL transport")
     require(sql, "pg_laplace_refactor_cognition", "native adapter symbol")
     require(sql, "entity_id", "terminal entity realization input")
