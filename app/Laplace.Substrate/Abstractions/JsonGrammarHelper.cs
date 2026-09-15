@@ -218,65 +218,8 @@ public static class JsonGrammarHelper
         return false;
     }
 
-    internal static byte[] DecodeJsonStringUtf8(ReadOnlySpan<byte> inner)
-    {
-        if (inner.IsEmpty) return Array.Empty<byte>();
-        var sb = new byte[inner.Length];
-        int w = 0;
-        for (int i = 0; i < inner.Length; i++)
-        {
-            byte c = inner[i];
-            if (c != (byte)'\\' || i + 1 >= inner.Length)
-            {
-                sb[w++] = c;
-                continue;
-            }
-            byte esc = inner[++i];
-            switch (esc)
-            {
-                case (byte)'"': sb[w++] = (byte)'"'; break;
-                case (byte)'\\': sb[w++] = (byte)'\\'; break;
-                case (byte)'/': sb[w++] = (byte)'/'; break;
-                case (byte)'b': sb[w++] = (byte)'\b'; break;
-                case (byte)'f': sb[w++] = (byte)'\f'; break;
-                case (byte)'n': sb[w++] = (byte)'\n'; break;
-                case (byte)'r': sb[w++] = (byte)'\r'; break;
-                case (byte)'t': sb[w++] = (byte)'\t'; break;
-                case (byte)'u' when i + 4 < inner.Length:
-                    if (TryParseHex4(inner.Slice(i + 1, 4), out int codepoint))
-                    {
-                        i += 4;
-                        w += Encoding.UTF8.GetBytes(char.ConvertFromUtf32(codepoint), 0, 1, sb, w);
-                    }
-                    break;
-                default:
-                    sb[w++] = esc;
-                    break;
-            }
-        }
-        return sb.AsSpan(0, w).ToArray();
-    }
-
-    private static bool TryParseHex4(ReadOnlySpan<byte> hex, out int value)
-    {
-        value = 0;
-        if (hex.Length < 4) return false;
-        for (int i = 0; i < 4; i++)
-        {
-            int d = HexDigit(hex[i]);
-            if (d < 0) return false;
-            value = (value << 4) | d;
-        }
-        return true;
-    }
-
-    private static int HexDigit(byte c) => c switch
-    {
-        >= (byte)'0' and <= (byte)'9' => c - (byte)'0',
-        >= (byte)'a' and <= (byte)'f' => c - (byte)'a' + 10,
-        >= (byte)'A' and <= (byte)'F' => c - (byte)'A' + 10,
-        _ => -1,
-    };
+    internal static byte[] DecodeJsonStringUtf8(ReadOnlySpan<byte> inner) =>
+        GrammarDecomposer.DecodeJsonStringUtf8(inner);
 
     private static IEnumerable<int> ChildrenOf(GrammarAst ast, int parentIndex)
     {

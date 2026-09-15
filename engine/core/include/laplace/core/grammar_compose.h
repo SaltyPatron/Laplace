@@ -90,6 +90,17 @@ int laplace_compose_reserve_rows(laplace_compose_result_t* r,
                                 size_t entities, size_t physicalities,
                                 size_t source_trees);
 
+/* Decode the inner bytes of one JSON string (without its enclosing quotes).
+ * Literal bytes must be valid UTF-8 JSON string characters; escaped quotes,
+ * controls and paired UTF-16 surrogates decode to their scalar UTF-8 values.
+ * No terminator is appended. NULL input is valid only with length zero; NULL
+ * output is valid only with capacity zero. Returns 0 on success, -1 for invalid
+ * arguments/malformed input, or -2 if capacity is insufficient. On 0/-2, written
+ * receives the exact decoded length; on -1 it is zero. Discard output on error.
+ * Decoded length never exceeds input length. In-place decoding is supported. */
+int laplace_json_string_decode(const uint8_t* input, size_t length,
+                               uint8_t* output, size_t capacity, size_t* written);
+
 int laplace_grammar_compose(
     const uint8_t*              utf8,
     size_t                      len,
