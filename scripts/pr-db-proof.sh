@@ -91,9 +91,38 @@ load_state() {
   private_paths
 }
 
+retain_private_postgresql_log() {
+  local evidence
+  evidence="${LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY:-/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-pr}/current"
+  python3 - "$stage/postgresql.log" "$evidence/private-postgresql.log" <<'PY_LOG'
+import json, os, pathlib, stat, sys
+source, destination = map(pathlib.Path, sys.argv[1:])
+try:
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+except FileNotFoundError:
+    raise SystemExit(0)
+with os.fdopen(descriptor, 'rb') as stream:
+    info = os.fstat(stream.fileno())
+    if not stat.S_ISREG(info.st_mode):
+        raise SystemExit('private PostgreSQL log is not a regular file')
+    stream.seek(max(0, info.st_size - 65536))
+    tail = stream.read(65536)
+destination.parent.mkdir(parents=True, exist_ok=True)
+descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+with os.fdopen(descriptor, 'wb') as output:
+    output.write(tail)
+print(f'PRIVATE_POSTGRESQL_LOG source_bytes={info.st_size} retained_bytes={len(tail)} path={destination}')
+# Escape control bytes so server messages cannot become workflow commands.
+print('PRIVATE_POSTGRESQL_LOG_TAIL ' + json.dumps(tail[-8192:].decode('utf-8', errors='replace')))
+PY_LOG
+}
+
 cleanup() {
   [[ -f "$state_file" || -L "$state_file" ]] || return 0
   load_state cleanup || return $?
+  # Keep the actual startup/phase error before removing its private directory.
+  # Diagnostic failure must never replace the original phase or cleanup status.
+  [[ "${1:-}" == quiet ]] || retain_private_postgresql_log || true
   # Bind the signal to the actual private postmaster, not a reusable PID. The
   # receipt also exists during startup, before pg_ctl has returned successfully.
   python3 - "$pgdata" "$PG_PREFIX/bin/postgres" <<'PY_STOP' || return $?
@@ -385,7 +414,7 @@ run_private_phase() {
     operational-db) prove_operational_database ;;
     highway-recovery) prove_highway_recovery ;;
     legacy-repair-db) prove_legacy_repairs ;;
-    private-db-stop) cleanup ;;
+    private-db-stop) cleanup quiet ;;
     *) echo "unknown private database phase: $1" >&2; return 2 ;;
   esac
 }

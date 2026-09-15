@@ -28,6 +28,7 @@ import time
 SCHEMA = "laplace.ci-session.v1"
 LIMIT = 65536
 IDENTITY_KEYS = ("GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB", "RUNNER_TRACKING_ID")
+COMMAND_FILES = ("GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH", "GITHUB_STEP_SUMMARY")
 
 
 def identity():
@@ -209,6 +210,22 @@ def response(directory, request):
     return os.open(path, os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
 
 
+def current_step_environment(environment, command_files):
+    # GitHub consumes and replaces these files after every step. Keep the
+    # session's pinned settings, but send output to the requesting step's files.
+    if not isinstance(command_files, dict) or set(command_files) != set(COMMAND_FILES):
+        raise ValueError("invalid GitHub command-file keys")
+    result = dict(environment)
+    for name, value in command_files.items():
+        if value is None:
+            result.pop(name, None)
+        elif not isinstance(value, str) or not os.path.isabs(value) or "\x00" in value:
+            raise ValueError("GitHub command-file path must be absolute")
+        else:
+            result[name] = value
+    return result
+
+
 def run_phase(directory, state, phase, connection, client_fd, environment, timeout):
     # A gate prevents execution before the guardian can identify the group. If
     # the supervisor dies before opening it, EOF makes the wrapper exit unused.
@@ -352,7 +369,8 @@ def serve(directory, startup_fd, lock_path, idle_timeout, phase_timeout):
                     raise ValueError(f"expected phase {expected!r}, received {phase!r}")
                 if source(state["checkout"]) != state["source"]:
                     raise ValueError("CI checkout identity changed")
-                code, reason = run_phase(directory, state, phase, connection, client_fd, environment, phase_timeout)
+                phase_environment = current_step_environment(environment, request.get("command_files"))
+                code, reason = run_phase(directory, state, phase, connection, client_fd, phase_environment, phase_timeout)
                 state["results"].append({"phase": phase, "exit_code": code})
                 state["next"] += 1
                 if code:
@@ -521,7 +539,8 @@ def main():
     try:
         request = {"operation": args.operation, "phase": getattr(args, "phase", None),
                    "identity": identity(), "token": state["token"], "pid": os.getpid(),
-                   "start": process_identity(os.getpid()), "reply": reply.name}
+                   "start": process_identity(os.getpid()), "reply": reply.name,
+                   "command_files": {name: os.environ.get(name) for name in COMMAND_FILES}}
         data = json.dumps(request).encode() + b"\n"
         if len(data) > 4096:
             raise ValueError("CI request exceeds atomic pipe size")

@@ -135,6 +135,30 @@ echo cleanup >> "$CI_FIXTURE_ROOT/cleaned"
         self.assertEqual("cleanup\n", (self.root / "cleaned").read_text())
         self.assertEqual(2, self.invoke("run", "--phase", "first").returncode)
 
+    def test_each_phase_uses_its_current_github_command_files(self):
+        keys = ("GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH", "GITHUB_STEP_SUMMARY")
+        self.script.write_text(self.script.read_text() + "\n" +
+            'for key in GITHUB_ENV GITHUB_OUTPUT GITHUB_PATH GITHUB_STEP_SUMMARY; do\n'
+            '  if [[ -n "${!key:-}" ]]; then printf "%s:%s\\n" "$phase" "$key" >> "${!key}"; fi\n'
+            'done\n')
+        self.git("add", ".")
+        self.git("-c", "user.name=CI Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "command files")
+        startup_files = {key: self.root / ("startup-" + key) for key in keys}
+        self.env.update({key: str(path) for key, path in startup_files.items()})
+        self.start()
+        original = {key: path.read_bytes() if path.exists() else None for key, path in startup_files.items()}
+        for phase in ("first", "second"):
+            current = {key: self.root / (phase + "-" + key) for key in keys}
+            result = self.invoke("run", "--phase", phase, env=dict(self.env, **{key: str(path) for key, path in current.items()}))
+            self.assertEqual(0, result.returncode, result.stderr)
+            for key, path in current.items():
+                self.assertEqual(f"{phase}:{key}\n", path.read_text())
+        absent = {key: value for key, value in self.env.items() if key not in keys}
+        self.assertEqual(0, self.invoke("run", "--phase", "third", env=absent).returncode)
+        for key, path in startup_files.items():
+            self.assertEqual(original[key], path.read_bytes() if path.exists() else None)
+            self.assertNotIn(str(path), (self.directory / "session.json").read_text())
+
     def test_stdout_eof_does_not_kill_work_still_running(self):
         (self.root / "redirect").touch()
         self.start()
