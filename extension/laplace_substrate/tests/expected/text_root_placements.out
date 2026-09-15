@@ -1,0 +1,5 @@
+-- Native text placement preserves canonical Unicode content and input occurrence.
+\set ECHO none
+NOTICE:  text root placements: complete batches preserve ordinals, duplicates, nulls and empty-input contracts
+NOTICE:  text root placements: canonical IDs, singleton tiers, Unicode normalization and full whitespace content agree
+NOTICE:  text root placements: complete native tree composition, exact Hilbert keys and radius agree

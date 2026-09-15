@@ -458,12 +458,21 @@ int content_witness_source_tree_build(
     return content_tree_build_mode(utf8, len, 1, out_tree);
 }
 
+int content_witness_tree_root_node(
+    const tier_tree_t* tree,
+    tier_node_view_t*  out_root) {
+    if (!tree || !out_root) return -1;
+    if (tier_tree_get_node(tree, natural_unit_index(tree), out_root) != 0) return -2;
+    return 0;
+}
+
 int content_witness_tree_root_id(
     const tier_tree_t* tree,
     hash128_t*         out_root_id) {
-    if (!tree || !out_root_id) return -1;
+    if (!out_root_id) return -1;
     tier_node_view_t root;
-    if (tier_tree_get_node(tree, natural_unit_index(tree), &root) != 0) return -2;
+    int rc = content_witness_tree_root_node(tree, &root);
+    if (rc != 0) return rc;
     *out_root_id = root.id;
     return 0;
 }
