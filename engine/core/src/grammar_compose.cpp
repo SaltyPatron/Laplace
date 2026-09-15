@@ -97,60 +97,81 @@ static int json_span_has_escapes(const uint8_t* span, size_t span_len) {
     return 0;
 }
 
+int laplace_json_string_decode(const uint8_t* input, size_t length,
+                               uint8_t* output, size_t capacity, size_t* written) {
+    if (!written) return -1;
+    *written = 0;
+    if ((!input && length != 0) || (!output && capacity != 0)) return -1;
+
+    size_t i = 0, w = 0;
+    while (i < length) {
+        uint32_t cp = input[i++];
+        if (cp == '\\') {
+            if (i == length) return -1;
+            switch (input[i++]) {
+                case '"': cp = '"'; break;
+                case '\\': cp = '\\'; break;
+                case '/': cp = '/'; break;
+                case 'b': cp = '\b'; break;
+                case 'f': cp = '\f'; break;
+                case 'n': cp = '\n'; break;
+                case 'r': cp = '\r'; break;
+                case 't': cp = '\t'; break;
+                case 'u': {
+                    if (length - i < 4) return -1;
+                    cp = 0;
+                    for (size_t h = 0; h < 4; ++h) {
+                        int digit = json_hex_digit(input[i++]);
+                        if (digit < 0) return -1;
+                        cp = (cp << 4) | (uint32_t)digit;
+                    }
+                    if (cp >= 0xD800 && cp <= 0xDBFF) {
+                        if (length - i < 6 || input[i] != '\\' || input[i + 1] != 'u')
+                            return -1;
+                        i += 2;
+                        uint32_t low = 0;
+                        for (size_t h = 0; h < 4; ++h) {
+                            int digit = json_hex_digit(input[i++]);
+                            if (digit < 0) return -1;
+                            low = (low << 4) | (uint32_t)digit;
+                        }
+                        if (low < 0xDC00 || low > 0xDFFF) return -1;
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                        return -1;
+                    }
+                    break;
+                }
+                default: return -1;
+            }
+        } else {
+            if (cp < 0x20 || cp == '"') return -1;
+            size_t consumed = 0;
+            if (laplace_utf8_decode(input + i - 1, length - (i - 1), &cp, &consumed) != 0)
+                return -1;
+            i += consumed - 1;
+        }
+        uint8_t encoded[4];
+        size_t n = laplace_utf8_encode(cp, encoded);
+        if (n <= capacity && w <= capacity - n)
+            memcpy(output + w, encoded, n);
+        w += n;
+    }
+    *written = w;
+    return w <= capacity ? 0 : -2;
+}
+
 static int json_unescape_utf8(const uint8_t* span, size_t span_len,
                               uint8_t** out, size_t* out_len) {
     *out = NULL;
     *out_len = 0;
-    if (!span || span_len == 0) return -1;
-    if (!json_span_has_escapes(span, span_len)) return -1;
-
-    uint8_t* buf = (uint8_t*)malloc(span_len);
+    uint8_t* buf = (uint8_t*)malloc(span_len ? span_len : 1);
     if (!buf) return -3;
-    size_t w = 0;
-    for (size_t i = 0; i < span_len; ++i) {
-        uint8_t c = span[i];
-        if (c != (uint8_t)'\\' || i + 1 >= span_len) {
-            buf[w++] = c;
-            continue;
-        }
-        uint8_t esc = span[++i];
-        switch (esc) {
-            case '"':  buf[w++] = (uint8_t)'"'; break;
-            case '\\': buf[w++] = (uint8_t)'\\'; break;
-            case '/':  buf[w++] = (uint8_t)'/'; break;
-            case 'b':  buf[w++] = (uint8_t)'\b'; break;
-            case 'f':  buf[w++] = (uint8_t)'\f'; break;
-            case 'n':  buf[w++] = (uint8_t)'\n'; break;
-            case 'r':  buf[w++] = (uint8_t)'\r'; break;
-            case 't':  buf[w++] = (uint8_t)'\t'; break;
-            case 'u':
-                if (i + 4 >= span_len) { free(buf); return -1; }
-                {
-                    int h0 = json_hex_digit(span[i + 1]);
-                    int h1 = json_hex_digit(span[i + 2]);
-                    int h2 = json_hex_digit(span[i + 3]);
-                    int h3 = json_hex_digit(span[i + 4]);
-                    if (h0 < 0 || h1 < 0 || h2 < 0 || h3 < 0) { free(buf); return -1; }
-                    uint32_t cp = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
-                    i += 4;
-                    uint8_t tmp[4];
-                    size_t n = laplace_utf8_encode(cp, tmp);
-                    if (w + n > span_len) {
-                        uint8_t* grown = (uint8_t*)realloc(buf, w + n + span_len);
-                        if (!grown) { free(buf); return -3; }
-                        buf = grown;
-                    }
-                    memcpy(buf + w, tmp, n);
-                    w += n;
-                }
-                break;
-            default:
-                buf[w++] = esc;
-                break;
-        }
-    }
+    size_t written = 0;
+    int rc = laplace_json_string_decode(span, span_len, buf, span_len, &written);
+    if (rc != 0) { free(buf); return rc; }
     *out = buf;
-    *out_len = w;
+    *out_len = written;
     return 0;
 }
 
@@ -186,6 +207,8 @@ static int emit_grapheme_floor_entities(
 
 
 
+/* +1 means syntax/empty content with no constituent; negative results are real
+ * decoding/allocation failures and must abort composition, not drop a value. */
 static int json_leaf_fill_grapheme_children(
     const uint8_t* utf8, size_t len, laplace_ast_t* ast, size_t idx,
     laplace_compose_result_t* r,
@@ -213,19 +236,17 @@ static int json_leaf_fill_grapheme_children(
         span_len -= 2;
     } else if (!nt || (strcmp(nt, "number") != 0 && strcmp(nt, "true") != 0
                        && strcmp(nt, "false") != 0 && strcmp(nt, "null") != 0)) {
-        return -1;
+        return 1;
     }
-    if (span_len == 0) return -1;
+    if (span_len == 0) return 1;
 
     const uint8_t* content_span = span;
     size_t content_len = span_len;
     uint8_t* decoded_owned = NULL;
     if (json_span_has_escapes(span, span_len)) {
-        if (json_unescape_utf8(span, span_len, &decoded_owned, &content_len) != 0
-            || content_len == 0) {
-            free(decoded_owned);
-            return -1;
-        }
+        int decode_rc = json_unescape_utf8(span, span_len, &decoded_owned, &content_len);
+        if (decode_rc != 0) return decode_rc;
+        if (content_len == 0) { free(decoded_owned); return 1; }
         content_span = decoded_owned;
     }
 
@@ -311,6 +332,7 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                              compose_state_t* st) {
     (void)tree;
     size_t n = laplace_ast_node_count(ast);
+    int rc = 0;
     st->n = n;
     if (n == 0) return 0;
 
@@ -393,12 +415,13 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
                 tier = next < TIER_DOCUMENT ? next : TIER_DOCUMENT;
             }
         } else if (is_json_modality(modality_id)) {
-            if (json_leaf_fill_grapheme_children(
+            int leaf_rc = json_leaf_fill_grapheme_children(
                     utf8, len, ast, idx, r,
                     emitted_entity, emitted_entity_n, emitted_entity_cap,
                     &child_ids, &child_coords, &child_flags, &m,
-                    &leaf_root_id) != 0)
-                continue;
+                    &leaf_root_id);
+            if (leaf_rc < 0) { rc = leaf_rc; goto done; }
+            if (leaf_rc > 0) continue;
             tier = 2;
         } else {
             size_t g_start = 0, g_end = 0;
@@ -450,12 +473,13 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         free(child_flags);
     }
 
+done:
     for (size_t i = 0; i < n; ++i) {
         free(children_of[i]);
     }
     free(children_of);
     free(child_counts);
-    return 0;
+    return rc;
 }
 
 template <typename T>
@@ -683,16 +707,12 @@ static int emit_ast_node_physicalities(
             }
         } else if (json_mod) {
             double* jcoords = NULL;
-            if (json_leaf_fill_grapheme_children(
+            int leaf_rc = json_leaf_fill_grapheme_children(
                     utf8, len, ast, idx, NULL,
                     NULL, NULL, NULL,
-                    &child_ids, &jcoords, &child_flags, &m, NULL) == 0) {
-                free(jcoords);
-            } else {
-                child_ids = NULL;
-                child_flags = NULL;
-                m = 0;
-            }
+                    &child_ids, &jcoords, &child_flags, &m, NULL);
+            free(jcoords);
+            if (leaf_rc < 0) return leaf_rc;
         } else {
             size_t g_start = 0, g_end = 0;
             if (laplace_grapheme_floor_span_to_graphemes(
@@ -863,7 +883,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
 
     rc = compose_ast_nodes(utf8, len, ast, modality_id, &floor, tree, r,
                            &emitted_entity, &emitted_entity_n, &emitted_entity_cap, &st);
-    if (rc != 0) goto fail_st;
+    if (rc != 0) goto fail_emit;
 
     n = st.n;
 
@@ -1034,16 +1054,12 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
             }
         } else if (json_mod) {
             double* jcoords = NULL;
-            if (json_leaf_fill_grapheme_children(
+            int leaf_rc = json_leaf_fill_grapheme_children(
                     utf8, len, ast, idx, NULL,
                     NULL, NULL, NULL,
-                    &child_ids, &jcoords, &child_flags, &m, NULL) == 0) {
-                free(jcoords);
-            } else {
-                child_ids = NULL;
-                child_flags = NULL;
-                m = 0;
-            }
+                    &child_ids, &jcoords, &child_flags, &m, NULL);
+            free(jcoords);
+            if (leaf_rc < 0) { rc = leaf_rc; goto fail_emit; }
         } else {
             size_t g_start = 0, g_end = 0;
             if (laplace_grapheme_floor_span_to_graphemes(
@@ -1187,7 +1203,6 @@ fail_emit:
     if (children_of) { for (size_t i = 0; i < n; ++i) free(children_of[i]); free(children_of); }
     free(child_counts);
     free(emitted_entity);
-fail_st:
     free(st.comp_id);
     free(st.comp_coord);
     free(st.comp_tier);

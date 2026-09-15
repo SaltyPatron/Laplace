@@ -21,6 +21,99 @@
 
 namespace {
 
+TEST(GrammarCompose, JsonStringDecodePreservesUnicodeScalarsAndEscapedControls) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"", ""},
+        {"ordinary text", "ordinary text"},
+        {"\xCE\xBB\xE6\xA3\x8B", "\xCE\xBB\xE6\xA3\x8B"},
+        {"cafe\xCC\x81", "cafe\xCC\x81"},
+        {R"(\"\\\/\b\f\n\r\t)", "\"\\/\b\f\n\r\t"},
+        {R"(\u0000\u001f\u0022\u005c)", std::string("\0\x1f\"\\", 4)},
+        {R"(\u03bb\u68CB)", "\xCE\xBB\xE6\xA3\x8B"},
+        {R"(\uD7FF\uE000\uFFFF)", "\xED\x9F\xBF\xEE\x80\x80\xEF\xBF\xBF"},
+        {R"(\uD800\uDC00)", "\xF0\x90\x80\x80"},
+        {R"(\uDBFF\uDFFF)", "\xF4\x8F\xBF\xBF"},
+        {R"(before\ud83D\uDe00after)", "before\xF0\x9F\x98\x80" "after"},
+        {R"(\ud83d\udc69\u200d\ud83d\udcbb)",
+            "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB"},
+        {"\xF0\x9F\x98\x80", "\xF0\x9F\x98\x80"},
+    };
+    for (const auto& [input, expected] : cases) {
+        SCOPED_TRACE(input);
+        std::vector<uint8_t> output(expected.size() + 1, 0xA5);
+        size_t written = SIZE_MAX;
+        ASSERT_EQ(laplace_json_string_decode(
+            reinterpret_cast<const uint8_t*>(input.data()), input.size(),
+            output.data(), expected.size(), &written), 0);
+        ASSERT_EQ(written, expected.size());
+        EXPECT_EQ(std::string(reinterpret_cast<const char*>(output.data()), written), expected);
+        EXPECT_EQ(output.back(), 0xA5) << "Decoder must not append a terminator";
+
+        std::string in_place = input;
+        ASSERT_EQ(laplace_json_string_decode(
+            reinterpret_cast<const uint8_t*>(in_place.data()), in_place.size(),
+            reinterpret_cast<uint8_t*>(in_place.data()), in_place.size(), &written), 0);
+        EXPECT_EQ(in_place.substr(0, written), expected);
+    }
+}
+
+TEST(GrammarCompose, JsonStringDecodeRejectsMalformedEscapesAndLiteralUtf8) {
+    const std::vector<std::string> cases = {
+        "\\", R"(\q)", R"(\x41)", R"(\U0001F600)",
+        R"(\u)", R"(\u0)", R"(\u00)", R"(\u000)", R"(\u00G0)",
+        R"(\uD800)", R"(\uDBFF)", R"(\uDC00)", R"(\uDFFF)",
+        R"(\uD800x)", R"(\uD800\n)", R"(\uD800\u0000)",
+        R"(\uD800\uD800)", R"(\uD800\uDC0)", R"(\uD800\uDC0Z)",
+        R"(\uDC00\uD800)", R"(\uD800 \uDC00)", R"(valid prefix\q)",
+        "raw\"quote", "raw\nnewline", std::string("raw\0nul", 7),
+        "\x80", "\xC0\x80", "\xC2", "\xC2x", "\xE0\x80\x80",
+        "\xED\xA0\x80", "\xED\xBF\xBF", "\xF0\x80\x80\x80",
+        "\xF4\x90\x80\x80", "\xF5\x80\x80\x80", "\xF0\x9F\x98", "\xFF",
+    };
+    for (const auto& input : cases) {
+        SCOPED_TRACE(input);
+        std::vector<uint8_t> output(input.size() + 1, 0xA5);
+        size_t written = SIZE_MAX;
+        EXPECT_EQ(laplace_json_string_decode(
+            reinterpret_cast<const uint8_t*>(input.data()), input.size(),
+            output.data(), input.size(), &written), -1);
+        EXPECT_EQ(written, 0u);
+        EXPECT_EQ(output.back(), 0xA5);
+        written = SIZE_MAX;
+        EXPECT_EQ(laplace_json_string_decode(
+            reinterpret_cast<const uint8_t*>(input.data()), input.size(),
+            nullptr, 0, &written), -1) << "Malformed input must not become a size result";
+        EXPECT_EQ(written, 0u);
+    }
+}
+
+TEST(GrammarCompose, JsonStringDecodeReportsCapacityAndValidatesArguments) {
+    const std::string input = R"(x\uD83D\uDE00y)";
+    const std::string expected = "x\xF0\x9F\x98\x80y";
+    for (size_t capacity = 0; capacity < expected.size(); ++capacity) {
+        std::vector<uint8_t> output(capacity + 1, 0xA5);
+        size_t written = SIZE_MAX;
+        EXPECT_EQ(laplace_json_string_decode(
+            reinterpret_cast<const uint8_t*>(input.data()), input.size(),
+            output.data(), capacity, &written), -2);
+        EXPECT_EQ(written, expected.size());
+        EXPECT_EQ(output.back(), 0xA5) << "Insufficient capacity must not overwrite the guard";
+    }
+    size_t written = SIZE_MAX;
+    EXPECT_EQ(laplace_json_string_decode(nullptr, 0, nullptr, 0, &written), 0);
+    EXPECT_EQ(written, 0u);
+    EXPECT_EQ(laplace_json_string_decode(
+        reinterpret_cast<const uint8_t*>(input.data()), input.size(), nullptr, 0, &written), -2);
+    EXPECT_EQ(written, expected.size());
+    uint8_t output = 0xA5;
+    EXPECT_EQ(laplace_json_string_decode(nullptr, 1, &output, 1, &written), -1);
+    EXPECT_EQ(written, 0u);
+    EXPECT_EQ(laplace_json_string_decode(nullptr, 0, nullptr, 1, &written), -1);
+    EXPECT_EQ(written, 0u);
+    EXPECT_EQ(laplace_json_string_decode(nullptr, 0, &output, 1, nullptr), -1);
+    EXPECT_EQ(output, 0xA5);
+}
+
 TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("tsv");
     ASSERT_NE(recipe, nullptr);

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,6 +141,69 @@ class ActionsAuthorityTests(unittest.TestCase):
         for forbidden in ("pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh deploy", "sudo "):
             self.assertNotIn(forbidden, command)
         self.assertEqual("true", workflow["concurrency"]["cancel-in-progress"])
+
+    def test_private_database_proof_requires_each_source_and_session_case(self):
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
+        prefix = "Laplace.SubstrateCRUD.Tests."
+        methods = [
+            prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold",
+            prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops",
+            prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent",
+            prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
+        ]
+        expected_filter = "|".join("FullyQualifiedName=" + method for method in methods)
+        self.assertIn("--filter '" + expected_filter + "'", source)
+        self.assertIn('managed_results="$exemplar_results"', source)
+        self.assertIn('"$managed_results/operational-source-execution.trx"',
+                      source.split('rm -f ', 1)[1].split('PATH="$PG_PREFIX/bin:', 1)[0])
+        validator = source.split('python3 - "$managed_results/operational-source-execution.trx" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
+        names = [methods[0], methods[1], methods[2] + "(batchPrefix: False)",
+                 methods[2] + "(batchPrefix: True)", methods[3]]
+
+        def receipt():
+            root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
+            results = ET.SubElement(root, "Results")
+            for name in names:
+                ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
+            summary = ET.SubElement(root, "ResultSummary")
+            ET.SubElement(summary, "Counters", total="5", executed="5", passed="5",
+                          failed="0", notExecuted="0")
+            return root
+
+        def check(root, passes):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "acceptance.trx"
+                ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+                result = subprocess.run([sys.executable, "-", str(path)], input=validator,
+                                        text=True, capture_output=True)
+            self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+
+        check(receipt(), True)
+        lower = receipt()
+        for result in lower.find("Results"):
+            result.set("testName", result.get("testName").replace("False", "false").replace("True", "true"))
+        check(lower, True)
+        for missing_name in names:
+            with self.subTest(missing_name=missing_name):
+                root = receipt()
+                results = root.find("Results")
+                results.remove(next(result for result in results if result.get("testName") == missing_name))
+                check(root, False)
+        for corruption in ("missing", "repeated-theory", "wrong-test", "skipped", "failed", "counter-only"):
+            with self.subTest(corruption=corruption):
+                root = receipt()
+                results = root.find("Results")
+                if corruption == "missing":
+                    results.remove(results[4])
+                elif corruption == "repeated-theory":
+                    results[3].set("testName", names[2])
+                elif corruption == "wrong-test":
+                    results[4].set("testName", prefix + "UnrelatedPassingTest")
+                elif corruption in ("skipped", "failed"):
+                    results[2].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
+                else:
+                    root.find("ResultSummary/Counters").set("executed", "4")
+                check(root, False)
 
     def test_manual_db_mutation_shares_product_lifecycle_lock(self):
         db = load(WORKFLOWS / "db-ops.yml")

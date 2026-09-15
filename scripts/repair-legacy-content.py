@@ -776,9 +776,13 @@ ANALYZE repair_candidates;
 -- The same routine rechecks captured bytes/testimony before/after mutation and
 -- when reconciling a retained prior action. It elects no display-name winner.
 CREATE TEMP TABLE repair_player_alias_evidence ON COMMIT DROP AS
-SELECT proof.* FROM pg_temp.repair_player_alias_proofs(COALESCE((
-  SELECT jsonb_agg(jsonb_build_object('original',pg_temp.repair_snapshot(source),
-                                    'existing_target',pg_temp.repair_snapshot(target)))
+WITH point_pairs AS MATERIALIZED (
+  -- Only native packed POINT carriers can satisfy this exact alias contract.
+  -- Materialize this set before the proof deserializes retained EWKB: native
+  -- one-vertex LineStrings can be stored but PostGIS rejects their EWKB input.
+  -- Other shapes remain fully captured by the ordinary unresolved repair plan.
+  SELECT jsonb_build_object('original',pg_temp.repair_snapshot(source),
+                           'existing_target',pg_temp.repair_snapshot(target)) AS pair
   FROM repair_candidates c
   JOIN laplace.physicalities source ON source.id=c.id
   JOIN laplace.physicalities target
@@ -786,9 +790,14 @@ SELECT proof.* FROM pg_temp.repair_player_alias_proofs(COALESCE((
   WHERE c.repair_kind='player-projection' AND c.projection_rows=1
     AND jsonb_array_length(c.occupied_projection_evidence)=1
     AND target.entity_id=c.entity_id AND target.type=3
+    AND ST_GeometryType(source.trajectory)='ST_Point'
+    AND ST_GeometryType(target.trajectory)='ST_Point'
     AND (pg_temp.repair_snapshot(target)-ARRAY['observed_at','observed_at_binary']) IS DISTINCT FROM
       ((pg_temp.repair_snapshot(source)||jsonb_build_object('id',encode(target.id,'hex'),'type',3))
-        -ARRAY['observed_at','observed_at_binary'])),'[]'::jsonb)) proof;
+        -ARRAY['observed_at','observed_at_binary'])
+)
+SELECT proof.* FROM pg_temp.repair_player_alias_proofs(COALESCE((
+  SELECT jsonb_agg(pair) FROM point_pairs),'[]'::jsonb)) proof;
 CREATE UNIQUE INDEX repair_player_alias_old_identity ON repair_player_alias_evidence(old_id);
 ANALYZE repair_player_alias_evidence;
 

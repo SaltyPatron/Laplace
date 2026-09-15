@@ -372,6 +372,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_grammar_modality_by_ext", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr GrammarModalityByExt(string ext);
 
+    [LibraryImport(Library, EntryPoint = "laplace_json_string_decode")]
+    internal static partial int JsonStringDecode(byte* input, nuint length,
+        byte* output, nuint capacity, nuint* written);
+
     [LibraryImport(Library, EntryPoint = "laplace_grammar_parse")]
     internal static partial int GrammarParse(byte* utf8, nuint len, IntPtr recipe, IntPtr* outAst);
 

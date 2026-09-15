@@ -5,6 +5,26 @@ namespace Laplace.Engine.Core;
 
 public static unsafe class GrammarDecomposer
 {
+    /// <summary>Decode the inner bytes of one JSON string through the same native
+    /// scalar/escape decoder used by grammar composition; delimiters are excluded.</summary>
+    public static byte[] DecodeJsonStringUtf8(ReadOnlySpan<byte> inner)
+    {
+        if (inner.IsEmpty) return [];
+        byte[] decoded = new byte[inner.Length];
+        nuint written;
+        fixed (byte* input = inner)
+        fixed (byte* output = decoded)
+        {
+            int rc = NativeInterop.JsonStringDecode(input, (nuint)inner.Length,
+                output, (nuint)decoded.Length, &written);
+            if (rc == -1)
+                throw new InvalidDataException("JSON string contains malformed UTF-8 or an invalid escape sequence.");
+            if (rc != 0 || written > (nuint)decoded.Length)
+                throw new InvalidOperationException($"Native JSON string decoding failed with status {rc}.");
+        }
+        return written == (nuint)decoded.Length ? decoded : decoded.AsSpan(0, checked((int)written)).ToArray();
+    }
+
     public static IntPtr LookupById(string modalityId) =>
         NativeInterop.GrammarLookupById(modalityId);
 

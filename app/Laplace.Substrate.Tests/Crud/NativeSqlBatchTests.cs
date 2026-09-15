@@ -132,39 +132,68 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
         // Seed one legacy row directly in this disposable database fixture.
         var session = Hash128.OfCanonical($"legacy-session/{Guid.NewGuid():N}");
         var contentId = PhysicalityId.Compute(session, PhysicalityType.Content);
-        await using var seed = pg.DataSource.CreateCommand(
-            """
-            INSERT INTO laplace.entities(id,tier,type_id)
-            VALUES($2,4,laplace.entity_type_id('Conversation_Session'));
-            INSERT INTO laplace.physicalities
-                (id,entity_id,type,coord,hilbert_index,n_constituents)
-            VALUES($1,$2,1,public.ST_MakePoint(0,0,0,0),decode(repeat('00',16),'hex'),0)
-            """);
-        seed.Parameters.AddWithValue(NpgsqlDbType.Bytea, contentId.ToBytes());
-        seed.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
-        await seed.ExecuteNonQueryAsync();
-        await using var read = pg.DataSource.CreateCommand(
-            "SELECT * FROM converse.session_turn_ids($1,NULL)");
-        read.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
-        var error = await Assert.ThrowsAsync<PostgresException>(async () =>
-            { await using var rows = await read.ExecuteReaderAsync(); });
-        Assert.Equal("22000", error.SqlState);
-        Assert.Contains("legacy Content manifest requires typed recovery", error.MessageText);
-        await using var append = pg.DataSource.CreateCommand(
-            "SELECT converse.session_append_turns($1,ARRAY[$1],now())");
-        append.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
-        var appendError = await Assert.ThrowsAsync<PostgresException>(async () =>
-            { await append.ExecuteScalarAsync(); });
-        Assert.Equal("22000", appendError.SqlState);
-        Assert.Contains("legacy Content manifest requires typed recovery", appendError.MessageText);
-        await using var retained = pg.DataSource.CreateCommand(
-            "SELECT id,type FROM laplace.physicalities WHERE entity_id=$1");
-        retained.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
-        await using var receipt = await retained.ExecuteReaderAsync();
-        Assert.True(await receipt.ReadAsync());
-        Assert.Equal(contentId.ToBytes(), receipt.GetFieldValue<byte[]>(0));
-        Assert.Equal((short)PhysicalityType.Content, receipt.GetInt16(1));
-        Assert.False(await receipt.ReadAsync());
+        try
+        {
+            await using (var connection = await pg.DataSource.OpenConnectionAsync())
+            {
+                await using var seed = new NpgsqlBatch(connection);
+                var entity = new NpgsqlBatchCommand(
+                    "INSERT INTO laplace.entities(id,tier,type_id) "
+                    + "VALUES($1,4,laplace.entity_type_id('Conversation_Session'))");
+                entity.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+                seed.BatchCommands.Add(entity);
+                var content = new NpgsqlBatchCommand(
+                    """
+                    INSERT INTO laplace.physicalities
+                        (id,entity_id,type,coord,hilbert_index,n_constituents)
+                    VALUES($1,$2,1,public.ST_MakePoint(0,0,0,0),decode(repeat('00',16),'hex'),0)
+                    """);
+                content.Parameters.AddWithValue(NpgsqlDbType.Bytea, contentId.ToBytes());
+                content.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+                seed.BatchCommands.Add(content);
+                Assert.Equal(2, await seed.ExecuteNonQueryAsync());
+            }
+            await using var read = pg.DataSource.CreateCommand(
+                "SELECT * FROM converse.session_turn_ids($1,NULL)");
+            read.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+            var error = await Assert.ThrowsAsync<PostgresException>(async () =>
+                { await using var rows = await read.ExecuteReaderAsync(); });
+            Assert.Equal("22000", error.SqlState);
+            Assert.Contains("legacy Content manifest requires typed recovery", error.MessageText);
+            await using var append = pg.DataSource.CreateCommand(
+                "SELECT converse.session_append_turns($1,ARRAY[$1],now())");
+            append.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+            var appendError = await Assert.ThrowsAsync<PostgresException>(async () =>
+                { await append.ExecuteScalarAsync(); });
+            Assert.Equal("22000", appendError.SqlState);
+            Assert.Contains("legacy Content manifest requires typed recovery", appendError.MessageText);
+            await using var retained = pg.DataSource.CreateCommand(
+                "SELECT id,type FROM laplace.physicalities WHERE entity_id=$1");
+            retained.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+            await using var receipt = await retained.ExecuteReaderAsync();
+            Assert.True(await receipt.ReadAsync());
+            Assert.Equal(contentId.ToBytes(), receipt.GetFieldValue<byte[]>(0));
+            Assert.Equal((short)PhysicalityType.Content, receipt.GetInt16(1));
+            Assert.False(await receipt.ReadAsync());
+        }
+        finally
+        {
+            // This collection shares a database: retain the defect for the
+            // assertions above, then remove only this fixture's unique session.
+            await using var connection = await pg.DataSource.OpenConnectionAsync();
+            await using var cleanup = new NpgsqlBatch(connection);
+            foreach (string sql in new[]
+            {
+                "DELETE FROM laplace.physicalities WHERE entity_id=$1",
+                "DELETE FROM laplace.entities WHERE id=$1",
+            })
+            {
+                var command = new NpgsqlBatchCommand(sql);
+                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+                cleanup.BatchCommands.Add(command);
+            }
+            await cleanup.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]

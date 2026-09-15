@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Code;
 
@@ -76,29 +77,38 @@ public sealed class VerifiedGitRepository
         if (privateReceipt != Path.GetFullPath(selection.BuildReceiptPath))
             throw new InvalidDataException("Build receipt must be the retained receipt in this checkout's Git metadata.");
         byte[] buildBytes = File.ReadAllBytes(privateReceipt);
-        using var build = JsonDocument.Parse(buildBytes);
-        var recipe = build.RootElement.GetProperty("recipe");
-        if (recipe.GetProperty("commit").GetString() != selection.Commit)
+        try { _ = new UTF8Encoding(false, true).GetCharCount(buildBytes); }
+        catch (DecoderFallbackException error)
+        {
+            throw new InvalidDataException("Retained engine build receipt is not valid UTF-8.", error);
+        }
+        using var buildAst = GrammarDecomposer.Parse(buildBytes, "json");
+        RequireReceiptDocument(buildAst);
+        using var build = JsonAstDocument.FromBorrowedAst(buildAst, buildBytes);
+        var recipe = RequiredProperty(build.Root, "recipe");
+        if (!recipe.IsObject)
+            throw new InvalidDataException("Retained engine build recipe must be a JSON object.");
+        if (RequiredString(recipe, "commit") != selection.Commit)
             throw new InvalidDataException("Retained engine build belongs to another Git commit.");
-        if (!recipe.TryGetProperty("source_integrity", out var sourceIntegrity)
-            || sourceIntegrity.ValueKind != JsonValueKind.String
-            || sourceIntegrity.GetString() != "git-committed-bytes-and-modes-v1"
-            || !recipe.TryGetProperty("dependency_include", out var dependencyInclude)
-            || dependencyInclude.ValueKind != JsonValueKind.String
-            || dependencyInclude.GetString() != "regenerated-by-upstream-make-with-prior-file-preserved")
+        var sourceIntegrity = LastProperty(recipe, "source_integrity");
+        var dependencyInclude = LastProperty(recipe, "dependency_include");
+        if (sourceIntegrity.Kind != JsonAstKind.String
+            || sourceIntegrity.AsString() != "git-committed-bytes-and-modes-v1"
+            || dependencyInclude.Kind != JsonAstKind.String
+            || dependencyInclude.AsString() != "regenerated-by-upstream-make-with-prior-file-preserved")
             throw new InvalidDataException("Retained Stockfish build lacks the required source-byte/mode and dependency-include verification. "
                 + "Rebuild this checkout with scripts/install-stockfish.py --source-dir <checkout> --rebuild before corpus admission.");
         if (Path.GetFullPath(selection.BinaryPath) != Path.Combine(root, "src", OperatingSystem.IsWindows() ? "stockfish.exe" : "stockfish"))
             throw new InvalidDataException("Selected engine must be the direct executable of this source checkout.");
         string binaryHash = HashFile(selection.BinaryPath);
-        if (binaryHash != build.RootElement.GetProperty("binary_sha256").GetString())
+        if (binaryHash != RequiredString(build.Root, "binary_sha256"))
             throw new InvalidDataException("Actual engine bytes do not match the retained build receipt.");
         // Only declared, public recipe fields cross into substrate provenance.
         var publicRecipe = JsonSerializer.SerializeToElement(new {
-            commit = recipe.GetProperty("commit").GetString(), arch = recipe.GetProperty("arch").GetString(),
-            cpu = recipe.GetProperty("cpu").GetString(), compiler = recipe.GetProperty("compiler").GetString(),
-            compiler_version = recipe.GetProperty("compiler_version").GetString(),
-            source_integrity = sourceIntegrity.GetString(), dependency_include = dependencyInclude.GetString() });
+            commit = RequiredString(recipe, "commit"), arch = RequiredString(recipe, "arch"),
+            cpu = RequiredString(recipe, "cpu"), compiler = RequiredString(recipe, "compiler"),
+            compiler_version = RequiredString(recipe, "compiler_version"),
+            source_integrity = sourceIntegrity.AsString(), dependency_include = dependencyInclude.AsString() });
         var entries = new List<Entry>();
         foreach (string line in new UTF8Encoding(false, true).GetString(Git(root, "ls-tree", "-rz", "--full-tree", "HEAD")).Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -145,6 +155,63 @@ public sealed class VerifiedGitRepository
             entries.OrderBy(e => e.Path, StringComparer.Ordinal).ToList());
         result.VerifyUnchanged();
         return result;
+    }
+
+    private static void RequireReceiptDocument(GrammarAst ast)
+    {
+        if (!ast.Diagnostics.SyntaxComplete)
+            throw new InvalidDataException("Retained engine build receipt contains invalid JSON syntax.");
+        int document = -1;
+        for (int i = 0; i < ast.NodeCount; i++)
+        {
+            var node = ast.GetNode(i);
+            // The registered grammar can retain comments and multiple values;
+            // this receipt contract requires one standard JSON object.
+            if (ast.NodeTypeIs(node.NodeTypeId, "comment"u8))
+                throw new InvalidDataException("Retained engine build receipt must not contain JSON comments.");
+            if (node.Parent != GrammarAst.Root) continue;
+            if (document >= 0 || !ast.NodeTypeIs(node.NodeTypeId, "document"u8))
+                throw new InvalidDataException("Retained engine build receipt requires one JSON document.");
+            document = i;
+        }
+        int values = 0;
+        for (int i = 0; i < ast.NodeCount; i++)
+            if (document >= 0 && ast.GetNode(i).Parent == (uint)document)
+            {
+                values++;
+                if (!ast.NodeTypeIs(ast.GetNode(i).NodeTypeId, "object"u8))
+                    throw new InvalidDataException("Retained engine build receipt requires a JSON object.");
+            }
+        if (values != 1)
+            throw new InvalidDataException("Retained engine build receipt requires exactly one JSON object.");
+    }
+
+    private static JsonAstCursor LastProperty(JsonAstCursor value, string name)
+    {
+        // Preserve the receipt's existing last-occurrence property policy,
+        // including escaped keys; the native JSON cursor decodes those keys.
+        JsonAstCursor result = default;
+        foreach (var (key, field) in value.Pairs())
+            if (key == name) result = field;
+        return result;
+    }
+
+    private static JsonAstCursor RequiredProperty(JsonAstCursor value, string name)
+    {
+        var field = LastProperty(value, name);
+        return field.IsValid ? field
+            : throw new InvalidDataException($"Retained engine build receipt is missing '{name}'.");
+    }
+
+    private static string? RequiredString(JsonAstCursor value, string name)
+    {
+        var field = RequiredProperty(value, name);
+        // Descriptive public recipe fields historically permit explicit null;
+        // required commit/hash/integrity values still must match their identities.
+        if (field.Kind == JsonAstKind.Null) return null;
+        if (field.Kind != JsonAstKind.String)
+            throw new InvalidDataException($"Retained engine build field '{name}' must be a string or null.");
+        return field.AsString();
     }
 
     public byte[] ReadVerified(Entry entry)

@@ -162,16 +162,16 @@ if (( ctest_rc != 0 )); then
   exit "$ctest_rc"
 fi
 
-# Exercise actual source admission, witness folding and ordinary native execution
+# Exercise source admission, native execution and stable session Projection writes
 # while the private branch postmaster is still alive. This DB-tier acceptance is
 # excluded from the later managed DEV profile, so its exact selection must run
 # here. A fresh TRX receipt prevents a missing or skipped test from passing.
 bash scripts/sync-managed-native-artifacts.sh
-managed_results="$stage/managed-results"
-mkdir -p "$managed_results"
 exemplar_results="$BUILD/test-results/operational-exemplar"
+managed_results="$exemplar_results"
 mkdir -p "$exemplar_results"
-rm -f "$exemplar_results/exemplar.json" "$exemplar_results/execution.json" "$exemplar_results/bundle.json"
+rm -f "$exemplar_results/exemplar.json" "$exemplar_results/execution.json" "$exemplar_results/bundle.json" \
+  "$managed_results/operational-source-execution.trx"
 PATH="$PG_PREFIX/bin:$PATH" \
 LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=laplace_substratecrud_test" \
 LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
@@ -179,19 +179,38 @@ LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT="$exemplar_results/exemplar.json" \
 LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
   dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj \
     -c Release --no-build --nologo --verbosity minimal \
-    --filter 'FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops' \
+    --filter 'FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery' \
     --logger 'trx;LogFileName=operational-source-execution.trx' \
     --results-directory "$managed_results"
 python3 - "$managed_results/operational-source-execution.trx" <<'PY'
+from collections import Counter
+import re
 import sys
 import xml.etree.ElementTree as ET
 
 root = ET.parse(sys.argv[1]).getroot()
 counters = root.find("{*}ResultSummary/{*}Counters")
-expected = {"total": "2", "executed": "2", "passed": "2", "failed": "0", "notExecuted": "0"}
+expected = {"total": "5", "executed": "5", "passed": "5", "failed": "0", "notExecuted": "0"}
 if counters is None or any(counters.get(key) != value for key, value in expected.items()):
-    raise SystemExit("operational source proof did not execute and pass its required acceptance tests")
+    raise SystemExit("private database proof did not execute and pass all five required acceptance cases")
+prefix = "Laplace.SubstrateCRUD.Tests."
+expected_names = Counter([
+    prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold",
+    prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops",
+    prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent(batchPrefix: false)",
+    prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent(batchPrefix: true)",
+    prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
+])
+results = root.findall("{*}Results/{*}UnitTestResult")
+# xUnit adapters render Boolean argument values with either .NET or C# casing.
+# Only that spelling may vary; both distinct theory rows must execute once.
+names = Counter(re.sub(r"(?<=batchPrefix: )(True|False)(?=\))",
+                       lambda match: match.group(0).lower(), result.get("testName", ""))
+                for result in results)
+if names != expected_names or any(result.get("outcome") != "Passed" for result in results):
+    raise SystemExit("private database proof is missing an exact passing source/session acceptance case")
 print("OPERATIONAL_SOURCE_EXECUTION_OK selected=2 executed=2 passed=2 skipped=0 postgres=isolated")
+print("SESSION_PROJECTION_EXECUTION_OK selected=3 executed=3 passed=3 skipped=0 postgres=isolated")
 PY
 
 # Exercise actual registry unavailability and WAL recovery in this private

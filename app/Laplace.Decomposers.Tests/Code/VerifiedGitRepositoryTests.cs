@@ -75,6 +75,70 @@ public sealed class VerifiedGitRepositoryTests : IDisposable
         Assert.Equal(previousBinary, File.ReadAllBytes(selection.BinaryPath));
     }
 
+    [Theory]
+    [InlineData("missing-delimiter")]
+    [InlineData("trailing-comma")]
+    [InlineData("comment")]
+    [InlineData("second-root")]
+    [InlineData("array-root")]
+    [InlineData("invalid-utf8")]
+    public void NativeReceiptReaderRejectsMalformedOrNonObjectDocuments(string mutation)
+    {
+        string valid = File.ReadAllText(selection.BuildReceiptPath);
+        byte[] malformed = Encoding.UTF8.GetBytes(mutation switch {
+            "missing-delimiter" => valid[..^1],
+            "trailing-comma" => valid[..^1] + ",}",
+            "comment" => "/* receipt */" + valid,
+            "second-root" => valid + "{}",
+            "array-root" => "[" + valid + "]",
+            _ => valid });
+        if (mutation == "invalid-utf8")
+            malformed[Array.IndexOf(malformed, (byte)'f')] = 0xff;
+        File.WriteAllBytes(selection.BuildReceiptPath, malformed);
+        Assert.Throws<InvalidDataException>(() => Capture());
+        Assert.Equal(malformed, File.ReadAllBytes(selection.BuildReceiptPath));
+    }
+
+    [Theory]
+    [InlineData("recipe", "missing")]
+    [InlineData("recipe", "array")]
+    [InlineData("binary_sha256", "number")]
+    [InlineData("arch", "missing")]
+    [InlineData("compiler", "number")]
+    public void NativeReceiptReaderPreservesRequiredFieldAndTypeChecks(string field, string mutation)
+    {
+        var document = JsonNode.Parse(File.ReadAllText(selection.BuildReceiptPath))!.AsObject();
+        var owner = field is "recipe" or "binary_sha256" ? document : document["recipe"]!.AsObject();
+        if (mutation == "missing") owner.Remove(field);
+        else if (mutation == "array") owner[field] = new JsonArray();
+        else owner[field] = 17;
+        File.WriteAllText(selection.BuildReceiptPath, document.ToJsonString());
+        Assert.Throws<InvalidDataException>(() => Capture());
+    }
+
+    [Fact]
+    public void NativeReceiptReaderRetainsDecodedLastPropertyAndNullableDescriptionSemantics()
+    {
+        var document = JsonNode.Parse(File.ReadAllText(selection.BuildReceiptPath))!.AsObject();
+        document["recipe"]!["cpu"] = null;
+        document["recipe"]!["compiler_version"] = "compilér Δ 🚀";
+        string receipt = document.ToJsonString();
+        // The original reader selected the final decoded property name. An
+        // earlier decoy must not replace a later exact identity or leak publicly.
+        receipt = "{\"recipe\":{},\"binary_sha256\":\"earlier-invalid-hash\"," + receipt[1..];
+        int finalKey = receipt.LastIndexOf("\"binary_sha256\"", StringComparison.Ordinal);
+        receipt = receipt[..finalKey] + "\"\\u0062inary_sha256\"" + receipt[(finalKey + "\"binary_sha256\"".Length)..];
+        File.WriteAllText(selection.BuildReceiptPath, receipt);
+        var snapshot = Capture();
+        using var provenance = JsonDocument.Parse(snapshot.ProvenanceUtf8);
+        var recipe = provenance.RootElement.GetProperty("build").GetProperty("recipe");
+        Assert.Equal(JsonValueKind.Null, recipe.GetProperty("cpu").ValueKind);
+        Assert.Equal("compilér Δ 🚀", recipe.GetProperty("compiler_version").GetString());
+        Assert.DoesNotContain("earlier-invalid-hash", Encoding.UTF8.GetString(snapshot.ProvenanceUtf8));
+        File.WriteAllText(selection.BuildReceiptPath, receipt[..^1] + ",\"binary_sha256\":\"last-invalid-hash\"}");
+        Assert.Throws<InvalidDataException>(() => Capture());
+    }
+
     [Fact]
     public void LocalEditCannotMasqueradeAsCommittedSource()
     {
