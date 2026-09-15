@@ -25,7 +25,8 @@ public class WorkingSetApplyTests
         new(H(seed), 2, H("type/word"), null);
 
     private static PhysicalityRow Phys(string seed) => new(
-        Id: H($"phys/{seed}"), EntityId: H(seed), SourceId: H("source"),
+        Id: PhysicalityId.Compute(H(seed), PhysicalityType.Content),
+        EntityId: H(seed), SourceId: H("source"),
         Type: PhysicalityType.Content, CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
         HilbertIndex: default, TrajectoryXyzm: null, NConstituents: 0,
         AlignmentResidual: null, SourceDim: null,
