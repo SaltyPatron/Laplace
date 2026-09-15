@@ -22,6 +22,7 @@ public sealed class OperationalDecomposer
     private static string? ModalityFor(string file) => Path.GetExtension(file).ToLowerInvariant() switch
     {
         ".md" or ".txt" => "markdown",
+        ".json" => "json",
         _ => null,
     };
 
@@ -30,7 +31,7 @@ public sealed class OperationalDecomposer
         if (File.Exists(root))
         {
             if (ModalityFor(root) is null)
-                throw new InvalidDataException("Operational source artifacts must be original .md or .txt contracts.");
+                throw new InvalidDataException("Operational artifacts must be .md/.txt contracts or declared .json task shapes.");
             return [Path.GetFullPath(root)];
         }
         if (!Directory.Exists(root))
@@ -67,7 +68,8 @@ public sealed class OperationalDecomposer
         if (bytes.Length == 0)
             throw new InvalidDataException($"Operational source contract is empty: {filePath}");
         return new GrammarComposeRecord(bytes, modality,
-            FileMetadata: GrammarSourceFileSupport.MetadataFromPath(filePath, relativePath, modality));
+            FileMetadata: GrammarSourceFileSupport.MetadataFromPath(filePath, relativePath, modality),
+            StructureWitness: modality == "json" ? OperationalTaskShapeWitness.Instance : null);
     }
 
     public Task<IngestArtifactGraph?> DescribeArtifactsAsync(

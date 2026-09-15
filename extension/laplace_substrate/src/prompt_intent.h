@@ -9,6 +9,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
 #include "prompt_input.h"
+#include "prompt_structure.h"
 #include "observation_read.h"
 #include "consensus_scan.h"
 #include "laplace/core/attestation_engine.h"
@@ -38,6 +39,8 @@ typedef struct LaplacePromptOperand
 typedef struct LaplacePromptRelationRead
 {
     hash128_t result_relation, source, context, call_witness;
+    hash128_t shape_id, exemplar_parse, current_parse;
+    hash128_t applicability_witness, parse_witness, exemplar_parse_witness;
     LaplacePromptOperand *inputs;
     int input_count;
     Bitmapset *operand_origins;
@@ -46,6 +49,8 @@ typedef struct LaplacePromptRelationRead
 typedef struct LaplacePromptIntent
 {
     MemoryContext owner;
+    const LaplacePromptInput *input;
+    ArrayType *hard_relation_types;
     HTAB *bindings;
     hash128_t root;
     hash128_t active_context;
@@ -55,6 +60,7 @@ typedef struct LaplacePromptIntent
     bool ambiguous;
     bool explicit_invocation;
     bool budget_exhausted;
+    LaplacePromptStructure *structure;
 } LaplacePromptIntent;
 
 static inline const Bitmapset *
@@ -156,7 +162,8 @@ laplace_prompt_binding_table(const char *name, MemoryContext owner)
 }
 
 static inline LaplacePromptIntent
-laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner)
+laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner,
+                            ArrayType *relation_types, int fanout)
 {
     LaplacePromptIntent result = {0};
     Datum *values, *nodes;
@@ -164,8 +171,11 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
     int count, node_count;
     MemoryContext previous = MemoryContextSwitchTo(owner);
     result.owner = owner;
+    result.input = input;
+    result.hard_relation_types = relation_types;
     result.root = input->root;
     result.bindings = laplace_prompt_binding_table("prompt witnessed bindings", owner);
+    result.structure = laplace_prompt_structure_couple(input, relation_types, fanout, owner);
     deconstruct_array(input->context, BYTEAOID, -1, false, TYPALIGN_INT,
                       &values, &nulls, &count);
     deconstruct_array(input->nodes, INT4OID, 4, true, TYPALIGN_INT,
@@ -336,12 +346,20 @@ laplace_prompt_intent_compile(LaplacePromptIntent *intent,
     read.cells = hash_create("prompt invocation cells", Max(Min(fanout, 128), 1), &ctl,
                              HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     for (size_t i = 0; i < laplace_relation_table_count; ++i)
-        if (laplace_prompt_contract_relation(&laplace_relation_table[i].type_id))
+    {
+        hash128_t relation_id;
+        /* The generated descriptor table stores metadata; canonical IDs live
+         * in the native law cache and must be obtained through its accessor. */
+        if (laplace_relation_type_id(laplace_relation_table[i].canonical,
+                                     &relation_id) != 0)
+            elog(ERROR, "prompt contract: governed relation identity is unavailable");
+        if (laplace_prompt_contract_relation(&relation_id))
         {
-            Datum id = hash128_to_datum(&laplace_relation_table[i].type_id);
+            Datum id = hash128_to_datum(&relation_id);
             type_ids = accumArrayResult(type_ids, id, false, BYTEAOID, intent->owner);
             pfree(DatumGetPointer(id));
         }
+    }
     types = type_ids ? DatumGetArrayTypeP(makeArrayResult(type_ids, intent->owner)) :
         construct_empty_array(BYTEAOID);
     root = hash128_to_datum(&intent->root);
@@ -459,6 +477,25 @@ laplace_prompt_intent_couple(LaplacePromptIntent *intent,
     HASH_SEQ_STATUS sequence;
     LaplacePromptIntentBinding *entry;
     ArrayBuildState *changed = NULL;
+    /* A witnessed complete parse binds the lemma at an exact token occurrence.
+     * Its head/features/roles remain in the separate structural alternative;
+     * neither lemma projection nor parse mood establishes a speech act. */
+    if (intent->structure && !intent->structure->budget_exhausted)
+        for (int p = 0; p < intent->structure->count; ++p)
+        {
+            const LaplacePromptParse *parse = intent->structure->parses[p];
+            if (!parse->supported) continue;
+            for (size_t t = 0; t < parse->decoded.token_count; ++t)
+            {
+                bool found;
+                const hash128_t *lemma = &parse->decoded.tokens[t].lemma_id;
+                int origin = parse->token_origins[t];
+                if (origin < 0) continue;
+                entry = hash_search(pending, lemma, HASH_ENTER, &found);
+                if (!found) entry->origins = NULL;
+                entry->origins = bms_add_member(entry->origins, origin);
+            }
+        }
     for (int i = 0; i < count; ++i)
     {
         const LaplaceQueryChannel *channel = &channels[i];

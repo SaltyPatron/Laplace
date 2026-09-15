@@ -42,3 +42,9 @@ CREATE INDEX IF NOT EXISTS physicalities_projection_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WITH (fastupdate = on, gin_pending_list_limit = 32768)
     WHERE type = 3 AND trajectory IS NOT NULL;
+
+-- Ordered source annotations participate in structural coupling through their
+-- own physicality domain. They must never enter text-continuation posting lists.
+CREATE INDEX IF NOT EXISTS physicalities_parse_constituents_gin
+    ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
+    WHERE type = 8 AND trajectory IS NOT NULL;

@@ -26,6 +26,7 @@
 #include "prompt_input.h"
 #include "prompt_intent.h"
 #include "query_evidence.h"
+#include "task_shape.h"
 #include "relation_symmetry.h"
 #include "spi_common.h"
 #include "trajectory_continuations.h"
@@ -972,7 +973,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         /* COUPLE is unmasked unless the caller supplied a hard relation scope.
          * Naming paths remain semantic candidates. Only an explicit applicable
          * whole-observation contract can bind an executable operation. */
-        coupled_intent = laplace_prompt_intent_begin(input, walk_context);
+        coupled_intent = laplace_prompt_intent_begin(input, walk_context, relation_types, fanout);
         for (;;)
         {
             int channel_count = 0;
@@ -1015,11 +1016,81 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         }
         if (invocation_context)
             laplace_prompt_intent_compile(&coupled_intent, invocation_context, fanout);
+        else if (!output_relations ||
+                 ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0)
+            laplace_task_shape_compile(&coupled_intent, fanout);
         /* An explicit output projection already declares its operation. Natural
          * language alternatives cannot override that caller-owned contract. */
         if (invocation_context || !output_relations ||
             ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0)
             intent = &coupled_intent;
+
+        /* ORIENT has now selected exact semantic inputs and a predicate. Route
+         * that entire input set once, including bindings discovered at the last
+         * permitted naming hop. Executing the declared read is not another
+         * interpretation hop. Its typed projection nominates results through
+         * the same executor even when unrelated metadata wins an unmasked
+         * proposal window at an input. */
+        if (intent && !intent->ambiguous && !intent->budget_exhausted &&
+            intent->relation_count > 0)
+        {
+            HTAB *selected_inputs = new_id_index("forward bound inputs", 32,
+                walk_context, sizeof(hash128_t));
+            HTAB *selected_predicates = new_id_index("forward bound predicates", 8,
+                walk_context, sizeof(hash128_t));
+            ArrayBuildState *input_ids = NULL, *predicate_ids = NULL, *route_ids = NULL;
+            for (int operation_index = 0; operation_index < intent->relation_count; ++operation_index)
+            {
+                const LaplacePromptRelationRead *operation = &intent->operations[operation_index];
+                bool found;
+                if (!relation_allowed_by_output_scope(&operation->result_relation, relation_types) ||
+                    !relation_allowed_by_output_scope(&operation->result_relation, output_relations))
+                    continue;
+                hash_search(selected_predicates, &operation->result_relation, HASH_ENTER, &found);
+                if (!found)
+                {
+                    Datum id = hash128_to_datum(&operation->result_relation);
+                    predicate_ids = accumArrayResult(predicate_ids, id, false, BYTEAOID, walk_context);
+                    pfree(DatumGetPointer(id));
+                }
+                for (int input_index = 0; input_index < operation->input_count; ++input_index)
+                {
+                    const LaplacePromptOperand *operand = &operation->inputs[input_index];
+                    bool routed;
+                    origin_add_occurrences(origins, &operand->id, operand->origins, walk_context);
+                    hash_search(route_seen, &operand->id, HASH_ENTER, &routed);
+                    if (!routed)
+                    {
+                        Datum id = hash128_to_datum(&operand->id);
+                        route_ids = accumArrayResult(route_ids, id, false, BYTEAOID, walk_context);
+                        pfree(DatumGetPointer(id));
+                    }
+                    hash_search(selected_inputs, &operand->id, HASH_ENTER, &found);
+                    if (!found)
+                    {
+                        Datum id = hash128_to_datum(&operand->id);
+                        input_ids = accumArrayResult(input_ids, id, false, BYTEAOID, walk_context);
+                        pfree(DatumGetPointer(id));
+                    }
+                }
+            }
+            if (input_ids && predicate_ids)
+            {
+                ArrayType *inputs = DatumGetArrayTypeP(makeArrayResult(input_ids, walk_context));
+                ArrayType *predicates = DatumGetArrayTypeP(makeArrayResult(predicate_ids, walk_context));
+                if (route_ids)
+                {
+                    ArrayType *routed = DatumGetArrayTypeP(makeArrayResult(route_ids, walk_context));
+                    laplace_query_state_extend_batch(query_state, routed, NULL);
+                    pfree(routed);
+                }
+                output_state = laplace_query_state_create(inputs, predicates, fanout, NULL);
+                pfree(inputs);
+                pfree(predicates);
+            }
+            hash_destroy(selected_inputs);
+            hash_destroy(selected_predicates);
+        }
 
         OriginEntry *root_origin = origin_get(origins, &input->root, true);
         for (int i = 0; i < context_length; ++i)
@@ -1037,7 +1108,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             laplace_cognition_program_finalize(cognition, LAPLACE_COGNITION_BUDGET_EXHAUSTED);
     }
 
-    if (!invocation_context && output_relations &&
+    if (!output_state && !invocation_context && output_relations &&
         ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) > 0)
     {
         ArrayType *output_operands;

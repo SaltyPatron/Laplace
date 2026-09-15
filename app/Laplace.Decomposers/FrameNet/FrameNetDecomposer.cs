@@ -82,7 +82,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         }
         else if (fileLabel.StartsWith("framenet/lu/", StringComparison.Ordinal))
         {
-            if (FrameNetLuIngest.ParseLu(filePath) is { } lu)
+            if (FrameNetLuIngest.ParseLu(filePath, fileLabel) is { } lu)
                 yield return new FnLu(lu);
         }
         else if (fileLabel.StartsWith("framenet/fulltext/", StringComparison.Ordinal))
@@ -126,40 +126,49 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         }
     }
 
-    private static void ComposeFulltextAnno(FulltextAnno ann, SubstrateChangeBuilder b)
+    internal static void ComposeFulltextAnno(FulltextAnno ann, SubstrateChangeBuilder b)
     {
         var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
         var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
         var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
         if (sentId is null || targetId is null || frameId is null) return;
 
-        // The annotation record is an ORDERED STRUCTURAL encoding over exact content
-        // roots plus source-coordinate metadata. It is not itself a text/content
-        // decomposition trajectory. The sentence and target strings above already
-        // enter through ContentEmitter and therefore recursively bottom out in the
-        // Unicode/codepoint Merkle DAG. Keeping schema/offset ids in type=Content
-        // polluted content-continuation indexes and made the recursive content proof
-        // demand content physicalities for source-reference coordinates.
-        var constituents = new Hash128[3 + ann.TargetSpans.Count * 2];
-        constituents[0] = AnnotationSchemaId;
-        constituents[1] = sentId.Value;
-        int cursor = 2;
-        foreach (var span in ann.TargetSpans)
+        // Typed source annotation, not a text continuation: labels retain their
+        // layer, source rank, offsets, null instantiation and frame-scoped role.
+        // Equal labels on different spans or under different frames stay distinct.
+        var constituents = new List<Hash128>
         {
-            Hash128 startId = OffsetId(span.Start);
-            Hash128 endId = OffsetId(span.End);
-            b.AddEntity(startId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
-            b.AddEntity(endId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
-            constituents[cursor++] = startId;
-            constituents[cursor++] = endId;
+            AnnotationSchemaId, sentId.Value, frameId.Value, targetId.Value,
+            ContentOrNone(ann.Status),
+        };
+        foreach (var layer in ann.Layers)
+        {
+            constituents.Add(AnnotationLayerId);
+            constituents.Add(ContentOrNone(layer.Name));
+            constituents.Add(ContentOrNone(layer.Rank));
+            foreach (var label in layer.Labels)
+            {
+                constituents.Add(AnnotationLabelId);
+                constituents.Add(ContentOrNone(label.Name));
+                constituents.Add(OffsetOrNone(label.Start));
+                constituents.Add(OffsetOrNone(label.End));
+                constituents.Add(ContentOrNone(label.InstantiationType));
+                Hash128 roleId = AnnotationNoneId;
+                if (layer.Name == "FE" && label.Name.Length > 0)
+                    roleId = RoleAnchor.Declare(
+                        b, RoleIdentityKind.FrameNet, frameId.Value, label.Name,
+                        FeTypeId, Source) ?? AnnotationNoneId;
+                constituents.Add(roleId);
+            }
+            constituents.Add(AnnotationLayerEndId);
         }
-        constituents[cursor] = targetId.Value;
+        constituents.Add(AnnotationLayersEndId);
 
-        b.AddEntity(
-            AnnotationSchemaId, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
-        Hash128 annotationId = Hash128.Merkle(EntityTier.Document, constituents);
-        b.AddEntity(
-            annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation, Source);
+        foreach (Hash128 marker in AnnotationMarkers)
+            b.AddEntity(marker, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
+        Hash128[] flat = constituents.ToArray();
+        Hash128 annotationId = Hash128.Merkle(EntityTier.Document, flat);
+        b.AddEntity(annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation, Source);
 
         byte[] sentenceUtf8 = Encoding.UTF8.GetBytes(ann.Sentence);
         if (!TextEntityBuilder.TryDecomposeRoot(
@@ -172,24 +181,52 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             b.AddPhysicalityPreSeen(new PhysicalityRow(
                 physicalityId, annotationId, Source, PhysicalityType.ParseStructure,
                 x, y, z, m, Hilbert128.Encode(coord),
-                Trajectory.Build(constituents), constituents.Length,
-                null, null, 0));
+                Trajectory.Build(flat), flat.Length, null, null, 0));
         }
 
         Hash128 occurrenceId = AnnotationOccurrenceId(ann, annotationId);
-        b.AddEntity(
-            occurrenceId, EntityTier.Document,
+        b.AddEntity(occurrenceId, EntityTier.Document,
             EntityTypeRegistry.FrameNetAnnotationOccurrence, Source);
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            sentId.Value, FrameNetSource.HasParseTypeId, annotationId,
+            Source, occurrenceId, TC.AcademicCurated));
         b.AddAttestation(NativeAttestation.Categorical(
             annotationId, "EVOKES_FRAME", frameId.Value,
             Source, TC.AcademicCurated, contextId: occurrenceId));
+
+        Hash128 ContentOrNone(string? value) =>
+            value is null ? AnnotationNoneId
+                : ContentEmitter.Emit(b, value, Source) ?? AnnotationNoneId;
+
+        Hash128 OffsetOrNone(int? offset)
+        {
+            if (offset is null) return AnnotationNoneId;
+            Hash128 id = OffsetId(offset.Value);
+            b.AddEntity(id, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
+            return id;
+        }
     }
 
     internal static Hash128 OffsetId(int offset) =>
         Hash128.OfCanonical($"framenet/character-offset/{offset}/v1");
 
     internal static readonly Hash128 AnnotationSchemaId =
-        Hash128.OfCanonical("framenet/span-annotation/schema/v1");
+        Hash128.OfCanonical("framenet/span-annotation/schema/v2");
+    internal static readonly Hash128 AnnotationNoneId =
+        Hash128.OfCanonical("framenet/span-annotation/none/v2");
+    internal static readonly Hash128 AnnotationLayerId =
+        Hash128.OfCanonical("framenet/span-annotation/layer/v2");
+    internal static readonly Hash128 AnnotationLabelId =
+        Hash128.OfCanonical("framenet/span-annotation/label/v2");
+    internal static readonly Hash128 AnnotationLayerEndId =
+        Hash128.OfCanonical("framenet/span-annotation/layer-end/v2");
+    internal static readonly Hash128 AnnotationLayersEndId =
+        Hash128.OfCanonical("framenet/span-annotation/layers-end/v2");
+    private static readonly Hash128[] AnnotationMarkers =
+    [
+        AnnotationSchemaId, AnnotationNoneId, AnnotationLayerId,
+        AnnotationLabelId, AnnotationLayerEndId, AnnotationLayersEndId,
+    ];
 
     private static Hash128 AnnotationOccurrenceId(FulltextAnno ann, Hash128 annotationId)
     {
@@ -442,12 +479,15 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         string? frameName = null;
         string sentenceReference = "";
         string annotationReference = "";
-        var targetSpans = new List<TargetSpan>();
-        bool invalidTargetSpan = false;
-        bool inTargetLayer = false;
+        string? status = null;
+        var layers = new List<AnnotationLayer>();
+        AnnotationLayer? currentLayer = null;
 
-        while (await reader.ReadAsync())
+        bool advance = true;
+        while (!reader.EOF)
         {
+            if (advance && !await reader.ReadAsync()) break;
+            advance = true;
             ct.ThrowIfCancellationRequested();
             if (reader.NodeType == XmlNodeType.Element)
             {
@@ -459,58 +499,84 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                         break;
                     case "text":
                         sentence = await reader.ReadElementContentAsStringAsync();
+                        advance = false;
                         break;
                     case "annotationSet":
                         frameName = reader.GetAttribute("frameName");
                         annotationReference = reader.GetAttribute("ID") ?? "";
-                        targetSpans.Clear();
-                        invalidTargetSpan = false;
-                        inTargetLayer = false;
+                        status = reader.GetAttribute("status");
+                        layers.Clear();
+                        currentLayer = null;
                         break;
                     case "layer":
-                        inTargetLayer = reader.GetAttribute("name") == "Target";
+                        currentLayer = new AnnotationLayer(
+                            reader.GetAttribute("name") ?? "", reader.GetAttribute("rank"), []);
+                        layers.Add(currentLayer);
+                        if (reader.IsEmptyElement) currentLayer = null;
                         break;
                     case "label":
-                        if (inTargetLayer && reader.GetAttribute("name") == "Target")
-                        {
-                            if (int.TryParse(reader.GetAttribute("start"), out int start)
-                                && int.TryParse(reader.GetAttribute("end"), out int end)
-                                && start >= 0 && end >= start)
-                                targetSpans.Add(new TargetSpan(start, end));
-                            else
-                                invalidTargetSpan = true;
-                        }
+                        if (currentLayer is not null)
+                            currentLayer.Labels.Add(ReadAnnotationLabel(
+                                reader.GetAttribute("name"), reader.GetAttribute("start"),
+                                reader.GetAttribute("end"), reader.GetAttribute("itype")));
                         break;
                 }
             }
             else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "layer")
-            {
-                inTargetLayer = false;
-            }
+                currentLayer = null;
             else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "annotationSet")
             {
-                if (!string.IsNullOrEmpty(frameName) && !string.IsNullOrEmpty(sentence)
-                    && !invalidTargetSpan && targetSpans.Count > 0
-                    && targetSpans.All(span => span.End < sentence.Length))
-                {
-                    TargetSpan[] orderedSpans = targetSpans
-                        .OrderBy(span => span.Start)
-                        .ThenBy(span => span.End)
-                        .ToArray();
-                    string[] targetParts = orderedSpans
-                        .Select(span => sentence.Substring(span.Start, span.End - span.Start + 1).Trim())
-                        .ToArray();
-                    if (targetParts.All(part => part.Length > 0))
-                        yield return new FulltextAnno(
-                            sentence, string.Join(' ', targetParts), frameName!, orderedSpans,
-                            fileLabel, sentenceReference, annotationReference);
-                }
+                if (CreateAnnotation(sentence, frameName, layers.ToArray(), fileLabel,
+                        sentenceReference, annotationReference, status) is { } annotation)
+                    yield return annotation;
                 frameName = null;
-                targetSpans.Clear();
-                invalidTargetSpan = false;
-                inTargetLayer = false;
+                layers.Clear();
+                currentLayer = null;
             }
         }
+    }
+
+    internal static AnnotationLabel ReadAnnotationLabel(
+        string? name, string? start, string? end, string? instantiationType)
+    {
+        static int? Offset(string? value)
+        {
+            if (value is null) return null;
+            if (int.TryParse(value, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out int offset) && offset >= 0)
+                return offset;
+            throw new FormatException($"Invalid FrameNet character offset '{value}'");
+        }
+        int? first = Offset(start), last = Offset(end);
+        if (first.HasValue != last.HasValue || (first is { } f && last is { } l && l < f))
+            throw new FormatException("FrameNet label must have a complete ordered span or no span");
+        return new AnnotationLabel(name ?? "", first, last, instantiationType);
+    }
+
+    internal static FulltextAnno? CreateAnnotation(
+        string sentence, string? frameName, IReadOnlyList<AnnotationLayer> layers,
+        string fileLabel, string sentenceReference, string annotationReference, string? status)
+    {
+        if (string.IsNullOrEmpty(frameName) || sentence.Length == 0) return null;
+        // The source offsets index Unicode characters, as in the FrameNet corpus
+        // reader's Python text[start:end+1] contract. .NET indexes UTF-16 code
+        // units, so map the unchanged sentence once before reading any span.
+        // https://www.nltk.org/_modules/nltk/corpus/reader/framenet.html
+        var boundaries = new List<int>(sentence.Length + 1) { 0 };
+        foreach (Rune rune in sentence.EnumerateRunes())
+            boundaries.Add(boundaries[^1] + rune.Utf16SequenceLength);
+        if (layers.SelectMany(layer => layer.Labels).Any(label => label.End is { } end && end >= boundaries.Count - 1))
+            throw new FormatException("FrameNet label span is outside the unchanged source sentence");
+        TargetSpan[] spans = layers.Where(layer => layer.Name == "Target")
+            .SelectMany(layer => layer.Labels)
+            .Where(label => label.Name == "Target" && label.Start.HasValue && label.End.HasValue)
+            .Select(label => new TargetSpan(label.Start!.Value, label.End!.Value))
+            .OrderBy(span => span.Start).ThenBy(span => span.End).ToArray();
+        if (spans.Length == 0) return null;
+        string[] targetParts = spans.Select(span =>
+            sentence[boundaries[span.Start]..boundaries[span.End + 1]].Trim()).ToArray();
+        return new FulltextAnno(sentence, string.Join(' ', targetParts), frameName,
+            spans, fileLabel, sentenceReference, annotationReference, status, layers);
     }
 
     internal static (string Def, List<string> Examples) ParseDefRoot(string raw)
@@ -606,6 +672,11 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     public readonly record struct TargetSpan(int Start, int End);
 
+    public sealed record AnnotationLabel(
+        string Name, int? Start, int? End, string? InstantiationType);
+
+    public sealed record AnnotationLayer(string Name, string? Rank, List<AnnotationLabel> Labels);
+
     public sealed record FulltextAnno(
         string Sentence,
         string TargetText,
@@ -613,7 +684,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         IReadOnlyList<TargetSpan> TargetSpans,
         string FileLabel,
         string SentenceReference,
-        string AnnotationReference)
+        string AnnotationReference,
+        string? Status,
+        IReadOnlyList<AnnotationLayer> Layers)
     {
         // Compatibility accessors for the original single-span shape. For a
         // discontinuous target these name its first textual segment; TargetSpans is

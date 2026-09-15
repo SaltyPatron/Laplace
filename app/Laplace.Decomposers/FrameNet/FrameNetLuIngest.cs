@@ -24,15 +24,15 @@ public static class FrameNetLuIngest
         }
     }
 
-    internal static LuDocument? ParseLu(string path)
+    internal static LuDocument? ParseLu(string path, string? fileLabel = null)
     {
         XDocument doc;
         try { doc = XDocument.Load(path); }
         catch (XmlException) { return null; }
-        return ParseLu(doc);
+        return ParseLu(doc, fileLabel ?? $"framenet/lu/{Path.GetFileName(path)}");
     }
 
-    internal static LuDocument? ParseLu(XDocument doc)
+    internal static LuDocument? ParseLu(XDocument doc, string? fileLabel = null)
     {
         XNamespace ns = Ns;
         var root = doc.Root;
@@ -94,34 +94,29 @@ public static class FrameNetLuIngest
         var sentences = new List<LuSentence>();
         foreach (var sent in root.Descendants(ns + "sentence"))
         {
-            string text = FrameNetLemmaHelper.CollapseWs((string?)sent.Element(ns + "text") ?? "");
+            // Annotation coordinates refer to the original XML text. Collapsing
+            // spaces before slicing moves every later target and role boundary.
+            string text = (string?)sent.Element(ns + "text") ?? "";
             if (text.Length == 0) continue;
-
-            string? target = null;
+            var annotations = new List<FrameNetDecomposer.FulltextAnno>();
             foreach (var anno in sent.Elements(ns + "annotationSet"))
             {
-                if (!string.Equals((string?)anno.Attribute("status"), "MANUAL", StringComparison.Ordinal))
-                    continue;
-                foreach (var layer in anno.Elements(ns + "layer"))
-                {
-                    if (!string.Equals((string?)layer.Attribute("name"), "Target", StringComparison.Ordinal))
-                        continue;
-                    foreach (var label in layer.Elements(ns + "label"))
-                    {
-                        if (!string.Equals((string?)label.Attribute("name"), "Target", StringComparison.Ordinal))
-                            continue;
-                        if (!int.TryParse((string?)label.Attribute("start"), out int start)) continue;
-                        if (!int.TryParse((string?)label.Attribute("end"), out int end)) end = start;
-                        if (start >= 0 && end >= start && end < text.Length)
-                        {
-                            target = text.Substring(start, end - start + 1).Trim();
-                            break;
-                        }
-                    }
-                }
-                if (target is not null) break;
+                var layers = anno.Elements(ns + "layer").Select(layer =>
+                    new FrameNetDecomposer.AnnotationLayer(
+                        (string?)layer.Attribute("name") ?? "", (string?)layer.Attribute("rank"),
+                        layer.Elements(ns + "label").Select(label =>
+                            FrameNetDecomposer.ReadAnnotationLabel(
+                                (string?)label.Attribute("name"), (string?)label.Attribute("start"),
+                                (string?)label.Attribute("end"), (string?)label.Attribute("itype")))
+                            .ToList())).ToArray();
+                if (FrameNetDecomposer.CreateAnnotation(
+                        text, (string?)anno.Attribute("frameName") ?? frameName, layers,
+                        fileLabel ?? $"framenet/lu/lu{id}.xml",
+                        (string?)sent.Attribute("ID") ?? "", (string?)anno.Attribute("ID") ?? "",
+                        (string?)anno.Attribute("status")) is { } annotation)
+                    annotations.Add(annotation);
             }
-            sentences.Add(new LuSentence(text, target));
+            sentences.Add(new LuSentence(text, annotations));
         }
 
         return new LuDocument(id, frameName, luName, luKey, lemma, pos, definition, totalAnnotated, patterns, sentences);
@@ -175,14 +170,8 @@ public static class FrameNetLuIngest
                 frameId, "HAS_EXAMPLE", sentId.Value, source, SourceTrust.AcademicCurated,
                 contextId: luId));
 
-            if (sent.TargetText is { Length: > 0 } target)
-            {
-                var targetId = ContentEmitter.Emit(b, target, source);
-                if (targetId is not null)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        targetId.Value, "EVOKES_FRAME", frameId, source, SourceTrust.AcademicCurated,
-                        contextId: sentId.Value));
-            }
+            foreach (var annotation in sent.Annotations)
+                FrameNetDecomposer.ComposeFulltextAnno(annotation, b);
         }
     }
 
@@ -214,5 +203,9 @@ public static class FrameNetLuIngest
     /// </summary>
     public readonly record struct ValencePatternCount(string Pattern, long Total);
 
-    public sealed record LuSentence(string Text, string? TargetText);
+    public sealed record LuSentence(
+        string Text, IReadOnlyList<FrameNetDecomposer.FulltextAnno> Annotations)
+    {
+        public string? TargetText => Annotations.FirstOrDefault()?.TargetText;
+    }
 }

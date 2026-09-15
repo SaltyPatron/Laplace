@@ -417,5 +417,123 @@ BEGIN
     RAISE NOTICE 'operational memory: distinct semantic inputs remain ambiguous even when their surface occurrence is shared';
 END
 $multilingual_semantic_input$;
+
+-- A complete typed parse supplies an occurrence-bound lemma. No free-standing
+-- lexical edge connects the current input surface to this semantic input.
+DO $structural_lemma_binding$
+DECLARE
+    prompt text := 'structcue surfaceplural';
+    reordered text := 'surfaceplural structcue';
+    wrapped text := '"structcue surfaceplural"';
+    cue bytea := laplace.word_id('structcue');
+    surface bytea := laplace.word_id('surfaceplural');
+    lemma bytea := laplace.word_id('structurallemma');
+    answer bytea := public.laplace_hash128_blake3('test/structure/answer');
+    source bytea := public.laplace_hash128_blake3('test/structure/source');
+    scope bytea := public.laplace_hash128_blake3('test/structure/active-context');
+    occurrence bytea := public.laplace_hash128_blake3('test/structure/parse-occurrence');
+    lang bytea := public.laplace_hash128_blake3('test/structure/language');
+    schema bytea := public.laplace_hash128_blake3('ud/parse/schema/v1');
+    none_id bytea := public.laplace_hash128_blake3('ud/parse/none/v1');
+    root_marker bytea := public.laplace_hash128_blake3('ud/parse/root/v1');
+    features_end bytea := public.laplace_hash128_blake3('ud/parse/features-end/v1');
+    enhanced_end bytea := public.laplace_hash128_blake3('ud/parse/enhanced-end/v1');
+    misc_end bytea := public.laplace_hash128_blake3('ud/parse/misc-end/v1');
+    tokens_end bytea := public.laplace_hash128_blake3('ud/parse/tokens-end/v1');
+    ref_one bytea := public.laplace_hash128_blake3('ud/token-ref/31/v1');
+    ref_two bytea := public.laplace_hash128_blake3('ud/token-ref/32/v1');
+    pos_id bytea := public.laplace_hash128_blake3('test/structure/pos');
+    dep_id bytea := public.laplace_hash128_blake3('test/structure/dependency');
+    calls bytea := laplace.relation_type_id('CALLS');
+    inputs bytea := laplace.relation_type_id('HAS_INPUT');
+    result_relation bytea := laplace.relation_type_id('CAUSES');
+    has_parse bytea := laplace.relation_type_id('HAS_PARSE');
+    current_root bytea;
+    other_root bytea;
+    parse_id bytea;
+    manifest bytea[];
+    metadata bytea;
+    r record;
+BEGIN
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    SELECT id,2,laplace.entity_type_id('Source_Reference'),source
+      FROM unnest(ARRAY[source,scope,occurrence,lang,schema,none_id,root_marker,
+          features_end,enhanced_end,misc_end,tokens_end,ref_one,ref_two,pos_id,dep_id,answer]) id
+    ON CONFLICT (id,tier) DO NOTHING;
+    PERFORM pg_temp.admit_operational_prompt(prompt,source);
+    PERFORM pg_temp.admit_operational_prompt(reordered,source);
+    PERFORM pg_temp.admit_operational_prompt(wrapped,source);
+    PERFORM pg_temp.admit_operational_prompt('structurallemma',source);
+    SELECT root_id INTO current_root FROM converse.prompt_tree(prompt) LIMIT 1;
+    PERFORM pg_temp.operation_cell(current_root,calls,result_relation,source,scope);
+    PERFORM pg_temp.operation_cell(current_root,inputs,lemma,source,scope);
+    PERFORM pg_temp.operation_cell(lemma,result_relation,answer,source,scope);
+    SELECT * INTO r FROM pg_temp.operation_receipt(prompt,1,p_context=>scope,p_hops=>1);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'FAIL: ungrounded lemma input executed before parse admission: %',r;
+    END IF;
+
+    manifest := ARRAY[schema,current_root,lang,
+        ref_one,cue,cue,pos_id,none_id,features_end,root_marker,dep_id,enhanced_end,misc_end,
+        ref_two,surface,lemma,pos_id,none_id,features_end,ref_one,dep_id,enhanced_end,misc_end,
+        tokens_end];
+    parse_id := public.laplace_hash128_merkle(4::smallint,manifest);
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'),source);
+    INSERT INTO laplace.physicalities
+        (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
+    VALUES(public.laplace_hash128_blake3(parse_id || decode('0800','hex')),
+        parse_id,8,'SRID=0;POINT ZM(0 0 0 0)'::geometry,
+        decode(repeat('00',16),'hex'),public.laplace_trajectory_build(manifest),
+        cardinality(manifest),now());
+    PERFORM pg_temp.operation_cell(current_root,has_parse,parse_id,source,occurrence);
+    SELECT * INTO r FROM pg_temp.operation_receipt(prompt,1,p_context=>scope,p_hops=>1);
+    IF r.emitted IS DISTINCT FROM ARRAY[answer] OR r.complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'FAIL: complete witnessed parse did not bind its input lemma: %',r;
+    END IF;
+
+    -- A selected semantic input must be routed even at the naming-hop boundary.
+    -- Its declared predicate supplies the result projection; higher-ranked
+    -- unrelated cells cannot hide that result in an unmasked fanout window.
+    FOR i IN 1..3 LOOP
+        metadata := public.laplace_hash128_blake3('test/structure/metadata/' || i::text);
+        INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+        VALUES(metadata,2,laplace.entity_type_id('CodeConcept'),source);
+        PERFORM pg_temp.operation_cell(lemma,laplace.relation_type_id('RELATED_TO'),metadata,source,scope);
+    END LOOP;
+    UPDATE laplace.consensus SET rating=3000000000000
+     WHERE subject_id=lemma AND type_id=laplace.relation_type_id('RELATED_TO');
+    SELECT * INTO r FROM pg_temp.operation_receipt(prompt,1,p_context=>scope,p_hops=>0,p_fanout=>2);
+    IF r.emitted IS DISTINCT FROM ARRAY[answer] OR r.complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'FAIL: declared input/predicate route was hidden by hop limit or unrelated metadata: %',r;
+    END IF;
+
+    -- An annotation discovered through the same constituent set must still
+    -- preserve full order. Additional quote marks are observations, not noise.
+    SELECT root_id INTO other_root FROM converse.prompt_tree(reordered) LIMIT 1;
+    PERFORM pg_temp.operation_cell(other_root,calls,result_relation,source,scope);
+    PERFORM pg_temp.operation_cell(other_root,inputs,lemma,source,scope);
+    SELECT * INTO r FROM pg_temp.operation_receipt(reordered,1,p_context=>scope,p_hops=>1);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'FAIL: parse role binding ignored current word order: %',r;
+    END IF;
+    SELECT root_id INTO other_root FROM converse.prompt_tree(wrapped) LIMIT 1;
+    PERFORM pg_temp.operation_cell(other_root,calls,result_relation,source,scope);
+    PERFORM pg_temp.operation_cell(other_root,inputs,lemma,source,scope);
+    SELECT * INTO r FROM pg_temp.operation_receipt(wrapped,1,p_context=>scope,p_hops=>1);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'FAIL: parse role binding discarded quote observations: %',r;
+    END IF;
+
+    UPDATE laplace.attestations SET outcome=0
+     WHERE subject_id=current_root AND type_id=has_parse AND object_id=parse_id
+       AND source_id=source AND context_id=occurrence;
+    SELECT * INTO r FROM pg_temp.operation_receipt(prompt,1,p_context=>scope,p_hops=>1);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'FAIL: refuted source parse still contributed a lemma binding: %',r;
+    END IF;
+    RAISE NOTICE 'operational memory: native parse roles bind exact ordered occurrences; quoted, reordered and refuted annotations cannot supply inputs';
+END
+$structural_lemma_binding$;
 ROLLBACK;
 \set ECHO all

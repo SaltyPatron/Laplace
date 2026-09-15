@@ -7,3 +7,4 @@ NOTICE:  operational memory: an admitted relation executes without compiled lexi
 NOTICE:  operational memory: distinct Unicode surfaces execute the same canonical semantic input and operation
 NOTICE:  operational memory: canonical inputs sharing one surface retain separate completion obligations
 NOTICE:  operational memory: distinct semantic inputs remain ambiguous even when their surface occurrence is shared
+NOTICE:  operational memory: native parse roles bind exact ordered occurrences; quoted, reordered and refuted annotations cannot supply inputs

@@ -1,4 +1,4 @@
-/* Canonical content physicality IDs are computable from entity identity. Route
+/* Canonical typed physicality IDs are computable from entity identity. Route
  * each ID to its actual PostgreSQL hash partition before the batched PK probe. */
 #include "postgres.h"
 #include "access/genam.h"
@@ -32,6 +32,7 @@ typedef struct ContentReadContext
     LaplaceContentTrajectoryConsumer consume;
     void *context;
     AttrNumber entity, type, trajectory;
+    int16 physicality_type;
 } ContentReadContext;
 
 static void
@@ -40,7 +41,7 @@ consume_content(TupleTableSlot *slot, AttrNumber id, void *opaque)
     ContentReadContext *read = opaque;
     bool isnull;
     Datum kind = slot_getattr(slot, read->type, &isnull);
-    if (!isnull && DatumGetInt16(kind) == 1)
+    if (!isnull && DatumGetInt16(kind) == read->physicality_type)
     {
         Datum geometry = slot_getattr(slot, read->trajectory, &isnull);
         if (!isnull)
@@ -56,19 +57,22 @@ consume_content(TupleTableSlot *slot, AttrNumber id, void *opaque)
 }
 
 static void
-read_leaf(Oid oid, ArrayType *ids, LaplaceContentTrajectoryConsumer consume, void *context)
+read_leaf(Oid oid, ArrayType *ids, int16 physicality_type,
+          LaplaceContentTrajectoryConsumer consume, void *context)
 {
     ContentReadContext read = {consume, context, get_attnum(oid, "entity_id"),
-        get_attnum(oid, "type"), get_attnum(oid, "trajectory")};
+        get_attnum(oid, "type"), get_attnum(oid, "trajectory"), physicality_type};
     if (read.entity <= 0 || read.type <= 0 || read.trajectory <= 0 ||
         !laplace_identity_scan(oid, ids, consume_content, &read))
         elog(ERROR, "content trajectory read requires canonical identity storage");
 }
 
 void
-laplace_content_trajectory_read(ArrayType *entities,
+laplace_typed_trajectory_read(ArrayType *entities, int16 physicality_type,
     LaplaceContentTrajectoryConsumer consume, void *context)
 {
+    if (physicality_type <= 0)
+        elog(ERROR, "trajectory read requires a positive physicality type");
     Oid root = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
     if (!OidIsValid(root)) elog(ERROR, "laplace.physicalities does not exist");
     AclResult acl = pg_class_aclcheck(root, GetUserId(), ACL_SELECT);
@@ -98,7 +102,7 @@ laplace_content_trajectory_read(ArrayType *entities,
         if (VARSIZE_ANY_EXHDR(value) != sizeof(entity))
             elog(ERROR, "content trajectory read requires 16-byte identities");
         memcpy(&entity, VARDATA_ANY(value), sizeof(entity));
-        laplace_physicality_id_compute(entity, 1, &physicality);
+        laplace_physicality_id_compute(entity, physicality_type, &physicality);
         Datum id = hash128_to_datum(&physicality);
         bool isnull = false;
         uint64 hash = compute_partition_hash_value(1, key->partsupfunc,
@@ -114,10 +118,17 @@ laplace_content_trajectory_read(ArrayType *entities,
     for (int i = 0; i < partitions->nparts; ++i)
         if (batches[i])
             read_leaf(partitions->oids[i], DatumGetArrayTypeP(makeArrayResult(batches[i],
-                CurrentMemoryContext)), consume, context);
+                CurrentMemoryContext)), physicality_type, consume, context);
     pfree(batches);
     pfree(values);
     pfree(nulls);
     /* Partition locks, like normal SELECT locks, survive to transaction end. */
     table_close(relation, NoLock);
+}
+
+void
+laplace_content_trajectory_read(ArrayType *entities,
+    LaplaceContentTrajectoryConsumer consume, void *context)
+{
+    laplace_typed_trajectory_read(entities, 1, consume, context);
 }

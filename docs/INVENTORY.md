@@ -115,7 +115,7 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 52 (`extension/laplace_substrate/src/`)
+## Native extension sources — 54 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `attestation_response.c`
@@ -159,12 +159,14 @@ Chess:
 - `perfcache.c`
 - `prompt_coherence.c`
 - `prompt_language.c`
+- `prompt_structure.c`
 - `query_evidence.c`
 - `realize_batch.c`
 - `recall.c`
 - `recall_route.c`
 - `steer_candidates.c`
 - `steered_walk.c`
+- `task_shape.c`
 - `trajectory_continuations.c`
 - `trajectory_generate.c`
 - `variant_synth.c`

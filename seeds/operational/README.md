@@ -24,7 +24,8 @@ dotnet app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll ingest operational /p
 ```
 
 This lane assigns `SubstrateMandate` provenance to the selected operational
-contract source. It accepts Markdown and plain-text contract artifacts. The
+contract source. It accepts Markdown and plain-text contract artifacts, plus
+explicit JSON task-shape declarations described below. The
 source adapter supplies each artifact's unchanged bytes and file metadata to the
 existing whole-source native grammar composition pipeline. Markdown parsing also
 accepts plain text; the original bytes are preserved. The same native machinery
@@ -45,3 +46,82 @@ Admitting the ISA document makes its authored content and structure available in
 the substrate. Executing the ISA still requires the runtime to consume grounded
 program structure through the canonical native operations. Document admission
 alone does not establish that execution behavior.
+
+## Declared relation-read task shapes
+
+A selected `.json` source can declare a reusable structural binding to the
+native relation-read capability. No language templates are supplied by default.
+The source names exact IDs already admitted by their owning source:
+
+```json
+{
+  "schema": "laplace/task-shape/relation-read/token-slots/v1",
+  "exemplar_parse_id": "<32 hexadecimal digits>",
+  "predicate_id": "<32 hexadecimal digits>",
+  "slots": [
+    {
+      "exemplar_token_ref_id": "<32 hexadecimal digits>",
+      "accepted_entity_type_id": "<32 hexadecimal digits>"
+    }
+  ]
+}
+```
+
+Replace each placeholder with the raw 16-byte identity encoded as hexadecimal.
+The exemplar must be a complete admitted UD parse. Each declared slot denotes
+one whole token under that parse and one current content occurrence; at least
+one token must remain invariant as an indexed lexical anchor. Exemplars with
+multiword-token records require span alignment and are unsupported by this
+schema. It does not generalize arbitrary spans or subtrees. The matcher retains
+dependency topology, grammatical features,
+language, order, punctuation, and all undeclared lexical structure. Only the
+declared token forms and lemmas may vary, and their current semantic bindings
+must satisfy the declared entity type. Additional unmatched content prevents a
+complete match. A surface name alone cannot supply an applicability declaration.
+A new request need not already have an observed corpus parse: its complete
+ordered surface can instantiate the explicitly declared substitutions. The
+resulting structural projection is an inference under the shape contract, with
+its own recipe identity; it is never recorded as a new `HAS_PARSE` observation
+merely because matching succeeded. Existing observed parses constrain that
+projection and cannot be bypassed when they contradict it.
+
+The native JSON grammar is parsed once with full-source admission. The source
+witness reuses that AST, creates a type-8 structural trajectory, and records
+`exemplar_parse IS_EXAMPLE_OF shape`, `shape CALLS predicate`, and the complete
+`shape HAS_INPUT slot` set under one source-file context. Missing, duplicate,
+unknown, or malformed fields fail admission. Referenced parses, predicates,
+token references and entity types are not manufactured by this source.
+
+The trajectory is `[schema, exemplar_parse, predicate, (slot, token_ref,
+accepted_type)*, slots_end]`. Its identity is the Document-tier Merkle
+composition of those exact IDs. Each slot is the Document-tier Merkle
+composition of `[token_slot_schema, token_ref, accepted_type]`. The marker names
+are `laplace/task-shape/relation-read/token-slots/v1`,
+`laplace/task-shape/token-slot/v1`, and `laplace/task-shape/slots-end/v1`.
+Source-file identity belongs to provenance, so changing JSON presentation can
+change its source occurrence without changing the declared shape.
+
+The type-8 coordinate realizes the canonical declaration representation. Its
+recipe serializes one UTF-8 JSON object without whitespace or a BOM, with fields
+in this exact order: `schema`, `exemplar_parse_id`, `predicate_id`, `slots`.
+Each slot object contains `exemplar_token_ref_id`, then
+`accepted_entity_type_id`; slot order is the declared array order. Every ID is
+the raw 16 bytes written as 32 lowercase hexadecimal digits. The schema value
+is the exact marker string above. The existing native JSON full-source composer
+realizes and stages this derived representation, separately from the unchanged
+authored file. The source witness reuses the original file AST; only the derived
+canonical representation receives its own native grammar composition. No
+coordinate is extracted from hash bits or invented for a referenced entity.
+These coordinates describe declaration representation, while the type-8
+trajectory retains the semantic reference IDs. Changing source whitespace,
+property order, JSON escapes or hexadecimal letter case cannot change the
+shape's coordinate, Hilbert address or structural trajectory.
+
+The canonical forward program consumes positively witnessed complete shapes
+after structural and semantic coupling. It binds new current input IDs and
+reads actual predicate results; no expected answer is stored in the shape.
+Competing complete interpretations remain ambiguous. The receipt includes the
+shape, exemplar/current parse identities and applicability witnesses, together
+with each exact input's completion obligation. These task shapes describe a
+relation-read capability within the ISA; they do not equate individual prompt
+words with cognition opcodes.

@@ -224,3 +224,6 @@ SQL_QUERY("ingest.clean_gin_pending_lists", "",
 
 SQL_QUERY("physicalities.present_ordinals", "bytea[]",
     "SELECT idx FROM laplace.physicalities_present_ordinals($1)")
+
+SQL_QUERY("generation.task_shape_entity_types", "bytea[]",
+    "SELECT id, type_id FROM laplace.entities WHERE id = ANY($1)")

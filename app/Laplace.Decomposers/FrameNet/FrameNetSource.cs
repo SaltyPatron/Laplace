@@ -19,9 +19,11 @@ public readonly struct FrameNetSource : ISeedSource
         "HAS_VALENCE_PATTERN", "HAS_DEFINITION", "HAS_NAME_ALIAS", "HAS_FEATURE",
         "HAS_POS", "HAS_EXAMPLE",
         "FRAME_USES", "PERSPECTIVE_ON", "INHERITS_FROM", "CAUSATIVE_OF",
-        "INCHOATIVE_OF", "PRECEDES", "ALSO_SEE", "IS_A", "HAS_SUBEVENT", "RELATED_TO",
+        "INCHOATIVE_OF", "PRECEDES", "ALSO_SEE", "IS_A", "HAS_SUBEVENT", "RELATED_TO", "HAS_PARSE",
     ];
 
+    internal static readonly Hash128 HasParseTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[20]);
     internal static readonly Hash128 HasFrameElementTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[1]);
     internal static readonly Hash128 RequiresTypeId =

@@ -119,14 +119,20 @@ program_operation_compare(const void *left, const void *right)
     if (order) return order;
     order = memcmp(&a->context, &b->context, sizeof(hash128_t));
     if (order) return order;
-    return memcmp(&a->call_witness, &b->call_witness, sizeof(hash128_t));
+    order = memcmp(&a->call_witness, &b->call_witness, sizeof(hash128_t));
+    if (order) return order;
+    const hash128_t a_shape[] = {a->shape_id, a->exemplar_parse, a->current_parse,
+        a->applicability_witness, a->parse_witness, a->exemplar_parse_witness};
+    const hash128_t b_shape[] = {b->shape_id, b->exemplar_parse, b->current_parse,
+        b->applicability_witness, b->parse_witness, b->exemplar_parse_witness};
+    return memcmp(a_shape, b_shape, sizeof(a_shape));
 }
 
 static void
 program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values)
 {
     StringInfoData bytes;
-    hash128_t domain = cognition_domain("laplace:cognition-program:v3");
+    hash128_t domain = cognition_domain("laplace:cognition-program:v4");
     int member = -1;
     initStringInfo(&bytes);
     appendBinaryStringInfo(&bytes, (const char *) &domain, sizeof(domain));
@@ -153,6 +159,11 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values)
         appendBinaryStringInfo(&bytes, (const char *) &operation->source, sizeof(hash128_t));
         appendBinaryStringInfo(&bytes, (const char *) &operation->context, sizeof(hash128_t));
         appendBinaryStringInfo(&bytes, (const char *) &operation->call_witness, sizeof(hash128_t));
+        const hash128_t shape_proof[] = {
+            operation->shape_id, operation->exemplar_parse, operation->current_parse,
+            operation->applicability_witness, operation->parse_witness,
+            operation->exemplar_parse_witness};
+        appendBinaryStringInfo(&bytes, (const char *) shape_proof, sizeof(shape_proof));
         program_fingerprint_u32(&bytes, operation->input_count);
         for (int j = 0; j < operation->input_count; ++j)
         {
