@@ -2,7 +2,8 @@
 """Change-aware .NET project selection over the app/ ProjectReference graph.
 
 Every project gets a Merkle fingerprint: sha256 of its own content (git index
-blobs + live hashes of dirty/untracked files, no mtimes) folded with the
+blobs + live hashes of dirty/untracked files and literal external content items,
+no mtimes) folded with the
 fingerprints of its transitive ProjectReferences and the app-global files
 (Directory.*.props/targets, *.slnx, loose files under app/). A project is
 "affected" iff its effective fingerprint differs from the stamp recorded at the
@@ -27,11 +28,13 @@ callers fall back to a full solution build/test.
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -119,6 +122,27 @@ def content_buckets(projects: dict[str, Path]) -> dict[str, list[str]]:
             buckets[target].append(f"dirty {path} {file_hash(live)}")
         else:
             buckets[target].append(f"gone {path}")
+    for name, csproj in projects.items():
+        # Copy/embedded inputs can live outside app/. Their owning project must
+        # change before its ProjectReference dependents can rebuild, retest and
+        # publish. Hash the live glob membership as well as bytes so additions,
+        # edits and deletions all invalidate, even before `git add`.
+        external_inputs: set[Path] = set()
+        for item in ET.parse(csproj).iter():
+            if item.tag.rsplit("}", 1)[-1] not in {"Content", "None", "EmbeddedResource"}:
+                continue
+            for include in item.get("Include", "").split(";"):
+                if not include or "$(" in include or "@(" in include:
+                    continue  # MSBuild-evaluated inputs retain their existing domain.
+                pattern = str(csproj.parent / include.replace("\\", "/"))
+                for candidate in glob.glob(pattern, recursive=True):
+                    path = Path(candidate).resolve()
+                    if path.is_file() and not path.is_relative_to(csproj.parent):
+                        if not path.is_relative_to(ROOT):
+                            raise RuntimeError(f"external project input is outside repository: {path}")
+                        external_inputs.add(path)
+        for path in sorted(external_inputs):
+            buckets[name].append(f"external {path.relative_to(ROOT)} {file_hash(path)}")
     return buckets
 
 

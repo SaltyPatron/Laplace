@@ -197,6 +197,32 @@
       "required": true
     },
     {
+      "id": "policy-managed-database-quiescence",
+      "profile": "policy",
+      "owner": "services",
+      "runner": "script",
+      "command": ["python3", "scripts/test-managed-database-quiescence.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-repair-transaction",
+      "profile": "policy",
+      "owner": "substrate",
+      "runner": "script",
+      "command": ["python3", "scripts/test-repair-transaction.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-managed-host",
       "profile": "policy",
       "owner": "services",

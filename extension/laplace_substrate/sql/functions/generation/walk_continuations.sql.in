@@ -36,6 +36,32 @@ CREATE OR REPLACE FUNCTION generation.forward_program(
     AS 'EXECUTION_LIBRARY', 'pg_laplace_forward_trace'
     LANGUAGE C VOLATILE;
 
+-- Explicit source-witnessed predicate application R(I,?) through the native
+-- relation-read program. Data declares the predicate, not an ISA opcode.
+-- The caller supplies active applicability
+-- context; historical text/alias matches never infer it. This uses the same
+-- native program body as forward_program, with one required appended context.
+CREATE OR REPLACE FUNCTION generation.forward_program(
+        p_prompt text, p_steps int, p_max_stride int,
+        p_spread float8, p_top_k int,
+        p_seed bigint, p_hops int, p_fanout int,
+        p_prior_frontier bytea[],
+        p_output_relation_types bytea[], p_invocation_context bytea)
+    RETURNS TABLE(step int, entity bytea, stride_used int, sep_entity bytea,
+        root_id bytea, candidate_count int, ordered_context_count int,
+        proposal_channel_count int, exact_channel_count int,
+        sequence_occurrences bigint, covered_occurrences int,
+        relation_families int, opposed_occurrences int,
+        support_anchor bytea, support_relation bytea, support_outbound boolean,
+        support_rating bigint, support_rd bigint, support_witnesses bigint,
+        support_sources int, support_contexts int, declared_result boolean,
+        event text, routing_round int,
+        program_id bytea, required_obligations int, satisfied_obligations int,
+        remaining_required int, completion boolean, disposition text,
+        output_fingerprint bytea, semantic_act_id bytea, output_count int)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_forward_trace'
+    LANGUAGE C VOLATILE;
+
 -- Existing trace contract is now a projection of the full program. Keeping the
 -- installed signature stable avoids an in-place return-type break while still
 -- guaranteeing there is only one native execution authority. Terminal program

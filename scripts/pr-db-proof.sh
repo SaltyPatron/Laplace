@@ -2,7 +2,7 @@
 # Execute the exact pull-request native extension build against an isolated
 # throwaway PostgreSQL cluster. The proof must not reuse the production
 # postmaster: production preloads the installed laplace_substrate image, while
-# PR proof deliberately loads the branch image from the build tree. Loading both
+# PR proof preloads only the branch host image from the build tree. Loading both
 # copies in one postmaster re-registers custom GUCs and makes CREATE EXTENSION
 # fail before branch SQL is exercised.
 set -euo pipefail
@@ -75,6 +75,7 @@ control_dir="$control_root/extension"
 }
 
 build_library_path="$BUILD/extension/laplace_substrate:$BUILD/extension/laplace_geom:$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis"
+branch_host="$BUILD/extension/laplace_substrate/laplace_substrate"
 t0_perfcache="$BUILD/engine/core/perfcache/laplace_t0_perfcache.bin"
 highway_perfcache="$BUILD/engine/core/perfcache/laplace_highway_perfcache.bin"
 chess_position_perfcache="$BUILD/engine/core/perfcache/laplace_chess_position_perfcache.bin"
@@ -90,6 +91,10 @@ done
 # postmaster while dynamic_library_path points at a branch build can load two
 # different copies of the extension into one process. Besides invalidating the
 # proof, that redefines custom GUCs such as laplace_substrate.perfcache_path.
+# Preload that exact branch host so fresh backends can call execution functions
+# before any host SQL function: the execution module uses the host's cache and
+# configuration symbols. This is the same module topology as production, with
+# neither production libraries nor production cache files loaded.
 # A private socket directory makes concurrent proofs independent; listen_addresses
 # is empty, so the arbitrary fixed port never opens a TCP listener or conflicts
 # with production.
@@ -98,7 +103,7 @@ cat >>"$pgdata/postgresql.conf" <<EOF
 listen_addresses = ''
 port = 55432
 unix_socket_directories = '$socket_dir'
-shared_preload_libraries = ''
+shared_preload_libraries = '$branch_host'
 extension_control_path = '$control_root:\$system'
 dynamic_library_path = '$build_library_path:\$libdir'
 laplace_substrate.perfcache_path = '$t0_perfcache'
@@ -126,11 +131,11 @@ if [[ "$available" != "laplace_geom,laplace_substrate" ]]; then
   exit 2
 fi
 
-# Prove the branch image, not a preloaded installed image, owns the process.
+# Prove the exact branch host, not the installed image, owns every backend.
 preload="$($PG_PREFIX/bin/psql -X -A -t -d postgres -v ON_ERROR_STOP=1 -c \
   "SHOW shared_preload_libraries;")"
-if [[ -n "$preload" ]]; then
-  echo "pr-db-proof: isolated postmaster unexpectedly preloaded libraries: $preload" >&2
+if [[ "$preload" != "$branch_host" ]]; then
+  echo "pr-db-proof: isolated postmaster host mismatch: expected $branch_host, found $preload" >&2
   exit 2
 fi
 
@@ -157,10 +162,46 @@ if (( ctest_rc != 0 )); then
   exit "$ctest_rc"
 fi
 
+# Exercise actual source admission, witness folding and ordinary native execution
+# while the private branch postmaster is still alive. This DB-tier acceptance is
+# excluded from the later managed DEV profile, so its exact selection must run
+# here. A fresh TRX receipt prevents a missing or skipped test from passing.
+bash scripts/sync-managed-native-artifacts.sh
+managed_results="$stage/managed-results"
+mkdir -p "$managed_results"
+PATH="$PG_PREFIX/bin:$PATH" \
+LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=laplace_substratecrud_test" \
+LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
+LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+  dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj \
+    -c Release --no-build --nologo --verbosity minimal \
+    --filter 'FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold' \
+    --logger 'trx;LogFileName=operational-source-execution.trx' \
+    --results-directory "$managed_results"
+python3 - "$managed_results/operational-source-execution.trx" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+counters = root.find("{*}ResultSummary/{*}Counters")
+expected = {"total": "1", "executed": "1", "passed": "1", "failed": "0", "notExecuted": "0"}
+if counters is None or any(counters.get(key) != value for key, value in expected.items()):
+    raise SystemExit("operational source proof did not execute and pass its required acceptance test")
+print("OPERATIONAL_SOURCE_EXECUTION_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
+PY
+
 # Exercise actual registry unavailability and WAL recovery in this private
 # postmaster. The normal public C deposit and SQL batch orchestrators run
 # unchanged; the fixture varies only the real registry file and process lifetime.
 LAPLACE_PG_PREFIX="$PG_PREFIX" bash scripts/test-highway-registry-recovery.sh \
   "$pgdata" "$highway_perfcache" "${REGRESS_DB}_highway"
+
+# Use the same isolated branch-native postmaster to prove exact legacy row
+# repairs, durable pre-mutation receipts, rejected evidence, and SQL rollback.
+# The harness creates a unique disposable database and keeps receipts with the
+# build's other test results for inspection after the private cluster is gone.
+LAPLACE_PG_PREFIX="$PG_PREFIX" python3 scripts/test-legacy-content-repair.py \
+  --pgdata "$pgdata" --database-stem "$REGRESS_DB" \
+  --receipt-root "$BUILD/test-results/legacy-content-repair"
 
 echo "PR_DB_PROOF_OK database_stem=$REGRESS_DB postgres=isolated controls=staged modules=build-tree canonical_mutations=0"

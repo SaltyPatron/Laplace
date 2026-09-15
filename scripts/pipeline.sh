@@ -1100,9 +1100,10 @@ phase_runtime_secrets() {
 
 # The publish input domain: everything deploy.sh reads. app/ covers both
 # dotnet publish closures, web/ the SPA (openapi.json is generated FROM app/
-# content, so app/ subsumes it), deploy/ the script + unit + nginx material.
+# content, so app/ subsumes it), deploy/ the script + unit + nginx material,
+# and the original operational contracts copied by the decomposer project.
 fp_publish() {
-  fp_compute app web deploy scripts/check-uci-runtime.py
+  fp_compute app docs/INVENTION.md docs/INVENTIONS.md docs/specs web deploy scripts/check-uci-runtime.py
 }
 
 phase_publish() {
@@ -1124,7 +1125,7 @@ phase_publish() {
   fp=$(fp_publish)
   if fp_check publish "$fp" && [[ "$RUNTIME_SECRETS_CHANGED" == 0 && -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -x "$app_dir/laplace-lichess" && -d "$app_dir/wwwroot" ]] \
       && python3 "$ROOT/scripts/check-uci-runtime.py" "$app_dir/laplace-uci"; then
-    echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
+    echo "publish domain unchanged (app/ operational contracts/ web/ deploy/) and $app_dir intact — skipping deploy"
     mkdir -p "$ROOT/build"
     printf 'skipped' >"$ROOT/build/.publish-action"
     return 0

@@ -24,4 +24,14 @@
     <ProjectReference Include="..\Laplace.Substrate\Laplace.Substrate.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Copy the selected authority artifacts themselves. No generated lexical or ISA summaries. -->
+    <Content Include="../../docs/INVENTION.md;../../docs/INVENTIONS.md"
+             Link="seeds/operational/docs/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../docs/specs/05_Substrate_Invariants.txt;../../docs/specs/06_Engineering_Ruleset.txt;../../docs/specs/08_Record_vs_Calculate_Spec.txt;../../docs/specs/09_Substrate_LM_Synthesis.txt;../../docs/specs/11_Chess_Provenance_Consensus_Spec.txt;../../docs/specs/33_Perfcache_Blob_Law.md;../../docs/specs/34_Conversational_Provenance.md;../../docs/specs/36_Laplace_Forward_Pass.md;../../docs/specs/37_Substrate_Operation_ISA.md"
+             Link="seeds/operational/docs/specs/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -19,6 +19,8 @@ set(EXT_EXECUTION_SOURCES
     src/consensus_scan.c
     src/consensus_neighbors.c
     src/query_evidence.c
+    src/prompt_structure.c
+    src/task_shape.c
     src/cognition_program.c
     src/steer_candidates.c
     src/explore_web.c

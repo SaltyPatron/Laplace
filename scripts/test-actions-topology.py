@@ -53,6 +53,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             "run_dev",
             "run_install_and_db",
             "run_publish",
+            "run_repair_installed_corpus",
             "run_integration",
             "run_live_if_expected",
         ]
@@ -147,7 +148,7 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
         cls.root = Path(cls.scratch.name)
         (cls.root / ".github/workflows").mkdir(parents=True)
         (cls.root / "scripts").mkdir()
-        for name in ("actions-audit.py", "product-ci.sh", "pr-proof.sh", "bootstrap-laplace-runner.sh", "test-profile-registry.py", "test-profiles.json", "test-parallel.sh", "ci-policy.sh"):
+        for name in ("actions-audit.py", "product-ci.sh", "pr-proof.sh", "bootstrap-laplace-runner.sh", "test-profile-registry.py", "test-profiles.json", "test-parallel.sh", "ci-policy.sh", "maintain-installed-database.sh", "repair-legacy-content-lifecycle.sh"):
             shutil.copy2(ROOT / "scripts" / name, cls.root / "scripts" / name)
 
     @classmethod
@@ -175,6 +176,81 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
 
     def test_deferred_readiness_and_optional_baseline_are_accepted(self):
         self.check_audit()
+
+    def test_database_maintenance_cannot_bypass_managed_quiescence(self):
+        path = self.root / "scripts/product-ci.sh"
+        original = path.read_text()
+        try:
+            path.write_text(original.replace("python3 scripts/quiesce-managed-database.py", "python3 scripts/other.py"))
+            self.check_audit(diagnostic="one managed-quiescence owner")
+        finally:
+            path.write_text(original)
+
+    def test_database_maintenance_order_and_failure_propagation_are_required(self):
+        path = self.root / "scripts/maintain-installed-database.sh"
+        original = path.read_text()
+        reconcile = 'bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"'
+        migrate = 'bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env'
+        for mutation in (original.replace(migrate, ""), original.replace(reconcile, reconcile + " || true"),
+                         original.replace(migrate, "MIGRATION_PLACEHOLDER").replace(reconcile, migrate).replace("MIGRATION_PLACEHOLDER", reconcile)):
+            try:
+                path.write_text(mutation)
+                self.check_audit(diagnostic="maintenance sequence must migrate, reconcile, and verify once")
+            finally:
+                path.write_text(original)
+
+    def test_corpus_repair_requires_successful_publication_and_its_own_quiescence(self):
+        path = self.root / "scripts/product-ci.sh"
+        original = path.read_text()
+        repair = 'bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"'
+        mutations = (
+            (original.replace("\nrun_publish\n", "\nREPAIR_ORDER_PLACEHOLDER\n").replace("\nrun_repair_installed_corpus\n", "\nrun_publish\n").replace("\nREPAIR_ORDER_PLACEHOLDER\n", "\nrun_repair_installed_corpus\n"), "product lifecycle order drifted"),
+            (original.replace("\nrun_repair_installed_corpus\n", "\nrun_repair_installed_corpus || true\n"), "one unsuppressed lifecycle invocation"),
+            (original.replace(repair, repair + " || true"), "post-publication corpus repair"),
+            (original.replace('LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)"', 'LAPLACE_REPAIR_PUBLISHED_SOURCE="unknown"'), "post-publication corpus repair"),
+        )
+        for mutation, diagnostic in mutations:
+            with self.subTest(diagnostic=diagnostic):
+                try:
+                    self.assertNotEqual(original, mutation)
+                    path.write_text(mutation)
+                    self.check_audit(diagnostic=diagnostic)
+                finally:
+                    path.write_text(original)
+
+    def test_publication_recovery_cannot_restart_api_after_unknown_repair_transaction(self):
+        source = PRODUCT.read_text()
+        footer = "trap recover_publish EXIT\nrun_publish\n" + source.rsplit(
+            "trap recover_publish EXIT\nrun_publish\n", 1)[1]
+        recovery = "recover_publish() {" + source.split("recover_publish() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        script = """set -euo pipefail
+bash() { echo publication-recovery; }
+ensure_api_running() { echo API-START; }
+run_publish() { echo published; }
+run_repair_installed_corpus() { echo repair-transaction-unknown; return 37; }
+run_integration() { echo unexpected-integration; }
+run_live_if_expected() { echo unexpected-live; }
+run_perf() { echo unexpected-perf; }
+""" + recovery + footer
+        result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, timeout=10)
+        self.assertEqual(37, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(["published", "repair-transaction-unknown"], result.stdout.splitlines())
+        path = self.root / "scripts/product-ci.sh"
+        original = path.read_text()
+        try:
+            path.write_text(original.replace("\nrun_publish\ntrap - EXIT\n", "\nrun_publish\n"))
+            self.check_audit(diagnostic="publication recovery must end before repair")
+        finally:
+            path.write_text(original)
+
+    def test_database_repair_cannot_bypass_measurement_lane(self):
+        path = self.root / "scripts/repair-legacy-content-lifecycle.sh"
+        original = path.read_text()
+        try:
+            path.write_text(original.replace("bash scripts/measure-lane.sh --", "bash scripts/unlocked.sh --"))
+            self.check_audit(diagnostic="authoritative measurement lane")
+        finally:
+            path.write_text(original)
 
     def test_failed_proof_cannot_be_hidden_at_step_or_job(self):
         mutations = [

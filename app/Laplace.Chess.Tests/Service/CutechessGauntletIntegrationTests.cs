@@ -83,6 +83,7 @@ public sealed class CutechessGauntletIntegrationTests(ITestOutputHelper output)
 
         var pgnGames = ReadPgnTags(pgn);
         Assert.Equal(games.Count, pgnGames.Count);
+        Assert.False(string.IsNullOrWhiteSpace(pgnGames[0].Fen));
         Assert.Equal(pgnGames[0].Fen, pgnGames[1].Fen);
         for (int i = 0; i < games.Count; i++)
         {

@@ -62,6 +62,18 @@ endif()
 
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
 
+# The same production decoder is also testable with plain C and no perfcache
+# fixture: ParseStructure already contains exact IDs and schema delimiters.
+add_executable(laplace_ud_parse_tests test_ud_parse.c)
+target_link_libraries(laplace_ud_parse_tests PRIVATE laplace_core)
+add_test(NAME laplace_ud_parse_tests COMMAND laplace_ud_parse_tests)
+add_dependencies(laplace_core_tests laplace_ud_parse_tests)
+
+add_executable(laplace_task_shape_tests test_task_shape.c)
+target_link_libraries(laplace_task_shape_tests PRIVATE laplace_core)
+add_test(NAME laplace_task_shape_tests COMMAND laplace_task_shape_tests)
+add_dependencies(laplace_core_tests laplace_task_shape_tests)
+
 add_dependencies(laplace_core_tests laplace_t0_perfcache laplace_modality_number_perfcache)
 
 target_link_libraries(laplace_core_tests

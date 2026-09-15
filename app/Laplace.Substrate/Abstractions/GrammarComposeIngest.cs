@@ -21,7 +21,10 @@ public readonly record struct GrammarComposeRecord(
     // Present for physical source-file observations. Synthetic grammar records leave
     // this null and retain their grammar root as the record root.
     FileMetadata? FileMetadata = null,
-    byte[]? ObservedPromptUtf8 = null) : IIngestResidentRecord
+    byte[]? ObservedPromptUtf8 = null,
+    // A source's declared structural semantics reuse the retained native AST.
+    // The ordinary full-source grammar/file admission remains the record owner.
+    IGrammarWitness? StructureWitness = null) : IIngestResidentRecord
 {
     public long ResidentInputBytes => (Utf8?.LongLength ?? 0) + (ObservedPromptUtf8?.LongLength ?? 0);
 }
@@ -57,6 +60,14 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     {
         if (root == default) return;
         EmitConceptLinks(builder, record, root, _sourceId, _trust);
+        if (record.StructureWitness is { } witness)
+        {
+            if (!string.Equals(record.Modality, witness.ModalityId, StringComparison.Ordinal))
+                throw new InvalidOperationException("source witness grammar does not match the admitted source");
+            if (unit is not Unit native)
+                throw new InvalidOperationException("source witness requires the retained native grammar unit");
+            witness.WalkRow(native.WitnessContext(root), new RowContext(0, 1, root), builder);
+        }
     }
 
     private static void EmitConceptLinks(
@@ -102,6 +113,14 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         }
 
         public TierTree? TreeForBatchProbe => null;
+
+        public GrammarComposeContext WitnessContext(Hash128 root)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return new GrammarComposeContext(_record.Utf8,
+                _ast ?? throw new InvalidOperationException("source grammar is unavailable"),
+                root, _composer);
+        }
 
         public long ResidentBytes => checked((_composer?.ResidentBytes ?? 0)
             + (_promptComposer?.ResidentBytes ?? 0) + (_promptTree?.ResidentBytes ?? 0));

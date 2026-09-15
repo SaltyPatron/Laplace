@@ -237,7 +237,7 @@ else:
     product = PRODUCT.read_text(encoding="utf-8")
     required_order = [
         "run_policy", "run_deps", "run_build", "run_dev",
-        "run_install_and_db", "run_publish", "run_integration", "run_live_if_expected",
+        "run_install_and_db", "run_publish", "run_repair_installed_corpus", "run_integration", "run_live_if_expected",
     ]
     positions = [product.rfind(f"\n{name}\n") for name in required_order]
     if any(pos < 0 for pos in positions) or positions != sorted(positions):
@@ -245,7 +245,6 @@ else:
     for token in (
         "managed-publish.sh preflight",
         "pipeline.sh install",
-        "migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
         "check-database-health.sh",
         "ensure-foundation.sh --check-only",
         "check-substrate-floor.sh",
@@ -259,6 +258,36 @@ else:
     ):
         if token not in product:
             fail(f"product lifecycle missing {token}")
+    maintenance_path = ROOT / "scripts" / "maintain-installed-database.sh"
+    repair_path = ROOT / "scripts" / "repair-legacy-content-lifecycle.sh"
+    delegation = r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --\s+\\\s+bash scripts/maintain-installed-database\.sh'
+    if len(re.findall(delegation, product)) != 1 or product.count("maintain-installed-database.sh") != 1:
+        fail("installed database maintenance must have one managed-quiescence owner")
+    post_publish_repair = r'LAPLACE_REPAIR_PUBLISHED_SOURCE="\$\(git rev-parse HEAD\)" \\\s+python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --\s+\\\s+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)'
+    if len(re.findall(post_publish_repair, product)) != 1 or product.count("repair-legacy-content-lifecycle.sh") != 1:
+        fail("post-publication corpus repair must retain quiescence, source evidence, and failure propagation")
+    if product.splitlines().count("run_repair_installed_corpus") != 1:
+        fail("post-publication corpus repair must have one unsuppressed lifecycle invocation")
+    published_tail = product.rsplit("\nrun_publish\n", 1)[-1]
+    if not published_tail.startswith("trap - EXIT\n") or "recover_publish" in published_tail or "ensure_api_running" in published_tail:
+        fail("publication recovery must end before repair owns service restoration")
+    if not maintenance_path.exists() or not repair_path.exists():
+        fail("installed database maintenance or measurement-lane wrapper is missing")
+    else:
+        maintenance = maintenance_path.read_text(encoding="utf-8")
+        repair = repair_path.read_text(encoding="utf-8")
+        commands = (
+            'bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env',
+            'bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"',
+            'bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"',
+        )
+        lines = [line.strip() for line in maintenance.splitlines()]
+        positions = [lines.index(command) if lines.count(command) == 1 else -1 for command in commands]
+        if "set -euo pipefail" not in lines or any(pos < 0 for pos in positions) or positions != sorted(positions):
+            fail("installed database maintenance sequence must migrate, reconcile, and verify once")
+        measured = r'bash scripts/measure-lane\.sh --\s+\\\s+python3 scripts/repair-legacy-content\.py --database "\$database"'
+        if len(re.findall(measured, repair)) != 1 or "set -euo pipefail" not in repair:
+            fail("legacy content repair must execute inside the authoritative measurement lane")
     reconcile = product.split("reconcile_installed_product() {", 1)[1].split("\n}", 1)[0]
     if "ensure-foundation.sh" in reconcile or "ensure_product_foundation" in reconcile:
         fail("fast installed-product reconciliation may not auto-seed")

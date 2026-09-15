@@ -153,7 +153,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         _active = true;
         _lastProgressUtc = DateTime.MinValue;
         ReconcileOrphanedRuns();
-        Execute(
+        bool journaled = Execute(
             "INSERT INTO laplace.ingest_run_journal "
             + "(run_id, source_name, source_id, layer, status, files_total, input_units_total, evidence_persisted) "
             + "VALUES ($1, $2, laplace.source_id($2), $3, 'running', $4, $5, $6)",
@@ -166,9 +166,39 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = inventory?.TotalInputUnits ?? 0L });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });
+        if (journaled) WriteRequestedRunReceipt(sourceName, layerOrder);
         PersistArtifactInventory(sourceName, artifactGraph);
         AcquireLivenessLock();
         StartFileJournalPump();
+    }
+
+    private void WriteRequestedRunReceipt(string sourceName, int layerOrder)
+    {
+        string? path = Environment.GetEnvironmentVariable("LAPLACE_INGEST_RUN_RECEIPT_PATH");
+        if (string.IsNullOrWhiteSpace(path)) return;
+        string staging = path + "." + _runId.ToString("N") + ".pending";
+        try
+        {
+            // A caller owns a fresh path for this invocation. Publish only after the
+            // journal INSERT commits; never replace an older invocation's receipt.
+            string json = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                run_id = _runId,
+                source_name = sourceName,
+                source_id = Convert.ToHexString(SubstrateCanonicalIds.Source(sourceName).ToBytes())
+                    .ToLowerInvariant(),
+                layer = layerOrder,
+            });
+            using (var stream = new FileStream(staging, FileMode.CreateNew, FileAccess.Write))
+            using (var writer = new StreamWriter(stream))
+                writer.Write(json);
+            File.Move(staging, path, overwrite: false);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"INGEST_RUN_RECEIPT_WRITE_FAILED run={_runId} error=[{ex.GetType().Name}] {ex.Message}");
+        }
     }
 
     private void PersistArtifactInventory(string sourceName, IngestArtifactGraph? artifactGraph)
@@ -929,7 +959,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     private static void AddParameter(NpgsqlBatchCommand command, object value, NpgsqlDbType type) =>
         command.Parameters.Add(new NpgsqlParameter { Value = value, NpgsqlDbType = type });
 
-    private void Execute(string sql, Action<NpgsqlCommand> bind, string failTag = "INGEST_RUN_JOURNAL_WRITE_FAILED")
+    private bool Execute(string sql, Action<NpgsqlCommand> bind, string failTag = "INGEST_RUN_JOURNAL_WRITE_FAILED")
     {
         try
         {
@@ -938,11 +968,13 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             cmd.CommandText = sql;
             bind(cmd);
             cmd.ExecuteNonQuery();
+            return true;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine(
                 $"{failTag} run={_runId} error=[{ex.GetType().Name}] {ex.Message}");
+            return false;
         }
     }
 }

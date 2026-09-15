@@ -11,6 +11,7 @@ WALK_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_te
 WALK_CONTINUATIONS_PATH = ROOT / "extension/laplace_substrate/sql/functions/generation/walk_continuations.sql.in"
 CHAT_PATH = ROOT / "extension/laplace_substrate/sql/functions/converse/chat.sql.in"
 COGNITION_COMPLETION_PATH = ROOT / "extension/laplace_substrate/tests/sql/cognition_completion.sql"
+OPERATIONAL_MEMORY_PATH = ROOT / "extension/laplace_substrate/tests/sql/operational_memory.sql"
 REGRESS_CMAKE_PATH = ROOT / "extension/laplace_substrate/tests/CMakeLists.txt"
 
 
@@ -41,6 +42,7 @@ def main() -> int:
     walk_continuations = strip_sql_comments(WALK_CONTINUATIONS_PATH.read_text())
     chat = strip_sql_comments(CHAT_PATH.read_text())
     cognition_completion = COGNITION_COMPLETION_PATH.read_text()
+    operational_memory = OPERATIONAL_MEMORY_PATH.read_text()
     regress_cmake = REGRESS_CMAKE_PATH.read_text()
 
     assert "CREATE OR REPLACE FUNCTION" not in frontier
@@ -76,14 +78,24 @@ def main() -> int:
 
     # Full program is the only C whole-prompt execution. Compatibility trace and
     # identity output are SQL projections of that exact invocation contract.
-    full_program = function_slice(
-        walk_continuations, "generation.forward_program", "generation.forward_trace")
+    program_definitions = list(re.finditer(
+        r"CREATE OR REPLACE FUNCTION generation\.forward_program\(", walk_continuations))
+    assert len(program_definitions) == 2, "natural and explicitly bound calls share one native program"
+    full_program = walk_continuations[program_definitions[0].start():program_definitions[1].start()]
+    bound_read = function_slice(
+        walk_continuations[program_definitions[1].start():],
+        "generation.forward_program", "generation.forward_trace")
     trace_sql = function_slice(
         walk_continuations, "generation.forward_trace", "generation.forward_prompt")
     prompt_sql = function_slice(
         walk_continuations, "generation.forward_prompt", "generation.forward_walk_continuations")
     assert "'pg_laplace_forward_trace'" in full_program
     assert "LANGUAGE C VOLATILE" in full_program
+    assert "p_invocation_context" not in full_program
+    assert "p_invocation_context bytea" in bound_read
+    assert "DEFAULT" not in bound_read
+    assert "'pg_laplace_forward_trace'" in bound_read
+    assert "LANGUAGE C VOLATILE" in bound_read
     for field in (
         "program_id bytea", "required_obligations int", "satisfied_obligations int",
         "remaining_required int", "completion boolean", "disposition text",
@@ -104,21 +116,43 @@ def main() -> int:
     assert "laplace_query_state_create(" in program
     assert "laplace_query_state_extend(query_state, selected" in program
     assert "laplace_query_state_extend(output_state, selected" in program
-    assert "laplace_prompt_intent_compile(input, CurrentMemoryContext)" in entry
-    assert "intent.relation_count > 0 ? &intent : NULL" in entry
-    assert "laplace_prompt_intent_has_relation(" in program
+    assert "laplace_prompt_intent_compile(" not in entry, \
+        "prompt admission cannot choose an operation before the substrate responds"
+    assert "laplace_prompt_intent_bound_operation(intent, channel)" in program
     assert "candidate_is_intent_result(" in program
-    assert "walk_continuations(" in entry and "intent.relation_count > 0 ? &intent : NULL" in entry
+    assert "walk_continuations(" in entry
     assert "laplace_trajectory_scope_bind_input(trajectory_scope, input)" in program
 
     intent_header = (ROOT / "extension/laplace_substrate/src/prompt_intent.h").read_text()
-    assert "laplace_relation_table_count" in intent_header
-    assert "laplace_relation_table[r].canonical" in intent_header
-    assert 'return "opposite"' in intent_header
-    assert 'strcmp(segment, "antonym")' in intent_header
-    assert "laplace_content_root_id(" in intent_header
-    assert "laplace_relation_type_id(canonical, &relation_id)" in intent_header
-    assert "cold" not in intent_header.lower()
+    # Naming/sense evidence remains data in the response field. Execution needs
+    # a source/context-attributed whole-root invocation with exact input records;
+    # naming an operation and finding an answer is not an invocation contract.
+    assert "LaplaceQueryChannel" in intent_header
+    assert "laplace_prompt_intent_couple(" in program
+    assert "cue_origins" not in intent_header
+    assert "operand_origins" in intent_header and "call_witness" in intent_header
+    assert "laplace_prompt_operation_input(operation, &channel->anchor)" in intent_header, \
+        "output must originate at an exact declared input"
+    assert "laplace_prompt_same_scope(" in intent_header
+    assert "hash128_eq(&a->source, &b->source)" in intent_header
+    assert "hash128_eq(&a->context, &b->context)" in intent_header
+    assert "hash128_eq(&row->subject, &read->intent->root)" in intent_header
+    assert "read->active_context" in intent_header
+    assert "laplace_observation_read(roots, NULL, types, 1," in intent_header
+    assert "laplace_consensus_scan(roots, objects, types," in intent_header
+    assert "budget_exhausted" in intent_header
+    assert "LAPLACE_ATTESTATION_OUTCOME_CONFIRM" in intent_header
+    assert "LAPLACE_ATTESTATION_OUTCOME_REFUTE" in intent_header
+    for retired in (
+        "laplace_relation_table[r].canonical",
+        "laplace_prompt_intent_alias", "pg_ascii_tolower", "laplace_content_root_id(",
+        '"opposite"', '"define"',
+    ):
+        assert retired not in intent_header, f"compiled lexical dispatch returned: {retired}"
+    assert "relation_types = intent->relations" not in program
+    assert program.index("query_state = laplace_query_state_create(") < \
+        program.index("laplace_prompt_intent_couple("), \
+        "the first typed substrate response must precede operational interpretation"
 
     # Structural and semantic providers may contribute ancestry to the same
     # selected identity, but structural ancestry alone must never satisfy a
@@ -144,10 +178,15 @@ def main() -> int:
     completion = (ROOT / "extension/laplace_substrate/src/cognition_program.c").read_text()
     completion_header = (ROOT / "extension/laplace_substrate/src/cognition_program.h").read_text()
     assert "tiers[node] >= 2" in completion
-    assert "program->required = bms_copy(compiled_required ? compiled_required : eligible)" in completion
-    assert "bms_num_members(compiled_required) <= operator_count" in completion
-    assert "program_operation_relation(" in completion
-    assert "program->operation_origins" in completion
+    assert "program->required = bms_add_members(bms_copy(eligible), compiled_required)" in completion, \
+        "binding an operation cannot erase unresolved prompt constituents"
+    assert "cue_origins" not in completion
+    assert "operation->operand_origins" in completion
+    assert "laplace_prompt_operation_input(operation, &channel->anchor)" in completion
+    assert "program->invocation_required" in completion
+    assert "program->invocation_results" in completion
+    assert "program->operation_origins" not in completion, \
+        "one operation must not discharge another operation's cue through a merged bitmap"
     assert "semantic_origins" in completion
     assert "semantic_origin_add(program, &id, i)" in completion
     assert "semantic_origin_get(program, &input->root, true)" in completion
@@ -160,13 +199,36 @@ def main() -> int:
     assert "program->semantic_output_count <= 0" in completion
     assert "laplace:semantic-act:v1" in completion
     assert "LAPLACE_COGNITION_BUDGET_EXHAUSTED" in completion_header
-    assert "keyword" in completion_header.lower(), \
-        "completion contract must explicitly reject prompt keyword classification"
+    assert "LAPLACE_COGNITION_AMBIGUOUS" in completion_header
+    assert "const struct LaplacePromptIntent *intent" in completion_header, \
+        "completion must receive the source-witnessed invocation and input records"
 
     # Runtime regressions are part of the executable DB suite: the whole prompt
     # trunk must satisfy the whole request when typed evidence says so, and
     # routed typed state must carry that grounding into a later result relation.
     assert re.search(r"set\(REGRESS_TESTS\b[^\n]*\bcognition_completion\b", regress_cmake)
+    assert re.search(r"set\(REGRESS_TESTS\b[^\n]*\boperational_memory\b", regress_cmake)
+    assert "DO $operational_memory$" in operational_memory
+    assert "INSERT INTO laplace.attestations" in operational_memory
+    assert "DELETE FROM laplace.consensus" in operational_memory
+    assert "families < 2" in operational_memory
+    assert "disposition IS DISTINCT FROM 'ambiguous'" in operational_memory
+    assert "ARRAY[defines_id]" in operational_memory
+    assert "DO $separate_input_obligations$" in operational_memory
+    assert "DO $admitted_operation_relation$" in operational_memory
+    assert "DO $multilingual_semantic_input$" in operational_memory
+    assert "first_surface,senses_id,semantic_input" in operational_memory
+    assert "second_surface,senses_id,semantic_input" in operational_memory
+    assert "'alias plus available result'" in operational_memory
+    assert "'natural observation with a stored contract'" in operational_memory
+    assert "'wrong supplied invocation context'" in operational_memory
+    assert "'mismatched context'" in operational_memory
+    assert "'mismatched source'" in operational_memory
+    assert "'changed word order'" in operational_memory
+    assert "'mention inside another observation'" in operational_memory
+    assert "ARRAY[changed_answer]" in operational_memory
+    assert "p_fanout=>1" in operational_memory
+    assert "NULL,p_output,p_context) p" in operational_memory
     assert "DO $whole_trunk_grounding$" in cognition_completion
     assert "FROM converse.prompt_tree(prompt)" in cognition_completion
     assert "ARRAY[causes_id]" in cognition_completion
@@ -225,7 +287,7 @@ def main() -> int:
         "FORWARD_PROMPT_ANALYSIS_OK "
         f"obligations=native semantic_act=hash-bound realization=completion-gated "
         f"query_state=persistent candidate_evidence=exact evidence=typed-separate "
-        f"intent=manifest-typed execution=single-native-program route_owner=native chat_steps={steps}"
+        f"intent=explicit-witnessed-invocation execution=single-native-program route_owner=native chat_steps={steps}"
     )
     return 0
 

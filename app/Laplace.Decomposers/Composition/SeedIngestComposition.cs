@@ -8,6 +8,7 @@ using Laplace.Decomposers.Media;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.OpenSubtitles;
+using Laplace.Decomposers.Operational;
 using Laplace.Decomposers.PropBank;
 using Laplace.Decomposers.SemLink;
 using Laplace.Decomposers.Tatoeba;
@@ -39,6 +40,7 @@ public static class SeedIngestComposition
     [
         ("unicode", typeof(UnicodeDecomposer)),
         ("iso639", typeof(ISODecomposer)),
+        ("operational", typeof(OperationalDecomposer)),
         ("atomic2020", typeof(Atomic2020Decomposer)),
         ("conceptnet", typeof(ConceptNetDecomposer)),
         ("wiktionary", typeof(WiktionaryDecomposer)),

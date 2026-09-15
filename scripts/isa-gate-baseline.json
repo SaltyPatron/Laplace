@@ -231,7 +231,7 @@
       "app/Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs::INHERITS_FROM": 1,
       "app/Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs::PERSPECTIVE_ON": 1,
       "app/Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs::PRECEDES": 1,
-      "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::EVOKES_FRAME": 2,
+      "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::EVOKES_FRAME": 1,
       "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::HAS_DEFINITION": 1,
       "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::HAS_EXAMPLE": 1,
       "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::HAS_VALENCE_PATTERN": 1,

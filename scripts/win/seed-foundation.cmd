@@ -7,7 +7,7 @@ set "ERR=0"
 
 echo ===== seed-foundation started %DATE% %TIME% =====
 
-for %%S in (unicode iso639 cili wordnet verbnet propbank framenet mapnet wordframenet semlink) do (
+for %%S in (unicode iso639 operational cili wordnet verbnet propbank framenet mapnet wordframenet semlink) do (
   echo.
   echo ==== %%S %TIME% ====
   call "%~dp0seed-step.cmd" %%S

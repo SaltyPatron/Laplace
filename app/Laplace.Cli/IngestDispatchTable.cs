@@ -45,6 +45,7 @@ internal static class IngestDispatchTable
         "framenet",
         "mapnet",
         "omw",
+        "operational",
         "opensubtitles",
         "propbank",
         "semlink",

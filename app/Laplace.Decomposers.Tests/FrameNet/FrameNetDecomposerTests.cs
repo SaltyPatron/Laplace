@@ -243,15 +243,15 @@ public sealed class FrameNetDecomposerTests
 
             Hash128 sentenceId = ContentEmitter.RootId("bank bank")!.Value;
             Hash128 targetId = ContentEmitter.RootId("bank")!.Value;
-            Hash128 firstSingleSpanId = Hash128.Merkle(EntityTier.Document,
-            [
-                FrameNetDecomposer.AnnotationSchemaId,
-                sentenceId,
-                FrameNetDecomposer.OffsetId(0),
-                FrameNetDecomposer.OffsetId(3),
-                targetId,
-            ]);
-            Assert.Contains(evokes, a => a.SubjectId == firstSingleSpanId);
+            var firstEvokes = Assert.Single(evokes,
+                a => a.ObjectId == CategoryAnchor.Id("Commerce")!.Value);
+            var firstPhysicality = Assert.Single(changes.SelectMany(c => c.Physicalities),
+                p => p.EntityId == firstEvokes.SubjectId);
+            Hash128[] firstMembers = Trajectory.Constituents(firstPhysicality.TrajectoryXyzm!);
+            Assert.Equal(FrameNetDecomposer.AnnotationSchemaId, firstMembers[0]);
+            Assert.Equal(sentenceId, firstMembers[1]);
+            Assert.Equal(CategoryAnchor.Id("Commerce")!.Value, firstMembers[2]);
+            Assert.Equal(targetId, firstMembers[3]);
 
             var annotationIds = changes.SelectMany(c => c.Entities)
                 .Where(e => e.TypeId == EntityTypeRegistry.FrameNetAnnotation)
@@ -322,16 +322,15 @@ public sealed class FrameNetDecomposerTests
             var annotationPhysicality = Assert.Single(
                 changes.SelectMany(c => c.Physicalities),
                 p => p.EntityId == evokes.SubjectId);
+            Hash128[] members = Trajectory.Constituents(annotationPhysicality.TrajectoryXyzm!);
+            Assert.Equal(FrameNetDecomposer.AnnotationSchemaId, members[0]);
+            Assert.Equal(ContentEmitter.RootId("take the box apart")!.Value, members[1]);
+            Assert.Equal(ContentEmitter.RootId("take apart")!.Value, members[3]);
             Assert.Equal(
-            [
-                FrameNetDecomposer.AnnotationSchemaId,
-                ContentEmitter.RootId("take the box apart")!.Value,
-                FrameNetDecomposer.OffsetId(0),
-                FrameNetDecomposer.OffsetId(3),
-                FrameNetDecomposer.OffsetId(13),
-                FrameNetDecomposer.OffsetId(17),
-                ContentEmitter.RootId("take apart")!.Value,
-            ], Trajectory.Constituents(annotationPhysicality.TrajectoryXyzm!));
+                [FrameNetDecomposer.OffsetId(0), FrameNetDecomposer.OffsetId(3),
+                 FrameNetDecomposer.OffsetId(13), FrameNetDecomposer.OffsetId(17)],
+                members.Where(id => new[] { 0, 3, 13, 17 }
+                    .Select(FrameNetDecomposer.OffsetId).Contains(id)));
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }

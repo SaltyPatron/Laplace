@@ -282,7 +282,7 @@ public static partial class CutechessRunner
 
         if (options.PairOpenings)
         {
-            if (!TryPrepareOpeningSuite(options, out var openingPath, out var openingCount, out var error))
+            if (!TryPrepareOpeningSuite(options, out var openingPath, out var openingCount, out var availableOpeningLines, out var error))
             {
                 yield return new ChessLabLogEvent("error", error!);
                 yield return new ChessLabDoneEvent(ChessLabJobState.Failed, error);
@@ -290,7 +290,7 @@ public static partial class CutechessRunner
             }
             options = options with { OpeningsFile = openingPath };
             yield return new ChessLabLogEvent("info",
-                $"paired opening suite: {openingCount} positions × 2 colours ({openingPath})");
+                $"paired opening suite: {openingCount} requested positions × 2 colours; {availableOpeningLines} nonempty EPD input lines available ({openingPath})");
         }
 
         var catalog = ChessLabPaths.Catalog;
@@ -397,19 +397,37 @@ public static partial class CutechessRunner
 
     private static string ResolveOpeningsPath(CutechessOptions o)
     {
-        if (!string.IsNullOrWhiteSpace(o.OpeningsFile)) return o.OpeningsFile;
+        if (!string.IsNullOrWhiteSpace(o.OpeningsFile)) return Path.GetFullPath(o.OpeningsFile);
         string dir = Path.GetDirectoryName(o.PgnOut) is { Length: > 0 } p ? p : Environment.CurrentDirectory;
         return Path.Combine(dir, "openings.epd");
     }
 
-    private static bool TryPrepareOpeningSuite(
-        CutechessOptions o, out string path, out int openingCount, out string? error)
+    internal static bool TryPrepareOpeningSuite(
+        CutechessOptions o, out string path, out int openingCount, out int availableOpeningLines, out string? error)
     {
-        path = ResolveOpeningsPath(o);
+        path = o.OpeningsFile ?? "";
         openingCount = o.Rounds / 2;
+        availableOpeningLines = 0;
         error = null;
         try
         {
+            path = ResolveOpeningsPath(o);
+            if (!string.IsNullOrWhiteSpace(o.OpeningsFile))
+            {
+                // The selected EPD is operator-owned input. Inventory framing only;
+                // Cute Chess owns EPD parsing and validation of the chess positions.
+                if (!File.Exists(path))
+                    throw new FileNotFoundException("selected EPD input does not exist", path);
+                if (string.Equals(path, Path.GetFullPath(o.PgnOut),
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    throw new IOException("selected EPD input must differ from the PGN output path");
+                availableOpeningLines = File.ReadLines(path).Count(line => !string.IsNullOrWhiteSpace(line));
+                if (availableOpeningLines < openingCount || availableOpeningLines == 0)
+                    throw new InvalidDataException(
+                        $"selected EPD input has {availableOpeningLines} nonempty EPD input lines; {openingCount} paired positions were requested");
+                return true;
+            }
+
             var fens = new List<string>(openingCount);
             try
             {
@@ -428,11 +446,12 @@ public static partial class CutechessRunner
             string? dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllLines(path, fens.Take(openingCount).Select(ToEpd));
+            availableOpeningLines = openingCount;
             return true;
         }
         catch (Exception ex)
         {
-            error = $"could not materialize paired opening suite '{path}': {ex.Message}";
+            error = $"could not prepare paired opening suite '{path}': {ex.Message}";
             return false;
         }
     }
