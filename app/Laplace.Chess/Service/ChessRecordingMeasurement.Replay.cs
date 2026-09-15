@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using global::Npgsql;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -27,18 +28,52 @@ internal sealed partial class ChessRecordingMeasurement
         && Writer.AttestationsInserted == 0 && ReplayScopes.Count > 0
         && ReplayScopes.All(s => s.Unchanged && ScopeRowsEqual(s.Before, s.After));
 
-    internal void ValidateRetainedMatch(string json)
+    // This is a typed projection of CutechessExperimentReceipt written by this
+    // service. Source PGN still enters through the registered native grammar;
+    // replay transport does not inspect or decompose a source JSON container.
+    private sealed record RetainedMatchReceipt(
+        [property: JsonRequired] string? ExperimentId,
+        [property: JsonRequired] string? MatchState,
+        [property: JsonRequired] bool ArtifactIdentitiesUnchanged,
+        [property: JsonRequired] ChessLabGameEvent[]? Games,
+        [property: JsonRequired] RetainedCommandReceipt? Command);
+
+    private sealed record RetainedCommandReceipt([property: JsonRequired] string[]? Arguments);
+
+    private static RetainedMatchReceipt ReadRetainedMatch(string json)
     {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        var games = root.GetProperty("games").Deserialize<ChessLabGameEvent[]>(options)
-            ?? throw new InvalidDataException("retained experiment game inventory is absent");
-        var arguments = root.GetProperty("command").GetProperty("arguments").Deserialize<string[]>(options);
-        if (!Enum.TryParse<ChessLabJobState>(root.GetProperty("matchState").GetString(), out var state))
+        RetainedMatchReceipt? receipt;
+        try
+        {
+            receipt = JsonSerializer.Deserialize<RetainedMatchReceipt>(json,
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        }
+        catch (JsonException error)
+        {
+            throw new InvalidDataException("retained experiment receipt has an invalid transport shape", error);
+        }
+        if (receipt?.Games is null || receipt.Games.Any(g => g is null)
+            || receipt.Command?.Arguments is null)
+            throw new InvalidDataException("retained experiment game inventory or command is absent");
+        return receipt;
+    }
+
+    internal static ChessRecordingMeasurement FromRetainedMatch(string experimentId, string json)
+    {
+        var receipt = ReadRetainedMatch(json);
+        var measurement = new ChessRecordingMeasurement(experimentId, receipt.Games!.Length, retainedPgn: true);
+        measurement.ValidateRetainedMatch(receipt);
+        return measurement;
+    }
+
+    internal void ValidateRetainedMatch(string json) => ValidateRetainedMatch(ReadRetainedMatch(json));
+
+    private void ValidateRetainedMatch(RetainedMatchReceipt receipt)
+    {
+        if (!Enum.TryParse<ChessLabJobState>(receipt.MatchState, out var state))
             throw new InvalidDataException("retained experiment state is invalid");
-        ValidateMatchObservation(root.GetProperty("experimentId").GetString(), state,
-            root.GetProperty("artifactIdentitiesUnchanged").GetBoolean(), games, arguments);
+        ValidateMatchObservation(receipt.ExperimentId, state,
+            receipt.ArtifactIdentitiesUnchanged, receipt.Games!, receipt.Command!.Arguments);
     }
 
     internal async Task<ScopeRequest> ReadScopeBeforeAsync(NpgsqlDataSource ds,

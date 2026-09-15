@@ -90,5 +90,50 @@ public sealed class ChessRecordingReplayTests
         Assert.Throws<InvalidDataException>(() => new ChessRecordingMeasurement("match", 2, true).ValidateRetainedMatch(json));
         Assert.Throws<InvalidDataException>(() => new ChessRecordingMeasurement("match", 1, true)
             .ValidateRetainedMatch(json.Replace("Completed", "Failed", StringComparison.Ordinal)));
+        var fromTransport = ChessRecordingMeasurement.FromRetainedMatch("match", json);
+        Assert.Equal("match", fromTransport.ExperimentId);
+        Assert.Equal(1, fromTransport.RequestedGames);
+        Assert.Null(fromTransport.Durability);
+        Assert.False(fromTransport.IsVerifiedNoOpReplay);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{invalid")]
+    [InlineData("experimentId")]
+    [InlineData("matchState")]
+    [InlineData("artifactIdentitiesUnchanged")]
+    [InlineData("games")]
+    [InlineData("command")]
+    [InlineData("arguments")]
+    [InlineData("null-games")]
+    [InlineData("null-game")]
+    [InlineData("null-command")]
+    [InlineData("null-arguments")]
+    [InlineData("invalid-state")]
+    [InlineData("string-unchanged")]
+    public void TypedRetainedReceiptRejectsIncompleteOrMalformedTransport(string mutation)
+    {
+        var receipt = new Dictionary<string, object?>
+        {
+            ["experimentId"] = "match", ["matchState"] = "Completed",
+            ["artifactIdentitiesUnchanged"] = true,
+            ["command"] = new Dictionary<string, object?> { ["arguments"] = new[] { "-each", "depth=4" } },
+            ["games"] = new[] { new { index = 1, white = "Laplace", black = "Stockfish", result = "1-0 (White mates)" } },
+        };
+        switch (mutation)
+        {
+            case "null-games": receipt["games"] = null; break;
+            case "null-game": receipt["games"] = new object?[] { null }; break;
+            case "null-command": receipt["command"] = null; break;
+            case "null-arguments": ((Dictionary<string, object?>)receipt["command"]!)["arguments"] = null; break;
+            case "arguments": ((Dictionary<string, object?>)receipt["command"]!).Remove("arguments"); break;
+            case "invalid-state": receipt["matchState"] = "NotAState"; break;
+            case "string-unchanged": receipt["artifactIdentitiesUnchanged"] = "true"; break;
+            default: receipt.Remove(mutation); break;
+        }
+        string json = mutation is "null" or "[]" or "{invalid" ? mutation : JsonSerializer.Serialize(receipt);
+        Assert.Throws<InvalidDataException>(() => ChessRecordingMeasurement.FromRetainedMatch("match", json));
     }
 }

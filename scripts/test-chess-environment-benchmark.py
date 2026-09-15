@@ -3,6 +3,7 @@
 import argparse
 import copy
 import hashlib
+import http.server
 import importlib.util
 import io
 import json
@@ -10,6 +11,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -286,16 +288,84 @@ ActiveEnterTimestampMonotonic=2000000
         with self.assertRaises(ValueError):
             bench.gpu_observations("0, incomplete")
 
+    @staticmethod
+    def lichess_status():
+        return {"configured": True, "running": True, "connected": True, "substrate": True,
+                "depth": 8, "maxConcurrent": 2, "gamesRecorded": 17, "error": None,
+                "tokenPreview": "private-preview", "recentLog": ["private-chat"],
+                "account": {"tokenValid": True, "botAccount": True, "botPlayScope": True,
+                            "username": "private-account", "error": None, "ready": True}}
+
+    def test_lichess_status_requires_actual_account_and_stream_without_retaining_secrets(self):
+        class Response(io.BytesIO):
+            code = 200
+        class Opener:
+            def __init__(self, body, code=200): self.body, self.code = body, code
+            def open(self, request, timeout):
+                reply = Response(json.dumps(self.body).encode())
+                reply.code = self.code
+                return reply
+        body = self.lichess_status()
+        observed = bench.lichess_readiness(1, Opener(body))
+        self.assertTrue(observed["ready"])
+        self.assertEqual(17, observed["observed"]["gamesRecorded"])
+        self.assertNotIn("private-", json.dumps(observed))
+        self.assertEqual(hashlib.sha256(json.dumps(body).encode()).hexdigest(), observed["response_sha256"])
+        for changed in ({**body, "running": False}, {**body, "connected": False},
+                        {**body, "configured": False}, {**body, "account": None},
+                        {**body, "error": "private-error"}):
+            result = bench.lichess_readiness(1, Opener(changed))
+            self.assertFalse(result["ready"])
+            self.assertEqual("not-ready", result["status"])
+            self.assertNotIn("private-", json.dumps(result))
+        self.assertFalse(bench.lichess_readiness(1, Opener(body, 503))["ready"])
+        for changed in ({**body, "running": "true"}, {**body, "gamesRecorded": True},
+                        {**body, "account": {**body["account"], "botPlayScope": False}},
+                        {**body, "account": {**body["account"], "tokenValid": 1}},
+                        {**body, "account": {**body["account"], "username": ""}},
+                        {**body, "recentLog": ["x" * 65536]}):
+            result = bench.lichess_readiness(1, Opener(changed))
+            self.assertFalse(result["ready"])
+            self.assertEqual("unavailable", result["status"])
+
+    def test_lichess_probe_uses_only_existing_status_get_on_actual_http_transport(self):
+        body = self.lichess_status()
+        seen = []
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                seen.append((self.command, self.path, self.headers.get("Authorization")))
+                payload = json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+        with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                with patch.dict(os.environ, {"LAPLACE_API_KEY": "fixture-key"}):
+                    result = bench.lichess_readiness(2, base=f"http://127.0.0.1:{server.server_port}")
+            finally:
+                server.shutdown()
+                worker.join(timeout=2)
+        self.assertTrue(result["ready"])
+        self.assertEqual([("GET", "/chess/lichess/status", "Bearer fixture-key")], seen)
+        self.assertNotIn("fixture-key", json.dumps(result))
+
     def test_missing_service_manager_and_gpu_utility_are_reported_without_starting_services(self):
         with patch.object(bench.subprocess, "run", side_effect=FileNotFoundError("systemctl")) as run, \
                 patch.object(bench.shutil, "which", return_value=None), \
-                patch.object(bench, "http_readiness", return_value={"ready": False}):
+                patch.object(bench, "http_readiness", return_value={"ready": False}), \
+                patch.object(bench, "lichess_readiness", return_value={"ready": False, "status": "not-ready"}) as online:
             result = bench.runtime_capabilities(time.monotonic() + 2)
         self.assertFalse(result["service_mutations_performed"])
         self.assertFalse(result["application_startup_measured"])
         self.assertEqual(result["systemd"]["status"], "unavailable")
         self.assertFalse(result["nvidia"]["utility_installed"])
         self.assertFalse(result["nvidia"]["compute_execution_measured"])
+        self.assertEqual({"ready": False, "status": "not-ready"}, result["lichess_readiness"])
+        self.assertEqual("http://127.0.0.1:5187", online.call_args.kwargs["base"])
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[0][:2], ["systemctl", "show"])
         self.assertNotIn("Environment", run.call_args.args[0][3].split(","))

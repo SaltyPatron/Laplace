@@ -6,10 +6,14 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
+import tempfile
+import time
 import unittest
-from io import BytesIO
+from contextlib import redirect_stdout, redirect_stderr
+from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -56,6 +60,204 @@ class _Response(BytesIO):
 
 
 class EvalOperationLaneTests(unittest.TestCase):
+    @staticmethod
+    def diagnostic_rows(event="unresolved", **changes):
+        return [{"event": "route", "entity": "\\x" + "12" * 16, "declared_result": False}, {
+            "event": event, "completion": event == "complete", "disposition": "exhausted",
+            "required_obligations": 3, "satisfied_obligations": 0,
+            "remaining_required": 3, "output_count": 0, **changes}]
+
+    @staticmethod
+    def diagnostic_op(rows):
+        def read(_api, name, args, **limits):
+            if name == "public.laplace_hash128_blake3":
+                return [{"laplace_hash128_blake3": "\\x" + "89" * 16}]
+            if name == "hash128_lo":
+                return [{"hash128_lo": -123}]
+            return rows
+        return read
+
+    def test_failure_diagnostic_uses_native_seed_and_preserves_both_terminal_receipts(self):
+        module = _load_eval_generation()
+        rows = self.diagnostic_rows()
+        probes = [{"id": "failure", "class": "forward", "prompt": "What is a glacier?"}]
+        with patch.object(module, "op_rows", side_effect=self.diagnostic_op(rows)) as read:
+            report = module.collect_forward_diagnostics("http://laplace", probes)
+        self.assertEqual(4, read.call_count)
+        self.assertEqual({"data": "\\x" + probes[0]["prompt"].encode().hex()}, read.call_args_list[0].args[2])
+        self.assertEqual(["normal", "wider"], [row["configuration"] for row in report["executions"]])
+        for item, bounds in zip(report["executions"], [(2, 8), (8, 32)]):
+            self.assertEqual("retained", item["status"])
+            self.assertEqual(rows, item["rows"])
+            self.assertEqual(rows[-1], item["terminal"])
+            args = item["arguments"]
+            self.assertEqual((128, 5, 0.6, 10, -123), tuple(args[key] for key in
+                ("p_steps", "p_max_stride", "p_spread", "p_top_k", "p_seed")))
+            self.assertEqual(bounds, (args["p_hops"], args["p_fanout"]))
+            self.assertIsNone(args["p_prior_frontier"])
+            self.assertIsNone(args["p_output_relation_types"])
+        self.assertFalse(report["executions"][0]["terminal"]["completion"])
+
+    def test_failure_diagnostic_retains_exact_completed_control_without_rewriting_failure(self):
+        module = _load_eval_generation()
+        rows = self.diagnostic_rows("complete", disposition="complete", satisfied_obligations=3,
+                                    remaining_required=0, output_count=1)
+        probe = {"id": "control", "class": "forward", "prompt": "The opposite of hot is"}
+        with patch.object(module, "op_rows", side_effect=self.diagnostic_op(rows)):
+            report = module.collect_forward_diagnostics("http://laplace", [probe])
+        self.assertEqual(rows[-1], report["executions"][0]["terminal"])
+        self.assertNotIn("ok", report)
+
+    def test_failure_diagnostic_rejects_missing_duplicate_and_malformed_terminal_rows(self):
+        module = _load_eval_generation()
+        probe = {"class": "forward", "prompt": "Water is made of"}
+        for rows in ([], self.diagnostic_rows() * 2,
+                     self.diagnostic_rows(completion="false"),
+                     self.diagnostic_rows(remaining_required=True)):
+            with self.subTest(rows=rows), patch.object(module, "op_rows", side_effect=self.diagnostic_op(rows)):
+                report = module.collect_forward_diagnostics("http://laplace", [probe])
+            self.assertTrue(all(item["status"] == "unavailable" for item in report["executions"]))
+            self.assertEqual(rows, report["executions"][0]["rows"])
+
+    def test_failure_diagnostic_records_unavailable_or_truncated_ops_and_continues(self):
+        module = _load_eval_generation()
+        reader = self.diagnostic_op(self.diagnostic_rows())
+        def truncated(api, name, args, **limits):
+            if name == "generation.forward_program" and args["p_hops"] == 2:
+                raise module.LaplaceApiError("operation truncated at 2048 rows")
+            return reader(api, name, args, **limits)
+        with patch.object(module, "op_rows", side_effect=truncated):
+            report = module.collect_forward_diagnostics("http://laplace", [{"class":"forward","prompt":"dog"}])
+        self.assertEqual(["unavailable", "retained"], [item["status"] for item in report["executions"]])
+        self.assertIn("truncated", report["executions"][0]["error"])
+
+    def test_failure_diagnostic_enforces_prompt_and_retained_byte_limits(self):
+        module = _load_eval_generation()
+        probes = [{"id":str(i),"class":"forward","prompt":str(i)} for i in range(6)]
+        with patch.object(module, "op_rows", side_effect=self.diagnostic_op(self.diagnostic_rows())) as read:
+            report = module.collect_forward_diagnostics("http://laplace", probes + probes)
+        self.assertEqual(16, read.call_count)
+        self.assertEqual(2, len(report["omitted"]))
+        with patch.object(module, "DIAGNOSTIC_MAX_BYTES", 1), patch.object(
+                module, "op_rows", side_effect=self.diagnostic_op(self.diagnostic_rows())):
+            report = module.collect_forward_diagnostics("http://laplace", probes)
+        self.assertEqual("byte-budget-exhausted", report["status"])
+        self.assertNotIn("rows", report["executions"][0])
+
+    def test_failure_diagnostic_whole_deadline_interrupts_wait_and_restores_handler(self):
+        module = _load_eval_generation()
+        handler = signal.getsignal(signal.SIGALRM)
+        started = time.monotonic()
+        def stalled(*_args, **_kwargs):
+            time.sleep(2)
+            self.fail("deadline did not interrupt the operation")
+        # Exercise the real client retry boundary: a TimeoutError subclass would
+        # be caught and retried there after the one-shot alarm had already fired.
+        with patch.object(module, "DIAGNOSTIC_SECONDS", 0.03), patch("laplace_api.urlopen", side_effect=stalled):
+            report = module.collect_forward_diagnostics("http://laplace", [{"class":"forward","prompt":"dog"}])
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual("deadline-exhausted", report["status"])
+        self.assertEqual(handler, signal.getsignal(signal.SIGALRM))
+        self.assertEqual((0.0, 0.0), signal.getitimer(signal.ITIMER_REAL))
+
+    def test_failure_diagnostic_preserves_earlier_external_deadline_and_exception(self):
+        module = _load_eval_generation()
+        original = signal.getsignal(signal.SIGALRM)
+        error = TimeoutError("outer caller deadline")
+        calls = []
+        def outer(signum, frame):
+            calls.append(signum)
+            raise error
+        signal.signal(signal.SIGALRM, outer)
+        signal.setitimer(signal.ITIMER_REAL, 0.03)
+        started = time.monotonic()
+        try:
+            with patch.object(module, "DIAGNOSTIC_SECONDS", 0.4), patch(
+                    "laplace_api.urlopen", side_effect=lambda *_args, **_kwargs: time.sleep(2)), \
+                    self.assertRaises(TimeoutError) as stopped:
+                module.collect_forward_diagnostics("http://laplace", [{"class":"forward","prompt":"dog"}])
+            self.assertIs(error, stopped.exception)
+            self.assertLess(time.monotonic() - started, 0.25)
+            self.assertEqual([signal.SIGALRM], calls)
+            self.assertIs(outer, signal.getsignal(signal.SIGALRM))
+            self.assertEqual((0.0, 0.0), signal.getitimer(signal.ITIMER_REAL))
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, original)
+
+    def test_failure_diagnostic_restores_external_period_after_delivering_alarm(self):
+        module = _load_eval_generation()
+        original = signal.getsignal(signal.SIGALRM)
+        calls = []
+        def outer(signum, frame):
+            calls.append(signum)
+        signal.signal(signal.SIGALRM, outer)
+        signal.setitimer(signal.ITIMER_REAL, 0.03, 0.5)
+        try:
+            with patch.object(module, "DIAGNOSTIC_SECONDS", 0.4), patch(
+                    "laplace_api.urlopen", side_effect=lambda *_args, **_kwargs: time.sleep(2)):
+                report = module.collect_forward_diagnostics("http://laplace", [{"class":"forward","prompt":"dog"}])
+            self.assertEqual([signal.SIGALRM], calls)
+            self.assertEqual("outer-caller", report["deadline_owner"])
+            remaining, interval = signal.getitimer(signal.ITIMER_REAL)
+            self.assertGreater(remaining, 0.25)
+            self.assertLessEqual(remaining, 0.5)
+            self.assertEqual(0.5, interval)
+            self.assertIs(outer, signal.getsignal(signal.SIGALRM))
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, original)
+
+    def test_failure_diagnostic_restores_later_external_deadline_without_delivering_it(self):
+        module = _load_eval_generation()
+        original = signal.getsignal(signal.SIGALRM)
+        calls = []
+        def outer(signum, frame):
+            calls.append(signum)
+        signal.signal(signal.SIGALRM, outer)
+        signal.setitimer(signal.ITIMER_REAL, 0.5, 0.5)
+        try:
+            with patch.object(module, "DIAGNOSTIC_SECONDS", 0.03), patch(
+                    "laplace_api.urlopen", side_effect=lambda *_args, **_kwargs: time.sleep(2)):
+                report = module.collect_forward_diagnostics("http://laplace", [{"class":"forward","prompt":"dog"}])
+            self.assertEqual([], calls)
+            self.assertEqual("collector", report["deadline_owner"])
+            remaining, interval = signal.getitimer(signal.ITIMER_REAL)
+            self.assertGreater(remaining, 0.25)
+            self.assertLess(remaining, 0.5)
+            self.assertEqual(0.5, interval)
+            self.assertIs(outer, signal.getsignal(signal.SIGALRM))
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, original)
+
+    def test_failed_evaluation_retains_diagnostics_without_changing_exit_or_expected_answers(self):
+        module = _load_eval_generation()
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", "/build/laplace/work")) as directory:
+            root = Path(directory)
+            probes = {"probes":[{"id":"held-out","class":"forward","prompt":"a query", "expected_answer_surface":"required answer"}]}
+            (root/"probes.json").write_text(json.dumps(probes))
+            (root/"baseline.json").write_text(json.dumps({"fingerprint":{"entities":1},"sources":["source"]}))
+            row = {"id":"held-out","class":"forward","surface":"chat","prompt":"a query",
+                   "nonempty":False,"leaks":[],"answer_reached":False,"session_present":True,"miss":True}
+            diagnostics = {"status":"collected","executions":[{"terminal":{"completion":True}}]}
+            with patch.object(sys, "argv", ["eval-generation.py","--api","http://laplace",
+                    "--surfaces","chat","--probes",str(root/"probes.json"),"--baseline",str(root/"baseline.json"),
+                    "--report",str(root/"report.json")]), \
+                 patch.object(module, "substrate_fingerprint", return_value={"entities":1}), \
+                 patch.object(module, "seeded_sources", return_value=["source"]), \
+                 patch.object(module, "entity_type_names", return_value=set()), \
+                 patch.object(module, "run_chat", return_value=row), \
+                 patch.object(module, "collect_forward_diagnostics", return_value=diagnostics), \
+                 redirect_stdout(StringIO()), redirect_stderr(StringIO()), self.assertRaises(SystemExit) as stopped:
+                module.main()
+            self.assertEqual(1, stopped.exception.code)
+            report = json.loads((root/"report.json").read_text())
+            self.assertFalse(report["ok"])
+            self.assertFalse(report["verdicts"]["chat_output"]["all_nonempty"])
+            self.assertEqual(diagnostics, report["forward_diagnostics"])
+            self.assertEqual(probes, json.loads((root/"probes.json").read_text()))
+
     def test_client_posts_named_operation_with_timeout(self):
         captured = {}
 

@@ -121,12 +121,27 @@ public sealed class ChessRecordingMeasurementTests
     {
         var game = Expected();
         game = game with { Record = game.Record with
-            { LineId = game.Record.PositionIds[0], PositionIds = [game.Record.PositionIds[0]], MoveIds = [], Moves = [] } };
+            { LineId = ChessCompose.LineId(game.Record.PositionIds[0], []),
+              PositionIds = [game.Record.PositionIds[0]], MoveIds = [], Moves = [] } };
         var readback = Hydrated(game);
         ChessRecordingMeasurement.ValidateGames([game], [readback]);
         ChessRecordingMeasurement.ValidateCarriers([game.Record], []);
         Assert.Empty(readback.MoveIds);
         Assert.Equal(readback.LineId, readback.StartPositionId);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(4)]
+    public void LineIdentityMatchesNativeContentTrajectoryIncludingSingleton(int moveCount)
+    {
+        var start = Id(20);
+        var moves = Enumerable.Range(0, moveCount).Select(i => Id((ulong)i + 30)).ToArray();
+        var trajectory = Trajectory.Build(new[] { start }.Concat(moves).ToArray());
+        var native = Trajectory.ContentIdentity(trajectory, out var count);
+        Assert.Equal(moveCount + 1, count);
+        Assert.Equal(native, ChessCompose.LineId(start, moves));
     }
 
     private static NpgsqlSubstrateReads.ContentCarrierVertex[] Carrier(ChessGameRecord game)

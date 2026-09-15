@@ -41,6 +41,9 @@ public static class ChessCompose
     /// </summary>
     public static Hash128 LineId(Hash128 startPositionId, ReadOnlySpan<Hash128> orderedMoveIds)
     {
+        // The ordinary composition law preserves a singleton child's identity.
+        // A playing that ends before its first move contains only its start state.
+        if (orderedMoveIds.IsEmpty) return startPositionId;
         Span<Hash128> constituents = orderedMoveIds.Length + 1 <= 256
             ? stackalloc Hash128[orderedMoveIds.Length + 1]
             : new Hash128[orderedMoveIds.Length + 1];

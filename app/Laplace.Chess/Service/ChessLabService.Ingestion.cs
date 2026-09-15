@@ -37,11 +37,8 @@ public sealed partial class ChessLabService
                 ? await File.ReadAllTextAsync(receiptPath, ct) : null;
             if (job.Kind == ChessLabJobKind.Cutechess && job.State == ChessLabJobState.Completed && experimentJson is not null)
             {
-                using var doc = JsonDocument.Parse(experimentJson);
-                int games = doc.RootElement.GetProperty("games").GetArrayLength();
-                measurement = new(job.Id, games, retainedPgn: true);
+                measurement = ChessRecordingMeasurement.FromRetainedMatch(job.Id, experimentJson);
                 artifact = "ingest-" + Guid.NewGuid().ToString("N") + ".json";
-                measurement.ValidateRetainedMatch(experimentJson);
                 await measurement.IdentifyPgnAsync(path, experimentJson, ct);
             }
             var host = await GetLiveHostAsync(ct);

@@ -237,6 +237,59 @@ def gpu_observations(text, with_compute=True):
     return devices
 
 
+def lichess_readiness(timeout, opener=None, base="http://127.0.0.1:5187"):
+    """Observe the existing managed bot's verified account and event-stream state."""
+    url = api_base(base) + "/chess/lichess/status"
+    started = time.monotonic()
+    result = {"url": url, "ready": False, "http_status": None,
+              "scope": "One managed service observation of account prerequisites and event-stream connectivity; no account changes, challenge or game."}
+    opener = opener or local_http_opener()
+    try:
+        try:
+            response = opener.open(urllib.request.Request(url, headers=normal_api_headers()), timeout=timeout)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            result["http_status"] = response.code
+            raw = response.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("Lichess status response exceeds bound")
+        body = json.loads(raw)
+        flags = ("configured", "running", "connected", "substrate")
+        if not isinstance(body, dict) or any(type(body.get(name)) is not bool for name in flags):
+            raise ValueError("Lichess service status booleans unavailable")
+        observed = {name: body[name] for name in flags}
+        for name in ("depth", "maxConcurrent", "gamesRecorded"):
+            if type(body.get(name)) is not int or body[name] < 0:
+                raise ValueError("Lichess service counts unavailable")
+            observed[name] = body[name]
+        observed["error_present"] = body.get("error") is not None
+        account = body.get("account")
+        observed["account"] = None
+        if account is not None:
+            account_flags = ("tokenValid", "botAccount", "botPlayScope")
+            if not isinstance(account, dict) or any(
+                    account.get(name) is not None and type(account[name]) is not bool for name in account_flags):
+                raise ValueError("Lichess account status booleans invalid")
+            selected = {name: account.get(name) for name in account_flags}
+            selected["username_present"] = isinstance(account.get("username"), str) and bool(account["username"].strip())
+            selected["error_present"] = account.get("error") is not None
+            ready = all(selected[name] is True for name in account_flags) and selected["username_present"] and not selected["error_present"]
+            if type(account.get("ready")) is not bool or account["ready"] != ready:
+                raise ValueError("Lichess account readiness contradicts its prerequisites")
+            selected["ready"] = ready
+            observed["account"] = selected
+        result["observed"] = observed
+        result["response_sha256"] = hashlib.sha256(raw).hexdigest()
+        result["ready"] = result["http_status"] == 200 and all(body[name] for name in ("configured", "running", "connected")) \
+            and not observed["error_present"] and observed["account"] is not None and observed["account"]["ready"]
+        result["status"] = "ready" if result["ready"] else "not-ready"
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        result.update(status="unavailable", error_type=type(error).__name__)
+    result["elapsed_seconds"] = time.monotonic() - started
+    return result
+
+
 def runtime_capabilities(deadline, base="http://127.0.0.1:5187"):
     def remaining():
         value = deadline - time.monotonic()
@@ -262,6 +315,7 @@ def runtime_capabilities(deadline, base="http://127.0.0.1:5187"):
             result["api_readiness"], result["api_readiness_after_chess_request"])
     else:
         result["chess_read_request"] = {"status": "not-run-api-not-ready"}
+    result["lichess_readiness"] = lichess_readiness(remaining(), base=base)
     executable = shutil.which("nvidia-smi")
     result["nvidia"] = {"utility_installed": executable is not None, "executable": executable,
                         "compute_execution_measured": False, "devices": [], "queries": []}
