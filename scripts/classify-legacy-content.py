@@ -60,6 +60,138 @@ failed AS MATERIALIZED (
 """
 
 
+def recovery_dependency_ctes() -> str:
+    """Complete dependency counts before repair eligibility/resource filters.
+
+    Packed membership supplies distinct dependency IDs; logical occurrences stay
+    in the existing exhaustive identity classification. Counts do not assert
+    that a recipe is eligible or estimate the bytes of its retained receipt.
+    """
+    return """
+recovery_types AS MATERIALIZED (
+  SELECT public.laplace_hash128_blake3('Chess_Game'::bytea) AS game,
+         public.laplace_hash128_blake3('Chess_Player'::bytea) AS player,
+         public.laplace_hash128_blake3('Conversation_Session'::bytea) AS session
+),
+recovery_failed_parents AS MATERIALIZED (
+  SELECT f.physicality_id,f.parent_id,
+         bool_or(e.type_id=t.game) AS is_game,
+         bool_or(e.type_id=t.player) AS is_player,
+         bool_or(e.type_id=t.session) AS is_session
+  FROM failed f JOIN laplace.entities e ON e.id=f.parent_id
+  CROSS JOIN recovery_types t WHERE e.type_id IN (t.game,t.player,t.session)
+  GROUP BY f.physicality_id,f.parent_id
+),
+recovery_parent_ids AS MATERIALIZED (
+  SELECT parent_id,bool_or(is_game) AS is_game,bool_or(is_player) AS is_player,
+         bool_or(is_session) AS is_session
+  FROM recovery_failed_parents GROUP BY parent_id
+),
+recovery_carriers AS MATERIALIZED (
+  SELECT p.id,p.entity_id,p.type,p.trajectory
+  FROM recovery_parent_ids owner JOIN laplace.physicalities p ON p.entity_id=owner.parent_id
+  WHERE p.type=1 OR (owner.is_game AND p.type=3)
+),
+recovery_carrier_members AS MATERIALIZED (
+  SELECT p.id AS carrier_id,member.child_id
+  FROM recovery_carriers p CROSS JOIN LATERAL
+    unnest(public.laplace_trajectory_constituent_ids(p.trajectory)) member(child_id)
+),
+recovery_needed_ids AS MATERIALIZED (
+  SELECT DISTINCT child_id FROM recovery_carrier_members
+),
+recovery_needed_entities AS MATERIALIZED (
+  SELECT n.child_id,count(e.id)::bigint AS entity_rows
+  FROM recovery_needed_ids n LEFT JOIN laplace.entities e ON e.id=n.child_id
+  GROUP BY n.child_id
+),
+recovery_needed_content AS MATERIALIZED (
+  SELECT n.child_id,count(p.id)::bigint AS content_rows,
+         count(p.id) FILTER(WHERE p.id<>public.laplace_hash128_blake3(
+           n.child_id||decode('0100','hex')))::bigint AS noncanonical_content_rows
+  FROM recovery_needed_ids n LEFT JOIN laplace.physicalities p ON p.entity_id=n.child_id AND p.type=1
+  GROUP BY n.child_id
+),
+recovery_needed_rows AS MATERIALIZED (
+  SELECT e.child_id,e.entity_rows,p.content_rows,p.noncanonical_content_rows
+  FROM recovery_needed_entities e JOIN recovery_needed_content p USING(child_id)
+),
+recovery_game_projections AS MATERIALIZED (
+  SELECT owner.parent_id,count(p.id)::bigint AS projection_rows,
+    count(p.id) FILTER(WHERE p.id<>public.laplace_hash128_blake3(
+      owner.parent_id||decode('0300','hex')))::bigint AS noncanonical_projection_rows
+  FROM recovery_parent_ids owner LEFT JOIN laplace.physicalities p
+    ON p.entity_id=owner.parent_id AND p.type=3
+  WHERE owner.is_game GROUP BY owner.parent_id
+),
+recovery_projection_destinations AS MATERIALIZED (
+  SELECT owner.parent_id,p.id,p.entity_id,p.type,
+    p.id=public.laplace_hash128_blake3(owner.parent_id||decode('0300','hex')) AS canonical_target
+  FROM recovery_parent_ids owner JOIN laplace.physicalities p
+    ON (p.entity_id=owner.parent_id AND p.type=3)
+       OR p.id=public.laplace_hash128_blake3(owner.parent_id||decode('0300','hex'))
+  WHERE owner.is_player OR owner.is_session
+),
+recovery_incoming_content AS MATERIALIZED (
+  SELECT p.id,p.entity_id,public.laplace_trajectory_constituent_ids(p.trajectory) AS member_ids
+  FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL
+    AND public.laplace_trajectory_constituent_ids(p.trajectory)
+        && ARRAY(SELECT parent_id FROM recovery_parent_ids)
+),
+recovery_incoming_matches AS MATERIALIZED (
+  SELECT p.id AS container_id,owner.parent_id
+  FROM recovery_incoming_content p JOIN recovery_parent_ids owner
+    ON owner.parent_id=ANY(p.member_ids)
+)
+"""
+
+
+def recovery_dependency_json() -> str:
+    return """jsonb_build_object(
+    'schema','laplace.legacy-content-recovery-dependencies/v1',
+    'scope','Complete failed typed parent dependency set before repair eligibility and resource filters; counts do not establish admissibility or receipt byte size.',
+    'failed_typed_parent_physicalities',(SELECT count(*) FROM recovery_failed_parents),
+    'failed_typed_parent_ids',(SELECT count(*) FROM recovery_parent_ids),
+    'carriers',jsonb_build_object(
+      'physicality_rows',(SELECT count(*) FROM recovery_carriers),
+      'content_rows',(SELECT count(*) FROM recovery_carriers WHERE type=1),
+      'game_position_projection_rows',(SELECT count(*) FROM recovery_carriers WHERE type=3),
+      'null_trajectory_rows',(SELECT count(*) FROM recovery_carriers WHERE trajectory IS NULL),
+      'empty_trajectory_rows',(SELECT count(*) FROM recovery_carriers WHERE ST_IsEmpty(trajectory)),
+      'distinct_carrier_child_memberships',(SELECT count(*) FROM recovery_carrier_members)),
+    'native_inputs',jsonb_build_object(
+      'distinct_needed_child_ids',(SELECT count(*) FROM recovery_needed_ids),
+      'joined_entity_content_snapshot_rows',(SELECT COALESCE(sum(entity_rows::numeric*content_rows::numeric),0) FROM recovery_needed_rows),
+      'entity_rows',(SELECT COALESCE(sum(entity_rows),0) FROM recovery_needed_rows),
+      'content_rows',(SELECT COALESCE(sum(content_rows),0) FROM recovery_needed_rows),
+      'missing_entity_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE entity_rows=0),
+      'missing_content_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE content_rows=0),
+      'missing_either_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE entity_rows=0 OR content_rows=0),
+      'multiple_entity_row_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE entity_rows>1),
+      'multiple_content_row_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE content_rows>1),
+      'noncanonical_content_rows',(SELECT COALESCE(sum(noncanonical_content_rows),0) FROM recovery_needed_rows)),
+    'game_position_projections',jsonb_build_object(
+      'game_ids',(SELECT count(*) FROM recovery_game_projections),
+      'missing_projection_game_ids',(SELECT count(*) FROM recovery_game_projections WHERE projection_rows=0),
+      'multiple_projection_game_ids',(SELECT count(*) FROM recovery_game_projections WHERE projection_rows>1),
+      'noncanonical_projection_rows',(SELECT COALESCE(sum(noncanonical_projection_rows),0) FROM recovery_game_projections)),
+    'player_session_destinations',jsonb_build_object(
+      'parent_ids',(SELECT count(*) FROM recovery_parent_ids WHERE is_player OR is_session),
+      'occupied_parent_ids',(SELECT count(DISTINCT parent_id) FROM recovery_projection_destinations),
+      'occupied_parent_row_pairs',(SELECT count(*) FROM recovery_projection_destinations),
+      'distinct_occupied_physicalities',(SELECT count(DISTINCT id) FROM recovery_projection_destinations),
+      'canonical_target_rows',(SELECT count(*) FROM recovery_projection_destinations WHERE canonical_target),
+      'noncanonical_projection_rows',(SELECT count(*) FROM recovery_projection_destinations WHERE NOT canonical_target),
+      'canonical_target_identity_or_type_conflicts',(SELECT count(*) FROM recovery_projection_destinations
+        WHERE canonical_target AND (entity_id<>parent_id OR type<>3))),
+    'incoming_content',jsonb_build_object(
+      'container_physicalities',(SELECT count(*) FROM recovery_incoming_content),
+      'container_entity_ids',(SELECT count(DISTINCT entity_id) FROM recovery_incoming_content),
+      'affected_failed_parent_ids',(SELECT count(DISTINCT parent_id) FROM recovery_incoming_matches),
+      'container_parent_pairs',(SELECT count(*) FROM recovery_incoming_matches))
+  )"""
+
+
 def classification_sql(sample_limit: int) -> str:
     if not 1 <= sample_limit <= 100:
         raise ValueError("sample_limit must be between 1 and 100")
@@ -114,7 +246,8 @@ strata AS MATERIALIZED (
     min(expanded_count) AS minimum_expanded_count,
     max(expanded_count) AS maximum_expanded_count
   FROM classified GROUP BY type_id,source_id,failure_class
-)
+),
+{recovery_dependency_ctes()}
 SELECT jsonb_build_object(
   'schema','laplace.legacy-content-classification/v1',
   'database',current_database(),'observed_at',clock_timestamp(),
@@ -126,6 +259,7 @@ SELECT jsonb_build_object(
   'parents_checked',(SELECT count(*) FROM checked),
   'identity_or_expansion_failures',(SELECT count(*) FROM failed),
   'examples_per_stratum',{sample_limit},
+  'recovery_dependency_envelope',{recovery_dependency_json()},
   'strata',COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'entity_type_id',encode(s.type_id,'hex'),'source_id',encode(s.source_id,'hex'),
     'failure_class',s.failure_class,'failures',s.failures,
