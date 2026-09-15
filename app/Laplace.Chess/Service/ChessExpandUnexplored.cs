@@ -48,7 +48,8 @@ public static class ChessExpandUnexplored
                 var moveNode = ChessGraph.EmitMove(b, moving, mv, SourceId, nowUs);
                 var lineId = ChessCompose.LineId(fromNode.Id, [moveNode.Id]);
                 b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, SourceId);
-                ChessGraph.AppendLineTrajectory(b, lineId, [moveNode], SourceId, nowUs);
+                ChessGraph.AppendLineTrajectory(
+                    b, lineId, fromNode, [moveNode], SourceId, nowUs);
                 ChessGraph.AppendPositionProjection(
                     b, lineId, new[] { fromNode, toNode }, SourceId, nowUs);
                 n++;
