@@ -3,13 +3,15 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Admission law for entity identity. Content and compositions require a physical
-/// realization; governed vocabulary, source references, semantic concepts and
-/// occurrence identities do not become content merely because their keys are strings.
+/// Admission law for entity physicalization. Requiring a physical representation does
+/// NOT mean the entity is canonical Content: ordered source structures, projections and
+/// other governed records can owe the substrate a typed non-Content physicality too.
+/// Content identity is separately constrained to the exact Merkle/collapse identity of
+/// its decomposition trajectory.
 /// </summary>
 public static class EntityIdentityPolicy
 {
-    private static readonly HashSet<Hash128> PhysicalContentTypes =
+    private static readonly HashSet<Hash128> PhysicalizedTypes =
     [
         EntityTypeRegistry.Byte,
         EntityTypeRegistry.Codepoint,
@@ -39,10 +41,10 @@ public static class EntityIdentityPolicy
     ];
 
     /// <summary>
-    /// True when an entity of this type is content/composition and therefore owes the
-    /// substrate a physicality. All other registered types are governed structural
-    /// identities unless and until their admission policy is explicitly promoted here.
+    /// True when this entity type owes the substrate some physical realization. The
+    /// producer still owns the semantic physicality type: Content only for canonical
+    /// content-addressed composition; ParseStructure/Projection/etc for other shapes.
     /// </summary>
     public static bool RequiresPhysicality(Hash128 typeId) =>
-        PhysicalContentTypes.Contains(typeId);
+        PhysicalizedTypes.Contains(typeId);
 }
