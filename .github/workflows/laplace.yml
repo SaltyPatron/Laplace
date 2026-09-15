@@ -167,6 +167,21 @@ jobs:
           flock --exclusive --close /build/laplace/work/host-resource.lock \
             bash scripts/product-ci.sh "$LAPLACE_STAGE"
 
+      # A source-only run can collect a preceding run's still-retained failure.
+      # These are raw diagnostic files, not a claim of exact-head acceptance.
+      - name: Upload retained native regression failure details
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-retained-native-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/extension/*/tests/regress_output/regression.diffs
+            build/extension/*/tests/regress_output/regression.out
+            build/extension/*/tests/regress_output/results/generation_corpus.out
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Retain current generation repair resource receipts
         if: always()
         env:
