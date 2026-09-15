@@ -140,16 +140,36 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         Hash128 type = Hash128.OfCanonical("TestFixture");
         Hash128 a = Hash128.OfCanonical($"substrate/test/reconstruct/cycle-a/{Guid.NewGuid():N}");
         Hash128 b = Hash128.OfCanonical($"substrate/test/reconstruct/cycle-b/{Guid.NewGuid():N}");
-        double[] coord = [1, 0, 0, 0];
-        Hilbert128 hilbert = Hilbert128.Encode(coord);
-        var builder = new SubstrateChangeBuilder(source, "test/reconstruct/cycle")
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        await writer.ApplyAsync(new SubstrateChangeBuilder(source, "test/reconstruct/cycle-entities")
             .AddEntity(a, EntityTier.Document, type, source)
             .AddEntity(b, EntityTier.Document, type, source)
-            .AddPhysicality(Composition(a, b, source, hilbert))
-            .AddPhysicality(Composition(b, a, source, hilbert));
+            .Build());
 
-        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        await writer.ApplyAsync(builder.Build());
+        // A legal content writer cannot create a cycle: a one-child content node
+        // collapses to its child and every multi-child parent is content-addressed.
+        // Keep the corruption-defense test by bypassing the writer and injecting
+        // malformed stored trajectories directly. The read path must still fail
+        // closed if disk state is corrupt.
+        await using (var corrupt = _pg.DataSource.CreateCommand("""
+            INSERT INTO laplace.physicalities
+                (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents)
+            VALUES
+                (@aid, @a, @ptype, ST_MakePoint(1,0,0,0), decode(repeat('00',16),'hex'),
+                 public.laplace_trajectory_build(ARRAY[@b]::bytea[]), 1),
+                (@bid, @b, @ptype, ST_MakePoint(1,0,0,0), decode(repeat('01',16),'hex'),
+                 public.laplace_trajectory_build(ARRAY[@a]::bytea[]), 1)
+            """))
+        {
+            corrupt.Parameters.Add("aid", NpgsqlDbType.Bytea).Value =
+                PhysicalityId.Compute(a, PhysicalityType.Content).ToBytes();
+            corrupt.Parameters.Add("bid", NpgsqlDbType.Bytea).Value =
+                PhysicalityId.Compute(b, PhysicalityType.Content).ToBytes();
+            corrupt.Parameters.Add("a", NpgsqlDbType.Bytea).Value = a.ToBytes();
+            corrupt.Parameters.Add("b", NpgsqlDbType.Bytea).Value = b.ToBytes();
+            corrupt.Parameters.Add("ptype", NpgsqlDbType.Smallint).Value = (short)PhysicalityType.Content;
+            await corrupt.ExecuteNonQueryAsync();
+        }
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             NpgsqlContentReconstructor.ReconstructUtf8Async(_pg.DataSource, a));
@@ -172,29 +192,34 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     {
         CodepointPerfcache.LoadDefault();
         Hash128 source = Hash128.OfCanonical($"render-depth/source/{Guid.NewGuid():N}");
-        Hash128 inner = Hash128.OfCanonical($"render-depth/inner/{Guid.NewGuid():N}");
-        Hash128 outer = Hash128.OfCanonical($"render-depth/outer/{Guid.NewGuid():N}");
         Hash128 type = Hash128.OfCanonical("TestFixture");
         var builder = new SubstrateChangeBuilder(source, "test/render/depth");
         Assert.True(builder.ContentStage.TryAddContentWitness(
-            Encoding.UTF8.GetBytes("a"), source, out Hash128 atom));
+            Encoding.UTF8.GetBytes("a"), source, out Hash128 atomA));
+        Assert.True(builder.ContentStage.TryAddContentWitness(
+            Encoding.UTF8.GetBytes("b"), source, out Hash128 atomB));
+        Assert.True(builder.ContentStage.TryAddContentWitness(
+            Encoding.UTF8.GetBytes("c"), source, out Hash128 atomC));
+
+        Hash128 inner = Hash128.Merkle((byte)EntityTier.Word, [atomA, atomB]);
+        Hash128 outer = Hash128.Merkle((byte)EntityTier.Sentence, [inner, atomC]);
         Hilbert128 hilbert = Hilbert128.Encode([1, 0, 0, 0]);
         builder.AddEntity(inner, EntityTier.Word, type, source)
             .AddEntity(outer, EntityTier.Sentence, type, source)
-            .AddPhysicality(Composition(inner, atom, source, hilbert))
-            .AddPhysicality(Composition(outer, inner, source, hilbert));
+            .AddPhysicality(Composition(inner, [atomA, atomB], source, hilbert))
+            .AddPhysicality(Composition(outer, [inner, atomC], source, hilbert));
         await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(builder.Build());
 
         await using var connection = await _pg.DataSource.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT realize.render_text(@outer, 1) IS NULL,
-                   realize.render_text(@inner, 1) = 'a',
+                   realize.render_text(@inner, 1) = 'ab',
                    realize.render_text_batch(ARRAY[@outer, @inner], 1)
-                       IS NOT DISTINCT FROM ARRAY[NULL::text, 'a'],
+                       IS NOT DISTINCT FROM ARRAY[NULL::text, 'ab'],
                    realize.render_text_batch(ARRAY[@inner, @outer], 1)
-                       IS NOT DISTINCT FROM ARRAY['a', NULL::text],
-                   realize.render_text_batch(ARRAY[@outer, @inner], 0) = ARRAY['a', 'a']
+                       IS NOT DISTINCT FROM ARRAY['ab', NULL::text],
+                   realize.render_text_batch(ARRAY[@outer, @inner], 0) = ARRAY['abc', 'ab']
             """;
         command.Parameters.Add("outer", NpgsqlDbType.Bytea).Value = outer.ToBytes();
         command.Parameters.Add("inner", NpgsqlDbType.Bytea).Value = inner.ToBytes();
@@ -204,7 +229,7 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     }
 
     private static PhysicalityRow Composition(
-        Hash128 entity, Hash128 child, Hash128 source, Hilbert128 hilbert) =>
+        Hash128 entity, Hash128[] children, Hash128 source, Hilbert128 hilbert) =>
         new(
             PhysicalityId.Compute(entity, PhysicalityType.Content),
             entity,
@@ -212,8 +237,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
             PhysicalityType.Content,
             1, 0, 0, 0,
             hilbert,
-            Trajectory.Build([child]),
-            1,
+            Trajectory.Build(children),
+            children.Length,
             null,
             null,
             0);

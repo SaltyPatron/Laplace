@@ -13,11 +13,24 @@ public sealed class LegacyUpgradeRegressionTests(LocalPgFixture pg)
     {
         await using var conn = await pg.DataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
-        // Recreate the pre-opponent-column state in this disposable fixture only.
-        // The transaction restores the extension schema and all fixture rows.
+
+        // Exercise the actual additive upgrade module against an isolated copy
+        // of the pre-column table shape. Dropping the column from the installed
+        // extension table is no longer a valid fixture setup because installed
+        // extension functions correctly depend on that column.
         await Execute("""
-            ALTER TABLE laplace.attestations DROP COLUMN opponent_rating_fp1e9;
-            INSERT INTO laplace.attestations
+            CREATE TEMP TABLE attestations (
+                id bytea NOT NULL,
+                subject_id bytea NOT NULL,
+                type_id bytea NOT NULL,
+                source_id bytea NOT NULL,
+                outcome smallint NOT NULL,
+                last_observed_at timestamptz NOT NULL,
+                observation_count bigint NOT NULL,
+                sum_score_fp1e9 bigint NOT NULL,
+                opponent_rd_fp1e9 bigint NOT NULL
+            );
+            INSERT INTO attestations
                 (id,subject_id,type_id,source_id,outcome,last_observed_at,
                  observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
             VALUES (decode('71aabe37f17c4c8f925517685224f901','hex'),
@@ -25,7 +38,7 @@ public sealed class LegacyUpgradeRegressionTests(LocalPgFixture pg)
                     decode('71aabe37f17c4c8f925517685224f903','hex'),
                     decode('71aabe37f17c4c8f925517685224f904','hex'),
                     2,'2026-01-01',7,6300000000,30000000000);
-            SET LOCAL search_path=laplace,public;
+            SET LOCAL search_path=pg_temp,public;
             """);
         string module = Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
             "extension", "laplace_substrate", "sql", "schema", "tables", "attestation_witness_columns.sql.in");
@@ -35,7 +48,7 @@ public sealed class LegacyUpgradeRegressionTests(LocalPgFixture pg)
         await using var verify = new NpgsqlCommand("""
             SELECT opponent_rating_fp1e9,observation_count,sum_score_fp1e9,
                    opponent_rd_fp1e9,outcome
-            FROM laplace.attestations
+            FROM pg_temp.attestations
             WHERE id=decode('71aabe37f17c4c8f925517685224f901','hex')
             """, conn, tx);
         await using (var rows = await verify.ExecuteReaderAsync())
