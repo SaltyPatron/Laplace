@@ -174,9 +174,9 @@ SQL_QUERY("conversation.forward_trace", "text,int4,int4,float8,int4,int4,int4",
     "ORDER BY t.step,t.routing_round,CASE t.event WHEN 'route' THEN 0 ELSE 1 END")
 SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz",
     "SELECT converse.session_append_turns($1,$2,$3)")
-SQL_QUERY("conversation.manifest", "bytea",
-    "SELECT public.ST_AsBinary(p.trajectory) FROM laplace.physicalities p "
-    "WHERE p.id=$1 AND p.type=1 AND p.trajectory IS NOT NULL")
+SQL_QUERY("conversation.manifest", "bytea,bytea",
+    "SELECT public.ST_AsBinary(p.trajectory),p.type FROM laplace.physicalities p "
+    "WHERE p.id IN ($1,$2)")
 SQL_QUERY("conversation.lock", "bytea",
     "SELECT id FROM laplace.entities WHERE id=$1 FOR UPDATE")
 SQL_QUERY("conversation.coordinates", "bytea[]",
@@ -188,7 +188,7 @@ SQL_QUERY("conversation.coordinates", "bytea[]",
 SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8,float8,bytea,int4,timestamptz",
     "INSERT INTO laplace.physicalities "
     "(id,entity_id,type,trajectory,coord,hilbert_index,n_constituents,observed_at) "
-    "VALUES ($1,$2,1,public.ST_GeomFromWKB($3),public.ST_MakePoint($4,$5,$6,$7),$8,$9,$10) "
+    "VALUES ($1,$2,3,public.ST_GeomFromWKB($3),public.ST_MakePoint($4,$5,$6,$7),$8,$9,$10) "
     "ON CONFLICT(id) DO UPDATE SET trajectory=EXCLUDED.trajectory,coord=EXCLUDED.coord,"
     "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
     "observed_at=EXCLUDED.observed_at")

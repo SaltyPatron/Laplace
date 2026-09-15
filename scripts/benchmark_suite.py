@@ -348,6 +348,7 @@ def run_profile(
         result_json = output_dir / "report.json"
         command = [sys.executable, "scripts/benchmark-chess-environment.py",
                    "--output-dir", str(output_dir), "--repeats", str(repeats),
+                   "--match-depth", "8", "--max-moves", "12",
                    *(chess_args or [])]
     else:
         raise ValueError(f"unsupported benchmark kind {kind}")
