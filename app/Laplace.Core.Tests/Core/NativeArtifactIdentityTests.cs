@@ -34,16 +34,17 @@ public sealed class NativeArtifactIdentityTests
 
     /// The path the process actually mapped, from /proc/self/maps — not a guess, and not
     /// the search order the loader was configured with.
-    private static string? LoadedPath()
+    private static string[] LoadedPaths(string library)
     {
+        var paths = new HashSet<string>(StringComparer.Ordinal);
         foreach (string line in File.ReadLines("/proc/self/maps"))
         {
             int slash = line.IndexOf('/');
             if (slash < 0) continue;
             string path = line[slash..].Trim();
-            if (path.Contains(Lib, StringComparison.Ordinal)) return path;
+            if (Path.GetFileName(path).StartsWith(library, StringComparison.Ordinal)) paths.Add(path);
         }
-        return null;
+        return paths.Order(StringComparer.Ordinal).ToArray();
     }
 
     private static string Sha(string path)
@@ -61,8 +62,7 @@ public sealed class NativeArtifactIdentityTests
         long neutral = Glicko2.NeutralMuFp1e9();
         Assert.True(neutral > 0);
 
-        string? loaded = LoadedPath();
-        Assert.True(loaded is not null, $"{Lib} is not mapped after calling into it");
+        string loaded = Assert.Single(LoadedPaths(Lib));
         _out.WriteLine($"loaded: {loaded}");
 
         // Build outputs may be outside the checkout (LAPLACE_BUILD_ROOT).
@@ -83,5 +83,25 @@ public sealed class NativeArtifactIdentityTests
             + "Every native-backed assertion in this run is describing the loaded artifact, "
             + "not the source under test. Install the build (pipeline.sh install) or point "
             + "the loader at build/engine/core before trusting a native parity result.");
+    }
+
+    [Fact]
+    public void NativeDependenciesAndManagedImportsShareTheAppLocalClosure()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        // Isolated loader controls exercise dependency-first process startup. Here
+        // the actual production engines, including their initialization, must agree
+        // on one app-local image even after the other native tests have run.
+        Assert.NotEmpty(Laplace.Engine.Dynamics.NativeInterop.LaplaceDynamicsVersion());
+        Assert.NotEmpty(Laplace.Engine.Synthesis.NativeInterop.LaplaceSynthesisVersion());
+        Assert.NotEmpty(NativeInterop.LaplaceCoreVersion());
+        foreach (string library in new[] { "core", "dynamics", "synthesis" })
+        {
+            string name = $"liblaplace_{library}.so";
+            string actual = Assert.Single(LoadedPaths(name));
+            string expected = Path.Combine(AppContext.BaseDirectory, name);
+            Assert.Equal(expected, actual);
+            _out.WriteLine($"{library}: {actual}; sha256={Sha(actual)}");
+        }
     }
 }

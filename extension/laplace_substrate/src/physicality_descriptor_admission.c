@@ -18,6 +18,7 @@
 #include "laplace/core/sql_catalog.h"
 #include "laplace/core/trajectory.h"
 #include "perfcache_native.h"
+#include "physicality_descriptor_admission_pg.h"
 
 /* This is a transport/provider boundary. The shared native owners validate
  * tuple framing, body identities, composition, descriptor/view recipes and
@@ -523,45 +524,43 @@ static text *admission_snapshot_text(admission_state *s)
     return result;
 }
 
-Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
+static admission_state *admission_state_create(size_t maximum_bytes,
+    int maximum_operations, size_t maximum_logical)
 {
     admission_state *s;
-    transport_array arrays[9];
-    physicality_descriptor_source_observation_t *sources;
-    physicality_descriptor_limits_t limits;
-    const physicality_descriptor_admitted_form_t *forms;
-    hash128_t generated_source, floor, *form_ids;
-    size_t source_count = 0, form_count = 0, tuple_bytes = 0, floor_bytes, source_peak = 0;
-    int64_t maximum_bytes = PG_GETARG_INT64(10), maximum_logical = PG_GETARG_INT64(12);
-    int32_t maximum_operations = PG_GETARG_INT32(11);
-    int64_t generated_at = PG_GETARG_INT64(9);
-    Datum snapshot_text, values[18] = {0};
-    bool nulls[18] = {false};
-    ReturnSetInfo *result;
-    Oid query_types[1] = {BYTEAARRAYOID};
-    const char *metadata_sql, *payload_sql;
-
-    if (maximum_bytes <= 0 || maximum_logical <= 0 || maximum_operations <= 0 ||
-        (uint64_t)maximum_bytes > SIZE_MAX || (uint64_t)maximum_logical > SIZE_MAX)
+    if (maximum_bytes == 0 || maximum_logical == 0 || maximum_operations <= 0)
         admission_invalid("positive finite byte, operation and logical-work grants are required");
     if (!ActiveSnapshotSet()) admission_invalid("an active statement snapshot is required");
     s = palloc0(sizeof(*s));
     s->context = CurrentMemoryContext;
-    s->maximum_bytes = (size_t)maximum_bytes;
-    s->maximum_logical = (size_t)maximum_logical;
+    s->maximum_bytes = maximum_bytes;
+    s->maximum_logical = maximum_logical;
     s->maximum_operations = maximum_operations;
-    admission_charge(s, sizeof(*s));
     s->cleanup.func = admission_cleanup; s->cleanup.arg = s;
     MemoryContextRegisterResetCallback(s->context, &s->cleanup);
-    for (int i = 0; i < 9; ++i)
-        arrays[i] = admission_array(s, PG_GETARG_DATUM(i), i == 8 ? FLOAT8OID : BYTEAOID);
-    admission_import(s, arrays, &s->source);
-    admission_import(s, arrays + 3, &s->admitted);
+    admission_charge(s, sizeof(*s));
+    return s;
+}
+
+static void admission_materialize(admission_state *s,
+    const physicality_descriptor_source_observation_t *sources, size_t source_count,
+    int64_t generated_at, laplace_physicality_pg_admission_result *result)
+{
+    physicality_descriptor_limits_t limits;
+    hash128_t generated_source, floor;
+    size_t form_count = 0, floor_bytes, source_peak = 0, actual_count = 0;
+    Datum snapshot_text;
+    Oid query_types[1] = {BYTEAARRAYOID};
+    const char *metadata_sql, *payload_sql;
     s->source_logical = admission_preflight(s, &s->source);
     s->admitted_logical = admission_preflight(s, &s->admitted);
     for (size_t i = 0; i < s->source.count; ++i)
-        source_count = admission_add(source_count, intent_stage_physicality_count(s->source.items[i]));
-    sources = admission_sources(s, arrays + 6, source_count);
+        actual_count = admission_add(actual_count, intent_stage_physicality_count(s->source.items[i]));
+    if (actual_count != source_count || (source_count != 0 && sources == NULL))
+        admission_invalid("source metadata must align with every raw physicality observation");
+    for (size_t i = 0; i < source_count; ++i)
+        if (!isfinite(sources[i].source_trust) || sources[i].source_trust < 0 || sources[i].source_trust > 1)
+            admission_invalid("source trust must be an explicit finite registered prior in [0,1]");
     if (!laplace_perfcache_ready())
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                        errmsg("physicality descriptor admission requires the configured Unicode perfcache")));
@@ -625,15 +624,121 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     SPI_finish();
     UnregisterSnapshot(s->snapshot); s->snapshot = InvalidSnapshot;
     MemoryContextSwitchTo(s->context);
-    forms = physicality_descriptor_materialization_forms(s->materialization, &form_count);
+    result->forms = physicality_descriptor_materialization_forms(s->materialization, &form_count);
     if (form_count != source_count) admission_invalid("native output form count differs from original observation count");
+    s->output[1] = physicality_descriptor_vocabulary_take_stage(s->vocabulary);
+    s->output[2] = physicality_descriptor_materialization_take_stage(s->materialization);
+    for (size_t i = 0; i < 3; ++i) result->stages[i] = s->output[i];
+    result->owner = s->context;
+    result->form_count = form_count;
+    result->floor_receipt = floor;
+    result->generated_source_id = generated_source;
+    result->snapshot_receipt = snapshot_text;
+    result->current_bodies = s->current_bodies;
+    result->missing_bodies = s->missing_count;
+    result->floor_index_added_bytes = floor_bytes;
+    result->retained_bytes = s->bytes;
+    result->peak_bytes = s->peak_bytes;
+    result->logical_work = s->logical_work;
+    result->stored_vertices = s->stored_vertices;
+    result->provider_rounds = s->rounds;
+    result->database_operations = s->operations;
+}
+
+/* Reuse the tuple import owner so backend callers get the same full framing,
+ * identity and finite-body validation as the SQL transport. Borrowed caller
+ * stages are never retained beyond this copy. */
+static void admission_clone_stages(admission_state *s,
+    const intent_stage_t *const *stages, size_t count, stage_list *list)
+{
+    if (count != 0 && stages == NULL) admission_invalid("stage array is missing");
+    for (size_t i = 0; i < count; ++i) {
+        size_t sizes[3];
+        const uint8_t *parts[3];
+        intent_stage_t **slot;
+        int rc;
+        if (stages[i] == NULL) admission_invalid("stage array contains a missing stage");
+        for (size_t j = 0; j < 3; ++j)
+            parts[j] = intent_stage_tuple_ptr(stages[i], (intent_stage_table_t)(j + 1), &sizes[j]);
+        slot = admission_stage_slot(s, list);
+        rc = intent_stage_from_tuple_bytes(parts[0], sizes[0], parts[1], sizes[1],
+            parts[2], sizes[2], s->maximum_bytes - s->bytes, slot);
+        if (rc != 0) admission_status(rc == -2 ? PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED :
+                                    PHYSICALITY_DESCRIPTOR_INVALID, "caller stage import");
+        admission_native_peak(s, intent_stage_memory_peak_bytes(*slot));
+        admission_charge(s, intent_stage_memory_bytes(*slot));
+    }
+}
+
+laplace_physicality_pg_admission_result *laplace_physicality_pg_materialize(
+    const intent_stage_t *const *source_stages, size_t source_stage_count,
+    const intent_stage_t *const *admitted_stages, size_t admitted_stage_count,
+    const physicality_descriptor_source_observation_t *observations, size_t observation_count,
+    int64 generated_at_unix_us, size_t maximum_bytes,
+    int maximum_database_operations, size_t maximum_logical_occurrences)
+{
+    MemoryContext owner = AllocSetContextCreate(CurrentMemoryContext,
+        "Laplace physicality admission", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext previous = MemoryContextSwitchTo(owner);
+    admission_state *s = admission_state_create(maximum_bytes,
+        maximum_database_operations, maximum_logical_occurrences);
+    laplace_physicality_pg_admission_result *result = admission_alloc(s, sizeof(*result));
+    physicality_descriptor_source_observation_t *sources;
+    if (observation_count != 0 && observations == NULL)
+        admission_invalid("source observations are missing");
+    sources = admission_alloc(s, admission_multiply(observation_count, sizeof(*sources)));
+    if (observation_count != 0) memcpy(sources, observations, observation_count * sizeof(*sources));
+    admission_clone_stages(s, source_stages, source_stage_count, &s->source);
+    admission_clone_stages(s, admitted_stages, admitted_stage_count, &s->admitted);
+    admission_materialize(s, sources, observation_count, generated_at_unix_us, result);
+    MemoryContextSwitchTo(previous);
+    return result;
+}
+
+void laplace_physicality_pg_admission_release(laplace_physicality_pg_admission_result *result)
+{
+    if (result != NULL) MemoryContextDelete(result->owner);
+}
+
+Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
+{
+    admission_state *s;
+    transport_array arrays[9];
+    physicality_descriptor_source_observation_t *sources;
+    laplace_physicality_pg_admission_result materialized = {0};
+    const physicality_descriptor_admitted_form_t *forms;
+    hash128_t generated_source, floor, *form_ids;
+    size_t source_count = 0, form_count = 0, tuple_bytes = 0, floor_bytes;
+    int64_t maximum_bytes = PG_GETARG_INT64(10), maximum_logical = PG_GETARG_INT64(12);
+    int32_t maximum_operations = PG_GETARG_INT32(11);
+    int64_t generated_at = PG_GETARG_INT64(9);
+    Datum snapshot_text, values[18] = {0};
+    bool nulls[18] = {false};
+    ReturnSetInfo *result;
+
+    if (maximum_bytes <= 0 || maximum_logical <= 0 || maximum_operations <= 0 ||
+        (uint64_t)maximum_bytes > SIZE_MAX || (uint64_t)maximum_logical > SIZE_MAX)
+        admission_invalid("positive finite byte, operation and logical-work grants are required");
+    s = admission_state_create((size_t)maximum_bytes, maximum_operations, (size_t)maximum_logical);
+    for (int i = 0; i < 9; ++i)
+        arrays[i] = admission_array(s, PG_GETARG_DATUM(i), i == 8 ? FLOAT8OID : BYTEAOID);
+    admission_import(s, arrays, &s->source);
+    admission_import(s, arrays + 3, &s->admitted);
+    for (size_t i = 0; i < s->source.count; ++i)
+        source_count = admission_add(source_count, intent_stage_physicality_count(s->source.items[i]));
+    sources = admission_sources(s, arrays + 6, source_count);
+    admission_materialize(s, sources, source_count, generated_at, &materialized);
+    forms = materialized.forms;
+    form_count = materialized.form_count;
+    floor = materialized.floor_receipt;
+    generated_source = materialized.generated_source_id;
+    floor_bytes = materialized.floor_index_added_bytes;
+    snapshot_text = materialized.snapshot_receipt;
     form_ids = admission_alloc(s, admission_multiply(form_count, sizeof(*form_ids)));
     for (size_t i = 0; i < form_count; ++i) form_ids[i] = forms[i].descriptor_id;
     values[3] = PointerGetDatum(admission_ids(s, form_ids, form_count));
     for (size_t i = 0; i < form_count; ++i) form_ids[i] = forms[i].view_id;
     values[4] = PointerGetDatum(admission_ids(s, form_ids, form_count));
-    s->output[1] = physicality_descriptor_vocabulary_take_stage(s->vocabulary);
-    s->output[2] = physicality_descriptor_materialization_take_stage(s->materialization);
     for (int i = 0; i < 3; ++i)
         values[i] = PointerGetDatum(admission_output(s, (intent_stage_table_t)(i + 1), &tuple_bytes));
     {

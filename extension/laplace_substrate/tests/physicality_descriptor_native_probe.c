@@ -206,6 +206,32 @@ int main(void) {
         tuple_values[i] = PointerGetDatum(probe_bytes(tuples, length));
         parts[i].values = &tuple_values[i]; parts[i].nulls = &tuple_nulls[i]; parts[i].count = 1;
     }
+    /* The callable backend boundary copies all three tuple tables through the
+     * same native importer; it never borrows mutable caller stage storage. */
+    {
+        admission_state *copy = probe_state(&snapshot);
+        const intent_stage_t *inputs[1] = {original};
+        admission_clone_stages(copy, inputs, 1, &copy->source);
+        CHECK(copy->source.count == 1 && copy->source.items[0] != original);
+        for (int table = 1; table <= 3; ++table) {
+            size_t expected_size, copied_size;
+            const uint8_t *expected = intent_stage_tuple_ptr(original,
+                (intent_stage_table_t)table, &expected_size);
+            const uint8_t *copied = intent_stage_tuple_ptr(copy->source.items[0],
+                (intent_stage_table_t)table, &copied_size);
+            CHECK(copied_size == expected_size);
+            CHECK(copied_size == 0 || memcmp(copied, expected, copied_size) == 0);
+            CHECK(copied_size == 0 || copied != expected);
+        }
+        CHECK(admission_preflight(copy, &copy->source) == 4);
+        REFUSES(admission_clone_stages(copy, NULL, 1, &copy->admitted), "array is missing");
+        inputs[0] = NULL;
+        REFUSES(admission_clone_stages(copy, inputs, 1, &copy->admitted), "missing stage");
+        inputs[0] = original;
+        copy->maximum_bytes = copy->bytes + sizeof(intent_stage_t *) * 4;
+        REFUSES(admission_clone_stages(copy, inputs, 1, &copy->admitted), "caller stage import");
+        probe_stages_free(copy);
+    }
     admission_import(s, parts, &s->source);
     CHECK(s->source.count == 1 && intent_stage_physicality_count(s->source.items[0]) == 2);
     CHECK(admission_preflight(s, &s->source) == 4);

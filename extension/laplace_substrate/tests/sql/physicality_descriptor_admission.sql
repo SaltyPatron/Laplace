@@ -20,12 +20,14 @@ FROM descriptor_atoms p CROSS JOIN descriptor_atoms a CROSS JOIN descriptor_atom
 WHERE p.ord=3 AND a.ord=1 AND b.ord=2;
 -- Exact native A/B/AB content and geometry above are the fixture's provider.
 -- The second body is an explicit alternate observation, not composer output.
+-- Native COPY geometry fields use EWKB Z/M flag bits. ST_AsBinary emits ISO
+-- type3001/3002 for these geometries and is not the native stage wire format.
 CREATE TEMP TABLE descriptor_frames ON COMMIT DROP AS
 SELECT variant,
     int2send(10::smallint) || pg_temp.descriptor_field(s.placement_id) || pg_temp.descriptor_field(s.entity_id) ||
-    pg_temp.descriptor_field(int2send(1::smallint)) || pg_temp.descriptor_field(public.ST_AsBinary(c.coord,'NDR')) ||
+    pg_temp.descriptor_field(int2send(1::smallint)) || pg_temp.descriptor_field(public.ST_AsEWKB(c.coord,'NDR')) ||
     pg_temp.descriptor_field(public.laplace_hilbert_encode(c.coord)) ||
-    pg_temp.descriptor_field(public.ST_AsBinary(s.trajectory,'NDR')) ||
+    pg_temp.descriptor_field(public.ST_AsEWKB(s.trajectory,'NDR')) ||
     pg_temp.descriptor_field(int4send(2)) || pg_temp.descriptor_field(NULL) ||
     pg_temp.descriptor_field(NULL) || pg_temp.descriptor_field(int8send(1000000::bigint + variant)) AS tuples
 FROM descriptor_source s CROSS JOIN (VALUES(0),(1)) v(variant)

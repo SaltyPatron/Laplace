@@ -170,4 +170,57 @@ TEST(PhysicalityDescriptorTransport, RawBatchRejectsClaimedPlacementWithoutRewri
         PHYSICALITY_DESCRIPTOR_INVALID_BODY);
     EXPECT_EQ(intent_stage_physicality_count(rejected.get()), 0u);
 }
+TEST(PhysicalityDescriptorTransport, CopyGeometryRequiresEwkbRatherThanIsoWkb) {
+    Stage stage(intent_stage_new(0u), intent_stage_free);
+    const hash128_t children[] = {{1u, 2u}, {3u, 4u}};
+    double trajectory[8]{};
+    ASSERT_EQ(trajectory_build(children, 2u, trajectory), 0);
+    hash128_t entity, placement;
+    size_t logical = 0u;
+    ASSERT_EQ(trajectory_content_identity(trajectory, 2u, &entity, &logical), 0);
+    laplace_physicality_id_compute(entity, 1, &placement);
+    const double coord[] = {0.125, 0.25, 0.375, 0.5};
+    const hilbert128_t hb{};
+    ASSERT_EQ(intent_stage_add_physicality(stage.get(), &placement, &entity, 1,
+        coord, &hb, trajectory, 2u, 2, 1, 0.0, 1, 0, 42), 0);
+    const intent_stage_t* stages[] = {stage.get()};
+    size_t bodies = 0, stored = 0, work = 0;
+    ASSERT_EQ(physicality_descriptor_stages_preflight(stages, 1u, 2u,
+        &bodies, &stored, &work), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(bodies, 1u); EXPECT_EQ(stored, 2u); EXPECT_EQ(work, 2u);
+    const auto valid = tuples(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES);
+    for (size_t field : {3u, 5u}) {
+        auto iso = valid;
+        size_t cursor = 2u;
+        for (size_t i = 0; i <= field; ++i) {
+            ASSERT_LE(cursor + 4u, iso.size());
+            const uint32_t length = (uint32_t(iso[cursor]) << 24u) |
+                (uint32_t(iso[cursor + 1u]) << 16u) |
+                (uint32_t(iso[cursor + 2u]) << 8u) | iso[cursor + 3u];
+            cursor += 4u;
+            if (i == field) break;
+            ASSERT_NE(length, UINT32_MAX);
+            cursor += length;
+        }
+        ASSERT_LE(cursor + 5u, iso.size());
+        EXPECT_EQ(iso[cursor], 1u);
+        const uint32_t ewkb = field == 3u ? UINT32_C(0xc0000001) : UINT32_C(0xc0000002);
+        uint32_t actual = 0; std::memcpy(&actual, iso.data() + cursor + 1u, sizeof(actual));
+        ASSERT_EQ(actual, ewkb);
+        // These are the ISO ZM tags produced by PostGIS ST_AsBinary. Tuple
+        // framing remains valid, but this is not the native COPY geometry law.
+        const uint32_t iso_type = field == 3u ? 3001u : 3002u;
+        std::memcpy(iso.data() + cursor + 1u, &iso_type, sizeof(iso_type));
+        intent_stage_t* raw = nullptr;
+        ASSERT_EQ(intent_stage_from_tuple_bytes(nullptr, 0u, iso.data(), iso.size(),
+            nullptr, 0u, kBudget, &raw), 0);
+        Stage imported(raw, intent_stage_free);
+        const intent_stage_t* invalid[] = {imported.get()};
+        bodies = stored = work = 99u;
+        EXPECT_EQ(physicality_descriptor_stages_preflight(invalid, 1u, 2u,
+            &bodies, &stored, &work), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+        EXPECT_EQ(bodies, 99u); EXPECT_EQ(stored, 99u); EXPECT_EQ(work, 99u);
+    }
+}
+
 }
