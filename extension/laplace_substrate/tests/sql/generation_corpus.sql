@@ -570,6 +570,9 @@ END $$;
 
 -- A lossy bitmap contains nonmatching tuples from matching heap pages. Exercise
 -- recheck against an independent SQL oracle, including mixed physicality types.
+-- Keep this stress fixture independent of heap compression and planner tuning.
+-- Its savepoint also removes the load and restores every SET LOCAL below.
+SAVEPOINT membership_bitmap_fixture;
 DO $membership_bitmap$
 DECLARE
     needle bytea := public.laplace_hash128_blake3('test/membership/needle');
@@ -582,6 +585,7 @@ DECLARE
     plan json;
     actual bytea[];
 BEGIN
+    ALTER TABLE laplace.physicalities ALTER COLUMN trajectory SET STORAGE PLAIN;
     SELECT public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(needle,i,1,4) ORDER BY i)),
            public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(noise,i,1,4) ORDER BY i))
       INTO yes_curve,no_curve FROM generate_series(1,40) i;
@@ -598,13 +602,17 @@ BEGIN
     LIMIT 10000;
     PERFORM set_config('work_mem','64kB',true);
     PERFORM set_config('enable_seqscan','off',true);
+    PERFORM set_config('enable_indexscan','off',true);
+    PERFORM set_config('enable_indexonlyscan','off',true);
+    PERFORM set_config('enable_bitmapscan','on',true);
+    PERFORM set_config('max_parallel_workers_per_gather','0',true);
     EXECUTE 'EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) SELECT entity_id
         FROM laplace.physicalities WHERE type=1 AND trajectory IS NOT NULL
         AND public.laplace_trajectory_constituent_ids(trajectory) @> $1'
         INTO plan USING ARRAY[needle];
     IF NOT EXISTS (SELECT 1 FROM jsonb_path_query(plan::jsonb,'$.**."Lossy Heap Blocks"') v
                    WHERE v::text::bigint > 0) THEN
-        RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap';
+        RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap: %',plan;
     END IF;
     SELECT array_agg(entity_id) INTO actual
       FROM structural.containers_containing_all(ARRAY[needle,needle]);
@@ -615,10 +623,10 @@ BEGIN
     IF actual IS DISTINCT FROM ARRAY[matched] THEN
         RAISE EXCEPTION 'FAIL: lossy OR membership admitted a wrong entity/type';
     END IF;
-    PERFORM set_config('work_mem','4MB',true);
-    PERFORM set_config('enable_seqscan','on',true);
 END
 $membership_bitmap$;
+ROLLBACK TO SAVEPOINT membership_bitmap_fixture;
+RELEASE SAVEPOINT membership_bitmap_fixture;
 
 -- Observation contexts are admissible sequence evidence. An arbitrary relation
 -- object is routing state, even when its physicality contains a matching prefix.
