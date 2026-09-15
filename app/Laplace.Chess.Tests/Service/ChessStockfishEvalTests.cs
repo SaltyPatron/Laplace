@@ -9,6 +9,7 @@ namespace Laplace.Chess.Service.Tests;
 [Trait("Tier", "fast")]
 public sealed class ChessStockfishEvalTests
 {
+    private static readonly StockfishEvaluationRecipe Recipe = StockfishEvaluationRecipe.ForTests("scripted-corpus-evaluator/v1");
     private const string Game =
         "[Event \"T\"]\n[White \"Alice\"]\n[Black \"Bob\"]\n[Date \"2024.01.01\"]\n[Result \"1-0\"]\n\n"
         + "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0\n";
@@ -39,7 +40,7 @@ public sealed class ChessStockfishEvalTests
         var parsed = ChessPgnDecomposer.TryParseGame(pgn)!;
         var witnessed = ChessAnalyze.WitnessedFromParsed(parsed);
         var b = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/sf-eval");
-        ChessStockfishEval.DeriveGame(b, witnessed, eval);
+        ChessStockfishEval.DeriveGame(b, witnessed, eval, Recipe);
         return b.SetInputUnitsConsumed(1).Build();
     }
 
@@ -63,7 +64,7 @@ public sealed class ChessStockfishEvalTests
     }
 
     [Fact]
-    public void DeriveGame_AttestsEvals_UnderStockfishSource_WithGameContext()
+    public void DeriveGame_AttestsEvals_UnderStockfishSource_WithExactRecipeContext()
     {
         var change = Derive(new ScriptedEvaluator(new int?[] { 20, -15, 25, -30, 90, -120, 350 }));
         var evalRows = change.Attestations
@@ -73,10 +74,12 @@ public sealed class ChessStockfishEvalTests
             .Where(e => e.TypeId == ChessVocabulary.PositionType)
             .Select(e => e.Id)
             .ToHashSet();
+        var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
+        var context = ChessStockfishEval.MarkerId(parsed.LineId, Recipe);
         Assert.All(evalRows, a =>
         {
             Assert.Equal(ChessStockfishEval.SourceId, a.SourceId);
-            Assert.NotNull(a.ContextId);
+            Assert.Equal(context, a.ContextId);
             Assert.Contains(a.SubjectId, positions);
         });
     }
@@ -104,11 +107,36 @@ public sealed class ChessStockfishEvalTests
     {
         var change = Derive(new ScriptedEvaluator());
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
-        var marker = ChessStockfishEval.MarkerId(parsed.LineId, ChessStockfishEval.Version);
+        var marker = ChessStockfishEval.MarkerId(parsed.LineId, Recipe);
         Assert.Contains(change.Entities, e => e.Id == marker);
         Assert.Contains(change.Attestations, a =>
             a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId && a.SubjectId == parsed.LineId
-            && a.SourceId == ChessStockfishEval.SourceId);
+            && a.SourceId == ChessStockfishEval.SourceId && a.ContextId == marker
+            && a.ObjectId == ContentEmitter.RootId(Recipe.CanonicalManifest));
+    }
+
+    [Fact]
+    public void DifferentRecipeCannotReuseSharedMemoOrCalculatedContext()
+    {
+        var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
+        var witnessed = ChessAnalyze.WitnessedFromParsed(parsed);
+        var memo = new ConcurrentDictionary<Hash128, int?>();
+        var original = new ScriptedEvaluator();
+        var first = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/original-recipe");
+        ChessStockfishEval.DeriveGame(first, witnessed, original, Recipe, memo);
+
+        var changedRecipe = StockfishEvaluationRecipe.ForTests("different-engine-or-options/v1");
+        var changed = new ScriptedEvaluator();
+        var second = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/changed-recipe");
+        ChessStockfishEval.DeriveGame(second, witnessed, changed, changedRecipe, memo);
+        Assert.Equal(7, original.Fens.Count);
+        Assert.Equal(7, changed.Fens.Count);
+        Assert.Equal(14, memo.Count);
+        var oldContext = ChessStockfishEval.MarkerId(parsed.LineId, Recipe);
+        var newContext = ChessStockfishEval.MarkerId(parsed.LineId, changedRecipe);
+        Assert.NotEqual(oldContext, newContext);
+        Assert.All(second.Build().Attestations.Where(a => a.TypeId == ChessVocabulary.HasEvalType),
+            a => Assert.Equal(newContext, a.ContextId));
     }
 
     [Fact]
@@ -134,13 +162,13 @@ public sealed class ChessStockfishEvalTests
 
         var w1 = ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(g1)!);
         var b1 = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/memo");
-        ChessStockfishEval.DeriveGame(b1, w1, eval, memo);
+        ChessStockfishEval.DeriveGame(b1, w1, eval, Recipe, memo);
         int afterFirst = eval.Fens.Count;
         Assert.Equal(7, afterFirst);
 
         var w2 = ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(g2)!);
         var b2 = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/memo");
-        ChessStockfishEval.DeriveGame(b2, w2, eval, memo);
+        ChessStockfishEval.DeriveGame(b2, w2, eval, Recipe, memo);
 
         Assert.Equal(afterFirst + 1, eval.Fens.Count);
         Assert.Contains(b2.SetInputUnitsConsumed(1).Build().Attestations,
@@ -154,12 +182,12 @@ public sealed class ChessStockfishEvalTests
         var memo = new ConcurrentDictionary<Hash128, int?>();
         var first = new ScriptedEvaluator(new int?[] { null, null, null, null, null, null, null });
         var b = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/null-memo");
-        ChessStockfishEval.DeriveGame(b, witnessed, first, memo);
+        ChessStockfishEval.DeriveGame(b, witnessed, first, Recipe, memo);
         Assert.Empty(memo);
 
         var retry = new ScriptedEvaluator(Enumerable.Repeat((int?)17, 7).ToArray());
         var b2 = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/null-retry");
-        ChessStockfishEval.DeriveGame(b2, witnessed, retry, memo);
+        ChessStockfishEval.DeriveGame(b2, witnessed, retry, Recipe, memo);
         Assert.Equal(7, retry.Fens.Count);
         Assert.Equal(7, memo.Count);
     }
@@ -173,9 +201,9 @@ public sealed class ChessStockfishEvalTests
         var calls = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
 
         var first = Task.Run(() => ChessStockfishEval.PrepareGame(
-            witnessed, new CountingEvaluator(calls), memo, inflight));
+            witnessed, new CountingEvaluator(calls), Recipe, memo, inflight));
         var second = Task.Run(() => ChessStockfishEval.PrepareGame(
-            witnessed, new CountingEvaluator(calls), memo, inflight));
+            witnessed, new CountingEvaluator(calls), Recipe, memo, inflight));
 
         var prepared = await Task.WhenAll(first, second);
         Assert.All(prepared, item => Assert.NotNull(item));
@@ -189,7 +217,7 @@ public sealed class ChessStockfishEvalTests
     {
         string path = Path.Combine(Path.GetTempPath(), $"lpsf-handler-{Guid.NewGuid():N}.bin");
         var decomposer = new ChessStockfishEvalDecomposer(
-            evaluatorFactory: () => new ScriptedEvaluator(), evalCachePath: path);
+            evaluatorFactory: () => new ScriptedEvaluator(), evalCachePath: path, evaluatorRecipe: Recipe);
         try
         {
             Assert.True(decomposer.CreateEvalHandlerForTests().ParallelizeDeferredUnitCreation);
@@ -197,8 +225,8 @@ public sealed class ChessStockfishEvalTests
         finally
         {
             await decomposer.DisposeAsync();
-            File.Delete(path);
-            File.Delete(path + ".journal");
+            File.Delete(StockfishEvalCache.RecipePath(path, Recipe));
+            File.Delete(StockfishEvalCache.RecipePath(path, Recipe) + ".journal");
         }
     }
 

@@ -47,6 +47,10 @@ interface Setup {
   elo: string;
   limitStrength: boolean;
   concurrency: string;
+  stockfishThreads: string;
+  stockfishHashMb: string;
+  stockfishNumaPolicy: string;
+  stockfishSyzygyPath: string;
   ingest: boolean;
 }
 
@@ -58,6 +62,10 @@ const DEFAULT_SETUP: Setup = {
   elo: '2000',
   limitStrength: true,
   concurrency: '1',
+  stockfishThreads: '',
+  stockfishHashMb: '',
+  stockfishNumaPolicy: '',
+  stockfishSyzygyPath: '',
   ingest: true,
 };
 
@@ -132,6 +140,10 @@ export function GauntletView() {
       elo: setup.elo || '2000',
       limitStrength: String(setup.limitStrength),
       concurrency: setup.concurrency || '1',
+      stockfishThreads: setup.stockfishThreads,
+      stockfishHashMb: setup.stockfishHashMb,
+      stockfishNumaPolicy: setup.stockfishNumaPolicy,
+      stockfishSyzygyPath: setup.stockfishSyzygyPath,
     });
     const timer = setTimeout(() => {
       void apiGet<Preview>(`/chess/lab/cutechess/preview?${q}`)
@@ -201,6 +213,15 @@ export function GauntletView() {
       setErr('Games must be an even number of at least 2 so every opening is played once from each color.');
       return;
     }
+    for (const [label, value] of [
+      ['Stockfish threads', setup.stockfishThreads],
+      ['Stockfish hash', setup.stockfishHashMb],
+    ]) {
+      if (value.trim() && (!Number.isInteger(Number(value)) || Number(value) < 1)) {
+        setErr(`${label} must be a positive whole number, or blank to use the engine default.`);
+        return;
+      }
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -209,6 +230,10 @@ export function GauntletView() {
         elo: setup.elo || '2000',
         limitStrength: String(setup.limitStrength),
         concurrency: setup.concurrency || '1',
+        stockfishThreads: setup.stockfishThreads,
+        stockfishHashMb: setup.stockfishHashMb,
+        stockfishNumaPolicy: setup.stockfishNumaPolicy,
+        stockfishSyzygyPath: setup.stockfishSyzygyPath,
         ingest: String(setup.ingest),
         // Exactly one shared match budget reaches both engines.
         depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
@@ -363,7 +388,7 @@ export function GauntletView() {
               />
             </Field>
 
-            <Field label="Games in flight" help="1 keeps the transcript and the live board readable.">
+            <Field label="Games in flight" help="Parallel games share this host. Choose concurrency together with engine threads and memory from a benchmark run in the same environment.">
               <Input
                 type="number"
                 min={1}
@@ -371,6 +396,27 @@ export function GauntletView() {
                 aria-label="Games in flight"
                 onChange={(e) => setSetup((s) => ({ ...s, concurrency: e.target.value }))}
               />
+            </Field>
+
+            <Field label="Stockfish threads" help="Search threads per Stockfish process. Blank uses the installed engine default; the run records the actual options.">
+              <Input type="number" min={1} step={1} value={setup.stockfishThreads}
+                placeholder="Engine default" aria-label="Stockfish threads"
+                onChange={(e) => setSetup((s) => ({ ...s, stockfishThreads: e.target.value }))} />
+            </Field>
+            <Field label="Stockfish hash (MiB)" help="Transposition-table memory per Stockfish process. Allow additional memory for its network, Laplace, and other services.">
+              <Input type="number" min={1} step={1} value={setup.stockfishHashMb}
+                placeholder="Engine default" aria-label="Stockfish hash (MiB)"
+                onChange={(e) => setSetup((s) => ({ ...s, stockfishHashMb: e.target.value }))} />
+            </Field>
+            <Field label="Stockfish NUMA policy" help="Optional: auto, system, hardware, or none. Use the topology observed by the benchmark on this host.">
+              <Input value={setup.stockfishNumaPolicy} placeholder="Engine default"
+                aria-label="Stockfish NUMA policy"
+                onChange={(e) => setSetup((s) => ({ ...s, stockfishNumaPolicy: e.target.value }))} />
+            </Field>
+            <Field label="Stockfish tablebase paths" help="Optional Syzygy directories on the server. Use colons on Linux or semicolons on Windows; include smaller-piece tables.">
+              <Input value={setup.stockfishSyzygyPath} placeholder="Engine default"
+                aria-label="Stockfish tablebase paths"
+                onChange={(e) => setSetup((s) => ({ ...s, stockfishSyzygyPath: e.target.value }))} />
             </Field>
 
             <Field

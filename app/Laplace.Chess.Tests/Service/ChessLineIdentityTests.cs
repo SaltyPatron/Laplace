@@ -85,6 +85,49 @@ public sealed class ChessLineIdentityTests
         Assert.Equal(ChessCompose.LineId(parsed.PositionIds[0], parsed.MoveIds), parsed.LineId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LinePlacement_PreservesEstablishedKarcherRecipeAndOccurrences(bool repeatMove)
+    {
+        static ChessNode Node(string key, double[] coordinate)
+        {
+            var id = Hash128.OfCanonical($"line-placement/{key}");
+            return new ChessNode(id, coordinate, Hilbert128.Encode(coordinate), [],
+                PhysicalityId.Compute(id, PhysicalityType.Content), 0, ChessCompose.PositionTier);
+        }
+        var start = Node("start", [0, 0, 0, 1]);
+        var moveA = Node("move-a", [1, 0, 0, 0]);
+        var moves = new[] { moveA, repeatMove ? moveA : Node("move-b", [0, 1, 0, 0]) };
+        var expectedIds = new[] { start.Id, moves[0].Id, moves[1].Id };
+        var lineId = ChessCompose.LineId(start.Id, moves.Select(move => move.Id).ToArray());
+        var builder = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/line-placement");
+
+        ChessGraph.AppendLineTrajectory(builder, lineId, start, moves,
+            ChessVocabulary.PgnSourceId, IntentStage.PgEpochUnixUs);
+
+        var physicality = Assert.Single(builder.Build().Physicalities);
+        Assert.Equal(PhysicalityType.Content, physicality.Type);
+        Assert.Equal(PhysicalityId.Compute(lineId, PhysicalityType.Content), physicality.Id);
+        Assert.Equal(expectedIds, Trajectory.Constituents(physicality.TrajectoryXyzm!));
+        Assert.Equal(lineId, Trajectory.ContentIdentity(physicality.TrajectoryXyzm!, out int count));
+        Assert.Equal(3, count);
+        Assert.Equal(count, physicality.NConstituents);
+        double[] coordinates = [.. start.Coord, .. moves[0].Coord, .. moves[1].Coord];
+        double[] expected = Math4d.KarcherMean(coordinates, tol: 1e-12, maxIters: 64);
+        double[] analytic = repeatMove
+            ? [Math.Sqrt(3) / 2, 0, 0, 0.5]
+            : [1 / Math.Sqrt(3), 1 / Math.Sqrt(3), 0, 1 / Math.Sqrt(3)];
+        var observed = new[] { physicality.CoordX, physicality.CoordY,
+            physicality.CoordZ, physicality.CoordM };
+        Assert.Equal(expected, observed);
+        for (int axis = 0; axis < 4; axis++) Assert.Equal(analytic[axis], observed[axis], 12);
+        Assert.Equal(Hilbert128.Encode(expected), physicality.HilbertIndex);
+        Assert.Equal(1, observed.Sum(component => component * component), 12);
+        double[] chord = Math4d.Centroid(coordinates);
+        Assert.True(observed.Zip(chord, (a, b) => (a - b) * (a - b)).Sum() > 0.01);
+    }
+
     // Cross-lane collision, the book path: a prose line replayed through TryReplayLine
     // must land on the same line entity a PGN playing of those moves mints.
     [Fact]

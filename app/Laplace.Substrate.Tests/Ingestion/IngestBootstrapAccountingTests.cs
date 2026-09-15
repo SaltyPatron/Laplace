@@ -36,6 +36,26 @@ public sealed class IngestBootstrapAccountingTests
         Assert.Equal(2, committed.HighwayMaskPairs);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Initialization_PreservesWorkingSetAndVerifierLane(int mode)
+    {
+        var writer = new InsertAllWriter();
+        var runner = new IngestRunner(writer, new EmptyReader(), NullLoggerFactory.Instance);
+        var decomposer = new BootstrapThenContentDecomposer(mode);
+        var result = await runner.RunAsync(decomposer, IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            SkipSourceCompletion = true,
+        });
+        Assert.Equal(1, writer.BootstrapWorkingSets);
+        Assert.Equal(mode == 3, decomposer.VerifiedInitialization);
+        Assert.Equal(1, result.BootstrapEntitiesInserted);
+        Assert.Equal(2, result.EntitiesInserted);
+    }
+
     private sealed class CapturedProgress(InsertAllWriter writer) : IProgress<IngestProgress>
     {
         public List<IngestProgress> Committed { get; } = [];
@@ -127,12 +147,13 @@ public sealed class IngestBootstrapAccountingTests
         }
     }
 
-    private sealed class BootstrapThenContentDecomposer : IDecomposer
+    private sealed class BootstrapThenContentDecomposer(int workingSetMode = 0) : IDecomposer
     {
         private static readonly Hash128 Source = Hash128.OfCanonical("test/bootstrap-accounting/source");
         private static readonly Hash128 Governed = Hash128.OfCanonical("test/bootstrap-accounting/governed");
         private static readonly Hash128 Content = Hash128.OfCanonical("test/bootstrap-accounting/content");
 
+        public bool VerifiedInitialization { get; private set; }
         public Hash128 SourceId => Source;
         public string SourceName => "BootstrapAccounting";
         public int LayerOrder => 0;
@@ -143,7 +164,14 @@ public sealed class IngestBootstrapAccountingTests
             var bootstrap = new SubstrateChangeBuilder(Source, "bootstrap/test")
                 .AddEntity(Governed, EntityTier.Word, EntityTypeRegistry.SourceReference, Source)
                 .Build();
-            await context.Writer.ApplyAsync(bootstrap, ct);
+            if (workingSetMode == 1) await context.Writer.ApplyWorkingSetAsync(bootstrap, ct);
+            else if (workingSetMode == 2) await context.Writer.ApplyWorkingSetAsync([bootstrap], ct);
+            else if (workingSetMode == 3) await context.Writer.ApplyWorkingSetAsync([bootstrap], token =>
+            {
+                VerifiedInitialization = true;
+                return ValueTask.CompletedTask;
+            }, ct);
+            else await context.Writer.ApplyAsync(bootstrap, ct);
         }
 
         public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
@@ -180,6 +208,18 @@ public sealed class IngestBootstrapAccountingTests
     private sealed class InsertAllWriter : ISubstrateWriter, IConsensusFoldMetrics
     {
         public List<string> AppliedUnits { get; } = [];
+        public int BootstrapWorkingSets { get; private set; }
+        public Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
+        {
+            if (changes.Any(c => c.Metadata.SourceContentUnitName == "bootstrap/test")) BootstrapWorkingSets++;
+            return ((ISubstrateWriter)this).ApplyManyAsync(changes, ct);
+        }
+        public async Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes,
+            Func<CancellationToken, ValueTask> verifier, CancellationToken ct = default)
+        {
+            await verifier(ct);
+            return await ApplyWorkingSetAsync(changes, ct);
+        }
         public long ObservationsAccumulated { get; private set; } = 11;
         public long CellsFolded { get; private set; } = 7;
         public long ConsensusUpsertCalls { get; private set; }

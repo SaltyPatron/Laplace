@@ -15,8 +15,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "scripts/sql-catalog-baseline.json"
 CATALOG = ROOT / "engine/core/src/sql_catalog.def"
-# Comments must be consumed before strings so examples in comments are not code.
-TOKEN = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"')
+# Comments and character literals must be consumed before strings, so their
+# quotes cannot start a fictitious string across later source code. A character
+# literal cannot start at a C++ numeric separator (for example, 1'000).
+TOKEN = re.compile(
+    r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|@"(?:""|[^"])*"'
+    r"|(?P<char>(?<![\w])(?:u8|[uUL])?'(?:\\.|[^'\\\r\n])+')"
+    r'|"(?:\\.|[^"\\])*"')
 SQL = re.compile(r'\b(?:SELECT\s|INSERT\s+INTO\s|UPDATE\s+[\w.]+\s+SET\s|DELETE\s+FROM\s|WITH\s+[\w]+\s+AS\s*\(|COPY\s+[\w.(]|CREATE\s+(?:TEMP\s+)?(?:TABLE|FUNCTION|INDEX)|ALTER\s+TABLE|DROP\s+(?:TABLE|FUNCTION))', re.I)
 
 
@@ -26,6 +31,13 @@ def statements(source):
     for token in TOKEN.finditer(source):
         value = token.group()
         if value.startswith(("//", "/*")):
+            continue
+        if token.lastgroup == "char":
+            # Unlike a comment, a character expression ends a string sequence.
+            joined = "".join(current)
+            if current and SQL.search(joined):
+                yield re.sub(r'\s+', ' ', joined).strip()
+            current, end = [], token.end()
             continue
         between = source[end:token.start()] if end >= 0 else ""
         between = re.sub(r'/\*[\s\S]*?\*/|//[^\n]*', '', between).strip()

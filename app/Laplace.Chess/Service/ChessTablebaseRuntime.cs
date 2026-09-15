@@ -61,11 +61,13 @@ public static class ChessTablebaseRuntime
         }
 
         var probe = ChessLabPaths.SyzygyDir;
+        if (!probe.Found && probe.Source == "config")
+            _ = ChessSyzygyPaths.Resolve(probe.Path!); // fail the exact configured selection
         if (!probe.Found || probe.Path is not { Length: > 0 } path) return 0;
-        int largest = Math.Max(0, SyzygyNative.Init(path));
+        int largest = Math.Max(0, ChessSyzygyPaths.RequireNativeSelection(path,
+            SyzygyNative.Init(ChessInput.SyzygyProbePath(path)), probe.Source == "config"));
         if (largest > 0)
-            _loadedTableSet = Path.GetFullPath(path)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            _loadedTableSet = path;
         return largest;
     }
 }

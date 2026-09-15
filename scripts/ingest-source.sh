@@ -224,11 +224,10 @@ case "$source" in
         # Stockfish eval pass over recorded games (calculated layer, GH #573). No path —
         # the substrate is the source. Part of the seed ladder so a db-reset + reseed
         # re-derives the census like every other calculated layer; per-game markers make
-        # re-runs skip-complete. Needs a stockfish binary (env, chess-lab bootstrap, PATH).
+        # re-runs skip-complete. ChessLabPaths resolves the explicit executable or
+        # configured official source build before install/PATH fallbacks. Do not
+        # promote a distro executable to an explicit override in this wrapper.
         build_cli
-        if [[ -z "${LAPLACE_STOCKFISH:-}" && -x /usr/games/stockfish ]]; then
-            export LAPLACE_STOCKFISH=/usr/games/stockfish
-        fi
         ingest chess-eval
         ;;
     chess-syzygy)

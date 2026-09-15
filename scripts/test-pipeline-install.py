@@ -45,6 +45,42 @@ class InstallTests(unittest.TestCase):
         path = self.base / "calls"
         return path.read_text() if path.exists() else ""
 
+    def test_chess_source_and_executable_selection_invalidate_publish_stamp(self):
+        sources = [self.base / name for name in ("source-one", "source-two")]
+        for source in sources:
+            binary = source / "src/stockfish"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o755)
+        cc = self.base / "install/bin/cutechess-cli"
+        cc.parent.mkdir(parents=True)
+        cc.write_text("#!/bin/sh\nexit 0\n")
+        cc.chmod(0o755)
+        result = self.run_shell(function("phase_chess_lab") + r'''
+ROOT="$PWD"
+fp_compute() { printf '%s\n' unchanged-files; }
+fp_check() { [[ -f "$FP_STAMP_DIR/$1" && $(cat "$FP_STAMP_DIR/$1") == "$2" ]]; }
+fp_record() { printf '%s\n' "$2" > "$FP_STAMP_DIR/$1"; }
+python3() {
+  if [[ "$*" == *--print-path* ]]; then printf '%s/src/stockfish\n' "$LAPLACE_STOCKFISH_SOURCE"; fi
+}
+bash() { printf 'published source=%s explicit=%s\n' "$LAPLACE_STOCKFISH_SOURCE" "${LAPLACE_STOCKFISH:-}" >> "$CALLS"; }
+export LAPLACE_STOCKFISH_SOURCE="$PWD/source-one"
+unset LAPLACE_STOCKFISH LAPLACE_CUTECHESS
+phase_chess_lab
+phase_chess_lab
+export LAPLACE_STOCKFISH_SOURCE="$PWD/source-two"
+phase_chess_lab
+export LAPLACE_STOCKFISH="$PWD/source-one/src/stockfish"
+phase_chess_lab
+''')
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        calls = self.calls().splitlines()
+        self.assertEqual(3, len(calls), calls)
+        self.assertIn("source=", calls[0])
+        self.assertIn("source-two", calls[1])
+        self.assertIn("explicit=" + str(sources[0] / "src/stockfish"), calls[2])
+
     def test_install_manifest_detects_replacement_deletion_and_symlink_change(self):
         import runpy
         digest = runpy.run_path(str(ROOT / "scripts/installed-artifact-digest.py"))["installed_digest"]

@@ -17,31 +17,40 @@ public sealed class ChessStockfishEvalDecomposer
 {
     private long _candidatesStreamed;
 
-    private readonly int _depth;
-    private readonly long _nodes;
+    public StockfishEvaluationRecipe Recipe { get; }
     private readonly StockfishEvaluatorPool _pool;
     private readonly ConcurrentDictionary<Hash128, int?> _evalMemo;
     private readonly ConcurrentDictionary<Hash128, Lazy<int?>> _evalInflight = new();
     private readonly string _cachePath;
+    private Hash128? _recipeMetadataRoot;
+    private CancellationTokenRegistration _cancellation;
 
     public ChessStockfishEvalDecomposer(
         int depth = 10, long nodes = 0, Func<IPositionEvaluator>? evaluatorFactory = null,
-        string? evalCachePath = null)
+        string? evalCachePath = null, StockfishEvaluationRecipe? evaluatorRecipe = null)
     {
-        _depth = depth;
-        _nodes = nodes;
         _cachePath = evalCachePath ?? StockfishEvalCache.DefaultPath();
-        _evalMemo = StockfishEvalCache.Load(_cachePath, ChessStockfishEval.Version, _depth, _nodes);
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => SaveCache();
-        _pool = new StockfishEvaluatorPool(evaluatorFactory ?? (() =>
+        if (evaluatorFactory is not null)
         {
-            var sf = ChessLabPaths.Catalog["stockfish"];
+            Recipe = evaluatorRecipe ?? throw new ArgumentException(
+                "An injected evaluator requires an explicit evaluation recipe.", nameof(evaluatorRecipe));
+            _pool = new StockfishEvaluatorPool(evaluatorFactory, Recipe.Resources.Processes);
+        }
+        else
+        {
+            var sf = ChessLabPaths.Stockfish;
             if (!sf.Found)
                 throw new InvalidOperationException(
-                    "stockfish binary not found (env LAPLACE_STOCKFISH, build dir, or PATH) — "
+                    "stockfish binary not found (LAPLACE_STOCKFISH, Stockfish source build, install dir, or PATH) — "
                     + "the chess-eval pass needs it");
-            return new StockfishProcessEvaluator(sf.Path!, _depth, _nodes);
-        }));
+            var settings = StockfishEvaluationOptions.FromEnvironment(depth, nodes);
+            var initial = new StockfishProcessEvaluator(sf.Path!, settings);
+            Recipe = initial.Recipe;
+            _pool = new StockfishEvaluatorPool(
+                () => new StockfishProcessEvaluator(sf.Path!, settings, Recipe), Recipe.Resources.Processes, initial);
+        }
+        _evalMemo = StockfishEvalCache.Load(_cachePath, Recipe);
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
     }
 
     public override Hash128 SourceId => ChessStockfishEval.SourceId;
@@ -59,8 +68,18 @@ public sealed class ChessStockfishEvalDecomposer
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => _canonicalNames = await ChessVocabulary.BootstrapAsync(
+    {
+        _cancellation.Dispose();
+        _cancellation = ct.Register(static state => ((StockfishEvaluatorPool)state!).Dispose(), _pool);
+        _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessStockfishEval.SourceId, SourceName, ChessStockfishEval.TrustClassId, ct);
+        // The full artifact manifest is one source-level input, not work repeated for every
+        // line/position. Persist it once through the shared writer before emitting references.
+        var metadata = new SubstrateChangeBuilder(SourceId, $"{BatchLabelPrefix}/recipe/{Recipe.Id}");
+        _recipeMetadataRoot = ContentEmitter.Emit(metadata, Recipe.CanonicalManifest, SourceId)
+            ?? throw new InvalidDataException("Stockfish evaluation recipe could not be admitted as content.");
+        await context.Writer.ApplyAsync(await metadata.BuildAsync(ct), ct);
+    }
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
@@ -96,10 +115,10 @@ public sealed class ChessStockfishEvalDecomposer
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, wave,
-                           lineId => ChessStockfishEval.MarkerId(lineId, ChessStockfishEval.Version), ct))
+                           lineId => ChessStockfishEval.MarkerId(lineId, Recipe), ct))
         {
             _candidatesStreamed++;
-            yield return new ChessStockfishEvalRecord(witnessed);
+            yield return new ChessStockfishEvalRecord(witnessed, Recipe);
         }
     }
 
@@ -107,7 +126,7 @@ public sealed class ChessStockfishEvalDecomposer
         => _candidatesStreamed == 0
             ? ("already-complete",
                $"ChessStockfishEval: every one of {declaredInputUnits} recorded line(s) already "
-               + $"carries the v{ChessStockfishEval.Version} eval marker — nothing left to evaluate.")
+               + $"carries the v{ChessStockfishEval.Version} recipe {Recipe.Id} eval marker — nothing left to evaluate.")
             : null;
 
     protected override IIngestRecordHandler<ChessStockfishEvalRecord> CreateHandler()
@@ -122,10 +141,10 @@ public sealed class ChessStockfishEvalDecomposer
         try
         {
             var prepared = ChessStockfishEval.PrepareGame(
-                record.Game, evaluator, _evalMemo, _evalInflight);
+                record.Game, evaluator, Recipe, _evalMemo, _evalInflight);
             if (prepared is null) return;
             Checkpoint(prepared);
-            ChessStockfishEval.DepositPrepared(b, prepared);
+            ChessStockfishEval.DepositPrepared(b, prepared, _recipeMetadataRoot);
         }
         finally
         {
@@ -136,16 +155,20 @@ public sealed class ChessStockfishEvalDecomposer
     private void Checkpoint(ChessStockfishEval.PreparedLine prepared)
     {
         StockfishEvalCache.Append(
-            _cachePath, ChessStockfishEval.Version, _depth, _nodes,
+            _cachePath, Recipe,
             prepared.FreshEvaluations);
     }
 
     private void SaveCache()
         => StockfishEvalCache.Save(
-            _cachePath, ChessStockfishEval.Version, _depth, _nodes, _evalMemo);
+            _cachePath, Recipe, _evalMemo);
+
+    private void OnProcessExit(object? sender, EventArgs args) => SaveCache();
 
     public override ValueTask DisposeAsync()
     {
+        AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+        _cancellation.Dispose();
         SaveCache();
         _pool.Dispose();
         return ValueTask.CompletedTask;
@@ -169,9 +192,9 @@ public sealed class ChessStockfishEvalDecomposer
             try
             {
                 var prepared = ChessStockfishEval.PrepareGame(
-                    record.Game, evaluator, owner._evalMemo, owner._evalInflight);
+                    record.Game, evaluator, owner.Recipe, owner._evalMemo, owner._evalInflight);
                 if (prepared is not null) owner.Checkpoint(prepared);
-                return new Unit(record, prepared);
+                return new Unit(record, prepared, owner._recipeMetadataRoot);
             }
             finally
             {
@@ -191,7 +214,8 @@ public sealed class ChessStockfishEvalDecomposer
 
         private sealed class Unit(
             ChessStockfishEvalRecord record,
-            ChessStockfishEval.PreparedLine? prepared) : IIngestDeferredUnit
+            ChessStockfishEval.PreparedLine? prepared,
+            Hash128? recipeMetadataRoot) : IIngestDeferredUnit
         {
             public TierTree? TreeForBatchProbe => null;
 
@@ -203,7 +227,7 @@ public sealed class ChessStockfishEvalDecomposer
                 SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap)
             {
                 if (prepared is null || !prepared.Complete) return default;
-                ChessStockfishEval.DepositPrepared(builder, prepared);
+                ChessStockfishEval.DepositPrepared(builder, prepared, recipeMetadataRoot);
                 return record.TrunkRootId;
             }
 
@@ -214,7 +238,7 @@ public sealed class ChessStockfishEvalDecomposer
     }
 }
 
-public sealed record ChessStockfishEvalRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessStockfishEvalRecord(ChessWitnessedGame Game, StockfishEvaluationRecipe Recipe) : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessStockfishEval.MarkerId(Game.LineId, ChessStockfishEval.Version);
+    public Hash128 TrunkRootId => ChessStockfishEval.MarkerId(Game.LineId, Recipe);
 }

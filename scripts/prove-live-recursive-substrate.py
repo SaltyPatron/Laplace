@@ -281,12 +281,29 @@ failed AS MATERIALIZED (
   SELECT * FROM checked
   WHERE expanded_count <> n_constituents
      OR recomputed_id IS NULL OR recomputed_id IS DISTINCT FROM parent_id
+),
+failure_groups AS MATERIALIZED (
+  SELECT e.type_id,e.first_observed_by,count(*) AS failed_physicalities
+  FROM failed f LEFT JOIN laplace.entities e ON e.id=f.parent_id
+  GROUP BY e.type_id,e.first_observed_by
 )
 SELECT json_build_object(
   'schema','laplace.proof.recursive-identity/v1',
   'parents_checked',(SELECT count(*) FROM checked),
   'expanded_constituents',(SELECT COALESCE(sum(expanded_count),0) FROM checked),
   'identity_or_expansion_failures',(SELECT count(*) FROM failed),
+  'failure_group_limit',32,
+  'failure_group_count',(SELECT count(*) FROM failure_groups),
+  'failure_groups_truncated',(SELECT count(*)>32 FROM failure_groups),
+  'failure_classification_rows',
+      (SELECT COALESCE(sum(failed_physicalities),0) FROM failure_groups),
+  'failure_groups',COALESCE((SELECT json_agg(x) FROM (
+      SELECT encode(type_id,'hex') AS entity_type_id,
+             encode(first_observed_by,'hex') AS first_observed_by,
+             failed_physicalities
+      FROM failure_groups
+      ORDER BY failed_physicalities DESC,type_id,first_observed_by
+      LIMIT 32) x),'[]'::json),
   'failure_examples',COALESCE((SELECT json_agg(x) FROM (
       SELECT encode(parent_id,'hex') AS parent_id,
              encode(recomputed_id,'hex') AS recomputed_id,

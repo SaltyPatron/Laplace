@@ -16,6 +16,9 @@ public readonly struct RepoSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
         ["CONTAINS", "CALLS", "DEFINES", "REFERENCES", "HAS_EXAMPLE", "HAS_DEFINITION"];
 
+    public static Hash128 ReferencesTypeId { get; } =
+        RelationTypeRegistry.Resolve(Relations[3]).Id;
+
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["RepoRoot", "SourceFile"];
 

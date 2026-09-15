@@ -5,6 +5,26 @@ namespace Laplace.Engine.Core;
 
 public static unsafe class GrammarDecomposer
 {
+    /// <summary>Decode the inner bytes of one JSON string through the same native
+    /// scalar/escape decoder used by grammar composition; delimiters are excluded.</summary>
+    public static byte[] DecodeJsonStringUtf8(ReadOnlySpan<byte> inner)
+    {
+        if (inner.IsEmpty) return [];
+        byte[] decoded = new byte[inner.Length];
+        nuint written;
+        fixed (byte* input = inner)
+        fixed (byte* output = decoded)
+        {
+            int rc = NativeInterop.JsonStringDecode(input, (nuint)inner.Length,
+                output, (nuint)decoded.Length, &written);
+            if (rc == -1)
+                throw new InvalidDataException("JSON string contains malformed UTF-8 or an invalid escape sequence.");
+            if (rc != 0 || written > (nuint)decoded.Length)
+                throw new InvalidOperationException($"Native JSON string decoding failed with status {rc}.");
+        }
+        return written == (nuint)decoded.Length ? decoded : decoded.AsSpan(0, checked((int)written)).ToArray();
+    }
+
     public static IntPtr LookupById(string modalityId) =>
         NativeInterop.GrammarLookupById(modalityId);
 
@@ -40,6 +60,21 @@ public static unsafe class GrammarDecomposer
     }
 }
 
+/// <summary>Native parser diagnostics; counts retain recovery syntax and do not
+/// imply compiler or semantic validation of the source language.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct GrammarAstDiagnostics
+{
+    public readonly ulong AstNodeCount;
+    public readonly ulong SyntaxNodeCount;
+    public readonly ulong ErrorNodeCount;
+    public readonly ulong MissingNodeCount;
+    public readonly uint RootHasError;
+    private readonly uint _reserved;
+
+    public bool SyntaxComplete => RootHasError == 0 && ErrorNodeCount == 0 && MissingNodeCount == 0;
+}
+
 public sealed unsafe class GrammarAst : IDisposable
 {
     public const uint Root = uint.MaxValue;
@@ -61,6 +96,18 @@ public sealed unsafe class GrammarAst : IDisposable
         }
     }
 
+    public GrammarAstDiagnostics Diagnostics
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_ast == IntPtr.Zero, this);
+            GrammarAstDiagnostics result;
+            if (NativeInterop.AstGetDiagnostics(_ast, &result) != 0)
+                throw new InvalidOperationException("Native AST diagnostics are unavailable.");
+            return result;
+        }
+    }
+
     public LaplaceAstNode GetNode(int index)
     {
         ObjectDisposedException.ThrowIf(_ast == IntPtr.Zero, this);

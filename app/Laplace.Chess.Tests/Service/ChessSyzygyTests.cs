@@ -366,7 +366,7 @@ public sealed class ChessSyzygyTests
     }
 
     [Fact]
-    public void TryLoadProber_NoTablebasesAnywhere_IsACleanNoOp()
+    public void TryLoadProber_ExplicitMissingTablebaseSelectionFailsWithoutFallback()
     {
         var priorEnv = Environment.GetEnvironmentVariable("LAPLACE_SYZYGY");
         var priorRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
@@ -378,7 +378,7 @@ public sealed class ChessSyzygyTests
         try
         {
             var d = new ChessSyzygyDecomposer();
-            Assert.False(d.TryLoadProber(out _));
+            Assert.Throws<ChessInputException>(() => d.TryLoadProber(out _));
             Assert.False(ChessLabPaths.SyzygyDir.Found);
         }
         finally
@@ -403,9 +403,11 @@ public sealed class ChessSyzygyTests
         {
             Assert.False(ChessLabPaths.SyzygyDir.Found);
             File.WriteAllBytes(Path.Combine(tables, "KQvK.rtbw"), [0]);
+            Assert.False(ChessLabPaths.SyzygyDir.Found);
+            File.WriteAllBytes(Path.Combine(tables, "KQvK.rtbz"), [0]);
             var probe = ChessLabPaths.SyzygyDir;
             Assert.True(probe.Found);
-            Assert.Equal(tables, probe.Path);
+            Assert.Equal(Path.Combine(root, "Games", "Chess", "syzygy"), probe.Path);
         }
         finally
         {

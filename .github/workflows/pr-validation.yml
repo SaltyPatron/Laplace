@@ -57,12 +57,51 @@ jobs:
           echo "LAPLACE_PR_FULL_PROOF=$full" >> "$GITHUB_ENV"
           echo "PR proof classification: full=$full"
 
+      - name: Inspect retained baseline before full proof
+        id: baseline_diagnostic
+        if: env.LAPLACE_PR_FULL_PROOF == '1'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            bash -e -o pipefail <<'PR_BASELINE'
+          set -euo pipefail
+          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr-baseline"
+          args=(
+            --checkout "$LAPLACE_PR_WORKTREE"
+            --checkout "$GITHUB_WORKSPACE"
+            --output "$evidence"
+            --expected-source "$LAPLACE_PR_TARGET_SHA"
+            --proof-outcome baseline-before-proof
+          )
+          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
+            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
+          fi
+          python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
+          python3 "$LAPLACE_PR_WORKTREE/scripts/inspect-recursive-proof-counterexamples.py" \
+            --collection "$evidence" --expected-source "$LAPLACE_PR_TARGET_SHA"
+          PR_BASELINE
+
+      - name: Upload retained baseline before full proof
+        if: always() && steps.baseline_diagnostic.outcome != 'skipped' && env.LAPLACE_PR_FULL_PROOF == '1'
+        continue-on-error: true
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-pr-baseline
+          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr-baseline/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Classify retained Content when the recovery audit changes
         if: always() && env.LAPLACE_PR_WORKTREE != ''
         run: |
           set -euo pipefail
+          umask 0002
           cd "$LAPLACE_PR_WORKTREE"
-          if git diff --quiet "$LAPLACE_PR_BASE_SHA" "$LAPLACE_PR_TARGET_SHA" -- scripts/classify-legacy-content.py; then
+          if git diff --quiet "$LAPLACE_PR_BASE_SHA" "$LAPLACE_PR_TARGET_SHA" -- scripts/classify-legacy-content.py scripts/repair-legacy-content.py scripts/lib/repair_transaction.py scripts/lib/legacy_content_history.py scripts/repair-legacy-content-lifecycle.sh; then
             exit 0
           fi
           source scripts/lib/storage.sh
@@ -70,27 +109,40 @@ jobs:
           evidence="/build/laplace/work/legacy-content-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p "$evidence"
           receipt="$evidence/classification.json"
-          echo "LAPLACE_LEGACY_CONTENT_RECEIPT=$receipt" >> "$GITHUB_ENV"
+          echo "LAPLACE_LEGACY_CONTENT_EVIDENCE=$evidence" >> "$GITHUB_ENV"
           export PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=laplace_admin
           flock --exclusive --close /build/laplace/work/host-resource.lock \
-            python3 scripts/classify-legacy-content.py "$PGDATABASE" \
-              --examples-per-stratum 10 --timeout-seconds 1800 --receipt "$receipt"
+            bash -e -o pipefail -s -- "$PGDATABASE" "$evidence" <<'RECOVERY_DIAGNOSTIC'
+          history_status=0
+          python3 scripts/lib/legacy_content_history.py --receipt "$2/history.json" \
+            --max-bytes 4294967296 --max-prior-bytes 34359738368 \
+            --max-current-readback-bytes 8589934592 || history_status=$?
+          classification_status=0
+          python3 scripts/classify-legacy-content.py "$1" \
+            --examples-per-stratum 10 --timeout-seconds 1800 --receipt "$2/classification.json" || classification_status=$?
+          if (( history_status != 0 || classification_status != 0 )); then
+            exit 1
+          fi
+          RECOVERY_DIAGNOSTIC
 
       - name: Retain bounded legacy Content classification
-        if: always() && env.LAPLACE_LEGACY_CONTENT_RECEIPT != ''
+        if: always() && env.LAPLACE_LEGACY_CONTENT_EVIDENCE != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: legacy-content-classification-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.LAPLACE_LEGACY_CONTENT_RECEIPT }}
+          path: ${{ env.LAPLACE_LEGACY_CONTENT_EVIDENCE }}/
           if-no-files-found: error
           retention-days: 14
 
       - name: Prove merge candidate without production mutation
+        id: proof
         run: |
           set -euo pipefail
           umask 0002
           mkdir -p /build/laplace/work
-          # Share the deployment host lock without leaking its descriptor to children.
+          # PR builds share the deployment machine with both repositories.
+          # Hold the same host lock through the entire proof, without passing
+          # its descriptor into any long-lived child processes.
           flock --exclusive --close /build/laplace/work/host-resource.lock \
             bash -e -o pipefail <<'PR_PROOF'
           set -euo pipefail
@@ -112,6 +164,48 @@ jobs:
           export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
           bash scripts/pr-proof.sh
           PR_PROOF
+
+      - name: Retain bounded recursive proof counterexamples
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        env:
+          PROOF_OUTCOME: ${{ steps.proof.outcome }}
+        run: |
+          set -euo pipefail
+          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr"
+          args=(
+            --checkout "$LAPLACE_PR_WORKTREE"
+            --checkout "$GITHUB_WORKSPACE"
+            --output "$evidence"
+            --expected-source "$LAPLACE_PR_TARGET_SHA"
+            --proof-outcome "$PROOF_OUTCOME"
+          )
+          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
+            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
+          fi
+          python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            python3 "$LAPLACE_PR_WORKTREE/scripts/inspect-recursive-proof-counterexamples.py" \
+              --collection "$evidence" --expected-source "$LAPLACE_PR_TARGET_SHA"
+
+      - name: Upload retained recursive proof diagnostics
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-pr
+          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload legacy content repair transaction evidence
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-legacy-content-repair-${{ github.run_id }}-${{ github.run_attempt }}-pr
+          path: ${{ env.LAPLACE_PR_WORKTREE }}/build/test-results/legacy-content-repair/
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Read source exemplars when the operational diagnostic changes
         if: always() && env.LAPLACE_PR_FULL_PROOF == '1' && env.LAPLACE_PR_WORKTREE != ''

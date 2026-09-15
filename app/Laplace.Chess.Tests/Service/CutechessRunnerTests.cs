@@ -208,6 +208,184 @@ public sealed class CutechessRunnerTests
         Assert.DoesNotContain(events, e => e is ChessLabLogEvent log && log.Message.Contains("bestmove"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ParseLines_OpeningFenInitializesTheBoardBeforeTheFirstPly(bool sendInitialPosition)
+    {
+        const string opening = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+        var lines = new List<string> { "Started game 1 of 2 (Laplace vs Stockfish)" };
+        if (sendInitialPosition) lines.Add("1 >Stockfish(1): position fen " + opening);
+        lines.Add("2 >Laplace(0): position fen " + opening + " moves e7e5");
+
+        var board = Assert.Single(CutechessRunner.ParseLinesForTest(lines).OfType<ChessLabBoardEvent>());
+
+        Assert.Equal((1, 1, "e7e5"), (board.Game, board.Ply, board.Uci));
+        Assert.Equal("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2", board.Fen);
+    }
+
+    [Fact]
+    public void ParseLines_FailedMoveDoesNotAdvanceTheAppliedPrefix()
+    {
+        var boards = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 1 of 2 (Laplace vs Stockfish)",
+            "1 >Laplace(0): position startpos moves e7e5",
+            "2 >Stockfish(1): position startpos moves e2e4 e7e5",
+        ]).OfType<ChessLabBoardEvent>().ToList();
+
+        Assert.Equal(new[] { "e2e4", "e7e5" }, boards.Select(board => board.Uci));
+        Assert.Equal(new[] { 1, 2 }, boards.Select(board => board.Ply));
+    }
+
+    [Fact]
+    public void ParseLines_ChangedMovePrefixRebuildsTheBoard()
+    {
+        var boards = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 1 of 2 (Laplace vs Stockfish)",
+            "1 >Laplace(0): position startpos moves e2e4",
+            "2 >Stockfish(1): position startpos moves d2d4",
+        ]).OfType<ChessLabBoardEvent>().ToList();
+
+        Assert.Equal(2, boards.Count);
+        Assert.Equal((1, "d2d4"), (boards[1].Ply, boards[1].Uci));
+        Assert.StartsWith("rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b", boards[1].Fen);
+    }
+
+    [Fact]
+    public void ParseLines_ChangedOpeningFenRebuildsEvenWithTheSameMoveCount()
+    {
+        var boards = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 1 of 2 (Laplace vs Stockfish)",
+            "1 >Laplace(0): position startpos moves g1f3",
+            "2 >Stockfish(1): position fen rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2 moves g1f3",
+        ]).OfType<ChessLabBoardEvent>().ToList();
+
+        Assert.Equal(2, boards.Count);
+        Assert.Equal((1, "g1f3"), (boards[1].Ply, boards[1].Uci));
+        Assert.StartsWith("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b", boards[1].Fen);
+    }
+
+    [Fact]
+    public void ParseLines_OverlappingGamesRetainEngineInstanceBindingsAcrossLaterStarts()
+    {
+        var boards = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 2 of 4 (Stockfish vs Laplace)",
+            "1 >Stockfish(2): ucinewgame",
+            "2 >Laplace(3): ucinewgame",
+            "3 >Laplace(3): position startpos moves d2d4",
+            "Started game 1 of 4 (Laplace vs Stockfish)",
+            "4 >Laplace(0): ucinewgame",
+            "5 >Stockfish(1): ucinewgame",
+            "6 >Stockfish(1): position startpos moves e2e4",
+            "Started game 3 of 4 (Laplace vs Stockfish)",
+            "7 >Stockfish(2): position startpos moves d2d4 d7d5",
+            "8 >Laplace(0): position startpos moves e2e4 e7e5",
+        ]).OfType<ChessLabBoardEvent>().ToList();
+
+        Assert.Equal(new[] { (2, 1, "d2d4"), (1, 1, "e2e4"), (2, 2, "d7d5"), (1, 2, "e7e5") },
+            boards.Select(board => (board.Game, board.Ply, board.Uci)));
+        Assert.All(boards.Where(board => board.Game == 2), board => Assert.Equal("Stockfish", board.White));
+    }
+
+    [Fact]
+    public void ParseLines_SameColorConcurrentStartsRemainUnassigned()
+    {
+        var events = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 1 of 4 (Laplace vs Stockfish)",
+            "Started game 3 of 4 (Laplace vs Stockfish)",
+            "1 >Laplace(0): ucinewgame",
+            "2 >Stockfish(1): ucinewgame",
+            "3 >Laplace(2): ucinewgame",
+            "4 >Stockfish(3): ucinewgame",
+            "5 >Stockfish(1): position startpos moves e2e4",
+            "6 >Stockfish(3): position startpos moves e2e4",
+        ]).ToList();
+
+        Assert.Empty(events.OfType<ChessLabBoardEvent>());
+        Assert.Equal(4, events.OfType<ChessLabLogEvent>().Count(log => log.Level == "warning"));
+        Assert.Contains(events.OfType<ChessLabTerminalEvent>(), terminal => terminal.Text == "position startpos moves e2e4");
+    }
+
+    [Fact]
+    public void ParseLines_AmbiguousPredecessorCannotCreateAFalselyUniqueNextGame()
+    {
+        var events = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 1 of 4 (Laplace vs Stockfish)",
+            "Started game 2 of 4 (Stockfish vs Laplace)",
+            "Started game 3 of 4 (Laplace vs Stockfish)",
+            "1 >Laplace(0): ucinewgame",
+            "2 >Stockfish(1): ucinewgame",
+            "3 >Stockfish(1): position startpos moves e2e4",
+        ]).ToList();
+
+        Assert.Empty(events.OfType<ChessLabBoardEvent>());
+        Assert.Contains(events.OfType<ChessLabLogEvent>(), log => log.Level == "warning" && log.Message.Contains("Stockfish(1)"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ParseLines_UnknownSessionIsNotAssignedAfterAnotherGameFinishes(bool resetObserved)
+    {
+        var lines = new List<string>
+        {
+            "Started game 1 of 4 (Laplace vs Stockfish)",
+            "Started game 3 of 4 (Laplace vs Stockfish)",
+        };
+        if (resetObserved) lines.Add("1 >Laplace(0): ucinewgame");
+        lines.AddRange(
+        [
+            "2 >Laplace(0): position startpos moves e2e4",
+            "Finished game 1 (Laplace vs Stockfish): 1/2-1/2 {Draw}",
+            "3 >Laplace(0): position startpos moves e2e4 e7e5",
+        ]);
+
+        Assert.Empty(CutechessRunner.ParseLinesForTest(lines).OfType<ChessLabBoardEvent>());
+    }
+
+    [Fact]
+    public void ParseLines_EngineInstancesMayChangeGamesAndColorsAfterFinishedAndNewGame()
+    {
+        var boards = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 1 of 2 (Laplace vs Stockfish)",
+            "1 >Laplace(0): ucinewgame",
+            "2 >Stockfish(1): ucinewgame",
+            "3 >Stockfish(1): position startpos moves e2e4",
+            "Finished game 1 (Laplace vs Stockfish): 1/2-1/2 {Draw}",
+            "Started game 2 of 2 (Stockfish vs Laplace)",
+            "4 >Stockfish(1): ucinewgame",
+            "5 >Laplace(0): ucinewgame",
+            "6 >Laplace(0): position startpos moves d2d4",
+        ]).OfType<ChessLabBoardEvent>().ToList();
+
+        Assert.Equal(new[] { (1, 1, "e2e4"), (2, 1, "d2d4") }, boards.Select(board => (board.Game, board.Ply, board.Uci)));
+        Assert.Equal("Stockfish", boards[1].White);
+    }
+
+    [Fact]
+    public void ParseLines_DuplicateResetInvalidatesBindingWithoutStealingAnotherGame()
+    {
+        var events = CutechessRunner.ParseLinesForTest(
+        [
+            "Started game 1 of 4 (Laplace vs Stockfish)",
+            "1 >Laplace(0): ucinewgame",
+            "2 >Stockfish(1): ucinewgame",
+            "Started game 3 of 4 (Laplace vs Stockfish)",
+            "3 >Laplace(0): ucinewgame",
+            "4 >Laplace(0): position startpos moves e2e4",
+        ]).ToList();
+
+        Assert.Empty(events.OfType<ChessLabBoardEvent>());
+        Assert.Contains(events.OfType<ChessLabLogEvent>(), log => log.Level == "warning" && log.Message.Contains("before its game finished"));
+    }
+
     [Fact]
     public void ParseLines_UciTraffic_IsTaggedByEngineAndDirection()
     {
@@ -219,6 +397,9 @@ public sealed class CutechessRunnerTests
         ]).OfType<ChessLabTerminalEvent>().ToList();
 
         Assert.Equal(3, events.Count);
+        Assert.Equal(0, events[0].EngineInstance);
+        Assert.Equal(1, events[1].EngineInstance);
+        Assert.Null(events[2].EngineInstance);
         Assert.Equal((ChessLabStream.Uci, "go depth 4", "Laplace", ChessLabDirection.Send),
             (events[0].Stream, events[0].Text, events[0].Engine, events[0].Direction));
         Assert.Equal((ChessLabStream.Uci, "info depth 12 score cp 31", "Stockfish", ChessLabDirection.Recv),
@@ -270,6 +451,7 @@ public sealed class CutechessRunnerTests
         {
             "Started game 1 of 2 (Laplace vs Stockfish)",
             "1 >Laplace(0): position startpos moves e2e4",
+            "Finished game 1 (Laplace vs Stockfish): 1/2-1/2 {Draw}",
             "Started game 2 of 2 (Stockfish vs Laplace)",
             "2 >Stockfish(1): position startpos moves d2d4",
         };

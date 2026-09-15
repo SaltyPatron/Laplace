@@ -45,6 +45,7 @@ public sealed class LichessConnectivityService : ILichessConnection
     private string? _username;
     private string? _lastError;
     private bool _connected;
+    private LichessAccountReadiness? _account;
     private int _depth = LichessDefaults.SearchDepth;
     private int _maxConcurrent = LichessDefaults.MaxConcurrent;
     private bool _substrate = true;
@@ -70,7 +71,7 @@ public sealed class LichessConnectivityService : ILichessConnection
         {
             var token = LichessBot.ResolveToken();
             bool configured = !string.IsNullOrEmpty(token);
-            bool connected = _connected && _runTask is not null && !_runTask.IsCompleted;
+            bool connected = _account?.Ready == true && _connected && _runTask is not null && !_runTask.IsCompleted;
             return new LichessConnectivityStatus(
                 Configured: configured,
                 TokenPreview: null,
@@ -82,7 +83,8 @@ public sealed class LichessConnectivityService : ILichessConnection
                 GamesRecorded: _gamesRecorded,
                 RecentLog: _recentLog.ToArray(),
                 Error: _lastError,
-                Running: _runTask is not null && !_runTask.IsCompleted);
+                Running: _runTask is not null && !_runTask.IsCompleted,
+                Account: _account);
         }
     }
 
@@ -115,6 +117,7 @@ public sealed class LichessConnectivityService : ILichessConnection
             _lastError = null;
             _connected = false;
             _username = null;
+            _account = null;
             _cts = new CancellationTokenSource();
             var lifetime = _cts.Token;
             _runTask = Task.Run(() => RunAsync(token, acceptSpeeds, lifetime));
@@ -162,13 +165,13 @@ public sealed class LichessConnectivityService : ILichessConnection
     {
         try
         {
-            var user = await LichessBot.FetchUsernameAsync(token, ct);
-            if (user is null) throw new InvalidOperationException("Lichess account authentication failed; verify token and bot scope.");
+            PushLog("verifying Lichess token, bot:play permission, and BOT account…");
+            var account = await LichessAccountReadiness.CheckAsync(token, ct);
+            lock (_gate) { _account = account; _username = account.Username; }
+            if (!account.Ready) throw new InvalidOperationException(account.Error);
+            var user = account.Username!;
             var host = _host ??= await _getHost(ct);
-            lock (_gate) { _username = user; }
-            PushLog(user is not null
-                ? $"online as @{user} — per-ply fold before each search; games record live"
-                : "connected (could not resolve username — check token scopes)");
+            PushLog($"BOT @{user} and bot:play permission verified; opening event stream…");
 
             if (_substrate)
                 PushLog("substrate fold bias + learned PST refresh after each ply fold");
@@ -190,10 +193,18 @@ public sealed class LichessConnectivityService : ILichessConnection
                     PushLog($"chat [{line.Room}] @{line.Username}: {line.Text}");
                 },
                 acceptSpeeds: acceptSpeeds,
-                onConnectionChanged: connected => { lock (_gate) { _connected = connected; } },
+                onConnectionChanged: connected =>
+                {
+                    lock (_gate)
+                    {
+                        if (_connected == connected) return;
+                        _connected = connected;
+                    }
+                    PushLog(connected ? $"online as @{user}; event stream connected" : "event stream disconnected");
+                },
                 log: new QueueLogger(this));
 
-            await bot.RunAsync(_maxConcurrent, ct);
+            await bot.RunVerifiedAsync(account, _maxConcurrent, ct);
             PushLog("disconnected");
         }
         catch (OperationCanceledException)
@@ -250,4 +261,5 @@ public sealed record LichessConnectivityStatus(
     long GamesRecorded,
     IReadOnlyList<string> RecentLog,
     string? Error,
-    bool Running = false);
+    bool Running = false,
+    LichessAccountReadiness? Account = null);

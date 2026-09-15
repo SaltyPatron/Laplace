@@ -35,11 +35,13 @@ if "%DO_FULL%"=="1" (
   call "%HERE%build-engine.cmd" || exit /b 1
   call "%HERE%build-extensions.cmd" || exit /b 1
   call "%HERE%install-extensions.cmd" || exit /b 1
-  if exist "%LAPLACE_ROOT%\external\cutechess\CMakeLists.txt" (
-    echo ==== [publish-deploy] cutechess ====
-    call "%HERE%build-cutechess.cmd" || echo [publish-deploy] WARN: build-cutechess failed - chess lab may be incomplete
-  )
+
 )
+
+rem Fresh and incremental publishes must both supply working chess dependencies.
+call "%HERE%build-cutechess.cmd" || exit /b 1
+call "%HERE%ensure-stockfish-toolchain.cmd" || exit /b 1
+python "%LAPLACE_ROOT%\scripts\install-stockfish.py" || exit /b 1
 
 call "%HERE%publish.cmd" %PUBLISH_ARGS%
 if errorlevel 1 exit /b 1

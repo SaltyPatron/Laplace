@@ -18,7 +18,7 @@ public sealed class LichessBot : IAsyncDisposable
     private readonly ChessLiveGameHost _host;
     private readonly bool _substrate;
     private readonly bool _record;
-    private readonly string? _botUsername;
+    private string? _botUsername;
     private readonly Action<LichessChatLine>? _onChatLine;
     private readonly IReadOnlySet<string>? _acceptSpeeds;
     private readonly ILogger _log;
@@ -71,6 +71,15 @@ public sealed class LichessBot : IAsyncDisposable
 
     public async Task RunAsync(int maxConcurrent = 4, CancellationToken ct = default)
     {
+        var token = _http.DefaultRequestHeaders.Authorization?.Parameter ?? "";
+        var account = await LichessAccountReadiness.CheckAsync(_http, token, ct).ConfigureAwait(false);
+        await RunVerifiedAsync(account, maxConcurrent, ct).ConfigureAwait(false);
+    }
+
+    internal async Task RunVerifiedAsync(LichessAccountReadiness account, int maxConcurrent, CancellationToken ct)
+    {
+        if (!account.Ready) throw new InvalidOperationException(account.Error ?? "Lichess BOT account access has not been verified.");
+        _botUsername = account.Username;
         var games = new Dictionary<string, Task>();
         using var gameLifetime = new CancellationTokenSource();
         var backoff = TimeSpan.FromSeconds(1);
@@ -124,6 +133,7 @@ public sealed class LichessBot : IAsyncDisposable
             catch (OperationCanceledException) { break; }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
+                _onConnectionChanged?.Invoke(false);
                 var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
                 _log.LogWarning(ex, "event stream dropped — reconnecting in {Delay:0.#}s",
                     (backoff + jitter).TotalSeconds);

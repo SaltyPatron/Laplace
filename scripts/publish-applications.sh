@@ -31,12 +31,13 @@ application_restore() {
 }
 application_stamp() { bash "$ROOT/scripts/pipeline.sh" publish-stamp; }
 application_verify() {
-  local prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+  local prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" stockfish
   application_managed verify
   python3 "$ROOT/scripts/verify-application-release.py"
   python3 "$ROOT/scripts/check-uci-runtime.py" "$prefix/app/laplace-uci"
+  stockfish="$(python3 "$ROOT/scripts/install-stockfish.py" --print-path)"
   python3 "$ROOT/scripts/test-cutechess-runtime.py" "$prefix/bin/cutechess-cli" \
-    "$prefix/app/laplace-uci" "$prefix/bin/stockfish"
+    "$prefix/app/laplace-uci" "$stockfish"
 }
 
 application_recover() {

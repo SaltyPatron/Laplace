@@ -11,10 +11,9 @@ namespace Laplace.Chess.Service;
 public sealed record CutechessOptions
 {
     /// <summary>
-    /// Games to play. cutechess's own manual: "for two-player tournaments this option
-    /// [-rounds] should be used to set the total number of games to play" — one game per
-    /// round. A valid paired gauntlet uses an even count so each opening is played from
-    /// both colours.
+    /// Total games to play. Paired gauntlets use two games per encounter and half as
+    /// many Cute Chess rounds, so each opening is played from both colours. Unpaired
+    /// gauntlets use one game per encounter.
     /// </summary>
     public int Rounds { get; init; } = 10;
 
@@ -32,6 +31,56 @@ public sealed record CutechessOptions
     /// <summary>Stockfish's <c>UCI_Elo</c> cap, paired with <c>UCI_LimitStrength</c>.</summary>
     public int StockfishElo { get; init; } = 2000;
     public bool StockfishLimitStrength { get; init; } = true;
+
+    // Null deliberately delegates to the installed engine's advertised default.
+    // These apply only to Stockfish; Laplace's UCI surface does not advertise them.
+    public int? StockfishThreads { get; init; }
+    public int? StockfishHashMb { get; init; }
+    public string? StockfishNumaPolicy { get; init; }
+    public string? StockfishSyzygyPath { get; init; }
+
+    // Stockfish 19 src/engine.cpp and src/engine.h advertise these spin ranges.
+    public static int MaximumStockfishThreads => Math.Max(1024, 4 * Environment.ProcessorCount);
+    public static int MaximumStockfishHashMb => Environment.Is64BitProcess ? 33554432 : 2048;
+
+    public CutechessOptions WithStockfishConfiguration(IReadOnlyDictionary<string, string> config)
+    {
+        string? Text(string key) => config.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw)
+            ? raw.Trim() : null;
+        int? Number(string key)
+        {
+            var raw = Text(key);
+            if (raw is null) return null;
+            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+                throw new ArgumentException($"{key} must be a whole number.", key);
+            return value;
+        }
+        var result = this with
+        {
+            StockfishThreads = Number("stockfishThreads"),
+            StockfishHashMb = Number("stockfishHashMb"),
+            StockfishNumaPolicy = Text("stockfishNumaPolicy"),
+            StockfishSyzygyPath = Text("stockfishSyzygyPath"),
+        };
+        result.ValidateStockfishConfiguration();
+        return result;
+    }
+
+    public void ValidateStockfishConfiguration()
+    {
+        if (StockfishThreads is { } threads && (threads < 1 || threads > MaximumStockfishThreads))
+            throw new ArgumentOutOfRangeException(nameof(StockfishThreads),
+                $"Stockfish threads must be between 1 and {MaximumStockfishThreads} per game.");
+        if (StockfishHashMb is { } hash && (hash < 1 || hash > MaximumStockfishHashMb))
+            throw new ArgumentOutOfRangeException(nameof(StockfishHashMb),
+                $"Stockfish hash must be between 1 and {MaximumStockfishHashMb} MiB per game.");
+        if (!string.IsNullOrWhiteSpace(StockfishNumaPolicy)
+            && StockfishNumaPolicy.Trim() is not ("auto" or "system" or "hardware" or "none"))
+            throw new ArgumentException("Stockfish NUMA policy must be auto, system, hardware, or none.",
+                nameof(StockfishNumaPolicy));
+        if (StockfishSyzygyPath?.Any(char.IsControl) == true)
+            throw new ArgumentException("Stockfish Syzygy path cannot contain control characters.", nameof(StockfishSyzygyPath));
+    }
 
     /// <summary>
     /// Use a deterministic opening suite and play every opening twice with colours swapped.
@@ -116,6 +165,9 @@ public static partial class CutechessRunner
     /// </summary>
     public static IReadOnlyList<string> BuildArguments(CutechessOptions o, string laplaceUci, string stockfish)
     {
+        o.ValidateStockfishConfiguration();
+        if (o.PairOpenings && (o.Rounds < 2 || (o.Rounds & 1) != 0))
+            throw new ArgumentOutOfRangeException(nameof(o.Rounds), "Paired games require an even total of at least two.");
         // Every key=value MUST be its own argv token: the old single-token form
         // ("name=Stockfish cmd=... arg=\"setoption ...\"") reached cutechess-cli as ONE
         // engine parameter whose value was the rest of the string, so the engine never
@@ -130,6 +182,14 @@ public static partial class CutechessRunner
         };
         if (o.StockfishLimitStrength)
             args.Add($"option.UCI_Elo={o.StockfishElo}");
+        if (!string.IsNullOrWhiteSpace(o.StockfishNumaPolicy))
+            args.Add($"option.NumaPolicy={o.StockfishNumaPolicy.Trim()}");
+        if (o.StockfishThreads is { } threads)
+            args.Add($"option.Threads={threads.ToString(CultureInfo.InvariantCulture)}");
+        if (o.StockfishHashMb is { } hash)
+            args.Add($"option.Hash={hash.ToString(CultureInfo.InvariantCulture)}");
+        if (!string.IsNullOrWhiteSpace(o.StockfishSyzygyPath))
+            args.Add($"option.SyzygyPath={o.StockfishSyzygyPath.Trim()}");
         args.Add("-each");
 
         if (o.Depth > 0)
@@ -154,14 +214,17 @@ public static partial class CutechessRunner
             args.Add($"file={openings}");
             args.Add("format=epd");
             args.Add("order=sequential");
-            // Cute Chess's -repeat contract is exactly the color-swapped pair we need:
-            // same opening twice, players swap sides after the first game.
+            // Put both colour-swapped games in the same encounter and match the
+            // repetition count to games-per-encounter, as required by Cute Chess's
+            // scheduler. Total requested games remain unchanged below.
+            args.Add("-games");
+            args.Add("2");
             args.Add("-repeat");
             args.Add("2");
         }
 
         args.Add("-rounds");
-        args.Add(o.Rounds.ToString(CultureInfo.InvariantCulture));
+        args.Add((o.PairOpenings ? o.Rounds / 2 : o.Rounds).ToString(CultureInfo.InvariantCulture));
         if (o.Concurrency > 1)
         {
             args.Add("-concurrency");
@@ -207,6 +270,7 @@ public static partial class CutechessRunner
     public static async IAsyncEnumerable<ChessLabEvent> RunAsync(
         CutechessOptions options, [EnumeratorCancellation] CancellationToken ct)
     {
+        options.ValidateStockfishConfiguration();
         if (options.PairOpenings && (options.Rounds < 2 || (options.Rounds & 1) != 0))
         {
             yield return new ChessLabLogEvent("error",
@@ -218,7 +282,7 @@ public static partial class CutechessRunner
 
         if (options.PairOpenings)
         {
-            if (!TryPrepareOpeningSuite(options, out var openingPath, out var openingCount, out var error))
+            if (!TryPrepareOpeningSuite(options, out var openingPath, out var openingCount, out var availableOpeningLines, out var error))
             {
                 yield return new ChessLabLogEvent("error", error!);
                 yield return new ChessLabDoneEvent(ChessLabJobState.Failed, error);
@@ -226,7 +290,7 @@ public static partial class CutechessRunner
             }
             options = options with { OpeningsFile = openingPath };
             yield return new ChessLabLogEvent("info",
-                $"paired opening suite: {openingCount} positions × 2 colours ({openingPath})");
+                $"paired opening suite: {openingCount} requested positions × 2 colours; {availableOpeningLines} nonempty EPD input lines available ({openingPath})");
         }
 
         var catalog = ChessLabPaths.Catalog;
@@ -333,19 +397,37 @@ public static partial class CutechessRunner
 
     private static string ResolveOpeningsPath(CutechessOptions o)
     {
-        if (!string.IsNullOrWhiteSpace(o.OpeningsFile)) return o.OpeningsFile;
+        if (!string.IsNullOrWhiteSpace(o.OpeningsFile)) return Path.GetFullPath(o.OpeningsFile);
         string dir = Path.GetDirectoryName(o.PgnOut) is { Length: > 0 } p ? p : Environment.CurrentDirectory;
         return Path.Combine(dir, "openings.epd");
     }
 
-    private static bool TryPrepareOpeningSuite(
-        CutechessOptions o, out string path, out int openingCount, out string? error)
+    internal static bool TryPrepareOpeningSuite(
+        CutechessOptions o, out string path, out int openingCount, out int availableOpeningLines, out string? error)
     {
-        path = ResolveOpeningsPath(o);
+        path = o.OpeningsFile ?? "";
         openingCount = o.Rounds / 2;
+        availableOpeningLines = 0;
         error = null;
         try
         {
+            path = ResolveOpeningsPath(o);
+            if (!string.IsNullOrWhiteSpace(o.OpeningsFile))
+            {
+                // The selected EPD is operator-owned input. Inventory framing only;
+                // Cute Chess owns EPD parsing and validation of the chess positions.
+                if (!File.Exists(path))
+                    throw new FileNotFoundException("selected EPD input does not exist", path);
+                if (string.Equals(path, Path.GetFullPath(o.PgnOut),
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    throw new IOException("selected EPD input must differ from the PGN output path");
+                availableOpeningLines = File.ReadLines(path).Count(line => !string.IsNullOrWhiteSpace(line));
+                if (availableOpeningLines < openingCount || availableOpeningLines == 0)
+                    throw new InvalidDataException(
+                        $"selected EPD input has {availableOpeningLines} nonempty EPD input lines; {openingCount} paired positions were requested");
+                return true;
+            }
+
             var fens = new List<string>(openingCount);
             try
             {
@@ -364,11 +446,12 @@ public static partial class CutechessRunner
             string? dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllLines(path, fens.Take(openingCount).Select(ToEpd));
+            availableOpeningLines = openingCount;
             return true;
         }
         catch (Exception ex)
         {
-            error = $"could not materialize paired opening suite '{path}': {ex.Message}";
+            error = $"could not prepare paired opening suite '{path}': {ex.Message}";
             return false;
         }
     }
@@ -390,7 +473,10 @@ public static partial class CutechessRunner
             ? $"UCI_Elo capped at {o.StockfishElo}"
             : "UCI_Elo unrestricted (match depth/time still applies)";
         string schedule = o.PairOpenings ? ", paired colour-swapped openings" : ", repeated startpos schedule";
-        return $"cutechess: {o.Rounds} games, {clock}, Stockfish {strength}{schedule}{parallel}";
+        string resources = $", Stockfish per game: Threads={o.StockfishThreads?.ToString(CultureInfo.InvariantCulture) ?? "engine default"}"
+            + $", Hash={o.StockfishHashMb?.ToString(CultureInfo.InvariantCulture) ?? "engine default"} MiB"
+            + $", NumaPolicy={o.StockfishNumaPolicy ?? "engine default"}, SyzygyPath={o.StockfishSyzygyPath ?? "engine default"}";
+        return $"cutechess: {o.Rounds} games, {clock}, Stockfish {strength}{resources}{schedule}{parallel}";
     }
 
     /// <summary>
@@ -399,7 +485,11 @@ public static partial class CutechessRunner
     /// </summary>
     internal sealed class TranscriptParser
     {
-        private readonly LiveBoardTracker _tracker = new();
+        private readonly Dictionary<int, GameBoardTracking> _boardGames = new();
+        private readonly Dictionary<int, GameBoardTracking> _engineBoardGames = new();
+        private readonly HashSet<int> _unresolvedBoardEngines = new();
+        private readonly HashSet<int> _unboundBoardWarnings = new();
+        private bool _sawBoardReset;
         private readonly int? _requestedElo;
         private readonly bool _requireEngineIdentity;
         private readonly bool _requirePairedSchedule;
@@ -460,6 +550,106 @@ public static partial class CutechessRunner
         public IEnumerable<ChessLabEvent> Line(string stream, string text)
             => stream == ChessLabStream.Stderr ? Stderr(text) : Stdout(text);
 
+        private sealed class EngineBoardSlot(string name)
+        {
+            public string Name { get; } = name;
+            public int? Instance { get; set; }
+            public bool Ambiguous { get; set; }
+        }
+
+        private sealed class GameBoardTracking
+        {
+            public int Number { get; }
+            public EngineBoardSlot[] Slots { get; }
+            public LiveBoardTracker Tracker { get; } = new();
+
+            public GameBoardTracking(int number, string white, string black)
+            {
+                Number = number;
+                Slots = [new(white), new(black)];
+                Tracker.Reset(number, white, black);
+            }
+        }
+
+        private List<(GameBoardTracking Game, EngineBoardSlot Slot)> BoardCandidates(string engine)
+            => _boardGames.Values.SelectMany(game => game.Slots
+                .Where(slot => slot.Instance is null && slot.Name.Equals(engine, StringComparison.Ordinal))
+                .Select(slot => (Game: game, Slot: slot))).ToList();
+
+        private IEnumerable<ChessLabEvent> BeginEngineBoardSession(string engine, int instance)
+        {
+            _sawBoardReset = true;
+            _unboundBoardWarnings.Remove(instance);
+            _unresolvedBoardEngines.Remove(instance);
+            bool resetBeforeFinish = _engineBoardGames.Remove(instance, out var previous);
+            if (resetBeforeFinish)
+            {
+                foreach (var slot in previous!.Slots.Where(slot => slot.Instance == instance))
+                {
+                    slot.Instance = null;
+                    slot.Ambiguous = true;
+                }
+            }
+
+            // Official Cute Chess identifies engine instances in debug traffic, but its
+            // Started-game banner contains only names. Threads can interleave their starts.
+            // Consider every matching unfilled slot, including earlier ambiguous resets;
+            // neither banner recency nor engine-id arithmetic proves a game association.
+            var candidates = BoardCandidates(engine);
+            if (!resetBeforeFinish && candidates.Count == 1 && !candidates[0].Slot.Ambiguous)
+            {
+                candidates[0].Slot.Instance = instance;
+                _engineBoardGames[instance] = candidates[0].Game;
+                yield break;
+            }
+
+            foreach (var candidate in candidates) candidate.Slot.Ambiguous = true;
+            _unresolvedBoardEngines.Add(instance);
+            foreach (var evt in UnboundBoardWarning(engine, instance,
+                         resetBeforeFinish ? "received another ucinewgame before its game finished" : "has no unique Started-game association"))
+                yield return evt;
+        }
+
+        private IEnumerable<ChessLabEvent> TrackPosition(string engine, int instance, string positionArgs)
+        {
+            if (!_engineBoardGames.TryGetValue(instance, out var game)
+                && !_sawBoardReset && !_unresolvedBoardEngines.Contains(instance) && _boardGames.Count == 1)
+            {
+                // Older transcripts may omit ucinewgame. A sole active game is usable;
+                // an unresolved concurrent session is never reassigned by elimination.
+                var candidates = BoardCandidates(engine);
+                if (candidates.Count == 1 && !candidates[0].Slot.Ambiguous)
+                {
+                    candidates[0].Slot.Instance = instance;
+                    _engineBoardGames[instance] = game = candidates[0].Game;
+                }
+            }
+
+            if (game is null)
+            {
+                _unresolvedBoardEngines.Add(instance);
+                foreach (var evt in UnboundBoardWarning(engine, instance, "has no proven game association"))
+                    yield return evt;
+                yield break;
+            }
+
+            foreach (var evt in game.Tracker.ApplyPositionLine(positionArgs)) yield return evt;
+        }
+
+        private IEnumerable<ChessLabEvent> UnboundBoardWarning(string engine, int instance, string reason)
+        {
+            if (_unboundBoardWarnings.Add(instance))
+                yield return new ChessLabLogEvent("warning",
+                    $"live board: {engine}({instance}) {reason}; retaining UCI traffic without assigning a numbered board");
+        }
+
+        private void FinishBoardGame(int number)
+        {
+            if (!_boardGames.Remove(number, out var game)) return;
+            foreach (var instance in _engineBoardGames.Where(pair => ReferenceEquals(pair.Value, game)).Select(pair => pair.Key).ToArray())
+                _engineBoardGames.Remove(instance);
+        }
+
         private IEnumerable<ChessLabEvent> Stderr(string text)
         {
             yield return new ChessLabTerminalEvent(ChessLabStream.Stderr, text);
@@ -477,7 +667,7 @@ public static partial class CutechessRunner
                 string engine = traffic.Groups[3].Value;
                 int engineIndex = int.Parse(traffic.Groups[4].Value, CultureInfo.InvariantCulture);
                 string payload = traffic.Groups[5].Value;
-                yield return new ChessLabTerminalEvent(ChessLabStream.Uci, payload, engine, direction);
+                yield return new ChessLabTerminalEvent(ChessLabStream.Uci, payload, engine, direction, engineIndex);
 
                 if (direction == ChessLabDirection.Recv
                     && payload.StartsWith("id name ", StringComparison.OrdinalIgnoreCase))
@@ -512,12 +702,16 @@ public static partial class CutechessRunner
                     }
                 }
 
-                if (direction == ChessLabDirection.Send && payload.StartsWith("position ", StringComparison.Ordinal))
+                if (direction == ChessLabDirection.Send && payload == "ucinewgame")
+                {
+                    foreach (var evt in BeginEngineBoardSession(engine, engineIndex)) yield return evt;
+                }
+                else if (direction == ChessLabDirection.Send && payload.StartsWith("position ", StringComparison.Ordinal))
                 {
                     // The "position" line cutechess sends before every "go" carries the full move
                     // list of the game so far — replaying it (instead of per-engine bestmove lines)
                     // makes the live board robust to ordering and to which engine is about to move.
-                    foreach (var evt in _tracker.ApplyPositionLine(payload["position ".Length..]))
+                    foreach (var evt in TrackPosition(engine, engineIndex, payload["position ".Length..]))
                         yield return evt;
                 }
                 else if (direction == ChessLabDirection.Recv && !_eloRangeChecked && _requestedElo is { } want)
@@ -547,7 +741,7 @@ public static partial class CutechessRunner
                 _total = int.Parse(started.Groups[2].Value, CultureInfo.InvariantCulture);
                 string white = started.Groups[3].Value;
                 string black = started.Groups[4].Value;
-                _tracker.Reset(index, white, black);
+                _boardGames[index] = new GameBoardTracking(index, white, black);
                 _startedGames[index] = (white, black);
 
                 if (_requirePairedSchedule)
@@ -571,6 +765,8 @@ public static partial class CutechessRunner
 
             var finished = GameEndRegex().Match(text);
             if (finished.Success)
+            {
+                FinishBoardGame(int.Parse(finished.Groups[1].Value, CultureInfo.InvariantCulture));
                 yield return new ChessLabGameEvent(
                     int.Parse(finished.Groups[1].Value, CultureInfo.InvariantCulture),
                     finished.Groups[2].Value,
@@ -578,6 +774,7 @@ public static partial class CutechessRunner
                     finished.Groups[5].Success && finished.Groups[5].Value.Length > 0
                         ? $"{finished.Groups[4].Value} ({finished.Groups[5].Value})"
                         : finished.Groups[4].Value);
+            }
 
             var score = ScoreRegex().Match(text);
             if (score.Success)
@@ -606,7 +803,8 @@ public static partial class CutechessRunner
     private sealed class LiveBoardTracker
     {
         private Board _board = Board.FromFen(ChessModality.StartFen);
-        private int _plyCount;
+        private readonly List<string> _appliedMoves = new();
+        private string? _baseFen;
         private int _game;
         private string? _white, _black;
 
@@ -615,7 +813,8 @@ public static partial class CutechessRunner
             _game = game;
             _white = white;
             _black = black;
-            _plyCount = 0;
+            _appliedMoves.Clear();
+            _baseFen = null;
             _board = Board.FromFen(ChessModality.StartFen);
         }
 
@@ -626,23 +825,29 @@ public static partial class CutechessRunner
             int movesIdx = Array.IndexOf(tok, "moves");
             var moves = movesIdx >= 0 ? tok[(movesIdx + 1)..] : [];
 
-            if (moves.Length < _plyCount)
+            string baseFen;
+            if (tok is ["startpos", ..]) baseFen = ChessModality.StartFen;
+            else if (tok is ["fen", ..] && tok.Length >= 7) baseFen = string.Join(' ', tok[1..7]);
+            else return [];
+
+            if (_baseFen != baseFen || moves.Length < _appliedMoves.Count
+                || !_appliedMoves.SequenceEqual(moves.Take(_appliedMoves.Count), StringComparer.Ordinal))
             {
-                // Shorter list than we've seen: a new game's first position line beat the
-                // "Started game" banner (or a takeback) — restart from scratch.
-                _plyCount = 0;
-                _board = tok is ["fen", ..] && movesIdx >= 7
-                    ? Board.FromFen(string.Join(' ', tok[1..7]))
-                    : Board.FromFen(ChessModality.StartFen);
+                // Each UCI position declares its starting board and exact move prefix.
+                // Initialize from that board even when no moves follow it yet; a changed
+                // base, takeback, or divergent prefix must not reuse the previous board.
+                _board = Board.FromFen(baseFen);
+                _baseFen = baseFen;
+                _appliedMoves.Clear();
             }
 
-            var events = new List<ChessLabBoardEvent>(Math.Max(0, moves.Length - _plyCount));
-            for (int i = _plyCount; i < moves.Length; i++)
+            var events = new List<ChessLabBoardEvent>(Math.Max(0, moves.Length - _appliedMoves.Count));
+            for (int i = _appliedMoves.Count; i < moves.Length; i++)
             {
                 if (!TryApplyUci(_board, moves[i])) break;
+                _appliedMoves.Add(moves[i]);
                 events.Add(new ChessLabBoardEvent(_game, i + 1, moves[i], _board.ToFen(), _white, _black));
             }
-            _plyCount = moves.Length;
             return events;
         }
 

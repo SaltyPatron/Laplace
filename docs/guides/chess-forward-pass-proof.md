@@ -9,7 +9,7 @@ This guide is a measurement/acceptance design. It does not define a chess-privat
 A useful controlled split is:
 
 ```text
-Stockfish 18
+Stockfish (exact source revision and build recorded for each experiment)
   strong external classical calculation provider / comparator / opponent
 
 Laplace

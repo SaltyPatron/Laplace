@@ -127,7 +127,7 @@ internal static class ChessEndpoints
                     new { kind = "tactics", label = "Tactics solve rate", @default = new { depth = "6" } },
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
-                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true" } },
+                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true", stockfishThreads = "", stockfishHashMb = "", stockfishNumaPolicy = "", stockfishSyzygyPath = "" } },
                     new { kind = "lichess-fetch", label = "Ingest player games", @default = new { site = "chesscom", all = "true", max = "1000", ingest = "true" } },
                     new { kind = "player-profile", label = "Acquire and associate player profiles", @default = new { site = "chesscom", ingest = "true" } },
                     new { kind = "fide-search", label = "Search FIDE players", @default = new { limit = "25" } },
@@ -143,7 +143,8 @@ internal static class ChessEndpoints
         // hour of engine time — and it comes from CutechessRunner.BuildArguments, the same
         // function the job uses, so the preview cannot drift from the thing it previews.
         app.MapGet("/chess/lab/cutechess/preview", (
-            int? rounds, int? depth, double? st, int? elo, int? concurrency, bool? limitStrength) =>
+            int? rounds, int? depth, double? st, int? elo, int? concurrency, bool? limitStrength,
+            string? stockfishThreads, string? stockfishHashMb, string? stockfishNumaPolicy, string? stockfishSyzygyPath) =>
         {
             var options = new CutechessOptions
             {
@@ -156,6 +157,17 @@ internal static class ChessEndpoints
                 PgnOut = Path.Combine(ChessLabPaths.LabDir, "{job}", "games.pgn"),
                 Event = "chess-lab/cutechess/{job}",
             };
+            try
+            {
+                options = options.WithStockfishConfiguration(new Dictionary<string, string>
+                {
+                    ["stockfishThreads"] = stockfishThreads ?? "",
+                    ["stockfishHashMb"] = stockfishHashMb ?? "",
+                    ["stockfishNumaPolicy"] = stockfishNumaPolicy ?? "",
+                    ["stockfishSyzygyPath"] = stockfishSyzygyPath ?? "",
+                });
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
             var catalog = ChessLabPaths.Catalog;
             var required = new (string Name, string Key, string Hint)[]
@@ -184,6 +196,13 @@ internal static class ChessEndpoints
                 commandLine = command.CommandLine,
                 workingDirectory = command.WorkingDirectory,
                 games = options.Rounds,
+                stockfish = new
+                {
+                    threads = options.StockfishThreads,
+                    hashMb = options.StockfishHashMb,
+                    numaPolicy = options.StockfishNumaPolicy,
+                    syzygyPath = options.StockfishSyzygyPath,
+                },
                 ready = missing.Length == 0,
                 missing,
             });
@@ -200,6 +219,11 @@ internal static class ChessEndpoints
             if (kind == ChessLabJobKind.LichessBot)
                 return Results.Conflict(new { error = "managed_service", message = "Use the Lichess service controls; the API must not start a second bot." });
             var config = req.Config?.ToDictionary(kv => kv.Key, kv => kv.Value.ToString()) ?? new Dictionary<string, string>();
+            if (kind == ChessLabJobKind.Cutechess)
+            {
+                try { _ = new CutechessOptions().WithStockfishConfiguration(config); }
+                catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            }
             var id = lab.StartJob(kind, config);
             return id is null ? Results.Problem("failed to start job") : Results.Json(new { jobId = id });
         }).WithTags("chess-lab");
@@ -274,6 +298,7 @@ internal static class ChessEndpoints
             var contentType = Path.GetExtension(path).ToLowerInvariant() switch
             {
                 ".pgn" => "application/x-chess-pgn",
+                ".json" => "application/json; charset=utf-8",
                 ".log" or ".txt" => "text/plain; charset=utf-8",
                 _ => "application/octet-stream",
             };
@@ -289,7 +314,9 @@ internal static class ChessEndpoints
             // Record + analyze the artifact through the writer spine, in-process. Novelty-gated
             // on game ids, so re-posting is idempotent (cutechess jobs already auto-ingest).
             await using var ingestor = await ChessPgnIngestor.CreateAsync(ct);
-            var r = await ingestor.IngestFileAsync(path, log: null, ct);
+            string? experimentJson = job.Artifacts.TryGetValue("experiment.json", out var receiptPath)
+                && File.Exists(receiptPath) ? await File.ReadAllTextAsync(receiptPath, ct) : null;
+            var r = await ingestor.IngestFileAsync(path, log: null, ct, experimentReceiptJson: experimentJson);
             return Results.Json(new { path, parsed = r.Parsed, ingested = r.Applied, alreadyPresent = r.Parsed - r.Novel });
         }).WithTags("chess-lab");
     }

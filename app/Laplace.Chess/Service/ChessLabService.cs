@@ -209,7 +209,7 @@ public sealed class ChessLabService
     /// evict the progress and result frames sharing it.
     /// </summary>
     public ChessLabTerminalLine AppendTerminal(JobSlot slot, ChessLabTerminalEvent evt) =>
-        slot.Terminal.Append(evt.Stream, evt.Text, evt.Engine, evt.Direction);
+        slot.Terminal.Append(evt.Stream, evt.Text, evt.Engine, evt.Direction, evt.EngineInstance);
 
     public void UpdateSummary(JobSlot slot, ChessLabJobSummary summary)
     {

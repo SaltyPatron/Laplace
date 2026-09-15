@@ -1,0 +1,14 @@
+{
+  "version": "1.5.1",
+  "tag": "v1.5.1",
+  "commit": "45e923949e43570886c0ad3392f514e743839c6b",
+  "repository": "https://github.com/cutechess/cutechess.git",
+  "release_url": "https://github.com/cutechess/cutechess/releases/tag/v1.5.1",
+  "latest_api": "https://api.github.com/repos/cutechess/cutechess/releases/latest",
+  "verified_utc": "2026-09-15",
+  "qt_version": "6.11.2",
+  "aqtinstall_version": "3.3.0",
+  "qt_modules": [
+    "qt5compat"
+  ]
+}

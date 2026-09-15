@@ -1205,6 +1205,27 @@ public sealed class IngestRunner
             return result;
         }
 
+        public Task<ApplyResult> ApplyWorkingSetAsync(
+            SubstrateChange change, CancellationToken ct = default)
+            => ApplyWorkingSetAsync([change], ct);
+
+        public async Task<ApplyResult> ApplyWorkingSetAsync(
+            IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
+        {
+            var result = await inner.ApplyWorkingSetAsync(changes, ct).ConfigureAwait(false);
+            Account(result, changes);
+            return result;
+        }
+
+        public async Task<ApplyResult> ApplyWorkingSetAsync(
+            IReadOnlyList<SubstrateChange> changes,
+            Func<CancellationToken, ValueTask> verifier, CancellationToken ct = default)
+        {
+            var result = await inner.ApplyWorkingSetAsync(changes, verifier, ct).ConfigureAwait(false);
+            Account(result, changes);
+            return result;
+        }
+
         private void Account(ApplyResult result, IReadOnlyList<SubstrateChange> changes)
         {
             Interlocked.Add(ref counters._entitiesInserted, result.EntitiesInserted);

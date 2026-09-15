@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
+from argparse import Namespace
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,7 +35,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.suite.validate_registry(self.registry)
         profiles = {item["id"] for item in self.registry["profiles"]}
         self.assertEqual(
-            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward"},
+            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment"},
             profiles,
         )
         for suite in self.registry["suites"]:
@@ -48,7 +50,34 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn("core-scale", suites["all"]["profiles"])
         self.assertEqual(["query-forward"], suites["query"]["profiles"])
         self.assertNotIn("query-forward", suites["all"]["profiles"])
-        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "all"}, set(suites))
+        self.assertEqual(["chess-environment"], suites["chess"]["profiles"])
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "chess", "all"}, set(suites))
+
+    def test_chess_suite_does_not_require_unrelated_native_artifacts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = Namespace(suite="chess", repeats=2, receipt_dir=folder,
+                             core="/missing/core", t0="/missing/t0", corpus_dir=folder,
+                             moby_path="/missing/book", scale_workers=None, database="unused",
+                             chess_stockfish="/selected/source/src/stockfish",
+                             chess_cutechess="/selected/build/cutechess-cli", chess_cpu_budget=4,
+                             chess_memory_mib=1024, chess_laplace_uci=None, chess_reserve_cpus=1)
+            with mock.patch.object(self.suite, "git_sha", return_value="source-revision"), \
+                 mock.patch.object(self.suite, "exact_env", side_effect=AssertionError("core must not be required")), \
+                 mock.patch.object(self.suite, "run_profile", return_value={"profile":"chess-environment"}) as run:
+                self.assertEqual(0, self.suite.run_suite(args))
+            forwarded = run.call_args.args[-1]
+            self.assertEqual(["--stockfish", args.chess_stockfish, "--cutechess", args.chess_cutechess,
+                              "--cpu-budget", "4", "--memory-mib", "1024", "--reserve-cpus", "1"], forwarded)
+            receipt = json.loads((Path(folder) / "suite-receipt.json").read_text())
+            self.assertEqual({"repository_sha":"source-revision"}, receipt["artifact_identity"])
+
+    def test_core_suite_still_rejects_missing_native_artifact(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = Namespace(suite="core", repeats=2, receipt_dir=folder,
+                             core=str(Path(folder) / "missing-core"), t0=str(Path(folder) / "missing-t0"))
+            with mock.patch.object(self.suite, "git_sha", return_value="source-revision"):
+                with self.assertRaisesRegex(SystemExit, "built core library not found"):
+                    self.suite.run_suite(args)
 
     def test_raw_harness_scaling_points_still_expose_full_topology_for_explicit_use(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))
@@ -80,20 +109,23 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(12, cap)
         self.assertEqual("derived", source)
 
-    def test_workflow_is_dispatch_only_and_routes_through_suite_runner(self):
+    def test_workflow_is_manual_or_post_deploy_and_routes_through_suite_runner(self):
         import yaml
         path = ROOT / ".github/workflows/benchmark-evidence.yml"
         workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         triggers = workflow["on"]
         names = {triggers} if isinstance(triggers, str) else set(triggers)
-        self.assertEqual({"workflow_dispatch"}, names)
+        self.assertEqual({"workflow_dispatch", "workflow_call"}, names)
         inputs = workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("query", inputs["suite"]["options"])
+        self.assertIn("chess", inputs["suite"]["options"])
+        self.assertEqual("chess", workflow["on"]["workflow_call"]["inputs"]["suite"]["default"])
         job = workflow["jobs"]["benchmark"]
         commands = "\n".join(step.get("run", "") for step in job["steps"] if isinstance(step, dict))
         self.assertIn("python3 scripts/benchmark_suite.py validate", commands)
         self.assertIn("python3 scripts/benchmark_scale_plan.py", commands)
-        self.assertIn("python3 scripts/benchmark_suite.py \"${args[@]}\"", commands)
+        self.assertIn("runner=(python3 scripts/benchmark_suite.py)", commands)
+        self.assertIn('"${runner[@]}" "${args[@]}"', commands)
         self.assertNotIn("python3 scripts/bench-compose.py", commands)
         self.assertNotIn("python3 scripts/bench-compose-scale.py", commands)
         self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", commands)
@@ -273,8 +305,132 @@ WORK_SHAPE tier_tree_nodes=8 nodes_per_codepoint=1.000000000000 nodes_per_tok4=4
         text = (ROOT / "docs/benchmarks/SCALING_MODES.md").read_text(encoding="utf-8")
         self.assertIn("33608791817", text)
         self.assertIn("41,601,961", text)
-        self.assertIn("unique-corpus makespan", text.lower())
+        self.assertRegex(text.lower(), r"unique-corpus(?:, file-grain)? makespan")
         self.assertIn("independent-stream", text.lower())
+
+
+class ChessRuntimeEnvironmentTests(unittest.TestCase):
+    def test_installed_runtime_reaches_child_without_artifact_or_log_export(self):
+        import contextlib
+        import io
+        import os
+        wrapper = load_module("chess_runtime_env", "scripts/chess-runtime-env.py")
+        with tempfile.TemporaryDirectory() as folder:
+            prefix = Path(folder)
+            (prefix / "app").mkdir()
+            (prefix / "app/laplace-api.env").write_text(
+                'LAPLACE_DB="Host=installed;Password=fixture-password;Database=corpus"\n'
+                'LAPLACE_PERFCACHE_BIN=/configured/native/perfcache.bin\n'
+                'LAPLACE_UCI_SUBSTRATE=substrate\n'
+                'LD_LIBRARY_PATH=/configured/native/lib\n'
+                'LAPLACE_OPERATOR_TOKEN=must-not-forward\n')
+            output = io.StringIO()
+            with mock.patch.dict(os.environ, {"PATH": "/usr/bin", "LAPLACE_PERFCACHE_BIN": "/explicit/cache.bin"}, clear=True), \
+                 mock.patch.object(wrapper.os, "execvpe") as execute, \
+                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                wrapper.main(["--prefix", str(prefix), "--", "python3", "check.py", "argument with spaces"])
+            executable, command, environment = execute.call_args.args
+            self.assertEqual("python3", executable)
+            self.assertEqual(["python3", "check.py", "argument with spaces"], command)
+            self.assertEqual("Host=installed;Password=fixture-password;Database=corpus", environment["LAPLACE_DB"])
+            self.assertEqual("/explicit/cache.bin", environment["LAPLACE_PERFCACHE_BIN"])
+            self.assertEqual("/configured/native/lib", environment["LD_LIBRARY_PATH"])
+            self.assertEqual("substrate", environment["LAPLACE_UCI_SUBSTRATE"])
+            self.assertNotIn("LAPLACE_OPERATOR_TOKEN", environment)
+            self.assertEqual("", output.getvalue())
+            self.assertEqual({"app"}, {item.name for item in prefix.iterdir()})
+
+
+class ChessReadinessEvidenceTests(unittest.TestCase):
+    def run_collector(self, *, required_failure=False, doctor_timeout=False, status=None, http_error=None):
+        import contextlib
+        import io
+        import os
+        import yaml
+        workflow = yaml.load((ROOT / ".github/workflows/benchmark-evidence.yml").read_text(), Loader=yaml.BaseLoader)
+        steps = workflow["jobs"]["benchmark"]["steps"]
+        step = next(item for item in steps if item.get("id") == "chess_readiness")
+        script = step["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+        dependency = {"executable_ready": not required_failure, "checks": [
+            {"name": "stockfish", "status": "failed" if required_failure else "ready", "required": True},
+            {"name": "syzygy", "status": "incomplete", "required": False},
+            {"name": "openings", "status": "incomplete", "required": False},
+        ]}
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = json.dumps(status or {}).encode()
+        opener = mock.MagicMock()
+        opener.open.return_value.__enter__.return_value = response
+        if http_error:
+            opener.open.side_effect = http_error
+        result = Namespace(returncode=124 if doctor_timeout else int(required_failure),
+                           stdout="" if doctor_timeout else json.dumps(dependency), stderr="not retained")
+        with tempfile.TemporaryDirectory() as folder:
+            env = {"LAPLACE_BENCH_RECEIPT": folder, "LAPLACE_INSTALL_PREFIX": "/configured prefix",
+                   "LAPLACE_BENCH_CHESS_STOCKFISH": "/shared source/src/stockfish",
+                   "LAPLACE_BENCH_CHESS_CUTECHESS": "/configured build/cutechess-cli",
+                   "LAPLACE_BENCH_CHESS_UCI": "/configured prefix/app/laplace-uci",
+                   "LAPLACE_LICHESS_STATUS_BASE": "http://127.0.0.1:5189"}
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch("subprocess.run", return_value=result) as process, \
+                 mock.patch("urllib.request.build_opener", return_value=opener), \
+                 mock.patch("signal.signal"), mock.patch("signal.alarm") as alarm, \
+                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as stopped:
+                exec(compile(script, "workflow-chess-readiness", "exec"), {})
+            reports = {path.name: json.loads(path.read_text()) for path in Path(folder).glob("*.json")}
+        return stopped.exception.code, reports, process, opener, alarm, steps
+
+    def test_missing_optional_data_does_not_fail_required_readiness(self):
+        code, reports, process, _, _, _ = self.run_collector()
+        self.assertEqual(0, code)
+        self.assertEqual("incomplete", reports["chess-dependency-readiness.json"]["checks"][1]["status"])
+        self.assertEqual("unverified", reports["chess-lichess-readiness.json"]["status"])
+        command = process.call_args.args[0]
+        self.assertIn("--check-latest", command)
+        self.assertIn("240s", command)
+        self.assertIn("scripts/chess-runtime-env.py", command)
+        self.assertEqual("/configured prefix/app/laplace-uci", command[command.index("--uci") + 1])
+        self.assertEqual("/configured build/cutechess-cli", process.call_args.kwargs["env"]["LAPLACE_CUTECHESS"])
+
+    def test_required_failure_keeps_receipts_and_final_gate_follows_upload(self):
+        code, reports, _, _, _, steps = self.run_collector(required_failure=True)
+        self.assertEqual(1, code)
+        self.assertFalse(reports["chess-readiness-execution.json"]["required_checks_passed"])
+        self.assertIn("chess-lichess-readiness.json", reports)
+        readiness = next(item for item in steps if item.get("id") == "chess_readiness")
+        self.assertEqual("true", readiness["continue-on-error"])
+        upload = next(i for i, item in enumerate(steps) if item.get("name") == "Upload complete benchmark evidence")
+        gate = next(i for i, item in enumerate(steps) if item.get("name") == "Require installed chess tools and verified release checks")
+        self.assertGreater(gate, upload)
+        self.assertIn("steps.chess_readiness.outcome == 'failure'", steps[gate]["if"])
+
+    def test_lichess_snapshot_excludes_tokens_logs_names_and_free_text(self):
+        body = {"configured": True, "connected": True, "running": True, "substrate": True,
+                "depth": 6, "maxConcurrent": 2, "gamesRecorded": 3,
+                "tokenPreview": "DO_NOT_RETAIN", "username": "DO_NOT_RETAIN",
+                "recentLog": ["DO_NOT_RETAIN"], "error": "DO_NOT_RETAIN",
+                "account": {"tokenValid": True, "botAccount": False, "botPlayScope": False,
+                            "ready": False, "username": "DO_NOT_RETAIN", "error": "DO_NOT_RETAIN"}}
+        code, reports, _, opener, alarm, _ = self.run_collector(status=body)
+        self.assertEqual(0, code)
+        self.assertNotIn("DO_NOT_RETAIN", json.dumps(reports))
+        online = reports["chess-lichess-readiness.json"]
+        self.assertEqual("not-ready", online["status"])
+        self.assertFalse(online["account"]["botAccount"])
+        self.assertTrue(online["service"]["error_present"])
+        opener.open.assert_called_once_with("http://127.0.0.1:5189/status", timeout=8)
+        self.assertIn(mock.call(10), alarm.call_args_list)
+        self.assertEqual(mock.call(0), alarm.call_args_list[-1])
+
+    def test_doctor_timeout_and_http_authentication_failure_are_retained(self):
+        from urllib.error import HTTPError
+        code, reports, _, _, _, _ = self.run_collector(
+            doctor_timeout=True, http_error=HTTPError("unused", 401, "DO_NOT_RETAIN", {}, None))
+        self.assertEqual(1, code)
+        self.assertEqual(124, reports["chess-readiness-execution.json"]["exit_code"])
+        self.assertFalse(reports["chess-dependency-readiness.json"]["executable_ready"])
+        self.assertEqual("authentication-required", reports["chess-lichess-readiness.json"]["status"])
+        self.assertNotIn("DO_NOT_RETAIN", json.dumps(reports))
 
 
 if __name__ == "__main__":

@@ -6,8 +6,9 @@ namespace Laplace.Chess.Service;
 /// <summary>
 /// Persistent form of the census eval memo — the spec-33 two-tier pattern applied to
 /// engine time: Postgres holds the system-of-record testimony; this file is a DERIVED,
-/// one-way, versioned cache of successful pure-function values (position id → side-to-move
-/// cp at a fixed budget). A timeout/dead engine produces no cache record: absence is not an
+/// one-way, versioned cache of successful recipe-scoped observations (complete FEN →
+/// side-to-move cp at a fixed budget). Parallel engine search can vary between attempts;
+/// the cache retains the successful witnessed result. A timeout/dead engine produces no record: absence is not an
 /// engine verdict and a replacement engine must be allowed to try again.
 ///
 /// The compact snapshot is accompanied by a fixed-record append journal. A successful
@@ -19,7 +20,8 @@ public static class StockfishEvalCache
 {
     private const uint Magic = 0x4C505346;        // "LPSF"
     private const uint JournalMagic = 0x4C50534A; // "LPSJ"
-    private const int FormatVersion = 1;
+    private const int LegacyFormatVersion = 1;
+    private const int RecipeFormatVersion = 2;
     private const int JournalHeaderBytes = sizeof(uint) + sizeof(int) + sizeof(int) + sizeof(int) + sizeof(long);
     private const int JournalRecordBytes = 16 + sizeof(bool) + sizeof(int);
 
@@ -37,12 +39,23 @@ public static class StockfishEvalCache
 
     public static ConcurrentDictionary<Hash128, int?> Load(
         string path, int censusVersion, int depth, long nodes)
+        => LoadCore(path, censusVersion, depth, nodes, recipeId: null);
+
+    public static string RecipePath(string path, StockfishEvaluationRecipe recipe)
+        => Path.GetFullPath(path) + ".recipe-" + recipe.Id;
+
+    public static ConcurrentDictionary<Hash128, int?> Load(string path, StockfishEvaluationRecipe recipe)
+        => LoadCore(RecipePath(path, recipe), ChessStockfishEval.Version,
+            recipe.Settings.Nodes > 0 ? 0 : recipe.Settings.Depth, recipe.Settings.Nodes, recipe.Id);
+
+    private static ConcurrentDictionary<Hash128, int?> LoadCore(
+        string path, int censusVersion, int depth, long nodes, string? recipeId)
     {
         var memo = new ConcurrentDictionary<Hash128, int?>();
         lock (Gate(path))
         {
-            LoadSnapshotInto(path, censusVersion, depth, nodes, memo);
-            LoadJournalInto(JournalPath(path), censusVersion, depth, nodes, memo);
+            LoadSnapshotInto(path, censusVersion, depth, nodes, memo, recipeId);
+            LoadJournalInto(JournalPath(path), censusVersion, depth, nodes, memo, recipeId);
         }
         return memo;
     }
@@ -50,6 +63,16 @@ public static class StockfishEvalCache
     public static void Append(
         string path, int censusVersion, int depth, long nodes,
         IReadOnlyCollection<KeyValuePair<Hash128, int?>> entries)
+        => AppendCore(path, censusVersion, depth, nodes, entries, recipeId: null);
+
+    public static void Append(string path, StockfishEvaluationRecipe recipe,
+        IReadOnlyCollection<KeyValuePair<Hash128, int?>> entries)
+        => AppendCore(RecipePath(path, recipe), ChessStockfishEval.Version,
+            recipe.Settings.Nodes > 0 ? 0 : recipe.Settings.Depth, recipe.Settings.Nodes, entries, recipe.Id);
+
+    private static void AppendCore(
+        string path, int censusVersion, int depth, long nodes,
+        IReadOnlyCollection<KeyValuePair<Hash128, int?>> entries, string? recipeId)
     {
         if (entries.Count == 0) return;
         var successful = entries.Where(static entry => entry.Value.HasValue).ToArray();
@@ -67,11 +90,11 @@ public static class StockfishEvalCache
                     journal, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
                 using var rw = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true);
 
-                if (!JournalHeaderMatches(stream, censusVersion, depth, nodes))
+                if (!JournalHeaderMatches(stream, censusVersion, depth, nodes, recipeId))
                 {
                     stream.SetLength(0);
                     stream.Position = 0;
-                    WriteHeader(rw, JournalMagic, censusVersion, depth, nodes);
+                    WriteHeader(rw, JournalMagic, censusVersion, depth, nodes, recipeId);
                 }
 
                 stream.Position = stream.Length;
@@ -94,6 +117,16 @@ public static class StockfishEvalCache
     public static void Save(
         string path, int censusVersion, int depth, long nodes,
         ConcurrentDictionary<Hash128, int?> memo)
+        => SaveCore(path, censusVersion, depth, nodes, memo, recipeId: null);
+
+    public static void Save(string path, StockfishEvaluationRecipe recipe,
+        ConcurrentDictionary<Hash128, int?> memo)
+        => SaveCore(RecipePath(path, recipe), ChessStockfishEval.Version,
+            recipe.Settings.Nodes > 0 ? 0 : recipe.Settings.Depth, recipe.Settings.Nodes, memo, recipe.Id);
+
+    private static void SaveCore(
+        string path, int censusVersion, int depth, long nodes,
+        ConcurrentDictionary<Hash128, int?> memo, string? recipeId)
     {
         string? tmp = null;
         try
@@ -110,7 +143,7 @@ public static class StockfishEvalCache
                     bufferSize: 128 * 1024, FileOptions.SequentialScan | FileOptions.WriteThrough))
                 using (var w = new BinaryWriter(stream))
                 {
-                    WriteHeader(w, Magic, censusVersion, depth, nodes);
+                    WriteHeader(w, Magic, censusVersion, depth, nodes, recipeId);
                     var snapshot = memo.Where(static entry => entry.Value.HasValue).ToArray();
                     w.Write(snapshot.Length);
                     foreach (var (id, cp) in snapshot)
@@ -140,14 +173,14 @@ public static class StockfishEvalCache
 
     private static void LoadSnapshotInto(
         string path, int censusVersion, int depth, long nodes,
-        ConcurrentDictionary<Hash128, int?> memo)
+        ConcurrentDictionary<Hash128, int?> memo, string? recipeId)
     {
         if (!File.Exists(path)) return;
         try
         {
             using var stream = File.OpenRead(path);
             using var r = new BinaryReader(stream);
-            if (!HeaderMatches(r, Magic, censusVersion, depth, nodes)) return;
+            if (!HeaderMatches(r, Magic, censusVersion, depth, nodes, recipeId)) return;
             if (stream.Length - stream.Position < sizeof(int)) return;
             int count = r.ReadInt32();
             if (count < 0) return;
@@ -171,14 +204,14 @@ public static class StockfishEvalCache
 
     private static void LoadJournalInto(
         string journal, int censusVersion, int depth, long nodes,
-        ConcurrentDictionary<Hash128, int?> memo)
+        ConcurrentDictionary<Hash128, int?> memo, string? recipeId)
     {
         if (!File.Exists(journal)) return;
         try
         {
             using var stream = File.OpenRead(journal);
             using var r = new BinaryReader(stream);
-            if (!HeaderMatches(r, JournalMagic, censusVersion, depth, nodes)) return;
+            if (!HeaderMatches(r, JournalMagic, censusVersion, depth, nodes, recipeId)) return;
             while (stream.Length - stream.Position >= JournalRecordBytes)
             {
                 var id = Hash128.FromBytes(r.ReadBytes(16));
@@ -195,24 +228,25 @@ public static class StockfishEvalCache
     }
 
     private static bool JournalHeaderMatches(
-        FileStream stream, int censusVersion, int depth, long nodes)
+        FileStream stream, int censusVersion, int depth, long nodes, string? recipeId)
     {
         if (stream.Length < JournalHeaderBytes) return false;
         stream.Position = 0;
         using var r = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
-        return HeaderMatches(r, JournalMagic, censusVersion, depth, nodes);
+        return HeaderMatches(r, JournalMagic, censusVersion, depth, nodes, recipeId);
     }
 
     private static bool HeaderMatches(
-        BinaryReader r, uint magic, int censusVersion, int depth, long nodes)
+        BinaryReader r, uint magic, int censusVersion, int depth, long nodes, string? recipeId)
     {
         try
         {
             return r.ReadUInt32() == magic
-                && r.ReadInt32() == FormatVersion
+                && r.ReadInt32() == (recipeId is null ? LegacyFormatVersion : RecipeFormatVersion)
                 && r.ReadInt32() == censusVersion
                 && r.ReadInt32() == depth
-                && r.ReadInt64() == nodes;
+                && r.ReadInt64() == nodes
+                && (recipeId is null || r.ReadBytes(32).AsSpan().SequenceEqual(Convert.FromHexString(recipeId)));
         }
         catch (EndOfStreamException)
         {
@@ -221,13 +255,14 @@ public static class StockfishEvalCache
     }
 
     private static void WriteHeader(
-        BinaryWriter w, uint magic, int censusVersion, int depth, long nodes)
+        BinaryWriter w, uint magic, int censusVersion, int depth, long nodes, string? recipeId)
     {
         w.Write(magic);
-        w.Write(FormatVersion);
+        w.Write(recipeId is null ? LegacyFormatVersion : RecipeFormatVersion);
         w.Write(censusVersion);
         w.Write(depth);
         w.Write(nodes);
+        if (recipeId is not null) w.Write(Convert.FromHexString(recipeId));
     }
 
     private static string JournalPath(string path) => Path.GetFullPath(path) + ".journal";

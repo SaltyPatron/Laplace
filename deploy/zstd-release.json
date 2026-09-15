@@ -1,0 +1,14 @@
+{
+  "version": "1.5.7",
+  "tag": "v1.5.7",
+  "repository": "https://github.com/facebook/zstd.git",
+  "commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+  "release": "https://github.com/facebook/zstd/releases/tag/v1.5.7",
+  "latest_api": "https://api.github.com/repos/facebook/zstd/releases/latest",
+  "released_at": "2025-02-19T21:50:11Z",
+  "license": "BSD-3-Clause OR GPL-2.0-or-later",
+  "license_sha256": {
+    "LICENSE": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+    "COPYING": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505"
+  }
+}

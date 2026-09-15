@@ -60,14 +60,51 @@ fp_compute() {
 }
 
 fp_native() {
-  fp_compute "${FP_NATIVE_PATHS[@]}"
+  {
+    fp_compute "${FP_NATIVE_PATHS[@]}"
+    fp_chess_openings_inputs
+  } | sha256sum | cut -d' ' -f1
+}
+
+fp_chess_openings_path() {
+  if [[ -n "${LAPLACE_CHESS_OPENINGS:-}" ]]; then
+    printf '%s\n' "$LAPLACE_CHESS_OPENINGS"
+    return
+  fi
+  local chess_root="${LAPLACE_DATA_ROOT:-/vault/Data}/Games/Chess" candidate
+  # Same populated-corpus preference as OpeningSeed, including older installations.
+  for candidate in "$chess_root/lichess-openings" "$chess_root/openings"; do
+    if [[ -d "$candidate" ]] && [[ -n "$(find -H "$candidate" -type f -name '*.tsv' -print -quit)" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+  printf '%s\n' "$chess_root/lichess-openings"
+}
+
+fp_chess_openings_inputs() {
+  local corpus file
+  corpus=$(fp_chess_openings_path)
+  printf 'chess-openings %s\n' "$corpus"
+  if [[ -f "$corpus" ]]; then
+    sha256sum -- "$corpus"
+  elif [[ -d "$corpus" ]]; then
+    while IFS= read -r -d '' file; do
+      sha256sum -- "$file"
+    done < <(find -H "$corpus" -type f -name '*.tsv' -print0 | LC_ALL=C sort -z)
+  else
+    printf 'absent\n'
+  fi
 }
 
 fp_runtime() {
   # Salt for dotnet test staleness: app tests exercise the native .so, the
   # installed extension, and the migrated schema — any of those moving must
   # re-run tests even when no C# changed.
-  fp_compute "${FP_NATIVE_PATHS[@]}" app/Laplace.Migrations
+  {
+    fp_compute "${FP_NATIVE_PATHS[@]}" app/Laplace.Migrations
+    fp_chess_openings_inputs
+  } | sha256sum | cut -d' ' -f1
 }
 
 fp_check() {

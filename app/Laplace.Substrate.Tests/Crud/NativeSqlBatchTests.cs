@@ -1,5 +1,6 @@
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
+using Npgsql;
 using NpgsqlTypes;
 using Xunit;
 
@@ -18,40 +19,181 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
         Assert.Empty(rows);
     }
 
-    [Fact]
-    public async Task ConversationWriterCommitsTheOrderedSessionManifest()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConversationWriterResumesProjectionWithoutForgingContent(bool batchPrefix)
     {
-        var source = Hash128.OfCanonical("catalog-conversation/source");
-        var session = Hash128.OfCanonical("catalog-conversation/session");
-        var turn = Hash128.OfCanonical("catalog-conversation/turn");
+        var tag = $"catalog-conversation/{batchPrefix}/{Guid.NewGuid():N}";
+        var source = Hash128.OfCanonical($"{tag}/source");
+        var session = Hash128.OfCanonical($"{tag}/session");
+        var atoms = new[] { Hash128.OfCanonical($"{tag}/a"), Hash128.OfCanonical($"{tag}/b") };
+        var turn = Hash128.Merkle(4, atoms);
         var type = Hash128.OfCanonical("catalog-conversation/type");
-        var change = new SubstrateChangeBuilder(source, "catalog-conversation")
-            .AddEntity(new EntityRow(session, 3, type, source))
-            .AddEntity(new EntityRow(turn, 2, type, source))
+        var builder = new SubstrateChangeBuilder(source, tag)
+            .AddEntity(new EntityRow(session, 4, type, source))
+            .AddEntity(new EntityRow(turn, 4, type, source))
             .AddPhysicality(new PhysicalityRow(
                 Id: PhysicalityId.Compute(turn, PhysicalityType.Content),
                 EntityId: turn, SourceId: source, Type: PhysicalityType.Content,
                 CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
-                HilbertIndex: default, TrajectoryXyzm: null, NConstituents: 0,
+                HilbertIndex: default,
+                TrajectoryXyzm: Trajectory.Build(atoms,
+                    [Trajectory.VertexFlags(0, false, 0), Trajectory.VertexFlags(0, false, 0)]),
+                NConstituents: atoms.Length,
                 AlignmentResidual: null, SourceDim: null,
                 ObservedAtUnixUs: IntentStage.PgEpochUnixUs))
             .AddAttestation(new AttestationRow(
-                Hash128.OfCanonical("catalog-conversation/evidence"), turn,
+                Hash128.OfCanonical($"{tag}/evidence"), turn,
                 Hash128.OfCanonical("catalog-conversation/relation"), null, source, null,
                 AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1,
-                1_000_000_000L, 30_000_000_000L))
-            .Build();
-        await using var writer = new ConsensusAccumulatingWriter(
-            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource);
-        await writer.ApplyConversationTurnAsync(change, session, new[] { turn, turn }, CancellationToken.None);
+                1_000_000_000L, 30_000_000_000L));
+        foreach (var atom in atoms)
+        {
+            builder.AddEntity(new EntityRow(atom, 0, type, source));
+            builder.AddPhysicality(new PhysicalityRow(
+                PhysicalityId.Compute(atom, PhysicalityType.Content), atom, source,
+                PhysicalityType.Content, 0.1, 0.2, 0.3, 0.4, default, null, 0,
+                null, null, IntentStage.PgEpochUnixUs));
+        }
+        if (batchPrefix)
+        {
+            // Same governed Projection contract emitted by AgentTrace. The
+            // native appender must retain the batch prefix even without flags.
+            builder.AddPhysicality(new PhysicalityRow(
+                PhysicalityId.Compute(session, PhysicalityType.Projection), session, source,
+                PhysicalityType.Projection, 0.1, 0.2, 0.3, 0.4, default,
+                Trajectory.Build(new[] { turn }), 1, null, null, IntentStage.PgEpochUnixUs));
+        }
+        var change = builder.Build();
+        await using (var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource))
+        {
+            await writer.ApplyConversationTurnAsync(change, session, new[] { turn, turn });
+            await writer.ApplyConversationTurnAsync(change, session, new[] { turn, turn });
+        }
+        // Reopen the writer, append one new occurrence, and retain the earlier
+        // exact order. Replaying the first journaled intent above adds nothing.
+        var next = new SubstrateChangeBuilder(source, $"{tag}/next")
+            .AddEntity(new EntityRow(session, 4, type, source)).Build();
+        await using (var resumed = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource))
+            await resumed.ApplyConversationTurnAsync(next, session, new[] { atoms[0] });
+
         await using var read = pg.DataSource.CreateCommand(
             "SELECT turn_id FROM converse.session_turn_ids($1,NULL) ORDER BY ordinal");
         read.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
-        await using var reader = await read.ExecuteReaderAsync();
         var turns = new List<byte[]>();
-        while (await reader.ReadAsync()) turns.Add(reader.GetFieldValue<byte[]>(0));
-        Assert.Equal(2, turns.Count);
-        Assert.All(turns, id => Assert.Equal(turn.ToBytes(), id));
+        await using (var reader = await read.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) turns.Add(reader.GetFieldValue<byte[]>(0));
+        Assert.Equal(batchPrefix ? 4 : 3, turns.Count);
+        Assert.All(turns.Take(turns.Count - 1), id => Assert.Equal(turn.ToBytes(), id));
+        Assert.Equal(atoms[0].ToBytes(), turns[^1]);
+
+        await using var proof = pg.DataSource.CreateCommand(
+            """
+            SELECT p.id,p.type,p.n_constituents,
+                   (SELECT count(*) FROM laplace.physicalities WHERE entity_id=$1 AND type=1),
+                   (SELECT public.laplace_hash128_merkle(0::smallint,
+                       array_agg(c.entity_id ORDER BY c.ordinal))
+                    FROM laplace.physicalities content,
+                         public.laplace_trajectory_expanded_constituents(content.trajectory) c
+                    WHERE content.entity_id=$2 AND content.type=1),
+                   (SELECT count(*) FROM laplace.physicalities content
+                    JOIN laplace.entities parent ON parent.id=content.entity_id,
+                         public.laplace_trajectory_constituents(content.trajectory) c
+                    WHERE content.entity_id=$2 AND content.type=1
+                      AND realize.vertex_tier(c.flags)>=parent.tier),
+                   (SELECT array_agg(realize.vertex_tier(c.flags) ORDER BY c.ordinal)
+                    FROM public.laplace_trajectory_expanded_constituents(p.trajectory) c)
+            FROM laplace.physicalities p WHERE p.entity_id=$1
+            """);
+        proof.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+        proof.Parameters.AddWithValue(NpgsqlDbType.Bytea, turn.ToBytes());
+        await using var evidence = await proof.ExecuteReaderAsync();
+        Assert.True(await evidence.ReadAsync());
+        Assert.Equal(PhysicalityId.Compute(session, PhysicalityType.Projection).ToBytes(),
+            evidence.GetFieldValue<byte[]>(0));
+        Assert.Equal((short)PhysicalityType.Projection, evidence.GetInt16(1));
+        Assert.Equal(turns.Count, evidence.GetInt32(2));
+        Assert.Equal(0, evidence.GetInt64(3));
+        Assert.Equal(turn.ToBytes(), evidence.GetFieldValue<byte[]>(4));
+        Assert.Equal(0, evidence.GetInt64(5));
+        var tiers = evidence.GetFieldValue<short[]>(6);
+        Assert.All(tiers.Take(tiers.Length - 1), tier => Assert.Equal((short)4, tier));
+        Assert.Equal((short)0, tiers[^1]);
+        Assert.False(await evidence.ReadAsync());
+    }
+
+    [Fact]
+    public async Task LegacySessionContentIsPreservedAndRequiresExplicitRecovery()
+    {
+        // A historical defect cannot be staged through the current writer.
+        // Seed one legacy row directly in this disposable database fixture.
+        var session = Hash128.OfCanonical($"legacy-session/{Guid.NewGuid():N}");
+        var contentId = PhysicalityId.Compute(session, PhysicalityType.Content);
+        try
+        {
+            await using (var connection = await pg.DataSource.OpenConnectionAsync())
+            {
+                await using var seed = new NpgsqlBatch(connection);
+                var entity = new NpgsqlBatchCommand(
+                    "INSERT INTO laplace.entities(id,tier,type_id) "
+                    + "VALUES($1,4,laplace.entity_type_id('Conversation_Session'))");
+                entity.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+                seed.BatchCommands.Add(entity);
+                var content = new NpgsqlBatchCommand(
+                    """
+                    INSERT INTO laplace.physicalities
+                        (id,entity_id,type,coord,hilbert_index,n_constituents)
+                    VALUES($1,$2,1,public.ST_MakePoint(0,0,0,0),decode(repeat('00',16),'hex'),0)
+                    """);
+                content.Parameters.AddWithValue(NpgsqlDbType.Bytea, contentId.ToBytes());
+                content.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+                seed.BatchCommands.Add(content);
+                Assert.Equal(2, await seed.ExecuteNonQueryAsync());
+            }
+            await using var read = pg.DataSource.CreateCommand(
+                "SELECT * FROM converse.session_turn_ids($1,NULL)");
+            read.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+            var error = await Assert.ThrowsAsync<PostgresException>(async () =>
+                { await using var rows = await read.ExecuteReaderAsync(); });
+            Assert.Equal("22000", error.SqlState);
+            Assert.Contains("legacy Content manifest requires typed recovery", error.MessageText);
+            await using var append = pg.DataSource.CreateCommand(
+                "SELECT converse.session_append_turns($1,ARRAY[$1],now())");
+            append.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+            var appendError = await Assert.ThrowsAsync<PostgresException>(async () =>
+                { await append.ExecuteScalarAsync(); });
+            Assert.Equal("22000", appendError.SqlState);
+            Assert.Contains("legacy Content manifest requires typed recovery", appendError.MessageText);
+            await using var retained = pg.DataSource.CreateCommand(
+                "SELECT id,type FROM laplace.physicalities WHERE entity_id=$1");
+            retained.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+            await using var receipt = await retained.ExecuteReaderAsync();
+            Assert.True(await receipt.ReadAsync());
+            Assert.Equal(contentId.ToBytes(), receipt.GetFieldValue<byte[]>(0));
+            Assert.Equal((short)PhysicalityType.Content, receipt.GetInt16(1));
+            Assert.False(await receipt.ReadAsync());
+        }
+        finally
+        {
+            // This collection shares a database: retain the defect for the
+            // assertions above, then remove only this fixture's unique session.
+            await using var connection = await pg.DataSource.OpenConnectionAsync();
+            await using var cleanup = new NpgsqlBatch(connection);
+            foreach (string sql in new[]
+            {
+                "DELETE FROM laplace.physicalities WHERE entity_id=$1",
+                "DELETE FROM laplace.entities WHERE id=$1",
+            })
+            {
+                var command = new NpgsqlBatchCommand(sql);
+                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, session.ToBytes());
+                cleanup.BatchCommands.Add(command);
+            }
+            await cleanup.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]

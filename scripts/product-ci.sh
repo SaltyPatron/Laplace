@@ -15,6 +15,15 @@ run_policy() {
   bash scripts/ci-policy.sh
 }
 
+resume_held_repair_if_needed() {
+  # Resolve this product's exact held repair before installation/publication can
+  # replace its native or managed generation. With no owned hold this is a no-op.
+  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" --resume-if-needed \
+    --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
+    --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
+    bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
+}
+
 run_deps() {
   bash scripts/ci-deps.sh
 }
@@ -38,24 +47,11 @@ run_install_and_db() (
   bash scripts/pipeline.sh install
   bash deploy/linux/managed-publish.sh preflight
 
-  local api_was_active=0
-  if systemctl is-active --quiet laplace-api; then
-    api_was_active=1
-    sudo -n systemctl stop laplace-api
-  fi
-  restore_api_after_db() {
-    [[ "$api_was_active" -eq 0 ]] || sudo -n systemctl start laplace-api || true
-  }
-  trap restore_api_after_db EXIT
-
-  local args=()
-  [[ "${LAPLACE_FRESH_DB:-}" != 1 ]] || args+=(--fresh-db)
-  bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
-  # Highway is part of the query execution plane. Once the registry is active,
-  # replay any exact pairs retained while it was unavailable and reconcile the
-  # pre-deposit estate exactly once. New ingest deposits masks inline thereafter.
-  bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
-  bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+  # Use the already installed fixed service controls. The command holds their
+  # managed transaction through migration, discards writer processes,
+  # and restores only the services that were running before maintenance.
+  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" -- \
+    bash scripts/maintain-installed-database.sh
 )
 
 ensure_product_foundation() {
@@ -99,6 +95,16 @@ reconcile_installed_product() {
 run_publish() {
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash scripts/publish-applications.sh deploy
+}
+
+run_repair_installed_corpus() {
+  # Publication has activated this source generation. Reclassification must not
+  # restart the previous managed producer after changing its cached identities.
+  LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)" \
+    python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
+      --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
+      --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
+      bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
 }
 
 ensure_api_running() {
@@ -145,6 +151,9 @@ run_perf() {
 }
 
 run_policy
+case "$stage" in
+  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;
+esac
 if [[ "$stage" == reconcile ]]; then
   reconcile_installed_product
   exit 0
@@ -176,17 +185,23 @@ fi
 run_install_and_db
 restore_foundation_if_requested
 seed_operational_memory
-[[ "$stage" == deploy ]] && exit 0
+if [[ "$stage" == deploy ]]; then
+  echo "native/database stage complete; application publication and corpus repair belong to the full lifecycle"
+  exit 0
+fi
 
 if [[ "$stage" == integrate ]]; then
+  echo "integration-only stage verifies the installed database; it does not publish applications or repair retained content"
   run_integration
   exit 0
 fi
 
 trap recover_publish EXIT
 run_publish
+trap - EXIT
+# Repair owns its restoration and unknown transaction outcomes. Publication's
+# API recovery must not restart a writer after unresolved repair quiescence.
+run_repair_installed_corpus
 run_integration
 run_live_if_expected
 run_perf
-recover_publish
-trap - EXIT
