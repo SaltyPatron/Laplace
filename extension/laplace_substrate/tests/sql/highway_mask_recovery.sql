@@ -107,7 +107,7 @@ DROP TABLE highway_recovery_pairs;
 BEGIN;
 CREATE TEMP TABLE highway_refresh_fixture(name text PRIMARY KEY,id bytea);
 INSERT INTO highway_refresh_fixture
-SELECT name,public.laplace_hash128_blake3('test/native-highway-refresh/'||name)
+SELECT name,public.laplace_hash128_blake3(convert_to('test/native-highway-refresh/'||name,'UTF8'))
 FROM unnest(ARRAY['a','b','isolated','untouched','dynamic','unknown','type']) name;
 INSERT INTO highway_refresh_fixture VALUES ('zero',decode(repeat('00',16),'hex'));
 INSERT INTO laplace.entities(id,tier,type_id)
@@ -238,7 +238,7 @@ BEGIN
 END $$;
 
 CREATE TEMP TABLE highway_refresh_pages AS
-SELECT public.laplace_hash128_blake3('test/native-highway-page/'||n) AS id,
+SELECT public.laplace_hash128_blake3(convert_to('test/native-highway-page/'||n,'UTF8')) AS id,
        CASE WHEN n%2=0 THEN laplace.relation_type_id('IS_A')
             ELSE (SELECT id FROM highway_refresh_fixture WHERE name='dynamic') END AS type_id
 FROM generate_series(1,8305) n;
