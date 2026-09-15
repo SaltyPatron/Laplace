@@ -16,10 +16,3 @@ CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit(
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_deposit'
     LANGUAGE C VOLATILE;
-
--- Preserve the already-declared alias without a second implementation.
-CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit_native(
-    p_entity_ids bytea[], p_type_ids bytea[])
-    RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_deposit'
-    LANGUAGE C VOLATILE;
