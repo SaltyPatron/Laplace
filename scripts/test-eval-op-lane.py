@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import unittest
 from io import BytesIO
@@ -218,9 +220,14 @@ class EvalOperationLaneTests(unittest.TestCase):
             workflow_text,
         )
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
-        perf_guard = product.split("run_perf() {", 1)[1].split("\n}\n\nrun_policy", 1)[0]
-        self.assertIn('[[ "${LAPLACE_GENERATION_BENCHMARK:-}" == 1 ]] || return 0', perf_guard)
-        self.assertIn("bash scripts/test-parallel.sh --perf", perf_guard)
+        for requested in ("0", "1"):
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
+                env={**os.environ, "LAPLACE_GENERATION_BENCHMARK": requested,
+                     "LAPLACE_FRESH_DB": "0", "LAPLACE_RESTORE_FOUNDATION": "0"},
+                capture_output=True, text=True, check=True, timeout=10,
+            )
+            self.assertEqual(requested == "1", "performance" in result.stdout.splitlines())
         self.assertEqual(1, product.count("test-parallel.sh --perf"))
 
         perf = next(s for s in _load_test_profiles() if s["id"] == "generation-perf")

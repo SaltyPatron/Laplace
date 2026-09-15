@@ -373,15 +373,22 @@ class EntryPointTests(unittest.TestCase):
             step["name"]: step.get("run", "")
             for step in steps if "name" in step
         }
-        for step_name, invocation in (
-            ("Fast source/tooling proof and installed-product reconciliation", "bash scripts/product-ci.sh reconcile"),
-            ("Run full product lifecycle", 'bash scripts/product-ci.sh "$LAPLACE_STAGE"'),
-        ):
-            command = commands[step_name]
-            self.assertIn("set -euo pipefail", command)
-            # The host lock is shared across repositories; --close prevents
-            # service children from retaining it after activation finishes.
-            self.assertRegex(command, r"flock --exclusive --close /build/laplace/work/host-resource\.lock\s+\\\s+" + re.escape(invocation))
+        command = commands["Fast source/tooling proof and installed-product reconciliation"]
+        self.assertIn("set -euo pipefail", command)
+        # Fast reconciliation owns the lock in one command. Full delivery keeps
+        # the same host reservation across its separate canonical phases.
+        self.assertRegex(command, r"flock --exclusive --close /build/laplace/work/host-resource\.lock\s+\\\s+"
+                         + re.escape("bash scripts/product-ci.sh reconcile"))
+        session = next(step for step in steps if step.get("id") == "product_session")
+        native_install = next(step for step in steps if step.get("id") == "product_native_install")
+        self.assertIn("set -euo pipefail", session["run"])
+        self.assertIn('python3 scripts/ci-session.py start --directory "$directory"', session["run"])
+        self.assertIn('--lock /build/laplace/work/host-resource.lock --checkout "$GITHUB_WORKSPACE"', session["run"])
+        self.assertIn('--kind product --stage "$LAPLACE_STAGE"', session["run"])
+        self.assertLess(steps.index(session), steps.index(native_install))
+        self.assertIn('scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-install',
+                      native_install["run"])
+        self.assertIn("native-install) run_install ;;", product)
         self.assertIn("test-profile-registry.py run --profile policy", policy)
         self.assertNotIn("python3 scripts/test-managed-host.py", policy)
         managed_host = [suite for suite in registry["suites"] if suite["id"] == "policy-managed-host"]
