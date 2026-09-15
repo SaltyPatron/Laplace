@@ -118,15 +118,21 @@ public sealed class FoldPlanRegressionTests(LocalPgFixture pg)
                     || p.Contains("Merge Join") || p.Contains("Seq Scan"),
                     "exact-leaf prior plan did not expose a target access path");
             });
-            Assert.Equal(matched, phasePlans.Any(p => p.Contains("WHERE b.seen ")));
-            Assert.Equal(novel, phasePlans.Any(p => p.Contains("WHERE NOT b.seen")));
-            if (matched)
+
+            // Matched rows normally persist through the native exact-leaf updater,
+            // and novel rows normally use native binary COPY. Those paths deliberately
+            // emit no INSERT query for auto_explain to capture. SQL INSERT is the
+            // policy/rewrite fallback only; when it appears, pin its keyed shape.
+            var matchedSql = phasePlans.Where(p => p.Contains("WHERE b.seen ")).ToArray();
+            var novelSql = phasePlans.Where(p => p.Contains("WHERE NOT b.seen")).ToArray();
+            if (!matched) Assert.Empty(matchedSql);
+            if (!novel) Assert.Empty(novelSql);
+            Assert.All(matchedSql, p =>
             {
-                Assert.Contains(phasePlans, p =>
-                    p.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE")
-                    && p.Split('\n').Any(line => line.Contains("Conflict Arbiter Indexes:")
-                        && line.Contains("consensus_pkey")));
-            }
+                Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", p);
+                Assert.Contains("Conflict Arbiter Indexes:", p);
+                Assert.Contains("consensus_pkey", p);
+            });
         }
 
         async Task Execute(string text)
