@@ -43,11 +43,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "chess/book";
 
-    /// <summary>
-    /// Drop reason: a prose move line that will not replay from the standard start. The
-    /// book is teaching from a diagram, and Gutenberg plain text carries the diagram as
-    /// <c>[Illustration: ...]</c> with no FEN, so there is no board to anchor to.
-    /// </summary>
     internal const string DiagramAnchoredLine = "diagram-anchored-line";
 
     private const double BookWitnessWeight = 0.7;
@@ -84,10 +79,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         finally { ChessDropLedger.Report(SourceName); }
     }
 
-    // Idempotent re-ingest: skip work already deposited, per layer. An embedded game whose
-    // ANALYZED_AT marker exists is fully done; one whose game entity exists but marker is
-    // missing (a killed run) needs only its calculated layer. A prose line's BookLine marker
-    // gates the whole line. --force (ReObservePresent) bypasses all of it.
     private async Task<IReadOnlyList<ChessBookRecord>> GateNoveltyAsync(
         List<ChessBookRecord> records, bool reObservePresent, CancellationToken ct)
     {
@@ -101,8 +92,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             var r = records[i];
             if (r.Parsed is { } parsed)
             {
-                // GH #736: the analyzer's unit is the PLAYING, so both probes key on the
-                // event — the marker gates derivation, the event entity gates the record.
                 offsets[i] = (probeIds.Count, probeIds.Count + 1);
                 probeIds.Add(ChessVocabulary.AnalysisMarkerId(parsed.PlayingId, ChessAnalyze.Version));
                 probeIds.Add(parsed.PlayingId);
@@ -110,7 +99,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             else
             {
                 offsets[i] = (probeIds.Count, -1);
-                probeIds.Add(r.RootId); // BookLine marker
+                probeIds.Add(r.RootId);
             }
         }
 
@@ -121,10 +110,10 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         for (int i = 0; i < records.Count; i++)
         {
             var (markerIdx, gameIdx) = offsets[i];
-            if (Present(markerIdx)) continue; // fully deposited
+            if (Present(markerIdx)) continue;
             var r = records[i];
             novel.Add(gameIdx >= 0 && Present(gameIdx)
-                ? r with { NeedsRecord = false } // witnessed layer landed; derive only
+                ? r with { NeedsRecord = false }
                 : r);
         }
         return novel;
@@ -136,7 +125,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         else ComposeProseLine(record, b);
     }
 
-    // Progress estimate only: embedded games plus candidate line anchors, without replaying.
     public override async Task<long?> EstimateUnitCountAsync(
         IDecomposerContext context, CancellationToken ct = default)
     {
@@ -159,13 +147,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         return units == 0 ? null : units;
     }
 
-    // ---- embedded PGN games -------------------------------------------------------------
-
-    // ONE pass, ONE pipeline: witnessed record (ChessBook source), calculated derivation
-    // (ChessAnalysis source, via DeriveFromParsed — the game is already parsed in memory;
-    // re-hydrating it from the database row-by-row would be pure waste), and the cross-modal
-    // EXPLAINS grounding, all in this record's Compose. DeriveFromParsed stamps the
-    // ANALYZED_AT marker, so the standalone analyzer scan permanently skips these games.
     private static void ComposeEmbeddedGame(ChessBookRecord record, SubstrateChangeBuilder b)
     {
         var parsed = record.Parsed!;
@@ -175,16 +156,11 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         {
             ChessPgnDecomposer.RecordGame(parsed, b, src);
 
-            // GH #736: the book's prose explains the PLAY — the shared line entity — so a
-            // second book annotating the same game corroborates the same EXPLAINS cell.
             if (!string.IsNullOrWhiteSpace(record.Context)
                 && ContentEmitter.Emit(b, record.Context, src) is { } ctxId)
                 b.AddAttestation(NativeAttestation.Categorical(
                     ctxId, "EXPLAINS", parsed.LineId, src, null, BookWitnessWeight));
 
-            // Ground each inline comment to the exact position it judges. This is the book's
-            // chess knowledge made walkable: (commentary, EXPLAINS, position) joins the text
-            // lane to the board lane by content hash.
             var m = new ChessModality();
             var state = m.Initial();
             var mainline = parsed.Walk.Mainline;
@@ -206,37 +182,24 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         ChessAnalyze.DeriveFromParsed(b, parsed);
     }
 
-    // ---- prose move lines ---------------------------------------------------------------
-
     private static void ComposeProseLine(ChessBookRecord record, SubstrateChangeBuilder b)
     {
         var src = ChessVocabulary.BookSourceId;
-
-        // GH #736: idempotency MARKER, keyed (book title, line) — re-ingesting the same
-        // book skips, while a DIFFERENT book teaching the same line adds witnesses to the
-        // shared line entity below (which is the point).
         b.AddEntity(record.RootId, EntityTier.Document, ChessVocabulary.BookLineType, src);
 
         var m = new ChessModality();
         var state = m.Initial();
-
-        // Replay once and retain the exact ordered structure. Terminal mechanics remain
-        // deterministic calculation; a book line is not fabricated game-outcome testimony.
         var states = new List<ChessState>(record.Sans.Count + 1) { state };
         var resolved = new List<(Piece Moving, ChessMove Move)>(record.Sans.Count);
         foreach (var san in record.Sans)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), san);
-            if (mv is null) return; // extraction replayed this already; disagreement = drop
+            if (mv is null) return;
             resolved.Add((state.Board.Squares[mv.Value.From], mv.Value));
             state = m.Apply(state, mv.Value);
             states.Add(state);
         }
 
-        // GH #736: the prose line's content id IS the shared line composition — the same
-        // entity a PGN playing of these moves mints — so each book's testimony folds into
-        // it, and EXPLAINS targets the line (the play the book teaches), not merely its
-        // final position.
         b.AddEntity(record.LineId, EntityTier.Document, ChessVocabulary.GameType, src);
         var line = new List<ChessNode>(states.Count);
         foreach (var position in states)
@@ -244,7 +207,8 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var movePoints = resolved.Select(r =>
             ChessGraph.EmitMove(b, r.Moving, r.Move, src, nowUs)).ToArray();
-        ChessGraph.AppendLineTrajectory(b, record.LineId, movePoints, src, nowUs);
+        ChessGraph.AppendLineTrajectory(
+            b, record.LineId, line[0], movePoints, src, nowUs);
         ChessGraph.AppendPositionProjection(
             b, record.LineId, line, src, nowUs);
         if (!string.IsNullOrWhiteSpace(record.Context)
@@ -253,17 +217,12 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 ctxId, "EXPLAINS", record.LineId, src, null, BookWitnessWeight));
     }
 
-    // ---- extraction ---------------------------------------------------------------------
-
     internal static IEnumerable<ChessBookRecord> ExtractFromText(string text, string fallbackTitle)
     {
         string title = ExtractTitle(text) ?? fallbackTitle;
         var (pgnBlocks, remainder) = SplitEmbeddedPgn(text);
         foreach (var (gameText, context) in pgnBlocks)
         {
-            // Parse once, here; Compose derives from this in-memory parse — never a re-parse,
-            // never a database read-back. Unparseable blocks die at the gate (TryParseGame
-            // records the reason in the drop ledger).
             if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed) continue;
             yield return new ChessBookRecord(title, gameText, Array.Empty<string>(), context)
             {
@@ -272,10 +231,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             };
         }
 
-        // GH #736: the prose line's content id is the line composition over its replayed
-        // positions (extraction already proved the replay; TryReplayLine re-walks it over
-        // the memoized composition, so this is id math, not a second engine pass). The
-        // per-book idempotency key is a MARKER salted with the book title's content id.
         var titleContentId = ContentEmitter.RootId(title);
         foreach (var paragraph in Paragraphs(remainder))
         {
@@ -284,11 +239,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 if (titleContentId is null
                     || ChessPgnDecomposer.TryReplayLineDetailed(sans, startFen: null) is not { } replay)
                 {
-                    // The book's line does not ground from the standard start — almost
-                    // always an endgame/middlegame study quoted off a diagram the text
-                    // never gives as a FEN. Counted, not silent: this is the measurable
-                    // shape of GH #574 ("book decomposer under-extracts"), and the ratio
-                    // is what says whether a book is worth a diagram-anchored reader.
                     ChessDropLedger.Drop(DiagramAnchoredLine, string.Join(' ', sans.Take(8)));
                     continue;
                 }
@@ -309,15 +259,8 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         return match.Success ? match.Groups[1].Value.Trim() : null;
     }
 
-    // A real annotated game is well under this; a tag block that runs this long without a
-    // result token is not a game and must not keep eating the book.
     private const int MaxPgnBlockLines = 512;
 
-    // Pull `[Event "..."] ... movetext ... result` regions out of the prose. The tag block plus
-    // everything up to a result token (or the next tag block) goes to the PGN parser, which is
-    // the actual validity gate. Context = the closest preceding prose paragraph. A block that
-    // never reaches a result token (malformed or truncated) is returned to the prose stream —
-    // one bad block must not silently swallow the rest of the book.
     internal static (List<(string GameText, string Context)> Blocks, string Remainder) SplitEmbeddedPgn(string text)
     {
         var blocks = new List<(string, string)>();
@@ -373,7 +316,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
 
     private static string PrecedingParagraph(List<string> proseLines)
     {
-        // Walk back over trailing blanks, then collect the contiguous non-blank run.
         int end = proseLines.Count;
         while (end > 0 && string.IsNullOrWhiteSpace(proseLines[end - 1])) end--;
         int start = end;
@@ -396,12 +338,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         }
     }
 
-    /// <summary>
-    /// Find move sequences in a prose paragraph and replay them from the standard start.
-    /// Returns each grounded line as SAN (regenerated during replay, so descriptive input
-    /// comes out algebraic). Legality from the start position is the filter: fragments quoted
-    /// from a diagrammed middle-game position do not survive it.
-    /// </summary>
     internal static IEnumerable<IReadOnlyList<string>> ExtractProseLines(string paragraph)
     {
         bool descriptive = DescriptiveMarker().IsMatch(paragraph);
@@ -430,7 +366,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
 
         foreach (Match tok in Token().Matches(paragraph[from..]))
         {
-            // "1.", "3...", and fused forms like "1.e4" / "3...d5" all shed their number.
             string raw = MoveNumberPrefix().Replace(tok.Value, "");
             if (raw.Length == 0) { consumedTo = from + tok.Index + tok.Length; continue; }
 
@@ -452,9 +387,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         var sans = new List<string>();
         consumedTo = from;
 
-        // Items are separated by commas/semicolons (inline style) or 2+ spaces (tabular
-        // column style); single spaces stay inside an item ("R - R 7"). Move numbers lead
-        // white's move. First unresolvable item ends the line.
         int pos = from;
         foreach (var segment in SegmentSplit().Split(paragraph[from..]))
         {
@@ -467,8 +399,8 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             var mv = DescriptiveNotation.Resolve(state.Board, legal, item);
             if (mv is null)
             {
-                if (sans.Count > 0) break; // line ended
-                continue;                  // still hunting for the first move after the anchor
+                if (sans.Count > 0) break;
+                continue;
             }
             sans.Add(San.ToSan(state.Board, mv.Value));
             state = m.Apply(state, mv.Value);
@@ -477,8 +409,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         return sans;
     }
 
-    // A segment may run into prose after the move ("3. B-Kt5 is the Ruy Lopez.") — keep only
-    // the leading run of move-shaped words so the resolver sees "B-Kt5", not the sentence.
     private static string TrimToMoveWords(string item)
     {
         var words = item.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -487,19 +417,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         return string.Join(' ', words[..keep]);
     }
 
-    /// <summary>
-    /// Pre-ingest inventory (GH #492), in the unit this lane actually yields: CANDIDATE
-    /// ASSERTIONS (embedded games + prose line anchors).
-    ///
-    /// This used to be <c>FromFiles("lines", …)</c> — a NEWLINE count. Measured on
-    /// <c>the-blue-book-of-chess.txt</c>, the run ended
-    /// <c>input_done=82 input_total=14961 … status=ok</c>: 0.5%, reported as success.
-    /// The numerator is records; the denominator was lines of the file. Two different
-    /// units in one ratio is not a slow lane, it is a meaningless number, and it is the
-    /// number an operator reads to decide whether a book was ingested. Anchors that fail
-    /// to ground are still counted here (they are candidates), and the exact shortfall is
-    /// reported by name in the CHESS_DROPPED line.
-    /// </summary>
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
@@ -518,24 +435,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         return Task.FromResult<IngestInventory?>(new IngestInventory("assertions", total, files));
     }
 
-    /// <summary>
-    /// The EXACT number of records this file will yield, by running the extraction and
-    /// counting it.
-    ///
-    /// A cheap proxy was tried and is not honest. Raw <c>LineAnchor</c> matches over
-    /// <c>the-blue-book-of-chess.txt</c> + Capablanca + Lasker give 2,392 against 166
-    /// records actually yielded — 7%, because an anchor is any "1." followed by a
-    /// move-shaped character, and the overwhelming majority are prose ("1. e4 is the
-    /// King's Pawn") that never reach <see cref="MinProsePlies"/>. Reporting 166/2392 as
-    /// a completed run is the same class of lie as the 82/14961 it replaced, just
-    /// smaller.
-    ///
-    /// The extra pass is affordable BECAUSE of what this lane reads: a book corpus is
-    /// hundreds of KB per file and hundreds of files, and the whole test-data/text tree
-    /// extracts in about nine seconds. That is the right trade for a denominator an
-    /// operator can act on. The PGN lane, whose inputs are gigabytes, keeps its sampled
-    /// byte estimate for exactly the same reason inverted.
-    /// </summary>
     private static long CountCandidateAssertions(string path, CancellationToken ct)
     {
         try
@@ -552,15 +451,9 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         }
     }
 
-    /// <summary>
-    /// An empty run is expected when the novelty gate consumed every record it read —
-    /// see <see cref="ChessDropLedger.ExplainEmptyRun"/>. Re-ingesting an already-ingested
-    /// corpus used to exit 1 with "declares N input unit(s) but ingested 0".
-    /// </summary>
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
         => ChessDropLedger.ExplainEmptyRun(SourceName, declaredInputUnits);
 
-    // Zero matches THROWS — see ChessInput.
     private static IReadOnlyList<string> EnumerateFiles(string path, SearchOption scope)
         => ChessInput.Resolve(path, scope, ChessInput.BookExtensions, "chess-books");
 
@@ -576,11 +469,9 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();
 
-    // "1. e4" / "1 P-K4" / "1...P-K4" — the start-of-line-1 anchor a move sequence hangs off.
     [GeneratedRegex(@"(?<![\d.])1\s*\.{0,3}\s*(?=[a-hPKQRBNO0])")]
     private static partial Regex LineAnchor();
 
-    // Descriptive-notation smell: "P-K4", "Kt-KB3", "B - Kt 5", "KtxP".
     [GeneratedRegex(@"\b(?:Kt|KT|[PRNBQK])\s*[-–—]\s*(?:Q|K)?\s*(?:Kt|KT|[RNB])?\s*[1-8]|\b(?:Kt|[PRNBQK])x(?:Kt|[PRNBQK])")]
     private static partial Regex DescriptiveMarker();
 
@@ -590,8 +481,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     [GeneratedRegex(@"[,;]|\s{2,}")]
     private static partial Regex SegmentSplit();
 
-    // Words that can be part of one descriptive move: piece/square charset runs ("B-Kt5",
-    // "R", "-", "7", "PxP", "O-O", "P-K8(Q)") plus the era's annotation words.
     [GeneratedRegex(@"^[PKQRBNKtO0-8xX+#=/()\-.]+$|^(?i:castles|ch|dis|dbl|mate|ep|e\.p\.?)$")]
     private static partial Regex MoveWord();
 
@@ -599,11 +488,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     private static partial Regex MoveNumberPrefix();
 }
 
-/// <summary>One grounded assertion from a chess book: an embedded PGN game (GameText/Parsed set)
-/// or a prose move line (Sans set), plus the prose context that explains it. RootId is the
-/// idempotency key (the playing-event id, or the (book, line) marker — GH #736); LineId is the
-/// shared line entity a prose line grounds onto; NeedsRecord carries the extractor's novelty
-/// verdict per layer.</summary>
 public sealed record ChessBookRecord(
     string BookTitle,
     string? GameText,
