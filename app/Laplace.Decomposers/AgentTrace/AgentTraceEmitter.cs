@@ -16,9 +16,9 @@ namespace Laplace.Decomposers.AgentTrace;
 ///                   physicality whose trajectory IS the part order (Pillar 3a)
 ///   tool call     → Tool_Invocation composition of input/result roots, CALLS / HAS_INPUT
 ///                   / HAS_RESULT edges
-///   session       → stable canonical identity (tenant=provider, key=session id) whose
-///                   Content physicality trajectory is the ordered turn manifest —
-///                   re-ingesting a grown log upserts the trajectory (versioned order)
+///   session       → stable governed identity (tenant=provider, key=session id) whose
+///                   Projection physicality is the ordered, growing turn manifest.
+///                   The handle is deliberately not the content hash of that manifest.
 ///
 /// Membership rides the per-tenant UserPrompt@/Response@ sources so replayed
 /// logs fold onto the SAME consensus cells as live conversation; structure, usage
@@ -29,10 +29,8 @@ public static class AgentTraceEmitter
 {
     private static readonly Hash128 LaneSource = AgentTraceSource.SourceId;
 
-    /// <summary>Typed relation → canonical surface (no ad-hoc name literals at emit sites).</summary>
     private static string Rel(AgentRelation relation) => AgentRelations.Surface(relation);
 
-    /// <summary>Per-tenant witness identities, resolved once per provider per process.</summary>
     public readonly record struct ProviderScope(
         ConversationContent.TenantScope Tenant,
         Hash128 ToolSource)
@@ -42,18 +40,6 @@ public static class AgentTraceEmitter
             SubstrateCanonicalIds.Source($"ToolResult@{provider}"));
     }
 
-    // ── grown-log re-witness protection ───────────────────────────────────────────
-    // A resumed session file GROWS, so its per-file content identity changes and file
-    // resume cannot skip it — without a finer marker every re-ingest would re-witness
-    // the whole prefix and inflate observation counts (the #417 novelty-gate class).
-    // The marker is a bare content-addressed entity per witnessed turn-prefix:
-    //   id = canonical(agent/watermark/{session}/{k}/{chain_k})
-    // where chain_k folds the ordered composed-turn ids, so ANY change inside the
-    // prefix (not just its tail) invalidates deeper marks. The extract stage probes all
-    // k in ONE batched existence bitmap; a probe miss merely re-witnesses (safe), a hit
-    // is only possible for a byte-identical prefix.
-
-    /// <summary>Part texts of a turn in THE composition order (the turn-id contract).</summary>
     internal static IEnumerable<string> PartTexts(AgentTurn turn)
     {
         if (!string.IsNullOrEmpty(turn.Text)) yield return turn.Text;
@@ -65,10 +51,6 @@ public static class AgentTraceEmitter
         }
     }
 
-    /// <summary>
-    /// Composed-turn ids by pure content resolution (no staging) — the same merkle the
-    /// witness path mints, for watermark probing before compose.
-    /// </summary>
     public static List<Hash128> ComputeComposedTurnIds(AgentSession session)
     {
         var ids = new List<Hash128>(session.Turns.Count);
@@ -99,7 +81,6 @@ public static class AgentTraceEmitter
     internal static Hash128 WatermarkId(Hash128 sessionId, int k, Hash128 chain) =>
         Hash128.OfCanonical($"agent/watermark/{sessionId}/{k}/{chain}/v1");
 
-    /// <summary>Candidate watermark ids for every prefix k = 1..N, in prefix order.</summary>
     public static IReadOnlyList<Hash128> WatermarkCandidates(
         Hash128 sessionId, IReadOnlyList<Hash128> composedTurnIds)
     {
@@ -165,9 +146,6 @@ public static class AgentTraceEmitter
             turnCoords.Add(coords[tid]);
             turnsUsedUs = Math.Max(turnsUsedUs, ts);
 
-            // Prefix turns of a grown log: content stays staged (idempotent), testimony
-            // is NOT re-emitted — the prior ingest already witnessed it, and testimony
-            // is not idempotent (observation counts accumulate).
             bool witnessTurn = turnIds.Count > watermark;
             if (!witnessTurn)
             {
@@ -175,17 +153,10 @@ public static class AgentTraceEmitter
                 continue;
             }
 
-            // Membership on the live lane's cell: (turn root APPEARS_IN session)@ctx=session.
-            // ONE witness class (φ) for every membership row: content collapse means the
-            // same subject can be a user turn, an assistant turn, and a tool input in one
-            // batch, and the fold's φ-per-cell invariant forbids role-varying trust on one
-            // cell (proven by the ~/.claude corpus: 12 workers died on exactly that).
-            // Role identity stays on the evidence row's SOURCE and on HAS_ROLE.
             Attest(b, ts, NativeAttestation.Categorical(
                 tid, Rel(AgentRelation.AppearsIn), sessionId, roleSource, sessionId,
                 TC.AppDerived));
 
-            // Role/model/stop-reason/usage: lane-source structure, session as context.
             AttestCanonical(b, ts, tid, Rel(AgentRelation.HasRole),
                 CanonicalEntity(b, $"agent/role/{turn.Role}/v1", turn.Role,
                     EntityTypeRegistry.ConversationTurn, coords: null),
@@ -231,22 +202,22 @@ public static class AgentTraceEmitter
 
             foreach (var (k, v) in turn.Meta)
                 AttestMetaAttribute(b, ts, tid, sessionId, k, v, coords);
-
         }
 
         long endUs = session.EndedAtUnixUs > 0 ? session.EndedAtUnixUs : turnsUsedUs;
 
-        // The session's ordered, versioned turn manifest — THE order authority (spec 34).
+        // A session id is a stable governed handle. Its growing ordered turn manifest is a
+        // projection of that handle, never the content identity of the handle itself.
         if (turnIds.Count > 0)
         {
             var flat = new double[turnIds.Count * 4];
             for (int i = 0; i < turnIds.Count; i++) turnCoords[i].CopyTo(flat, i * 4);
             double[] centroid = Math4d.KarcherMean(flat);
-            Hash128 physId = PhysicalityId.Compute(sessionId, PhysicalityType.Content);
+            Hash128 physId = PhysicalityId.Compute(sessionId, PhysicalityType.Projection);
             if (b.TrySeePhysicality(physId))
                 b.AddPhysicalityPreSeen(new PhysicalityRow(
                     Id: physId, EntityId: sessionId, SourceId: scope.Tenant.PromptSource,
-                    Type: PhysicalityType.Content,
+                    Type: PhysicalityType.Projection,
                     CoordX: centroid[0], CoordY: centroid[1],
                     CoordZ: centroid[2], CoordM: centroid[3],
                     HilbertIndex: Hilbert128.Encode(centroid),
@@ -257,8 +228,6 @@ public static class AgentTraceEmitter
                     ObservedAtUnixUs: endUs));
         }
 
-        // The witnessed-prefix watermark for THIS parse, atomically with its testimony.
-        // A future re-ingest of the grown file probes these and skips the prefix.
         if (turnIds.Count > 0)
         {
             Hash128 chain = sessionId;
@@ -267,11 +236,8 @@ public static class AgentTraceEmitter
                 EntityTypeRegistry.AgentSessionWatermark, LaneSource);
         }
 
-        // A re-parse with NOTHING beyond the watermark owes no session-level testimony
-        // either — it was all witnessed by the run that deposited the watermark.
         if (turnIds.Count <= watermark) return;
 
-        // Session-level metadata — every field the log carried.
         if (Witness(b, session.Title, scope.Tenant.PromptSource, coords, members: null) is { } title)
             Attest(b, endUs, NativeAttestation.Categorical(
                 sessionId, Rel(AgentRelation.HasName), title, LaneSource, sessionId, TC.AppDerived));
@@ -299,12 +265,6 @@ public static class AgentTraceEmitter
             EmitUsage(b, endUs, sessionId, sessionId, totals.ToUsage(), coords);
     }
 
-    // ── content witnessing ────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Stage the tiered content DAG for one part; returns its root and records the root
-    /// coordinate. Appends to <paramref name="members"/> (composition order) when given.
-    /// </summary>
     private static Hash128? Witness(
         SubstrateChangeBuilder b, string? text, Hash128 sourceId,
         Dictionary<Hash128, double[]> coords, List<Hash128>? members)
@@ -327,10 +287,6 @@ public static class AgentTraceEmitter
         return root;
     }
 
-    /// <summary>
-    /// Tier-0 floor: a single-codepoint part collapses to its codepoint id, which the
-    /// content builder never stages (seeded). Its coordinate comes from the perfcache.
-    /// </summary>
     private static bool TryCodepointCoord(Hash128 id, out double[] coord)
     {
         coord = [];
@@ -347,11 +303,6 @@ public static class AgentTraceEmitter
         return false;
     }
 
-    /// <summary>
-    /// Ordered composition (the chess-position law): merkle id over member order, Content
-    /// physicality whose trajectory is the member manifest, Karcher-mean coordinate.
-    /// One member collapses to that member (tier-floor law); zero members compose nothing.
-    /// </summary>
     private static Hash128? ComposeOrdered(
         SubstrateChangeBuilder b, List<Hash128> members, byte tier, Hash128 typeId,
         Hash128 sourceId, Dictionary<Hash128, double[]> coords, long observedAtUs)
@@ -394,12 +345,6 @@ public static class AgentTraceEmitter
         return list;
     }
 
-    // ── governed identities and attestations ──────────────────────────────────────
-
-    /// <summary>
-    /// Canonical (non-content) identity with its name witnessed as content and linked
-    /// via IS_INSTANCE_OF — the Tabular column/value law.
-    /// </summary>
     private static Hash128 CanonicalEntity(
         SubstrateChangeBuilder b, string canonicalKey, string surfaceName, Hash128 typeId,
         Dictionary<Hash128, double[]>? coords)
@@ -419,10 +364,6 @@ public static class AgentTraceEmitter
         Attest(b, ts, NativeAttestation.Categorical(
             subject, relation, obj, LaneSource, sessionId, TC.AppDerived));
 
-    /// <summary>
-    /// Metadata retention: every leftover provider field becomes (subject HAS_ATTRIBUTE
-    /// root("key=value"))@ctx=session — queryable testimony, nothing dropped.
-    /// </summary>
     private static void AttestMetaAttribute(
         SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
         string key, string value, Dictionary<Hash128, double[]> coords)
@@ -454,10 +395,6 @@ public static class AgentTraceEmitter
                 v.ToString(CultureInfo.InvariantCulture), coords);
     }
 
-    /// <summary>
-    /// Scalar identity = the text-content law (ModelCoordinates.ScalarId): the entity for
-    /// "4096" here IS the content root of "4096" everywhere in the substrate.
-    /// </summary>
     private static void AttestScalarText(
         SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
         string relation, string value, Dictionary<Hash128, double[]> coords)
@@ -469,14 +406,12 @@ public static class AgentTraceEmitter
             subject, relation, scalarRoot, LaneSource, sessionId, TC.AppDerived));
     }
 
-    /// <summary>Event-time retention: the log's clock, never the ingest clock.</summary>
     private static void Attest(SubstrateChangeBuilder b, long eventUs, AttestationRow row) =>
         b.AddAttestation(eventUs > 0 ? row with { LastObservedAtUnixUs = eventUs } : row);
 
     private static bool IsRealModelId(string? model) =>
         model is { Length: > 0 } && model[0] != '<';
 
-    /// <summary>Clamp arbitrary provider keys into the conversational identifier charset.</summary>
     internal static string SanitizeKey(string raw)
     {
         if (ConversationContent.IsValidIdentifier(raw)) return raw;
