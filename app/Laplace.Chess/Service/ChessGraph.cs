@@ -259,13 +259,22 @@ public static class ChessGraph
         => AppendOrderedTrajectory(b, gameId, line, src, nowUs, PhysicalityType.Projection);
 
     /// <summary>
-    /// The irreducible reusable line: ordered typed move objects. Individual playings point to
-    /// this content; board positions are deterministic transition projections.
+    /// The reusable line content is EXACTLY the preimage named by <see cref="ChessCompose.LineId"/>:
+    /// start position followed by the ordered typed move objects. Board positions after the start
+    /// remain deterministic projections through the transition floor. A Content trajectory that
+    /// omitted the start position described different bytes than its parent id and was therefore
+    /// not a content DAG at all.
     /// </summary>
     internal static void AppendLineTrajectory(
-        SubstrateChangeBuilder b, Hash128 lineId, IReadOnlyList<ChessNode> moves,
-        Hash128 src, long nowUs)
-        => AppendOrderedTrajectory(b, lineId, moves, src, nowUs, PhysicalityType.Content);
+        SubstrateChangeBuilder b, Hash128 lineId, ChessNode startPosition,
+        IReadOnlyList<ChessNode> moves, Hash128 src, long nowUs)
+    {
+        if (moves.Count == 0) return;
+        var content = new ChessNode[moves.Count + 1];
+        content[0] = startPosition;
+        for (int i = 0; i < moves.Count; i++) content[i + 1] = moves[i];
+        AppendOrderedTrajectory(b, lineId, content, src, nowUs, PhysicalityType.Content);
+    }
 
     /// <summary>
     /// One compact parallel sequence for occurrence annotations. Ordinals align exactly with
@@ -305,6 +314,16 @@ public static class ChessGraph
             coords[i * 4 + 1] = points[i].Coord[1];
             coords[i * 4 + 2] = points[i].Coord[2];
             coords[i * 4 + 3] = points[i].Coord[3];
+        }
+
+        if (type == PhysicalityType.Content)
+        {
+            Hash128 expected = ids.Length == 1
+                ? ids[0]
+                : Hash128.Merkle(0, ids);
+            if (expected != entityId)
+                throw new InvalidOperationException(
+                    $"Content trajectory identity mismatch: entity={entityId} recomputed={expected} constituents={ids.Length}");
         }
 
         // Same primitives the position tier composes with — one implementation of "pack an
