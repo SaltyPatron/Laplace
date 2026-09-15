@@ -4,6 +4,7 @@
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
+#include "nodes/parsenodes.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
@@ -136,7 +137,9 @@ pg_laplace_highway_match(PG_FUNCTION_ARGS)
     uint64      acc = 0;
     Size        i = 0;
 
-    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+    if (PG_ARGISNULL(0))
+        PG_RETURN_BOOL(false);
+    if (PG_ARGISNULL(1))
         PG_RETURN_BOOL(false);
 
     a = PG_GETARG_BYTEA_PP(0);
@@ -362,8 +365,10 @@ deposit_retain_pending(ArrayType *entities, ArrayType *types)
         elog(ERROR, "highway_mask_deposit: pending SPI_connect failed");
     if (!pending_plan)
     {
-        SPIPlanPtr plan = SPI_prepare(laplace_sql_query_text("entities.mask_pending"),
-                                     2, argtypes);
+        /* This is an INSERT: explicitly retain write-plan options, not
+         * CURSOR_OPT_PARALLEL_OK. The family SELECT below is independent. */
+        SPIPlanPtr plan = SPI_prepare_cursor(
+            laplace_sql_query_text("entities.mask_pending"), 2, argtypes, 0);
         if (!plan || SPI_keepplan(plan) != 0)
             elog(ERROR, "highway_mask_deposit: pending prepare failed");
         pending_plan = plan;
@@ -514,8 +519,9 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
                 elog(ERROR, "highway_mask_deposit: SPI_connect failed");
             if (!family_plan)
             {
-                SPIPlanPtr plan = SPI_prepare(laplace_sql_query_text("entities.mask_families"),
-                                             2, argtypes);
+                SPIPlanPtr plan = SPI_prepare_cursor(
+                    laplace_sql_query_text("entities.mask_families"),
+                    2, argtypes, CURSOR_OPT_PARALLEL_OK);
                 if (!plan || SPI_keepplan(plan) != 0)
                     elog(ERROR, "highway_mask_deposit: family prepare failed");
                 family_plan = plan;
