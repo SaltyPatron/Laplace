@@ -258,7 +258,9 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
 
     if (row->object_is_null)
         return;
-    if (!(walk_edge_score(row->type, row->rating, row->rd) > 0.0))
+    /* Standing admits a response; relation rank orders it later. An admitted
+     * dynamic relation has real testimony even before a static rank exists. */
+    if (!(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
         return;
 
     anchor = state->reverse ? &row->object : &row->subject;

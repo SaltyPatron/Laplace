@@ -10,6 +10,7 @@
   "manifest_order": [
     "unicode",
     "iso639",
+    "operational",
     "cili",
     "document",
     "wordnet",
@@ -70,6 +71,12 @@
           "min": 1
         }
       ]
+    },
+    "operational": {
+      "decomposer": "OperationalDecomposer",
+      "layer": 2,
+      "prerequisites": ["unicode", "iso639"],
+      "consensus_gates": []
     },
     "cili": {
       "decomposer": "CILIDecomposer",

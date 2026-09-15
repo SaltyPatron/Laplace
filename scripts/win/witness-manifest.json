@@ -14,6 +14,7 @@
     "sources": [
       "unicode",
       "iso639",
+      "operational",
       "cili",
       "wordnet",
       "verbnet",
@@ -34,6 +35,7 @@
       "sources": [
         { "cli": "unicode", "path": "UCD/Public/UCD/latest", "layer": "L0", "role": "codepoint atoms — the only dedup floor" },
         { "cli": "iso639", "path": "ISO639", "layer": "L1", "role": "the language axis; 639-1/-2/-3 codes for one language converge to one language entity, macrolanguage = IS_A/HAS_MEMBER" },
+        { "cli": "operational", "path": "@bundled/seeds/operational", "layer": "L2", "role": "original inventor-authority contracts admitted with exact source bytes, grammar structure and file provenance under SubstrateMandate" },
         { "cli": "cili", "path": "CILI", "layer": "L2", "role": "Collaborative Interlingual Index — ILI concept anchors; MUST precede wordnet/omw so synsets bind to shared concept entities" }
       ]
     },

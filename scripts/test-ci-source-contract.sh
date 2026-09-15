@@ -28,9 +28,12 @@ for f in \
   scripts/pr-proof.sh \
   scripts/lib/fp.sh \
   scripts/affected-app.py \
+  scripts/test-app-fingerprints.py \
   scripts/setup-host.sh \
   scripts/bootstrap-laplace-runner.sh \
   scripts/ingest-source.sh \
+  scripts/verify-operational-seed.py \
+  scripts/test-operational-seed.py \
   scripts/dataset-estate-refresh.sh \
   scripts/dataset-estate-refresh.sources.psv \
   scripts/test-dataset-estate-refresh.py \
@@ -86,6 +89,9 @@ python3 scripts/test-forward-prompt-analysis.py
 # an edit starts measuring packed carrier coordinates or drops a hard invariant.
 python3 scripts/test-live-recursive-proof-gate.py
 
+# Deployment must read back this invocation's complete authored operational seed.
+python3 scripts/test-operational-seed.py
+
 # BEGIN ATOMIC pg_depend release is part of live extension-upgrade safety. Prove
 # both legal release forms (drop/rebind) and the unsafe rebind/ordering cases with
 # a synthetic manifest before the live-catalog checker uses that model.
@@ -98,3 +104,7 @@ python3 scripts/test-installed-extension-current.py
 
 # Ingest interruption is diagnostic metadata, never successful completion.
 python3 scripts/test-ingest-source-exit.py
+
+# An external seeded source edit must invalidate its real project consumers,
+# their tests, the ingest CLI build, and the application publish domain.
+python3 scripts/test-app-fingerprints.py

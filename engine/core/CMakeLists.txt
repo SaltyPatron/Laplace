@@ -2,6 +2,8 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/version.h
     include/laplace/core/math4d.h
     include/laplace/core/hash128.h
+    include/laplace/core/ud_parse.h
+    include/laplace/core/task_shape.h
     include/laplace/core/hilbert4d.h
     include/laplace/core/mantissa.h
     include/laplace/core/super_fibonacci.h
@@ -51,6 +53,8 @@ set(LAPLACE_CORE_SOURCES
     src/version.c
     src/math4d.c
     src/hash128.c
+    src/ud_parse.c
+    src/task_shape.c
     src/hilbert4d.c
     src/mantissa.c
     src/super_fibonacci.c

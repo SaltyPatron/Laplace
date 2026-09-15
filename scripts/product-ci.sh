@@ -76,6 +76,18 @@ restore_foundation_if_requested() {
   fi
 }
 
+seed_operational_memory() {
+  # The versioned operational source ships with this executable generation.
+  # Its per-file content completion skips unchanged artifacts; do not use
+  # --force/ReObservePresent and turn a deployment into another witness.
+  if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+    return 0
+  fi
+  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+  LAPLACE_INGEST_MAX_UNITS=0 LAPLACE_INGEST_FORCE=0 \
+    python3 scripts/verify-operational-seed.py --ingest
+}
+
 reconcile_installed_product() {
   # Fast source/tooling path: reconcile installed derived state and prove
   # application health. Never build and never seed corpus content.
@@ -163,6 +175,7 @@ fi
 
 run_install_and_db
 restore_foundation_if_requested
+seed_operational_memory
 [[ "$stage" == deploy ]] && exit 0
 
 if [[ "$stage" == integrate ]]; then

@@ -1,4 +1,4 @@
-/* Native Content GIN set reader. PostgreSQL owns index consistency, bitmap
+/* Native typed GIN set reader. PostgreSQL owns index consistency, bitmap
  * memory limits and MVCC; C owns consumption. No planner, SPI or SQL cursor. */
 #include "postgres.h"
 #include "access/genam.h"
@@ -38,10 +38,10 @@ is_column(Node *node, AttrNumber column)
 }
 
 /* A similarly named index with a different predicate can silently omit rows.
- * Validate the actual canonical expression and Content predicate, not its name. */
+ * Validate the canonical expression and requested type predicate, not its name. */
 static void
 validate_membership_index(Relation index, AttrNumber trajectory, AttrNumber type,
-               Oid projection, Oid family)
+               Oid projection, Oid family, int16 physicality_type)
 {
     List *expressions = RelationGetIndexExpressions(index);
     List *predicate = RelationGetIndexPredicate(index);
@@ -54,7 +54,7 @@ validate_membership_index(Relation index, AttrNumber trajectory, AttrNumber type
     FuncExpr *expression = linitial_node(FuncExpr, expressions);
     if (expression->funcid != projection || list_length(expression->args) != 1 ||
         !is_column(linitial(expression->args), trajectory) || list_length(predicate) != 2)
-        elog(ERROR, "content membership requires the canonical Content expression and predicate");
+        elog(ERROR, "content membership requires the canonical typed expression and predicate");
     ListCell *cell;
     foreach(cell, predicate)
     {
@@ -75,19 +75,20 @@ validate_membership_index(Relation index, AttrNumber trajectory, AttrNumber type
                 Oid function = get_opcode(op->opno);
                 kind = !value->constisnull &&
                     ((function == F_INT24EQ && value->consttype == INT4OID &&
-                      DatumGetInt32(value->constvalue) == 1) ||
+                      DatumGetInt32(value->constvalue) == physicality_type) ||
                      (function == F_INT2EQ && value->consttype == INT2OID &&
-                      DatumGetInt16(value->constvalue) == 1));
+                      DatumGetInt16(value->constvalue) == physicality_type));
             }
         }
     }
     if (!kind || !present)
-        elog(ERROR, "content membership requires the exact Content index predicate");
+        elog(ERROR, "content membership requires the exact requested physicality index predicate");
 }
 
-static void
+static bool
 read_leaf(Relation relation, Oid index_oid, ArrayType *members, Oid projection,
           Oid family, Oid operation, StrategyNumber strategy,
+          int16 physicality_type, uint64 max_rows, uint64 *matched_rows,
           LaplaceContentMembershipConsumer consume, void *context)
 {
     Oid oid = RelationGetRelid(relation);
@@ -96,7 +97,7 @@ read_leaf(Relation relation, Oid index_oid, ArrayType *members, Oid projection,
     if (id <= 0 || entity <= 0 || type <= 0 || trajectory <= 0 || !OidIsValid(index_oid))
         elog(ERROR, "content membership requires indexed physicality storage");
     Relation index = index_open(index_oid, AccessShareLock);
-    validate_membership_index(index, trajectory, type, projection, family);
+    validate_membership_index(index, trajectory, type, projection, family, physicality_type);
     ScanKeyData key;
     ScanKeyEntryInitialize(&key, 0, 1, strategy, ANYARRAYOID, InvalidOid,
                            operation, PointerGetDatum(members));
@@ -111,6 +112,7 @@ read_leaf(Relation relation, Oid index_oid, ArrayType *members, Oid projection,
     MemoryContext owner = CurrentMemoryContext;
     MemoryContext row = AllocSetContextCreate(owner, "content membership row", ALLOCSET_SMALL_SIZES);
     bool recheck;
+    bool complete = true;
     uint64 lossy = 0, exact = 0;
     while (table_scan_bitmap_next_tuple(scan, slot, &recheck, &lossy, &exact))
     {
@@ -118,36 +120,56 @@ read_leaf(Relation relation, Oid index_oid, ArrayType *members, Oid projection,
         MemoryContextSwitchTo(row);
         bool isnull;
         Datum kind = slot_getattr(slot, type, &isnull);
-        if (!isnull && DatumGetInt16(kind) == 1)
+        if (!isnull && DatumGetInt16(kind) == physicality_type)
         {
             Datum geometry = slot_getattr(slot, trajectory, &isnull);
             if (!isnull && (!recheck || DatumGetBool(OidFunctionCall2(operation,
                     OidFunctionCall1(projection, geometry), PointerGetDatum(members)))))
             {
+                if (max_rows > 0 && *matched_rows >= max_rows)
+                {
+                    complete = false;
+                    MemoryContextSwitchTo(owner);
+                    break;
+                }
                 Datum physicality = slot_getattr(slot, id, &isnull);
                 if (isnull) elog(ERROR, "content membership physicality lacks identity");
                 Datum root = slot_getattr(slot, entity, &isnull);
                 if (isnull) elog(ERROR, "content membership physicality lacks entity");
                 MemoryContextSwitchTo(owner);
                 consume(physicality, root, geometry, context);
+                ++*matched_rows;
             }
         }
         MemoryContextSwitchTo(owner);
         ExecClearTuple(slot);
         MemoryContextReset(row);
     }
+    ExecClearTuple(slot);
     MemoryContextDelete(row);
     tbm_end_iterate(&scan->st.rs_tbmiterator);
     table_endscan(scan);
     tbm_free(bitmap);
     ExecDropSingleTupleTableSlot(slot);
     index_close(index, NoLock);
+    return complete;
 }
 
-void
-laplace_content_membership_read(ArrayType *members, bool require_all,
+bool
+laplace_typed_membership_read(ArrayType *members, bool require_all,
+    int16 physicality_type, uint64 max_rows,
     LaplaceContentMembershipConsumer consume, void *context)
 {
+    const char *index_name;
+    switch (physicality_type)
+    {
+        case 1: index_name = "physicalities_constituents_gin"; break;
+        case 3: index_name = "physicalities_projection_constituents_gin"; break;
+        case 5: index_name = "physicalities_set_constituents_gin"; break;
+        case 8: index_name = "physicalities_parse_constituents_gin"; break;
+        default: elog(ERROR, "membership read has no index for physicality type %d", physicality_type);
+                 pg_unreachable();
+    }
     Oid schema = get_namespace_oid("laplace", false);
     Oid root = get_relname_relid("physicalities", schema);
     if (!OidIsValid(root)) elog(ERROR, "laplace.physicalities does not exist");
@@ -166,11 +188,11 @@ laplace_content_membership_read(ArrayType *members, bool require_all,
             elog(ERROR, "content membership requires 16-byte identities");
     }
     pfree(values); pfree(nulls);
-    if (count == 0 || (require_all && has_null)) return;
+    if (count == 0 || (require_all && has_null)) return true;
     Relation relation = table_open(root, AccessShareLock);
     if (relation->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
         elog(ERROR, "content membership requires partitioned physicalities");
-    Oid parent_oid = get_relname_relid("physicalities_constituents_gin", schema);
+    Oid parent_oid = get_relname_relid(index_name, schema);
     if (!OidIsValid(parent_oid)) elog(ERROR, "content membership GIN index is absent");
     Relation parent = index_open(parent_oid, AccessShareLock);
     if (parent->rd_index->indrelid != root)
@@ -187,7 +209,8 @@ laplace_content_membership_read(ArrayType *members, bool require_all,
     StrategyNumber strategy = get_op_opfamily_strategy(operator, family);
     if (!strategy || operation != (require_all ? F_ARRAYCONTAINS : F_ARRAYOVERLAP))
         elog(ERROR, "content membership requires canonical array operators");
-    validate_membership_index(parent, trajectory, get_attnum(root, "type"), projection, family);
+    validate_membership_index(parent, trajectory, get_attnum(root, "type"), projection, family,
+                              physicality_type);
     PartitionDesc partitions = RelationGetPartitionDesc(relation, true);
     HASHCTL ctl = {0};
     ctl.keysize = ctl.entrysize = sizeof(Oid);
@@ -199,6 +222,8 @@ laplace_content_membership_read(ArrayType *members, bool require_all,
      * on every leaf and repeatedly probes pg_inherits, recreating catalog I/O. */
     List *indexes = find_inheritance_children(parent_oid, AccessShareLock);
     ListCell *cell;
+    uint64 matched_rows = 0;
+    bool complete = true;
     foreach(cell, indexes)
     {
         CHECK_FOR_INTERRUPTS();
@@ -210,8 +235,10 @@ laplace_content_membership_read(ArrayType *members, bool require_all,
         Relation leaf = table_open(leaf_oid, AccessShareLock);
         if (leaf->rd_rel->relkind != RELKIND_RELATION)
             elog(ERROR, "content membership requires physicality leaf partitions");
-        read_leaf(leaf, index_oid, members, projection,
-                  family, operation, strategy, consume, context);
+        if (complete)
+            complete = read_leaf(leaf, index_oid, members, projection,
+                family, operation, strategy, physicality_type, max_rows, &matched_rows,
+                consume, context);
         table_close(leaf, NoLock);
     }
     if (hash_get_num_entries(leaves) != 0)
@@ -220,6 +247,14 @@ laplace_content_membership_read(ArrayType *members, bool require_all,
     list_free(indexes);
     index_close(parent, NoLock);
     table_close(relation, NoLock);
+    return complete;
+}
+
+void
+laplace_content_membership_read(ArrayType *members, bool require_all,
+    LaplaceContentMembershipConsumer consume, void *context)
+{
+    (void) laplace_typed_membership_read(members, require_all, 1, 0, consume, context);
 }
 
 static void

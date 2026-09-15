@@ -14,14 +14,16 @@ namespace Laplace.Decomposers.Abstractions;
 public sealed class JsonAstDocument : IDisposable
 {
     private readonly GrammarAst _ast;
+    private readonly bool _ownsAst;
     internal readonly byte[] Utf8;
     private readonly int[] _childStart;
     private readonly int[] _childList;
     private readonly int _rootIndex;
 
-    private JsonAstDocument(GrammarAst ast, byte[] utf8)
+    private JsonAstDocument(GrammarAst ast, byte[] utf8, bool ownsAst = true)
     {
         _ast = ast;
+        _ownsAst = ownsAst;
         Utf8 = utf8;
         int n = ast.NodeCount;
 
@@ -74,6 +76,17 @@ public sealed class JsonAstDocument : IDisposable
     public static JsonAstDocument? TryParse(string text) =>
         TryParse(Encoding.UTF8.GetBytes(text));
 
+    /// <summary>Navigate an already parsed source without reparsing or owning its AST.</summary>
+    public static JsonAstDocument FromBorrowedAst(GrammarAst ast, byte[] utf8)
+    {
+        ArgumentNullException.ThrowIfNull(ast);
+        ArgumentNullException.ThrowIfNull(utf8);
+        var doc = new JsonAstDocument(ast, utf8, ownsAst: false);
+        if (doc._rootIndex < 0)
+            throw new InvalidDataException("JSON source has no object or array root");
+        return doc;
+    }
+
     public JsonAstCursor Root => new(this, _rootIndex);
 
     internal GrammarAst Ast => _ast;
@@ -83,7 +96,10 @@ public sealed class JsonAstDocument : IDisposable
             ? []
             : _childList.AsSpan(_childStart[node], _childStart[node + 1] - _childStart[node]);
 
-    public void Dispose() => _ast.Dispose();
+    public void Dispose()
+    {
+        if (_ownsAst) _ast.Dispose();
+    }
 }
 
 public enum JsonAstKind { None, Object, Array, String, Number, True, False, Null }

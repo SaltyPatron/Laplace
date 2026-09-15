@@ -128,7 +128,7 @@ CEILINGS = {
     # named is now the line/playing trajectory. Lowered by exactly the 7 cleaned.
     # Shared grammar examples, including complete prompt/response observations,
     # resolve the relation once instead of repeating it at each staging site.
-    "g3_csharp_vocabulary_literalism": 447,
+    "g3_csharp_vocabulary_literalism": 446,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3

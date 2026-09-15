@@ -66,7 +66,8 @@ public sealed class FrameNetPhysicalityContractTests
             Hash128[] members = Trajectory.Constituents(annotation.TrajectoryXyzm!);
             Assert.Equal(FrameNetDecomposer.AnnotationSchemaId, members[0]);
             Assert.Equal(sentence, members[1]);
-            Assert.Equal(target, members[^1]);
+            Assert.Equal(target, members[3]);
+            Assert.Equal(FrameNetDecomposer.AnnotationLayersEndId, members[^1]);
         }
         finally
         {

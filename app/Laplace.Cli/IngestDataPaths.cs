@@ -49,6 +49,9 @@ internal static class IngestDataPaths
         if (!string.IsNullOrWhiteSpace(cliPath))
             return Path.GetFullPath(cliPath);
 
+        if (cliSource.Equals("operational", StringComparison.OrdinalIgnoreCase))
+            return Laplace.Decomposers.Operational.OperationalDecomposer.BundledPath;
+
         if (!RelativeByCli.TryGetValue(cliSource, out var relative))
             throw new InvalidOperationException($"no manifest path for ingest source '{cliSource}'");
 

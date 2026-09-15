@@ -25,6 +25,7 @@ on:
         options:
           - unicode
           - iso639
+          - operational
           - cili
           - wordnet
           - verbnet
