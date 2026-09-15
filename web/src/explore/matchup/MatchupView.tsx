@@ -107,25 +107,46 @@ export function MatchupView() {
   );
 }
 
+function displayRelation(type: string, chessPlayer: boolean) {
+  const normalized = type.replaceAll('_', ' ').trim().toLowerCase();
+  return chessPlayer && normalized === 'played by' ? 'played against' : normalized;
+}
+
 function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' }) {
   const topStanding = side.top_facts.length
     ? Math.max(...side.top_facts.map((f) => Number(f.eff_mu)))
     : null;
   const edgeCount = side.record.thin + side.record.confirmed + side.record.contested + side.record.refuted;
-  const chessPlayer = side.entity_type === 'Chess_Player';
-  const statValue = chessPlayer ? side.source_rating_peak ?? null : topStanding;
-  const statLabel = chessPlayer
-    ? `peak source Elo · ${side.source_rating_observations ?? 0} rating observations`
-    : `top standing · ${edgeCount} rated edges`;
+  const chess = side.chess ?? null;
+  const chessPlayer = chess !== null || side.entity_type === 'Chess_Player';
+  const statValue = chess
+    ? chess.peak_source_elo
+    : chessPlayer ? side.source_rating_peak ?? null : topStanding;
+  const statLabel = chess
+    ? `peak source Elo · ${chess.games.toLocaleString()} witnessed games`
+    : chessPlayer
+      ? `peak source Elo · ${side.source_rating_observations ?? 0} rating observations`
+      : `top standing · ${edgeCount} rated edges`;
 
   return (
     <div className={`${styles.side} ${align === 'right' ? styles.right : ''}`}>
       <RouterLink className={styles.sideName} to={`/explore/entity/${side.id}`}>{side.label}</RouterLink>
       <div className={styles.record}>
-        <Rec n={side.record.confirmed} label="confirmed" tone="confirm" />
-        <Rec n={side.record.contested} label="contested" tone="draw" />
-        <Rec n={side.record.refuted} label="refuted" tone="refute" />
-        <Rec n={side.record.thin} label="thin" />
+        {chess ? (
+          <>
+            <Rec n={chess.wins} label="wins" tone="confirm" />
+            <Rec n={chess.draws} label="draws" tone="draw" />
+            <Rec n={chess.losses} label="losses" tone="refute" />
+            <Rec n={chess.unscored} label="unscored" />
+          </>
+        ) : (
+          <>
+            <Rec n={side.record.confirmed} label="confirmed" tone="confirm" />
+            <Rec n={side.record.contested} label="contested" tone="draw" />
+            <Rec n={side.record.refuted} label="refuted" tone="refute" />
+            <Rec n={side.record.thin} label="thin" />
+          </>
+        )}
       </div>
       <div className={styles.topStat}>
         <span className={styles.topMu}>{statValue != null ? Number(statValue).toFixed(0) : '—'}</span>
@@ -133,7 +154,7 @@ function SideCard({ side, align }: { side: MatchupSide; align: 'left' | 'right' 
       </div>
       <ul className={styles.facts}>
         {side.top_facts.slice(0, 5).map((f, i) => (
-          <li key={i}><span className={styles.factType}>{f.type}</span> {f.fact}</li>
+          <li key={i}><span className={styles.factType}>{displayRelation(f.type, chessPlayer)}</span> {f.fact}</li>
         ))}
       </ul>
     </div>
