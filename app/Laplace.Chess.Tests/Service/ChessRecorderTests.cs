@@ -29,10 +29,9 @@ public sealed class ChessRecorderTests
 
         var line = Assert.Single(change.Physicalities,
             p => p.EntityId == parsed.LineId && p.Type == PhysicalityType.Content);
-        Assert.Equal(parsed.ResolvedMoves.Length, line.NConstituents);
+        Assert.Equal(parsed.ResolvedMoves.Length + 1, line.NConstituents);
         var actual = Trajectory.Constituents(line.TrajectoryXyzm!);
-        var expected = parsed.ResolvedMoves.Select((move, i) =>
-            ChessCompose.MoveId(parsed.MovingPieces[i], move)).ToArray();
+        Hash128[] expected = [parsed.PositionIds[0], .. parsed.MoveIds];
         Assert.Equal(expected, actual);
     }
 

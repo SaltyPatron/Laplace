@@ -110,13 +110,18 @@ public class CopyTupleParserTests
     {
         using var stage = IntentStage.New(4);
         Span<double> coord = stackalloc double[4] { 0.1, 0.2, 0.3, 0.4 };
-        var traj = new double[] { 1, 2, 3, 4, 5, 6, 7, 8 };
-        stage.AddPhysicality(H(10), H(1), 1, coord, default, traj, 2, 0.5, 4, 1_000_000);
-        stage.AddPhysicality(H(11), H(2), 1, coord, default, ReadOnlySpan<double>.Empty, 0, null, null, 2_000_000);
+        var entity1 = H(1);
+        var entity2 = H(2);
+        const PhysicalityType type = PhysicalityType.Projection;
+        var id1 = PhysicalityId.Compute(entity1, type);
+        var id2 = PhysicalityId.Compute(entity2, type);
+        var traj = Trajectory.Build([H(101), H(102)]);
+        stage.AddPhysicality(id1, entity1, (short)type, coord, default, traj, 2, 0.5, 4, 1_000_000);
+        stage.AddPhysicality(id2, entity2, (short)type, coord, default, ReadOnlySpan<double>.Empty, 0, null, null, 2_000_000);
 
         var parsed = CopyTupleParser.ParsePhysicalities(Blobs(stage, IntentStageTable.Physicalities));
-        Assert.Equal(new[] { H(10), H(11) }, parsed.Ids);
-        Assert.Equal(new[] { H(1), H(2) }, parsed.EntityIds);
+        Assert.Equal(new[] { id1, id2 }, parsed.Ids);
+        Assert.Equal(new[] { entity1, entity2 }, parsed.EntityIds);
     }
 
     [Fact]

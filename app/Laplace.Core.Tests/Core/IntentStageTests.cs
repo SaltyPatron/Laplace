@@ -18,6 +18,14 @@ public class IntentStageTests
     private static short ReadBe16(ReadOnlySpan<byte> p) =>
         (short)(((ushort)p[0] << 8) | p[1]);
 
+    private static Hash128 PhysicalityId(Hash128 entityId, short type)
+    {
+        Span<byte> preimage = stackalloc byte[18];
+        entityId.WriteBytes(preimage[..16]);
+        BinaryPrimitives.WriteInt16LittleEndian(preimage[16..], type);
+        return Hash128.Blake3(preimage);
+    }
+
     [Fact]
     public void EmptyStream_HeaderAndTrailerOnly()
     {
@@ -54,10 +62,11 @@ public class IntentStageTests
     public void AddPhysicality_NullTrajectoryAccepted()
     {
         using var s = IntentStage.New(1);
-        var h = Hash128.Zero;
+        var entityId = Hash128.Zero;
+        var id = PhysicalityId(entityId, 1);
         var hb = new Hilbert128();
         s.AddPhysicality(
-            h, h, physicalityType: 1,
+            id, entityId, physicalityType: 1,
             coord: stackalloc double[] { 0, 0, 0, 0 },
             hilbertIndex: hb,
             trajectoryXyzm: ReadOnlySpan<double>.Empty,

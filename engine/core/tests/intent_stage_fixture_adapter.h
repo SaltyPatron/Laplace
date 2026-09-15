@@ -83,7 +83,13 @@ static inline int intent_stage_add_physicality_legacy_fixture(
     int                 source_dim_is_null,
     int32_t             source_dim,
     int64_t             observed_at_unix_us) {
-    if (!stage || !id || !entity_id || !coord || !hilbert_index) {
+    /* Preserve production argument validation. The fixture shim exists only to
+     * translate otherwise well-formed legacy serialization rows; malformed
+     * pointer/count shapes must reach the real function unchanged. */
+    if (!stage || !id || !entity_id || !coord || !hilbert_index
+        || n_constituents < 0
+        || (trajectory_n_vertices > 0 && !trajectory_xyzm)
+        || (trajectory_n_vertices == 0 && n_constituents != 0)) {
         return intent_stage_add_physicality(
             stage, id, entity_id, type, coord, hilbert_index,
             trajectory_xyzm, trajectory_n_vertices, n_constituents,

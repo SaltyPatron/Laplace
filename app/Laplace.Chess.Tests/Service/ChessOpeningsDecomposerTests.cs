@@ -69,8 +69,9 @@ public sealed class ChessOpeningsDecomposerTests
 
         var moves = Assert.Single(change.Physicalities,
             p => p.EntityId == expectedLine && p.Type == PhysicalityType.Content);
-        Assert.Equal(sans.Count, moves.NConstituents);
-        Assert.Equal(replayed.MoveIds, Trajectory.Constituents(moves.TrajectoryXyzm!));
+        Assert.Equal(sans.Count + 1, moves.NConstituents);
+        Hash128[] expectedContent = [replayed.PositionIds[0], .. replayed.MoveIds];
+        Assert.Equal(expectedContent, Trajectory.Constituents(moves.TrajectoryXyzm!));
         var positions = Assert.Single(change.Physicalities,
             p => p.EntityId == expectedLine && p.Type == PhysicalityType.Projection);
         Assert.Equal(sans.Count + 1, positions.NConstituents);
