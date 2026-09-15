@@ -74,67 +74,21 @@ public static class ChessVocabulary
     // ever played, no matter who played it or when. The type name stays Chess_Game: the
     // game-as-content IS the line.
     public static readonly Hash128 GameType = EntityTypeRegistry.Id("Chess_Game");
-    // Chess_Event = the tournament / named event (PGN [Event], optionally Site/Date).
-    // ONE event contains MANY games. Never mint this from white|black|source serialization — that
-    // conflates event with a single playing (operator law 2026-08-03).
+    // Chess_Event = the tournament / named event (many games).
     public static readonly Hash128 EventType = EntityTypeRegistry.Id("Chess_Event");
-    // Per-game playing occurrence (novelty / attestation context). Not Chess_Event.
     public static readonly Hash128 PlayingType = EntityTypeRegistry.Id("Chess_Playing");
     public static readonly Hash128 PlaysLineType = EntityTypeRegistry.Id("PLAYS_LINE");
     public static readonly Hash128 HasSetupType = EntityTypeRegistry.Id("HAS_SETUP");
-    // Analysis watermark: analyzer stamps each game once it has derived at a given version.
-    //
-    // GAME METADATA HANGS OFF THE GAME TRUNK; IT IS NOT RATED TESTIMONY.
-    //
-    // This was emitted as the manifest relation ANALYZED_AT, so it FOLDED: measured
-    // 2026-08-23, 12,891,661 attestations produced 12,863,059 consensus cells, 100%
-    // single-witness with 2 distinct ratings across the lot. It cannot ever be anything
-    // else -- the subject is one game and the object is the analyzer version, so the
-    // triple is unique by construction and no second witness can exist to rate it
-    // against. 12.8M cells in the table whose entire purpose is adjudicating competing
-    // testimony, none of which can compete.
-    //
-    // The substrate already has the right shape for this and uses it elsewhere:
-    // FileEntity.MetadataRelationTypeId (HasFileMetadata) and LayerCompletion's
-    // HasLayerCompleted are minted inline as substrate meta-types, never entered in
-    // relation_types.toml, never given a highway bit, and therefore never folded --
-    // verified live: HasFileMetadata 209 attestations / 0 consensus,
-    // HasLayerCompleted/2 8,995 attestations / 0 consensus. Provenance hangs off the
-    // trunk node and is FETCHED when asked, exactly as a file's name/size/mtime is.
-    //
-    // A game's analysis version is that, not a claim about the world.
     public static readonly Hash128 AnalysisVersionMetaTypeId =
         SubstrateCanonicalIds.OfVersioned("type", "HasAnalysisVersion");
-
-    // Retained: relation bits are an append-only registry (ADR 0001), so ANALYZED_AT
-    // cannot be withdrawn from the manifest. It is simply no longer emitted.
     public static readonly Hash128 AnalyzedAtType = EntityTypeRegistry.Id("ANALYZED_AT");
     public static readonly Hash128 AnalysisMarkerType = EntityTypeRegistry.Id("Chess_AnalysisMarker");
     public static readonly Hash128 AnalysisSourceId = SubstrateCanonicalIds.Source("ChessAnalysis");
     public static readonly Hash128 AnalysisTrustClass = TrustClass("DerivedCalculation");
-    // GH #736 lane/source split: the trajectory backfill writes physicalities under its
-    // OWN source so source-grain eviction (evict_source, #508) never conflates it with
-    // ChessAnalysis testimony. One lane = one source = one evictable unit.
     public static readonly Hash128 TrajectorySourceId = SubstrateCanonicalIds.Source("ChessTrajectory");
-
-    // GH #736 source split: the position-id opening matcher writes under its OWN source so
-    // its verdict can be read, trusted and evicted separately from the analyzer's
-    // SAN-prefix guess. Three witnesses name a game's opening; only this one does it by
-    // board identity.
     public static readonly Hash128 OpeningMatchSourceId = SubstrateCanonicalIds.Source("ChessOpeningMatch");
-    // Syzygy probe lane (campaign PR-8): an exact mathematical oracle rides the
-    // StandardsDerived band — high witness weight, still one voice among many.
     public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");
 
-    // Deterministic per-(PLAYING, analysis version) marker (GH #736). The analyzer deposits
-    // per-playing testimony — outcome/clock/think/eval contexts — so its unit is the
-    // PLAYING, not the tournament event: two playings of one line each fold their own
-    // outcome, and one event holds many playings. The scan bulk-probes these
-    // (EntitiesExistBitmapAsync) to skip playings already derived at this version.
-    //
-    // The argument must be the same id ChessAnalyze stamps with, or the probe silently
-    // never matches and the watermark stops skipping — every re-run re-analyzes the whole
-    // corpus at full cost while still looking correct.
     public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
         => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
     public static readonly Hash128 HasWhiteType = EntityTypeRegistry.Id("HAS_WHITE");
@@ -148,62 +102,28 @@ public static class ChessVocabulary
     public static readonly Hash128 HasEvalType = EntityTypeRegistry.Id("HAS_EVAL");
     public static readonly Hash128 HasEvalObject = EntityTypeRegistry.Id("Chess_Eval");
     public static readonly Hash128 MoveQualityType = EntityTypeRegistry.Id("MOVE_QUALITY");
-    // Syzygy tablebase verdicts (ChessSyzygy source): five-valued WDL token
-    // (side-to-move POV) and distance-to-zeroing scalar, on witnessed positions.
     public static readonly Hash128 HasWdlType = EntityTypeRegistry.Id("HAS_WDL");
     public static readonly Hash128 HasDtzType = EntityTypeRegistry.Id("HAS_DTZ");
     public static readonly Hash128 HasThinkClassType = EntityTypeRegistry.Id("HAS_THINK_CLASS");
     public static readonly Hash128 GameHasOpeningType = EntityTypeRegistry.Id("GAME_HAS_OPENING");
     public static readonly Hash128 GameHasEcoType = EntityTypeRegistry.Id("GAME_HAS_ECO");
     public static readonly Hash128 GameHasMotifType = EntityTypeRegistry.Id("GAME_HAS_MOTIF");
-    // GH #736: a book's grounded prose line IS the shared line entity (ChessCompose.LineId
-    // of its replayed positions) — two books teaching the same trap collide, which is the
-    // point. The idempotency the old (title|sans)-salted id provided moves to a MARKER,
-    // exactly like every calculated lane: probed by the extractor so re-ingesting a book
-    // never re-witnesses its lines, while a DIFFERENT book adds witnesses to the shared line.
     public static readonly Hash128 BookLineType = EntityTypeRegistry.Id("Chess_BookLine");
     public static Hash128 BookLineMarkerId(Hash128 bookTitleContentId, Hash128 lineId)
         => Hash128.OfCanonical($"chess/bookline-marker/{bookTitleContentId}/{lineId}");
     public static readonly Hash128 ExplainsType = EntityTypeRegistry.Id("EXPLAINS");
     public static readonly Hash128 IsExampleOfType = EntityTypeRegistry.Id("IS_EXAMPLE_OF");
-    // Reuses the manifest's existing HAS_DEFINITION relation (same one WordNet/Wiktionary glosses
-    // use) rather than minting a chess-only "DEFINES" duplicate, so a chess term's definition and
-    // a dictionary gloss for the same content-addressed term land on the same relation type.
     public static readonly Hash128 DefinesType = EntityTypeRegistry.Id("HAS_DEFINITION");
 
-    /// <summary>
-    /// Tournament / named event id from PGN tags. Same [Event] (+ Site, Date) → one id
-    /// shared by every game in that event. Not a game id; not a playing id.
-    /// </summary>
     public static Hash128 PgnEventId(string @event, string site, string date)
         => Hash128.OfCanonical($"chess/event/{@event}|{site}|{date}");
 
-    /// <summary>
-    /// One playing of a line (one PGN game record). Novelty gate and attestation context.
-    /// Closed over the decomposed line so formatting-equivalent PGNs converge, and over the
-    /// witnessed result so two source records are two playings. Never Chess_Event.
-    ///
-    /// GH #736 rules this handle provenance-shaped and SOURCE-RECORD-derived, precisely so
-    /// re-ingest is idempotent while distinct records stay distinct. Closing it over the line
-    /// alone made it a pure function of content, so the same players/date/event replaying the
-    /// same moves to a DIFFERENT result collapsed onto one playing — and HAS_RESULT is
-    /// subjected on the line with this id as its context, so the two results became
-    /// indistinguishable rather than separately recoverable. The result token restores the
-    /// record grain without reintroducing a dependency on PGN spelling.
-    /// </summary>
     public static Hash128 PgnPlayingId(
         string white, string black, string date, string @event, string round, string site,
         Hash128 lineId, string resultToken)
         => Hash128.OfCanonical(
             $"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{lineId}|{resultToken}");
 
-    /// <summary>
-    /// One playing of a live/lab game. The line is the Merkle of the ordered position ids,
-    /// players/context/result close over the normal content record, and an optional external
-    /// occurrence key distinguishes source-asserted occurrences such as two separate Lichess
-    /// game ids that happen to contain the same line and result. A routing GUID is never an
-    /// occurrence key.
-    /// </summary>
     public static Hash128 LivePlayingId(
         Hash128? whitePlayer, Hash128? blackPlayer, string learnContext,
         Hash128 lineId, string resultToken, string? occurrenceKey = null)
@@ -215,11 +135,6 @@ public static class ChessVocabulary
             : Hash128.OfCanonical($"{canonical}|occurrence:{occurrenceKey.Trim()}");
     }
 
-    // IN-MEMORY SESSION HANDLE ONLY — never an entity id. A live game needs a key to route
-    // plies to a session before any content exists; that key is not identity and no longer
-    // reaches the substrate. The playing entity is minted by LivePlayingId at completion,
-    // when the content it names finally exists. Lichess games keep their source-asserted
-    // external id (ChessLiveGameHost.LichessGameId), which IS deterministic.
     public static Hash128 PlaySessionHandle(Guid sessionGame)
         => Hash128.OfCanonical($"chess/play/{sessionGame:N}");
 
@@ -229,9 +144,6 @@ public static class ChessVocabulary
 
     public static readonly Hash128 LaplacePlayerId = PlayerId("Laplace");
 
-    // Historical lab builds attributed the guided actor to its experiment mode instead of
-    // the canonical Laplace player. Reads retain those content addresses so already-recorded
-    // games remain visible; new games always write LaplacePlayerId.
     public static readonly IReadOnlyList<Hash128> HistoricalLaplacePlayerIds =
     [
         PlayerId("Laplace-guided-transition"),
@@ -255,20 +167,17 @@ public static class ChessVocabulary
     }
 
     /// <summary>
-    /// Give a governed player identity its stored player → name composition. This is also
-    /// the testimony-free repair path for players recorded before the composition existed.
+    /// Project a governed player identity onto its witnessed display-name content. The player
+    /// handle is not the content hash of the name, so a one-child trajectory must NOT be type
+    /// Content (which would collapse to the name root). The name root itself owns the complete
+    /// text DAG down through graphemes/codepoints; this Projection only places the governed
+    /// identity at that content-derived coordinate.
     /// </summary>
     public static void AppendPlayerPhysicality(
         SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,
         Hash128? expectedNameRoot = null)
     {
-        /* The governed player handle is not the content hash of its display name,
-         * but it still owns a physical composition: player -> witnessed name root.
-         * Without this row a player can accumulate tens of thousands of games and
-         * consensus cells while remaining a geometry-less leaf in the explorer.
-         * The name root carries its own complete text ladder, so expanding this one
-         * edge continues naturally from player -> word -> grapheme -> codepoint. */
-        Hash128 physId = PhysicalityId.Compute(playerId, PhysicalityType.Content);
+        Hash128 physId = PhysicalityId.Compute(playerId, PhysicalityType.Projection);
         if (!b.TrySeePhysicality(physId)) return;
 
         byte[] utf8 = Encoding.UTF8.GetBytes(name);
@@ -283,7 +192,7 @@ public static class ChessVocabulary
             Id: physId,
             EntityId: playerId,
             SourceId: sourceId,
-            Type: PhysicalityType.Content,
+            Type: PhysicalityType.Projection,
             CoordX: x, CoordY: y, CoordZ: z, CoordM: m,
             HilbertIndex: Hilbert128.Encode(coord),
             TrajectoryXyzm: Trajectory.Build([nameRoot]),
@@ -309,12 +218,6 @@ public static class ChessVocabulary
             writer, [new BootstrapSource(sourceId, sourceName, trustClassId)], ct, reader)
             .ConfigureAwait(false);
 
-    /// <summary>
-    /// Bootstraps every source used by one chess runtime in one presence probe and one
-    /// writer apply. A runtime consumes several evidence vendors together (PGN, analysis,
-    /// transitions, outcomes, Syzygy); probing and applying each vendor separately made
-    /// startup issue the same database operation once per source.
-    /// </summary>
     public static async Task<IReadOnlyCollection<string>> BootstrapManyAsync(
         ISubstrateWriter writer, IReadOnlyList<BootstrapSource> sources,
         CancellationToken ct = default, ISubstrateReader? reader = null)
