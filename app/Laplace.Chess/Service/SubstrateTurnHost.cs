@@ -29,19 +29,11 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         _valuer = new SubstrateStateValuer(ds);
     }
 
-
-
-
-
     public Hash128 Address(string canonicalSurface)
         => ChessCompose.PositionId(canonicalSurface);
 
     public async Task<double[]> EffMuAsync(IReadOnlyList<Hash128> edgeIds, CancellationToken ct = default)
     {
-        // Edge ids arrive from ModalityEngine.ScoreMovesAsync, which builds them
-        // with ChessVocabulary.MoveType — thread that type so the partitioned
-        // consensus scan prunes to the MOVE partition instead of Append-scanning
-        // every relation type.
         var byId = await Laplace.SubstrateCRUD.Npgsql.NpgsqlConsensusByIds.ReadAsync(
             _ds, edgeIds, ChessVocabulary.MoveType, ct).ConfigureAwait(false);
 
@@ -53,26 +45,15 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         return outv;
     }
 
-
-
-
-
-
-
-
-
     public Task<double[]> ValueStatesAsync(
         IReadOnlyList<string> stateSurfaces, CancellationToken ct = default)
         => _valuer.ValueStatesAsync(stateSurfaces, ct);
 
-
-
-
     public Task LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct = default)
-    => LearnGameAsync(edges, adjudicated: false, ct);
+        => LearnGameAsync(edges, adjudicated: false, ct);
 
     public async Task LearnGameAsync(
-    IReadOnlyList<RecordedEdge> edges, bool adjudicated, CancellationToken ct = default)
+        IReadOnlyList<RecordedEdge> edges, bool adjudicated, CancellationToken ct = default)
     {
         if (edges.Count == 0) return;
 
@@ -140,8 +121,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
                 lineId, ChessVocabulary.HasResultType, resultId,
                 ChessVocabulary.SourceId, playingId, _witnessWeight));
         ChessGraph.AppendLineTrajectory(
-            b, lineId, moves, ChessVocabulary.SourceId, nowUs);
-        // Fused move-outcome fold, same law as the PGN and live-game lanes.
+            b, lineId, line[0], moves, ChessVocabulary.SourceId, nowUs);
         ChessMoveOutcomes.AppendGame(
             b, lineId, moves.Select(static n => n.Id).ToArray(),
             whiteOutcome switch
