@@ -31,7 +31,6 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
     private Hash128 _repoId;
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
-
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 
     protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
@@ -46,7 +45,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         _repoId = Hash128.OfCanonical(repoCanonical);
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/repo-root", null,
-            entityCapacity: 1, physicalityCapacity: 1, attestationCapacity: 0);
+            entityCapacity: 16, physicalityCapacity: 16, attestationCapacity: 0);
         StageRepoRoot(seed, repoCanonical, _repoId);
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
@@ -140,38 +139,34 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
     private static void StageRepoRoot(SubstrateChangeBuilder b, string repoCanonical, Hash128 repoId)
     {
         b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId, Source));
-        if (TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(repoCanonical),
-                out _, out _, out double cx, out double cy, out double cz, out double cm))
-        {
-            Span<double> coord = stackalloc double[4] { cx, cy, cz, cm };
-            Hash128 physId = PhysicalityId.Compute(repoId, PhysicalityType.Content);
-            b.AddPhysicality(new PhysicalityRow(
-                Id: physId, EntityId: repoId, SourceId: Source,
-                Type: PhysicalityType.Content,
-                CoordX: cx, CoordY: cy, CoordZ: cz, CoordM: cm,
-                HilbertIndex: Hilbert128.Encode(coord),
-                TrajectoryXyzm: null, NConstituents: 0,
-                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
-        }
+
+        // repoId is a stable governed handle for this repository. The canonical path text is
+        // actual content and therefore enters through the normal text Merkle DAG all the way
+        // to Unicode/codepoints. The handle's spatial placement is a Projection onto that
+        // content root; treating the handle itself as atomic Content forged a fake leaf.
+        Hash128 pathRoot = ContentEmitter.Emit(b, repoCanonical, Source)
+            ?? throw new InvalidOperationException("repository canonical path did not produce content");
+        if (!TextEntityBuilder.TryDecomposeRoot(Encoding.UTF8.GetBytes(repoCanonical),
+                out var decomposedRoot, out _, out double cx, out double cy, out double cz, out double cm)
+            || decomposedRoot != pathRoot)
+            throw new InvalidOperationException("repository canonical path content root was not reproducible");
+
+        Span<double> coord = stackalloc double[4] { cx, cy, cz, cm };
+        Hash128 physId = PhysicalityId.Compute(repoId, PhysicalityType.Projection);
+        b.AddPhysicality(new PhysicalityRow(
+            Id: physId, EntityId: repoId, SourceId: Source,
+            Type: PhysicalityType.Projection,
+            CoordX: cx, CoordY: cy, CoordZ: cz, CoordM: cm,
+            HilbertIndex: Hilbert128.Encode(coord),
+            TrajectoryXyzm: Trajectory.Build([pathRoot]), NConstituents: 1,
+            AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
     }
 
-    /// <summary>
-    /// RepoDecomposer mints exactly one repo-root identity per invocation and fans
-    /// every file's containment out to it — correct for one repo, silently wrong for
-    /// a directory holding several independent ones (a snapshot/backup dump of
-    /// "everything on this drive" is not hypothetical; it is how this gets hit).
-    /// Detecting the ambiguity and failing loudly is the safe first cut: the caller
-    /// re-runs `ingest repo` once per discovered root instead of getting one
-    /// repo identity silently covering unrelated projects.
-    /// </summary>
     internal static void ThrowIfNestedRepos(string root)
     {
         var nested = new List<string>();
         foreach (var dir in Directory.EnumerateDirectories(root, ".git", SearchOption.AllDirectories))
         {
-            // The root's own .git (root/.git) is the normal, expected case — only
-            // a .git found strictly BENEATH that (or beneath a sibling subtree) means
-            // more than one repo is nested under this path.
             if (string.Equals(
                     Path.GetFullPath(Path.GetDirectoryName(dir) ?? ""),
                     Path.GetFullPath(root),
