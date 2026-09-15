@@ -162,6 +162,34 @@ if (( ctest_rc != 0 )); then
   exit "$ctest_rc"
 fi
 
+# Exercise actual source admission, witness folding and ordinary native execution
+# while the private branch postmaster is still alive. This DB-tier acceptance is
+# excluded from the later managed DEV profile, so its exact selection must run
+# here. A fresh TRX receipt prevents a missing or skipped test from passing.
+bash scripts/sync-managed-native-artifacts.sh
+managed_results="$stage/managed-results"
+mkdir -p "$managed_results"
+PATH="$PG_PREFIX/bin:$PATH" \
+LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=laplace_substratecrud_test" \
+LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
+LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+  dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj \
+    -c Release --no-build --nologo --verbosity minimal \
+    --filter 'FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold' \
+    --logger 'trx;LogFileName=operational-source-execution.trx' \
+    --results-directory "$managed_results"
+python3 - "$managed_results/operational-source-execution.trx" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+counters = root.find("{*}ResultSummary/{*}Counters")
+expected = {"total": "1", "executed": "1", "passed": "1", "failed": "0", "notExecuted": "0"}
+if counters is None or any(counters.get(key) != value for key, value in expected.items()):
+    raise SystemExit("operational source proof did not execute and pass its required acceptance test")
+print("OPERATIONAL_SOURCE_EXECUTION_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
+PY
+
 # Exercise actual registry unavailability and WAL recovery in this private
 # postmaster. The normal public C deposit and SQL batch orchestrators run
 # unchanged; the fixture varies only the real registry file and process lifetime.

@@ -57,6 +57,34 @@ jobs:
           echo "LAPLACE_PR_FULL_PROOF=$full" >> "$GITHUB_ENV"
           echo "PR proof classification: full=$full"
 
+      - name: Classify retained Content when the recovery audit changes
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        run: |
+          set -euo pipefail
+          cd "$LAPLACE_PR_WORKTREE"
+          if git diff --quiet "$LAPLACE_PR_BASE_SHA" "$LAPLACE_PR_TARGET_SHA" -- scripts/classify-legacy-content.py; then
+            exit 0
+          fi
+          source scripts/lib/storage.sh
+          laplace_storage_init
+          evidence="/build/laplace/work/legacy-content-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$evidence"
+          receipt="$evidence/classification.json"
+          echo "LAPLACE_LEGACY_CONTENT_RECEIPT=$receipt" >> "$GITHUB_ENV"
+          export PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=laplace_admin
+          flock /build/laplace/work/host-resource.lock \
+            python3 scripts/classify-legacy-content.py "$PGDATABASE" \
+              --examples-per-stratum 10 --timeout-seconds 1800 --receipt "$receipt"
+
+      - name: Retain bounded legacy Content classification
+        if: always() && env.LAPLACE_LEGACY_CONTENT_RECEIPT != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: legacy-content-classification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.LAPLACE_LEGACY_CONTENT_RECEIPT }}
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prove merge candidate without production mutation
         run: |
           set -euo pipefail
