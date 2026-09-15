@@ -8,6 +8,8 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/hsearch.h"
+#include "miscadmin.h"
 
 #include "spi_common.h"
 #include "spi_nested.h"
@@ -380,6 +382,101 @@ deposit_retain_pending(ArrayType *entities, ArrayType *types)
     laplace_spi_finish(spi_top);
 }
 
+/* Both incremental deposits and authoritative refresh use this one native
+ * relation-to-mask law. Canonical slots are memory lookups; unresolved dynamic
+ * relation families are fetched together through one prepared SPI operation. */
+static void
+deposit_resolve_types(highway_deposit_type *types, int n_types, bool *spi_top)
+{
+    /* Canonical relations resolve without SQL. Only misses can be dynamic
+     * family members and need the single IS_A consensus probe below. */
+    {
+        int n_missing = 0;
+        for (int i = 0; i < n_types; i++)
+        {
+            hash128_t tid;
+            uint8_t bit;
+            float rank;
+            uint8_t band;
+
+            memcpy(&tid, types[i].id, sizeof(tid));
+            if (highway_table_relation_by_hash(&tid, &bit, &rank, &band) == 0)
+                deposit_mask_set(&types[i].mask, bit);
+            else
+                n_missing++;
+        }
+
+        if (n_missing > 0)
+        {
+            static SPIPlanPtr family_plan = NULL;
+            Datum *missing = (Datum *) palloc(sizeof(Datum) * n_missing);
+            ArrayType *missing_arr;
+            hash128_t isa;
+            Oid argtypes[2] = {BYTEAARRAYOID, BYTEAOID};
+            Datum args[2];
+            int m = 0;
+
+            for (int i = 0; i < n_types; i++)
+                if (deposit_mask_empty(&types[i].mask))
+                    missing[m++] = PointerGetDatum(
+                        deposit_bytea(types[i].id, HASH128_BYTES));
+            missing_arr = construct_array(missing, n_missing, BYTEAOID, -1,
+                                          false, TYPALIGN_INT);
+            if (laplace_relation_type_id("IS_A", &isa) < 0)
+                elog(ERROR, "highway_mask_deposit: cannot derive IS_A relation id");
+            args[0] = PointerGetDatum(missing_arr);
+            args[1] = hash128_to_datum(&isa);
+
+            if (!*spi_top && laplace_spi_connect(spi_top) != SPI_OK_CONNECT)
+                elog(ERROR, "highway_mask_deposit: SPI_connect failed");
+            if (!family_plan)
+            {
+                SPIPlanPtr plan = SPI_prepare_cursor(
+                    laplace_sql_query_text("entities.mask_families"),
+                    2, argtypes, CURSOR_OPT_PARALLEL_OK);
+                if (!plan || SPI_keepplan(plan) != 0)
+                    elog(ERROR, "highway_mask_deposit: family prepare failed");
+                family_plan = plan;
+            }
+            int rc = SPI_execute_plan(family_plan, args, NULL, true, 0);
+            if (rc != SPI_OK_SELECT)
+                elog(ERROR, "highway_mask_deposit: family lookup failed: %s",
+                     SPI_result_code_string(rc));
+
+            for (uint64 i = 0; i < SPI_processed; i++)
+            {
+                HeapTuple tuple = SPI_tuptable->vals[i];
+                TupleDesc desc = SPI_tuptable->tupdesc;
+                bool subj_null;
+                bool obj_null;
+                Datum subj = SPI_getbinval(tuple, desc, 1, &subj_null);
+                Datum obj = SPI_getbinval(tuple, desc, 2, &obj_null);
+                unsigned char sid[HASH128_BYTES];
+                unsigned char oid[HASH128_BYTES];
+                highway_deposit_type *entry;
+                hash128_t family_id;
+                uint8_t bit;
+                float rank;
+                uint8_t band;
+
+                if (subj_null || obj_null)
+                    continue;
+                deposit_read_id(subj, sid, "dynamic relation id");
+                deposit_read_id(obj, oid, "relation family id");
+                entry = (highway_deposit_type *) bsearch(
+                    sid, types, n_types, sizeof(*types), deposit_id_cmp);
+                if (entry == NULL)
+                    continue;
+                memcpy(&family_id, oid, sizeof(family_id));
+                if (highway_table_relation_by_hash(&family_id, &bit, &rank, &band) == 0)
+                    deposit_mask_set(&entry->mask, bit);
+            }
+            SPI_freetuptable(SPI_tuptable);
+        }
+    }
+
+}
+
 /*
  * Native deposit lane. Pair reduction and all highway-table work stay in C;
  * SPI is used for durable pending pairs when unavailable, dynamic-relation
@@ -406,7 +503,6 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
     int n_types = 0;
     int n_deposits = 0;
     bool spi_top = false;
-    int rc;
 
     if (!PG_ARGISNULL(0))
     {
@@ -476,91 +572,7 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
         n_types = out;
     }
 
-    /* Canonical relations resolve without SQL. Only misses can be dynamic
-     * family members and need the single IS_A consensus probe below. */
-    {
-        int n_missing = 0;
-        for (int i = 0; i < n_types; i++)
-        {
-            hash128_t tid;
-            uint8_t bit;
-            float rank;
-            uint8_t band;
-
-            memcpy(&tid, types[i].id, sizeof(tid));
-            if (highway_table_relation_by_hash(&tid, &bit, &rank, &band) == 0)
-                deposit_mask_set(&types[i].mask, bit);
-            else
-                n_missing++;
-        }
-
-        if (n_missing > 0)
-        {
-            static SPIPlanPtr family_plan = NULL;
-            Datum *missing = (Datum *) palloc(sizeof(Datum) * n_missing);
-            ArrayType *missing_arr;
-            hash128_t isa;
-            Oid argtypes[2] = {BYTEAARRAYOID, BYTEAOID};
-            Datum args[2];
-            int m = 0;
-
-            for (int i = 0; i < n_types; i++)
-                if (deposit_mask_empty(&types[i].mask))
-                    missing[m++] = PointerGetDatum(
-                        deposit_bytea(types[i].id, HASH128_BYTES));
-            missing_arr = construct_array(missing, n_missing, BYTEAOID, -1,
-                                          false, TYPALIGN_INT);
-            if (laplace_relation_type_id("IS_A", &isa) < 0)
-                elog(ERROR, "highway_mask_deposit: cannot derive IS_A relation id");
-            args[0] = PointerGetDatum(missing_arr);
-            args[1] = hash128_to_datum(&isa);
-
-            if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
-                elog(ERROR, "highway_mask_deposit: SPI_connect failed");
-            if (!family_plan)
-            {
-                SPIPlanPtr plan = SPI_prepare_cursor(
-                    laplace_sql_query_text("entities.mask_families"),
-                    2, argtypes, CURSOR_OPT_PARALLEL_OK);
-                if (!plan || SPI_keepplan(plan) != 0)
-                    elog(ERROR, "highway_mask_deposit: family prepare failed");
-                family_plan = plan;
-            }
-            rc = SPI_execute_plan(family_plan, args, NULL, true, 0);
-            if (rc != SPI_OK_SELECT)
-                elog(ERROR, "highway_mask_deposit: family lookup failed: %s",
-                     SPI_result_code_string(rc));
-
-            for (uint64 i = 0; i < SPI_processed; i++)
-            {
-                HeapTuple tuple = SPI_tuptable->vals[i];
-                TupleDesc desc = SPI_tuptable->tupdesc;
-                bool subj_null;
-                bool obj_null;
-                Datum subj = SPI_getbinval(tuple, desc, 1, &subj_null);
-                Datum obj = SPI_getbinval(tuple, desc, 2, &obj_null);
-                unsigned char sid[HASH128_BYTES];
-                unsigned char oid[HASH128_BYTES];
-                highway_deposit_type *entry;
-                hash128_t family_id;
-                uint8_t bit;
-                float rank;
-                uint8_t band;
-
-                if (subj_null || obj_null)
-                    continue;
-                deposit_read_id(subj, sid, "dynamic relation id");
-                deposit_read_id(obj, oid, "relation family id");
-                entry = (highway_deposit_type *) bsearch(
-                    sid, types, n_types, sizeof(*types), deposit_id_cmp);
-                if (entry == NULL)
-                    continue;
-                memcpy(&family_id, oid, sizeof(family_id));
-                if (highway_table_relation_by_hash(&family_id, &bit, &rank, &band) == 0)
-                    deposit_mask_set(&entry->mask, bit);
-            }
-        }
-    }
+    deposit_resolve_types(types, n_types, &spi_top);
 
     /* Map the zipped arrays and collapse duplicate entities to one 256-bit
      * delta. qsort is bytea's memcmp order, matching the writer and lock ORDER. */
@@ -612,6 +624,196 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
         elog(ERROR, "highway_mask_deposit: SPI_connect failed");
     int64 updated = laplace_entity_masks_apply(deposits, n_deposits);
     laplace_spi_finish(spi_top);
+    PG_RETURN_INT64(updated);
+}
+
+/* Authoritative population/clearing is native too. PostgreSQL only selects the
+ * incident identity/type set. Pages bound marshalling, not coverage: the cursor
+ * is consumed to exhaustion and each distinct relation is resolved once for
+ * the whole request. Every requested entity has a zero-initialized result even
+ * when it has no remaining cells; those zeros explicitly clear stale masks. */
+#define HIGHWAY_REFRESH_PAGE 8192
+
+typedef struct highway_refresh_pair
+{
+    unsigned char entity[HASH128_BYTES];
+    unsigned char type[HASH128_BYTES];
+} highway_refresh_pair;
+
+PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_refresh);
+
+Datum
+pg_laplace_highway_mask_refresh(PG_FUNCTION_ARGS)
+{
+    Datum *values;
+    bool *nulls;
+    int count, requested = 0;
+    ArrayType *input, *ids;
+    highway_deposit_entity *masks;
+    bool spi_top = false;
+    MemoryContext caller = CurrentMemoryContext;
+    MemoryContext owner;
+    MemoryContext page;
+    HASHCTL ctl = {0};
+    HTAB *resolved_types;
+    Portal cursor;
+    static SPIPlanPtr incident_plan = NULL;
+    Oid argtypes[1] = {BYTEAARRAYOID};
+    Datum args[1];
+    int64 updated;
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_INT64(0);
+    owner = AllocSetContextCreate(caller, "Highway refresh", ALLOCSET_DEFAULT_SIZES);
+    MemoryContextSwitchTo(owner);
+    input = PG_GETARG_ARRAYTYPE_P(0);
+    deconstruct_array(input, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &values, &nulls, &count);
+    if (count == 0)
+    {
+        MemoryContextSwitchTo(caller);
+        MemoryContextDelete(owner);
+        PG_RETURN_INT64(0);
+    }
+    if ((Size) count > MaxAllocSize / sizeof(*masks))
+        elog(ERROR, "highway_mask_refresh: requested identity set exceeds allocation capacity");
+    masks = palloc0(sizeof(*masks) * count);
+    for (int i = 0; i < count; ++i)
+    {
+        if (nulls[i]) continue;
+        deposit_read_id(values[i], masks[requested++].id, "entity id");
+    }
+    if (requested == 0)
+    {
+        MemoryContextSwitchTo(caller);
+        MemoryContextDelete(owner);
+        PG_RETURN_INT64(0);
+    }
+    qsort(masks, requested, sizeof(*masks), deposit_id_cmp);
+    {
+        int out = 0;
+        for (int i = 0; i < requested; ++i)
+        {
+            if (out && memcmp(masks[out - 1].id, masks[i].id, HASH128_BYTES) == 0)
+                continue;
+            if (out != i) masks[out] = masks[i];
+            ++out;
+        }
+        requested = out;
+    }
+    for (int i = 0; i < requested; ++i)
+        values[i] = PointerGetDatum(deposit_bytea(masks[i].id, HASH128_BYTES));
+    ids = construct_array(values, requested, BYTEAOID, -1, false, TYPALIGN_INT);
+    args[0] = PointerGetDatum(ids);
+
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+        elog(ERROR, "highway_mask_refresh: SPI_connect failed");
+    if (!highway_registry_available())
+    {
+        static SPIPlanPtr dirty_plan = NULL;
+        if (!dirty_plan)
+        {
+            dirty_plan = SPI_prepare_cursor(laplace_sql_query_text("entities.mask_dirty"),
+                                             1, argtypes, 0);
+            if (!dirty_plan || SPI_keepplan(dirty_plan) != 0)
+                elog(ERROR, "highway_mask_refresh: dirty prepare failed");
+        }
+        if (SPI_execute_plan(dirty_plan, args, NULL, false, 0) != SPI_OK_INSERT)
+            elog(ERROR, "highway_mask_refresh: retaining dirty identities failed");
+        laplace_spi_finish(spi_top);
+        MemoryContextSwitchTo(caller);
+        MemoryContextDelete(owner);
+        PG_RETURN_INT64(0);
+    }
+    if (!incident_plan)
+    {
+        incident_plan = SPI_prepare_cursor(
+            laplace_sql_query_text("entities.mask_incident_types"), 1, argtypes,
+            CURSOR_OPT_PARALLEL_OK);
+        if (!incident_plan || SPI_keepplan(incident_plan) != 0)
+            elog(ERROR, "highway_mask_refresh: incident prepare failed");
+    }
+    cursor = SPI_cursor_open(NULL, incident_plan, args, NULL, true);
+    if (!cursor)
+        elog(ERROR, "highway_mask_refresh: incident cursor failed");
+    ctl.keysize = HASH128_BYTES;
+    ctl.entrysize = sizeof(highway_deposit_type);
+    ctl.hcxt = owner;
+    resolved_types = hash_create("Highway refresh relation masks", 256, &ctl,
+                                 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    page = AllocSetContextCreate(owner, "Highway refresh page", ALLOCSET_DEFAULT_SIZES);
+    for (;;)
+    {
+        MemoryContext previous;
+        highway_refresh_pair *pairs;
+        highway_deposit_type *missing;
+        uint64 rows;
+        int missing_count = 0;
+
+        CHECK_FOR_INTERRUPTS();
+        SPI_cursor_fetch(cursor, true, HIGHWAY_REFRESH_PAGE);
+        rows = SPI_processed;
+        if (!rows)
+        {
+            if (SPI_tuptable) SPI_freetuptable(SPI_tuptable);
+            break;
+        }
+        previous = MemoryContextSwitchTo(page);
+        pairs = palloc(sizeof(*pairs) * rows);
+        missing = palloc0(sizeof(*missing) * rows);
+        for (uint64 i = 0; i < rows; ++i)
+        {
+            HeapTuple tuple = SPI_tuptable->vals[i];
+            TupleDesc desc = SPI_tuptable->tupdesc;
+            bool entity_null, type_null, found;
+            Datum entity = SPI_getbinval(tuple, desc, 1, &entity_null);
+            Datum type = SPI_getbinval(tuple, desc, 2, &type_null);
+            highway_deposit_type *entry;
+
+            if (entity_null || type_null)
+                elog(ERROR, "highway_mask_refresh: incident row has a null identity");
+            deposit_read_id(entity, pairs[i].entity, "entity id");
+            deposit_read_id(type, pairs[i].type, "relation id");
+            entry = hash_search(resolved_types, pairs[i].type, HASH_ENTER, &found);
+            if (!found)
+            {
+                memset(&entry->mask, 0, sizeof(entry->mask));
+                memcpy(missing[missing_count++].id, pairs[i].type, HASH128_BYTES);
+            }
+        }
+        /* Never retain SPI tuple pointers across the nested family query. */
+        SPI_freetuptable(SPI_tuptable);
+        if (missing_count)
+        {
+            qsort(missing, missing_count, sizeof(*missing), deposit_id_cmp);
+            deposit_resolve_types(missing, missing_count, &spi_top);
+            for (int i = 0; i < missing_count; ++i)
+            {
+                highway_deposit_type *entry = hash_search(
+                    resolved_types, missing[i].id, HASH_FIND, NULL);
+                entry->mask = missing[i].mask;
+            }
+        }
+        for (uint64 i = 0; i < rows; ++i)
+        {
+            highway_deposit_entity *target = bsearch(
+                pairs[i].entity, masks, requested, sizeof(*masks), deposit_id_cmp);
+            highway_deposit_type *type = hash_search(
+                resolved_types, pairs[i].type, HASH_FIND, NULL);
+            if (!target || !type)
+                elog(ERROR, "highway_mask_refresh: incident row outside requested workset");
+            deposit_mask_or(&target->mask, &type->mask);
+        }
+        MemoryContextSwitchTo(previous);
+        MemoryContextReset(page);
+    }
+    SPI_cursor_close(cursor);
+    hash_destroy(resolved_types);
+    MemoryContextDelete(page);
+    updated = laplace_entity_masks_replace(masks, requested);
+    laplace_spi_finish(spi_top);
+    MemoryContextSwitchTo(caller);
+    MemoryContextDelete(owner);
     PG_RETURN_INT64(updated);
 }
 

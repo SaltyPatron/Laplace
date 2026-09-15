@@ -47,7 +47,7 @@ static int compare_target(const void *a, const void *b)
 }
 
 static bool mask_missing(Datum datum, bool isnull, const laplace_mask256_t *delta,
-                          laplace_mask256_t *merged)
+                          laplace_mask256_t *merged, bool replace)
 {
     memset(merged,0,sizeof(*merged));
     if (!isnull)
@@ -56,6 +56,13 @@ static bool mask_missing(Datum datum, bool isnull, const laplace_mask256_t *delt
         if (VARSIZE_ANY_EXHDR(value) != sizeof(*merged))
             elog(ERROR,"entity mask write: stored mask must be 32 bytes");
         memcpy(merged,VARDATA_ANY(value),sizeof(*merged));
+    }
+    if (replace)
+    {
+        bool empty=(delta->w[0]|delta->w[1]|delta->w[2]|delta->w[3])==0;
+        bool changed=empty ? !isnull : isnull || memcmp(merged,delta,sizeof(*merged))!=0;
+        *merged=*delta;
+        return changed;
     }
     bool changed=false;
     for (int i=0;i<4;++i)
@@ -78,7 +85,7 @@ static void check_storage(Relation relation)
         elog(ERROR,"entity mask write cannot bypass row security");
 }
 
-int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count)
+static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count, bool replace)
 {
     if (!count) return 0;
     if (XactReadOnly)
@@ -121,7 +128,7 @@ int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count
         if(!delta) elog(ERROR,"entity mask write: unexpected identity");
         Datum mask=SPI_getbinval(tuple,desc,3,&isnull);
         laplace_mask256_t merged;
-        if(!mask_missing(mask,isnull,&delta->mask,&merged)) continue;
+        if(!mask_missing(mask,isnull,&delta->mask,&merged,replace)) continue;
         MaskTarget *target=&targets[n++];
         target->delta=(int)(delta-deltas);
         target->tier=DatumGetInt16(SPI_getbinval(tuple,desc,2,&isnull));
@@ -169,7 +176,7 @@ int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count
         { ExecClearTuple(entry->old_slot); continue; }
         Datum old_mask=slot_getattr(entry->old_slot,entry->mask,&isnull);
         laplace_mask256_t merged;
-        if(mask_missing(old_mask,isnull,&delta->mask,&merged))
+        if(mask_missing(old_mask,isnull,&delta->mask,&merged,replace))
         {
             ResetPerTupleExprContext(entry->estate);
             MemoryContext previous=MemoryContextSwitchTo(GetPerTupleMemoryContext(entry->estate));
@@ -177,7 +184,8 @@ int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count
             bytea *value=palloc(VARHDRSZ+sizeof(merged));SET_VARSIZE(value,VARHDRSZ+sizeof(merged));
             memcpy(VARDATA(value),&merged,sizeof(merged));
             entry->new_slot->tts_values[entry->mask-1]=PointerGetDatum(value);
-            entry->new_slot->tts_isnull[entry->mask-1]=false;
+            entry->new_slot->tts_isnull[entry->mask-1]=replace &&
+                (merged.w[0]|merged.w[1]|merged.w[2]|merged.w[3])==0;
             ExecSimpleRelationUpdate(&entry->result,entry->estate,NULL,entry->old_slot,entry->new_slot);
             ExecClearTuple(entry->new_slot);
             MemoryContextSwitchTo(previous);
@@ -196,4 +204,17 @@ int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count
     hash_destroy(relations);table_close(root,NoLock);
     if(updated) CommandCounterIncrement();
     return updated;
+}
+
+/* Accumulation and authoritative refresh share tuple routing, lock rechecks,
+ * constraints, permissions and index maintenance. Empty replacement means NULL,
+ * not an absent request: it must clear an entity's final stale relation bit. */
+int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count)
+{
+    return entity_masks_write(deltas,count,false);
+}
+
+int64 laplace_entity_masks_replace(const LaplaceEntityMaskDelta *masks, int count)
+{
+    return entity_masks_write(masks,count,true);
 }
