@@ -740,6 +740,24 @@ class NativeRepairProof:
         self.sql("SELECT repair_test.reset();\n" + PLAYER_ALIAS_TARGET + "DELETE FROM laplace.attestations WHERE object_id=repair_test.id('alias-target');")
         self.planning_failure("witnessed-alias-prior-proof-diverged", prior=[prior], expected_error="Prior witnessed player alias receipt")
 
+        # The packed builder can retain a singleton LineString, but PostGIS
+        # rejects its EWKB when the shared proof reconstructs the carrier.
+        # This is a planning rejection before resource measurement or capture.
+        self.sql("SELECT repair_test.reset();\n" + PLAYER_ALIAS_TARGET + """
+          UPDATE laplace.physicalities
+          SET trajectory=public.laplace_trajectory_build(ARRAY[repair_test.id('alias-target')])
+          WHERE id=repair_test.physicality_id('player',3::smallint);
+          """)
+        name = "alias-onepoint-linestring-target"
+        self.planning_failure(name, expected_error="LineString must have at least two points")
+        directory = self.receipts / name
+        failure = json.loads((directory / "failure.json").read_text())
+        assert failure["phase_at_failure"] == "planning_and_capture"
+        assert failure["received_bytes"] == failure["retained_bytes"] == 0
+        for filename in ("resources.json", "resource-admission.json", "plan.jsonl",
+                         "manifest.json", "submission.json", "outcome.json"):
+            assert not (directory / filename).exists(), (name, filename)
+
         for name, mutation in (
             ("missing-target-witness", "DELETE FROM laplace.attestations WHERE object_id=repair_test.id('alias-target');"),
             ("refuted-target-witness", "UPDATE laplace.attestations SET outcome=0,sum_score_fp1e9=0 WHERE object_id=repair_test.id('alias-target');"),
@@ -748,7 +766,6 @@ class NativeRepairProof:
             ("target-alignment", "UPDATE laplace.physicalities SET alignment_residual=0.5 WHERE id=repair_test.physicality_id('player',3::smallint);"),
             ("target-source-dimension", "UPDATE laplace.physicalities SET source_dim=4 WHERE id=repair_test.physicality_id('player',3::smallint);"),
             ("nonzero-target-flags", "UPDATE laplace.physicalities SET trajectory=public.laplace_mantissa_pack(repair_test.id('alias-target'),1,1,4) WHERE id=repair_test.physicality_id('player',3::smallint);"),
-            ("onepoint-linestring-target", "UPDATE laplace.physicalities SET trajectory=public.laplace_trajectory_build(ARRAY[repair_test.id('alias-target')]) WHERE id=repair_test.physicality_id('player',3::smallint);"),
             ("changed-target-trajectory-srid", "UPDATE laplace.physicalities SET trajectory=ST_SetSRID(trajectory,4326) WHERE id=repair_test.physicality_id('player',3::smallint);"),
             ("changed-source-trajectory-srid", "UPDATE laplace.physicalities SET trajectory=ST_SetSRID(trajectory,4326) WHERE id=repair_test.physicality_id('player');"),
             ("shared-wrong-native-target-placement", """UPDATE laplace.physicalities SET coord=ST_MakePoint(0,0,0,0),
@@ -759,6 +776,19 @@ class NativeRepairProof:
                  WHERE id IN (repair_test.physicality_id('alias-old'),repair_test.physicality_id('player'));"""),
         ):
             self.rejected("alias-" + name, PLAYER_ALIAS_TARGET + mutation, "projection-semantic-mismatch")
+
+        self.rejected("alias-twopoint-linestring-target", PLAYER_ALIAS_TARGET + """
+          UPDATE laplace.physicalities SET trajectory=ST_MakeLine(ARRAY[
+            public.laplace_mantissa_pack(repair_test.id('alias-target'),1,1,0::bigint),
+            public.laplace_mantissa_pack(repair_test.id('alias-target'),2,1,0::bigint)])
+          WHERE id=repair_test.physicality_id('player',3::smallint);
+          """, "projection-semantic-mismatch")
+        assert self.sql("""SELECT ST_GeometryType(decoded)='ST_LineString'
+            AND ST_NPoints(decoded)=2 AND n_constituents=1
+          FROM (SELECT ST_GeomFromEWKB(ST_AsEWKB(trajectory)) AS decoded,n_constituents
+            FROM laplace.physicalities
+            WHERE id=repair_test.physicality_id('player',3::smallint)) target;
+          """) == "t", "non-Point carrier must decode before its full-journal semantic rejection"
 
         self.rollback("alias-target-changed-after-receipt", """UPDATE laplace.physicalities
           SET observed_at=observed_at+interval '1 microsecond'
