@@ -26,6 +26,7 @@ import uuid
 PSQL_FETCH_MAX_ROWS = 8
 PSQL_FETCH_PAYLOAD_BYTES = 16 * 1024 * 1024
 RESOURCE_RECORD_MAX_BYTES = 64 * 1024
+RECEIPT_METADATA_RESERVE_BYTES = 1024 * 1024
 RESOURCE_SCHEMA = "laplace.legacy-content-repair-resources/v1"
 RESOURCE_FIELDS = ("physicality_rows", "native_input_rows", "context_rows", "summary_rows",
                    "plan_bytes", "max_line_bytes", "max_jsonl_line_bytes")
@@ -53,7 +54,10 @@ def write_new_json(path: Path, value: dict) -> None:
 
 
 class PsqlTransaction:
-    def __init__(self, command: list[str], errors, *, timeout: int, max_line_bytes: int):
+    def __init__(self, command: list[str], errors, *, timeout: int, max_line_bytes: int,
+                 deadline_monotonic: float | None = None):
+        self.deadline = time.monotonic() + timeout if deadline_monotonic is None else deadline_monotonic
+        require_before_deadline(self.deadline, "maintenance deadline")
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=errors, bufsize=0)
         self.timeout = timeout
@@ -61,16 +65,11 @@ class PsqlTransaction:
         self.pending = bytearray()
         assert self.process.stdin is not None
         os.set_blocking(self.process.stdin.fileno(), False)
-        self.begin_phase()
-
-    def begin_phase(self) -> None:
-        """One finite budget covers both transmitting SQL and receiving its barrier."""
-        self.deadline = time.monotonic() + self.timeout
 
     def remaining(self) -> float:
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
-            raise RepairProtocolError("repair transaction phase timed out")
+            raise RepairProtocolError("repair transaction maintenance deadline timed out")
         return remaining
 
     def send(self, sql: str) -> None:
@@ -83,7 +82,7 @@ class PsqlTransaction:
                     raise RepairProtocolError("repair transaction phase timed out while sending SQL")
                 self.remaining()
                 try:
-                    sent = os.write(self.process.stdin.fileno(), remaining)
+                    sent = os.write(self.process.stdin.fileno(), remaining[:65536])
                 except BlockingIOError:
                     continue
                 if not sent:
@@ -151,9 +150,16 @@ def validate_resources(resources: dict) -> None:
         if type(resources.get(field)) is not int or resources[field] < 0:
             raise RepairProtocolError("repair resource summary lacks a nonnegative integer " + field)
     if resources["context_rows"] != 1 or resources["summary_rows"] != 1 \
-            or resources["max_line_bytes"] <= 0 \
+            or resources["max_line_bytes"] < 2 \
             or resources["max_jsonl_line_bytes"] != resources["max_line_bytes"] + 1:
         raise RepairProtocolError("repair resource summary has inconsistent record structure")
+    records = sum(resources[field] for field in (
+        "physicality_rows", "native_input_rows", "context_rows", "summary_rows"))
+    longest = resources["max_jsonl_line_bytes"]
+    # Each stream record is a JSON object followed by LF: even {} takes three
+    # bytes. One record attains the declared maximum and no record exceeds it.
+    if not longest + 3 * (records - 1) <= resources["plan_bytes"] <= longest * records:
+        raise RepairProtocolError("repair resource summary has inconsistent serialized byte counts")
 
 
 def resource_rejections(resources: dict, *, max_rows: int, max_native_inputs: int,
@@ -164,10 +170,15 @@ def resource_rejections(resources: dict, *, max_rows: int, max_native_inputs: in
                          ("plan_bytes", max_bytes), ("max_line_bytes", max_line_bytes)):
         if resources[field] > limit:
             rejected.append(f"{field}={resources[field]} exceeds declared limit {limit}")
-    required = resources["plan_bytes"] + auxiliary_reserve_bytes
+    required = resources["plan_bytes"] + auxiliary_reserve_bytes + RECEIPT_METADATA_RESERVE_BYTES
     if required > disk_free_bytes:
         rejected.append(f"receipt and auxiliary reserve require {required} bytes; {disk_free_bytes} available")
     return rejected
+
+
+def require_before_deadline(deadline: float, phase: str) -> None:
+    if time.monotonic() >= deadline:
+        raise RepairProtocolError(f"repair {phase} timed out")
 
 
 def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
@@ -179,58 +190,70 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                        persistence_timeout: int = 60,
                        receipt_sql: str | None = None,
                        measurement_only: bool = False,
-                       auxiliary_reserve_bytes: int = 0) -> dict:
-    """Keep the same database transaction open while its complete plan is fsynced.
+                       auxiliary_reserve_bytes: int = 0,
+                       deadline_monotonic: float | None = None) -> dict:
+    """Durably retain an admitted locked plan before submitting its mutation.
 
-    plan_sql yields context, native-input and physicality JSONB records, then a
-    plan summary with both counts and unresolved evidence. apply_sql validates
-    and updates that exact locked plan and yields one applied(count) record.
-    Each phase shares one timeout across SQL send and complete response receipt.
-    Final pre-apply flush/fsyncs share a separate persistence_timeout; an overrun
-    retains evidence and forbids submission. This function supplies BEGIN/COMMIT.
-    With receipt_sql, plan_sql emits one resource summary; only an admitted,
-    durable summary permits the separately submitted receipt stream. Both use
-    the same planning deadline. measurement_only confirms ROLLBACK at that
-    barrier and reports sizing, including envelope rejections, without streaming.
-    There is no arbitrary SQL command-line entry point.
+    With receipt_sql, plan_sql emits one complete resource summary. Only a
+    durable, accepted summary and exact journal disk reservation permit the
+    separately submitted receipt stream. measurement_only confirms ROLLBACK at
+    this barrier without reserving or streaming the body. The caller's shared
+    maintenance deadline includes work before entry; send, capture, fsync, apply
+    and durable outcome never start a fresh maintenance budget. Final pre-apply
+    persistence is also bounded by persistence_timeout within that deadline.
+    Legacy fixed bounded callers may provide their complete stream as plan_sql.
+    The caller owns row selection, SQL recipes, locks and semantic eligibility.
     """
-    if max_rows < 0 or max_native_inputs < 0 or max_bytes <= 0 or max_line_bytes <= 0:
+    if any(type(value) is not int or value < 0 for value in (max_rows, max_native_inputs)) \
+            or any(type(value) is not int or value <= 0 for value in (max_bytes, max_line_bytes)):
         raise ValueError("repair bounds must be nonnegative rows and positive bytes")
-    if not math.isfinite(timeout) or not math.isfinite(persistence_timeout) \
-            or timeout <= 0 or persistence_timeout <= 0:
-        raise ValueError("repair phase and persistence timeouts must be finite and positive")
+    if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+           for value in (timeout, persistence_timeout)):
+        raise ValueError("repair maintenance and persistence timeouts must be finite and positive")
     if type(auxiliary_reserve_bytes) is not int or auxiliary_reserve_bytes < 0:
         raise ValueError("repair auxiliary reserve must be nonnegative integer bytes")
     if measurement_only and receipt_sql is None:
         raise ValueError("repair measurement requires the separate resource barrier")
     if receipt_sql is not None and not receipt_sql.strip():
         raise ValueError("repair receipt SQL must be nonempty")
+    entered_monotonic = time.monotonic()
+    deadline = entered_monotonic + timeout if deadline_monotonic is None else deadline_monotonic
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ValueError("repair deadline must be finite")
+    require_before_deadline(deadline, "maintenance deadline")
     fetch_rows = max(1, min(PSQL_FETCH_MAX_ROWS, PSQL_FETCH_PAYLOAD_BYTES // max_line_bytes))
     directory.mkdir(mode=0o770, parents=False, exist_ok=False)
     sync_directory(directory.parent)
     token = uuid.uuid4().hex
     plan_marker, commit_marker = f"PLAN_{token}", f"COMMITTED_{token}"
     plan_hash = hashlib.sha256()
-    count = native_inputs = total_bytes = largest_line = 0
+    count = native_inputs = total_bytes = retained_bytes = largest_line = 0
     context = summary = None
-    resources = resources_hash = disk_free = None
+    resources = resources_hash = disk_free = admission = None
     submitted = confirmed = False
     tx = None
     started = time.time_ns()
+    phase_timings = {}
+    phase = "connection_setup"
+    phase_started = entered_monotonic
     try:
         with (directory / "database-errors.log").open("xb") as errors:
+            connected_monotonic = time.monotonic()
+            remaining_at_connection = deadline - connected_monotonic
+            require_before_deadline(deadline, "maintenance deadline")
+            database_timeout_ms = max(1, math.ceil(remaining_at_connection * 1000))
+            phase = "planning_and_capture"
+            phase_started = connected_monotonic
             tx = PsqlTransaction(command, errors, timeout=timeout,
-                                 max_line_bytes=RESOURCE_RECORD_MAX_BYTES if receipt_sql is not None else max_line_bytes)
+                max_line_bytes=RESOURCE_RECORD_MAX_BYTES if receipt_sql is not None else max_line_bytes,
+                deadline_monotonic=deadline)
             tx.send("\\set ON_ERROR_STOP on\n\\set SHOW_ALL_RESULTS on\n"
                     f"\\set FETCH_COUNT {fetch_rows}\n"
                     "BEGIN ISOLATION LEVEL SERIALIZABLE;\n"
                     "SET LOCAL client_encoding='UTF8';\n"
                     "SET LOCAL lock_timeout='10s';\n"
-                    f"SET LOCAL statement_timeout='{timeout}s';\n"
-                    # The server may finish before buffered rows reach Python.
-                    # Its idle window covers the remaining receive phase plus
-                    # the separately bounded durable-persistence interval.
-                    f"SET LOCAL idle_in_transaction_session_timeout='{timeout + persistence_timeout}s';\n"
+                    f"SET LOCAL statement_timeout='{database_timeout_ms}ms';\n"
+                    f"SET LOCAL idle_in_transaction_session_timeout='{database_timeout_ms}ms';\n"
                     + plan_sql + f"\n\\echo {plan_marker}\n")
             if receipt_sql is not None:
                 for raw in tx.lines(plan_marker):
@@ -239,8 +262,6 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                     resources = parse_record(raw)
                 if resources is None:
                     raise RepairProtocolError("repair planning omitted its resource summary")
-                # Preserve complete measured counts even when the proposed
-                # receipt is too large to admit under this invocation's limits.
                 write_new_json(directory / "resources.json", resources)
                 resources_hash = hashlib.sha256(
                     (json.dumps(resources, sort_keys=True) + "\n").encode()).hexdigest()
@@ -253,7 +274,6 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                     auxiliary_reserve_bytes=auxiliary_reserve_bytes)
                 if measurement_only:
                     rollback_marker = f"ROLLED_BACK_{token}"
-                    tx.begin_phase()
                     tx.send(f"ROLLBACK;\n\\echo {rollback_marker}\n")
                     for raw in tx.lines(rollback_marker):
                         raise RepairProtocolError("repair measurement emitted unexpected rollback output")
@@ -264,66 +284,114 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                         "max_rows": max_rows, "max_native_inputs": max_native_inputs,
                         "max_bytes": max_bytes, "max_line_bytes": max_line_bytes,
                         "auxiliary_reserve_bytes": auxiliary_reserve_bytes,
+                        "metadata_reserve_bytes": RECEIPT_METADATA_RESERVE_BYTES,
                         "disk_free_bytes": disk_free, "timeout_seconds": timeout,
+                        "remaining_seconds_at_connection_start": remaining_at_connection,
+                        "initial_database_timeout_milliseconds": database_timeout_ms,
                         "plan_sql_sha256": hashlib.sha256(plan_sql.encode()).hexdigest(),
                         "receipt_sql_sha256": hashlib.sha256(receipt_sql.encode()).hexdigest(),
                         "finished_unix_nanoseconds": time.time_ns()}
                     write_new_json(directory / "measurement.json", measurement)
+                    require_before_deadline(deadline, "maintenance deadline")
                     return measurement
                 if rejected:
                     measured = {field: resources[field] for field in RESOURCE_FIELDS}
                     raise RepairProtocolError("repair resource envelope rejected: " + "; ".join(rejected)
                         + "; measured=" + json.dumps(measured, sort_keys=True)
                         + "; resources_receipt=" + str(directory / "resources.json"))
-                tx.max_line_bytes = max_line_bytes
-                plan_marker = f"RECEIPT_{token}"
-                tx.send(receipt_sql + f"\n\\echo {plan_marker}\n")
             with (directory / "plan.jsonl").open("xb") as receipt:
-                for raw in tx.lines(plan_marker):
-                    total_bytes += len(raw) + 1
-                    largest_line = max(largest_line, len(raw))
-                    if total_bytes > max_bytes:
-                        raise RepairProtocolError("repair receipt exceeds byte bound")
-                    record = parse_record(raw)
-                    kind = record.get("kind")
-                    if summary is not None:
-                        raise RepairProtocolError("repair plan emitted rows after its summary")
-                    if context is None:
-                        if kind != "context":
-                            raise RepairProtocolError("repair context must precede its rows")
-                        context = record
-                    elif kind == "native-input":
-                        native_inputs += 1
-                        if native_inputs > max_native_inputs:
-                            raise RepairProtocolError("repair native input evidence exceeds row bound")
-                        if not all(key in record for key in ("entity_id", "entity", "content")):
-                            raise RepairProtocolError("repair native input lacks identity or exact content snapshot")
-                    elif kind == "physicality":
-                        count += 1
-                        if count > max_rows:
-                            raise RepairProtocolError("repair plan exceeds row bound")
-                        if not all(key in record for key in ("original", "proposed", "evidence")):
-                            raise RepairProtocolError("repair row lacks original, proposed, or evidence")
-                    elif kind == "plan":
-                        summary = record
-                    else:
-                        raise RepairProtocolError("unexpected repair record kind")
-                    receipt.write(raw + b"\n")
-                    plan_hash.update(raw + b"\n")
-                if context is None or summary is None or summary.get("count") != count \
-                        or summary.get("native_input_count", 0) != native_inputs:
-                    raise RepairProtocolError("repair plan count does not match retained rows")
-                if resources is not None and (resources["physicality_rows"] != count
-                        or resources["native_input_rows"] != native_inputs
-                        or resources["plan_bytes"] != total_bytes
-                        or resources["max_line_bytes"] != largest_line):
-                    raise RepairProtocolError("repair receipt does not match its retained resource summary")
-                persistence_deadline = time.monotonic() + persistence_timeout
+                try:
+                    if resources is not None:
+                        # Reserve the actual journal on its own filesystem before
+                        # authorizing PostgreSQL to emit any of its body. A free
+                        # space observation alone cannot reserve shared-host blocks.
+                        filesystem = os.fstatvfs(receipt.fileno())
+                        available_bytes = filesystem.f_bavail * filesystem.f_frsize
+                        rejected = resource_rejections(resources, max_rows=max_rows,
+                            max_native_inputs=max_native_inputs, max_bytes=max_bytes,
+                            max_line_bytes=max_line_bytes, disk_free_bytes=available_bytes,
+                            auxiliary_reserve_bytes=auxiliary_reserve_bytes)
+                        if rejected:
+                            raise RepairProtocolError("repair resource envelope rejected before reservation: "
+                                                      + "; ".join(rejected))
+                        os.posix_fallocate(receipt.fileno(), 0, resources["plan_bytes"])
+                        require_before_deadline(deadline, "resource admission")
+                        admission = {"schema": "laplace.legacy-content-repair-resource-admission/v1",
+                            "resources_sha256": resources_hash,
+                            "expected_plan_bytes": resources["plan_bytes"],
+                            "available_filesystem_bytes_before_reservation": available_bytes,
+                            "metadata_reserve_bytes": RECEIPT_METADATA_RESERVE_BYTES,
+                            "auxiliary_reserve_bytes": auxiliary_reserve_bytes,
+                            "journal_preallocation": "posix_fallocate-succeeded",
+                            "max_rows": max_rows, "max_native_inputs": max_native_inputs,
+                            "max_bytes": max_bytes, "max_line_bytes": max_line_bytes}
+                        write_new_json(directory / "resource-admission.json", admission)
+                        require_before_deadline(deadline, "resource admission")
+                        tx.max_line_bytes = max_line_bytes
+                        plan_marker = f"RECEIPT_{token}"
+                        tx.send(receipt_sql + f"\n\\echo {plan_marker}\n")
+                    for raw in tx.lines(plan_marker):
+                        total_bytes += len(raw) + 1
+                        largest_line = max(largest_line, len(raw))
+                        if total_bytes > max_bytes:
+                            raise RepairProtocolError("repair receipt exceeds byte bound")
+                        record = parse_record(raw)
+                        kind = record.get("kind")
+                        if summary is not None:
+                            raise RepairProtocolError("repair plan emitted rows after its summary")
+                        if context is None:
+                            if kind != "context":
+                                raise RepairProtocolError("repair context must precede its rows")
+                            context = record
+                        elif kind == "native-input":
+                            native_inputs += 1
+                            if native_inputs > max_native_inputs:
+                                raise RepairProtocolError("repair native input evidence exceeds row bound")
+                            if not all(key in record for key in ("entity_id", "entity", "content")):
+                                raise RepairProtocolError("repair native input lacks identity or exact content snapshot")
+                        elif kind == "physicality":
+                            count += 1
+                            if count > max_rows:
+                                raise RepairProtocolError("repair plan exceeds row bound")
+                            if not all(key in record for key in ("original", "proposed", "evidence")):
+                                raise RepairProtocolError("repair row lacks original, proposed, or evidence")
+                        elif kind == "plan":
+                            summary = record
+                        else:
+                            raise RepairProtocolError("unexpected repair record kind")
+                        receipt.write(raw + b"\n")
+                        plan_hash.update(raw + b"\n")
+                        retained_bytes += len(raw) + 1
+                    if context is None or summary is None or summary.get("count") != count \
+                            or summary.get("native_input_count", 0) != native_inputs:
+                        raise RepairProtocolError("repair plan count does not match retained rows")
+                    if resources is not None and (resources["physicality_rows"] != count
+                            or resources["native_input_rows"] != native_inputs
+                            or resources["plan_bytes"] != total_bytes
+                            or resources["max_line_bytes"] != largest_line):
+                        raise RepairProtocolError("repair receipt does not match its retained resource summary")
+                finally:
+                    # Failed capture preserves only the actual prefix. Reserved
+                    # unwritten blocks must not appear as zero-filled evidence.
+                    receipt.truncate(receipt.tell())
+                captured_monotonic = time.monotonic()
+                phase_timings["planning_and_capture_seconds"] = captured_monotonic - connected_monotonic
+                phase = "durability"
+                phase_started = captured_monotonic
+                persistence_deadline = min(deadline, captured_monotonic + persistence_timeout)
+                require_before_deadline(persistence_deadline, "receipt persistence")
+                idle_timeout_ms = max(1, math.ceil((persistence_deadline - time.monotonic()) * 1000))
+                durable_marker = f"DURABILITY_{token}"
+                tx.deadline = persistence_deadline
+                tx.send(f"SET LOCAL idle_in_transaction_session_timeout='{idle_timeout_ms}ms';\n"
+                        f"\\echo {durable_marker}\n")
+                for raw in tx.lines(durable_marker):
+                    raise RepairProtocolError("database emitted unexpected durability barrier output")
                 receipt.flush()
                 os.fsync(receipt.fileno())
+                require_before_deadline(persistence_deadline, "receipt persistence")
             sync_directory(directory)
-            if time.monotonic() >= persistence_deadline:
-                raise RepairProtocolError("repair receipt persistence timed out before submission")
+            require_before_deadline(persistence_deadline, "receipt persistence")
             manifest = {"schema": "laplace.legacy-content-repair-plan/v1",
                         "source_sha": source_sha, "started_unix_nanoseconds": started,
                         "plan_sha256": plan_hash.hexdigest(), "plan_bytes": total_bytes,
@@ -332,7 +400,10 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                         "max_bytes": max_bytes, "max_line_bytes": max_line_bytes,
                         "timeout_seconds": timeout, "psql_fetch_rows": fetch_rows,
                         "persistence_timeout_seconds": persistence_timeout,
-                        "idle_timeout_seconds": timeout + persistence_timeout,
+                        "remaining_seconds_at_connection_start": remaining_at_connection,
+                        "initial_database_timeout_milliseconds": database_timeout_ms,
+                        "durability_idle_timeout_milliseconds": idle_timeout_ms,
+                        "phase_timings": dict(phase_timings), "resource_admission": admission,
                         "auxiliary_reserve_bytes": auxiliary_reserve_bytes,
                         "plan_sql_sha256": hashlib.sha256(plan_sql.encode()).hexdigest(),
                         "apply_sql_sha256": hashlib.sha256(apply_sql.encode()).hexdigest()}
@@ -340,21 +411,19 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                 manifest.update(resources_sha256=resources_hash, resources_disk_free_bytes=disk_free,
                     receipt_sql_sha256=hashlib.sha256(receipt_sql.encode()).hexdigest())
             write_new_json(directory / "manifest.json", manifest)
-            if time.monotonic() >= persistence_deadline:
-                raise RepairProtocolError("repair receipt persistence timed out before submission")
+            require_before_deadline(persistence_deadline, "receipt persistence")
             if summary.get("unresolved") != 0:
                 raise RepairProtocolError("repair has unresolved evidence; original rows retained")
-
-            # This durable marker deliberately precedes sending SQL. If the client
-            # dies during/after COMMIT, its absence/presence distinguishes never
-            # submitted from unknown outcome. The original plan remains replayable
-            # as evidence, not as permission to blindly rerun an unknown commit.
             write_new_json(directory / "submission.json", {
                 "plan_sha256": plan_hash.hexdigest(), "planned_rows": count,
                 "disposition": "submission-starting", "at_unix_nanoseconds": time.time_ns()})
-            if time.monotonic() >= persistence_deadline:
-                raise RepairProtocolError("repair receipt persistence timed out before submission")
-            tx.begin_phase()
+            require_before_deadline(persistence_deadline, "receipt persistence")
+            submitted_monotonic = time.monotonic()
+            phase_timings["durability_seconds"] = submitted_monotonic - captured_monotonic
+            phase = "apply_and_commit_confirmation"
+            phase_started = submitted_monotonic
+            # Restore only the existing overall deadline, never a fresh budget.
+            tx.deadline = deadline
             submitted = True
             tx.send(apply_sql + f"\nCOMMIT;\n\\echo {commit_marker}\n")
             applied = None
@@ -367,18 +436,36 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
             if applied is None:
                 raise RepairProtocolError("committed repair output does not match retained plan")
             confirmed = True
+            confirmed_monotonic = time.monotonic()
+            phase_timings["apply_and_commit_confirmation_seconds"] = confirmed_monotonic - submitted_monotonic
+            phase_timings["protocol_seconds_through_commit_confirmation"] = confirmed_monotonic - entered_monotonic
+            phase = "outcome_durability"
+            phase_started = confirmed_monotonic
             outcome = {**manifest, "disposition": "commit-confirmed", "applied": applied,
-                       "finished_unix_nanoseconds": time.time_ns()}
+                       "phase_timings": phase_timings, "finished_unix_nanoseconds": time.time_ns()}
             write_new_json(directory / "outcome.json", outcome)
+            outcome_durable_monotonic = time.monotonic()
+            write_new_json(directory / "completion-timing.json", {
+                "plan_sha256": plan_hash.hexdigest(),
+                "measured_through": "outcome.json file and directory fsync",
+                "outcome_durability_seconds": outcome_durable_monotonic - confirmed_monotonic,
+                "protocol_seconds_through_durable_outcome": outcome_durable_monotonic - entered_monotonic,
+                "remaining_maintenance_seconds": deadline - outcome_durable_monotonic,
+                "maintenance_deadline_exceeded": outcome_durable_monotonic >= deadline})
+            require_before_deadline(deadline, "maintenance deadline")
             return outcome
     except BaseException as error:
-        # A missing COMMIT echo is never reported as a proven rollback: connection
-        # loss can happen after PostgreSQL committed but before the echo arrived.
+        # Missing COMMIT confirmation is never reported as proven rollback.
+        # PostgreSQL may have committed before the client lost its acknowledgement.
         outcome = {"schema": "laplace.legacy-content-repair-outcome/v1",
                    "source_sha": source_sha, "plan_sha256": plan_hash.hexdigest(),
-                   "disposition": "commit-confirmed-receipt-failed" if confirmed else
+                   "disposition": ("commit-confirmed-deadline-exceeded" if time.monotonic() >= deadline
+                                   else "commit-confirmed-receipt-failed") if confirmed else
                        "submission-outcome-unknown" if submitted else "not-submitted",
-                   "error_type": type(error).__name__,
+                   "error_type": type(error).__name__, "phase_timings": phase_timings,
+                   "phase_at_failure": phase, "phase_elapsed_seconds": time.monotonic() - phase_started,
+                   "protocol_elapsed_seconds": time.monotonic() - entered_monotonic,
+                   "received_bytes": total_bytes, "retained_bytes": retained_bytes,
                    "finished_unix_nanoseconds": time.time_ns()}
         if resources_hash is not None:
             outcome.update(resources_sha256=resources_hash,
@@ -387,7 +474,7 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
         try:
             write_new_json(directory / "failure.json", outcome)
         except OSError:
-            pass  # Keep the original failure and any partial durable artifacts.
+            pass
         raise
     finally:
         if tx is not None:

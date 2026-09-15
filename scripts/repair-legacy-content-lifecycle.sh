@@ -15,4 +15,5 @@ connection="Host=\"${host//\"/\"\"}\";Port=\"${port//\"/\"\"}\";Username=\"${rol
 LAPLACE_DB="$connection" PGDATABASE="$database" \
   bash scripts/measure-lane.sh -- \
     python3 scripts/repair-legacy-content.py --database "$database" \
-    --receipt-root /build/laplace/recovery/legacy-content-repair
+    --receipt-root /build/laplace/recovery/legacy-content-repair \
+    --max-native-inputs 1000000 --max-bytes 4294967296 --timeout-seconds 1800

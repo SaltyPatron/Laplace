@@ -48,6 +48,10 @@ for line in sys.stdin:
             if mode.startswith('native-missing-'):
                 del children[1][mode.removeprefix('native-missing-')]
             if mode.startswith('resources-'): children[0]['entity']['label'] = 'ñébulo 水'
+            if mode == 'resources-many':
+                children = [dict(kind='native-input', entity_id=f'{identity:032x}',
+                                 entity={'tier':2}, content={'trajectory_ewkb':'00000080ff'})
+                            for identity in range(100001)]
             if mode == 'native-chunked':
                 assert fetch_rows is not None and 0 < fetch_rows <= 8
                 children = [dict(kind='native-input', entity_id=f'{identity:032x}',
@@ -61,7 +65,7 @@ for line in sys.stdin:
         if mode.startswith('resources-'):
             encoded = [(json.dumps(row,ensure_ascii=False)+'\n').encode() for row in rows]
             resources = dict(kind='resources',schema='laplace.legacy-content-repair-resources/v1',
-                physicality_rows=1,native_input_rows=2,context_rows=1,summary_rows=1,
+                physicality_rows=1,native_input_rows=len(children),context_rows=1,summary_rows=1,
                 plan_bytes=sum(map(len,encoded)),max_line_bytes=max(map(len,encoded))-1,
                 max_jsonl_line_bytes=max(map(len,encoded)))
             if mode == 'resources-mismatch-bytes': resources['plan_bytes'] += 1
@@ -71,6 +75,11 @@ for line in sys.stdin:
             if mode == 'resources-mismatch-parents': resources['physicality_rows'] += 1
             if mode == 'resources-mismatch-children': resources['native_input_rows'] += 1
             if mode == 'resources-invalid-count': resources['native_input_rows'] = True
+            if mode == 'resources-impossible-short-total': resources['plan_bytes'] = resources['max_jsonl_line_bytes']
+            if mode == 'resources-impossible-long-total': resources['plan_bytes'] = len(rows)*resources['max_jsonl_line_bytes']+1
+            if mode == 'resources-impossible-line':
+                resources['max_line_bytes'] = 1
+                resources['max_jsonl_line_bytes'] = 2
             print(json.dumps(resources),flush=True)
         elif mode == 'native-chunked':
             # Exercise protocol transport boundaries; native PostgreSQL tests own
@@ -81,6 +90,8 @@ for line in sys.stdin:
         else:
             for row in rows: print(json.dumps(row), flush=True)
         print(line.split()[1], flush=True)
+    elif line.startswith('\\echo DURABILITY_'):
+        print(line.split()[1],flush=True)
     elif line.strip() == 'STREAM_RETAINED_PLAN;':
         assert (directory/'resources.json').is_file()
     elif line.startswith('\\echo RECEIPT_'):
@@ -206,7 +217,7 @@ class RepairTransactionTests(unittest.TestCase):
                 elapsed[0] += 6
         with patch.object(REPAIR.os, "fsync", side_effect=slow_resource_sync), \
                 patch.object(REPAIR.time, "monotonic", side_effect=lambda: monotonic() + elapsed[0]), \
-                self.assertRaisesRegex(REPAIR.RepairProtocolError, "phase timed out"):
+                self.assertRaisesRegex(REPAIR.RepairProtocolError, "timed out|deadline"):
             self.run_resource_repair()
         self.assert_resource_plan_not_streamed()
 
@@ -230,8 +241,121 @@ class RepairTransactionTests(unittest.TestCase):
         self.assertNotIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
         self.assertTrue((self.directory / "resources.json").is_file())
 
+    def test_impossible_resource_sizes_reject_before_reservation_or_measurement_success(self):
+        for suffix in ("short-total", "long-total", "line"):
+            for measurement_only in (False, True):
+                with self.subTest(suffix=suffix, measurement_only=measurement_only):
+                    self.directory = self.root / ("impossible-" + suffix + str(measurement_only))
+                    self.transcript.unlink(missing_ok=True)
+                    with patch.object(REPAIR.os, "posix_fallocate") as reserve, \
+                            self.assertRaisesRegex(REPAIR.RepairProtocolError, "resource summary"):
+                        self.run_resource_repair("resources-impossible-" + suffix,
+                                                 measurement_only=measurement_only)
+                    reserve.assert_not_called()
+                    self.assert_resource_plan_not_streamed()
+                    self.assertFalse((self.directory / "measurement.json").exists())
+
+    def test_complete_plan_reservation_and_admission_are_durable_before_stream(self):
+        reserved = []
+        synced = []
+        reserve, fsync, send = REPAIR.os.posix_fallocate, REPAIR.os.fsync, REPAIR.PsqlTransaction.send
+        def reserve_plan(fd, offset, length):
+            self.assertEqual(str(self.directory / "plan.jsonl"), os.readlink(f"/proc/self/fd/{fd}"))
+            self.assertEqual(0, offset)
+            self.assertEqual(0, os.lseek(fd, 0, os.SEEK_CUR))
+            self.assertTrue((self.directory / "resources.json").is_file())
+            self.assertNotIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
+            reserved.append(length)
+            reserve(fd, offset, length)
+        def sync(fd):
+            fsync(fd)
+            synced.append(os.readlink(f"/proc/self/fd/{fd}"))
+        def submit(tx, sql):
+            if "STREAM_RETAINED_PLAN;" in sql:
+                resources = json.loads((self.directory / "resources.json").read_text())
+                self.assertEqual([resources["plan_bytes"]], reserved)
+                self.assertEqual(resources["plan_bytes"], (self.directory / "plan.jsonl").stat().st_size)
+                self.assertIn(str(self.directory / "resource-admission.json"), synced)
+                self.assertIn(str(self.directory), synced)
+            send(tx, sql)
+        with patch.object(REPAIR.os, "posix_fallocate", side_effect=reserve_plan), \
+                patch.object(REPAIR.os, "fsync", side_effect=sync), \
+                patch.object(REPAIR.PsqlTransaction, "send", new=submit):
+            outcome = self.run_resource_repair()
+        raw = (self.directory / "plan.jsonl").read_bytes()
+        admission = json.loads((self.directory / "resource-admission.json").read_text())
+        self.assertEqual([len(raw)], reserved)
+        self.assertEqual(len(raw), admission["expected_plan_bytes"])
+        self.assertEqual("posix_fallocate-succeeded", admission["journal_preallocation"])
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), outcome["plan_sha256"])
+
+    def test_explicit_larger_envelope_preserves_more_than_old_native_input_limit(self):
+        outcome = self.run_resource_repair("resources-many", max_native_inputs=100001, timeout=30)
+        self.assertEqual(100001, outcome["native_input_rows"])
+        self.assertEqual(100001, outcome["max_native_inputs"])
+        with (self.directory / "plan.jsonl").open("rb") as source:
+            self.assertEqual(100004, sum(1 for _ in source))
+        resources = json.loads((self.directory / "resources.json").read_text())
+        self.assertEqual(resources["plan_bytes"], (self.directory / "plan.jsonl").stat().st_size)
+        self.assertEqual(100001, resources["native_input_rows"])
+
+    def test_reservation_failure_forbids_receipt_stream_even_after_disk_admission(self):
+        with patch.object(REPAIR.os, "posix_fallocate", side_effect=OSError("injected quota failure")), \
+                self.assertRaises(OSError):
+            self.run_resource_repair()
+        self.assert_not_submitted()
+        self.assertNotIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
+        self.assertEqual(b"", (self.directory / "plan.jsonl").read_bytes())
+
+    def test_failed_reserved_receipt_truncates_unused_tail_to_hashed_prefix(self):
+        for suffix in ("bytes", "line", "parents", "children"):
+            with self.subTest(suffix=suffix):
+                self.directory = self.root / ("reserved-mismatch-" + suffix)
+                self.transcript.unlink(missing_ok=True)
+                with self.assertRaises(REPAIR.RepairProtocolError):
+                    self.run_resource_repair("resources-mismatch-" + suffix)
+                self.assert_not_submitted()
+                raw = (self.directory / "plan.jsonl").read_bytes()
+                self.assertTrue(raw.endswith(b"\n"))
+                self.assertNotIn(b"\0", raw)
+                self.assertEqual(5, len(raw.splitlines()))
+                failure = json.loads((self.directory / "failure.json").read_text())
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), failure["plan_sha256"])
+                self.assertEqual(len(raw), failure["retained_bytes"])
+
+    def test_metadata_reserve_is_required_in_addition_to_explicit_auxiliary_reserve(self):
+        with patch.object(REPAIR.shutil, "disk_usage", return_value=SimpleNamespace(free=1024 * 1024)), \
+                patch.object(REPAIR.os, "posix_fallocate") as reserve, \
+                self.assertRaisesRegex(REPAIR.RepairProtocolError, "reserve require|insufficient"):
+            self.run_resource_repair(auxiliary_reserve_bytes=0)
+        reserve.assert_not_called()
+        self.assert_resource_plan_not_streamed()
+
+    def test_admission_and_persistence_share_one_deadline_without_reset(self):
+        reject, fsync, monotonic = REPAIR.resource_rejections, REPAIR.os.fsync, REPAIR.time.monotonic
+        elapsed = [0]
+        def slow_admission(*args, **kwargs):
+            result = reject(*args, **kwargs)
+            if elapsed[0] == 0:
+                elapsed[0] += 3
+            return result
+        def slow_plan_sync(fd):
+            fsync(fd)
+            if os.readlink(f"/proc/self/fd/{fd}") == str(self.directory / "plan.jsonl"):
+                elapsed[0] += 3
+        with patch.object(REPAIR, "resource_rejections", side_effect=slow_admission), \
+                patch.object(REPAIR.os, "fsync", side_effect=slow_plan_sync), \
+                patch.object(REPAIR.time, "monotonic", side_effect=lambda: monotonic() + elapsed[0]), \
+                self.assertRaisesRegex(REPAIR.RepairProtocolError, "timed out|deadline"):
+            self.run_resource_repair(timeout=5, persistence_timeout=5)
+        self.assert_not_submitted()
+        self.assertIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
+        self.assertEqual("durability", json.loads((self.directory / "failure.json").read_text())["phase_at_failure"])
+
     def test_measurement_reports_excess_envelope_after_confirmed_rollback_only(self):
-        measured = self.run_resource_repair(measurement_only=True, max_native_inputs=1, max_bytes=1)
+        with patch.object(REPAIR.os, "posix_fallocate") as reserve:
+            measured = self.run_resource_repair(measurement_only=True, max_native_inputs=1, max_bytes=1)
+        reserve.assert_not_called()
         self.assertEqual("measurement-only-rollback-confirmed", measured["disposition"])
         self.assertFalse(measured["envelope_admitted"])
         self.assertEqual(2, measured["resources"]["native_input_rows"])
@@ -389,7 +513,7 @@ class RepairTransactionTests(unittest.TestCase):
             try:
                 # The child never reads: this exceeds the pipe capacity and must
                 # reach the deadline instead of blocking in FileIO.write.
-                with self.assertRaisesRegex(REPAIR.RepairProtocolError, "phase timed out"):
+                with self.assertRaisesRegex(REPAIR.RepairProtocolError, "timed out|deadline"):
                     tx.send("X" * (2 * 1024 * 1024))
             finally:
                 tx.close()
@@ -402,7 +526,7 @@ class RepairTransactionTests(unittest.TestCase):
             try:
                 tx.send("PHASE_COMPLETE\n")
                 with patch.object(REPAIR.time, "monotonic", return_value=tx.deadline + 1), \
-                        self.assertRaisesRegex(REPAIR.RepairProtocolError, "phase timed out"):
+                        self.assertRaisesRegex(REPAIR.RepairProtocolError, "timed out|deadline"):
                     list(tx.lines("PHASE_COMPLETE"))
             finally:
                 tx.close()
@@ -420,7 +544,7 @@ class RepairTransactionTests(unittest.TestCase):
                         elapsed[0] += 2
                 with patch.object(REPAIR.os, "fsync", side_effect=slow_sync), \
                         patch.object(REPAIR.time, "monotonic", side_effect=lambda: monotonic() + elapsed[0]), \
-                        self.assertRaisesRegex(REPAIR.RepairProtocolError, "persistence timed out before submission"):
+                        self.assertRaisesRegex(REPAIR.RepairProtocolError, "persistence timed out|deadline"):
                     self.run_repair("native-success", persistence_timeout=1)
                 self.assert_not_submitted()
                 self.assertEqual(["context", "native-input", "native-input", "physicality", "plan"],
@@ -434,13 +558,26 @@ class RepairTransactionTests(unittest.TestCase):
         outcome = self.run_repair(persistence_timeout=7)
         self.assertEqual(5, outcome["timeout_seconds"])
         self.assertEqual(7, outcome["persistence_timeout_seconds"])
-        self.assertEqual(12, outcome["idle_timeout_seconds"])
-        self.assertIn("SET LOCAL idle_in_transaction_session_timeout='12s';", self.transcript.read_text())
+        self.assertLessEqual(outcome["remaining_seconds_at_connection_start"], 5)
+        self.assertLessEqual(outcome["initial_database_timeout_milliseconds"], 5000)
+        self.assertIn(f"SET LOCAL idle_in_transaction_session_timeout='{outcome['initial_database_timeout_milliseconds']}ms';",
+                      self.transcript.read_text())
         for parameter in ("timeout", "persistence_timeout"):
-            for timeout in (0, -1, float("inf"), float("nan")):
+            for timeout in (0, -1, True, float("inf"), float("nan")):
                 with self.subTest(parameter=parameter, timeout=timeout), \
-                        self.assertRaisesRegex(ValueError, "finite and positive"):
+                        self.assertRaisesRegex(ValueError, "finite and positive|positive integer"):
                     self.run_repair(**{parameter: timeout})
+
+    def test_resource_limits_reject_noninteger_or_invalid_values_before_launch(self):
+        for parameter in ("max_rows", "max_native_inputs", "max_bytes", "max_line_bytes"):
+            invalid = [True, None, float("inf"), float("nan"), 1.5, -1]
+            if parameter in ("max_bytes", "max_line_bytes"):
+                invalid.append(0)
+            for value in invalid:
+                with self.subTest(parameter=parameter, value=value), self.assertRaises(ValueError):
+                    self.run_repair(**{parameter: value})
+                self.assertFalse(self.transcript.exists())
+                self.assertFalse(self.directory.exists())
 
     def test_apply_acknowledgement_retains_at_most_one_matching_record(self):
         for mode in ("missing-applied", "wrong-applied-count", "extra-applied"):
@@ -485,6 +622,73 @@ class RepairTransactionTests(unittest.TestCase):
                 self.assertTrue((self.directory / "submission.json").is_file())
                 self.assertFalse((self.directory / "outcome.json").exists())
 
+    def test_external_deadline_includes_budget_spent_before_protocol_entry(self):
+        monotonic = REPAIR.time.monotonic
+        result = self.run_repair(timeout=1800, deadline_monotonic=monotonic() + 4)
+        self.assertEqual(1800, result["timeout_seconds"])
+        self.assertLessEqual(result["remaining_seconds_at_connection_start"], 4)
+        self.assertLessEqual(result["initial_database_timeout_milliseconds"], 4000)
+
+
+    def test_expired_external_deadline_does_not_launch_database_connection(self):
+        with self.assertRaisesRegex(REPAIR.RepairProtocolError, "maintenance deadline"):
+            self.run_repair(deadline_monotonic=REPAIR.time.monotonic() - 1)
+        self.assertFalse(self.transcript.exists())
+
+
+    def test_full_sql_input_pipe_cannot_block_past_shared_deadline(self):
+        with (self.root / "unread-child-errors.log").open("wb") as errors:
+            tx = REPAIR.PsqlTransaction(
+                [sys.executable, "-c", "import time; time.sleep(5)"], errors,
+                timeout=1, max_line_bytes=4096,
+                deadline_monotonic=REPAIR.time.monotonic() + 0.25)
+            try:
+                with self.assertRaisesRegex(REPAIR.RepairProtocolError, "timed out|deadline"):
+                    tx.send("x" * (1024 * 1024))
+            finally:
+                tx.process.terminate()
+                tx.close()
+
+
+    def test_deadline_expires_after_submission_remains_unknown(self):
+        send = REPAIR.PsqlTransaction.send
+        monotonic = REPAIR.time.monotonic
+        elapsed = [0]
+        def expire_after_submission(tx, sql):
+            send(tx, sql)
+            if "APPLY_RETAINED_PLAN;" in sql:
+                elapsed[0] += 6
+        with patch.object(REPAIR.PsqlTransaction, "send", new=expire_after_submission), \
+                patch.object(REPAIR.time, "monotonic", side_effect=lambda: monotonic() + elapsed[0]), \
+                self.assertRaises(REPAIR.RepairProtocolError):
+            self.run_repair(timeout=5)
+        failure = json.loads((self.directory / "failure.json").read_text())
+        self.assertEqual("submission-outcome-unknown", failure["disposition"])
+        self.assertEqual("apply_and_commit_confirmation", failure["phase_at_failure"])
+        self.assertTrue((self.directory / "submission.json").exists())
+        self.assertFalse((self.directory / "outcome.json").exists())
+
+
+    def test_deadline_overrun_during_final_receipt_retains_confirmed_commit_and_actual_timing(self):
+        fsync = REPAIR.os.fsync
+        monotonic = REPAIR.time.monotonic
+        elapsed = [0]
+        def delayed_outcome_sync(fd):
+            fsync(fd)
+            if os.readlink(f"/proc/self/fd/{fd}") == str(self.directory / "outcome.json"):
+                elapsed[0] += 6
+        with patch.object(REPAIR.os, "fsync", side_effect=delayed_outcome_sync), \
+                patch.object(REPAIR.time, "monotonic", side_effect=lambda: monotonic() + elapsed[0]), \
+                self.assertRaises(REPAIR.RepairProtocolError):
+            self.run_repair(timeout=5)
+        self.assertEqual("commit-confirmed", json.loads((self.directory / "outcome.json").read_text())["disposition"])
+        self.assertEqual("commit-confirmed-deadline-exceeded",
+                         json.loads((self.directory / "failure.json").read_text())["disposition"])
+        completion = json.loads((self.directory / "completion-timing.json").read_text())
+        self.assertTrue(completion["maintenance_deadline_exceeded"])
+        self.assertGreaterEqual(completion["outcome_durability_seconds"], 6)
+
+
     def test_existing_receipt_is_never_replaced(self):
         self.directory.mkdir()
         old = self.directory / "plan.jsonl"
@@ -510,10 +714,11 @@ class RepairReceiptReconciliationTests(unittest.TestCase):
         directory.mkdir()
         context = {"kind": "context", "database": "fixture",
                    "prior_submission_reconciliation": reconciles or []}
-        payload = (json.dumps(context) + "\n" + json.dumps({"kind":"plan","count":0,"unresolved":0}) + "\n").encode()
+        payload = (json.dumps(context) + "\n" + json.dumps({"kind":"plan","count":0,"native_input_count":0,"unresolved":0}) + "\n").encode()
         (directory / "plan.jsonl").write_bytes(payload)
         manifest = {"schema":"laplace.legacy-content-repair-plan/v1",
-                    "plan_sha256":hashlib.sha256(payload).hexdigest(), "plan_bytes":len(payload), "planned_rows":0}
+                    "plan_sha256":hashlib.sha256(payload).hexdigest(), "plan_bytes":len(payload), "planned_rows":0,
+                    "native_input_rows":0}
         (directory / "manifest.json").write_text(json.dumps(manifest))
         (directory / "submission.json").write_text("{}")
         if confirmed:

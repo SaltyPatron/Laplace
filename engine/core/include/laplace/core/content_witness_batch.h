@@ -71,6 +71,13 @@ int content_witness_tree_root_id(
     const tier_tree_t* tree,
     hash128_t*         out_root_id);
 
+/* The same natural unit as root-id lookup and emission, including complete
+ * singleton/span collapse. Copy the already composed node; do not recompute
+ * its placement or select a different scaffold node for geometry inspection. */
+int content_witness_tree_root_node(
+    const tier_tree_t* tree,
+    tier_node_view_t*  out_root);
+
 void content_witness_reset(void);
 
 int laplace_content_root_id(

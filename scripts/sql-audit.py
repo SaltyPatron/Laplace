@@ -384,12 +384,15 @@ def decode_quoted(literal: str) -> str | None:
         value = ast.literal_eval(literal)
         return value if isinstance(value, str) else None
     except (SyntaxError, ValueError):
-        quote = literal.find('"')
-        if quote < 0:
-            quote = literal.find("'")
-        if quote < 0:
+        opening = re.match("(?i)([rubf]*)(\"{3}|'{3}|\"|')", literal)
+        if opening is None:
             return None
-        body = literal[quote + 1:-1]
+        prefix, delimiter = opening.groups()
+        if not literal.endswith(delimiter) or len(literal) < opening.end() + len(delimiter):
+            return None
+        body = literal[opening.end():-len(delimiter)]
+        if "r" in prefix.lower():
+            return body
         escapes = {
             "\\": "\\", '"': '"', "'": "'", "n": "\n", "r": "\r",
             "t": "\t", "b": "\b", "f": "\f", "v": "\v", "0": "\0",
@@ -399,7 +402,53 @@ def decode_quoted(literal: str) -> str | None:
 
 def python_string_chunks(text: str) -> list[tuple[str, int, int]]:
     chunks: list[tuple[str, int, int]] = []
+    nested_chunks: list[tuple[str, int, int]] = []
     pending: list[tuple[str, int, int]] = []
+    lines = text.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+
+    def literal_value(literal: str, start_line: int) -> str | None:
+        # AST parsing decodes escapes/raw prefixes and literal braces identically
+        # on both token layouts. Replacement expressions are never evaluated or
+        # misidentified as SQL text: their values remain opaque placeholders.
+        try:
+            node = ast.parse(literal, mode="eval").body
+        except (SyntaxError, ValueError):
+            return decode_quoted(literal)
+
+        def render(value: ast.AST) -> str | None:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                return value.value
+            if isinstance(value, ast.JoinedStr):
+                return "".join(item.value if isinstance(item, ast.Constant) else "@PYTHON_EXPR@"
+                               for item in value.values)
+            return None
+
+        def nested(value: ast.AST) -> None:
+            rendered = render(value)
+            if rendered is not None:
+                if len(rendered) >= 12 and SQL_LEADS.search(rendered):
+                    nested_chunks.append((rendered, start_line + value.lineno - 1,
+                                          start_line + value.end_lineno - 1))
+                if isinstance(value, ast.JoinedStr):
+                    for part in value.values:
+                        if isinstance(part, ast.FormattedValue):
+                            nested(part.value)
+                            if part.format_spec is not None:
+                                nested(part.format_spec)
+                return
+            for child in ast.iter_child_nodes(value):
+                nested(child)
+
+        if isinstance(node, ast.JoinedStr):
+            for part in node.values:
+                if isinstance(part, ast.FormattedValue):
+                    nested(part.value)
+                    if part.format_spec is not None:
+                        nested(part.format_spec)
+        return render(node)
 
     def flush() -> None:
         if not pending:
@@ -410,10 +459,26 @@ def python_string_chunks(text: str) -> list[tuple[str, int, int]]:
         pending.clear()
 
     try:
-        stream = tokenize.generate_tokens(iter(text.splitlines(keepends=True)).__next__)
+        stream = tokenize.generate_tokens(iter(lines).__next__)
         for token in stream:
+            if token.type == getattr(tokenize, "FSTRING_START", -1):
+                # Python <=3.11 returns the whole f-string as STRING; >=3.12
+                # exposes its parts, including arbitrary nested expressions.
+                # Recover the exact outer source span without interpreting any
+                # replacement token as an independent adjacent SQL literal.
+                first = token
+                depth = 1
+                while depth:
+                    token = next(stream)
+                    if token.type == tokenize.FSTRING_START:
+                        depth += 1
+                    elif token.type == tokenize.FSTRING_END:
+                        depth -= 1
+                start = offsets[first.start[0] - 1] + first.start[1]
+                end = offsets[token.end[0] - 1] + token.end[1]
+                token = tokenize.TokenInfo(tokenize.STRING, text[start:end], first.start, token.end, first.line)
             if token.type == tokenize.STRING:
-                value = decode_quoted(token.string)
+                value = literal_value(token.string, token.start[0])
                 if value is not None:
                     pending.append((value, token.start[0], token.end[0]))
                 else:
@@ -424,9 +489,9 @@ def python_string_chunks(text: str) -> list[tuple[str, int, int]]:
             }:
                 flush()
         flush()
-    except (tokenize.TokenError, IndentationError):
+    except (tokenize.TokenError, IndentationError, StopIteration):
         flush()
-    return chunks
+    return sorted(chunks + nested_chunks, key=lambda item: item[1])
 
 
 def source_string_literals(text: str, suffix: str) -> list[tuple[str, int, int, int]]:

@@ -13,7 +13,8 @@ import stat
 METADATA_BYTES = 64 * 1024
 MAX_DIRECTORIES = 1024
 NAMES = ("resources.json", "measurement.json", "manifest.json", "submission.json",
-         "failure.json", "outcome.json", "reconciliation.json")
+         "failure.json", "outcome.json", "reconciliation.json",
+         "resource-admission.json", "completion-timing.json")
 SOURCE_RECORDS = ("measurement.json", "manifest.json", "failure.json", "outcome.json")
 
 
