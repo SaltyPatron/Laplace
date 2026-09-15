@@ -10,12 +10,16 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 {
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger<NpgsqlSubstrateWriter> _log;
+    public PostgresWriteDurability Durability { get; }
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
-        ILogger<NpgsqlSubstrateWriter>? logger = null)
+        ILogger<NpgsqlSubstrateWriter>? logger = null,
+        PostgresWriteDurability durability = PostgresWriteDurability.Asynchronous)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _log = logger ?? NullLogger<NpgsqlSubstrateWriter>.Instance;
+        if (!Enum.IsDefined(durability)) throw new ArgumentOutOfRangeException(nameof(durability));
+        Durability = durability;
     }
 
 
@@ -231,6 +235,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         long attestationsFolded = 0;
         long entitiesSkipped = 0, physicalitiesSkipped = 0;
         bool journalReplayHit = false;
+        PostgresCommitReceipt? postgresCommit = null;
+        int copyTransactionsStarted = 0, copyTransactionsCommitted = 0;
         bool anyRows = entCount > 0 || physCount > 0 || attCount > 0;
 
         try
@@ -248,6 +254,9 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 physicalitiesSkipped = r.pSkip;
                 roundTrips += r.rt;
                 journalReplayHit = r.journalHit;
+                postgresCommit = r.commit;
+                copyTransactionsStarted = r.copy.Started;
+                copyTransactionsCommitted = r.copy.Committed;
 
                 // Apply-side bitmap verify is the presence gate: compose descent
                 // stages the working set (content-addressed, deduped in the
@@ -296,7 +305,12 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                  && attestationsInserted == 0 && attestationsFolded == 0),
             EntitiesSkippedAtMerge: entitiesSkipped,
             PhysicalitiesSkippedAtMerge: physicalitiesSkipped,
-            JournalReplayHit: journalReplayHit);
+            JournalReplayHit: journalReplayHit)
+        {
+            PostgresCommit = postgresCommit,
+            CopyTransactionsStarted = copyTransactionsStarted,
+            CopyTransactionsCommitted = copyTransactionsCommitted,
+        };
     }
 
     internal static AttestationStagedNative StageAttestation(AttestationRow a) => new()

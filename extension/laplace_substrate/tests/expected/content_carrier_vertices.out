@@ -1,0 +1,4 @@
+-- Canonical selected carrier batches preserve stored metadata and native runs.
+\set ECHO none
+NOTICE:  content carrier batch: exact selected metadata, logical ordinals, runs, flags and scalar parity
+NOTICE:  content carrier batch: missing carriers stay absent, duplicates form a set, malformed selections and corrupt ownership reject

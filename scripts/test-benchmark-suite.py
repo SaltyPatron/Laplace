@@ -35,7 +35,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.suite.validate_registry(self.registry)
         profiles = {item["id"] for item in self.registry["profiles"]}
         self.assertEqual(
-            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment"},
+            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment", "postgres-geometry", "recorded-chess"},
             profiles,
         )
         for suite in self.registry["suites"]:
@@ -51,7 +51,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(["query-forward"], suites["query"]["profiles"])
         self.assertNotIn("query-forward", suites["all"]["profiles"])
         self.assertEqual(["chess-environment"], suites["chess"]["profiles"])
-        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "chess", "all"}, set(suites))
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "chess", "geometry", "recorded", "all"}, set(suites))
 
     def test_chess_suite_does_not_require_unrelated_native_artifacts(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -65,11 +65,26 @@ class BenchmarkSuiteTests(unittest.TestCase):
                  mock.patch.object(self.suite, "exact_env", side_effect=AssertionError("core must not be required")), \
                  mock.patch.object(self.suite, "run_profile", return_value={"profile":"chess-environment"}) as run:
                 self.assertEqual(0, self.suite.run_suite(args))
-            forwarded = run.call_args.args[-1]
+            forwarded = run.call_args.args[-3]
             self.assertEqual(["--stockfish", args.chess_stockfish, "--cutechess", args.chess_cutechess,
                               "--cpu-budget", "4", "--memory-mib", "1024", "--reserve-cpus", "1"], forwarded)
             receipt = json.loads((Path(folder) / "suite-receipt.json").read_text())
             self.assertEqual({"repository_sha":"source-revision"}, receipt["artifact_identity"])
+
+    def test_geometry_suite_uses_existing_pg_without_a_core_build(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = Namespace(suite="geometry", repeats=2, receipt_dir=folder,
+                             core="/missing/core", t0="/missing/t0", corpus_dir=folder,
+                             moby_path="/missing/book", scale_workers=None, database="laplace",
+                             geometry_rows=1234, geometry_transaction_rows=500,
+                             geometry_concurrency="1,2", geometry_max_bytes=1000000)
+            with mock.patch.object(self.suite, "git_sha", return_value="source-revision"), \
+                 mock.patch.object(self.suite, "exact_env", side_effect=AssertionError("core must not be required")), \
+                 mock.patch.object(self.suite, "run_profile", return_value={"profile":"postgres-geometry"}) as run:
+                self.assertEqual(0, self.suite.run_suite(args))
+            self.assertEqual(["--rows", "1234", "--transaction-rows", "500",
+                              "--concurrency", "1,2", "--max-bytes", "1000000"], run.call_args.args[-2])
+            self.assertNotIn("postgres-geometry", self.suite.suite_map(self.registry)["all"]["profiles"])
 
     def test_core_suite_still_rejects_missing_native_artifact(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -78,6 +93,36 @@ class BenchmarkSuiteTests(unittest.TestCase):
             with mock.patch.object(self.suite, "git_sha", return_value="source-revision"):
                 with self.assertRaisesRegex(SystemExit, "built core library not found"):
                     self.suite.run_suite(args)
+
+    def test_recorded_suite_uses_installed_api_and_forwards_duration_bounds(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = Namespace(suite="recorded", repeats=1, receipt_dir=folder,
+                             core="/missing/core", t0="/missing/t0", corpus_dir=folder,
+                             moby_path="/missing/book", scale_workers=None, database="unused",
+                             recorded_games=24, recorded_duration_seconds=60,
+                             recorded_total_timeout=900, recorded_max_sustained_cases=128)
+            with mock.patch.object(self.suite, "git_sha", return_value="collector-revision"), \
+                 mock.patch.object(self.suite, "exact_env", side_effect=AssertionError("collector core build is unrelated")), \
+                 mock.patch.object(self.suite, "run_profile", return_value={"profile":"recorded-chess"}) as run:
+                self.assertEqual(0, self.suite.run_suite(args))
+            self.assertEqual(["--games", "24", "--duration-seconds", "60", "--total-timeout", "900",
+                              "--max-sustained-cases", "128"], run.call_args.args[-1])
+            self.assertNotIn("recorded-chess", self.suite.suite_map(self.registry)["all"]["profiles"])
+
+    def test_recorded_profile_executes_existing_collector_with_explicit_duration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "recorded-chess/receipt.json"
+            target.parent.mkdir()
+            target.write_text('{"status":"passed","durationQualified":false,"targetMet":false}')
+            with mock.patch.object(self.suite, "capture_rapl", return_value=[]), \
+                 mock.patch.object(self.suite, "run_and_tee", return_value=(0, 100)) as run:
+                result = self.suite.run_profile(self.suite.profile_map(self.registry)["recorded-chess"],
+                    Path(folder), {}, 1, Path(folder), Path(folder), None, "unused", recorded_args=["--games", "24"])
+            command = run.call_args.args[0]
+            self.assertEqual("scripts/benchmark-recorded-chess.py", command[1])
+            self.assertIn("--duration-seconds", command)
+            self.assertNotIn("--max-moves", command)
+            self.assertFalse(result["result"]["targetMet"])
 
     def test_raw_harness_scaling_points_still_expose_full_topology_for_explicit_use(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))

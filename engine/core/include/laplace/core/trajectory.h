@@ -32,6 +32,13 @@ int trajectory_constituent_count(const double* trajectory_xyzm,
                                  size_t        n_points,
                                  size_t*       out_count);
 
+/* Visit stored vertices without expanding runs. Ordinals are the logical
+ * prefix sum; a legacy zero run denotes one constituent. */
+typedef int (*trajectory_vertex_visitor_t)(void* context, size_t ordinal,
+    const hash128_t* entity_id, size_t run_length, uint64_t flags);
+int trajectory_visit_vertices(const double* trajectory_xyzm, size_t n_points,
+    trajectory_vertex_visitor_t visitor, void* context);
+
 typedef int (*trajectory_constituent_visitor_t)(void*             context,
                                                 size_t            ordinal,
                                                 const hash128_t*   entity_id,

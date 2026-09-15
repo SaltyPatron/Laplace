@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import copy
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import shutil
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -24,6 +28,7 @@ POLICY_IDS = {
     "policy-actions-audit", "policy-shellcheck-gate", "policy-deploy-payload-sync",
     "policy-pipeline-install", "policy-application-runtime", "policy-stockfish-release", "policy-zstd-release",
     "policy-chess-dependencies", "policy-stockfish-corpus", "policy-cutechess-release", "policy-chess-environment-benchmark",
+    "policy-recorded-chess-benchmark", "policy-retained-chess-ingestion", "policy-benchmark-registry", "policy-postgres-geometry-benchmark",
     "policy-managed-services", "policy-managed-host", "policy-managed-tls",
     "policy-managed-database-quiescence", "policy-repair-transaction",
     "policy-legacy-content-history", "policy-legacy-repair-evidence",
@@ -39,6 +44,76 @@ POLICY_IDS = {
 class TestProfileRegistryTests(unittest.TestCase):
     def document(self):
         return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(shutil.which("ctest"), "CTest is required for the executable failure fixture")
+    def test_real_ctest_failure_emits_regression_diff_and_keeps_failed_receipt(self):
+        with tempfile.TemporaryDirectory(prefix="native-regression-diagnostic-") as td:
+            root = Path(td)
+            build = root / "build"
+            build.mkdir()
+            driver = root / "fail.py"
+            driver.write_text(
+                "from pathlib import Path\n"
+                "import sys\n"
+                "p=Path(__file__).parent/'build'/'regression.diffs'\n"
+                "p.write_text('- expected result\\n+ ERROR: actual fixture failure\\n::error::fixture text\\n')\n"
+                "print('The differences can be viewed in the file '+chr(34)+str(p)+chr(34)+'.')\n"
+                "sys.exit(1)\n", encoding="utf-8")
+            (build / "CTestTestfile.cmake").write_text(
+                f'add_test(regression_failure [=[{sys.executable}]=] [=[{driver}]=])\n',
+                encoding="utf-8")
+            suite = registry.load_validated()["native-dev"]
+            receipt = root / "receipt.json"
+            log = io.StringIO()
+            with patch.object(registry, "ROOT", root), \
+                 patch.object(registry, "load_validated", return_value={suite["id"]: suite}), \
+                 patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                 contextlib.redirect_stdout(log):
+                rc = registry.run_profile("dev-native", REGISTRY_PATH, receipt)
+            saved = json.loads(receipt.read_text())
+            self.assertEqual(1, rc)
+            self.assertEqual("failed", saved["status"])
+            self.assertEqual("failed", saved["suites"][0]["status"])
+            diagnostic = saved["suites"][0]["failure_diagnostics"][0]
+            self.assertEqual("read", diagnostic["status"])
+            self.assertFalse(diagnostic["truncated"])
+            self.assertEqual(registry._sha256(build / "regression.diffs"),
+                             diagnostic["emitted_sha256"])
+            self.assertIn("NATIVE_REGRESSION | + ERROR: actual fixture failure", log.getvalue())
+            self.assertIn("NATIVE_REGRESSION | ::error::fixture text", log.getvalue())
+
+    def test_native_diagnostic_rejects_paths_outside_selected_build(self):
+        with tempfile.TemporaryDirectory(prefix="native-regression-path-") as td:
+            root = Path(td)
+            build = root / "build"
+            build.mkdir()
+            outside = root / "regression.diffs"
+            outside.write_text("outside data must not be printed")
+            paths = [outside]
+            if os.name == "posix":
+                linked = build / "regression.diffs"
+                linked.symlink_to(outside)
+                paths.append(linked)
+            log = io.StringIO()
+            with patch.object(registry, "ROOT", root), contextlib.redirect_stdout(log):
+                records = registry._ctest_failure_diagnostics(
+                    "\n".join(f'file "{p}"' for p in paths))
+            self.assertEqual(len(paths), len(records))
+            self.assertTrue(all(r["status"] == "unavailable" for r in records))
+            self.assertNotIn("outside data must not be printed", log.getvalue())
+
+    def test_native_diagnostic_records_bounded_prefix_without_claiming_full_hash(self):
+        with tempfile.TemporaryDirectory(prefix="native-regression-bound-") as td:
+            root = Path(td)
+            path = root / "build" / "regression.diffs"
+            path.parent.mkdir()
+            path.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+            with patch.object(registry, "ROOT", root), contextlib.redirect_stdout(io.StringIO()):
+                records = registry._ctest_failure_diagnostics(f'file "{path}"')
+            self.assertEqual(1, len(records))
+            self.assertTrue(records[0]["truncated"])
+            self.assertEqual(2 * 1024 * 1024, records[0]["emitted_bytes"])
+            self.assertNotEqual(registry._sha256(path), records[0]["emitted_sha256"])
 
     def test_one_registered_suite_runs_without_other_profile_suites(self):
         with tempfile.TemporaryDirectory(prefix="test-profile-suite-") as td:

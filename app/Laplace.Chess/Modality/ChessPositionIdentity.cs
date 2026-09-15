@@ -158,11 +158,65 @@ public static class ChessPositionIdentity
 
     internal static Hash128 AtomId(in Atom atom)
     {
+        if (!atom.HasDigest && ScalarAtomIds.TryGet(atom.Domain, atom.Value, out var id))
+            return id;
+        return CalculateAtomId(atom);
+    }
+
+    // This is the canonical native calculation used both to initialize the
+    // finite lookup and for misses. Rule digests and rare rook overrides are
+    // not accumulated in a process-wide memo.
+    private static Hash128 CalculateAtomId(in Atom atom)
+    {
         Span<byte> bytes = stackalloc byte[33];
         int n = FillAtomBytes(atom, bytes);
         Span<Hash128> ids = stackalloc Hash128[n];
         for (int i = 0; i < n; i++) ids[i] = ByteAtoms.Id(bytes[i]);
         return Hash128.Merkle(AtomTier, ids);
+    }
+
+    private static class ScalarAtomIds
+    {
+        // 1,023 immutable values (16,368 ID bytes). The native build-time chess
+        // alphabet uses the same domain/value encoding. No emitted table API
+        // resolves a domain/value before its ID is known, so derive these once
+        // through the existing native identity body. Flags/promotion retain
+        // the full small ranges accepted by MoveAtomIndex.
+        private static readonly Hash128[]?[] ByDomain = Build();
+
+        internal static bool TryGet(byte domain, ushort value, out Hash128 id)
+        {
+            if (domain < ByDomain.Length && ByDomain[domain] is { } ids && value < ids.Length)
+            {
+                id = ids[value];
+                return true;
+            }
+            id = default;
+            return false;
+        }
+
+        private static Hash128[]?[] Build()
+        {
+            var domains = new Hash128[]?[MovePromotionDomain + 1];
+            Add(SideDomain, 2);
+            Add(CastlingDomain, 16);
+            Add(EnPassantDomain, 65);
+            Add(PieceSquareDomain, 12 * 64);
+            Add(MovePieceDomain, 12);
+            Add(MoveFromDomain, 64);
+            Add(MoveToDomain, 64);
+            Add(MoveFlagsDomain, 16);
+            Add(MovePromotionDomain, 16);
+            return domains;
+
+            void Add(byte domain, int count)
+            {
+                var ids = new Hash128[count];
+                for (ushort value = 0; value < count; ++value)
+                    ids[value] = CalculateAtomId(Atom.Scalar(domain, value));
+                domains[domain] = ids;
+            }
+        }
     }
 
     /// <summary>

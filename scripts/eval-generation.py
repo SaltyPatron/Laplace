@@ -21,7 +21,9 @@ import argparse
 import importlib.util
 import json
 import re
+import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -30,6 +32,150 @@ from laplace_api import LaplaceApiError, chat_completion, op_rows
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROBES = ROOT / "scripts" / "eval-probes.json"
 DEFAULT_BASELINE = ROOT / "scripts" / "eval-baselines.json"
+
+DIAGNOSTIC_SECONDS = 120
+DIAGNOSTIC_MAX_PROMPTS = 4
+DIAGNOSTIC_MAX_ROWS = 2048
+DIAGNOSTIC_MAX_BYTES = 8 * 1024 * 1024
+
+
+class DiagnosticDeadline(Exception):
+    """A whole-collector deadline must bypass the client's transient retries."""
+
+    pass
+
+
+def collect_forward_diagnostics(api: str, probes: list[dict]) -> dict:
+    """Read fresh native terminal receipts; never change the evaluation verdict.
+
+    The normal text wrapper only realizes completed acts, and forward_trace
+    omits terminal rows. The existing full-program op exposes the reason an
+    invocation did not complete without turning candidate labels into answers.
+    """
+    report = {
+        "schema": "laplace.generation-failure-diagnostics/v1",
+        "scope": "Fresh read-only ordinary-op executions with the same prompt and text-wrapper seed; "
+                 "the failed chat session's history frontier is not reconstructed. "
+                 "A terminal disposition reports execution state, not proof of absent corpus evidence.",
+        "limits": {"seconds": DIAGNOSTIC_SECONDS, "prompts": DIAGNOSTIC_MAX_PROMPTS,
+                   "rows_per_execution": DIAGNOSTIC_MAX_ROWS, "retained_bytes": DIAGNOSTIC_MAX_BYTES},
+        "executions": [], "omitted": [],
+    }
+    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
+        report["status"] = "unavailable"
+        report["error"] = "bounded diagnostic timer requires a Unix main thread"
+        return report
+
+    selected = []
+    seen = set()
+    for probe in probes:
+        prompt = probe.get("prompt")
+        if probe.get("class") != "forward" or not isinstance(prompt, str) or prompt in seen:
+            continue
+        seen.add(prompt)
+        if len(selected) >= DIAGNOSTIC_MAX_PROMPTS or len(prompt.encode("utf-8")) > 4096:
+            report["omitted"].append({"id": probe.get("id"), "reason": "diagnostic input envelope"})
+            continue
+        selected.append(probe)
+
+    started = time.monotonic()
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    earlier_outer = 0 < previous_timer[0] <= DIAGNOSTIC_SECONDS
+    effective_seconds = min(DIAGNOSTIC_SECONDS, previous_timer[0]) if previous_timer[0] > 0 else DIAGNOSTIC_SECONDS
+    report["limits"]["effective_seconds"] = effective_seconds
+    report["deadline_owner"] = "outer-caller" if earlier_outer else "collector"
+    interrupted_frame = None
+
+    def expired(_signum, _frame):
+        nonlocal interrupted_frame
+        interrupted_frame = _frame
+        # Deliver an outer handler after leaving the API's transient retry
+        # boundary, which would otherwise swallow its TimeoutError exception.
+        raise DiagnosticDeadline("whole diagnostic deadline expired")
+
+    def read(name, args, max_rows=1):
+        return op_rows(api, name, args, max_rows=max_rows, timeout_seconds=20)
+
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, effective_seconds)
+    retained_bytes = 0
+    report["status"] = "collected"
+    try:
+        for probe in selected:
+            seed_proof = {"id": probe.get("id"), "prompt": probe["prompt"]}
+            try:
+                # These are the exact installed owners called by forward_text.
+                # Native bigint extraction, including its sign, stays native.
+                hashed = read("public.laplace_hash128_blake3", {
+                    "data": "\\x" + probe["prompt"].encode("utf-8").hex()})
+                digest = hashed[0]["laplace_hash128_blake3"] if len(hashed) == 1 else None
+                if not isinstance(digest, str) or not re.fullmatch(r"\\x[0-9a-fA-F]{32}", digest):
+                    raise ValueError("native prompt hash has an invalid result shape")
+                seeded = read("hash128_lo", {"p_id": digest})
+                seed = seeded[0]["hash128_lo"] if len(seeded) == 1 else None
+                if type(seed) is not int or not -(1 << 63) <= seed < (1 << 63):
+                    raise ValueError("native prompt seed is not a signed bigint")
+                seed_proof.update(prompt_hash=digest, seed=seed)
+            except DiagnosticDeadline:
+                raise
+            except (LaplaceApiError, KeyError, IndexError, TypeError, ValueError) as error:
+                report["executions"].append({**seed_proof, "status": "unavailable", "error": str(error)})
+                continue
+            for name, hops, fanout in (("normal", 2, 8), ("wider", 8, 32)):
+                args = {"p_prompt": probe["prompt"], "p_steps": 128, "p_max_stride": 5,
+                        "p_spread": 0.6, "p_top_k": 10, "p_seed": seed,
+                        "p_hops": hops, "p_fanout": fanout,
+                        "p_prior_frontier": None, "p_output_relation_types": None}
+                item = {**seed_proof, "configuration": name, "operation": "generation.forward_program",
+                        "arguments": args, "status": "pending"}
+                report["executions"].append(item)
+                try:
+                    rows = read(item["operation"], args, DIAGNOSTIC_MAX_ROWS)
+                    size = len(json.dumps(rows, ensure_ascii=False).encode("utf-8"))
+                    if retained_bytes + size > DIAGNOSTIC_MAX_BYTES:
+                        item.update(status="unavailable", error="diagnostic retained-byte envelope exceeded")
+                        report["status"] = "byte-budget-exhausted"
+                        return report
+                    retained_bytes += size
+                    item["rows"] = rows
+                    terminal = [row for row in rows if row.get("event") in ("complete", "unresolved")]
+                    if len(terminal) != 1:
+                        raise ValueError("native full program did not return exactly one terminal receipt")
+                    last = terminal[0]
+                    if (type(last.get("completion")) is not bool
+                        or not isinstance(last.get("disposition"), str)
+                        or any(type(last.get(key)) is not int or last[key] < 0 for key in
+                               ("required_obligations", "satisfied_obligations", "remaining_required", "output_count"))):
+                        raise ValueError("native terminal receipt has an invalid field shape")
+                    item.update(status="retained", terminal=last)
+                except DiagnosticDeadline:
+                    item.update(status="unavailable", error="whole diagnostic deadline expired")
+                    raise
+                except (LaplaceApiError, KeyError, TypeError, ValueError) as error:
+                    item.update(status="unavailable", error=str(error))
+    except DiagnosticDeadline as error:
+        report.update(status="deadline-exhausted", error=str(error))
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        elapsed = time.monotonic() - started
+        outer_due = previous_timer[0] > 0 and elapsed >= previous_timer[0]
+        if previous_timer[0] > 0:
+            remaining = previous_timer[0] - elapsed
+            if outer_due:
+                # A periodic timer keeps its original phase; an expired
+                # one-shot is delivered once and remains disarmed.
+                remaining = previous_timer[1] - ((-remaining) % previous_timer[1]) if previous_timer[1] > 0 else 0
+            signal.setitimer(signal.ITIMER_REAL, remaining, previous_timer[1])
+        report["elapsed_seconds"] = elapsed
+        report["retained_row_bytes"] = retained_bytes
+        if outer_due:
+            if callable(previous_handler):
+                previous_handler(signal.SIGALRM, interrupted_frame)
+            elif previous_handler == signal.SIG_DFL:
+                signal.raise_signal(signal.SIGALRM)
+    return report
 
 
 def _load_glue_words():
@@ -512,6 +658,11 @@ def main() -> None:
         "probes": results,
         "misses_first": True,
     }
+
+    if any(name in surfaces and not surface_passes(verdicts, name)
+           for name in ("forward", "chat")):
+        # Diagnostic success or failure cannot change any acceptance boolean.
+        report["forward_diagnostics"] = collect_forward_diagnostics(args.api, probes)
 
     if args.record:
         baseline = {

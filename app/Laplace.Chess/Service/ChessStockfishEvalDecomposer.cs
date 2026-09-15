@@ -19,6 +19,7 @@ public sealed class ChessStockfishEvalDecomposer
 
     public StockfishEvaluationRecipe Recipe { get; }
     private readonly StockfishEvaluatorPool _pool;
+    private readonly IPositionEvaluator _evaluator;
     private readonly ConcurrentDictionary<Hash128, int?> _evalMemo;
     private readonly ConcurrentDictionary<Hash128, Lazy<int?>> _evalInflight = new();
     private readonly string _cachePath;
@@ -49,6 +50,7 @@ public sealed class ChessStockfishEvalDecomposer
             _pool = new StockfishEvaluatorPool(
                 () => new StockfishProcessEvaluator(sf.Path!, settings, Recipe), Recipe.Resources.Processes, initial);
         }
+        _evaluator = new PooledEvaluator(_pool);
         _evalMemo = StockfishEvalCache.Load(_cachePath, Recipe);
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
     }
@@ -137,26 +139,31 @@ public sealed class ChessStockfishEvalDecomposer
 
     protected override void Compose(ChessStockfishEvalRecord record, SubstrateChangeBuilder b)
     {
-        var evaluator = _pool.Rent();
-        try
-        {
-            var prepared = ChessStockfishEval.PrepareGame(
-                record.Game, evaluator, Recipe, _evalMemo, _evalInflight);
-            if (prepared is null) return;
-            Checkpoint(prepared);
+        var prepared = Prepare(record.Game);
+        if (prepared is not null)
             ChessStockfishEval.DepositPrepared(b, prepared, _recipeMetadataRoot);
-        }
-        finally
-        {
-            _pool.Return(evaluator);
-        }
     }
 
-    private void Checkpoint(ChessStockfishEval.PreparedLine prepared)
+    private ChessStockfishEval.PreparedLine? Prepare(ChessWitnessedGame game)
     {
-        StockfishEvalCache.Append(
-            _cachePath, Recipe,
-            prepared.FreshEvaluations);
+        var prepared = ChessStockfishEval.PrepareGame(game, _evaluator, Recipe, _evalMemo, _evalInflight);
+        if (prepared is not null)
+            StockfishEvalCache.Append(_cachePath, Recipe, prepared.FreshEvaluations);
+        return prepared;
+    }
+
+    private sealed class PooledEvaluator(StockfishEvaluatorPool pool) : IPositionEvaluator
+    {
+        public int? EvaluateCp(string fen)
+        {
+            // PrepareGame calls this only for a real memo miss whose single-flight
+            // callback wins. Cached games and waiters never acquire a worker.
+            // Return after each search: holding a lease across positions could wait
+            // on another unit's callback while that callback waits for this worker.
+            var evaluator = pool.Rent();
+            try { return evaluator.EvaluateCp(fen); }
+            finally { pool.Return(evaluator); }
+        }
     }
 
     private void SaveCache()
@@ -188,18 +195,8 @@ public sealed class ChessStockfishEvalDecomposer
 
         public IIngestDeferredUnit CreateDeferredUnit(ChessStockfishEvalRecord record)
         {
-            var evaluator = owner._pool.Rent();
-            try
-            {
-                var prepared = ChessStockfishEval.PrepareGame(
-                    record.Game, evaluator, owner.Recipe, owner._evalMemo, owner._evalInflight);
-                if (prepared is not null) owner.Checkpoint(prepared);
-                return new Unit(record, prepared, owner._recipeMetadataRoot);
-            }
-            finally
-            {
-                owner._pool.Return(evaluator);
-            }
+            var prepared = owner.Prepare(record.Game);
+            return new Unit(record, prepared, owner._recipeMetadataRoot);
         }
 
         public void WalkWitness(

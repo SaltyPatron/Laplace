@@ -496,6 +496,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async Task<ReadinessResponse> ReadinessAsync(CancellationToken ct)
     {
+        var chessPerfcache = ObserveChessPerfcache();
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -532,16 +533,16 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
             var ready = entities > 0 && consensus > 0 && perfcacheReady;
             if (ready)
-                return new ReadinessResponse(true, true, entities, consensus, true);
+                return new ReadinessResponse(true, true, entities, consensus, true, ChessPerfcache: chessPerfcache);
 
             detail ??= entities == 0 ? "substrate has no entities (unseeded)"
                 : consensus == 0 ? "substrate has no consensus relations (unseeded)"
                 : "T0 perfcache not loaded";
-            return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail);
+            return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail, chessPerfcache);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {
-            return new ReadinessResponse(false, false, 0, 0, false, $"substrate unreachable: {ex.Message}");
+            return new ReadinessResponse(false, false, 0, 0, false, $"substrate unreachable: {ex.Message}", chessPerfcache);
         }
     }
 

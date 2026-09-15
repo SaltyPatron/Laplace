@@ -30,8 +30,9 @@
 typedef struct ContentReadContext
 {
     LaplaceContentTrajectoryConsumer consume;
+    LaplaceContentCarrierConsumer carrier;
     void *context;
-    AttrNumber entity, type, trajectory;
+    AttrNumber entity, type, trajectory, n_constituents;
     int16 physicality_type;
 } ContentReadContext;
 
@@ -51,25 +52,38 @@ consume_content(TupleTableSlot *slot, AttrNumber id, void *opaque)
             Datum entity_id = slot_getattr(slot, read->entity, &entity_null);
             if (physicality_null || entity_null)
                 elog(ERROR, "content trajectory read requires physicality and entity identities");
-            read->consume(physicality_id, entity_id, geometry, read->context);
+            if (read->carrier)
+            {
+                Datum count = slot_getattr(slot, read->n_constituents, &isnull);
+                if (isnull) elog(ERROR, "content carrier read requires a stored count");
+                read->carrier(physicality_id, entity_id, DatumGetInt32(count),
+                    geometry, read->context);
+            }
+            else
+                read->consume(physicality_id, entity_id, geometry, read->context);
         }
     }
 }
 
 static void
 read_leaf(Oid oid, ArrayType *ids, int16 physicality_type,
-          LaplaceContentTrajectoryConsumer consume, void *context)
+          LaplaceContentTrajectoryConsumer consume,
+          LaplaceContentCarrierConsumer carrier, void *context)
 {
-    ContentReadContext read = {consume, context, get_attnum(oid, "entity_id"),
-        get_attnum(oid, "type"), get_attnum(oid, "trajectory"), physicality_type};
+    ContentReadContext read = {consume, carrier, context, get_attnum(oid, "entity_id"),
+        get_attnum(oid, "type"), get_attnum(oid, "trajectory"),
+        carrier ? get_attnum(oid, "n_constituents") : 0, physicality_type};
     if (read.entity <= 0 || read.type <= 0 || read.trajectory <= 0 ||
+        (carrier && (read.n_constituents <= 0 ||
+                     get_atttype(oid, read.n_constituents) != INT4OID)) ||
         !laplace_identity_scan(oid, ids, consume_content, &read))
         elog(ERROR, "content trajectory read requires canonical identity storage");
 }
 
-void
-laplace_typed_trajectory_read(ArrayType *entities, int16 physicality_type,
-    LaplaceContentTrajectoryConsumer consume, void *context)
+static void
+read_trajectories(ArrayType *entities, int16 physicality_type,
+    LaplaceContentTrajectoryConsumer consume,
+    LaplaceContentCarrierConsumer carrier, void *context)
 {
     if (physicality_type <= 0)
         elog(ERROR, "trajectory read requires a positive physicality type");
@@ -118,12 +132,26 @@ laplace_typed_trajectory_read(ArrayType *entities, int16 physicality_type,
     for (int i = 0; i < partitions->nparts; ++i)
         if (batches[i])
             read_leaf(partitions->oids[i], DatumGetArrayTypeP(makeArrayResult(batches[i],
-                CurrentMemoryContext)), physicality_type, consume, context);
+                CurrentMemoryContext)), physicality_type, consume, carrier, context);
     pfree(batches);
     pfree(values);
     pfree(nulls);
     /* Partition locks, like normal SELECT locks, survive to transaction end. */
     table_close(relation, NoLock);
+}
+
+void
+laplace_typed_trajectory_read(ArrayType *entities, int16 physicality_type,
+    LaplaceContentTrajectoryConsumer consume, void *context)
+{
+    read_trajectories(entities, physicality_type, consume, NULL, context);
+}
+
+void
+laplace_content_carrier_read(ArrayType *entities,
+    LaplaceContentCarrierConsumer consume, void *context)
+{
+    read_trajectories(entities, 1, NULL, consume, context);
 }
 
 void

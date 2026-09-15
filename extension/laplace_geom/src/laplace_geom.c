@@ -747,68 +747,44 @@ pg_laplace_trajectory_build(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(out);
 }
 
+typedef struct
+{
+    ReturnSetInfo *rsinfo;
+} trajectory_vertex_emit_t;
+
+static int
+emit_trajectory_vertex(void *context, size_t ordinal,
+    const hash128_t *entity_id, size_t run_length, uint64_t flags)
+{
+    trajectory_vertex_emit_t *emit = context;
+    if (ordinal > PG_INT32_MAX)
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+            errmsg("laplace_trajectory_constituents: ordinal exceeds int4")));
+    bytea *id = palloc(VARHDRSZ + sizeof(*entity_id));
+    SET_VARSIZE(id, VARHDRSZ + sizeof(*entity_id));
+    memcpy(VARDATA(id), entity_id, sizeof(*entity_id));
+    Datum values[4] = {Int32GetDatum((int32) ordinal), PointerGetDatum(id),
+        Int32GetDatum((int32) run_length), Int64GetDatum((int64) flags)};
+    bool nulls[4] = {false, false, false, false};
+    tuplestore_putvalues(emit->rsinfo->setResult, emit->rsinfo->setDesc, values, nulls);
+    pfree(id);
+    return 0;
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_trajectory_constituents);
 
 Datum
 pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
 {
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-
     InitMaterializedSRF(fcinfo, 0);
-
     GSERIALIZED *g;
     LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
-
-    size_t  n = 0;
+    size_t n = 0;
     double *xyzm = geom_to_xyzm_buffer(l, "laplace_trajectory_constituents", &n);
-
-    /* ORDINAL IS DERIVED HERE, NOT READ OUT OF THE VERTEX. The packed field is
-     * a duplicate of what the vertex sequence already states, and it is 16 bits
-     * wide, so it stops being able to state it past 65,535 constituents -- which
-     * is what capped composition width until the writer stopped treating a spare
-     * field's range as a bound on content. The running sum below is exact for
-     * both vertex shapes: run_length is 1 on every plain trajectory, making the
-     * sum the vertex position, and it is the true source ordinal on a run-length
-     * vertex, where position deliberately does not track it.
-     *
-     * Verified against the substrate before the switch (2026-08-15): over 291,412
-     * physicalities / 3,519,140 constituents, zero rows where the packed field
-     * differed from this derivation, so already-stored rows read back identically. */
-    int64 ordinal = 1;
-
-    for (size_t i = 0; i < n; ++i)
-    {
-        mantissa_payload_t payload;
-        mantissa_unpack(&xyzm[i * 4], &payload);
-
-        bytea *eid_out = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-        SET_VARSIZE(eid_out, VARHDRSZ + sizeof(hash128_t));
-        memcpy(VARDATA(eid_out), &payload.entity_id, sizeof(hash128_t));
-
-        int32 run = (int32) payload.run_length;
-        if (run < 1)
-            run = 1;
-
-        /* The OUT parameter is int4. Removing the 16-bit cap must not swap one
-         * silent wrap for another, so refuse rather than truncate -- a trajectory
-         * this wide is a corrupt geometry, not a workload. */
-        if (ordinal > PG_INT32_MAX)
-            ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                     errmsg("laplace_trajectory_constituents: ordinal %ld exceeds int4",
-                            (long) ordinal)));
-
-        Datum values[4];
-        bool  nulls[4] = {false, false, false, false};
-        values[0] = Int32GetDatum((int32) ordinal);
-        values[1] = PointerGetDatum(eid_out);
-        values[2] = Int32GetDatum(run);
-        values[3] = Int64GetDatum((int64) payload.flags);
-        tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
-
-        ordinal += run;
-    }
-
+    trajectory_vertex_emit_t emit = {rsinfo};
+    if (trajectory_visit_vertices(xyzm, n, emit_trajectory_vertex, &emit) != 0)
+        ereport(ERROR, (errmsg("laplace_trajectory_constituents: invalid trajectory")));
     pfree(xyzm);
     lwgeom_free(l);
     return (Datum) 0;

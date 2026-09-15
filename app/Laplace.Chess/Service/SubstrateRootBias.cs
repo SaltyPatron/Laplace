@@ -12,9 +12,26 @@ public sealed class SubstrateRootBias : IRootBias
     private sealed record Evidence(
         IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Transitions,
         IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Moves);
-    private sealed record CacheEntry(long Version, long ExpiresAt, Lazy<Evidence> Value);
+    // Equality retains the complete ordered legal frontier, including flags/promotion.
+    // A position-only cache can reuse evidence for a different filtered frontier.
+    private sealed class FrontierKey(Hash128 root, IReadOnlyList<ChessMove> moves) : IEquatable<FrontierKey>
+    {
+        public readonly Hash128 Root = root;
+        public readonly ChessMove[] Moves = moves.ToArray();
+        public bool Equals(FrontierKey? other) => other is not null && Root == other.Root
+            && Moves.AsSpan().SequenceEqual(other.Moves);
+        public override bool Equals(object? other) => other is FrontierKey key && Equals(key);
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+            hash.Add(Root);
+            foreach (var move in Moves) hash.Add(move);
+            return hash.ToHashCode();
+        }
+    }
+    private sealed record Frontier(Hash128[] MoveIds, Hash128[] TransitionEdges, Hash128[] MoveOutcomeEdges);
+    private sealed record CacheEntry(long Version, long ExpiresAt, Lazy<Frontier> Frontier, Lazy<Evidence> Value);
 
-    private readonly ChessModality _modality = new();
     private readonly double _cpPerPoint;
     private readonly int _capCp;
     private readonly double? _shrinkK0;
@@ -24,10 +41,17 @@ public sealed class SubstrateRootBias : IRootBias
         (IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> First,
          IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Second)> _read;
     private readonly Func<Hash128, IReadOnlyList<Hash128>, long> _version;
-    private readonly ConcurrentDictionary<Hash128, CacheEntry> _cache = new();
-    private readonly ConcurrentQueue<Hash128> _cacheOrder = new();
+    private readonly ConcurrentDictionary<FrontierKey, CacheEntry> _cache = new();
+    private readonly ConcurrentQueue<FrontierKey> _cacheOrder = new();
     private const int CacheCapacity = 16_384;
-    private static readonly long CacheLifetimeTicks = TimeSpan.FromSeconds(2).Ticks;
+    private const long CacheLifetimeMilliseconds = 2_000;
+    private readonly Func<long> _clock = static () => Environment.TickCount64;
+    private long _frontierBuilds;
+    private long _evidenceCacheHits;
+    public long FrontierBuilds => Volatile.Read(ref _frontierBuilds);
+    public long EvidenceCacheHits => Volatile.Read(ref _evidenceCacheHits);
+    internal int CachedFrontiers => _cache.Count;
+    internal int EvictionQueueCount => _cacheOrder.Count;
     private long _rootReads;
     private long _backendReads;
     private long _rootsWithExactEvidence;
@@ -70,13 +94,14 @@ public sealed class SubstrateRootBias : IRootBias
             (IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> First,
              IReadOnlyDictionary<Hash128, NpgsqlConsensusByIds.Row> Second)> read,
         double cpPerPoint = 8.0, int capCp = 150, double? shrinkK0 = null,
-        Func<Hash128, IReadOnlyList<Hash128>, long>? version = null)
+        Func<Hash128, IReadOnlyList<Hash128>, long>? version = null, Func<long>? clock = null)
     {
         _read = read ?? throw new ArgumentNullException(nameof(read));
         _cpPerPoint = cpPerPoint;
         _capCp = capCp;
         _shrinkK0 = shrinkK0;
         _version = version ?? (static (_, _) => 0);
+        _clock = clock ?? (static () => Environment.TickCount64);
     }
 
     public int[] Bonus(Board root, IReadOnlyList<ChessMove> moves)
@@ -85,72 +110,41 @@ public sealed class SubstrateRootBias : IRootBias
         if (moves.Count == 0) return bonus;
         Interlocked.Increment(ref _rootReads);
 
-        var state = _modality.FromFen(root.ToFen());
-        var transitionEdgeIds = new Hash128[moves.Count];
-        var moveIds = new Hash128[moves.Count];
-        var moveOutcomeEdgeIds = new Hash128[moves.Count];
-        Hash128 rootId;
-        lock (ChessCompose.Gate)
-        {
-            rootId = ChessCompose.PositionId(state.Board);
-            for (int i = 0; i < moves.Count; i++)
-            {
-                Piece moving = state.Board.Squares[moves[i].From];
-                Hash128 moveId = ChessCompose.MoveId(moving, moves[i]);
-                moveIds[i] = moveId;
-                Hash128 transitionKey = ChessCompose.TransitionKey(rootId, moveId);
-                Hash128 toId;
-                if (ChessTransitionFloor.TryLookup(transitionKey, out toId, out var source))
-                {
-                    if (source == ChessTransitionFloor.LookupSource.Persistent)
-                        Interlocked.Increment(ref _transitionPerfcacheHits);
-                    else
-                        Interlocked.Increment(ref _transitionNovelHits);
-                }
-                else
-                {
-                    var next = _modality.Apply(state, moves[i]);
-                    toId = ChessCompose.PositionId(next.Board);
-                    ChessTransitionFloor.Remember(transitionKey, toId);
-                    Interlocked.Increment(ref _transitionCompositions);
-                }
-                transitionEdgeIds[i] = ConsensusKeys.EdgeId(
-                    rootId, ChessVocabulary.MoveType, toId);
-                moveOutcomeEdgeIds[i] = ConsensusKeys.EdgeId(
-                    moveId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
-            }
-        }
-
-        // One database command materializes this exact legal frontier. The result is reusable
-        // until a completed game changes this position or one of these typed moves. A short
-        // wall-clock expiry also observes ingest performed by another process, whose local
-        // observation generation cannot be seen here.
-        long version = _version(rootId, moveIds);
-        long now = DateTime.UtcNow.Ticks;
+        Hash128 rootId = ChessCompose.PositionId(root);
+        var key = new FrontierKey(rootId, moves);
         CacheEntry entry;
+        Lazy<Frontier>? derived = null;
         while (true)
         {
-            if (_cache.TryGetValue(rootId, out var current)
-                && current.Version == version && current.ExpiresAt > now)
+            _cache.TryGetValue(key, out var current);
+            // Derivation is immutable for this exact root and ordered frontier. An
+            // evidence refresh does not require repeating legal-transition composition.
+            derived ??= current?.Frontier ?? new Lazy<Frontier>(
+                () => BuildFrontier(root, key), LazyThreadSafetyMode.ExecutionAndPublication);
+            var frontier = derived.Value;
+            long version = _version(rootId, frontier.MoveIds);
+            long now = _clock();
+            if (current is not null && current.Version == version && current.ExpiresAt > now)
             {
                 entry = current;
+                Interlocked.Increment(ref _evidenceCacheHits);
                 break;
             }
-            var replacement = new CacheEntry(version, now + CacheLifetimeTicks,
+            var replacement = new CacheEntry(version, now + CacheLifetimeMilliseconds, derived,
                 new Lazy<Evidence>(() =>
                 {
                     Interlocked.Increment(ref _backendReads);
-                    var pair = _read(
-                        transitionEdgeIds, ChessVocabulary.MoveType,
-                        moveOutcomeEdgeIds, ChessVocabulary.OutcomeType);
+                    var pair = _read(frontier.TransitionEdges, ChessVocabulary.MoveType,
+                        frontier.MoveOutcomeEdges, ChessVocabulary.OutcomeType);
                     return new Evidence(pair.First, pair.Second);
                 }, LazyThreadSafetyMode.ExecutionAndPublication));
             bool installed = current is null
-                ? _cache.TryAdd(rootId, replacement)
-                : _cache.TryUpdate(rootId, replacement, current);
+                ? _cache.TryAdd(key, replacement)
+                : _cache.TryUpdate(key, replacement, current);
             if (!installed) continue;
             entry = replacement;
-            _cacheOrder.Enqueue(rootId);
+            // Replacing an expired entry must not grow an otherwise undrained queue.
+            if (current is null) _cacheOrder.Enqueue(key);
             break;
         }
         TrimCache();
@@ -158,10 +152,14 @@ public sealed class SubstrateRootBias : IRootBias
         try { evidence = entry.Value.Value; }
         catch
         {
-            if (_cache.TryGetValue(rootId, out var current) && ReferenceEquals(current, entry))
-                _cache.TryRemove(rootId, out _);
+            // Remove only this failed observation. A newer evidence generation may
+            // already have replaced it while the database operation was in flight.
+            ((ICollection<KeyValuePair<FrontierKey, CacheEntry>>)_cache).Remove(new(key, entry));
             throw;
         }
+        var identities = entry.Frontier.Value;
+        var transitionEdgeIds = identities.TransitionEdges;
+        var moveOutcomeEdgeIds = identities.MoveOutcomeEdges;
         var transitions = evidence.Transitions;
         var moveOutcomes = evidence.Moves;
         bool rootExact = false, rootMove = false;
@@ -189,9 +187,44 @@ public sealed class SubstrateRootBias : IRootBias
         return bonus;
     }
 
+    private Frontier BuildFrontier(Board root, FrontierKey key)
+    {
+        Interlocked.Increment(ref _frontierBuilds);
+        var moveIds = new Hash128[key.Moves.Length];
+        var transitions = new Hash128[key.Moves.Length];
+        var outcomes = new Hash128[key.Moves.Length];
+        for (int i = 0; i < key.Moves.Length; i++)
+        {
+            ChessMove move = key.Moves[i];
+            Hash128 moveId = ChessCompose.MoveId(root.Squares[move.From], move);
+            moveIds[i] = moveId;
+            Hash128 transitionKey = ChessCompose.TransitionKey(key.Root, moveId);
+            Hash128 toId;
+            if (ChessTransitionFloor.TryLookup(transitionKey, out toId, out var source))
+            {
+                if (source == ChessTransitionFloor.LookupSource.Persistent)
+                    Interlocked.Increment(ref _transitionPerfcacheHits);
+                else
+                    Interlocked.Increment(ref _transitionNovelHits);
+            }
+            else
+            {
+                var next = root.Clone();
+                MoveApply.Make(next, move);
+                toId = ChessCompose.PositionId(next);
+                ChessTransitionFloor.Remember(transitionKey, toId);
+                Interlocked.Increment(ref _transitionCompositions);
+            }
+            transitions[i] = ConsensusKeys.EdgeId(key.Root, ChessVocabulary.MoveType, toId);
+            outcomes[i] = ConsensusKeys.EdgeId(moveId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
+        }
+        return new Frontier(moveIds, transitions, outcomes);
+    }
+
     private void TrimCache()
     {
-        while (_cache.Count > CacheCapacity && _cacheOrder.TryDequeue(out var oldest))
+        while ((_cache.Count > CacheCapacity || _cacheOrder.Count > CacheCapacity)
+               && _cacheOrder.TryDequeue(out var oldest))
             _cache.TryRemove(oldest, out _);
     }
 

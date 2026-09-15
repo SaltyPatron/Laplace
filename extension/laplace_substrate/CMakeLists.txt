@@ -10,6 +10,7 @@ set(EXT_EXECUTION_SOURCES
     src/content_resolve.c
     src/text_root_placements.c
     src/content_trajectory_read.c
+    src/content_carrier_vertices.c
     src/identity_scan.c
     src/content_membership_read.c
     src/content_text_read.c

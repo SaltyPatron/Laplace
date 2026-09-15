@@ -145,6 +145,58 @@
       "required": true
     },
     {
+      "id": "policy-benchmark-registry",
+      "profile": "policy",
+      "owner": "native-query",
+      "runner": "script",
+      "command": ["python3", "scripts/test-benchmark-suite.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-postgres-geometry-benchmark",
+      "profile": "policy",
+      "owner": "native-query",
+      "runner": "script",
+      "command": ["python3", "scripts/test-postgres-geometry-benchmark.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-recorded-chess-benchmark",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-recorded-chess-benchmark.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-retained-chess-ingestion",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-retained-chess-ingestion.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-chess-environment-benchmark",
       "profile": "policy",
       "owner": "chess",

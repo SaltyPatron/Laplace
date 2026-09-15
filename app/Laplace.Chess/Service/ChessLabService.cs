@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Laplace.Chess.Service;
 
-public sealed class ChessLabService
+public sealed partial class ChessLabService
 {
     private readonly ILogger _log;
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
@@ -242,7 +242,11 @@ public sealed class ChessLabService
 
         foreach (var job in terminal.Skip(MaxRetainedTerminalJobs))
         {
-            if (!_jobs.TryRemove(job.Id, out var slot)) continue;
+            if (!_jobs.TryGetValue(job.Id, out var slot)) continue;
+            lock (slot.Gate)
+            {
+                if (slot.ActiveIngests > 0 || !_jobs.TryRemove(job.Id, out _)) continue;
+            }
             slot.Cts?.Dispose();
             if (TryDeleteJobWorkspace(job.Id)) removed++;
         }
@@ -359,6 +363,8 @@ public sealed class ChessLabService
         public ChessLabTerminal Terminal { get; } = new();
         public CancellationTokenSource? Cts;
         public Task? RunTask;
+        internal readonly SemaphoreSlim IngestGate = new(1, 1);
+        internal int ActiveIngests;
 
         public JobSlot(ChessLabJob job, Channel<ChessLabEvent> channel)
         {

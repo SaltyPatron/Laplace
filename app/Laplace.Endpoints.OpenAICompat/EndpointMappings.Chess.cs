@@ -311,13 +311,11 @@ internal static class ChessEndpoints
             var job = lab.GetJob(jobId);
             if (job is null || !job.Artifacts.TryGetValue("games.pgn", out var path) || !File.Exists(path))
                 return Results.NotFound(new { error = "no games.pgn artifact" });
-            // Record + analyze the artifact through the writer spine, in-process. Novelty-gated
-            // on game ids, so re-posting is idempotent (cutechess jobs already auto-ingest).
-            await using var ingestor = await ChessPgnIngestor.CreateAsync(ct);
-            string? experimentJson = job.Artifacts.TryGetValue("experiment.json", out var receiptPath)
-                && File.Exists(receiptPath) ? await File.ReadAllTextAsync(receiptPath, ct) : null;
-            var r = await ingestor.IngestFileAsync(path, log: null, ct, experimentReceiptJson: experimentJson);
-            return Results.Json(new { path, parsed = r.Parsed, ingested = r.Applied, alreadyPresent = r.Parsed - r.Novel });
+            if (job.State is ChessLabJobState.Pending or ChessLabJobState.Running)
+                return Results.Conflict(new { error = "the retained PGN is still being written" });
+            var result = await lab.IngestArtifactAsync(jobId, ct);
+            return result is null ? Results.NotFound(new { error = "retained job is no longer available" })
+                : Results.Json(result);
         }).WithTags("chess-lab");
     }
 

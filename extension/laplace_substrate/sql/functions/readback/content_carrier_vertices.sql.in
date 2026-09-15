@@ -1,0 +1,14 @@
+-- Exact selected Content carriers through one native indexed batch. Ordinals
+-- and runs use the same core visitor as laplace_trajectory_constituents.
+CREATE OR REPLACE FUNCTION structural.content_carrier_vertices(
+    p_entities bytea[], p_physicalities bytea[])
+RETURNS TABLE(parent_id bytea, n_constituents integer, ordinal bigint,
+    child_id bytea, run_length bigint, flags bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_content_carrier_vertices'
+LANGUAGE C STABLE PARALLEL RESTRICTED;
+
+COMMENT ON FUNCTION structural.content_carrier_vertices(bytea[],bytea[]) IS
+    'Read a set of canonical Content entity/physicality pairs through the native indexed batch reader. '
+    'Stored constituent counts are preserved even when corrupt. Missing/null trajectories and other '
+    'physicality types have no vertices; callers must verify complete expected carrier coverage. '
+    'Arrays must have equal lengths and non-null 16-byte canonical identities; duplicates form one set.';
