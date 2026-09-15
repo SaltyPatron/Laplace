@@ -14,7 +14,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "scripts/sql-catalog-baseline.json"
-CATALOG = ROOT / "engine/core/src/sql_catalog.def"
+CATALOGS = sorted((ROOT / "engine/core/src").glob("sql_catalog*.def"))
 # Comments must be consumed before strings so examples in comments are not code.
 TOKEN = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"')
 SQL = re.compile(r'\b(?:SELECT\s|INSERT\s+INTO\s|UPDATE\s+[\w.]+\s+SET\s|DELETE\s+FROM\s|WITH\s+[\w]+\s+AS\s*\(|COPY\s+[\w.(]|CREATE\s+(?:TEMP\s+)?(?:TABLE|FUNCTION|INDEX)|ALTER\s+TABLE|DROP\s+(?:TABLE|FUNCTION))', re.I)
@@ -73,7 +73,11 @@ def main():
         debt += sum(actual.values())
         for digest, count in excess(actual, allowed.get(rel, {})).items():
             errors.append(f"{rel}: {count} new/changed inline SQL statement(s), {digest[:12]}; use the native catalog")
-    catalog = CATALOG.read_text()
+    if not CATALOGS:
+        errors.append("native SQL catalog is missing")
+        catalog = ""
+    else:
+        catalog = "\n".join(path.read_text() for path in CATALOGS)
     entries = re.findall(r'SQL_QUERY\("([^"]+)",\s*"([^"]*)",([\s\S]*?)\)\s*(?=SQL_QUERY|$)', catalog)
     keys = set()
     for key, types, literal in entries:
@@ -92,7 +96,7 @@ def main():
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         return 1
-    print(f"SQL_CATALOG_OK queries={len(keys)} legacy_runtime_literals={debt}")
+    print(f"SQL_CATALOG_OK queries={len(keys)} catalogs={len(CATALOGS)} legacy_runtime_literals={debt}")
     return 0
 
 
