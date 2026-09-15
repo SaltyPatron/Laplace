@@ -14,7 +14,6 @@ public sealed record SubstrateChange(
     ImmutableArray<EphemeralFoldInput> EphemeralFoldInputs = default)
 {
     public bool CountsAsUnit { get; init; } = true;
-
     public SubstrateApplyEnvelope? ApplyEnvelope { get; init; }
 }
 
@@ -65,11 +64,6 @@ public sealed record PhysicalityRow(
     int? SourceDim,
     long ObservedAtUnixUs)
 {
-    // This initializer executes for every managed row construction, including hot
-    // AddPhysicalityPreSeen call sites. It prevents a producer from manufacturing
-    // a row that merely *looks* like Content while naming a different identity.
-    // Native validation streams the packed/RLE manifest directly; no expanded child
-    // array is allocated on this path.
     private readonly bool _identityValidated = ValidateIdentity(
         Id, EntityId, Type, TrajectoryXyzm, NConstituents);
 
@@ -96,17 +90,22 @@ public sealed record PhysicalityRow(
         if (trajectoryXyzm.Length % 4 != 0)
             throw new InvalidOperationException("physicality trajectory is not an XYZM vertex sequence");
 
-        if (type != PhysicalityType.Content) return true;
-
-        Hash128 contentId = Trajectory.ContentIdentity(trajectoryXyzm, out int logicalCount);
+        // Every trajectory type owes an exact logical constituent count. Only Content
+        // additionally owns the identity of that ordered manifest.
+        _ = Trajectory.ContentIdentity(trajectoryXyzm, out int logicalCount);
         if (logicalCount != nConstituents)
             throw new InvalidOperationException(
-                $"content trajectory count mismatch: entity={entityId} "
+                $"physicality trajectory count mismatch: entity={entityId} type={(short)type} "
                 + $"declared={nConstituents} decoded={logicalCount}");
-        if (contentId != entityId)
-            throw new InvalidOperationException(
-                $"content trajectory identity mismatch: entity={entityId} "
-                + $"recomputed={contentId} constituents={logicalCount}");
+
+        if (type == PhysicalityType.Content)
+        {
+            Hash128 contentId = Trajectory.ContentIdentity(trajectoryXyzm, out _);
+            if (contentId != entityId)
+                throw new InvalidOperationException(
+                    $"content trajectory identity mismatch: entity={entityId} "
+                    + $"recomputed={contentId} constituents={logicalCount}");
+        }
         return true;
     }
 }
