@@ -57,6 +57,44 @@ jobs:
           echo "LAPLACE_PR_FULL_PROOF=$full" >> "$GITHUB_ENV"
           echo "PR proof classification: full=$full"
 
+      - name: Inspect retained baseline before full proof
+        id: baseline_diagnostic
+        if: env.LAPLACE_PR_FULL_PROOF == '1'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            bash -e -o pipefail <<'PR_BASELINE'
+          set -euo pipefail
+          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr-baseline"
+          args=(
+            --checkout "$LAPLACE_PR_WORKTREE"
+            --checkout "$GITHUB_WORKSPACE"
+            --output "$evidence"
+            --expected-source "$LAPLACE_PR_TARGET_SHA"
+            --proof-outcome baseline-before-proof
+          )
+          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
+            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
+          fi
+          python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
+          python3 "$LAPLACE_PR_WORKTREE/scripts/inspect-recursive-proof-counterexamples.py" \
+            --collection "$evidence" --expected-source "$LAPLACE_PR_TARGET_SHA"
+          PR_BASELINE
+
+      - name: Upload retained baseline before full proof
+        if: always() && steps.baseline_diagnostic.outcome != 'skipped' && env.LAPLACE_PR_FULL_PROOF == '1'
+        continue-on-error: true
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-pr-baseline
+          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr-baseline/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Prove merge candidate without production mutation
         id: proof
         run: |
