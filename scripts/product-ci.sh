@@ -81,6 +81,7 @@ seed_operational_memory() {
   fi
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash scripts/ingest-source.sh operational
+  bash scripts/verify-ingest-journal.sh OperationalDecomposer
 }
 
 reconcile_installed_product() {
