@@ -193,6 +193,7 @@ jobs:
             | tee "$LAPLACE_BENCH_RECEIPT/scale-plan.txt"
 
       - name: Resolve configured chess executables and resource grant
+        id: chess_paths
         if: inputs.suite == 'chess'
         shell: bash
         env:
@@ -249,6 +250,109 @@ jobs:
                       raise SystemExit(f'{name}: invalid multiline environment value')
                   handle.write(f'{name}={value}\n')
           print(json.dumps(identities, indent=2))
+          PY
+
+      - name: Record installed chess functionality and online readiness
+        id: chess_readiness
+        if: ${{ !cancelled() && inputs.suite == 'chess' && steps.chess_paths.outcome != 'skipped' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        env:
+          LAPLACE_CHESS_STATUS_BASE: ${{ vars.LAPLACE_API_BASE || 'http://127.0.0.1:5187' }}
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close /build/laplace/work/host-resource.lock python3 - <<'PY'
+          import datetime, json, os, signal, subprocess, sys
+          import urllib.error, urllib.parse, urllib.request
+          from pathlib import Path
+
+          receipt = Path(os.environ['LAPLACE_BENCH_RECEIPT'])
+          prefix = Path(os.environ['LAPLACE_INSTALL_PREFIX'])
+          uci = os.environ.get('LAPLACE_BENCH_CHESS_UCI') or os.environ.get('LAPLACE_UCI') or str(prefix / 'app/laplace-uci')
+          env = dict(os.environ)
+          for name in ('STOCKFISH', 'CUTECHESS'):
+              selected = env.get('LAPLACE_BENCH_CHESS_' + name)
+              if selected:
+                  env['LAPLACE_' + name] = selected
+          command = ['timeout', '--signal=TERM', '--kill-after=5s', '240s', sys.executable,
+                     'scripts/check-chess-dependencies.py', '--prefix', str(prefix), '--uci', uci, '--check-latest']
+          observed = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          execution = {'observed_utc': observed, 'timeout_seconds': 240, 'prefix': str(prefix), 'uci': uci}
+          try:
+              result = subprocess.run(command, env=env, capture_output=True, text=True)
+              execution['exit_code'] = result.returncode
+              try:
+                  doctor = json.loads(result.stdout)
+                  if not isinstance(doctor, dict) or not isinstance(doctor.get('checks'), list):
+                      raise ValueError('invalid report shape')
+              except ValueError:
+                  doctor = {'executable_ready': False, 'checks': [], 'status': 'report-unavailable'}
+              failed = result.returncode != 0 or doctor.get('executable_ready') is not True or any(
+                  check.get('required') and check.get('status') not in ('ready', 'present')
+                  for check in doctor['checks'])
+          except OSError as error:
+              execution['failure_type'] = type(error).__name__
+              doctor = {'executable_ready': False, 'checks': [], 'status': 'could-not-run'}
+              failed = True
+          execution['required_checks_passed'] = not failed
+          (receipt / 'chess-dependency-readiness.json').write_text(json.dumps(doctor, indent=2) + '\n', encoding='utf-8')
+          (receipt / 'chess-readiness-execution.json').write_text(json.dumps(execution, indent=2) + '\n', encoding='utf-8')
+
+          # The endpoint returns tokenPreview, logs and free-text errors. Keep
+          # only typed capability fields; never retain the raw response or auth.
+          status = {'observed_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'required': False, 'status': 'unverified',
+                    'verification': 'read-only service snapshot; no account upgrade, bot start or game creation'}
+          def deadline(signum, frame):
+              raise TimeoutError('status deadline exceeded')
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, response, code, message, headers, newurl):
+                  return None
+          try:
+              base = urllib.parse.urlsplit(os.environ['LAPLACE_CHESS_STATUS_BASE'])
+              if base.scheme not in ('http', 'https') or not base.netloc or base.username or base.password or base.query or base.fragment:
+                  raise ValueError('invalid status base')
+              url = urllib.parse.urlunsplit((base.scheme, base.netloc, base.path.rstrip('/') + '/chess/lichess/status', '', ''))
+              status['endpoint'] = url
+              signal.signal(signal.SIGALRM, deadline)
+              signal.alarm(10)
+              with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect).open(url, timeout=8) as response:
+                  status['http_status'] = response.status
+                  raw = response.read(65537)
+              if len(raw) > 65536:
+                  raise ValueError('oversized response')
+              payload = json.loads(raw)
+              if not isinstance(payload, dict):
+                  raise ValueError('invalid response shape')
+              service = {key: payload[key] for key in ('configured', 'connected', 'running', 'substrate')
+                         if isinstance(payload.get(key), bool)}
+              service.update({key: payload[key] for key in ('depth', 'maxConcurrent', 'gamesRecorded')
+                              if type(payload.get(key)) is int and payload[key] >= 0})
+              service['error_present'] = bool(payload.get('error'))
+              account = payload.get('account') if isinstance(payload.get('account'), dict) else {}
+              account_status = {key: account.get(key) if isinstance(account.get(key), bool) else None
+                                for key in ('tokenValid', 'botAccount', 'botPlayScope', 'ready')}
+              account_status['error_present'] = bool(account.get('error'))
+              account_keys = ('tokenValid', 'botAccount', 'botPlayScope', 'ready')
+              service_keys = ('configured', 'connected', 'running')
+              verified = all(account_status[key] is True for key in account_keys)
+              known_failure = service['error_present'] or account_status['error_present'] or any(
+                  service.get(key) is False for key in service_keys) or any(account_status[key] is False for key in account_keys)
+              status.update(service=service, account=account_status,
+                            status='not-ready' if known_failure else 'ready' if verified and all(
+                                service.get(key) is True for key in service_keys) else 'unverified')
+          except urllib.error.HTTPError as error:
+              status.update(status='authentication-required' if error.code in (401, 403) else 'http-error', http_status=error.code)
+          except (OSError, ValueError) as error:
+              status.update(status='unreachable' if isinstance(error, OSError) else 'invalid-response', failure_type=type(error).__name__)
+          finally:
+              signal.alarm(0)
+          (receipt / 'chess-lichess-readiness.json').write_text(json.dumps(status, indent=2) + '\n', encoding='utf-8')
+          print('Required chess dependency checks:', 'passed' if not failed else 'failed; retained evidence and measurements follow')
+          print('Optional Lichess service/account readiness:', status['status'])
+          raise SystemExit(1 if failed else 0)
           PY
 
       - name: Record source, runner, hardware and accelerator inventory
@@ -509,6 +613,33 @@ jobs:
               echo
               cat "$LAPLACE_BENCH_RECEIPT/chess-environment/report.md"
             fi
+            if [[ -f "$LAPLACE_BENCH_RECEIPT/chess-readiness-execution.json" ]]; then
+              echo
+              python3 - "$LAPLACE_BENCH_RECEIPT" <<'PY'
+          import json, sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          execution = json.loads((root / 'chess-readiness-execution.json').read_text())
+          report = json.loads((root / 'chess-dependency-readiness.json').read_text())
+          print('### Installed chess functionality')
+          print()
+          print(f"- Required executable/latest-release checks passed: {execution['required_checks_passed']}")
+          for check in report.get('checks', []):
+              print(f"- {check['name']}: {check['status']} ({'required' if check['required'] else 'optional'})")
+              if check['name'] == 'syzygy' and isinstance(check.get('detail'), dict):
+                  print(f"- Tablebase verification: {check['detail'].get('verification', 'unreported')}")
+          status_path = root / 'chess-lichess-readiness.json'
+          if status_path.is_file():
+              online = json.loads(status_path.read_text())
+              print(f"- Lichess service/account snapshot: {online['status']} (optional; HTTP {online.get('http_status', 'unavailable')})")
+              for key in ('configured', 'running', 'connected'):
+                  print(f"- Lichess {key}: {online.get('service', {}).get(key, 'unverified')}")
+              account = online.get('account', {})
+              for key in ('tokenValid', 'botAccount', 'botPlayScope', 'ready'):
+                  print(f"- Lichess {key}: {account.get(key, 'unverified')}")
+          print('- Optional missing data and unverified account access remain visible in the readiness receipts.')
+          PY
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Seal evidence manifest
@@ -532,3 +663,10 @@ jobs:
           path: ${{ runner.temp }}/laplace-benchmark-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Require installed chess tools and verified release checks
+        if: ${{ !cancelled() && inputs.suite == 'chess' && steps.chess_readiness.outcome == 'failure' }}
+        shell: bash
+        run: |
+          echo '::error::Required chess dependency checks failed; inspect chess-dependency-readiness.json and chess-readiness-execution.json in the uploaded evidence.'
+          exit 1

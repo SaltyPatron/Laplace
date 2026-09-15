@@ -106,6 +106,9 @@ jobs:
             args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
           fi
           python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            python3 "$LAPLACE_PR_WORKTREE/scripts/inspect-recursive-proof-counterexamples.py" \
+              --collection "$evidence" --expected-source "$LAPLACE_PR_TARGET_SHA"
 
       - name: Upload retained recursive proof diagnostics
         if: always() && env.LAPLACE_PR_WORKTREE != ''
