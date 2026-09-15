@@ -2,9 +2,9 @@
 \set ECHO none
 BEGIN;
 CREATE TEMP TABLE carrier_input ON COMMIT DROP AS
-SELECT i, public.laplace_hash128_blake3('carrier-test/parent/' || i) AS parent,
-    public.laplace_hash128_blake3('carrier-test/child/' || i) AS child,
-    public.laplace_hash128_blake3('carrier-test/second/' || i) AS second
+SELECT i, public.laplace_hash128_blake3(convert_to('carrier-test/parent/' || i,'UTF8')) AS parent,
+    public.laplace_hash128_blake3(convert_to('carrier-test/child/' || i,'UTF8')) AS child,
+    public.laplace_hash128_blake3(convert_to('carrier-test/second/' || i,'UTF8')) AS second
 FROM generate_series(1,100) i;
 ALTER TABLE carrier_input ADD COLUMN physicality bytea;
 UPDATE carrier_input SET physicality = public.laplace_hash128_blake3(parent || decode('0100','hex'));
@@ -84,7 +84,7 @@ BEGIN
     EXCEPTION WHEN invalid_parameter_value THEN failures := failures+1; END;
     IF failures<>6 THEN RAISE EXCEPTION 'malformed selected identity batches were accepted: %',failures; END IF;
     -- A corrupt stored entity link must never be attributed to the requested parent.
-    UPDATE laplace.physicalities SET entity_id=public.laplace_hash128_blake3('carrier-test/wrong-owner')
+    UPDATE laplace.physicalities SET entity_id=public.laplace_hash128_blake3(convert_to('carrier-test/wrong-owner','UTF8'))
     WHERE id=placement;
     BEGIN
         PERFORM * FROM structural.content_carrier_vertices(ARRAY[entity],ARRAY[placement]);
