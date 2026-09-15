@@ -10,9 +10,9 @@ Type=simple
 User=laplace-runner
 Group=laplace-runner
 UMask=0002
-Environment=TMPDIR=/build/laplace/work/legacy-api
-Environment=TMP=/build/laplace/work/legacy-api
-Environment=TEMP=/build/laplace/work/legacy-api
+Environment=TMPDIR=/build/laplace/work/api
+Environment=TMP=/build/laplace/work/api
+Environment=TEMP=/build/laplace/work/api
 WorkingDirectory=/opt/laplace/app
 # Non-secret runtime config (DB, perfcache, URLs). Owned by laplace-runner; CI may refresh.
 EnvironmentFile=/opt/laplace/app/laplace-api.env
