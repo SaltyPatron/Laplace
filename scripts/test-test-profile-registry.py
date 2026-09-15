@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -38,6 +39,81 @@ POLICY_IDS = {
 class TestProfileRegistryTests(unittest.TestCase):
     def document(self):
         return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+
+    def test_one_registered_suite_runs_without_other_profile_suites(self):
+        with tempfile.TemporaryDirectory(prefix="test-profile-suite-") as td:
+            receipt = Path(td) / "receipt.json"
+            with patch.object(registry, "discovered_count", return_value=(2, "")) as discover, \
+                 patch.object(registry, "_run", return_value=(0, "Total: 2\nSkipped: 0\n", 5)) as execute:
+                rc = registry.run_profile("db", REGISTRY_PATH, receipt, "managed-db")
+            self.assertEqual(0, rc)
+            self.assertEqual(1, discover.call_count)
+            self.assertEqual(1, execute.call_count)
+            self.assertEqual("managed-db", discover.call_args.args[0]["id"])
+            saved = json.loads(receipt.read_text())
+            self.assertEqual({"scope": "suite", "suite": "managed-db"}, saved["selection"])
+            self.assertEqual(["managed-db"], [item["id"] for item in saved["suites"]])
+
+    def test_unknown_empty_and_wrong_profile_suite_are_rejected_before_discovery(self):
+        for name in ("not-registered", "", "managed-live"):
+            with self.subTest(name=name), patch.object(registry, "discovered_count") as discover:
+                with self.assertRaisesRegex(registry.RegistryError, "not a single member"):
+                    registry.run_profile("db", REGISTRY_PATH, None, name)
+                discover.assert_not_called()
+
+    def test_cli_rejects_repeated_suite_instead_of_taking_last_value(self):
+        with patch.object(registry, "run_profile") as run:
+            self.assertEqual(2, registry.main(["run", "--profile", "db", "--suite", "native-db",
+                                              "--suite", "native-db"]))
+            run.assert_not_called()
+
+    def test_native_failure_captures_diagnostics_before_leaving_original_failure(self):
+        with tempfile.TemporaryDirectory(prefix="test-profile-native-") as td:
+            receipt = Path(td) / "receipt.json"
+            events = []
+            def execute(*_args):
+                events.append("native-test")
+                return 8, "native regression failed\n", 5
+            def capture(suite):
+                events.append("capture-" + suite["id"])
+                return {"directory": str(Path(td) / "evidence"), "capture_exit_code": 1}
+            with patch.object(registry, "discovered_count", return_value=(6, "")), \
+                 patch.object(registry, "_run", side_effect=execute), \
+                 patch.object(registry, "_capture_native_failure", side_effect=capture):
+                rc = registry.run_profile("db", REGISTRY_PATH, receipt, "native-db")
+            self.assertEqual(1, rc)
+            self.assertEqual(["native-test", "capture-native-db"], events)
+            saved = json.loads(receipt.read_text())
+            self.assertEqual("failed", saved["status"])
+            self.assertEqual(1, saved["suites"][0]["native_diagnostics"]["capture_exit_code"])
+
+    def test_successful_native_suite_does_not_collect_prior_failed_output(self):
+        with tempfile.TemporaryDirectory(prefix="test-profile-native-") as td:
+            with patch.object(registry, "discovered_count", return_value=(6, "")), \
+                 patch.object(registry, "_run", return_value=(0, "", 5)), \
+                 patch.object(registry, "_capture_native_failure") as capture:
+                rc = registry.run_profile("db", REGISTRY_PATH, Path(td) / "receipt.json", "native-db")
+            self.assertEqual(0, rc)
+            capture.assert_not_called()
+
+    def test_native_failure_hook_runs_real_collector_and_preserves_exact_diff(self):
+        with tempfile.TemporaryDirectory(prefix="test-profile-native-capture-") as td:
+            root = Path(td)
+            (root / "scripts").mkdir()
+            (root / "scripts/capture-native-regression.py").write_bytes(
+                (ROOT / "scripts/capture-native-regression.py").read_bytes())
+            relative = "extension/laplace_substrate/tests/regress_output/regression.diffs"
+            source = root / "build" / relative
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"+ERROR: fixture exercises the real collector\n")
+            with patch.object(registry, "ROOT", root), patch.dict(
+                os.environ, {"LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY": str(root / "evidence")}
+            ):
+                result = registry._capture_native_failure({"id": "native-db"})
+            self.assertEqual(0, result["capture_exit_code"])
+            receipts = list((root / "evidence/current").glob("capture-*/receipt.json"))
+            self.assertEqual(1, len(receipts))
+            self.assertEqual(source.read_bytes(), (receipts[0].parent / relative).read_bytes())
 
     def test_registry_accounts_for_all_executable_profiles(self):
         suites = registry.validate_document(self.document())

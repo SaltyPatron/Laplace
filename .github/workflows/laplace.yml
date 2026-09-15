@@ -118,6 +118,9 @@ jobs:
                 continue
               fi
               case "$path" in
+                scripts/product-ci.sh|scripts/pr-proof.sh|scripts/pr-db-proof.sh|scripts/ci-session.py|scripts/test-profile-registry.py)
+                  fast=0
+                  ;;
                 scripts/prove-*|scripts/test-live-recursive-proof-gate.py)
                   verify_recursive=1
                   ;;
@@ -153,51 +156,184 @@ jobs:
           flock --exclusive --close /build/laplace/work/host-resource.lock \
             python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"
 
-      - name: Run full product lifecycle
-        id: full_product
+      - name: Reserve host for product phases
+        id: product_session
         if: env.LAPLACE_FAST_ONLY != '1'
         env:
           LAPLACE_OPERATIONAL_PROOF_DIRECTORY: /build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}
+          LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product
         run: |
           set -euo pipefail
           umask 0002
+          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
           mkdir -p /build/laplace/work
-          # Hold the host lock through source builds, activation and verification;
-          # release it before the dependent chess measurement job can start.
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            bash scripts/product-ci.sh "$LAPLACE_STAGE"
+          directory="/build/laplace/work/ci-sessions/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product"
+          mkdir -p "$(dirname "$directory")"
+          echo "LAPLACE_PHASE_CHECKOUT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "LAPLACE_CI_SESSION_DIRECTORY=$directory" >> "$GITHUB_ENV"
+          python3 scripts/ci-session.py start --directory "$directory" \
+            --lock /build/laplace/work/host-resource.lock --checkout "$GITHUB_WORKSPACE" \
+            --kind product --stage "$LAPLACE_STAGE"
 
-      # A source-only run can collect a preceding run's still-retained failure.
-      # These are raw diagnostic files, not a claim of exact-head acceptance.
-      - name: Upload retained native regression failure details
-        if: always()
+      - name: Retain native regression baseline before build
+        continue-on-error: true
+        id: product_native_baseline
+        if: env.LAPLACE_FAST_ONLY != '1'
+        run: |
+          python3 scripts/capture-native-regression.py --repo-root "$GITHUB_WORKSPACE" \
+            --build-root "$(readlink -f build)" \
+            --output-dir "/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product/baseline" \
+            --label retained-baseline --print-diffs
+
+      - name: Upload retained native baseline before build
+        continue-on-error: true
+        if: always() && steps.product_native_baseline.outcome != 'skipped'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: laplace-retained-native-regression-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            build/extension/*/tests/regress_output/regression.diffs
-            build/extension/*/tests/regress_output/regression.out
-            build/extension/*/tests/regress_output/results/generation_corpus.out
-            build/Testing/Temporary/LastTest.log
+          name: laplace-native-baseline-${{ github.run_id }}-${{ github.run_attempt }}-product
+          path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product/baseline/
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Retain current generation repair resource receipts
-        if: always()
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          python3 scripts/collect-legacy-repair-evidence.py \
-            --expected-source "$TARGET_SHA" \
-            --output "/build/laplace/work/legacy-repair-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+      - name: Check source and policy
+        id: product_policy
+        if: contains(env.LAPLACE_CI_PHASES, '|policy|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase policy
 
-      - name: Upload current generation repair metadata
-        if: always()
-        # actions/upload-artifact v4.6.2
+      - name: Resolve build dependencies
+        id: product_dependencies
+        if: contains(env.LAPLACE_CI_PHASES, '|dependencies|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase dependencies
+
+      - name: Build native and managed artifacts
+        id: product_build
+        if: contains(env.LAPLACE_CI_PHASES, '|build|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase build
+
+      - name: Test native engine
+        id: product_native_dev
+        if: contains(env.LAPLACE_CI_PHASES, '|native-dev|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-dev
+
+      - name: Test managed code
+        id: product_managed_dev
+        if: contains(env.LAPLACE_CI_PHASES, '|managed-dev|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase managed-dev
+
+      - name: Test UCI runtime
+        id: product_uci_dev
+        if: contains(env.LAPLACE_CI_PHASES, '|uci-dev|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase uci-dev
+
+      - name: Test browser product
+        id: product_browser_dev
+        if: contains(env.LAPLACE_CI_PHASES, '|browser-dev|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase browser-dev
+
+      - name: Check application release
+        id: product_application_check
+        if: contains(env.LAPLACE_CI_PHASES, '|application-check|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase application-check
+
+      - name: Install native artifacts
+        id: product_native_install
+        if: contains(env.LAPLACE_CI_PHASES, '|native-install|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-install
+
+      - name: Migrate and reconcile installed database
+        id: product_database_maintenance
+        if: contains(env.LAPLACE_CI_PHASES, '|database-maintenance|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase database-maintenance
+
+      - name: Restore requested foundation
+        id: product_foundation
+        if: contains(env.LAPLACE_CI_PHASES, '|foundation|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase foundation
+
+      - name: Admit operational memory
+        id: product_operational_seed
+        if: contains(env.LAPLACE_CI_PHASES, '|operational-seed|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase operational-seed
+
+      - name: Publish applications
+        id: product_publish
+        if: contains(env.LAPLACE_CI_PHASES, '|publish|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase publish
+
+      - name: Verify ordinary operational execution
+        id: product_operational_execution
+        if: contains(env.LAPLACE_CI_PHASES, '|operational-execution|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase operational-execution
+
+      - name: Verify database health
+        id: product_db_health
+        if: contains(env.LAPLACE_CI_PHASES, '|db-health|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase db-health
+
+      - name: Test native PostgreSQL extensions
+        id: product_native_db
+        if: contains(env.LAPLACE_CI_PHASES, '|native-db|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-db
+
+      - name: Test managed database integration
+        id: product_managed_db
+        if: contains(env.LAPLACE_CI_PHASES, '|managed-db|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase managed-db
+
+      - name: Prove live recursive substrate
+        id: product_live_floor
+        if: contains(env.LAPLACE_CI_PHASES, '|live-floor|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase live-floor
+
+      - name: Verify live API endpoints
+        id: product_live_api
+        if: contains(env.LAPLACE_CI_PHASES, '|live-api|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase live-api
+
+      - name: Test live product behavior
+        id: product_managed_live
+        if: contains(env.LAPLACE_CI_PHASES, '|managed-live|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase managed-live
+
+      - name: Evaluate witnessed generation
+        id: product_generation_eval
+        if: contains(env.LAPLACE_CI_PHASES, '|generation-eval|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase generation-eval
+
+      - name: Measure requested generation performance
+        id: product_performance
+        if: contains(env.LAPLACE_CI_PHASES, '|performance|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase performance
+
+      - name: Release product host reservation
+        if: always() && steps.product_session.outcome == 'success'
+        run: python3 scripts/ci-session.py stop --directory "$LAPLACE_CI_SESSION_DIRECTORY"
+
+      - name: Upload lifecycle phase results
+        if: always() && steps.product_session.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: laplace-legacy-repair-metadata-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/work/legacy-repair-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+          name: laplace-phases-${{ github.run_id }}-${{ github.run_attempt }}-product
+          path: |
+            ${{ env.LAPLACE_CI_SESSION_DIRECTORY }}/session.json
+            ${{ env.LAPLACE_CI_SESSION_DIRECTORY }}/supervisor.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Retain native regression results
+        if: always()
+        run: |
+          python3 scripts/capture-native-regression.py --repo-root "$GITHUB_WORKSPACE" \
+            --build-root "$(readlink -f build)" \
+            --output-dir "/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product/current" \
+            --label current --print-diffs
+
+      - name: Upload native regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-native-regression-${{ github.run_id }}-${{ github.run_attempt }}-product
+          path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product/
           if-no-files-found: error
           retention-days: 30
 
@@ -281,7 +417,7 @@ jobs:
           BASH
 
       - name: Upload operational seed and execution receipts
-        if: always() && steps.full_product.outcome != 'skipped' && env.LAPLACE_STAGE == 'all'
+        if: always() && steps.product_session.outcome != 'skipped' && env.LAPLACE_STAGE == 'all'
         # actions/upload-artifact v4.6.2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -299,7 +435,7 @@ jobs:
           printf 'ready=true\n' >> "$GITHUB_OUTPUT"
           printf 'source_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Retain bounded live recursive proof counterexamples
+      - name: Retain existing live recursive proof receipts
         if: always()
         env:
           TARGET_SHA: ${{ github.sha }}
@@ -317,10 +453,6 @@ jobs:
             args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
           fi
           python3 scripts/collect-recursive-proof-evidence.py "${args[@]}"
-          # Bounded READ ONLY inspection has its own statement/lock deadlines.
-          # Do not queue a no-example result behind unrelated host-wide work.
-          python3 scripts/inspect-recursive-proof-counterexamples.py \
-            --collection "$evidence" --expected-source "$TARGET_SHA"
 
       - name: Upload retained live recursive proof diagnostics
         if: always()
