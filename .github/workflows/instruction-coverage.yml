@@ -1,118 +1,149 @@
-name: Read instruction relation coverage
+name: Compose authored instruction identities
 on:
   push:
     branches: [ops/instruction-coverage-20260915]
 permissions:
   contents: read
 jobs:
-  coverage:
+  authoring:
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 3
+    timeout-minutes: 6
     steps:
-      - name: Read bounded current relation and provenance coverage
+      - name: Compose original annotations with the installed native source reader
         shell: bash
         run: |
           set -euo pipefail
           umask 0077
-          evidence="/build/laplace/work/instruction-coverage/${GITHUB_RUN_ID}"
+          evidence="/build/laplace/work/instruction-authoring/${GITHUB_RUN_ID}"
           mkdir -p "$evidence"
-          echo "INSTRUCTION_COVERAGE_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          cat > "$evidence/relation-coverage.sql" <<'SQL'
-          BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
-          SET LOCAL statement_timeout='45s';
-          SET LOCAL lock_timeout='5s';
-          SET LOCAL bytea_output='hex';
-          WITH
-          surface(label,id) AS MATERIALIZED (
-           SELECT x,laplace.content_id(convert_to(x,'UTF8'))
-           FROM unnest(ARRAY['glacier','pawn','chess','water','Water']) x
-          ),
-          roster AS MATERIALIZED (
-           SELECT laplace.source_id('WordNetDecomposer') AS wordnet,
-           laplace.relation_type_id('HAS_SENSE') AS has_sense,
-           laplace.relation_type_id('IS_SENSE_OF') AS sense_of,
-           ARRAY[laplace.relation_type_id('HAS_DEFINITION'),laplace.relation_type_id('HAS_DOMAIN_TOPIC'),
-           laplace.relation_type_id('HAS_CONTEXT'),laplace.relation_type_id('HAS_SUBSTANCE'),
-           laplace.relation_type_id('MADE_UP_OF')] AS fact_types
-          ),
-          variants AS MATERIALIZED (
-           SELECT * FROM lexical.word_case_variants_batch(ARRAY(SELECT id FROM surface)) LIMIT 65
-          ),
-          roots AS MATERIALIZED (
-           SELECT id FROM surface UNION SELECT variant_id FROM variants
-          ),
-          senses AS MATERIALIZED (
-           SELECT a.* FROM laplace.attestations a
-           WHERE a.subject_id=ANY(ARRAY(SELECT id FROM roots))
-           AND a.source_id=(SELECT wordnet FROM roster) AND a.type_id=(SELECT has_sense FROM roster)
-           ORDER BY id LIMIT 129
-          ),
-          synsets AS MATERIALIZED (
-           SELECT a.* FROM laplace.attestations a
-           WHERE a.subject_id=ANY(ARRAY(SELECT object_id FROM senses WHERE object_id IS NOT NULL))
-           AND a.source_id=(SELECT wordnet FROM roster) AND a.type_id=(SELECT sense_of FROM roster)
-           ORDER BY id LIMIT 129
-          ),
-          inputs AS MATERIALIZED (
-           SELECT id FROM roots UNION SELECT object_id FROM senses WHERE object_id IS NOT NULL
-           UNION SELECT object_id FROM synsets WHERE object_id IS NOT NULL
-          ),
-          facts AS MATERIALIZED (
-           SELECT a.* FROM laplace.attestations a
-           WHERE a.subject_id=ANY(ARRAY(SELECT id FROM inputs)) AND a.type_id=ANY((SELECT fact_types FROM roster)::bytea[])
-           ORDER BY id LIMIT 257
-          ),
-          evidence AS MATERIALIZED (
-           SELECT 'sense'::text AS lane,a.* FROM senses a UNION ALL SELECT 'synset',a.* FROM synsets a
-           UNION ALL SELECT 'fact',a.* FROM facts a
-          ),
-          records AS MATERIALIZED (
-           SELECT e.*,to_jsonb(c) AS standing,consensus.walk_edge_weight(c.rating,c.rd)>0 AS positive_standing
-           FROM evidence e LEFT JOIN laplace.consensus c
-           ON c.subject_id=e.subject_id AND c.type_id=e.type_id AND c.object_id=e.object_id
-          ),
-          ids AS MATERIALIZED (
-           SELECT array_agg(id ORDER BY id) AS ids FROM (
-           SELECT id FROM inputs UNION SELECT object_id FROM facts WHERE object_id IS NOT NULL) x
-          ),
-          rendered AS MATERIALIZED (SELECT ids,realize.batch(ids) AS surfaces FROM ids),
-          counts AS (
-           SELECT (SELECT count(*) FROM variants) AS variants,(SELECT count(*) FROM senses) AS senses,
-           (SELECT count(*) FROM synsets) AS synsets,(SELECT count(*) FROM facts) AS facts
-          )
-          SELECT jsonb_build_object(
-           'schema','laplace.lexical-instruction-coverage/v1','database',current_database(),
-           'linked_core_version',laplace.laplace_substrate_version(),
-           'server_version',current_setting('server_version'),
-           'snapshot',pg_current_snapshot()::text,'observed_at',transaction_timestamp(),
-           'read_only',current_setting('transaction_read_only'),
-           'extensions',(SELECT jsonb_object_agg(extname,extversion) FROM pg_extension WHERE extname IN ('laplace_geom','laplace_substrate')),
-           'roster',(SELECT to_jsonb(x) FROM roster x),
-           'surfaces',(SELECT jsonb_agg(to_jsonb(x)) FROM surface x),
-           'case_variants',(SELECT jsonb_agg(to_jsonb(x)) FROM variants x),
-           'counts',(SELECT to_jsonb(x) FROM counts x),
-           'complete',(SELECT variants<=64 AND senses<=128 AND synsets<=128 AND facts<=256 FROM counts),
-           'evidence',(SELECT jsonb_agg(to_jsonb(x) ORDER BY lane,id) FROM records x),
-           'entities',(SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM laplace.entities e WHERE e.id=ANY((SELECT ids FROM ids)::bytea[])),
-           'realization',(SELECT to_jsonb(x) FROM rendered x));
-          ROLLBACK;
-          SQL
-          sha256sum "$evidence/relation-coverage.sql" > "$evidence/query.sha256"
-          /opt/laplace/pgsql-18/bin/psql --version > "$evidence/postgresql-version.txt"
-          /opt/laplace/pgsql-18/bin/psql -X -q -A -t -v ON_ERROR_STOP=1 \
-            -h /var/run/postgresql -p 5432 -U laplace_admin -d laplace \
-            -f "$evidence/relation-coverage.sql" > "$evidence/relation-coverage.json"
-          python3 - "$evidence/relation-coverage.json" <<'PY'
-          import json,sys
+          cd "$evidence"
+          cat > 'Authoring.csproj' <<'LAPLACE_AUTHORING_INPUT_EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net10.0</TargetFramework>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <Nullable>enable</Nullable>
+            </PropertyGroup>
+            <ItemGroup>
+              <FrameworkReference Include="Microsoft.AspNetCore.App" />
+              <Reference Include="$(LaplacePayload)/*.dll" />
+            </ItemGroup>
+          </Project>
+          LAPLACE_AUTHORING_INPUT_EOF
+          cat > 'Program.cs' <<'LAPLACE_AUTHORING_INPUT_EOF'
+          using System.Reflection;
+          using System.Security.Cryptography;
+          using System.Text.Json;
+          using Laplace.Decomposers.Abstractions;
+          using Laplace.Decomposers.Operational;
+          using Laplace.Decomposers.UD;
+          using Laplace.Engine.Core;
+          using Laplace.SubstrateCRUD;
+          
+          // Authoring only: executes the existing source composer into an in-memory
+          // change. No database connection, writer, source registration, or consensus fold.
+          CodepointPerfcache.LoadDefault();
+          LanguageReference.EnsureLoaded();
+          var output = new List<object>();
+          var reader = typeof(OperationalDecomposer).GetMethod("ReadContractAsync", BindingFlags.Static | BindingFlags.NonPublic)
+              ?? throw new InvalidOperationException("Installed operational source reader is absent.");
+          foreach (string path in args)
+          {
+              string name = Path.GetFileName(path);
+              var task = (Task<GrammarComposeRecord>)reader.Invoke(null,
+                  new object?[] { path, "seeds/operational/exemplars/" + name, CancellationToken.None, null, null })!;
+              var record = await task;
+              var handler = new GrammarComposeHandler(OperationalSource.SourceId, SourceTrust.SubstrateMandate, null);
+              using var unit = handler.CreateDeferredUnit(record);
+              var builder = new SubstrateChangeBuilder(OperationalSource.SourceId, "source-authoring");
+              Hash128 file = unit.DrainInto(builder, SourceTrust.SubstrateMandate, null);
+              handler.WalkWitness(record, file, builder, unit);
+              var change = builder.Build();
+              try
+              {
+                  var parseClaim = change.Attestations.Single(x => x.TypeId == RelationTypeRegistry.Resolve("HAS_PARSE").Id);
+                  var structure = change.Physicalities.Single(x => x.EntityId == parseClaim.ObjectId && x.Type == PhysicalityType.ParseStructure);
+                  var flat = Trajectory.Constituents(structure.TrajectoryXyzm!);
+                  if (!UdParseStructure.TryDecode(flat, out var parse) || parse is null)
+                      throw new InvalidOperationException("Native source composition did not produce a complete UD structure.");
+                  if (Hash128.Merkle(EntityTier.Document, flat) != structure.EntityId)
+                      throw new InvalidOperationException("Source structure identity does not match its constituents.");
+                  output.Add(new {
+                      path = name, sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(),
+                      file_id = Hex(file), parse_id = Hex(structure.EntityId), language_id = Hex(parse.LanguageId),
+                      root_id = Hex(parse.SentenceId),
+                      tokens = parse.Tokens.Select((token, index) => new {
+                          ordinal = index + 1, token_ref_id = Hex(token.RefId), form_id = Hex(token.FormId),
+                          lemma_id = Hex(token.LemmaId), type_id = Hex(token.UposId) }).ToArray()
+                  });
+              }
+              finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+          }
+          Console.WriteLine(JsonSerializer.Serialize(new {
+              schema = "laplace.operational-source-authoring/v1", scope = "composition-only-no-admission",
+              managed = new[] { typeof(OperationalDecomposer).Assembly, typeof(Hash128).Assembly, typeof(SubstrateChangeBuilder).Assembly }
+                  .Select(assembly => new { path = assembly.Location, sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(assembly.Location))).ToLowerInvariant() }),
+              loaded_native = System.Diagnostics.Process.GetCurrentProcess().Modules.Cast<System.Diagnostics.ProcessModule>()
+                  .Where(module => Path.GetFileName(module.FileName).StartsWith("liblaplace", StringComparison.Ordinal))
+                  .Select(module => module.FileName).Distinct().Select(path => new {
+                      path, sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant() }),
+              t0 = new { path = LaplaceInstall.ResolveT0Perfcache(),
+                  sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(LaplaceInstall.ResolveT0Perfcache()))).ToLowerInvariant() },
+              files = output
+          }));
+          static string Hex(Hash128 id) => Convert.ToHexString(id.ToBytes()).ToLowerInvariant();
+          LAPLACE_AUTHORING_INPUT_EOF
+          cat > 'en_definition_question.conllu' <<'LAPLACE_AUTHORING_INPUT_EOF'
+          # This is an authored Laplace operational annotation, not an upstream UD corpus observation.
+          # Token 4 is the prospective variable occurrence. This annotation declares no task or answer.
+          # sent_id = laplace-operational-definition-question-telescope-v1
+          # text = What is a telescope?
+          1	What	what	PRON	_	PronType=Int	0	root	_	_
+          2	is	be	AUX	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	1	cop	_	_
+          3	a	a	DET	_	Definite=Ind|PronType=Art	4	det	_	_
+          4	telescope	telescope	NOUN	_	Number=Sing	1	nsubj	_	SpaceAfter=No
+          5	?	?	PUNCT	_	_	1	punct	_	_
+          
+          LAPLACE_AUTHORING_INPUT_EOF
+          cat > 'en_context_definition.conllu' <<'LAPLACE_AUTHORING_INPUT_EOF'
+          # This is an authored Laplace operational annotation, not an upstream UD corpus observation.
+          # Tokens 4 and 6 are prospective subject and context variables. No task, fact or answer is declared here.
+          # sent_id = laplace-operational-context-definition-rook-shogi-v1
+          # text = What is a rook in shogi?
+          1	What	what	PRON	_	PronType=Int	0	root	_	_
+          2	is	be	AUX	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	1	cop	_	_
+          3	a	a	DET	_	Definite=Ind|PronType=Art	4	det	_	_
+          4	rook	rook	NOUN	_	Number=Sing	1	nsubj	_	_
+          5	in	in	ADP	_	_	6	case	_	_
+          6	shogi	shogi	NOUN	_	Number=Sing	4	nmod	_	SpaceAfter=No
+          7	?	?	PUNCT	_	_	1	punct	_	_
+          
+          LAPLACE_AUTHORING_INPUT_EOF
+          sha256sum Authoring.csproj Program.cs en_definition_question.conllu en_context_definition.conllu > inputs.sha256
+          dotnet --version > dotnet-version.txt
+          timeout 180s dotnet build Authoring.csproj -m:1 -c Release -p:LaplacePayload=/opt/laplace/app --nologo > build.log 2>&1
+          LD_LIBRARY_PATH="/opt/laplace/app:/opt/laplace/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" timeout 120s dotnet bin/Release/net10.0/Authoring.dll en_definition_question.conllu en_context_definition.conllu > authoring.json 2> authoring.stderr
+          python3 - <<'PY'
+          import json
           from pathlib import Path
-          p=Path(sys.argv[1]); d=json.loads(p.read_bytes())
-          print(json.dumps({"bytes":p.stat().st_size,"counts":d["counts"],"complete":d["complete"]}))
+          p=Path("authoring.json")
+          d=json.loads(p.read_bytes())
+          print(json.dumps({"scope":d["scope"],"files":len(d["files"]),"loaded_native":len(d["loaded_native"]),"bytes":p.stat().st_size}))
           PY
-      - name: Retain actual read-only results
+      - name: Retain native authoring inputs, identities and output
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: instruction-coverage-${{ github.run_id }}
-          path: /build/laplace/work/instruction-coverage/${{ github.run_id }}/
+          name: instruction-authoring-${{ github.run_id }}
+          path: |
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.csproj
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.cs
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.conllu
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.json
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.sha256
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.log
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.txt
+            /build/laplace/work/instruction-authoring/${{ github.run_id }}/*.stderr
           if-no-files-found: warn
           retention-days: 30
