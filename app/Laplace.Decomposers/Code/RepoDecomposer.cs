@@ -60,8 +60,8 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
             verifiedRepository.VerifyUnchanged();
             ProvenanceRoot = ContentEmitter.Emit(seed, Encoding.UTF8.GetString(verifiedRepository.ProvenanceUtf8), Source)
                 ?? throw new InvalidDataException("Git provenance did not produce native content.");
-            seed.AddAttestation(NativeAttestation.Categorical(
-                _repoId, "REFERENCES", ProvenanceRoot.Value, Source, SourceTrust));
+            seed.AddAttestation(NativeAttestation.CategoricalResolved(
+                _repoId, RepoSource.ReferencesTypeId, ProvenanceRoot.Value, Source, null, SourceTrust));
             await context.Writer.ApplyWorkingSetAsync([seed.Build()], token =>
             {
                 token.ThrowIfCancellationRequested();

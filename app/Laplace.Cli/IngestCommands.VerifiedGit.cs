@@ -136,7 +136,7 @@ internal static partial class IngestCommands
         if (!provenance.AsSpan().SequenceEqual(repository.ProvenanceUtf8))
             throw new InvalidDataException("Native provenance reconstruction differs from the verified Git/build observation.");
         var provenanceEvidence = await NpgsqlConsensusCell.ReadAsync(ds, decomposer.RepositoryId,
-            RelationTypeRegistry.Resolve("REFERENCES").Id, provenanceRoot)
+            RepoSource.ReferencesTypeId, provenanceRoot)
             ?? throw new InvalidDataException("Repository-to-provenance relation is absent from the native consensus readback.");
         if (provenanceEvidence.WitnessCount < 1)
             throw new InvalidDataException("Repository provenance has no admitted witness.");
