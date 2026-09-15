@@ -1,6 +1,9 @@
 -- Reusable task shapes bind new semantic IDs through complete witnessed parses.
 -- Fixture setup supplies source records; ordinary native forward_program executes.
 \set ECHO none
+NOTICE:  task shapes: v1 and v2 witnessed-semantic retain same-type Word lemma ambiguity at hops 2 and fanout 8
+NOTICE:  task shapes: v2 current-form selects the original Word and reads changed facts without embedded answers or current HAS_PARSE
+NOTICE:  task shapes: schema filtering excludes eleven non-UD carriers before admission; nine eligible parses exhaust fanout 8
 NOTICE:  task shapes: ordinary native forward program binds a new Unicode request and semantic input; result changes alter output
 NOTICE:  task shapes: complete source and context testimony plus declared semantic input types are required
 NOTICE:  task shapes: quote boundaries, polarity, dependency roles and incomplete fanout cannot be discarded

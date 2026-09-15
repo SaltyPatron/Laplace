@@ -25,6 +25,9 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 PROMPT = "define glacier"
 SCHEMA = "laplace/task-shape/relation-read/token-slots/v1"
+SCHEMA_V2 = "laplace/task-shape/relation-read/token-slots/v2"
+CURRENT_FORM = "laplace/task-shape/binding/current-form/v1"
+WITNESSED_SEMANTIC = "laplace/task-shape/binding/witnessed-semantic/v1"
 MODEL = "laplace-converse-001"
 MAX_BYTES = 4 << 20
 WITNESS_LIMIT = 32
@@ -66,26 +69,132 @@ def selected_files(shape_path: Path, exemplar_path: Path, root: Path = ROOT,
         require(selected.get(relative) == payload, "task artifact is not the exact declared product bundle selection")
         files[kind] = {"relative_path": relative, "payload": payload,
                        "sha256": hashlib.sha256(payload).hexdigest()}
-    shape = json.loads(files["shape"]["payload"])
-    if (set(shape) != {"schema", "exemplar_parse_id", "predicate_id", "slots"}
-            or shape["schema"] != SCHEMA or not isinstance(shape["slots"], list)
+    return read_shape_definition(files["shape"]["payload"]), files
+
+
+def read_shape_definition(payload: bytes) -> dict:
+    shape = json.loads(payload)
+    if (not isinstance(shape, dict) or set(shape) != {"schema", "exemplar_parse_id", "predicate_id", "slots"}
+            or shape["schema"] not in {SCHEMA, SCHEMA_V2} or not isinstance(shape["slots"], list)
             or len(shape["slots"]) != 1):
         raise ValueError("this proof requires the one-token default relation-read declaration")
     slot = shape["slots"][0]
-    if set(slot) != {"exemplar_token_ref_id", "accepted_entity_type_id"}:
+    fields = {"exemplar_token_ref_id", "accepted_entity_type_id"}
+    if shape["schema"] == SCHEMA_V2:
+        fields.add("binding_mode_id")
+    if not isinstance(slot, dict) or set(slot) != fields:
         raise ValueError("default slot fields differ from the authored source schema")
     for value in (shape["exemplar_parse_id"], shape["predicate_id"], *slot.values()):
         id_hex(value)
-    return shape, files
+    # Mode identity is checked against native canonical IDs in the readback;
+    # Python does not implement a second canonical hash or accept a label alias.
+    return shape
 
 
-def proof_sql(shape: dict, files: dict, timeout: int, seed_run_id: str) -> str:
+def proof_sql(shape: dict, files: dict, timeout: int, seed_run_id: str,
+              proof_mode: str = "definition", prompt: str = PROMPT, operand: str = "glacier") -> str:
     require(str(uuid.UUID(seed_run_id)) == seed_run_id, "seed run ID must be a canonical UUID")
+    require(proof_mode in {"definition", "direct-relation"}, "unsupported proof evidence mode")
+    require(shape["schema"] in {SCHEMA, SCHEMA_V2}, "unsupported task-shape schema")
     slot = shape["slots"][0]
     binary = lambda value: "decode('" + id_hex(value) + "','hex')"
+    v2 = shape["schema"] == SCHEMA_V2
+    version = 2 if v2 else 1
+    mode_roster = mode_column = mode_hash = mode_flat = schema_column = ""
+    current_ctes = current_report = ""
+    if v2:
+        mode = binary(slot["binding_mode_id"])
+        mode_roster = f"""
+        realize.canonical_id('{CURRENT_FORM}') AS current_form_binding,
+        realize.canonical_id('{WITNESSED_SEMANTIC}') AS witnessed_semantic_binding,
+        realize.canonical_id('{SCHEMA_V2}') AS task_schema_v2,
+        realize.canonical_id('laplace/task-shape/slots-end/v2') AS slots_end_v2,
+"""
+        mode_column, mode_hash, mode_flat = f"{mode} AS binding_mode,", "," + mode, ",s.binding_mode"
+        schema_column = SOURCE.text_sql(SCHEMA_V2) + " AS schema,"
+        if proof_mode == "direct-relation":
+            # Cold readback of the native tree's exact tier-2 cut. Preserve
+            # lower-tier punctuation/atoms and the native Unicode whitespace
+            # decision; no Python tokenization or reconstructed parse is used.
+            current_ctes = f"""
+prompt_nodes AS MATERIALIZED (
+ SELECT * FROM converse.prompt_tree({SOURCE.text_sql(prompt)},true)
+),
+current_forms AS MATERIALIZED (
+ SELECT n.root_id,n.node_index,n.byte_offset,n.byte_length,n.id
+ FROM prompt_nodes n LEFT JOIN prompt_nodes p ON p.node_index=n.parent_index
+ WHERE n.tier<=2 AND (n.parent_index IS NULL OR p.tier>2)
+ AND NOT realize.is_all_whitespace(n.surface)
+ ORDER BY n.byte_offset,n.node_index LIMIT 2049
+),
+"""
+            current_report = """
+ 'current_forms',COALESCE((SELECT jsonb_agg(to_jsonb(f) ORDER BY byte_offset,node_index)
+                         FROM current_forms f),'[]'),
+"""
     expected = ",".join("(" + SOURCE.text_sql(kind) + "," + SOURCE.text_sql(file["relative_path"])
         + f",{len(file['payload'])}::bigint," + SEED.fingerprint_sql(file["payload"]) + ")"
         for kind, file in files.items())
+    # These alternatives describe independent verification evidence. Neither
+    # this choice nor its operands/predicate constrain the native execution.
+    if proof_mode == "definition":
+        require(prompt == PROMPT and operand == "glacier", "definition proof inputs must remain unchanged")
+        operand_expression = "laplace.word_id('glacier')"
+        frontier_forms = "ARRAY[laplace.word_id('define'),laplace.word_id('glacier')]"
+        result_table = "definitions"
+        operand_ctes = f"""
+senses AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a WHERE a.source_id=(SELECT wordnet FROM roster)
+ AND a.type_id=(SELECT has_sense FROM roster) AND a.subject_id=(SELECT operand FROM roster)
+ ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
+),
+synsets AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a WHERE a.source_id=(SELECT wordnet FROM roster)
+ AND a.type_id=(SELECT sense_of FROM roster) AND a.subject_id=ANY(ARRAY(SELECT object_id FROM senses))
+ ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
+),
+definitions AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a WHERE a.source_id=(SELECT wordnet FROM roster)
+ AND a.type_id=(SELECT definition FROM roster) AND a.subject_id=ANY(ARRAY(SELECT object_id FROM synsets))
+ ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
+),
+"""
+        operand_evidence = """
+ UNION ALL SELECT 'sense',a.* FROM senses a UNION ALL SELECT 'synset',a.* FROM synsets a
+ UNION ALL SELECT 'definition',a.* FROM definitions a
+"""
+        operand_entities = "ARRAY(SELECT object_id FROM synsets)"
+        entity_key = "synset_entities"
+    else:
+        require(bool(prompt) and bool(operand), "direct relation proof needs explicit prompt and operand")
+        operand_expression = f"laplace.content_id(convert_to({SOURCE.text_sql(operand)},'UTF8'))"
+        frontier_forms = ("ARRAY(SELECT x.id FROM converse.prompt_tree("
+                          + SOURCE.text_sql(prompt) + ",false) x WHERE x.tier=2)")
+        result_table = "relation_targets"
+        operand_ctes = f"""
+relation_targets AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a
+ WHERE a.subject_id=(SELECT operand FROM roster) AND a.type_id=(SELECT predicate FROM task)
+ ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
+),
+target_senses AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a WHERE a.type_id=(SELECT sense_of FROM roster)
+ AND a.object_id=ANY(ARRAY(SELECT object_id FROM relation_targets))
+ ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
+),
+target_names AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a WHERE a.type_id=(SELECT has_sense FROM roster)
+ AND a.object_id=ANY(ARRAY(SELECT subject_id FROM target_senses))
+ ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
+),
+"""
+        operand_evidence = """
+ UNION ALL SELECT 'relation',a.* FROM relation_targets a
+ UNION ALL SELECT 'target_sense',a.* FROM target_senses a
+ UNION ALL SELECT 'target_name',a.* FROM target_names a
+"""
+        operand_entities = "ARRAY[(SELECT operand FROM roster)]"
+        entity_key = "operand_entities"
     # Fixed, indexed source reads. Extra witnesses are retained and explicitly
     # reject an incomplete proof; limits never select an interpretation.
     return f"""
@@ -96,6 +205,7 @@ SET LOCAL statement_timeout='{timeout}s';
 SET LOCAL lock_timeout='5s';
 SET LOCAL idle_in_transaction_session_timeout='60s';
 WITH
+{current_ctes}
 seed_run AS MATERIALIZED (
  SELECT * FROM laplace.ingest_run_journal WHERE run_id='{seed_run_id}'::uuid
 ),
@@ -111,21 +221,23 @@ roster AS MATERIALIZED (
         laplace.relation_type_id('IS_SENSE_OF') AS sense_of,
         laplace.relation_type_id('HAS_DEFINITION') AS definition,
         laplace.entity_type_id('WordNet_Synset') AS synset_type,
-        laplace.word_id('glacier') AS operand
+        {mode_roster}
+        {operand_expression} AS operand
 ),
 slot AS MATERIALIZED (
  SELECT {binary(slot['exemplar_token_ref_id'])} AS token_ref,
         {binary(slot['accepted_entity_type_id'])} AS accepted_type,
+        {mode_column}
         public.laplace_hash128_merkle(4::smallint, ARRAY[
-          realize.canonical_id('laplace/task-shape/token-slot/v1'),
-          {binary(slot['exemplar_token_ref_id'])},{binary(slot['accepted_entity_type_id'])}]) AS id
+          realize.canonical_id('laplace/task-shape/token-slot/v{version}'),
+          {binary(slot['exemplar_token_ref_id'])},{binary(slot['accepted_entity_type_id'])}{mode_hash}]) AS id
 ),
 declaration AS MATERIALIZED (
- SELECT {binary(shape['exemplar_parse_id'])} AS exemplar,
+ SELECT {schema_column} {binary(shape['exemplar_parse_id'])} AS exemplar,
         {binary(shape['predicate_id'])} AS predicate,
-        ARRAY[realize.canonical_id('{SCHEMA}'),{binary(shape['exemplar_parse_id'])},
-          {binary(shape['predicate_id'])},s.id,s.token_ref,s.accepted_type,
-          realize.canonical_id('laplace/task-shape/slots-end/v1')] AS ids FROM slot s
+        ARRAY[realize.canonical_id('{shape['schema']}'),{binary(shape['exemplar_parse_id'])},
+          {binary(shape['predicate_id'])},s.id,s.token_ref,s.accepted_type{mode_flat},
+          realize.canonical_id('laplace/task-shape/slots-end/v{version}')] AS ids FROM slot s
 ),
 task AS MATERIALIZED (
  SELECT d.*,public.laplace_hash128_merkle(4::smallint,d.ids) AS id FROM declaration d
@@ -172,26 +284,11 @@ containment AS MATERIALIZED (
  AND a.subject_id=ANY(ARRAY(SELECT file_id FROM files WHERE kind='exemplar'))
  AND a.object_id=ANY(ARRAY(SELECT context_id FROM parses)) ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
 ),
-senses AS MATERIALIZED (
- SELECT a.* FROM laplace.attestations a WHERE a.source_id=(SELECT wordnet FROM roster)
- AND a.type_id=(SELECT has_sense FROM roster) AND a.subject_id=laplace.word_id('glacier')
- ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
-),
-synsets AS MATERIALIZED (
- SELECT a.* FROM laplace.attestations a WHERE a.source_id=(SELECT wordnet FROM roster)
- AND a.type_id=(SELECT sense_of FROM roster) AND a.subject_id=ANY(ARRAY(SELECT object_id FROM senses))
- ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
-),
-definitions AS MATERIALIZED (
- SELECT a.* FROM laplace.attestations a WHERE a.source_id=(SELECT wordnet FROM roster)
- AND a.type_id=(SELECT definition FROM roster) AND a.subject_id=ANY(ARRAY(SELECT object_id FROM synsets))
- ORDER BY a.id LIMIT {WITNESS_LIMIT+1}
-),
+{operand_ctes}
 evidence AS MATERIALIZED (
  SELECT 'declaration'::text AS route,a.* FROM declarations a
  UNION ALL SELECT 'parse',a.* FROM parses a UNION ALL SELECT 'containment',a.* FROM containment a
- UNION ALL SELECT 'sense',a.* FROM senses a UNION ALL SELECT 'synset',a.* FROM synsets a
- UNION ALL SELECT 'definition',a.* FROM definitions a
+ {operand_evidence}
 ),
 standing AS MATERIALIZED (
  SELECT e.*,to_jsonb(c) AS pooled_consensus,
@@ -221,17 +318,17 @@ type8_frontier AS MATERIALIZED (
  SELECT p.id,p.entity_id,p.n_constituents FROM laplace.physicalities p
  WHERE p.type=8 AND p.trajectory IS NOT NULL
  AND public.laplace_trajectory_constituent_ids(p.trajectory)
-     && ARRAY[laplace.word_id('define'),laplace.word_id('glacier')]
+     && {frontier_forms}
  LIMIT 9
 ),
 execution AS MATERIALIZED (
- SELECT * FROM generation.forward_program({SOURCE.text_sql(PROMPT)},128,5,0.6,10,
-   laplace.hash128_lo(public.laplace_hash128_blake3(convert_to({SOURCE.text_sql(PROMPT)},'UTF8'))),
+ SELECT * FROM generation.forward_program({SOURCE.text_sql(prompt)},128,5,0.6,10,
+   laplace.hash128_lo(public.laplace_hash128_blake3(convert_to({SOURCE.text_sql(prompt)},'UTF8'))),
    2,8,NULL::bytea[],NULL::bytea[])
 ),
 realization_ids AS MATERIALIZED (
  SELECT array_agg(id ORDER BY id) AS ids FROM (
-   SELECT object_id AS id FROM definitions UNION SELECT entity FROM execution WHERE event='emit'
+   SELECT object_id AS id FROM {result_table} UNION SELECT entity FROM execution WHERE event='emit'
    UNION SELECT sep_entity FROM execution WHERE event='emit' AND sep_entity IS NOT NULL) x
 ),
 rendered AS MATERIALIZED (SELECT ids,realize.batch(ids) AS surfaces FROM realization_ids)
@@ -243,6 +340,7 @@ SELECT jsonb_build_object(
  'seed_run',(SELECT to_jsonb(r) FROM seed_run r),
  'roster',(SELECT to_jsonb(r) FROM roster r),'task',(SELECT to_jsonb(t) FROM task t),
  'slot',(SELECT to_jsonb(s) FROM slot s),'files',(SELECT jsonb_agg(to_jsonb(f) ORDER BY kind) FROM files f),
+ {current_report}
  'witnesses',COALESCE((SELECT jsonb_agg(to_jsonb(s) ORDER BY route,id) FROM standing s),'[]'),
  'witness_counts',(SELECT jsonb_object_agg(route,n) FROM (SELECT route,count(*) AS n FROM evidence GROUP BY route) c),
  'type8_nomination_diagnostic',jsonb_build_object(
@@ -253,8 +351,8 @@ SELECT jsonb_build_object(
     'n_constituents',s.n_constituents,'trajectory_ewkb_hex',s.trajectory_ewkb_hex,
     'canonical_identity',s.entity_id=public.laplace_hash128_merkle(4::smallint,s.ids),
     'constituent_ids',(SELECT jsonb_agg(encode(x,'hex')) FROM unnest(s.ids) x))) FROM structures s),'[]'),
- 'synset_entities',COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM laplace.entities e
-    WHERE e.id=ANY(ARRAY(SELECT object_id FROM synsets))),'[]'),
+ '{entity_key}',COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM laplace.entities e
+    WHERE e.id=ANY({operand_entities})),'[]'),
  'execution',(SELECT jsonb_agg(to_jsonb(g) ORDER BY step,routing_round,event) FROM execution g),
  'realizations',COALESCE((SELECT jsonb_object_agg(encode(u.id,'hex'),r.surfaces[u.ord])
     FROM rendered r CROSS JOIN LATERAL unnest(r.ids) WITH ORDINALITY u(id,ord)),'{{}}'),
@@ -273,20 +371,31 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
-def validate_native(report: dict) -> str:
+def validate_source(report: dict):
+    """Shared exact source admission and applicability proof; no result election."""
     require(report.get("transaction_read_only") == "on", "native proof was not read-only")
     require(not report["current_root_has_invocation"] and not report["current_root_has_parse"],
             "default prompt already has explicit invocation/parse testimony; novelty proof is invalid")
     require(all(type(n) is int and 0 < n <= WITNESS_LIMIT for n in report["witness_counts"].values()),
             "source witness envelope was exceeded")
     roster, task, slot = report["roster"], report["task"], report["slot"]
+    schema = task.get("schema", SCHEMA)
+    require(schema in {SCHEMA, SCHEMA_V2}, "native declaration uses an unsupported task-shape schema")
+    if schema == SCHEMA:
+        require("binding_mode" not in slot, "v1 cannot contain an explicit binding mode")
+    else:
+        require(set(slot) == {"id", "token_ref", "accepted_type", "binding_mode"},
+                "v2 slot readback has missing or unknown fields")
+        require(slot["binding_mode"] in {roster["current_form_binding"], roster["witnessed_semantic_binding"]},
+                "v2 declaration contains an unknown native binding mode")
+        require(task["ids"] == [roster["task_schema_v2"], task["exemplar"], task["predicate"],
+                slot["id"], slot["token_ref"], slot["accepted_type"], slot["binding_mode"], roster["slots_end_v2"]],
+                "v2 admitted slot/mode layout differs from its native declaration identity")
     run = report["seed_run"]
     require(run["source_name"] == "OperationalDecomposer" and run["source_id"] == roster["operational"]
             and run["layer"] == 2 and run["status"] == "ok" and run["evidence_persisted"] is True
             and run["files_done"] == run["files_total"] == SEED.EXPECTED_ARTIFACTS and run["units_failed"] == 0
             and run["ended_at"] and not run["error"], "the exact full operational seed run did not complete")
-    require(task["predicate"] == roster["definition"] and slot["accepted_type"] == roster["synset_type"],
-            "declaration does not request a definition of a typed WordNet synset")
     files = {f["kind"]: f for f in report["files"]}
     require(set(files) == {"shape", "exemplar"}, "missing authored file receipts")
     for file in files.values():
@@ -333,6 +442,35 @@ def validate_native(report: dict) -> str:
     require(parse.get("complete_native_decode") is True, "exemplar did not pass the installed native UD decoder")
     require(any(t["ref_id"] == id_hex(slot["token_ref"]) for t in parse["ud"]["tokens"]),
             "declared slot is absent from the complete exemplar")
+    return positive
+
+
+def completed_emit(report: dict) -> dict:
+    """The one-slot contract completes after one grounded emitted result."""
+    execution = report["execution"]
+    terminals = [r for r in execution if r["event"] in {"complete", "unresolved"}]
+    require(len(terminals) == 1, "native execution did not return exactly one terminal receipt")
+    terminal = terminals[0]
+    require(terminal["event"] == "complete" and terminal["completion"] is True
+            and terminal["disposition"] == "complete" and terminal["remaining_required"] == 0
+            and terminal["required_obligations"] == terminal["satisfied_obligations"]
+            and terminal["required_obligations"] > 0, "native execution left required obligations open")
+    for name in ("root_id", "program_id", "output_fingerprint", "semantic_act_id"):
+        id_hex(terminal[name])
+    require(all(r["root_id"] == terminal["root_id"] and r["program_id"] == terminal["program_id"] for r in execution),
+            "native rows do not belong to one exact root/program")
+    emitted = [r for r in execution if r["event"] == "emit"]
+    require(len(emitted) == terminal["output_count"] == 1,
+            "native one-slot execution did not complete with one emitted result")
+    return emitted[0]
+
+
+def validate_native(report: dict) -> str:
+    """Preserve the original singleton WordNet definition acceptance contract."""
+    positive = validate_source(report)
+    roster, task, slot, witnesses = report["roster"], report["task"], report["slot"], report["witnesses"]
+    require(task["predicate"] == roster["definition"] and slot["accepted_type"] == roster["synset_type"],
+            "declaration does not request a definition of a typed WordNet synset")
     synset_ids = {e["id"] for e in report["synset_entities"] if e["type_id"] == slot["accepted_type"]}
     valid_definitions = set()
     for definition in (w for w in witnesses if w["route"] == "definition"):
@@ -347,34 +485,77 @@ def validate_native(report: dict) -> str:
                     valid_definitions.add(definition["object_id"])
     require(len(valid_definitions) == 1, "WordNet operand does not have one complete, unopposed definition chain")
     expected = next(iter(valid_definitions))
-    execution = report["execution"]
-    terminals = [r for r in execution if r["event"] in {"complete", "unresolved"}]
-    require(len(terminals) == 1, "native execution did not return exactly one terminal receipt")
-    terminal = terminals[0]
-    require(terminal["event"] == "complete" and terminal["completion"] is True
-            and terminal["disposition"] == "complete" and terminal["remaining_required"] == 0
-            and terminal["required_obligations"] == terminal["satisfied_obligations"]
-            and terminal["required_obligations"] > 0, "native execution left required obligations open")
-    for name in ("root_id", "program_id", "output_fingerprint", "semantic_act_id"):
-        id_hex(terminal[name])
-    require(all(r["root_id"] == terminal["root_id"] and r["program_id"] == terminal["program_id"] for r in execution),
-            "native rows do not belong to one exact root/program")
-    emitted = [r for r in execution if r["event"] == "emit"]
-    require(len(emitted) == terminal["output_count"] == 1 and emitted[0]["entity"] == expected,
+    emitted = completed_emit(report)
+    require(emitted["entity"] == expected,
             "native result differs from the source-witnessed WordNet definition")
-    require(emitted[0]["declared_result"] is True and emitted[0]["support_relation"] == roster["definition"],
+    require(emitted["declared_result"] is True and emitted["support_relation"] == roster["definition"],
             "native result lacks the declared relation-read support")
-    require(emitted[0]["support_anchor"] in synset_ids and emitted[0]["support_outbound"] is True
-            and emitted[0]["support_witnesses"] > 0,
+    require(emitted["support_anchor"] in synset_ids and emitted["support_outbound"] is True
+            and emitted["support_witnesses"] > 0,
             "native result does not retain the actual witnessed WordNet operand")
     text = report["realizations"].get(id_hex(expected))
     require(isinstance(text, str) and bool(text.strip()), "native realization of the WordNet result is empty")
     return text
 
 
-def chat_request(session: str) -> dict:
+def validate_direct_native(report: dict) -> dict[str, str]:
+    """Return the entire supported ID→native-text set, never a preferred answer."""
+    positive = validate_source(report)
+    roster, task, slot, witnesses = report["roster"], report["task"], report["slot"], report["witnesses"]
+    entities = report["operand_entities"]
+    require(bool(entities) and all(e["id"] == roster["operand"] and e["type_id"] == slot["accepted_type"]
+                                  for e in entities),
+            "original operand does not have the declared unambiguous entity type")
+    # Query routes retain every source, context and outcome through a limit+1
+    # bound. Missing rows or a saturated route cannot become a smaller oracle.
+    counts = {}
+    for row in witnesses:
+        counts[row["route"]] = counts.get(row["route"], 0) + 1
+    require(counts == report["witness_counts"], "direct relation evidence counts are incomplete")
+    results = [w for w in witnesses if w["route"] == "relation"]
+    require(bool(results) and all(w["subject_id"] == roster["operand"]
+            and w["type_id"] == task["predicate"] for w in results),
+            "direct relation evidence does not address the exact original operand and declared predicate")
+    valid = {w["object_id"] for w in results if w["source_id"] == roster["wordnet"]
+             and positive(roster["operand"], task["predicate"], w["object_id"],
+                          w["source_id"], w["context_id"])}
+    require(bool(valid), "no complete, unopposed WordNet relation target is supported")
+    texts = {}
+    for target in sorted(valid):
+        key = id_hex(target)
+        text = report["realizations"].get(key)
+        require(isinstance(text, str) and bool(text.strip()),
+                "a supported target lacks its complete native realization")
+        texts[key] = text
+    emitted = completed_emit(report)
+    require(emitted["entity"] in valid and emitted["declared_result"] is True
+            and emitted["support_relation"] == task["predicate"]
+            and emitted["support_anchor"] == roster["operand"]
+            and emitted["support_outbound"] is True and emitted["support_witnesses"] > 0,
+            "native emit lacks exact source-supported direct relation provenance")
+    if task.get("schema", SCHEMA) == SCHEMA_V2:
+        parse = next(s for s in report["structures"] if s["parse_id"] == id_hex(task["exemplar"]))
+        tokens, forms = parse["ud"]["tokens"], report["current_forms"]
+        require(1 < len(forms) == len(tokens) <= 2048,
+                "current native occurrence readback is incomplete or exceeds its proof envelope")
+        slots = [i for i, token in enumerate(tokens) if token["ref_id"] == id_hex(slot["token_ref"])]
+        require(len(slots) == 1, "declared token reference does not select one exemplar occurrence")
+        ordering = []
+        for i, form in enumerate(forms):
+            require(form["root_id"] == emitted["root_id"] and form["byte_length"] > 0,
+                    "current native form is not an occurrence of the actual executed root")
+            ordering.append((form["byte_offset"], form["node_index"]))
+            expected = id_hex(roster["operand"]) if i == slots[0] else tokens[i]["form_id"]
+            require(id_hex(form["id"]) == expected,
+                    "current token occurrence differs from its declared invariant or original operand")
+        require(ordering == sorted(ordering) and len(set(ordering)) == len(ordering),
+                "current native token occurrences are not complete distinct ordered positions")
+    return texts
+
+
+def chat_request(session: str, prompt: str = PROMPT) -> dict:
     # No caller task/shape/predicate, output mask, answer, or special execution context.
-    return {"model": MODEL, "messages": [{"role": "user", "content": PROMPT}],
+    return {"model": MODEL, "messages": [{"role": "user", "content": prompt}],
             "session": session, "stream": False}
 
 
@@ -396,7 +577,7 @@ def normal_chat(base: str, request: dict, timeout: int) -> dict:
                 "response": json.loads(payload.decode("utf-8"))}
 
 
-def validate_chat(result: dict, session: str, expected: str) -> None:
+def validate_chat(result: dict, session: str, expected: str | frozenset[str]) -> None:
     require(result["status"] == 200, f"ordinary chat failed with HTTP {result['status']}")
     response = result["response"]
     require(response.get("object") == "chat.completion" and response.get("model") == MODEL,
@@ -407,7 +588,9 @@ def validate_chat(result: dict, session: str, expected: str) -> None:
     require(len(choices) == 1 and choices[0]["message"]["role"] == "assistant"
             and choices[0]["finish_reason"] == "stop" and response["metadata"]["reply_rows"] == 1,
             "ordinary conversation did not complete exactly one response")
-    require(choices[0]["message"]["content"] == expected, "ordinary response differs from native WordNet realization")
+    allowed = {expected} if isinstance(expected, str) else expected
+    require(bool(allowed) and choices[0]["message"]["content"] in allowed,
+            "ordinary response differs from the complete source-supported native realization set")
 
 
 def main() -> int:
@@ -421,11 +604,24 @@ def main() -> int:
     parser.add_argument("--core", type=Path, default=Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace")) / "lib/liblaplace_core.so")
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument("--proof-mode", choices=("definition", "direct-relation"), default="definition",
+                        help="verification evidence route only; never sent to either executor")
+    parser.add_argument("--prompt", help="exact ordinary request, required for direct-relation proof")
+    parser.add_argument("--operand", help="exact original operand surface for direct source readback")
     args = parser.parse_args()
     if not 1 <= args.timeout_seconds <= 600:
         parser.error("timeout-seconds must be within 1..600")
+    if args.proof_mode == "direct-relation":
+        if not args.prompt or not args.operand:
+            parser.error("direct-relation proof requires explicit --prompt and --operand")
+        prompt, operand = args.prompt, args.operand
+    else:
+        if args.prompt is not None or args.operand is not None:
+            parser.error("--prompt and --operand apply only to direct-relation proof")
+        prompt, operand = PROMPT, "glacier"
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
-    report = {"schema": "laplace.operational-task-proof/v1", "disposition": "failed", "prompt": PROMPT,
+    report = {"schema": "laplace.operational-task-proof/v1", "disposition": "failed", "prompt": prompt,
+              "proof_mode": args.proof_mode, "operand_surface": operand,
               "execution_separation": "Native receipt is an independent read-only invocation; HTTP executes a fresh witnessed session. No shared invocation identity is asserted.",
               "native_parameters": {"steps": 128, "max_stride": 5, "spread": 0.6, "top_k": 10,
                   "hops": 2, "fanout": 8, "prior_frontier": None, "output_relation_types": None,
@@ -434,7 +630,7 @@ def main() -> int:
     try:
         shape, files = selected_files(args.shape_file, args.exemplar_file, bundle=args.bundle)
         report["authored_files"] = {k: {n: v for n, v in f.items() if n != "payload"} for k, f in files.items()}
-        sql = proof_sql(shape, files, args.timeout_seconds, args.seed_run_id)
+        sql = proof_sql(shape, files, args.timeout_seconds, args.seed_run_id, args.proof_mode, prompt, operand)
         sql_path = args.receipt.with_suffix(".sql")
         sql_path.write_text(sql, encoding="utf-8")
         report["sql_sha256"] = hashlib.sha256(sql.encode("utf-8")).hexdigest()
@@ -443,10 +639,14 @@ def main() -> int:
         decoder = {"parse_candidates": [s for s in native["structures"] if s["parse_id"] == shape["exemplar_parse_id"]]}
         SOURCE.decode_candidates(decoder, args.core)
         report["decoder"] = {k: decoder[k] for k in ("decoder_path", "decoder_sha256")}
-        expected = validate_native(native)
+        if args.proof_mode == "direct-relation":
+            report["supported_target_realizations"] = validate_direct_native(native)
+            expected = frozenset(report["supported_target_realizations"].values())
+        else:
+            expected = validate_native(native)
         # Preserve the native evidence even if transport fails after the normal
         # endpoint has witnessed the prompt. No failed request is retried here.
-        report["http_request"] = chat_request("operational-proof-" + uuid.uuid4().hex)
+        report["http_request"] = chat_request("operational-proof-" + uuid.uuid4().hex, prompt)
         report["http_base"] = args.base
         report["http_tenant_header"] = os.environ.get("LAPLACE_PROOF_TENANT", "ci")
         report["http_started_at_unix_ns"] = time.time_ns()

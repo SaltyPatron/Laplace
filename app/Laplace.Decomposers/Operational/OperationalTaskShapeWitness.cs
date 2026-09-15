@@ -12,15 +12,21 @@ namespace Laplace.Decomposers.Operational;
 internal sealed class OperationalTaskShapeWitness : IGrammarWitness
 {
     internal const string Schema = "laplace/task-shape/relation-read/token-slots/v1";
+    internal const string SchemaV2 = "laplace/task-shape/relation-read/token-slots/v2";
     internal static readonly OperationalTaskShapeWitness Instance = new();
     internal static readonly Hash128 SchemaId = Hash128.OfCanonical(Schema);
     internal static readonly Hash128 SlotSchemaId = Hash128.OfCanonical("laplace/task-shape/token-slot/v1");
     internal static readonly Hash128 SlotsEndId = Hash128.OfCanonical("laplace/task-shape/slots-end/v1");
+    internal static readonly Hash128 SchemaV2Id = Hash128.OfCanonical(SchemaV2);
+    internal static readonly Hash128 SlotSchemaV2Id = Hash128.OfCanonical("laplace/task-shape/token-slot/v2");
+    internal static readonly Hash128 SlotsEndV2Id = Hash128.OfCanonical("laplace/task-shape/slots-end/v2");
+    internal static readonly Hash128 CurrentFormBindingId = Hash128.OfCanonical("laplace/task-shape/binding/current-form/v1");
+    internal static readonly Hash128 WitnessedSemanticBindingId = Hash128.OfCanonical("laplace/task-shape/binding/witnessed-semantic/v1");
 
     public string ModalityId => "json";
 
-    internal sealed record Slot(Hash128 Id, Hash128 TokenRefId, Hash128 AcceptedTypeId);
-    internal sealed record Definition(Hash128 Id, Hash128 ExemplarParseId,
+    internal sealed record Slot(Hash128 Id, Hash128 TokenRefId, Hash128 AcceptedTypeId, Hash128 BindingModeId);
+    internal sealed record Definition(Hash128 Id, string Schema, Hash128 ExemplarParseId,
         Hash128 PredicateId, Slot[] Slots, Hash128[] Constituents);
 
     internal static Definition Read(GrammarAst ast, byte[] utf8)
@@ -54,37 +60,45 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
         using var document = JsonAstDocument.FromBorrowedAst(ast, utf8);
         var root = document.Root;
         var fields = ReadFields(root, "schema", "exemplar_parse_id", "predicate_id", "slots");
-        if (fields["schema"].AsString() != Schema)
+        string? schema = fields["schema"].AsString();
+        if (schema is not (Schema or SchemaV2))
             throw new InvalidDataException("Unsupported operational task-shape schema.");
-        Hash128 exemplar = ReadId(fields, "exemplar_parse_id");
-        Hash128 predicate = ReadId(fields, "predicate_id");
+        bool version2 = schema == SchemaV2;
+        Hash128 exemplar = ReadId(fields, "exemplar_parse_id", version2);
+        Hash128 predicate = ReadId(fields, "predicate_id", version2);
         JsonAstCursor slotArray = fields["slots"];
         if (!slotArray.IsArray)
             throw new InvalidDataException("Task-shape slots must be an ordered array.");
 
         var slots = new List<Slot>();
         var refs = new HashSet<Hash128>();
-        var flat = new List<Hash128> { SchemaId, exemplar, predicate };
+        var flat = new List<Hash128> { version2 ? SchemaV2Id : SchemaId, exemplar, predicate };
         foreach (var item in slotArray.Items())
         {
-            var slotFields = ReadFields(item, "exemplar_token_ref_id", "accepted_entity_type_id");
-            Hash128 token = ReadId(slotFields, "exemplar_token_ref_id");
-            Hash128 type = ReadId(slotFields, "accepted_entity_type_id");
+            var slotFields = version2
+                ? ReadFields(item, "exemplar_token_ref_id", "accepted_entity_type_id", "binding_mode_id")
+                : ReadFields(item, "exemplar_token_ref_id", "accepted_entity_type_id");
+            Hash128 token = ReadId(slotFields, "exemplar_token_ref_id", version2);
+            Hash128 type = ReadId(slotFields, "accepted_entity_type_id", version2);
+            Hash128 mode = version2 ? ReadId(slotFields, "binding_mode_id", version2, bindingMode: true)
+                : WitnessedSemanticBindingId;
             if (!refs.Add(token))
                 throw new InvalidDataException("A task shape cannot declare the same token slot twice.");
-            Hash128 slotId = Hash128.Merkle(EntityTier.Document, [SlotSchemaId, token, type]);
-            RequireExternalIdentity(slotId, "computed slot");
-            slots.Add(new Slot(slotId, token, type));
+            Hash128 slotId = Hash128.Merkle(EntityTier.Document, version2
+                ? [SlotSchemaV2Id, token, type, mode] : [SlotSchemaId, token, type]);
+            RequireExternalIdentity(slotId, "computed slot", version2);
+            slots.Add(new Slot(slotId, token, type, mode));
             flat.Add(slotId);
             flat.Add(token);
             flat.Add(type);
+            if (version2) flat.Add(mode);
         }
         if (slots.Count == 0)
             throw new InvalidDataException("A reusable token-slot shape requires at least one declared slot.");
-        flat.Add(SlotsEndId);
+        flat.Add(version2 ? SlotsEndV2Id : SlotsEndId);
         Hash128[] constituents = flat.ToArray();
         return new Definition(Hash128.Merkle(EntityTier.Document, constituents),
-            exemplar, predicate, slots.ToArray(), constituents);
+            schema, exemplar, predicate, slots.ToArray(), constituents);
     }
 
     public void WalkRow(in GrammarComposeContext composed, in RowContext ctx,
@@ -95,7 +109,11 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
             ? sourceFile
             : throw new InvalidDataException("Task-shape testimony requires an admitted source-file context.");
         Hash128 source = OperationalSource.SourceId;
-        foreach (Hash128 marker in new[] { SchemaId, SlotSchemaId, SlotsEndId })
+        bool version2 = shape.Schema == SchemaV2;
+        foreach (Hash128 marker in version2
+            ? new[] { SchemaV2Id, SlotSchemaV2Id, SlotsEndV2Id }
+                .Concat(shape.Slots.Select(slot => slot.BindingModeId)).Distinct()
+            : new[] { SchemaId, SlotSchemaId, SlotsEndId })
             builder.AddEntity(marker, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
         builder.AddEntity(shape.Id, EntityTier.Document, EntityTypeRegistry.CodeConcept, source);
         foreach (Slot slot in shape.Slots)
@@ -115,7 +133,7 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
             using (var writer = new System.Text.Json.Utf8JsonWriter(canonical))
             {
                 writer.WriteStartObject();
-                writer.WriteString("schema", Schema);
+                writer.WriteString("schema", shape.Schema);
                 writer.WriteString("exemplar_parse_id", Hex(shape.ExemplarParseId));
                 writer.WriteString("predicate_id", Hex(shape.PredicateId));
                 writer.WriteStartArray("slots");
@@ -124,6 +142,7 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
                     writer.WriteStartObject();
                     writer.WriteString("exemplar_token_ref_id", Hex(slot.TokenRefId));
                     writer.WriteString("accepted_entity_type_id", Hex(slot.AcceptedTypeId));
+                    if (version2) writer.WriteString("binding_mode_id", Hex(slot.BindingModeId));
                     writer.WriteEndObject();
                 }
                 writer.WriteEndArray();
@@ -154,7 +173,8 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
         static string Hex(Hash128 id) => Convert.ToHexString(id.ToBytes()).ToLowerInvariant();
     }
 
-    private static Hash128 ReadId(IReadOnlyDictionary<string, JsonAstCursor> fields, string key)
+    private static Hash128 ReadId(IReadOnlyDictionary<string, JsonAstCursor> fields, string key,
+        bool version2, bool bindingMode = false)
     {
         string? value = fields[key].AsString();
         if (value is not { Length: 32 })
@@ -166,14 +186,22 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
             throw new InvalidDataException($"Task-shape field '{key}' is not a hexadecimal ID.", error);
         }
         Hash128 id = Hash128.FromBytes(bytes);
-        RequireExternalIdentity(id, key);
+        if (bindingMode)
+        {
+            if (id != CurrentFormBindingId && id != WitnessedSemanticBindingId)
+                throw new InvalidDataException("Unsupported operational task-shape binding mode.");
+        }
+        else RequireExternalIdentity(id, key, version2);
         return id;
     }
 
-    private static void RequireExternalIdentity(Hash128 id, string key)
+    private static void RequireExternalIdentity(Hash128 id, string key, bool version2)
     {
         if (id == default || id == SchemaId || id == SlotSchemaId || id == SlotsEndId)
             throw new InvalidDataException($"Task-shape field '{key}' cannot use an empty or reserved schema ID.");
+        if (version2 && (id == SchemaV2Id || id == SlotSchemaV2Id || id == SlotsEndV2Id
+            || id == CurrentFormBindingId || id == WitnessedSemanticBindingId))
+            throw new InvalidDataException($"Task-shape field '{key}' cannot use a reserved schema or binding ID.");
     }
 
     private static Dictionary<string, JsonAstCursor> ReadFields(JsonAstCursor value, params string[] fields)

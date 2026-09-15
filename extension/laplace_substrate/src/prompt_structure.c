@@ -343,8 +343,12 @@ laplace_prompt_structure_couple(const LaplacePromptInput *input,
     }
     pfree(root);
     ArrayType *forms = hash128_array_from_ids(read.forms, read.form_count);
-    bool complete = laplace_typed_membership_read(forms, true, 8, fanout,
-                                                  receive_parse, &read);
+    laplace_ud_markers_t parse_markers;
+    laplace_ud_markers_init(&parse_markers);
+    ArrayType *required = hash128_array_from_ids(&parse_markers.schema_v1, 1);
+    bool complete = laplace_typed_membership_read_with_required(forms, true,
+        required, 8, fanout, receive_parse, &read);
+    pfree(required);
     state->budget_exhausted = state->budget_exhausted || !complete;
     if (state->count > 0)
     {

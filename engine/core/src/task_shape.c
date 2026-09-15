@@ -15,32 +15,57 @@ void laplace_task_shape_markers_init(laplace_task_shape_markers_t *out) {
     hash128_blake3_str("laplace/task-shape/slots-end/v1", &out->end);
 }
 
+void laplace_task_shape_markers_extended_init(laplace_task_shape_markers_extended_t *out) {
+    laplace_task_shape_markers_t legacy;
+    if (!out) return;
+    laplace_task_shape_markers_init(&legacy);
+    out->schema = legacy.schema;
+    out->slot_schema = legacy.slot_schema;
+    out->end = legacy.end;
+    hash128_blake3_str("laplace/task-shape/relation-read/token-slots/v2", &out->schema_v2);
+    hash128_blake3_str("laplace/task-shape/token-slot/v2", &out->slot_schema_v2);
+    hash128_blake3_str("laplace/task-shape/slots-end/v2", &out->end_v2);
+    hash128_blake3_str("laplace/task-shape/binding/current-form/v1", &out->current_form);
+    hash128_blake3_str("laplace/task-shape/binding/witnessed-semantic/v1", &out->witnessed_semantic);
+}
+
 static int compare_id(const void *a, const void *b) {
     return memcmp(a, b, sizeof(hash128_t));
 }
 
-int laplace_task_shape_decode(const hash128_t *flat, size_t count,
-                              laplace_task_shape_t *out) {
-    laplace_task_shape_markers_t markers;
+int laplace_task_shape_decode_view(const hash128_t *flat, size_t count,
+                                   laplace_task_shape_view_t *out) {
+    laplace_task_shape_markers_extended_t markers;
     hash128_t *refs;
-    size_t n;
+    size_t n, stride;
+    int v2;
     if (!out) return -2;
     memset(out, 0, sizeof(*out));
     if (!flat || count < 7 || count > SIZE_MAX / sizeof(*flat)) return -2;
-    laplace_task_shape_markers_init(&markers);
-    if (!same(flat[0], markers.schema)) return -1;
-    if ((count - 4) % 3 || !same(flat[count - 1], markers.end)) return -2;
-    for (size_t i = 1; i < count - 1; ++i)
-        if (!(flat[i].hi || flat[i].lo) || same(flat[i], markers.schema)
-            || same(flat[i], markers.slot_schema) || same(flat[i], markers.end))
-            return -2;
-    n = (count - 4) / 3;
+    laplace_task_shape_markers_extended_init(&markers);
+    v2 = same(flat[0], markers.schema_v2);
+    if (!v2 && !same(flat[0], markers.schema)) return -1;
+    stride = v2 ? 4 : 3;
+    if ((count - 4) % stride || !same(flat[count - 1], v2 ? markers.end_v2 : markers.end))
+        return -2;
+    for (size_t i = 1; i < count - 1; ++i) {
+        if (v2 && i >= 3 && (i - 3) % stride == 3) {
+            if (!same(flat[i], markers.current_form) && !same(flat[i], markers.witnessed_semantic))
+                return -2;
+        } else if (!(flat[i].hi || flat[i].lo) || same(flat[i], markers.schema)
+            || same(flat[i], markers.slot_schema) || same(flat[i], markers.end)
+            || (v2 && (same(flat[i], markers.schema_v2) || same(flat[i], markers.slot_schema_v2)
+                || same(flat[i], markers.end_v2) || same(flat[i], markers.current_form)
+                || same(flat[i], markers.witnessed_semantic)))) return -2;
+    }
+    n = (count - 4) / stride;
     refs = (hash128_t *)malloc(n * sizeof(*refs));
     if (!refs) return -3;
     for (size_t i = 0; i < n; ++i) {
-        const hash128_t *slot = flat + 3 + i * 3;
-        hash128_t parts[3] = {markers.slot_schema, slot[1], slot[2]}, expected;
-        hash128_merkle(4, parts, 3, &expected);
+        const hash128_t *slot = flat + 3 + i * stride;
+        hash128_t parts[4] = {v2 ? markers.slot_schema_v2 : markers.slot_schema, slot[1], slot[2], {0}}, expected;
+        if (v2) parts[3] = slot[3];
+        hash128_merkle(4, parts, stride, &expected);
         if (!same(slot[0], expected)) { free(refs); return -2; }
         refs[i] = slot[1];
     }
@@ -52,7 +77,28 @@ int laplace_task_shape_decode(const hash128_t *flat, size_t count,
     out->predicate = flat[2];
     out->slots = flat + 3;
     out->slot_count = n;
+    out->slot_stride = stride;
     return 0;
+}
+
+int laplace_task_shape_decode(const hash128_t *flat, size_t count,
+                              laplace_task_shape_t *out) {
+    laplace_task_shape_markers_t markers;
+    laplace_task_shape_view_t view;
+    int result;
+    if (!out) return -2;
+    memset(out, 0, sizeof(*out));
+    if (!flat || count < 7 || count > SIZE_MAX / sizeof(hash128_t)) return -2;
+    laplace_task_shape_markers_init(&markers);
+    if (!same(flat[0], markers.schema)) return -1;
+    result = laplace_task_shape_decode_view(flat, count, &view);
+    if (result == 0) {
+        out->exemplar_parse = view.exemplar_parse;
+        out->predicate = view.predicate;
+        out->slots = view.slots;
+        out->slot_count = view.slot_count;
+    }
+    return result;
 }
 
 typedef struct { hash128_t id; size_t ordinal; } ref_index;
@@ -131,7 +177,7 @@ done:
     return result;
 }
 
-int laplace_task_shape_match(const laplace_task_shape_t *shape,
+int laplace_task_shape_match_view(const laplace_task_shape_view_t *shape,
     const laplace_ud_parse_t *exemplar, const laplace_ud_parse_t *current,
     size_t *slot_ordinals) {
     ref_index *a = NULL, *b = NULL;
@@ -139,7 +185,8 @@ int laplace_task_shape_match(const laplace_task_shape_t *shape,
     laplace_ud_markers_t markers;
     size_t n;
     int result = 0, complete;
-    if (!shape || !exemplar || !current || !slot_ordinals || !shape->slots)
+    if (!shape || !exemplar || !current || !slot_ordinals || !shape->slots
+        || (shape->slot_stride != 3 && shape->slot_stride != 4))
         return -1;
     n = exemplar->token_count;
     if (!n || n != current->token_count || !shape->slot_count
@@ -154,7 +201,7 @@ int laplace_task_shape_match(const laplace_task_shape_t *shape,
     complete = complete_tree(current, b, &markers);
     if (complete != 1) { result = complete; goto done; }
     for (size_t i = 0; i < shape->slot_count; ++i) {
-        size_t at = ordinal(a, n, shape->slots[i * 3 + 1]);
+        size_t at = ordinal(a, n, shape->slots[i * shape->slot_stride + 1]);
         if (at == SIZE_MAX || variables[at]) goto done;
         variables[at] = 1;
         slot_ordinals[i] = at;
@@ -189,14 +236,15 @@ done:
     return result;
 }
 
-int laplace_task_shape_match_forms(const laplace_task_shape_t *shape,
+int laplace_task_shape_match_forms_view(const laplace_task_shape_view_t *shape,
     const laplace_ud_parse_t *exemplar, const hash128_t *forms, size_t form_count,
     size_t *slot_ordinals) {
     ref_index *refs = NULL;
     unsigned char *variables = NULL;
     laplace_ud_markers_t markers;
     int result = 0;
-    if (!shape || !exemplar || !forms || !slot_ordinals || !shape->slots) return -1;
+    if (!shape || !exemplar || !forms || !slot_ordinals || !shape->slots
+        || (shape->slot_stride != 3 && shape->slot_stride != 4)) return -1;
     if (!form_count || form_count != exemplar->token_count || !shape->slot_count
         || shape->slot_count >= form_count || exemplar->mwt_count) return 0;
     refs = make_refs(exemplar);
@@ -207,7 +255,7 @@ int laplace_task_shape_match_forms(const laplace_task_shape_t *shape,
     if (result != 1) goto done;
     result = 0;
     for (size_t i = 0; i < shape->slot_count; ++i) {
-        size_t at = ordinal(refs, form_count, shape->slots[i * 3 + 1]);
+        size_t at = ordinal(refs, form_count, shape->slots[i * shape->slot_stride + 1]);
         if (at == SIZE_MAX || variables[at]) goto done;
         variables[at] = 1;
         slot_ordinals[i] = at;
@@ -220,4 +268,22 @@ done:
     free(refs);
     free(variables);
     return result;
+}
+
+int laplace_task_shape_match(const laplace_task_shape_t *shape,
+    const laplace_ud_parse_t *exemplar, const laplace_ud_parse_t *current,
+    size_t *slot_ordinals) {
+    if (!shape) return -1;
+    laplace_task_shape_view_t view = {shape->exemplar_parse, shape->predicate,
+                                     shape->slots, shape->slot_count, 3};
+    return laplace_task_shape_match_view(&view, exemplar, current, slot_ordinals);
+}
+
+int laplace_task_shape_match_forms(const laplace_task_shape_t *shape,
+    const laplace_ud_parse_t *exemplar, const hash128_t *forms, size_t form_count,
+    size_t *slot_ordinals) {
+    if (!shape) return -1;
+    laplace_task_shape_view_t view = {shape->exemplar_parse, shape->predicate,
+                                     shape->slots, shape->slot_count, 3};
+    return laplace_task_shape_match_forms_view(&view, exemplar, forms, form_count, slot_ordinals);
 }

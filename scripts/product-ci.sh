@@ -114,6 +114,11 @@ PY
   python3 scripts/verify-operational-task.py \
     --shape-file seeds/operational/tasks/en_define.json --seed-run-id "$seed_run_id" \
     --receipt "$operational_proof_directory/task.json"
+  python3 scripts/verify-operational-task.py \
+    --proof-mode direct-relation --prompt 'The opposite of hot is' --operand hot \
+    --shape-file seeds/operational/tasks/en_antonym.json \
+    --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
+    --receipt "$operational_proof_directory/antonym-task.json"
 }
 
 reconcile_installed_product() {

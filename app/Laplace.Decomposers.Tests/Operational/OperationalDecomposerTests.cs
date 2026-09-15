@@ -33,7 +33,8 @@ public sealed class OperationalDecomposerTests
         Assert.Contains(graph.Selected, a => a.RelativePath == "docs/INVENTION.md");
         Assert.Contains(graph.Selected, a => a.RelativePath == "seeds/operational/tasks/en_define.json");
         Assert.Contains(graph.Selected, a => a.RelativePath == "seeds/operational/exemplars/en_antonym.conllu");
-        Assert.Equal(14, graph.Selected.Count);
+        Assert.Contains(graph.Selected, a => a.RelativePath == "seeds/operational/tasks/en_antonym.json");
+        Assert.Equal(15, graph.Selected.Count);
         foreach (var artifact in graph.Selected)
         {
             byte[] original = await File.ReadAllBytesAsync(Path.Combine(repo, artifact.RelativePath));
@@ -98,6 +99,49 @@ public sealed class OperationalDecomposerTests
         await foreach (var sentence in UdConlluParser.ParseSentencesAsync(stream)) fromMemory.Add(sentence);
         Assert.Single(fromFile);
         Assert.Equal(JsonSerializer.Serialize(fromFile), JsonSerializer.Serialize(fromMemory));
+    }
+
+    [Fact]
+    public async Task BundledAntonymTaskReferencesTheActualAuthoredParseAndCurrentForm()
+    {
+        const string exemplarRelative = "seeds/operational/exemplars/en_antonym.conllu";
+        const string taskRelative = "seeds/operational/tasks/en_antonym.json";
+        var exemplarRecord = await OperationalDecomposer.ReadContractAsync(
+            Path.Combine(OperationalDecomposer.BundledPath, exemplarRelative), exemplarRelative);
+        byte[] taskBytes = await File.ReadAllBytesAsync(Path.Combine(OperationalDecomposer.BundledPath, taskRelative));
+        using var ast = GrammarDecomposer.Parse(taskBytes, "json");
+        var declared = OperationalTaskShapeWitness.Read(ast, taskBytes);
+        var exemplar = Compose(exemplarRecord);
+        try
+        {
+            AttestationRow claim = Assert.Single(exemplar.Change.Attestations,
+                a => a.TypeId == RelationTypeRegistry.Resolve("HAS_PARSE").Id);
+            Assert.Equal(OperationalSource.SourceId, claim.SourceId);
+            Assert.Equal(ContentTierSpine.ResolveRoot("The opposite of empty is"), claim.SubjectId);
+            Assert.Equal(claim.ObjectId, declared.ExemplarParseId);
+            PhysicalityRow structure = Assert.Single(exemplar.Change.Physicalities,
+                p => p.EntityId == declared.ExemplarParseId && p.Type == PhysicalityType.ParseStructure);
+            Assert.True(UdParseStructure.TryDecode(Trajectory.Constituents(structure.TrajectoryXyzm!), out var parsed));
+            Assert.NotNull(parsed);
+            Assert.Equal(5, parsed.Tokens.Count);
+            Assert.Equal(OperationalTaskShapeWitness.SchemaV2, declared.Schema);
+            Assert.Equal(RelationTypeRegistry.Resolve("IS_ANTONYM_OF").Id, declared.PredicateId);
+            var slot = Assert.Single(declared.Slots);
+            Assert.Equal(parsed.Tokens[3].RefId, slot.TokenRefId);
+            Assert.Equal(UdParseStructure.TokenRefId("4"), slot.TokenRefId);
+            Assert.Equal(EntityTypeRegistry.Word, slot.AcceptedTypeId);
+            Assert.Equal(OperationalTaskShapeWitness.CurrentFormBindingId, slot.BindingModeId);
+            Assert.Equal(Hash128.Merkle(EntityTier.Document,
+                [OperationalTaskShapeWitness.SlotSchemaV2Id, slot.TokenRefId, slot.AcceptedTypeId, slot.BindingModeId]), slot.Id);
+            Assert.Equal(new[] { OperationalTaskShapeWitness.SchemaV2Id, declared.ExemplarParseId,
+                declared.PredicateId, slot.Id, slot.TokenRefId, slot.AcceptedTypeId, slot.BindingModeId,
+                OperationalTaskShapeWitness.SlotsEndV2Id }, declared.Constituents);
+            Assert.Contains(exemplar.Change.Attestations, a => a.SubjectId == exemplar.FileId
+                && a.TypeId == RelationTypeRegistry.Resolve("CONTAINS").Id
+                && a.ObjectId == claim.ContextId && a.ContextId == exemplar.FileId
+                && a.SourceId == OperationalSource.SourceId);
+        }
+        finally { foreach (var stage in exemplar.Change.IntentStages) stage.Dispose(); }
     }
 
     [Fact]

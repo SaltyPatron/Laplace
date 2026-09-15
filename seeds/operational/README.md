@@ -13,6 +13,7 @@ The selected inputs are declared as literal `Content` items in
 - The explicitly authored annotation `seeds/operational/exemplars/en_define.conllu`.
 - The explicitly authored fragment annotation `seeds/operational/exemplars/en_antonym.conllu`.
 - The explicit definition relation-read declaration `seeds/operational/tasks/en_define.json`.
+- The explicit antonym relation-read declaration `seeds/operational/tasks/en_antonym.json`.
 
 After the Unicode and language foundation, admit the bundled source with:
 
@@ -87,7 +88,7 @@ and accepts a witnessed `WordNet_Synset` semantic binding for the second token.
 The first token remains invariant. Both artifacts are authored operational
 evidence with `SubstrateMandate` provenance; neither claims upstream UD authorship.
 
-This bundle declares one English, two-token relation-read shape: `define` followed
+The definition declaration supplies one English, two-token relation-read shape: `define` followed
 by one token whose current witnessed semantic binding has the declared type.
 The shared native runtime uses Unicode-derived identities, exact source
 structure and typed relations. It does not contain an English keyword dispatch
@@ -100,15 +101,27 @@ declaration against the native admitted parse and token identities. It exercises
 a fresh request operand, witnessed WordNet relation paths, changed source facts
 and competing declarations through the existing forward program. Deployment
 completion still requires the exact file journal and native completion witnesses
-for all fourteen selected artifacts, followed by execution readback.
+for all fifteen selected artifacts, followed by execution readback.
 
 The additional `The opposite of empty is` annotation retains an intentionally
 unfinished five-token fragment. Its fourth token is the prospective variable;
-the other four forms are invariant source content. It contains no answer and
-has no task declaration. Native database acceptance admits the complete bundle
-and retains `antonym-exemplar.json` with the actual parse, token, file and
-occurrence identities. A later declaration must use those witnessed identities
-and independently verified relation and operand-type evidence.
+the other four forms are invariant source content. Its separate
+`seeds/operational/tasks/en_antonym.json` declaration references the actual
+admitted parse and fourth token, calls `IS_ANTONYM_OF`, and accepts the current
+whole `Word` identity as its input. Its version-2 slot explicitly declares the
+`CURRENT_FORM` binding mode. The declaration contains no answer.
+The native executor consumes the same generic token-slot contract as the
+definition declaration; it does not dispatch on the English words.
+
+Native database acceptance admits the complete bundle and retains
+`antonym-exemplar.json` with the actual parse, token, file, occurrence and task
+identities. A separate execution case uses a fresh Unicode operand under the
+ordinary forward defaults. It verifies that a missing relation result remains
+unresolved even when two positively witnessed Word lemma alternatives have
+their own results. Those alternatives remain admitted throughout the test.
+Changing the source-witnessed result on the current Word changes the emitted
+identity while every byte of the task stays unchanged. Its bounded
+`antonym-execution.json` records the actual fact witnesses and execution receipts.
 
 ## Declared relation-read task shapes
 
@@ -165,11 +178,29 @@ are `laplace/task-shape/relation-read/token-slots/v1`,
 Source-file identity belongs to provenance, so changing JSON presentation can
 change its source occurrence without changing the declared shape.
 
+Version 2 uses the schema `laplace/task-shape/relation-read/token-slots/v2`
+and requires a `binding_mode_id` on every slot. `WITNESSED_SEMANTIC` retains
+the same typed, source-witnessed semantic binding alternatives as version 1;
+multiple complete interpretations remain ambiguous. `CURRENT_FORM` binds the
+exact whole current token form at the declared source occurrence and checks its
+stored entity type. The declaration selects this behavior explicitly. Naming
+and lemma evidence remains available to other contracts and operators.
+
+The version-2 trajectory retains `[schema, exemplar_parse, predicate,
+(slot, token_ref, accepted_type, binding_mode)*, slots_end]`. Its slot identity
+commits all four constituents `[token_slot_schema, token_ref, accepted_type,
+binding_mode]`. Both schema and slot markers carry version 2. An unsupported
+mode or a slot identity that omits or changes the declared mode fails decoding;
+the runtime cannot silently reinterpret a version-1 contract as current-form
+binding. The version-1 representation and existing definition declaration stay
+unchanged.
+
 The type-8 coordinate realizes the canonical declaration representation. Its
 recipe serializes one UTF-8 JSON object without whitespace or a BOM, with fields
 in this exact order: `schema`, `exemplar_parse_id`, `predicate_id`, `slots`.
 Each slot object contains `exemplar_token_ref_id`, then
-`accepted_entity_type_id`; slot order is the declared array order. Every ID is
+`accepted_entity_type_id`, followed by `binding_mode_id` for version 2;
+slot order is the declared array order. Every ID is
 the raw 16 bytes written as 32 lowercase hexadecimal digits. The schema value
 is the exact marker string above. The existing native JSON full-source composer
 realizes and stages this derived representation, separately from the unchanged

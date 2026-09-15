@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import copy
+import json
 import os
 import shutil
 import subprocess
@@ -149,6 +150,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold",
             prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops",
             prefix + "OperationalSourceExecutionTests.AuthoredAntonymExemplar_AdmitsCompleteSourceWithNativeParseProvenance",
+            prefix + "OperationalSourceExecutionTests.AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding",
             prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent",
             prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
         ]
@@ -158,8 +160,8 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertIn('"$managed_results/operational-source-execution.trx"',
                       source.split('rm -f ', 1)[1].split('PATH="$PG_PREFIX/bin:', 1)[0])
         validator = source.split('python3 - "$managed_results/operational-source-execution.trx" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
-        names = [methods[0], methods[1], methods[2], methods[3] + "(batchPrefix: False)",
-                 methods[3] + "(batchPrefix: True)", methods[4]]
+        names = [methods[0], methods[1], methods[2], methods[3], methods[4] + "(batchPrefix: False)",
+                 methods[4] + "(batchPrefix: True)", methods[5]]
 
         def receipt():
             root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
@@ -167,7 +169,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             for name in names:
                 ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
             summary = ET.SubElement(root, "ResultSummary")
-            ET.SubElement(summary, "Counters", total="6", executed="6", passed="6",
+            ET.SubElement(summary, "Counters", total="7", executed="7", passed="7",
                           failed="0", notExecuted="0")
             return root
 
@@ -195,15 +197,15 @@ class ActionsAuthorityTests(unittest.TestCase):
                 root = receipt()
                 results = root.find("Results")
                 if corruption == "missing":
-                    results.remove(results[5])
+                    results.remove(results[6])
                 elif corruption == "repeated-theory":
-                    results[4].set("testName", names[3])
+                    results[5].set("testName", names[4])
                 elif corruption == "wrong-test":
-                    results[5].set("testName", prefix + "UnrelatedPassingTest")
+                    results[6].set("testName", prefix + "UnrelatedPassingTest")
                 elif corruption in ("skipped", "failed"):
                     results[2].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
                 else:
-                    root.find("ResultSummary/Counters").set("executed", "5")
+                    root.find("ResultSummary/Counters").set("executed", "6")
                 check(root, False)
 
     def test_manual_db_mutation_shares_product_lifecycle_lock(self):
@@ -354,6 +356,57 @@ run_perf() { echo unexpected-perf; }
         result = subprocess.run(["bash"], input=script, text=True, capture_output=True)
         self.assertEqual(41, result.returncode, result.stderr)
         self.assertEqual(["repair-complete", "operational-proof-rejected"], result.stdout.splitlines())
+
+    def test_both_operational_forms_require_the_same_seed_and_independent_passing_proofs(self):
+        source = PRODUCT.read_text()
+        function = "verify_operational_execution() {" + source.split(
+            "verify_operational_execution() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        run_id = "e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"
+        shim = "#!" + sys.executable + "\n" + """import json, os, sys
+from pathlib import Path
+if sys.argv[1] == '-':
+    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+with Path(os.environ['PROOF_CALLS']).open('a') as stream:
+    stream.write(json.dumps(sys.argv[1:]) + '\\n')
+mode = 'ANTONYM_RC' if '--proof-mode' in sys.argv else 'DEFINITION_RC'
+raise SystemExit(int(os.environ[mode]))
+"""
+        for first_rc, second_rc in ((0, 0), (41, 0), (0, 42)):
+            with self.subTest(definition=first_rc, antonym=second_rc), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "seed.json").write_text(json.dumps(
+                    {"disposition": "verified", "run": {"run_id": run_id}}))
+                executable = root / "python3"
+                executable.write_text(shim)
+                executable.chmod(0o755)
+                calls_path = root / "calls.jsonl"
+                environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                    "PROOF_CALLS": str(calls_path), "TEST_PROOF_DIR": str(root),
+                    "DEFINITION_RC": str(first_rc), "ANTONYM_RC": str(second_rc),
+                    "LAPLACE_FRESH_DB": "0", "LAPLACE_RESTORE_FOUNDATION": "0"}
+                script = 'set -euo pipefail\noperational_proof_directory="$TEST_PROOF_DIR"\n' \
+                    + function + '\nverify_operational_execution\necho later-acceptance\n'
+                result = subprocess.run(["bash"], input=script, env=environment,
+                                        text=True, capture_output=True)
+                self.assertEqual(first_rc or second_rc, result.returncode, result.stderr)
+                self.assertEqual("later-acceptance\n" if not (first_rc or second_rc) else "", result.stdout)
+                calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+                self.assertEqual(1 if first_rc else 2, len(calls))
+                for call in calls:
+                    self.assertEqual("scripts/verify-operational-task.py", call[0])
+                    self.assertEqual(run_id, call[call.index("--seed-run-id") + 1])
+                self.assertNotIn("--proof-mode", calls[0])
+                self.assertEqual("seeds/operational/tasks/en_define.json",
+                                 calls[0][calls[0].index("--shape-file") + 1])
+                self.assertEqual(str(root / "task.json"), calls[0][calls[0].index("--receipt") + 1])
+                if len(calls) == 2:
+                    direct = calls[1]
+                    for flag, expected in (("--proof-mode", "direct-relation"),
+                        ("--prompt", "The opposite of hot is"), ("--operand", "hot"),
+                        ("--shape-file", "seeds/operational/tasks/en_antonym.json"),
+                        ("--exemplar-file", "seeds/operational/exemplars/en_antonym.conllu"),
+                        ("--receipt", str(root / "antonym-task.json"))):
+                        self.assertEqual(expected, direct[direct.index(flag) + 1])
 
     def test_owned_repair_resume_cannot_be_omitted_swallowed_or_moved_after_build(self):
         path=self.root / "scripts/product-ci.sh"

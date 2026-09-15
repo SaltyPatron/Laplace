@@ -43,7 +43,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             DateTime startedAt;
             await using (var clock = pg.DataSource.CreateCommand("SELECT clock_timestamp()"))
                 startedAt = (DateTime)(await clock.ExecuteScalarAsync())!;
-            await IngestSource(runner, new OperationalDecomposer(), directory, 14, reobservePresent: true);
+            await IngestSource(runner, new OperationalDecomposer(), directory, 15, reobservePresent: true);
             Hash128 root = ContentTierSpine.ResolveRoot(text)!.Value;
             Hash128 parse;
             await using (var query = pg.DataSource.CreateCommand(
@@ -136,13 +136,10 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             Assert.Single(parsed.Tokens, t => t.HeadRefId == UdParseStructure.RootId);
             Hash128 prospectiveToken = parsed.Tokens[3].RefId;
             Assert.Equal(UdParseStructure.TokenRefId("4"), prospectiveToken);
-            await using (var query = pg.DataSource.CreateCommand(
-                "SELECT count(*) FROM laplace.attestations WHERE subject_id=$1 AND type_id=$2"))
-            {
-                query.Parameters.AddWithValue(parse.ToBytes());
-                query.Parameters.AddWithValue(OperationalSource.ExampleOfTypeId.ToBytes());
-                Assert.Equal(0L, (long)(await query.ExecuteScalarAsync())!);
-            }
+            var task = await ReadBundledAntonymTask(directory);
+            Assert.Equal(parse, task.Shape.ExemplarParseId);
+            Assert.Equal(prospectiveToken, Assert.Single(task.Shape.Slots).TokenRefId);
+            await AssertPersistedContract(task.Shape, task.File);
             string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
             if (!string.IsNullOrWhiteSpace(receiptPath))
             {
@@ -171,8 +168,12 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                         misc = token.Misc.Select(pair => new { key_id = Hex(pair.KeyId), value_id = Hex(pair.ValueId) }),
                     }),
                     canonical_parse_verified = true, file_occurrence_context_verified = true,
-                    source_trust_verified = true, completion_present = true, task_declaration_admitted = false,
-                    selected_files = 14, admitted_file_journals = 14, completion_markers = 14,
+                    source_trust_verified = true, completion_present = true, task_declaration_admitted = true,
+                    shape_id = Hex(task.Shape.Id), shape_file_id = Hex(task.File),
+                    shape_relative_path = task.RelativePath, predicate_id = Hex(task.Shape.PredicateId),
+                    accepted_entity_type_id = Hex(Assert.Single(task.Shape.Slots).AcceptedTypeId),
+                    binding_mode_id = Hex(Assert.Single(task.Shape.Slots).BindingModeId),
+                    selected_files = 15, admitted_file_journals = 15, completion_markers = 15,
                     parse_observation_count = 1, parse_consensus_witness_count = 1,
                 }, new JsonSerializerOptions { WriteIndented = true });
                 Assert.InRange(receipt.Length, 1, 64 * 1024);
@@ -180,6 +181,235 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             }
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding()
+    {
+        CodepointPerfcache.LoadDefault();
+        LanguageReference.EnsureLoaded();
+        string scope = Guid.NewGuid().ToString("N");
+        string directory = Path.Combine(Path.GetTempPath(), "laplace-antonym-execution-" + scope);
+        string operand = "ñébulo" + scope;
+        string prompt = "The opposite of " + operand + " is";
+        Hash128 source = Hash128.OfCanonical("test/antonym-execution/source/" + scope);
+        Hash128 context = Hash128.OfCanonical("test/antonym-execution/context/" + scope);
+        Hash128 answer = Hash128.OfCanonical("test/antonym-execution/answer/" + scope);
+        Hash128 changedAnswer = Hash128.OfCanonical("test/antonym-execution/changed-answer/" + scope);
+        Hash128 alternativeAnswerA = Hash128.OfCanonical("test/antonym-execution/alternative-answer-a/" + scope);
+        Hash128 alternativeAnswerB = Hash128.OfCanonical("test/antonym-execution/alternative-answer-b/" + scope);
+        await using var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource, persistEvidence: true);
+        var runner = new IngestRunner(writer, new NpgsqlSubstrateReader(pg.DataSource),
+            NullLoggerFactory.Instance, new NpgsqlIngestObservability(pg.DataSource, evidencePersisted: true));
+        try
+        {
+            await CopyBundledSource(directory);
+            DateTime startedAt;
+            await using (var clock = pg.DataSource.CreateCommand("SELECT clock_timestamp()"))
+                startedAt = (DateTime)(await clock.ExecuteScalarAsync())!;
+            await IngestSource(runner, new OperationalDecomposer(), directory, 15, reobservePresent: true);
+            var task = await ReadBundledAntonymTask(directory);
+            Hash128 exemplarRoot = ContentTierSpine.ResolveRoot("The opposite of empty is")!.Value;
+            const string exemplarRelative = "seeds/operational/exemplars/en_antonym.conllu";
+            var exemplar = await ReadAuthoredExemplar(Path.Combine(directory, exemplarRelative),
+                exemplarRelative, startedAt, exemplarRoot, task.Shape.ExemplarParseId);
+            await AssertFullBundleReceipt(directory, exemplar.RunId, retainReceipt: false);
+            await AssertPersistedContract(task.Shape, task.File);
+
+            // Native text admission supplies the whole Word entity directly.
+            // These are new fixture facts, not observations attributed to WordNet.
+            var facts = new SubstrateChangeBuilder(source, "antonym-execution-content/" + scope);
+            facts.AddEntity(source, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
+            facts.AddEntity(context, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
+            facts.AddEntity(answer, EntityTier.Word, EntityTypeRegistry.WordNetSynset, source);
+            facts.AddEntity(changedAnswer, EntityTier.Word, EntityTypeRegistry.WordNetSynset, source);
+            facts.AddEntity(alternativeAnswerA, EntityTier.Word, EntityTypeRegistry.WordNetSynset, source);
+            facts.AddEntity(alternativeAnswerB, EntityTier.Word, EntityTypeRegistry.WordNetSynset, source);
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(facts, Encoding.UTF8.GetBytes(prompt), source, out Hash128 promptRoot));
+            Hash128 input = ContentTierSpine.ResolveRoot(operand)!.Value;
+            Assert.NotEqual(ContentTierSpine.ResolveRoot("empty"), input);
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(facts, Encoding.UTF8.GetBytes("próbulo" + scope), source, out Hash128 alternativeA));
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(facts, Encoding.UTF8.GetBytes("plúvulo" + scope), source, out Hash128 alternativeB));
+            Hash128 isLemma = RelationTypeRegistry.Resolve("IS_LEMMA_OF").Id;
+            AttestationRow[] alternatives =
+            [
+                NativeAttestation.CategoricalResolved(input, isLemma, alternativeA, source, context, SourceTrust.SubstrateMandate),
+                NativeAttestation.CategoricalResolved(input, isLemma, alternativeB, source, context, SourceTrust.SubstrateMandate),
+                NativeAttestation.CategoricalResolved(alternativeA, task.Shape.PredicateId, alternativeAnswerA, source, context, SourceTrust.SubstrateMandate),
+                NativeAttestation.CategoricalResolved(alternativeB, task.Shape.PredicateId, alternativeAnswerB, source, context, SourceTrust.SubstrateMandate),
+            ];
+            foreach (AttestationRow witness in alternatives) facts.AddAttestation(witness);
+            await Apply(facts.Build());
+            await using (var query = pg.DataSource.CreateCommand("SELECT id,type_id,first_observed_by FROM laplace.entities WHERE id=ANY($1)"))
+            {
+                query.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                    new[] { input.ToBytes(), alternativeA.ToBytes(), alternativeB.ToBytes() });
+                await using var row = await query.ExecuteReaderAsync();
+                var seen = new HashSet<Hash128>();
+                while (await row.ReadAsync())
+                {
+                    Assert.True(seen.Add(Hash128.FromBytes(row.GetFieldValue<byte[]>(0))));
+                    Assert.Equal(Assert.Single(task.Shape.Slots).AcceptedTypeId.ToBytes(), row.GetFieldValue<byte[]>(1));
+                    Assert.Equal(source.ToBytes(), row.GetFieldValue<byte[]>(2));
+                }
+                Assert.Equal(3, seen.Count);
+            }
+            foreach (AttestationRow witness in alternatives) await AssertWitness(witness);
+            await AssertNoCurrentParseOrInvocation(promptRoot);
+            // Both named Word alternatives have witnessed results already.
+            // CURRENT_FORM must still leave the absent original fact unresolved.
+            Receipt absent = await Forward(prompt, ordinaryDefaults: true);
+            Assert.False(absent.Complete);
+            Assert.Empty(absent.Emitted);
+
+            Hash128 originalWitness = await AdmitFact(answer, "antonym-execution-fact/" + scope);
+            Receipt original = await Forward(prompt, ordinaryDefaults: true);
+            AssertComplete(original, answer);
+            await AssertNoCurrentParseOrInvocation(promptRoot);
+
+            // Change the source fact while preserving every byte of the task.
+            // The ordinary program must read the new witnessed result.
+            await using (var retract = pg.DataSource.CreateCommand(
+                "DELETE FROM laplace.attestations WHERE subject_id=$1 AND type_id=$2 AND object_id=$3 AND source_id=$4 AND context_id=$5"))
+            {
+                retract.Parameters.AddWithValue(input.ToBytes());
+                retract.Parameters.AddWithValue(task.Shape.PredicateId.ToBytes());
+                retract.Parameters.AddWithValue(answer.ToBytes());
+                retract.Parameters.AddWithValue(source.ToBytes());
+                retract.Parameters.AddWithValue(context.ToBytes());
+                Assert.Equal(1, await retract.ExecuteNonQueryAsync());
+            }
+            await using (var retract = pg.DataSource.CreateCommand(
+                "DELETE FROM laplace.consensus WHERE subject_id=$1 AND type_id=$2 AND object_id=$3"))
+            {
+                retract.Parameters.AddWithValue(input.ToBytes());
+                retract.Parameters.AddWithValue(task.Shape.PredicateId.ToBytes());
+                retract.Parameters.AddWithValue(answer.ToBytes());
+                Assert.Equal(1, await retract.ExecuteNonQueryAsync());
+            }
+            Hash128 changedWitness = await AdmitFact(changedAnswer, "antonym-execution-changed-fact/" + scope);
+            Receipt changed = await Forward(prompt, ordinaryDefaults: true);
+            AssertComplete(changed, changedAnswer);
+            Assert.Equal(task.Bytes, await File.ReadAllBytesAsync(Path.Combine(directory, task.RelativePath)));
+            Assert.DoesNotContain(input, task.Shape.Constituents);
+            Assert.DoesNotContain(answer, task.Shape.Constituents);
+            Assert.DoesNotContain(changedAnswer, task.Shape.Constituents);
+            await AssertPersistedContract(task.Shape, task.File);
+            await AssertNoCurrentParseOrInvocation(promptRoot);
+            foreach (AttestationRow witness in alternatives) await AssertWitness(witness);
+
+            string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
+            if (!string.IsNullOrWhiteSpace(receiptPath))
+            {
+                string receiptDirectory = Path.GetDirectoryName(Path.GetFullPath(receiptPath))!;
+                Directory.CreateDirectory(receiptDirectory);
+                byte[] receipt = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    schema = "laplace.operational-antonym-execution-proof/v1", disposition = "complete",
+                    candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"), run_id = exemplar.RunId,
+                    prompt, root_id = Hex(promptRoot), input_surface_id = Hex(input), input_id = Hex(input),
+                    accepted_entity_type_id = Hex(Assert.Single(task.Shape.Slots).AcceptedTypeId),
+                    binding_mode_id = Hex(Assert.Single(task.Shape.Slots).BindingModeId),
+                    predicate_id = Hex(task.Shape.PredicateId), fact_source_id = Hex(source), fact_context_id = Hex(context),
+                    fact_witness_id = Hex(originalWitness), changed_fact_witness_id = Hex(changedWitness),
+                    retained_word_lemma_alternative_ids = new[] { Hex(alternativeA), Hex(alternativeB) },
+                    retained_alternative_witness_ids = alternatives.Select(witness => Hex(witness.Id)).ToArray(),
+                    exemplar_parse_id = Hex(task.Shape.ExemplarParseId), shape_id = Hex(task.Shape.Id),
+                    shape_file_id = Hex(task.File), bundled_shape_relative_path = task.RelativePath,
+                    bundled_shape_bytes = task.Bytes.Length,
+                    bundled_shape_sha256 = Convert.ToHexString(SHA256.HashData(task.Bytes)).ToLowerInvariant(),
+                    program_id = Hex(original.ProgramId), changed_fact_program_id = Hex(changed.ProgramId),
+                    emitted_id = Hex(Assert.Single(original.Emitted)), changed_fact_emitted_id = Hex(Assert.Single(changed.Emitted)),
+                    required_obligations = original.Required, satisfied_obligations = original.Satisfied,
+                    remaining_required = original.Remaining,
+                    execution_defaults = new { steps = 128, max_stride = 5, spread = 0.6, top_k = 10,
+                        hops = 2, fanout = 8, seed_recipe = "hash128_lo(blake3(prompt UTF8))", prior_frontier = "NULL" },
+                    direct_word_binding_verified = true, missing_fact_rejected = true, changed_fact_read = true,
+                    competing_word_lemma_bindings_retained = true,
+                    task_bytes_unchanged = true, current_parse_or_invocation_manufactured = false,
+                    selected_files = 15, admitted_file_journals = 15, completion_markers = 15,
+                }, new JsonSerializerOptions { WriteIndented = true });
+                Assert.InRange(receipt.Length, 1, 64 * 1024);
+                await File.WriteAllBytesAsync(Path.Combine(receiptDirectory, "antonym-execution.json"), receipt);
+            }
+
+            AttestationRow Fact(Hash128 result) => NativeAttestation.CategoricalResolved(input,
+                task.Shape.PredicateId, result, source, context, SourceTrust.SubstrateMandate);
+
+            async Task<Hash128> AdmitFact(Hash128 result, string label)
+            {
+                AttestationRow witness = Fact(result);
+                await Apply(new SubstrateChangeBuilder(source, label).AddAttestation(witness).Build());
+                return await AssertWitness(witness);
+            }
+
+            async Task<Hash128> AssertWitness(AttestationRow witness)
+            {
+                await using var query = pg.DataSource.CreateCommand(
+                    "SELECT a.id,a.outcome,a.observation_count,a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,c.rating,c.witness_count "
+                    + "FROM laplace.attestations a JOIN laplace.consensus c "
+                    + "ON c.subject_id=a.subject_id AND c.type_id=a.type_id AND c.object_id=a.object_id "
+                    + "WHERE a.subject_id=$1 AND a.type_id=$2 AND a.object_id=$3 AND a.source_id=$4 AND a.context_id=$5");
+                query.Parameters.AddWithValue(witness.SubjectId.ToBytes());
+                query.Parameters.AddWithValue(witness.TypeId.ToBytes());
+                query.Parameters.AddWithValue(witness.ObjectId!.Value.ToBytes());
+                query.Parameters.AddWithValue(witness.SourceId.ToBytes());
+                query.Parameters.AddWithValue(witness.ContextId!.Value.ToBytes());
+                await using var row = await query.ExecuteReaderAsync();
+                Assert.True(await row.ReadAsync());
+                Hash128 actual = Hash128.FromBytes(row.GetFieldValue<byte[]>(0));
+                Assert.Equal(witness.Id, actual);
+                Assert.Equal(2, row.GetInt16(1));
+                Assert.Equal(1, row.GetInt64(2));
+                Assert.Equal(witness.OpponentRatingFp1e9, row.GetInt64(3));
+                Assert.Equal(witness.OpponentRdFp1e9, row.GetInt64(4));
+                Assert.True(row.GetInt64(5) > Glicko2.DefaultRatingFp1e9);
+                Assert.Equal(1, row.GetInt64(6));
+                Assert.False(await row.ReadAsync());
+                return actual;
+            }
+
+            void AssertComplete(Receipt receipt, Hash128 result)
+            {
+                Assert.True(receipt.Complete, receipt.Disposition);
+                Assert.Equal(result, Assert.Single(receipt.Emitted));
+                Assert.Equal(promptRoot, receipt.Root);
+                Assert.True(receipt.Required > 0);
+                Assert.Equal(receipt.Required, receipt.Satisfied);
+                Assert.Equal(0, receipt.Remaining);
+            }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+
+        async Task Apply(SubstrateChange change)
+        {
+            try { await writer.ApplyAsync(change); }
+            finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+        }
+    }
+
+    private static async Task<(OperationalTaskShapeWitness.Definition Shape, Hash128 File,
+        string RelativePath, byte[] Bytes)> ReadBundledAntonymTask(string root)
+    {
+        const string relative = "seeds/operational/tasks/en_antonym.json";
+        string path = Path.Combine(root, relative);
+        byte[] bytes = await File.ReadAllBytesAsync(path);
+        Assert.InRange(bytes.Length, 1, 64 * 1024);
+        Assert.Equal(await File.ReadAllBytesAsync(Path.Combine(OperationalDecomposer.BundledPath, relative)), bytes);
+        using var ast = GrammarDecomposer.Parse(bytes, "json");
+        var declared = OperationalTaskShapeWitness.Read(ast, bytes);
+        Assert.Equal(OperationalTaskShapeWitness.SchemaV2, declared.Schema);
+        Assert.Equal(RelationTypeRegistry.Resolve("IS_ANTONYM_OF").Id, declared.PredicateId);
+        var slot = Assert.Single(declared.Slots);
+        Assert.Equal(UdParseStructure.TokenRefId("4"), slot.TokenRefId);
+        Assert.Equal(EntityTypeRegistry.Word, slot.AcceptedTypeId);
+        Assert.Equal(OperationalTaskShapeWitness.CurrentFormBindingId, slot.BindingModeId);
+        using var composer = new GrammarRowComposer(bytes, ast, OperationalSource.SourceId,
+            "json", GrammarCompositionMode.FullSource);
+        FileIdentity file = FileEntity.Resolve(composer.RootComponent(),
+            GrammarSourceFileSupport.MetadataFromPath(path, relative, "json"));
+        return (declared, file.FileId, relative, bytes);
     }
 
     private async Task AssertSourceExecution(bool throughWordNetSense)
@@ -232,7 +462,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                     authoredStartedAt = (DateTime)(await clock.ExecuteScalarAsync())!;
                 // One real generic source run owns the entire distributed bundle;
                 // parse/shape admission ordering is not arranged by the fixture.
-                await Ingest(new OperationalDecomposer(), authoredRoot, expectedFiles: 14, reobservePresent: true);
+                await Ingest(new OperationalDecomposer(), authoredRoot, expectedFiles: 15, reobservePresent: true);
                 parseSource = OperationalSource.SourceId;
             }
             else
@@ -460,7 +690,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     private static async Task CopyBundledSource(string root)
     {
         string[] files = Directory.GetFiles(OperationalDecomposer.BundledPath, "*", SearchOption.AllDirectories);
-        Assert.Equal(14, files.Length);
+        Assert.Equal(15, files.Length);
         foreach (string path in files)
         {
             string destination = Path.Combine(root, Path.GetRelativePath(OperationalDecomposer.BundledPath, path));
@@ -613,7 +843,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     private async Task AssertFullBundleReceipt(string root, Guid runId, bool retainReceipt = true)
     {
         string[] files = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
-        Assert.Equal(14, files.Length);
+        Assert.Equal(15, files.Length);
         var expected = files.ToDictionary(path => Path.GetRelativePath(root, path).Replace('\\', '/'),
             path => (Path: path, Bytes: File.ReadAllBytes(path), Fingerprint: IngestBatchPipeline.TryResolveFileIdentity(path)!.Value),
             StringComparer.Ordinal);
@@ -652,7 +882,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                 JsonSerializer.Serialize(new { schema = "laplace.operational-bundle-proof/v1",
                     candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"),
                     run_id = runId, source_id = Hex(OperationalSource.SourceId), files = manifest,
-                    selected = 14, admitted = 14, completions = 14,
+                    selected = 15, admitted = 15, completions = 15,
                 }, new JsonSerializerOptions { WriteIndented = true }) + "\n");
     }
 

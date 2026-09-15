@@ -86,8 +86,9 @@ validate_membership_index(Relation index, AttrNumber trajectory, AttrNumber type
 }
 
 static bool
-read_leaf(Relation relation, Oid index_oid, ArrayType *members, Oid projection,
-          Oid family, Oid operation, StrategyNumber strategy,
+read_leaf(Relation relation, Oid index_oid, ArrayType *members, ArrayType *required_members,
+          Oid projection, Oid family, Oid operation, StrategyNumber strategy,
+          Oid required_operation, StrategyNumber required_strategy,
           int16 physicality_type, uint64 max_rows, uint64 *matched_rows,
           LaplaceContentMembershipConsumer consume, void *context)
 {
@@ -98,11 +99,15 @@ read_leaf(Relation relation, Oid index_oid, ArrayType *members, Oid projection,
         elog(ERROR, "content membership requires indexed physicality storage");
     Relation index = index_open(index_oid, AccessShareLock);
     validate_membership_index(index, trajectory, type, projection, family, physicality_type);
-    ScanKeyData key;
-    ScanKeyEntryInitialize(&key, 0, 1, strategy, ANYARRAYOID, InvalidOid,
+    ScanKeyData keys[2];
+    int key_count = required_members ? 2 : 1;
+    ScanKeyEntryInitialize(&keys[0], 0, 1, strategy, ANYARRAYOID, InvalidOid,
                            operation, PointerGetDatum(members));
-    IndexScanDesc index_scan = index_beginscan_bitmap(index, GetActiveSnapshot(), NULL, 1);
-    index_rescan(index_scan, &key, 1, NULL, 0);
+    if (required_members)
+        ScanKeyEntryInitialize(&keys[1], 0, 1, required_strategy, ANYARRAYOID, InvalidOid,
+                               required_operation, PointerGetDatum(required_members));
+    IndexScanDesc index_scan = index_beginscan_bitmap(index, GetActiveSnapshot(), NULL, key_count);
+    index_rescan(index_scan, keys, key_count, NULL, 0);
     TIDBitmap *bitmap = tbm_create((Size)work_mem * 1024, NULL);
     index_getbitmap(index_scan, bitmap);
     index_endscan(index_scan);
@@ -123,8 +128,15 @@ read_leaf(Relation relation, Oid index_oid, ArrayType *members, Oid projection,
         if (!isnull && DatumGetInt16(kind) == physicality_type)
         {
             Datum geometry = slot_getattr(slot, trajectory, &isnull);
-            if (!isnull && (!recheck || DatumGetBool(OidFunctionCall2(operation,
-                    OidFunctionCall1(projection, geometry), PointerGetDatum(members)))))
+            bool matches = !isnull;
+            if (matches && recheck)
+            {
+                Datum ids = OidFunctionCall1(projection, geometry);
+                matches = DatumGetBool(OidFunctionCall2(operation, ids, PointerGetDatum(members))) &&
+                    (!required_members || DatumGetBool(OidFunctionCall2(required_operation,
+                        ids, PointerGetDatum(required_members))));
+            }
+            if (matches)
             {
                 if (max_rows > 0 && *matched_rows >= max_rows)
                 {
@@ -160,6 +172,15 @@ laplace_typed_membership_read(ArrayType *members, bool require_all,
     int16 physicality_type, uint64 max_rows,
     LaplaceContentMembershipConsumer consume, void *context)
 {
+    return laplace_typed_membership_read_with_required(members, require_all, NULL,
+        physicality_type, max_rows, consume, context);
+}
+
+bool
+laplace_typed_membership_read_with_required(ArrayType *members, bool require_all,
+    ArrayType *required_members, int16 physicality_type, uint64 max_rows,
+    LaplaceContentMembershipConsumer consume, void *context)
+{
     const char *index_name;
     switch (physicality_type)
     {
@@ -189,6 +210,23 @@ laplace_typed_membership_read(ArrayType *members, bool require_all,
     }
     pfree(values); pfree(nulls);
     if (count == 0 || (require_all && has_null)) return true;
+    if (required_members)
+    {
+        if (ARR_NDIM(required_members) > 1 || ARR_ELEMTYPE(required_members) != BYTEAOID)
+            elog(ERROR, "required content membership requires a 1-D bytea array");
+        has_null = false;
+        deconstruct_array(required_members, BYTEAOID, -1, false, TYPALIGN_INT,
+                          &values, &nulls, &count);
+        for (int i = 0; i < count; ++i)
+        {
+            if (nulls[i]) { has_null = true; continue; }
+            if (VARSIZE_ANY_EXHDR(DatumGetByteaPP(values[i])) != sizeof(hash128_t))
+                elog(ERROR, "required content membership requires 16-byte identities");
+        }
+        pfree(values); pfree(nulls);
+        if (has_null) return true;
+        if (count == 0) required_members = NULL;
+    }
     Relation relation = table_open(root, AccessShareLock);
     if (relation->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
         elog(ERROR, "content membership requires partitioned physicalities");
@@ -209,6 +247,17 @@ laplace_typed_membership_read(ArrayType *members, bool require_all,
     StrategyNumber strategy = get_op_opfamily_strategy(operator, family);
     if (!strategy || operation != (require_all ? F_ARRAYCONTAINS : F_ARRAYOVERLAP))
         elog(ERROR, "content membership requires canonical array operators");
+    Oid required_operation = InvalidOid;
+    StrategyNumber required_strategy = 0;
+    if (required_members)
+    {
+        Oid required_operator = LookupOperName(NULL, list_make2(makeString("pg_catalog"),
+            makeString("@>")), ANYARRAYOID, ANYARRAYOID, false, -1);
+        required_operation = get_opcode(required_operator);
+        required_strategy = get_op_opfamily_strategy(required_operator, family);
+        if (!required_strategy || required_operation != F_ARRAYCONTAINS)
+            elog(ERROR, "required content membership requires canonical array containment");
+    }
     validate_membership_index(parent, trajectory, get_attnum(root, "type"), projection, family,
                               physicality_type);
     PartitionDesc partitions = RelationGetPartitionDesc(relation, true);
@@ -236,8 +285,9 @@ laplace_typed_membership_read(ArrayType *members, bool require_all,
         if (leaf->rd_rel->relkind != RELKIND_RELATION)
             elog(ERROR, "content membership requires physicality leaf partitions");
         if (complete)
-            complete = read_leaf(leaf, index_oid, members, projection,
-                family, operation, strategy, physicality_type, max_rows, &matched_rows,
+            complete = read_leaf(leaf, index_oid, members, required_members, projection,
+                family, operation, strategy, required_operation, required_strategy,
+                physicality_type, max_rows, &matched_rows,
                 consume, context);
         table_close(leaf, NoLock);
     }

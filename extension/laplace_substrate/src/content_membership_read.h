@@ -15,6 +15,12 @@ typedef void (*LaplaceContentMembershipConsumer)(Datum physicality, Datum entity
 bool laplace_typed_membership_read(ArrayType *members, bool require_all,
     int16 physicality_type, uint64 max_rows,
     LaplaceContentMembershipConsumer consume, void *context);
+/* Intersect the original predicate with containment of required_members in
+ * the same GIN scan, before max_rows is consumed. NULL/empty requirements add
+ * no constraint. The existing entry point retains its original semantics. */
+bool laplace_typed_membership_read_with_required(ArrayType *members, bool require_all,
+    ArrayType *required_members, int16 physicality_type, uint64 max_rows,
+    LaplaceContentMembershipConsumer consume, void *context);
 void laplace_content_membership_read(ArrayType *members, bool require_all,
     LaplaceContentMembershipConsumer consume, void *context);
 /* Complete, distinct identities in byte order, shared by SQL and native callers. */

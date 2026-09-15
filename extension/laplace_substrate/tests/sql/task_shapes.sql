@@ -131,6 +131,39 @@ BEGIN
 END
 $shape$;
 
+-- V2 preserves the complete parse while declaring each slot's binding mode.
+CREATE FUNCTION pg_temp.declare_shape_v2(
+    p_exemplar bytea,p_predicate bytea,p_ordinals int[],p_types bytea[],p_modes bytea[],
+    p_source bytea,p_context bytea)
+RETURNS bytea LANGUAGE plpgsql AS $shape_v2$
+DECLARE
+    v_slot_schema bytea := public.laplace_hash128_blake3('laplace/task-shape/token-slot/v2');
+    v_flat bytea[] := ARRAY[public.laplace_hash128_blake3(
+        'laplace/task-shape/relation-read/token-slots/v2'),p_exemplar,p_predicate];
+    v_slots bytea[] := ARRAY[]::bytea[];
+    v_slot bytea;
+    v_shape bytea;
+BEGIN
+    FOR i IN 1..cardinality(p_ordinals) LOOP
+        v_slot := public.laplace_hash128_merkle(4::smallint,
+            ARRAY[v_slot_schema,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]]);
+        v_slots := v_slots || v_slot;
+        v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]];
+        INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+        VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'),p_source)
+        ON CONFLICT (id,tier) DO NOTHING;
+    END LOOP;
+    v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('laplace/task-shape/slots-end/v2')];
+    v_shape := pg_temp.shape_projection(v_flat,'CodeConcept',p_source);
+    PERFORM pg_temp.shape_cell(p_exemplar,laplace.relation_type_id('IS_EXAMPLE_OF'),v_shape,p_source,p_context);
+    PERFORM pg_temp.shape_cell(v_shape,laplace.relation_type_id('CALLS'),p_predicate,p_source,p_context);
+    FOREACH v_slot IN ARRAY v_slots LOOP
+        PERFORM pg_temp.shape_cell(v_shape,laplace.relation_type_id('HAS_INPUT'),v_slot,p_source,p_context);
+    END LOOP;
+    RETURN v_shape;
+END
+$shape_v2$;
+
 CREATE FUNCTION pg_temp.shape_receipt(p_prompt text,p_steps int DEFAULT 2,p_fanout int DEFAULT 256)
 RETURNS TABLE(emitted bytea[],complete boolean,disposition text,program_id bytea,remaining int)
 LANGUAGE sql AS $receipt$
@@ -154,6 +187,158 @@ BEGIN
     END IF;
 END
 $reject$;
+
+-- This cohort precedes the other lessons so unrelated fixture parses cannot
+-- consume its default two-hop/eight-fanout envelope. Rollback retains helpers.
+SAVEPOINT binding_modes;
+DO $binding_modes$
+DECLARE
+    v_source bytea := public.laplace_hash128_blake3('test/task-shapes/v2/source');
+    v_context bytea := public.laplace_hash128_blake3('test/task-shapes/v2/source-file');
+    v_language bytea := public.laplace_hash128_blake3('test/task-shapes/v2/language');
+    v_answer bytea := public.laplace_hash128_blake3('test/task-shapes/v2/original-answer');
+    v_changed bytea := public.laplace_hash128_blake3('test/task-shapes/v2/changed-answer');
+    v_answer_a bytea := public.laplace_hash128_blake3('test/task-shapes/v2/lemma-answer-a');
+    v_answer_b bytea := public.laplace_hash128_blake3('test/task-shapes/v2/lemma-answer-b');
+    v_word bytea := laplace.entity_type_id('Word');
+    v_predicate bytea := laplace.relation_type_id('CAUSES');
+    v_lemma bytea := laplace.relation_type_id('IS_LEMMA_OF');
+    v_example_of bytea := laplace.relation_type_id('IS_EXAMPLE_OF');
+    v_has_parse bytea := laplace.relation_type_id('HAS_PARSE');
+    v_semantic bytea := public.laplace_hash128_blake3('laplace/task-shape/binding/witnessed-semantic/v1');
+    v_form bytea := public.laplace_hash128_blake3('laplace/task-shape/binding/current-form/v1');
+    v_deps bytea[] := ARRAY[public.laplace_hash128_blake3('test/task-shapes/v2/root-role'),
+        public.laplace_hash128_blake3('test/task-shapes/v2/input-role')];
+    v_prompt text := 'ζξ žđþ';
+    v_root bytea;
+    v_original bytea;
+    v_alternative_a bytea;
+    v_alternative_b bytea;
+    v_exemplar bytea;
+    v_v1 bytea;
+    v_v2_semantic bytea;
+    v_v2_form bytea;
+    v_carrier bytea;
+    v_fanout int;
+    v_before jsonb;
+    r record;
+BEGIN
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    SELECT value,2,laplace.entity_type_id('CodeConcept'),v_source
+      FROM unnest(ARRAY[v_source,v_context,v_language,v_answer,v_changed,v_answer_a,v_answer_b]) value;
+    v_exemplar := pg_temp.shape_parse('ζξ őűȝ',ARRAY['ζξ','őűȝ'],ARRAY[0,1],
+        v_deps,v_language,v_source,v_context);
+    v_root := pg_temp.shape_surface(v_prompt,v_source);
+    v_original := pg_temp.shape_surface('žđþ',v_source);
+    v_alternative_a := pg_temp.shape_surface('čŋł',v_source);
+    v_alternative_b := pg_temp.shape_surface('ðřŝ',v_source);
+    IF (SELECT count(*) FROM laplace.entities WHERE tier=2 AND type_id=v_word
+         AND id=ANY(ARRAY[v_original,v_alternative_a,v_alternative_b])) <> 3 THEN
+        RAISE EXCEPTION 'FAIL: binding-mode fixture requires three distinct native Word identities';
+    END IF;
+    PERFORM pg_temp.shape_cell(v_original,v_lemma,v_alternative_a,v_source,v_context);
+    PERFORM pg_temp.shape_cell(v_original,v_lemma,v_alternative_b,v_source,v_context);
+    PERFORM pg_temp.shape_cell(v_original,v_predicate,v_answer,v_source,v_context);
+    PERFORM pg_temp.shape_cell(v_alternative_a,v_predicate,v_answer_a,v_source,v_context);
+    PERFORM pg_temp.shape_cell(v_alternative_b,v_predicate,v_answer_b,v_source,v_context);
+    FOR i IN 1..11 LOOP
+        PERFORM pg_temp.shape_projection(ARRAY[v_original,public.laplace_hash128_blake3(
+            convert_to('test/task-shapes/v2/non-ud/' || i::text,'UTF8'))],'CodeConcept',v_source);
+    END LOOP;
+    IF (SELECT count(*) FROM laplace.physicalities p WHERE p.type=8
+         AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY[v_original]
+         AND NOT public.laplace_trajectory_constituent_ids(p.trajectory) @>
+             ARRAY[public.laplace_hash128_blake3('ud/parse/schema/v1')]) < 11 THEN
+        RAISE EXCEPTION 'FAIL: non-UD membership noise did not exceed the eight-row envelope';
+    END IF;
+
+    v_v1 := pg_temp.declare_shape(v_exemplar,v_predicate,ARRAY[2],ARRAY[v_word],v_source,v_context);
+    SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false OR r.disposition IS DISTINCT FROM 'ambiguous' THEN
+        RAISE EXCEPTION 'FAIL: v1 silently selected among same-type Word lemma alternatives: %',r;
+    END IF;
+    DELETE FROM laplace.attestations WHERE subject_id=v_exemplar AND type_id=v_example_of AND object_id=v_v1;
+
+    v_v2_semantic := pg_temp.declare_shape_v2(v_exemplar,v_predicate,ARRAY[2],ARRAY[v_word],
+        ARRAY[v_semantic],v_source,v_context);
+    SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false OR r.disposition IS DISTINCT FROM 'ambiguous' THEN
+        RAISE EXCEPTION 'FAIL: v2 witnessed-semantic changed v1 ambiguity behavior: %',r;
+    END IF;
+    DELETE FROM laplace.attestations
+     WHERE subject_id=v_exemplar AND type_id=v_example_of AND object_id=v_v2_semantic;
+    RAISE NOTICE 'task shapes: v1 and v2 witnessed-semantic retain same-type Word lemma ambiguity at hops 2 and fanout 8';
+
+    v_v2_form := pg_temp.declare_shape_v2(v_exemplar,v_predicate,ARRAY[2],ARRAY[v_word],
+        ARRAY[v_form],v_source,v_context);
+    -- The declaration contains only the exemplar, predicate, slot and mode;
+    -- neither the novel Word nor any possible result is an encoded operand.
+    FOREACH v_carrier IN ARRAY ARRAY[v_exemplar,v_v1,v_v2_semantic,v_v2_form] LOOP
+        IF EXISTS (SELECT 1 FROM generation.trajectory_unpacked_points(v_carrier,8::smallint) p
+                    WHERE p.entity_id=ANY(ARRAY[v_original,v_answer,v_changed,v_answer_a,v_answer_b])) THEN
+            RAISE EXCEPTION 'FAIL: binding-mode declaration pre-encoded a novel input or answer';
+        END IF;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM laplace.attestations WHERE subject_id=v_root
+                AND type_id IN (v_has_parse,laplace.relation_type_id('CALLS'),laplace.relation_type_id('HAS_INPUT')))
+       OR EXISTS (SELECT 1 FROM laplace.consensus WHERE subject_id=v_root AND type_id=v_has_parse) THEN
+        RAISE EXCEPTION 'FAIL: current request was pre-bound or supplied with a current HAS_PARSE';
+    END IF;
+    -- Both naming alternatives retain live predicate results. A current-form
+    -- slot must remain unresolved when only the original Word lacks its fact.
+    DELETE FROM laplace.consensus WHERE subject_id=v_original AND type_id=v_predicate AND object_id=v_answer;
+    SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false OR r.disposition IS DISTINCT FROM 'unresolved' THEN
+        RAISE EXCEPTION 'FAIL: current-form substituted a naming alternative for its missing original fact: %',r;
+    END IF;
+    PERFORM pg_temp.shape_cell(v_original,v_predicate,v_answer,v_source,v_context);
+    SELECT to_jsonb(p) INTO v_before FROM laplace.physicalities p WHERE entity_id=v_v2_form AND type=8;
+    FOR v_fanout IN 8..10 BY 2 LOOP
+        SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>v_fanout);
+        IF r.emitted IS DISTINCT FROM ARRAY[v_answer] OR r.complete IS DISTINCT FROM true OR r.program_id IS NULL THEN
+            RAISE EXCEPTION 'FAIL: v2 current-form did not select the exact original Word at fanout %: %',v_fanout,r;
+        END IF;
+    END LOOP;
+
+    DELETE FROM laplace.consensus WHERE subject_id=v_original AND type_id=v_predicate AND object_id=v_answer;
+    PERFORM pg_temp.shape_cell(v_original,v_predicate,v_changed,v_source,v_context);
+    SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
+    IF r.emitted IS DISTINCT FROM ARRAY[v_changed] OR r.complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'FAIL: current-form replayed a stored answer instead of reading changed relation state: %',r;
+    END IF;
+    IF (SELECT to_jsonb(p) FROM laplace.physicalities p WHERE entity_id=v_v2_form AND type=8)
+          IS DISTINCT FROM v_before
+       OR EXISTS (SELECT 1 FROM laplace.attestations WHERE subject_id=v_root AND type_id=v_has_parse)
+       OR EXISTS (SELECT 1 FROM laplace.consensus WHERE subject_id=v_root AND type_id=v_has_parse)
+       OR (SELECT count(*) FROM laplace.consensus WHERE subject_id=v_original AND type_id=v_lemma
+            AND object_id=ANY(ARRAY[v_alternative_a,v_alternative_b])) <> 2 THEN
+        RAISE EXCEPTION 'FAIL: execution changed the declaration, erased alternatives or fabricated a current parse';
+    END IF;
+    RAISE NOTICE 'task shapes: v2 current-form selects the original Word and reads changed facts without embedded answers or current HAS_PARSE';
+
+    -- Non-UD carriers are excluded before admission, but nine genuinely
+    -- eligible canonical UD parses must still exhaust an eight-row budget.
+    FOR i IN 1..8 LOOP
+        PERFORM pg_temp.shape_parse('ζξ őűȝ',ARRAY['ζξ','őűȝ'],ARRAY[0,1],v_deps,
+            public.laplace_hash128_blake3(convert_to('test/task-shapes/v2/other-language/' || i::text,'UTF8')),
+            v_source,v_context);
+    END LOOP;
+    IF (SELECT count(*) FROM laplace.physicalities p WHERE p.type=8
+         AND public.laplace_trajectory_constituent_ids(p.trajectory) &&
+             ARRAY[converse.word_id('ζξ'),v_original]
+         AND public.laplace_trajectory_constituent_ids(p.trajectory) @>
+             ARRAY[public.laplace_hash128_blake3('ud/parse/schema/v1')]) <> 9 THEN
+        RAISE EXCEPTION 'FAIL: eligible UD overflow fixture must contain exactly nine matching parses';
+    END IF;
+    SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
+    IF r.emitted IS NOT NULL OR r.complete IS DISTINCT FROM false OR r.disposition IS DISTINCT FROM 'budget_exhausted' THEN
+        RAISE EXCEPTION 'FAIL: over-budget canonical UD set was silently truncated: %',r;
+    END IF;
+    RAISE NOTICE 'task shapes: schema filtering excludes eleven non-UD carriers before admission; nine eligible parses exhaust fanout 8';
+END
+$binding_modes$;
+ROLLBACK TO SAVEPOINT binding_modes;
+RELEASE SAVEPOINT binding_modes;
 
 DO $novel_request$
 DECLARE
