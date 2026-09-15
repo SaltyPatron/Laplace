@@ -29,7 +29,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
             .AddEntity(new EntityRow(session, 3, type, source))
             .AddEntity(new EntityRow(turn, 2, type, source))
             .AddPhysicality(new PhysicalityRow(
-                Id: Hash128.OfCanonical("catalog-conversation/placement"),
+                Id: PhysicalityId.Compute(turn, PhysicalityType.Content),
                 EntityId: turn, SourceId: source, Type: PhysicalityType.Content,
                 CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
                 HilbertIndex: default, TrajectoryXyzm: null, NConstituents: 0,
