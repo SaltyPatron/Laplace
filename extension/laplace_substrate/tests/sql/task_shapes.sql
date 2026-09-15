@@ -7,11 +7,24 @@ CREATE FUNCTION pg_temp.shape_surface(p_text text,p_source bytea)
 RETURNS bytea LANGUAGE plpgsql AS $surface$
 DECLARE v_root bytea;
 BEGIN
+    -- prompt_tree exposes the complete parser scaffolding. Native admission
+    -- collapses a unary, span-identical wrapper to its child; persisting that
+    -- wrapper would give one Word identity conflicting Sentence/Document types.
     INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    WITH nodes AS MATERIALIZED (SELECT * FROM converse.prompt_tree(p_text,false)),
+    unary_children AS (
+        SELECT parent_index,min(node_index) AS child_index
+          FROM nodes WHERE parent_index IS NOT NULL
+         GROUP BY parent_index HAVING count(*)=1
+    )
     SELECT DISTINCT p.id,p.tier,laplace.entity_type_id(CASE p.tier
         WHEN 0 THEN 'Codepoint' WHEN 1 THEN 'Grapheme' WHEN 2 THEN 'Word'
         WHEN 3 THEN 'Sentence' ELSE 'Document' END),p_source
-      FROM converse.prompt_tree(p_text,false) p
+      FROM nodes p
+     WHERE NOT EXISTS (
+        SELECT 1 FROM unary_children u JOIN nodes c ON c.node_index=u.child_index
+         WHERE u.parent_index=p.node_index AND p.tier>0 AND c.id=p.id
+           AND c.byte_offset=p.byte_offset AND c.byte_length=p.byte_length)
     ON CONFLICT (id,tier) DO NOTHING;
     SELECT root_id INTO v_root FROM converse.prompt_tree(p_text) LIMIT 1;
     RETURN v_root;
@@ -235,6 +248,11 @@ BEGIN
     IF (SELECT count(*) FROM laplace.entities WHERE tier=2 AND type_id=v_word
          AND id=ANY(ARRAY[v_original,v_alternative_a,v_alternative_b])) <> 3 THEN
         RAISE EXCEPTION 'FAIL: binding-mode fixture requires three distinct native Word identities';
+    END IF;
+    IF EXISTS (SELECT id FROM laplace.entities
+                WHERE id=ANY(ARRAY[v_original,v_alternative_a,v_alternative_b])
+                GROUP BY id HAVING count(DISTINCT type_id)<>1 OR count(*)<>1) THEN
+        RAISE EXCEPTION 'FAIL: binding-mode fixture persisted unary scaffold types for a canonical Word';
     END IF;
     PERFORM pg_temp.shape_cell(v_original,v_lemma,v_alternative_a,v_source,v_context);
     PERFORM pg_temp.shape_cell(v_original,v_lemma,v_alternative_b,v_source,v_context);
