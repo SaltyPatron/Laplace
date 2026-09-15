@@ -84,8 +84,8 @@ seed_operational_memory() {
     return 0
   fi
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
-  bash scripts/ingest-source.sh operational
-  bash scripts/verify-ingest-journal.sh OperationalDecomposer
+  LAPLACE_INGEST_MAX_UNITS=0 LAPLACE_INGEST_FORCE=0 \
+    python3 scripts/verify-operational-seed.py --ingest
 }
 
 reconcile_installed_product() {

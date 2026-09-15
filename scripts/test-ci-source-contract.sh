@@ -32,6 +32,8 @@ for f in \
   scripts/setup-host.sh \
   scripts/bootstrap-laplace-runner.sh \
   scripts/ingest-source.sh \
+  scripts/verify-operational-seed.py \
+  scripts/test-operational-seed.py \
   scripts/dataset-estate-refresh.sh \
   scripts/dataset-estate-refresh.sources.psv \
   scripts/test-dataset-estate-refresh.py \
@@ -86,6 +88,9 @@ python3 scripts/test-forward-prompt-analysis.py
 # construction and floor wiring are source contracts and must fail before build if
 # an edit starts measuring packed carrier coordinates or drops a hard invariant.
 python3 scripts/test-live-recursive-proof-gate.py
+
+# Deployment must read back this invocation's complete authored operational seed.
+python3 scripts/test-operational-seed.py
 
 # BEGIN ATOMIC pg_depend release is part of live extension-upgrade safety. Prove
 # both legal release forms (drop/rebind) and the unsafe rebind/ordering cases with

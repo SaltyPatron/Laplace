@@ -17,6 +17,22 @@ After the Unicode and language foundation, admit the bundled source with:
 dotnet app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll ingest operational
 ```
 
+Product deployment runs `python3 scripts/verify-operational-seed.py --ingest`.
+This default bootstrap scopes the input cap and forced reobservation flags to
+zero, preserving per-file completion skips. An optional
+`LAPLACE_INGEST_RUN_RECEIPT_PATH` lets the journal publish the actual generated
+run UUID and source identity after its initial durable write; the verifier owns
+a new private receipt path for each invocation and never substitutes the latest
+source run. It derives all 11 expected artifact paths from the project's literal
+`Content` selection, verifies the bundled bytes against the authored files, and
+uses the existing native BLAKE3/Merkle file-resume recipe to read back the exact
+byte fingerprint and source-scoped layer-2 completion attestation for every file.
+The file journal must account for that exact set as admitted and complete; the
+run must be `ok`, uncapped, and backed by persisted evidence. Output contains
+paths, identities, byte counts and completion status. Original contract text is
+not copied into deployment logs. The generic ingest journal status checker
+remains available for other sources and deliberate capped smoke runs.
+
 An explicitly selected contract file or collection can be supplied as the path:
 
 ```sh
@@ -120,8 +136,9 @@ shape's coordinate, Hilbert address or structural trajectory.
 The canonical forward program consumes positively witnessed complete shapes
 after structural and semantic coupling. It binds new current input IDs and
 reads actual predicate results; no expected answer is stored in the shape.
-Competing complete interpretations remain ambiguous. The receipt includes the
-shape, exemplar/current parse identities and applicability witnesses, together
-with each exact input's completion obligation. These task shapes describe a
-relation-read capability within the ISA; they do not equate individual prompt
+Competing complete interpretations remain ambiguous. The program fingerprint
+commits the shape, exemplar/current parse identities and applicability witnesses.
+The public receipt exposes that fingerprint together with completion counts and
+support fields; these identities are not separate public receipt columns.
+These task shapes describe a relation-read capability within the ISA; they do not equate individual prompt
 words with cognition opcodes.
