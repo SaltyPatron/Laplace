@@ -1,19 +1,63 @@
--- Full population of entities.highway_mask via highway_mask_refresh, batched with a
--- COMMIT per batch. This is the historical RECONCILE tool for a database that
--- predates inline exact-pair deposit. Normal ingest never calls this: current writes
--- populate masks directly from the (entity,type) pairs already held by the fold.
+-- Exact-pair backlog replay plus historical full population of entities.highway_mask.
+-- Normal ingest never calls either procedure: current writes populate masks directly from
+-- the (entity,type) pairs already held by the fold. These procedures only recover work
+-- retained during a temporary registry outage and reconcile databases created before
+-- inline exact-pair deposit existed.
 --
--- Current Highway bits are an explicit append-only registry. This procedure therefore
--- does not clear masks before reconciling: existing bits remain valid, while any missing
--- governed relation bits are added by recomputation. Per-source eviction still uses the
--- dirty/drain path because it is the operation that must clear bits.
+-- No SET clause on either procedure: a PL/pgSQL procedure carrying one is barred from
+-- transaction control (COMMIT), so references are schema-qualified.
+
+DROP PROCEDURE IF EXISTS laplace.highway_mask_pending_drain(int);
+CREATE OR REPLACE PROCEDURE laplace.highway_mask_pending_drain(p_batch int DEFAULT 250000)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    entity_ids bytea[];
+    type_ids bytea[];
+    drained bigint := 0;
+    n bigint;
+BEGIN
+    IF p_batch IS NULL OR p_batch < 1 THEN
+        RAISE EXCEPTION 'highway_mask_pending_drain: p_batch must be >= 1';
+    END IF;
+    IF NOT consensus.highway_ready() THEN
+        RAISE LOG 'highway_mask_pending_drain: Highway registry unavailable; exact pending pairs retained';
+        RETURN;
+    END IF;
+
+    LOOP
+        SELECT array_agg(q.entity_id ORDER BY q.entity_id, q.type_id),
+               array_agg(q.type_id ORDER BY q.entity_id, q.type_id)
+        INTO entity_ids, type_ids
+        FROM (
+            SELECT entity_id, type_id
+            FROM laplace.highway_mask_pending
+            ORDER BY entity_id, type_id
+            LIMIT p_batch
+            FOR UPDATE SKIP LOCKED
+        ) AS q;
+
+        EXIT WHEN entity_ids IS NULL;
+        PERFORM consensus.highway_mask_deposit_native(entity_ids, type_ids);
+
+        DELETE FROM laplace.highway_mask_pending p
+        USING unnest(entity_ids, type_ids) AS q(entity_id, type_id)
+        WHERE p.entity_id = q.entity_id AND p.type_id = q.type_id;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        drained := drained + n;
+        RAISE LOG 'highway_mask_pending_drain: % exact pairs drained', drained;
+        COMMIT;
+    END LOOP;
+END $$;
+
+-- Full population via highway_mask_refresh, batched with a COMMIT per batch. Current
+-- Highway bits are an explicit append-only registry. Existing valid bits therefore do
+-- not need to be cleared before reconciliation; missing governed bits are added by the
+-- exact recomputation. Per-source eviction still uses highway_mask_drain because that is
+-- the operation that must turn bits OFF.
 --
 -- SCAN SET: drive batches from the candidate set, not every entity. An entity that
--- appears in no consensus row cannot gain a mask from this repair. Entities that are
--- already masked remain candidates so stale bits can still be corrected by refresh.
---
--- No SET clause on the procedure: a PL/pgSQL procedure carrying a SET clause is barred
--- from transaction control (COMMIT), so references are schema-qualified.
+-- appears in no consensus row cannot gain a mask from this repair. Entities already
+-- carrying a mask remain candidates so stale bits can be corrected by refresh.
 DROP PROCEDURE IF EXISTS laplace.highway_mask_rebuild(int);
 
 CREATE OR REPLACE PROCEDURE laplace.highway_mask_rebuild(p_batch int DEFAULT 500000)
