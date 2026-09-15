@@ -156,6 +156,25 @@ jobs:
           flock --exclusive --close /build/laplace/work/host-resource.lock \
             bash scripts/product-ci.sh "$LAPLACE_STAGE"
 
+      - name: Retain current generation repair resource receipts
+        if: always()
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          python3 scripts/collect-legacy-repair-evidence.py \
+            --expected-source "$TARGET_SHA" \
+            --output "/build/laplace/work/legacy-repair-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Upload current generation repair metadata
+        if: always()
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-legacy-repair-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/legacy-repair-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Record successful activation for installed chess measurement
         id: chess_benchmark_gate
         if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')

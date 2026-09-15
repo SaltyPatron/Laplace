@@ -20,6 +20,8 @@ import subprocess
 import time
 import uuid
 
+from lib.legacy_content_snapshot import snapshot_expression
+from lib.legacy_content_receipt import frozen_receipt_sql, receipt_stream_sql
 from lib.repair_transaction import preserve_and_apply, write_new_json
 
 
@@ -27,42 +29,104 @@ ROOT = Path(__file__).resolve().parents[1]
 MAX_ROWS = 25000
 MAX_CONSTITUENTS = 4096
 MAX_BYTES = 512 * 1024 * 1024
+MAX_LINE_BYTES = 2 * 1024 * 1024
+MAX_NATIVE_INPUTS = 100000
+PHASE_TIMEOUT_SECONDS = 180
+PERSISTENCE_TIMEOUT_SECONDS = 60
+# Policy allowance for auxiliary receipts and logs, separate from measured JSONL.
+AUXILIARY_RESERVE_BYTES = 64 * 1024 * 1024
+MAX_METADATA_BYTES = 64 * 1024
+LEGACY_MAX_BYTES = 512 * 1024 * 1024
+LEGACY_MAX_LINE_BYTES = 2 * 1024 * 1024
 
 
-def snapshot_expression(alias: str) -> str:
-    if not re.fullmatch(r"[a-z_]+", alias):
-        raise ValueError("snapshot alias must be a fixed SQL identifier")
-    p = alias
-    return f"""jsonb_build_object(
-      'id',encode({p}.id,'hex'),'entity_id',encode({p}.entity_id,'hex'),'type',{p}.type,
-      'coord_ewkb',encode(ST_AsEWKB({p}.coord),'hex'),
-      'hilbert_index',encode({p}.hilbert_index,'hex'),
-      'trajectory_ewkb',encode(ST_AsEWKB({p}.trajectory),'hex'),
-      'radius_origin_bits',encode(float8send({p}.radius_origin),'hex'),
-      'n_constituents',{p}.n_constituents,
-      'alignment_residual_bits',encode(float8send({p}.alignment_residual),'hex'),
-      'source_dim',{p}.source_dim,
-      'observed_at',{p}.observed_at,
-      'observed_at_binary',encode(timestamptz_send({p}.observed_at),'hex'))"""
+def positive_integer(value: object) -> int:
+    if type(value) is not int or value <= 0:
+        raise ValueError("resource limits must be positive integers")
+    return value
 
 
-def verified_plan(directory: Path) -> tuple[dict, dict]:
-    manifest = json.loads((directory / "manifest.json").read_text())
+def positive_argument(value: str) -> int:
+    try:
+        return positive_integer(int(value))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def nonnegative_argument(value: str) -> int:
+    try:
+        number = int(value)
+        if number < 0:
+            raise ValueError("resource reserve must be a nonnegative integer")
+        return number
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+class PriorReceiptBudget:
+    """Bound aggregate prior plan bytes verified during one receipt read phase."""
+
+    def __init__(self, max_bytes: int):
+        self.max_bytes = positive_integer(max_bytes)
+        self.bytes_read = 0
+
+    def reserve(self, size: int) -> None:
+        positive_integer(size)
+        if size > self.max_bytes - self.bytes_read:
+            raise ValueError("prior repair receipts exceed aggregate byte bound")
+        self.bytes_read += size
+
+
+def read_metadata(path: Path) -> dict:
+    with path.open("rb") as source:
+        raw = source.read(MAX_METADATA_BYTES + 1)
+    if len(raw) > MAX_METADATA_BYTES:
+        raise ValueError("repair receipt metadata exceeds byte bound")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("repair receipt metadata must be an object")
+    return value
+
+
+def verified_plan(directory: Path, *, max_bytes: int = MAX_BYTES,
+                  max_line_bytes: int = MAX_LINE_BYTES,
+                  budget: PriorReceiptBudget | None = None) -> tuple[dict, dict]:
+    max_bytes = positive_integer(max_bytes)
+    max_line_bytes = positive_integer(max_line_bytes)
+    manifest = read_metadata(directory / "manifest.json")
     if manifest.get("schema") != "laplace.legacy-content-repair-plan/v1":
         raise ValueError("unknown prior repair receipt schema")
+    declared_size = positive_integer(manifest.get("plan_bytes"))
+    recorded_bytes = positive_integer(manifest.get("max_bytes", LEGACY_MAX_BYTES))
+    recorded_line_bytes = positive_integer(manifest.get("max_line_bytes", LEGACY_MAX_LINE_BYTES))
+    for field in ("max_rows", "max_native_inputs", "timeout_seconds", "persistence_timeout_seconds",
+                  "idle_timeout_seconds", "psql_fetch_rows"):
+        if field in manifest:
+            positive_integer(manifest[field])
+    admitted_bytes = min(max_bytes, recorded_bytes)
+    admitted_line_bytes = min(max_line_bytes, recorded_line_bytes, admitted_bytes, declared_size)
+    if declared_size > admitted_bytes:
+        raise ValueError("prior repair receipt exceeds recorded or current byte bound")
     size = 0
     digest = hashlib.sha256()
+    context = None
     with (directory / "plan.jsonl").open("rb") as source:
-        first = source.readline(MAX_BYTES + 1)
-        size += len(first)
-        digest.update(first)
-        context = json.loads(first)
-        while chunk := source.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_BYTES:
-                raise ValueError("prior repair receipt exceeds byte bound")
-            digest.update(chunk)
-    if size != manifest.get("plan_bytes") or digest.hexdigest() != manifest.get("plan_sha256"):
+        if os.fstat(source.fileno()).st_size != declared_size:
+            raise ValueError("prior repair evidence changed")
+        if budget is not None:
+            budget.reserve(declared_size)
+        while raw := source.readline(admitted_line_bytes + 2):
+            if not raw.endswith(b"\n") or len(raw) - 1 > admitted_line_bytes:
+                raise ValueError("prior repair receipt exceeds line byte bound or is incomplete")
+            size += len(raw)
+            if size > declared_size:
+                raise ValueError("prior repair evidence changed")
+            digest.update(raw)
+            if context is None:
+                context = json.loads(raw)
+                if not isinstance(context, dict) or context.get("kind") != "context":
+                    raise ValueError("prior repair context is missing")
+    if size != declared_size or digest.hexdigest() != manifest.get("plan_sha256"):
         raise ValueError("prior repair evidence changed")
     if not isinstance(context, dict) or context.get("kind") != "context":
         raise ValueError("prior repair context is missing")
@@ -71,7 +135,7 @@ def verified_plan(directory: Path) -> tuple[dict, dict]:
 
 def confirmed_outcome(directory: Path, manifest: dict) -> bool:
     try:
-        outcome = json.loads((directory / "outcome.json").read_text())
+        outcome = read_metadata(directory / "outcome.json")
     except (OSError, ValueError):
         return False
     return isinstance(outcome, dict) and outcome.get("disposition") == "commit-confirmed" \
@@ -81,16 +145,19 @@ def confirmed_outcome(directory: Path, manifest: dict) -> bool:
         and outcome["applied"].get("count") == manifest["planned_rows"]
 
 
-def verified_reconciliation(directory: Path, manifest: dict, root: Path) -> bool:
+def verified_reconciliation(directory: Path, manifest: dict, root: Path, *,
+                            max_bytes: int = MAX_BYTES, max_line_bytes: int = MAX_LINE_BYTES,
+                            budget: PriorReceiptBudget | None = None) -> bool:
     path = directory / "reconciliation.json"
     if not path.exists():
         return False
-    reference = json.loads(path.read_text())
+    reference = read_metadata(path)
     target = Path(reference["reconciliation_directory"])
     if target.resolve().parent != root.resolve() or target.resolve() == directory.resolve() \
             or reference.get("original_plan_sha256") != manifest["plan_sha256"]:
         raise ValueError("prior reconciliation reference does not identify this receipt estate")
-    current_manifest, current_context = verified_plan(target)
+    current_manifest, current_context = verified_plan(target, max_bytes=max_bytes,
+        max_line_bytes=max_line_bytes, budget=budget)
     if not confirmed_outcome(target, current_manifest) \
             or current_manifest["plan_sha256"] != reference.get("reconciliation_plan_sha256"):
         raise ValueError("prior reconciliation has no matching successful durable outcome")
@@ -99,15 +166,23 @@ def verified_reconciliation(directory: Path, manifest: dict, root: Path) -> bool
                for item in current_context.get("prior_submission_reconciliation", []))
 
 
-def unresolved_submissions(root: Path) -> list[Path]:
+def unresolved_submissions(root: Path, *, max_bytes: int = MAX_BYTES,
+                           max_line_bytes: int = MAX_LINE_BYTES,
+                           budget: PriorReceiptBudget | None = None) -> list[Path]:
+    positive_integer(max_bytes)
+    positive_integer(max_line_bytes)
+    if budget is None:
+        budget = PriorReceiptBudget(max_bytes)
     pending = []
     for directory in sorted(root.iterdir()):
         if not directory.is_dir() or not (directory / "submission.json").exists():
             continue
         if directory.is_symlink():
             raise ValueError("repair receipt directories cannot be symlinks")
-        manifest, _ = verified_plan(directory)
-        if confirmed_outcome(directory, manifest) or verified_reconciliation(directory, manifest, root):
+        manifest, _ = verified_plan(directory, max_bytes=max_bytes,
+            max_line_bytes=max_line_bytes, budget=budget)
+        if confirmed_outcome(directory, manifest) or verified_reconciliation(directory, manifest, root,
+                max_bytes=max_bytes, max_line_bytes=max_line_bytes, budget=budget):
             continue
         pending.append(directory / "plan.jsonl")
     if len(pending) > 32:
@@ -115,15 +190,22 @@ def unresolved_submissions(root: Path) -> list[Path]:
     return pending
 
 
-def close_reconciled_submissions(root: Path, current: Path) -> None:
-    manifest, context = verified_plan(current)
+def close_reconciled_submissions(root: Path, current: Path, *, max_bytes: int = MAX_BYTES,
+                                 max_line_bytes: int = MAX_LINE_BYTES,
+                                 budget: PriorReceiptBudget | None = None) -> None:
+    # The newly written plan has its own admitted write envelope. The separate
+    # prior budget covers retained earlier plans read while closing references.
+    manifest, context = verified_plan(current, max_bytes=max_bytes, max_line_bytes=max_line_bytes)
+    if budget is None:
+        budget = PriorReceiptBudget(max_bytes)
     if not confirmed_outcome(current, manifest):
         raise ValueError("cannot close prior submissions without a successful durable reconciliation")
     for item in context.get("prior_submission_reconciliation", []):
         directory = Path(item["receipt"]).parent
         if directory.resolve().parent != root.resolve() or directory.resolve() == current.resolve():
             raise ValueError("reconciliation refers outside its receipt estate")
-        old_manifest, _ = verified_plan(directory)
+        old_manifest, _ = verified_plan(directory, max_bytes=max_bytes,
+            max_line_bytes=max_line_bytes, budget=budget)
         reference = {"schema": "laplace.legacy-content-repair-reconciliation/v1",
                      "original_plan_sha256": old_manifest["plan_sha256"],
                      "reconciliation_directory": str(current.resolve()),
@@ -164,12 +246,37 @@ BEGIN
       OR s.context->>'system_identifier' IS DISTINCT FROM (SELECT system_identifier::text FROM pg_control_system())) THEN
     RAISE EXCEPTION 'Prior repair receipt contract or database identity does not match';
   END IF;
+  IF EXISTS(SELECT FROM repair_prior r WHERE r.document->>'kind'='physicality'
+      AND (COALESCE(r.document->>'action','rewrite') NOT IN ('rewrite','reuse-existing-projection')
+        OR (r.document->>'action'='reuse-existing-projection' AND (
+          COALESCE(r.document->>'repair_kind','') NOT IN ('player-projection','session-projection')
+          OR jsonb_typeof(r.document->'existing_target') IS DISTINCT FROM 'object'
+          OR jsonb_typeof(r.document->'migration_proposal') IS DISTINCT FROM 'object'
+          OR r.document->'original'->>'type' IS DISTINCT FROM '1'
+          OR r.document->'proposed'->>'type' IS DISTINCT FROM '3'
+          OR r.document->'original'->>'id' IS NOT DISTINCT FROM r.document->'proposed'->>'id'
+          OR r.document->'original'->>'id' IS DISTINCT FROM encode(public.laplace_hash128_blake3(
+               decode(r.document->'original'->>'entity_id','hex')||decode('0100','hex')),'hex')
+          OR r.document->'proposed' IS DISTINCT FROM r.document->'existing_target'
+          OR r.document->'proposed'->>'id' IS DISTINCT FROM encode(public.laplace_hash128_blake3(
+               decode(r.document->'original'->>'entity_id','hex')||decode('0300','hex')),'hex')
+          OR ((r.document->'migration_proposal')-ARRAY['observed_at','observed_at_binary'])
+               IS DISTINCT FROM ((r.document->'existing_target')-ARRAY['observed_at','observed_at_binary'])
+          OR (((r.document->'original')||jsonb_build_object(
+                 'id',r.document->'proposed'->>'id','type',3))-ARRAY['observed_at','observed_at_binary'])
+               IS DISTINCT FROM ((r.document->'migration_proposal')-ARRAY['observed_at','observed_at_binary'])
+        )))) THEN
+    RAISE EXCEPTION 'Prior Projection reuse receipt has an invalid action or semantic contract';
+  END IF;
 END $prior_contract$;
 CREATE TEMP TABLE repair_reconciliation ON COMMIT DROP AS
 WITH compared AS (
   SELECT r.receipt,r.document,
          pg_temp.repair_snapshot(oldrow)=r.document->'original'
-           AND (oldrow.id=newrow.id OR newrow.id IS NULL) AS matches_original,
+           AND CASE WHEN r.document->>'action'='reuse-existing-projection'
+                THEN oldrow.id<>newrow.id
+                  AND pg_temp.repair_snapshot(newrow)=r.document->'existing_target'
+                ELSE oldrow.id=newrow.id OR newrow.id IS NULL END AS matches_original,
          pg_temp.repair_snapshot(newrow)=r.document->'proposed'
            AND (oldrow.id=newrow.id OR oldrow.id IS NULL) AS matches_proposed
   FROM repair_prior r
@@ -194,8 +301,9 @@ END $reconcile$;
     return "\n".join(statements)
 
 
-def plan_sql(max_rows: int, prior_paths: list[Path], producer_generation: dict | None = None) -> str:
-    if not 1 <= max_rows <= 100000:
+def plan_sql(max_rows: int, prior_paths: list[Path], producer_generation: dict | None = None, *,
+             resource_preamble: bool = False) -> str:
+    if type(max_rows) is not int or not 1 <= max_rows <= 100000:
         raise ValueError("repair row envelope must be between 1 and 100000")
     producer_json = json.dumps(producer_generation, sort_keys=True).replace("'", "''")
     return f"""
@@ -397,6 +505,15 @@ CROSS JOIN LATERAL (
     CASE WHEN bounded.valid THEN p.trajectory ELSE NULL END) v
 ) proof;
 
+-- Eligibility probes only the exceptional invalid set. Its cardinality may be
+-- tiny even when the retained native input manifest contains hundreds of
+-- thousands of rows; never rescan that complete manifest for every owner.
+CREATE INDEX repair_native_inputs_invalid_entity ON repair_native_inputs(entity_id)
+WHERE NOT COALESCE(valid_content,false);
+ANALYZE repair_native_inputs;
+ANALYZE repair_candidates;
+ANALYZE repair_incoming;
+
 CREATE TEMP TABLE repair_eligibility ON COMMIT DROP AS
 SELECT c.*,
   CASE WHEN c.entity_rows<>1 THEN 'duplicate-owner-identity'
@@ -417,7 +534,7 @@ SELECT c.*,
                 WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
                    OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000)
                 THEN 'opposing-name-testimony'
-              WHEN c.projection_target_exists THEN 'occupied-projection-target' ELSE 'eligible' END
+              ELSE 'eligible' END
        WHEN c.repair_kind='session-projection' THEN
          CASE WHEN NOT c.all_messages OR c.witnessed_messages<>(SELECT count(DISTINCT id) FROM unnest(c.child_ids) id)
                 THEN 'missing-exact-confirmed-session-membership'
@@ -425,7 +542,7 @@ SELECT c.*,
                 WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
                    OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000)
                 THEN 'opposing-session-membership'
-              WHEN c.projection_target_exists THEN 'occupied-projection-target' ELSE 'eligible' END
+              ELSE 'eligible' END
        WHEN NOT c.zero_flags THEN 'nonzero-move-occurrence-flags'
        WHEN NOT c.all_moves THEN 'legacy-line-has-non-move-constituents'
        WHEN c.projection_rows>1 THEN 'ambiguous-position-projections'
@@ -452,6 +569,7 @@ FROM repair_candidates c;
 
 CREATE TEMP TABLE repair_plan ON COMMIT DROP AS
 SELECT c.id AS old_id,c.entity_id,c.repair_kind,c.disposition,
+       'rewrite'::text AS action,NULL::jsonb AS existing_target,NULL::jsonb AS migration_proposal,
        c.id AS new_id,c.type AS new_type,c.coord AS new_coord,c.hilbert_index AS new_hilbert,
        c.trajectory AS new_trajectory,c.n_constituents AS new_count,
        pg_temp.repair_snapshot(p) AS original,
@@ -487,9 +605,35 @@ UPDATE repair_plan p SET proposed=p.original || jsonb_build_object(
   'coord_ewkb',encode(ST_AsEWKB(p.new_coord),'hex'),
   'hilbert_index',encode(p.new_hilbert,'hex'),
   'trajectory_ewkb',encode(ST_AsEWKB(p.new_trajectory),'hex'),
-  'radius_origin_bits',encode(float8send(public.laplace_radius_origin(p.new_coord)),'hex'),
+  'radius_origin_bits',CASE WHEN p.repair_kind='chess-line'
+    THEN encode(float8send(public.laplace_radius_origin(p.new_coord)),'hex')
+    ELSE p.original->>'radius_origin_bits' END,
   'n_constituents',p.new_count);
 
+-- Reuse is a distinct witnessed operation. Every semantic field must match
+-- the source-derived migration; only observation timestamps may differ. Keep
+-- the existing row unchanged and retain both exact prestate records.
+UPDATE repair_plan SET migration_proposal=proposed;
+UPDATE repair_plan p SET existing_target=c.occupied_projection_evidence->0
+FROM repair_eligibility c
+WHERE c.id=p.old_id AND p.disposition='eligible'
+  AND p.repair_kind IN ('player-projection','session-projection')
+  AND c.projection_rows=1 AND jsonb_array_length(c.occupied_projection_evidence)=1
+  AND c.occupied_projection_evidence->0->>'id'=encode(p.new_id,'hex')
+  AND c.occupied_projection_evidence->0->>'entity_id'=encode(p.entity_id,'hex')
+  AND c.occupied_projection_evidence->0->>'type'='3';
+UPDATE repair_plan p SET disposition='occupied-projection-target'
+FROM repair_eligibility c
+WHERE c.id=p.old_id AND p.disposition='eligible'
+  AND p.repair_kind IN ('player-projection','session-projection')
+  AND c.projection_target_exists AND p.existing_target IS NULL;
+UPDATE repair_plan SET disposition='projection-semantic-mismatch'
+WHERE disposition='eligible' AND existing_target IS NOT NULL
+  AND (migration_proposal-ARRAY['observed_at','observed_at_binary'])
+    IS DISTINCT FROM (existing_target-ARRAY['observed_at','observed_at_binary']);
+UPDATE repair_plan SET action='reuse-existing-projection',proposed=existing_target
+WHERE disposition='eligible' AND existing_target IS NOT NULL;
+""" + frozen_receipt_sql(f"""
 SELECT jsonb_build_object('kind','context','database',current_database(),
   'producer_generation','{producer_json}'::jsonb,
   'chess_coordinate_recipe',jsonb_build_object('sql_function','public.laplace_karcher_mean_4d',
@@ -504,25 +648,21 @@ SELECT jsonb_build_object('kind','context','database',current_database(),
   'write_epoch_before',(SELECT last_value FROM laplace.apply_write_epoch),
   'prior_submission_reconciliation',COALESCE((SELECT jsonb_agg(to_jsonb(r)) FROM repair_reconciliation r),'[]'::jsonb),
   'owner_envelope',{max_rows},'typed_content_owners_screened',(SELECT count(*) FROM repair_owner_inventory),'logical_constituent_envelope',{MAX_CONSTITUENTS});
-SELECT jsonb_build_object('kind','native-input','entity_id',encode(entity_id,'hex'),
-  'entity',entity,'content',content) FROM repair_native_inputs ORDER BY entity_id;
-SELECT jsonb_build_object('kind','physicality','repair_kind',repair_kind,'disposition',disposition,
-  'original',original,'proposed',proposed,'evidence',evidence)
-FROM repair_plan ORDER BY old_id;
+""", """
 SELECT jsonb_build_object('kind','plan','count',count(*),
   'native_input_count',(SELECT count(*) FROM repair_native_inputs),
   'unresolved',count(*) FILTER(WHERE disposition<>'eligible'),
   'classifications',COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM (
     SELECT repair_kind,disposition,count(*) AS rows FROM repair_plan GROUP BY repair_kind,disposition) g),'[]'::jsonb))
 FROM repair_plan;
-"""
+""", resource_preamble=resource_preamble)
 
 
 def apply_sql() -> str:
     return """
 CREATE TEMP TABLE repair_applied_epoch(epoch bigint) ON COMMIT DROP;
 DO $apply$
-DECLARE expected bigint; changed bigint;
+DECLARE expected bigint; changed bigint; reused bigint;
 BEGIN
   SELECT count(*) INTO expected FROM repair_plan;
   IF EXISTS(SELECT FROM repair_plan WHERE disposition<>'eligible') THEN
@@ -531,6 +671,20 @@ BEGIN
   IF EXISTS(SELECT FROM repair_plan r LEFT JOIN laplace.physicalities p ON p.id=r.old_id
             WHERE pg_temp.repair_snapshot(p) IS DISTINCT FROM r.original) THEN
     RAISE EXCEPTION 'Original physicality changed after its durable receipt';
+  END IF;
+  IF EXISTS(SELECT FROM repair_plan r
+            LEFT JOIN laplace.physicalities p ON p.id=r.new_id
+            WHERE r.existing_target IS NOT NULL
+              AND pg_temp.repair_snapshot(p) IS DISTINCT FROM r.existing_target) THEN
+    RAISE EXCEPTION 'Existing projection changed after its durable receipt';
+  END IF;
+  IF EXISTS(SELECT FROM repair_plan r WHERE r.action NOT IN ('rewrite','reuse-existing-projection')
+      OR (r.action='reuse-existing-projection' AND (
+        r.repair_kind NOT IN ('player-projection','session-projection') OR r.old_id=r.new_id
+        OR r.existing_target IS NULL OR r.proposed IS DISTINCT FROM r.existing_target
+        OR (r.migration_proposal-ARRAY['observed_at','observed_at_binary'])
+             IS DISTINCT FROM (r.existing_target-ARRAY['observed_at','observed_at_binary'])))) THEN
+    RAISE EXCEPTION 'Projection reuse action changed after its durable receipt';
   END IF;
   IF EXISTS(SELECT FROM repair_native_inputs i
             LEFT JOIN laplace.entities e ON e.id=i.entity_id
@@ -580,8 +734,12 @@ BEGIN
     INSERT INTO repair_applied_epoch SELECT nextval('laplace.apply_write_epoch');
     UPDATE laplace.physicalities p SET id=r.new_id,type=r.new_type,coord=r.new_coord,
       hilbert_index=r.new_hilbert,trajectory=r.new_trajectory,n_constituents=r.new_count
-    FROM repair_plan r WHERE p.id=r.old_id;
+    FROM repair_plan r WHERE p.id=r.old_id AND r.action='rewrite';
     GET DIAGNOSTICS changed=ROW_COUNT;
+    DELETE FROM laplace.physicalities p USING repair_plan r
+    WHERE p.id=r.old_id AND r.action='reuse-existing-projection';
+    GET DIAGNOSTICS reused=ROW_COUNT;
+    changed:=changed+reused;
     IF changed<>expected THEN
       RAISE EXCEPTION 'Repair updated % rows, expected %; rolling back',changed,expected;
     END IF;
@@ -609,6 +767,8 @@ BEGIN
   END IF;
 END $apply$;
 SELECT jsonb_build_object('kind','applied','count',(SELECT count(*) FROM repair_plan),
+  'rewritten_rows',(SELECT count(*) FROM repair_plan WHERE action='rewrite'),
+  'reused_projection_rows',(SELECT count(*) FROM repair_plan WHERE action='reuse-existing-projection'),
   'epoch',(SELECT epoch FROM repair_applied_epoch),'postconditions','exact-row-readback-and-native-content-proof');
 """
 
@@ -617,7 +777,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database', default=os.environ.get('PGDATABASE', 'laplace'))
     parser.add_argument('--receipt-root', type=Path, default=Path('/build/laplace/recovery/legacy-content-repair'))
-    parser.add_argument('--max-rows', type=int, default=MAX_ROWS)
+    parser.add_argument('--max-rows', type=positive_argument, default=MAX_ROWS)
+    parser.add_argument('--max-native-inputs', type=positive_argument, default=MAX_NATIVE_INPUTS,
+                        help='maximum complete child entity/Content snapshots in this receipt')
+    parser.add_argument('--max-bytes', type=positive_argument, default=MAX_BYTES,
+                        help='maximum UTF-8 JSONL bytes for one new or retained receipt')
+    parser.add_argument('--max-line-bytes', type=positive_argument, default=MAX_LINE_BYTES,
+                        help='maximum UTF-8 bytes per JSON record, excluding the newline')
+    parser.add_argument('--max-prior-bytes', type=positive_argument, default=MAX_BYTES,
+                        help='aggregate earlier plan bytes verified per discovery or closure phase; repeated reads count')
+    parser.add_argument('--timeout-seconds', type=positive_argument, default=PHASE_TIMEOUT_SECONDS,
+                        help='shared send/receive deadline for each database transaction phase')
+    parser.add_argument('--persistence-timeout-seconds', type=positive_argument, default=PERSISTENCE_TIMEOUT_SECONDS,
+                        help='maximum final evidence durability interval before APPLY')
+    parser.add_argument('--auxiliary-reserve-bytes', type=nonnegative_argument, default=AUXILIARY_RESERVE_BYTES,
+                        help='additional free receipt-filesystem allowance for receipts/logs beyond measured JSONL; default 64 MiB')
+    parser.add_argument('--measurement-only', action='store_true',
+                        help='retain complete resource measurement and confirm rollback without streaming or applying the plan')
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location("repair_quiescence", ROOT / "scripts/quiesce-managed-database.py")
     quiescence = importlib.util.module_from_spec(spec)
@@ -656,11 +832,19 @@ def main() -> int:
                "-p", os.environ.get("PGPORT", "5432"), "-U", os.environ.get("PGUSER", "laplace_admin"),
                "-d", args.database, "-v", "ON_ERROR_STOP=1"]
     args.receipt_root.mkdir(parents=True, mode=0o770, exist_ok=True)
-    pending = unresolved_submissions(args.receipt_root)
+    pending = unresolved_submissions(args.receipt_root, max_bytes=args.max_bytes,
+        max_line_bytes=args.max_line_bytes, budget=PriorReceiptBudget(args.max_prior_bytes))
     directory = args.receipt_root / (str(time.time_ns()) + "-" + uuid.uuid4().hex)
-    outcome = preserve_and_apply(command, plan_sql(args.max_rows, pending, producer_generation), apply_sql(), directory,
-        source_sha=source_sha, max_rows=args.max_rows, max_bytes=MAX_BYTES)
-    close_reconciled_submissions(args.receipt_root, directory)
+    outcome = preserve_and_apply(command,
+        plan_sql(args.max_rows, pending, producer_generation, resource_preamble=True), apply_sql(), directory,
+        source_sha=source_sha, max_rows=args.max_rows, max_native_inputs=args.max_native_inputs,
+        max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes,
+        timeout=args.timeout_seconds, persistence_timeout=args.persistence_timeout_seconds,
+        receipt_sql=receipt_stream_sql(), measurement_only=args.measurement_only,
+        auxiliary_reserve_bytes=args.auxiliary_reserve_bytes)
+    if not args.measurement_only:
+        close_reconciled_submissions(args.receipt_root, directory, max_bytes=args.max_bytes,
+            max_line_bytes=args.max_line_bytes, budget=PriorReceiptBudget(args.max_prior_bytes))
     print(json.dumps({"receipt_directory": str(directory), "outcome": outcome}, sort_keys=True))
     return 0
 

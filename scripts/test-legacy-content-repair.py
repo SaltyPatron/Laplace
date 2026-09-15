@@ -134,6 +134,15 @@ PHYSICALITY = """jsonb_build_object(
  'source_dim',p.source_dim,'observed_at',p.observed_at,
  'observed_at_binary',encode(timestamptz_send(p.observed_at),'hex'))"""
 
+PROJECTION_TARGETS = """
+INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
+    n_constituents,alignment_residual,source_dim,observed_at)
+SELECT public.laplace_hash128_blake3(entity_id||decode('0300','hex')),entity_id,3,
+  coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at
+FROM laplace.physicalities WHERE type=1
+  AND entity_id IN (repair_test.id('player'),repair_test.id('session'));
+"""
+
 
 class NativeRepairProof:
     def __init__(self, psql: Path, database: str, receipts: Path):
@@ -162,10 +171,16 @@ class NativeRepairProof:
             FROM laplace.attestations a),'[]'::jsonb));"""))
 
     def run(self, name: str, *, apply: str | None = None,
-            prior: list[Path] | None = None, max_rows: int = 100) -> dict:
-        return preserve_and_apply(self.command, REPAIR.plan_sql(max_rows, prior or []),
+            prior: list[Path] | None = None, max_rows: int = 100,
+            measurement_only: bool = False, auxiliary_reserve_bytes: int = 0,
+            producer_generation: dict | None = None,
+            **resource_limits) -> dict:
+        return preserve_and_apply(self.command, REPAIR.plan_sql(max_rows, prior or [],
+            producer_generation=producer_generation, resource_preamble=True),
             REPAIR.apply_sql() if apply is None else apply, self.receipts / name,
-            source_sha=self.source_sha, max_rows=max_rows, timeout=180)
+            source_sha=self.source_sha, max_rows=max_rows, timeout=180,
+            receipt_sql=REPAIR.receipt_stream_sql(), measurement_only=measurement_only,
+            auxiliary_reserve_bytes=auxiliary_reserve_bytes, **resource_limits)
 
     def records(self, name: str) -> list[dict]:
         directory = self.receipts / name
@@ -174,10 +189,31 @@ class NativeRepairProof:
         assert manifest["plan_bytes"] == len(contents), "receipt byte count changed"
         assert manifest["plan_sha256"] == hashlib.sha256(contents).hexdigest(), "receipt digest changed"
         assert manifest["source_sha"] == self.source_sha, "receipt lost source identity"
-        records = [json.loads(line) for line in contents.splitlines()]
+        assert contents.endswith(b"\n"), "retained JSONL lost its final newline"
+        lines = contents.split(b"\n")[:-1]
+        records = [json.loads(line) for line in lines]
         native_inputs = [row for row in records if row["kind"] == "native-input"]
         assert manifest["native_input_rows"] == len(native_inputs), "native input receipt count changed"
         assert records[-1]["native_input_count"] == len(native_inputs), "native input plan count changed"
+        resources_bytes = (directory / "resources.json").read_bytes()
+        resources = json.loads(resources_bytes)
+        assert resources["kind"] == "resources"
+        assert resources["schema"] == "laplace.legacy-content-repair-resources/v1"
+        assert resources["plan_bytes"] == sum(len(line) + 1 for line in lines) == len(contents)
+        assert resources["max_line_bytes"] == max(map(len, lines)), "header lost UTF-8 line byte bound"
+        assert resources["max_jsonl_line_bytes"] == max(len(line) + 1 for line in lines)
+        for field, kind in (("physicality_rows", "physicality"), ("native_input_rows", "native-input"),
+                            ("context_rows", "context"), ("summary_rows", "plan")):
+            assert resources[field] == sum(record["kind"] == kind for record in records)
+        assert resources["context_rows"] == resources["summary_rows"] == 1
+        context_fields = ("database", "database_oid", "system_identifier", "transaction", "observed_at",
+                          "producer_generation", "chess_coordinate_recipe", "write_epoch_before",
+                          "substrate_extension_version", "geometry_extension_version")
+        assert resources["plan_context"] == {field: records[0][field] for field in context_fields}, \
+            "resource header did not preserve its frozen receipt context"
+        assert resources["plan_summary"] == records[-1], "resource header did not preserve its frozen plan summary"
+        assert manifest["resources_sha256"] == hashlib.sha256(resources_bytes).hexdigest()
+        assert manifest["receipt_sql_sha256"] == hashlib.sha256(REPAIR.receipt_stream_sql().encode()).hexdigest()
         return records
 
     def native_inputs(self, records: list[dict], before: dict, names: list[str]) -> None:
@@ -202,13 +238,55 @@ class NativeRepairProof:
             "after_sha256": digest(after), "tables_unchanged": before == after,
             "after": after})
 
+    def measurement_only(self) -> None:
+        self.sql("SELECT repair_test.reset();")
+        before = self.state()
+        epoch_sql = "SELECT jsonb_build_object('last_value',last_value,'is_called',is_called) FROM laplace.apply_write_epoch;"
+        epoch_before = self.sql(epoch_sql)
+        name = "measurement-over-receipt-envelopes"
+        result = self.run(name, max_rows=3, measurement_only=True,
+            max_native_inputs=1, max_bytes=1, max_line_bytes=1,
+            apply="DO $$ BEGIN RAISE EXCEPTION 'Measurement unexpectedly executed APPLY'; END $$;")
+        after = self.state()
+        assert after == before, "measurement changed the complete substrate estate"
+        assert self.sql(epoch_sql) == epoch_before, "measurement advanced the write epoch"
+        assert result["disposition"] == "measurement-only-rollback-confirmed"
+        assert result["envelope_admitted"] is False
+        assert result["max_rows"] == 3 and result["max_native_inputs"] == 1
+        assert result["max_bytes"] == result["max_line_bytes"] == 1
+        assert result["auxiliary_reserve_bytes"] == 0
+        resources = result["resources"]
+        assert resources["physicality_rows"] == 3 and resources["native_input_rows"] == 8
+        assert resources["context_rows"] == resources["summary_rows"] == 1
+        assert resources["plan_summary"]["count"] == 3
+        assert resources["plan_summary"]["native_input_count"] == 8
+        assert resources["plan_summary"]["unresolved"] == 0
+        assert resources["plan_bytes"] > 1 and resources["max_line_bytes"] > 1
+        assert resources["max_jsonl_line_bytes"] == resources["max_line_bytes"] + 1
+        for field in ("native_input_rows", "plan_bytes", "max_line_bytes"):
+            assert any(rejection.startswith(field + "=") for rejection in result["resource_rejections"])
+        directory = self.receipts / name
+        resource_bytes = (directory / "resources.json").read_bytes()
+        assert json.loads(resource_bytes) == resources
+        assert result["resources_sha256"] == hashlib.sha256(resource_bytes).hexdigest()
+        assert json.loads((directory / "measurement.json").read_text()) == result
+        for filename in ("plan.jsonl", "manifest.json", "submission.json", "outcome.json", "failure.json"):
+            assert not (directory / filename).exists(), f"measurement unexpectedly retained {filename}"
+        self.readback(name, before, after)
+        self.completed.append("measurement-over-tiny-caps-retains-complete-header-and-confirms-rollback")
+
     def success(self) -> None:
         before = self.state()
         # One healthy game is outside the repair envelope: the bound applies
         # after failed Content identity classification, not to all owners.
-        outcome = self.run("positive", max_rows=3)
+        fixture_producer = {"fixture": "λ棋"}
+        outcome = self.run("positive", max_rows=3, producer_generation=fixture_producer)
         after = self.state()
         records = self.records("positive")
+        assert records[0]["producer_generation"] == fixture_producer
+        utf8_receipt = (self.receipts / "positive" / "plan.jsonl").read_bytes()
+        assert "λ棋".encode("utf-8") in utf8_receipt, "fixture Unicode was not emitted as UTF-8"
+        assert len(utf8_receipt) > len(utf8_receipt.decode("utf-8")), "byte-count fixture remained ASCII-only"
         rows = [record for record in records if record["kind"] == "physicality"]
         assert outcome["disposition"] == "commit-confirmed"
         assert outcome["applied"]["count"] == 3
@@ -223,6 +301,8 @@ class NativeRepairProof:
         expected = dict(before["physicalities"])
         for row in rows:
             assert row["disposition"] == "eligible"
+            assert row["action"] == "rewrite" and row["existing_target"] is None
+            assert row["migration_proposal"] == row["proposed"]
             old, new = row["original"], row["proposed"]
             assert expected.pop(old["id"]) == old, "receipt did not preserve complete original bytes"
             expected[new["id"]] = new
@@ -315,6 +395,91 @@ class NativeRepairProof:
           FROM laplace.physicalities WHERE id=repair_test.physicality_id('player',3::smallint);""")
         self.planning_failure("prior-proposed-and-original-coexist", prior=[prior],
                               expected_error="Unknown repair submission diverged")
+
+    def reuse_existing_projections(self) -> None:
+        timestamp_fields = {"observed_at", "observed_at_binary"}
+        for name, different_timestamps in (("reuse-identical-projections", False),
+                                            ("reuse-projection-timestamps", True)):
+            setup = PROJECTION_TARGETS
+            if different_timestamps:
+                setup += """UPDATE laplace.physicalities SET observed_at=observed_at+interval '2 days'
+                  WHERE id IN (repair_test.physicality_id('player',3::smallint),
+                    repair_test.physicality_id('session',3::smallint));"""
+            self.sql("SELECT repair_test.reset();\n" + setup)
+            before = self.state()
+            outcome = self.run(name, max_rows=3)
+            after = self.state()
+            records = self.records(name)
+            rows = [row for row in records if row["kind"] == "physicality"]
+            assert outcome["applied"]["count"] == len(rows) == 3
+            assert outcome["applied"]["rewritten_rows"] == 1
+            assert outcome["applied"]["reused_projection_rows"] == 2
+            assert sum(row["action"] == "reuse-existing-projection" for row in rows) == 2
+            expected = dict(before["physicalities"])
+            for row in rows:
+                assert row["disposition"] == "eligible"
+                old, proposed = row["original"], row["proposed"]
+                migration = row["migration_proposal"]
+                assert expected.pop(old["id"]) == old
+                if row["action"] == "reuse-existing-projection":
+                    assert row["repair_kind"] in {"player-projection", "session-projection"}
+                    target = row["existing_target"]
+                    assert target == before["physicalities"][target["id"]] == proposed
+                    assert migration == old | {"id": target["id"], "type": 3}
+                    assert {key: value for key, value in migration.items() if key not in timestamp_fields} == \
+                           {key: value for key, value in target.items() if key not in timestamp_fields}
+                    for field in timestamp_fields:
+                        assert (migration[field] != target[field]) == different_timestamps
+                    assert old["id"] not in after["physicalities"]
+                    assert after["physicalities"][target["id"]] == target, "reuse rewrote existing target bytes"
+                else:
+                    assert row["action"] == "rewrite" and row["repair_kind"] == "chess-line"
+                    assert row["existing_target"] is None and migration == proposed
+                expected[proposed["id"]] = proposed
+            assert after == {**before, "physicalities": expected}
+            self.native_inputs(records, before, ["m1", "m2", "p0", "p1", "p2", "name", "msg1", "msg2"])
+            self.readback(name, before, after)
+            self.completed.append(name)
+
+            prior = self.receipts / name / "plan.jsonl"
+            retained_bytes = prior.read_bytes()
+            replay_name = name + "-prior-poststate"
+            replay = self.run(replay_name, prior=[prior], max_rows=1)
+            assert replay["applied"]["count"] == 0 and replay["applied"]["epoch"] is None
+            reconciliation = self.records(replay_name)[0]["prior_submission_reconciliation"]
+            assert len(reconciliation) == 1 and reconciliation[0]["disposition"] == "prior-commit-confirmed"
+            assert self.state() == after and prior.read_bytes() == retained_bytes
+            self.readback(replay_name, after, self.state())
+            self.completed.append(replay_name)
+
+            # A reuse receipt names both exact rows in its legitimate prestate.
+            # The older rewrite-receipt coexistence cases above remain rejected.
+            self.sql("SELECT repair_test.reset();\n" + setup)
+            assert self.state() == before
+            retry_name = name + "-prior-prestate"
+            retry = self.run(retry_name, prior=[prior], max_rows=3)
+            reconciliation = self.records(retry_name)[0]["prior_submission_reconciliation"]
+            assert retry["applied"]["count"] == 3
+            assert len(reconciliation) == 1 and reconciliation[0]["disposition"] == "originals-confirmed"
+            assert self.state() == after and prior.read_bytes() == retained_bytes
+            self.readback(retry_name, before, self.state())
+            self.completed.append(retry_name)
+
+        self.rollback("reuse-changed-target-after-receipt", """
+          UPDATE laplace.physicalities SET observed_at=observed_at+interval '1 second'
+          WHERE id=repair_test.physicality_id('player',3::smallint);
+          """, "Existing projection changed after its durable receipt", setup=PROJECTION_TARGETS)
+        self.rollback("reuse-abort-after-content-delete", """
+          CREATE FUNCTION pg_temp.abort_reuse_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF OLD.id=repair_test.physicality_id('player') THEN
+              RAISE EXCEPTION 'Injected failure after old Content deletion';
+            END IF;
+            RETURN OLD;
+          END $$;
+          CREATE TRIGGER repair_delete_failure AFTER DELETE ON laplace.physicalities
+            FOR EACH ROW EXECUTE FUNCTION pg_temp.abort_reuse_delete();
+          """, "Injected failure after old Content deletion", setup=PROJECTION_TARGETS)
 
     def one_move(self) -> None:
         self.sql("SELECT repair_test.reset();")
@@ -425,8 +590,8 @@ class NativeRepairProof:
         self.completed.append(name)
         return records
 
-    def rollback(self, name: str, inject: str, expected_error: str) -> None:
-        self.sql("SELECT repair_test.reset();")
+    def rollback(self, name: str, inject: str, expected_error: str, *, setup: str = "") -> None:
+        self.sql("SELECT repair_test.reset();\n" + setup)
         before = self.state()
         try:
             self.run(name, apply=inject + "\n" + REPAIR.apply_sql())
@@ -468,8 +633,10 @@ class NativeRepairProof:
              "unresolved-or-malformed-original-manifest"),
             ("nonzero-move-flags", "UPDATE laplace.physicalities SET trajectory=ST_MakeLine(ARRAY[public.laplace_mantissa_pack(repair_test.id('m1'),1,1,2),public.laplace_mantissa_pack(repair_test.id('m2'),2,1,0)]) WHERE id=repair_test.physicality_id('game');",
              "nonzero-move-occurrence-flags"),
-            ("occupied-player-projection", "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT repair_test.physicality_id('player',3::smallint),entity_id,3,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at FROM laplace.physicalities WHERE id=repair_test.physicality_id('player');",
-             "occupied-projection-target"),
+            ("mismatched-player-projection", "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT repair_test.physicality_id('player',3::smallint),entity_id,3,coord,hilbert_index,trajectory,n_constituents,0.75,source_dim,observed_at FROM laplace.physicalities WHERE id=repair_test.physicality_id('player');",
+             "projection-semantic-mismatch"),
+            ("mismatched-session-occurrence-order", "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT repair_test.physicality_id('session',3::smallint),entity_id,3,coord,hilbert_index,ST_MakeLine(ARRAY[public.laplace_mantissa_pack(repair_test.id('msg1'),1,1,8),public.laplace_mantissa_pack(repair_test.id('msg1'),2,1,8),public.laplace_mantissa_pack(repair_test.id('msg2'),3,1,8)]),n_constituents,alignment_residual,source_dim,observed_at FROM laplace.physicalities WHERE id=repair_test.physicality_id('session');",
+             "projection-semantic-mismatch"),
             ("occupied-noncanonical-player-projection", "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT realize.canonical_id('legacy-repair-regression/noncanonical-player-projection'),entity_id,3,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at FROM laplace.physicalities WHERE id=repair_test.physicality_id('player');",
              "occupied-projection-target"),
             ("non-descending-line", "UPDATE laplace.entities SET tier=4 WHERE id=repair_test.id('m1');",
@@ -683,8 +850,10 @@ def main() -> int:
     try:
         proof = NativeRepairProof(prefix / "psql", database, receipts)
         proof.sql(FIXTURE)
+        proof.measurement_only()
         proof.success()
         proof.one_move()
+        proof.reuse_existing_projections()
         proof.negative_cases()
         proof.hash_correct_missing_child()
         proof.healthy_corpus_over_envelope()

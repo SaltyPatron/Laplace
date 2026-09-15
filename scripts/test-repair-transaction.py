@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -26,8 +27,10 @@ SPEC.loader.exec_module(REPAIR)
 CHILD = r'''
 import hashlib, json, pathlib, sys
 directory, mode, transcript = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])
+fetch_rows = None
 for line in sys.stdin:
     with transcript.open('a') as out: out.write(line)
+    if line.startswith('\\set FETCH_COUNT '): fetch_rows = int(line.split()[2])
     if line.startswith('\\echo PLAN_'):
         rows = [dict(kind='context', database='fixture'),
                 dict(kind='physicality', original={'trajectory_ewkb':'00000080ff'},
@@ -36,7 +39,7 @@ for line in sys.stdin:
                      unresolved=1 if mode == 'unresolved' else 0)]
         if mode == 'missing-original': del rows[1]['original']
         if mode == 'non-object': rows[1] = []
-        if mode.startswith('native-'):
+        if mode.startswith(('native-','resources-')):
             children = [dict(kind='native-input', entity_id=identity,
                              entity={'id':'\\x'+identity,'tier':2},
                              content={'entity_id':identity,'trajectory_ewkb':trajectory})
@@ -44,18 +47,57 @@ for line in sys.stdin:
                                                     ('02'*16,'00800000fe')]]
             if mode.startswith('native-missing-'):
                 del children[1][mode.removeprefix('native-missing-')]
+            if mode.startswith('resources-'): children[0]['entity']['label'] = 'ñébulo 水'
+            if mode == 'native-chunked':
+                assert fetch_rows is not None and 0 < fetch_rows <= 8
+                children = [dict(kind='native-input', entity_id=f'{identity:032x}',
+                                 entity={'id':'\\x'+f'{identity:032x}','tier':2},
+                                 content={'entity_id':f'{identity:032x}',
+                                          'trajectory_ewkb':'00800000fe'})
+                            for identity in range(1,18)]
             rows[1:1] = children
-            rows[-1]['native_input_count'] = 1 if mode == 'native-bad-count' else 2
+            rows[-1]['native_input_count'] = 1 if mode == 'native-bad-count' else len(children)
         if mode == 'plan-disconnect': sys.exit(3)
-        for row in rows: print(json.dumps(row), flush=True)
+        if mode.startswith('resources-'):
+            encoded = [(json.dumps(row,ensure_ascii=False)+'\n').encode() for row in rows]
+            resources = dict(kind='resources',schema='laplace.legacy-content-repair-resources/v1',
+                physicality_rows=1,native_input_rows=2,context_rows=1,summary_rows=1,
+                plan_bytes=sum(map(len,encoded)),max_line_bytes=max(map(len,encoded))-1,
+                max_jsonl_line_bytes=max(map(len,encoded)))
+            if mode == 'resources-mismatch-bytes': resources['plan_bytes'] += 1
+            if mode == 'resources-mismatch-line':
+                resources['max_line_bytes'] += 1
+                resources['max_jsonl_line_bytes'] += 1
+            if mode == 'resources-mismatch-parents': resources['physicality_rows'] += 1
+            if mode == 'resources-mismatch-children': resources['native_input_rows'] += 1
+            if mode == 'resources-invalid-count': resources['native_input_rows'] = True
+            print(json.dumps(resources),flush=True)
+        elif mode == 'native-chunked':
+            # Exercise protocol transport boundaries; native PostgreSQL tests own
+            # proving that psql uses libpq chunked mode for the configured value.
+            for offset in range(0,len(rows),fetch_rows):
+                sys.stdout.write(''.join(json.dumps(row)+'\n' for row in rows[offset:offset+fetch_rows]))
+                sys.stdout.flush()
+        else:
+            for row in rows: print(json.dumps(row), flush=True)
         print(line.split()[1], flush=True)
+    elif line.strip() == 'STREAM_RETAINED_PLAN;':
+        assert (directory/'resources.json').is_file()
+    elif line.startswith('\\echo RECEIPT_'):
+        for row in rows: print(json.dumps(row,ensure_ascii=False),flush=True)
+        print(line.split()[1],flush=True)
+    elif line.startswith('\\echo ROLLED_BACK_'):
+        if mode == 'resources-rollback-disconnect': sys.exit(6)
+        print(line.split()[1],flush=True)
     elif line.strip() == 'APPLY_RETAINED_PLAN;':
         receipt = (directory/'plan.jsonl').read_bytes()
         manifest = json.loads((directory/'manifest.json').read_text())
         assert manifest['plan_sha256'] == hashlib.sha256(receipt).hexdigest()
         assert (directory/'submission.json').is_file()
         if mode == 'apply-disconnect': sys.exit(4)
-        print(json.dumps(dict(kind='applied',count=1,epoch=9)), flush=True)
+        if mode != 'missing-applied':
+            print(json.dumps(dict(kind='applied',count=2 if mode == 'wrong-applied-count' else 1,epoch=9)), flush=True)
+        if mode == 'extra-applied': print(json.dumps(dict(kind='applied',count=1,epoch=9)), flush=True)
     elif line.startswith('\\echo COMMITTED_'):
         if mode == 'commit-disconnect': sys.exit(5)
         print(line.split()[1], flush=True)
@@ -80,12 +122,134 @@ class RepairTransactionTests(unittest.TestCase):
         return REPAIR.preserve_and_apply(
             [sys.executable, str(self.child), str(self.directory), mode, str(self.transcript)],
             "SELECT_LOCKED_EVIDENCE;", "APPLY_RETAINED_PLAN;", self.directory,
-            source_sha="a" * 40, max_rows=bounds.pop("max_rows", 2), timeout=5, **bounds)
+            source_sha="a" * 40, max_rows=bounds.pop("max_rows", 2), timeout=bounds.pop("timeout", 5), **bounds)
 
     def assert_not_submitted(self):
         self.assertNotIn("APPLY_RETAINED_PLAN;", self.transcript.read_text())
         self.assertNotIn("COMMIT;", self.transcript.read_text())
         self.assertEqual("not-submitted", json.loads((self.directory / "failure.json").read_text())["disposition"])
+
+    def run_resource_repair(self, mode="resources-success", **bounds):
+        return self.run_repair(mode, receipt_sql="STREAM_RETAINED_PLAN;", **bounds)
+
+    def assert_resource_plan_not_streamed(self):
+        self.assert_not_submitted()
+        self.assertNotIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
+        resources = json.loads((self.directory / "resources.json").read_text())
+        self.assertEqual(1, resources["physicality_rows"])
+        self.assertEqual(2, resources["native_input_rows"])
+        self.assertFalse((self.directory / "plan.jsonl").exists())
+        self.assertFalse((self.directory / "submission.json").exists())
+
+    def test_resource_barrier_is_durable_before_exact_utf8_receipt_stream(self):
+        fsync, send = REPAIR.os.fsync, REPAIR.PsqlTransaction.send
+        synced = []
+        def record_sync(fd):
+            fsync(fd)
+            synced.append(os.readlink(f"/proc/self/fd/{fd}"))
+        def record_send(tx, sql):
+            if "STREAM_RETAINED_PLAN;" in sql:
+                self.assertIn(str(self.directory / "resources.json"), synced)
+                self.assertIn(str(self.directory), synced)
+            send(tx, sql)
+        with patch.object(REPAIR.os, "fsync", side_effect=record_sync), \
+                patch.object(REPAIR.PsqlTransaction, "send", new=record_send):
+            outcome = self.run_resource_repair()
+        raw = (self.directory / "plan.jsonl").read_bytes()
+        resources = json.loads((self.directory / "resources.json").read_text())
+        self.assertIn("ñébulo 水".encode(), raw)
+        self.assertEqual(len(raw), resources["plan_bytes"])
+        self.assertEqual(max(map(len, raw.splitlines())), resources["max_line_bytes"])
+        self.assertEqual(resources["max_line_bytes"] + 1, resources["max_jsonl_line_bytes"])
+        self.assertEqual(hashlib.sha256((self.directory / "resources.json").read_bytes()).hexdigest(),
+                         outcome["resources_sha256"])
+        self.assertEqual("commit-confirmed", outcome["disposition"])
+        self.assertIn("SET LOCAL client_encoding='UTF8';", self.transcript.read_text())
+
+    def test_resource_limits_reject_before_stream_with_complete_measured_metadata(self):
+        for index, bounds in enumerate((dict(max_rows=0), dict(max_native_inputs=1),
+                                        dict(max_bytes=1), dict(max_line_bytes=1))):
+            with self.subTest(bounds=bounds):
+                self.directory = self.root / f"resource-limit-{index}"
+                self.transcript.unlink(missing_ok=True)
+                with self.assertRaisesRegex(REPAIR.RepairProtocolError, "resource envelope rejected") as caught:
+                    self.run_resource_repair(**bounds)
+                self.assert_resource_plan_not_streamed()
+                message = str(caught.exception)
+                for field in REPAIR.RESOURCE_FIELDS:
+                    self.assertIn(field, message)
+                self.assertIn(str(self.directory / "resources.json"), message)
+                self.assertNotIn("trajectory_ewkb", message)
+
+    def test_resource_disk_admission_includes_declared_auxiliary_reserve(self):
+        with patch.object(REPAIR.shutil, "disk_usage", return_value=SimpleNamespace(free=1024)), \
+                self.assertRaisesRegex(REPAIR.RepairProtocolError, "receipt and auxiliary reserve"):
+            self.run_resource_repair(auxiliary_reserve_bytes=1024)
+        self.assert_resource_plan_not_streamed()
+
+    def test_resource_fsync_failure_never_submits_receipt_stream(self):
+        fsync = REPAIR.os.fsync
+        def fail_resource_sync(fd):
+            if os.readlink(f"/proc/self/fd/{fd}") == str(self.directory / "resources.json"):
+                raise OSError("injected resource receipt fsync failure")
+            fsync(fd)
+        with patch.object(REPAIR.os, "fsync", side_effect=fail_resource_sync), self.assertRaises(OSError):
+            self.run_resource_repair()
+        self.assert_resource_plan_not_streamed()
+
+    def test_resource_barrier_keeps_the_original_planning_deadline(self):
+        monotonic, fsync = REPAIR.time.monotonic, REPAIR.os.fsync
+        elapsed = [0]
+        def slow_resource_sync(fd):
+            fsync(fd)
+            if os.readlink(f"/proc/self/fd/{fd}") == str(self.directory / "resources.json"):
+                elapsed[0] += 6
+        with patch.object(REPAIR.os, "fsync", side_effect=slow_resource_sync), \
+                patch.object(REPAIR.time, "monotonic", side_effect=lambda: monotonic() + elapsed[0]), \
+                self.assertRaisesRegex(REPAIR.RepairProtocolError, "phase timed out"):
+            self.run_resource_repair()
+        self.assert_resource_plan_not_streamed()
+
+    def test_resource_receipt_must_match_every_measured_count_and_size(self):
+        for suffix in ("bytes", "line", "parents", "children"):
+            with self.subTest(suffix=suffix):
+                self.directory = self.root / ("mismatch-" + suffix)
+                self.transcript.unlink(missing_ok=True)
+                with self.assertRaisesRegex(REPAIR.RepairProtocolError, "does not match its retained resource summary"):
+                    self.run_resource_repair("resources-mismatch-" + suffix)
+                self.assert_not_submitted()
+                self.assertIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
+                self.assertTrue((self.directory / "resources.json").is_file())
+                self.assertTrue((self.directory / "plan.jsonl").is_file())
+                self.assertFalse((self.directory / "submission.json").exists())
+
+    def test_resource_header_rejects_boolean_count_before_stream(self):
+        with self.assertRaisesRegex(REPAIR.RepairProtocolError, "nonnegative integer native_input_rows"):
+            self.run_resource_repair("resources-invalid-count")
+        self.assert_not_submitted()
+        self.assertNotIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
+        self.assertTrue((self.directory / "resources.json").is_file())
+
+    def test_measurement_reports_excess_envelope_after_confirmed_rollback_only(self):
+        measured = self.run_resource_repair(measurement_only=True, max_native_inputs=1, max_bytes=1)
+        self.assertEqual("measurement-only-rollback-confirmed", measured["disposition"])
+        self.assertFalse(measured["envelope_admitted"])
+        self.assertEqual(2, measured["resources"]["native_input_rows"])
+        self.assertGreater(measured["resources"]["plan_bytes"], 1)
+        commands = self.transcript.read_text()
+        self.assertIn("ROLLBACK;", commands)
+        self.assertNotIn("STREAM_RETAINED_PLAN;", commands)
+        self.assertNotIn("APPLY_RETAINED_PLAN;", commands)
+        self.assertNotIn("COMMIT;", commands)
+        self.assertTrue((self.directory / "measurement.json").is_file())
+        for artifact in ("plan.jsonl", "submission.json", "outcome.json"):
+            self.assertFalse((self.directory / artifact).exists())
+
+    def test_measurement_requires_complete_rollback_acknowledgement(self):
+        with self.assertRaises(REPAIR.RepairProtocolError):
+            self.run_resource_repair("resources-rollback-disconnect", measurement_only=True)
+        self.assert_resource_plan_not_streamed()
+        self.assertFalse((self.directory / "measurement.json").exists())
 
     def test_original_bytes_and_plan_are_durable_before_mutation(self):
         events = []
@@ -190,6 +354,107 @@ class RepairTransactionTests(unittest.TestCase):
             self.run_repair("native-success", max_rows=1, max_native_inputs=1)
         self.assert_native_prefix_retained(["context", "native-input"])
 
+    def test_bounded_psql_fetch_is_configured_before_plan_without_changing_receipts(self):
+        outcome = self.run_repair("native-chunked", max_rows=1, max_native_inputs=17)
+        commands = self.transcript.read_text().splitlines()
+        self.assertIn("\\set FETCH_COUNT 8", commands)
+        self.assertIn("\\set SHOW_ALL_RESULTS on", commands)
+        self.assertLess(commands.index("\\set FETCH_COUNT 8"), commands.index("SELECT_LOCKED_EVIDENCE;"))
+        records = self.native_records()
+        self.assertEqual(["context"] + ["native-input"] * 17 + ["physicality", "plan"],
+                         [record["kind"] for record in records])
+        self.assertEqual([f"{identity:032x}" for identity in range(1, 18)],
+                         [record["entity_id"] for record in records[1:18]])
+        receipt = (self.directory / "plan.jsonl").read_bytes()
+        self.assertEqual(b"".join((json.dumps(record) + "\n").encode() for record in records), receipt)
+        self.assertEqual(hashlib.sha256(receipt).hexdigest(), outcome["plan_sha256"])
+        self.assertEqual(17, outcome["native_input_rows"])
+        self.assertEqual(1, outcome["applied"]["count"])
+        self.assertEqual(8, outcome["psql_fetch_rows"])
+        self.assertEqual(2 * 1024 * 1024, outcome["max_line_bytes"])
+        self.assertEqual(512 * 1024 * 1024, outcome["max_bytes"])
+        self.assertEqual(5, outcome["timeout_seconds"])
+
+    def test_larger_record_envelope_reduces_fetch_group_instead_of_scaling_memory(self):
+        outcome = self.run_repair(max_line_bytes=8 * 1024 * 1024)
+        self.assertIn("\\set FETCH_COUNT 2", self.transcript.read_text().splitlines())
+        self.assertEqual(2, outcome["psql_fetch_rows"])
+        self.assertEqual(8 * 1024 * 1024, outcome["max_line_bytes"])
+
+    def test_sql_send_cannot_block_past_the_phase_deadline(self):
+        with (self.root / "blocked-child.log").open("wb") as errors:
+            tx = REPAIR.PsqlTransaction(
+                [sys.executable, "-c", "import time; time.sleep(0.5)"],
+                errors, timeout=0.05, max_line_bytes=1024)
+            try:
+                # The child never reads: this exceeds the pipe capacity and must
+                # reach the deadline instead of blocking in FileIO.write.
+                with self.assertRaisesRegex(REPAIR.RepairProtocolError, "phase timed out"):
+                    tx.send("X" * (2 * 1024 * 1024))
+            finally:
+                tx.close()
+
+    def test_receive_uses_the_sql_send_phase_deadline(self):
+        with (self.root / "phase-child.log").open("wb") as errors:
+            tx = REPAIR.PsqlTransaction(
+                [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip(), flush=True)"],
+                errors, timeout=5, max_line_bytes=1024)
+            try:
+                tx.send("PHASE_COMPLETE\n")
+                with patch.object(REPAIR.time, "monotonic", return_value=tx.deadline + 1), \
+                        self.assertRaisesRegex(REPAIR.RepairProtocolError, "phase timed out"):
+                    list(tx.lines("PHASE_COMPLETE"))
+            finally:
+                tx.close()
+
+    def test_persistence_overrun_retains_evidence_without_sending_apply(self):
+        fsync, monotonic = REPAIR.os.fsync, REPAIR.time.monotonic
+        for artifact in ("plan.jsonl", "manifest.json", "submission.json"):
+            with self.subTest(artifact=artifact):
+                self.directory = self.root / ("slow-" + artifact)
+                self.transcript.unlink(missing_ok=True)
+                elapsed = [0]
+                def slow_sync(fd):
+                    fsync(fd)
+                    if os.readlink(f"/proc/self/fd/{fd}") == str(self.directory / artifact):
+                        elapsed[0] += 2
+                with patch.object(REPAIR.os, "fsync", side_effect=slow_sync), \
+                        patch.object(REPAIR.time, "monotonic", side_effect=lambda: monotonic() + elapsed[0]), \
+                        self.assertRaisesRegex(REPAIR.RepairProtocolError, "persistence timed out before submission"):
+                    self.run_repair("native-success", persistence_timeout=1)
+                self.assert_not_submitted()
+                self.assertEqual(["context", "native-input", "native-input", "physicality", "plan"],
+                                 [record["kind"] for record in self.native_records()])
+                receipt = (self.directory / "plan.jsonl").read_bytes()
+                failure = json.loads((self.directory / "failure.json").read_text())
+                self.assertEqual(hashlib.sha256(receipt).hexdigest(), failure["plan_sha256"])
+                self.assertFalse((self.directory / "outcome.json").exists())
+
+    def test_phase_and_persistence_limits_are_recorded_and_finite(self):
+        outcome = self.run_repair(persistence_timeout=7)
+        self.assertEqual(5, outcome["timeout_seconds"])
+        self.assertEqual(7, outcome["persistence_timeout_seconds"])
+        self.assertEqual(12, outcome["idle_timeout_seconds"])
+        self.assertIn("SET LOCAL idle_in_transaction_session_timeout='12s';", self.transcript.read_text())
+        for parameter in ("timeout", "persistence_timeout"):
+            for timeout in (0, -1, float("inf"), float("nan")):
+                with self.subTest(parameter=parameter, timeout=timeout), \
+                        self.assertRaisesRegex(ValueError, "finite and positive"):
+                    self.run_repair(**{parameter: timeout})
+
+    def test_apply_acknowledgement_retains_at_most_one_matching_record(self):
+        for mode in ("missing-applied", "wrong-applied-count", "extra-applied"):
+            with self.subTest(mode=mode):
+                self.directory = self.root / mode
+                with self.assertRaises(REPAIR.RepairProtocolError):
+                    self.run_repair(mode)
+                failure = json.loads((self.directory / "failure.json").read_text())
+                self.assertEqual("submission-outcome-unknown", failure["disposition"])
+                self.assertTrue((self.directory / "plan.jsonl").is_file())
+                self.assertTrue((self.directory / "manifest.json").is_file())
+                self.assertTrue((self.directory / "submission.json").is_file())
+                self.assertFalse((self.directory / "outcome.json").exists())
+
     def test_rejects_incomplete_ambiguous_or_unbounded_plans(self):
         for mode, bounds in (("bad-count", {}), ("unresolved", {}),
                              ("missing-original", {}), ("non-object", {}),
@@ -280,6 +545,177 @@ class RepairReceiptReconciliationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"successful durable reconciliation"):
             self.repair.close_reconciled_submissions(self.root,current)
         self.assertFalse((old / "reconciliation.json").exists())
+
+    def resource_receipt(self, name, *, padding=0, tail_padding=0, limits=None):
+        directory = self.receipt(name)
+        context = {"kind": "context", "database": "fixture", "padding": "x" * padding,
+                   "prior_submission_reconciliation": []}
+        summary = {"kind": "plan", "count": 0, "native_input_count": 0, "unresolved": 0,
+                   "padding": "y" * tail_padding}
+        payload = (json.dumps(context) + "\n" + json.dumps(summary) + "\n").encode()
+        (directory / "plan.jsonl").write_bytes(payload)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest.update(plan_bytes=len(payload), plan_sha256=hashlib.sha256(payload).hexdigest())
+        manifest.update(limits or {})
+        (directory / "manifest.json").write_text(json.dumps(manifest))
+        return directory
+
+    def test_explicit_larger_receipt_envelope_overrides_a_smaller_module_default(self):
+        directory = self.resource_receipt("admitted", padding=1024,
+            limits={"max_bytes": 4096, "max_line_bytes": 2048})
+        payload = (directory / "plan.jsonl").read_bytes()
+        budget = self.repair.PriorReceiptBudget(4096)
+        with patch.object(self.repair, "MAX_BYTES", 64):
+            manifest, context = self.repair.verified_plan(directory, max_bytes=4096,
+                max_line_bytes=2048, budget=budget)
+        self.assertGreater(len(payload), 64)
+        self.assertEqual(4096, manifest["max_bytes"])
+        self.assertEqual("x" * 1024, context["padding"])
+        self.assertEqual(len(payload), budget.bytes_read)
+        self.assertEqual(payload, (directory / "plan.jsonl").read_bytes())
+
+    def test_legacy_manifest_without_envelopes_keeps_historical_limits(self):
+        directory = self.resource_receipt("legacy", padding=256)
+        original_manifest = (directory / "manifest.json").read_bytes()
+        original_plan = (directory / "plan.jsonl").read_bytes()
+        with patch.object(self.repair, "MAX_BYTES", 32), \
+                patch.object(self.repair, "MAX_LINE_BYTES", 32):
+            manifest, context = self.repair.verified_plan(directory,
+                max_bytes=4096, max_line_bytes=2048)
+        self.assertNotIn("max_bytes", manifest)
+        self.assertNotIn("max_line_bytes", manifest)
+        self.assertEqual("fixture", context["database"])
+        self.assertEqual(original_manifest, (directory / "manifest.json").read_bytes())
+        self.assertEqual(original_plan, (directory / "plan.jsonl").read_bytes())
+
+    def test_recorded_and_current_total_byte_limits_both_apply(self):
+        for bounded_by in ("recorded", "current"):
+            with self.subTest(bounded_by=bounded_by):
+                directory = self.resource_receipt(bounded_by, padding=128,
+                    limits={"max_bytes": 4096, "max_line_bytes": 2048})
+                size = (directory / "plan.jsonl").stat().st_size
+                current_limit = size
+                if bounded_by == "recorded":
+                    manifest = json.loads((directory / "manifest.json").read_text())
+                    manifest["max_bytes"] = size - 1
+                    (directory / "manifest.json").write_text(json.dumps(manifest))
+                else:
+                    current_limit = size - 1
+                with self.assertRaises(ValueError):
+                    self.repair.verified_plan(directory, max_bytes=current_limit, max_line_bytes=2048)
+        directory = self.resource_receipt("exact-total", limits={"max_bytes": 4096, "max_line_bytes": 2048})
+        size = (directory / "plan.jsonl").stat().st_size
+        self.repair.verified_plan(directory, max_bytes=size, max_line_bytes=2048)
+
+    def test_context_line_limit_excludes_lf_and_honors_both_envelopes(self):
+        for bounded_by in ("recorded", "current"):
+            with self.subTest(bounded_by=bounded_by):
+                directory = self.resource_receipt("line-" + bounded_by, padding=256,
+                    limits={"max_bytes": 4096, "max_line_bytes": 2048})
+                line_size = len((directory / "plan.jsonl").read_bytes().split(b"\n", 1)[0])
+                manifest = json.loads((directory / "manifest.json").read_text())
+                manifest["max_line_bytes"] = line_size
+                (directory / "manifest.json").write_text(json.dumps(manifest))
+                self.repair.verified_plan(directory, max_bytes=4096, max_line_bytes=line_size)
+                if bounded_by == "recorded":
+                    manifest["max_line_bytes"] = line_size - 1
+                    (directory / "manifest.json").write_text(json.dumps(manifest))
+                with self.assertRaises(ValueError):
+                    self.repair.verified_plan(directory, max_bytes=4096,
+                        max_line_bytes=line_size - (bounded_by == "current"))
+
+    def test_later_jsonl_line_cannot_exceed_recorded_or_current_limit(self):
+        for bounded_by in ("recorded", "current"):
+            with self.subTest(bounded_by=bounded_by):
+                directory = self.resource_receipt("tail-" + bounded_by, tail_padding=512,
+                    limits={"max_bytes": 4096, "max_line_bytes": 128 if bounded_by == "recorded" else 2048})
+                self.assertLessEqual(len((directory / "plan.jsonl").read_bytes().split(b"\n", 1)[0]), 128)
+                with self.assertRaises(ValueError):
+                    self.repair.verified_plan(directory, max_bytes=4096,
+                        max_line_bytes=128 if bounded_by == "current" else 2048)
+
+    def test_resource_limits_require_positive_integers_not_booleans(self):
+        directory = self.resource_receipt("invalid-current")
+        for value in (True, False, 0, -1, 1.5, "1024", None):
+            with self.subTest(budget=value), self.assertRaises(ValueError):
+                self.repair.PriorReceiptBudget(value)
+            for parameter in ("max_bytes", "max_line_bytes"):
+                limits = {"max_bytes": 4096, "max_line_bytes": 2048, parameter: value}
+                with self.subTest(parameter=parameter, value=value), self.assertRaises(ValueError):
+                    self.repair.verified_plan(directory, **limits)
+
+    def test_recorded_limits_and_plan_bytes_reject_invalid_numeric_fields(self):
+        for parameter in ("max_bytes", "max_line_bytes", "plan_bytes"):
+            for value in (True, False, 0, -1, 1.5, "1024", None):
+                with self.subTest(parameter=parameter, value=value):
+                    directory = self.resource_receipt(f"invalid-{parameter}-{type(value).__name__}-{value}",
+                        limits={"max_bytes": 4096, "max_line_bytes": 2048, parameter: value})
+                    with self.assertRaises(ValueError):
+                        self.repair.verified_plan(directory, max_bytes=4096, max_line_bytes=2048)
+
+    def test_manifest_metadata_is_bounded_independently_of_plan_envelope(self):
+        directory = self.resource_receipt("oversized-manifest")
+        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest["padding"] = "x" * (64 * 1024)
+        (directory / "manifest.json").write_text(json.dumps(manifest))
+        with self.assertRaises(ValueError):
+            self.repair.verified_plan(directory, max_bytes=128 * 1024, max_line_bytes=2048)
+
+    def test_resource_admission_does_not_replace_hash_and_size_verification(self):
+        for corrupt in ("hash", "size"):
+            with self.subTest(corrupt=corrupt):
+                directory = self.resource_receipt("changed-" + corrupt,
+                    limits={"max_bytes": 4096, "max_line_bytes": 2048})
+                payload = (directory / "plan.jsonl").read_bytes()
+                manifest = json.loads((directory / "manifest.json").read_text())
+                manifest["plan_sha256" if corrupt == "hash" else "plan_bytes"] = \
+                    "0" * 64 if corrupt == "hash" else len(payload) + 1
+                (directory / "manifest.json").write_text(json.dumps(manifest))
+                with self.assertRaises(ValueError):
+                    self.repair.verified_plan(directory, max_bytes=4096, max_line_bytes=2048)
+                self.assertEqual(payload, (directory / "plan.jsonl").read_bytes())
+
+    def test_aggregate_budget_rejects_two_individually_admitted_receipts(self):
+        first = self.resource_receipt("a-first", padding=128)
+        second = self.resource_receipt("b-second", padding=128)
+        total = sum((directory / "plan.jsonl").stat().st_size for directory in (first, second))
+        for directory in (first, second):
+            self.repair.verified_plan(directory, max_bytes=4096, max_line_bytes=2048)
+        with self.assertRaises(ValueError):
+            self.repair.unresolved_submissions(self.root, max_bytes=4096, max_line_bytes=2048,
+                budget=self.repair.PriorReceiptBudget(total - 1))
+        budget = self.repair.PriorReceiptBudget(total)
+        self.assertEqual([first / "plan.jsonl", second / "plan.jsonl"],
+            self.repair.unresolved_submissions(self.root, max_bytes=4096, max_line_bytes=2048, budget=budget))
+        self.assertEqual(total, budget.bytes_read)
+
+    def test_reconciliation_reference_reads_share_the_aggregate_budget(self):
+        old = self.receipt("a-old")
+        current = self.receipt("b-current", confirmed=True, reconciles=[{
+            "receipt": str(old / "plan.jsonl"), "rows": 0, "disposition": "zero-row-no-mutation"}])
+        self.repair.close_reconciled_submissions(self.root, current,
+            max_bytes=4096, max_line_bytes=2048, budget=self.repair.PriorReceiptBudget(8192))
+        old_size = (old / "plan.jsonl").stat().st_size
+        current_size = (current / "plan.jsonl").stat().st_size
+        with self.assertRaises(ValueError):
+            self.repair.unresolved_submissions(self.root, max_bytes=4096, max_line_bytes=2048,
+                budget=self.repair.PriorReceiptBudget(old_size + current_size))
+        budget = self.repair.PriorReceiptBudget(old_size + 2 * current_size)
+        self.assertEqual([], self.repair.unresolved_submissions(self.root,
+            max_bytes=4096, max_line_bytes=2048, budget=budget))
+        self.assertEqual(old_size + 2 * current_size, budget.bytes_read)
+
+    def test_closure_cannot_ignore_the_shared_read_budget(self):
+        old = self.receipt("old-budget")
+        current = self.receipt("new-budget", confirmed=True, reconciles=[{
+            "receipt": str(old / "plan.jsonl"), "rows": 0, "disposition": "zero-row-no-mutation"}])
+        original = (old / "plan.jsonl").read_bytes()
+        with self.assertRaises(ValueError):
+            self.repair.close_reconciled_submissions(self.root, current,
+                max_bytes=4096, max_line_bytes=2048,
+                budget=self.repair.PriorReceiptBudget(len(original) - 1))
+        self.assertFalse((old / "reconciliation.json").exists())
+        self.assertEqual(original, (old / "plan.jsonl").read_bytes())
 
 
 if __name__ == "__main__":
