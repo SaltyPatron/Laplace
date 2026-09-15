@@ -157,4 +157,10 @@ if (( ctest_rc != 0 )); then
   exit "$ctest_rc"
 fi
 
+# Exercise actual registry unavailability and WAL recovery in this private
+# postmaster. The normal public C deposit and SQL batch orchestrators run
+# unchanged; the fixture varies only the real registry file and process lifetime.
+LAPLACE_PG_PREFIX="$PG_PREFIX" bash scripts/test-highway-registry-recovery.sh \
+  "$pgdata" "$highway_perfcache" "${REGRESS_DB}_highway"
+
 echo "PR_DB_PROOF_OK database_stem=$REGRESS_DB postgres=isolated controls=staged modules=build-tree canonical_mutations=0"

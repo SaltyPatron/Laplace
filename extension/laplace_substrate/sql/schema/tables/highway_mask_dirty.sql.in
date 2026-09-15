@@ -1,33 +1,26 @@
--- Mask refresh queue: entities whose CONSENSUS participation changed and whose
--- highway_mask therefore needs recomputing.
---
--- Why this exists (2026-07-21): highway_mask_refresh derives a mask purely from an
--- entity's consensus edges, so the exact refresh set after a fold is "every subject
--- and object written by that fold". That set was being tracked client-side in a
--- HashSet<Hash128> capped at 8,388,608 (ConsensusAccumulatingWriter); any ingest
--- larger than the cap threw the set away and fell back to highway_mask_rebuild --
--- a full pass over every entity in the substrate. Every large source therefore paid
--- a multi-minute full rebuild, which is batch-rebuild-as-a-class, the thing the
--- substrate forbids: the fold-time refresh is the intended mechanism and the full
--- rebuild is a rare REGENERATE tool for highway bit renumbering only.
---
--- Capturing the set here instead makes it exact, unbounded, and deduplicated by the
--- primary key, with no client memory and no overflow path.
---
--- SUPERSEDED ON THE INGEST PATH (2026-07-21). The fold no longer queues here and
--- no ingest drains it: highway_mask_deposit runs INLINE in every lane, which is
--- O(pairs the fold already holds in RAM) with zero consensus re-reads, versus this
--- queue's O(touched entities x consensus probes) recompute in one serial pass at
--- the end of a run. What survives here is the REPAIR path, which deposit cannot
--- express: deposit only OR-accumulates, so anything that must CLEAR bits --
--- per-source eviction removing an entity's last governed edge -- queues the
--- affected entities here and calls highway_mask_drain(), whose
--- highway_mask_refresh recomputes each mask from scratch and can therefore clear.
--- (highway_mask_rebuild remains the full REGENERATE tool for bit renumbering.)
---
--- UNLOGGED: pure derived work-queue. Losing it on a crash costs a regenerate, never
--- data — and the masks it would have written are themselves recomputable from
--- consensus at any time (recompute-not-accumulate).
-CREATE UNLOGGED TABLE IF NOT EXISTS highway_mask_dirty (
+-- Bit-clearing work from source eviction/refolding is a durable obligation.
+-- Native ingest deposits exact (entity,type) deltas inline; this queue is only
+-- for recomputation that may turn bits OFF. A crash must not erase that work.
+CREATE TABLE IF NOT EXISTS highway_mask_dirty (
     id bytea PRIMARY KEY
 );
+ALTER TABLE laplace.highway_mask_dirty SET LOGGED;
+
+-- Exact deposit backlog. Persist already-known pairs when the registry is
+-- unavailable instead of rediscovering them with a later consensus scan.
+CREATE TABLE IF NOT EXISTS highway_mask_pending (
+    entity_id bytea NOT NULL CHECK (octet_length(entity_id) = 16),
+    type_id   bytea NOT NULL CHECK (octet_length(type_id) = 16),
+    PRIMARY KEY (entity_id, type_id)
+);
+
+-- Existing data needs one historical population pass. Subsequent writes use
+-- native inline deposit; deployment only drains retained and dirty batches.
+CREATE TABLE IF NOT EXISTS highway_mask_population_state (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    complete boolean NOT NULL DEFAULT false,
+    completed_at timestamptz
+);
+INSERT INTO highway_mask_population_state(singleton, complete)
+VALUES (true, false)
+ON CONFLICT (singleton) DO NOTHING;
