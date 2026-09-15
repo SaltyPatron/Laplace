@@ -133,6 +133,13 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
         if (sentId is null || targetId is null || frameId is null) return;
 
+        // The annotation record is an ORDERED STRUCTURAL encoding over exact content
+        // roots plus source-coordinate metadata. It is not itself a text/content
+        // decomposition trajectory. The sentence and target strings above already
+        // enter through ContentEmitter and therefore recursively bottom out in the
+        // Unicode/codepoint Merkle DAG. Keeping schema/offset ids in type=Content
+        // polluted content-continuation indexes and made the recursive content proof
+        // demand content physicalities for source-reference coordinates.
         var constituents = new Hash128[3 + ann.TargetSpans.Count * 2];
         constituents[0] = AnnotationSchemaId;
         constituents[1] = sentId.Value;
@@ -158,12 +165,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         if (!TextEntityBuilder.TryDecomposeRoot(
                 sentenceUtf8, out _, out _, out double x, out double y, out double z, out double m))
             throw new InvalidOperationException("FrameNet span annotation has no sentence placement");
-        Hash128 physicalityId = PhysicalityId.Compute(annotationId, PhysicalityType.Content);
+        Hash128 physicalityId = PhysicalityId.Compute(annotationId, PhysicalityType.ParseStructure);
         if (b.TrySeePhysicality(physicalityId))
         {
             double[] coord = [x, y, z, m];
             b.AddPhysicalityPreSeen(new PhysicalityRow(
-                physicalityId, annotationId, Source, PhysicalityType.Content,
+                physicalityId, annotationId, Source, PhysicalityType.ParseStructure,
                 x, y, z, m, Hilbert128.Encode(coord),
                 Trajectory.Build(constituents), constituents.Length,
                 null, null, 0));
@@ -249,7 +256,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         }
     }
 
-
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
         Hash128? frameAnchor = CategoryAnchor.Emit(
@@ -267,18 +273,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
-
         foreach (var lu in frame.LexUnits)
             ContentEmitter.Emit(b, lu.Lemma, Source);
-
-
-
-
-
     }
-
-
-
 
     private static void EmitFrameAttestations(SubstrateChangeBuilder b, Frame frame)
     {
@@ -328,7 +325,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                         Source, null, TC.AcademicCurated));
             }
 
-
             foreach (var reqName in fe.Requires)
                 if (RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, reqName) is { } reqId)
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
@@ -358,8 +354,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             Hash128? tgt = CategoryAnchor.Id(rel.TargetFrame);
             if (tgt is null) continue;
 
-
-
             if (rel.Type == "Subframe of")
                 b.AddAttestation(NativeAttestation.Categorical(
                     tgt.Value, typeName, frameId, Source, TC.AcademicCurated));
@@ -368,8 +362,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                     frameId, typeName, tgt.Value, Source, TC.AcademicCurated));
         }
     }
-
-
 
     internal static Frame? ParseFrame(string path)
     {
