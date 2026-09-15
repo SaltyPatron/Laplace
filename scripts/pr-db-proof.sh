@@ -2,7 +2,7 @@
 # Execute the exact pull-request native extension build against an isolated
 # throwaway PostgreSQL cluster. The proof must not reuse the production
 # postmaster: production preloads the installed laplace_substrate image, while
-# PR proof deliberately loads the branch image from the build tree. Loading both
+# PR proof preloads only the branch host image from the build tree. Loading both
 # copies in one postmaster re-registers custom GUCs and makes CREATE EXTENSION
 # fail before branch SQL is exercised.
 set -euo pipefail
@@ -75,6 +75,7 @@ control_dir="$control_root/extension"
 }
 
 build_library_path="$BUILD/extension/laplace_substrate:$BUILD/extension/laplace_geom:$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis"
+branch_host="$BUILD/extension/laplace_substrate/laplace_substrate"
 t0_perfcache="$BUILD/engine/core/perfcache/laplace_t0_perfcache.bin"
 highway_perfcache="$BUILD/engine/core/perfcache/laplace_highway_perfcache.bin"
 chess_position_perfcache="$BUILD/engine/core/perfcache/laplace_chess_position_perfcache.bin"
@@ -90,6 +91,10 @@ done
 # postmaster while dynamic_library_path points at a branch build can load two
 # different copies of the extension into one process. Besides invalidating the
 # proof, that redefines custom GUCs such as laplace_substrate.perfcache_path.
+# Preload that exact branch host so fresh backends can call execution functions
+# before any host SQL function: the execution module uses the host's cache and
+# configuration symbols. This is the same module topology as production, with
+# neither production libraries nor production cache files loaded.
 # A private socket directory makes concurrent proofs independent; listen_addresses
 # is empty, so the arbitrary fixed port never opens a TCP listener or conflicts
 # with production.
@@ -98,7 +103,7 @@ cat >>"$pgdata/postgresql.conf" <<EOF
 listen_addresses = ''
 port = 55432
 unix_socket_directories = '$socket_dir'
-shared_preload_libraries = ''
+shared_preload_libraries = '$branch_host'
 extension_control_path = '$control_root:\$system'
 dynamic_library_path = '$build_library_path:\$libdir'
 laplace_substrate.perfcache_path = '$t0_perfcache'
@@ -126,11 +131,11 @@ if [[ "$available" != "laplace_geom,laplace_substrate" ]]; then
   exit 2
 fi
 
-# Prove the branch image, not a preloaded installed image, owns the process.
+# Prove the exact branch host, not the installed image, owns every backend.
 preload="$($PG_PREFIX/bin/psql -X -A -t -d postgres -v ON_ERROR_STOP=1 -c \
   "SHOW shared_preload_libraries;")"
-if [[ -n "$preload" ]]; then
-  echo "pr-db-proof: isolated postmaster unexpectedly preloaded libraries: $preload" >&2
+if [[ "$preload" != "$branch_host" ]]; then
+  echo "pr-db-proof: isolated postmaster host mismatch: expected $branch_host, found $preload" >&2
   exit 2
 fi
 
