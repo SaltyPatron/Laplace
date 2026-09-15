@@ -25,11 +25,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
 
     private const double OpeningWitnessWeight = 0.7;
 
-    // One game's weight per book line (doc 03 C09): a catalog line asserts the line EXISTS, not
-    // an outcome — at games=4 the fabricated Draw mass systematically dragged sharp book lines
-    // toward neutral against real-game evidence. games=1 keeps the existence witness while real
-    // outcomes dominate as soon as any actual games fold in.
-
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
@@ -122,9 +117,9 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         var moveIds = moves.Select(static move => move.Id).ToArray();
         var lineId = ChessCompose.LineId(line[0].Id, moveIds);
 
-        // Shared Game/line type — identity is the merkle; do not mint a parallel id space.
         b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.OpeningsSourceId);
-        ChessGraph.AppendLineTrajectory(b, lineId, moves, ChessVocabulary.OpeningsSourceId, nowUs);
+        ChessGraph.AppendLineTrajectory(
+            b, lineId, line[0], moves, ChessVocabulary.OpeningsSourceId, nowUs);
         ChessGraph.AppendPositionProjection(b, lineId, line, ChessVocabulary.OpeningsSourceId, nowUs);
 
         Hash128? nameId = null;
@@ -142,9 +137,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
                 lineId, ChessSeedManifest.HasEco, eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
     }
 
-    /// <summary>
-    /// Pure compose for tests: same product as <see cref="AppendLine"/> without a live writer.
-    /// </summary>
     internal static SubstrateChange ComposeLineForTest(string eco, string name, IReadOnlyList<string> sans)
     {
         var b = new SubstrateChangeBuilder(ChessVocabulary.OpeningsSourceId, "test/openings");
@@ -180,18 +172,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
                 yield return row;
     }
 
-    /// <summary>
-    /// Pre-ingest inventory (GH #492). Counts the rows this decomposer will actually
-    /// YIELD, not newlines.
-    ///
-    /// <c>FromFiles</c> newline-counts, which includes each TSV's <c>eco name pgn</c>
-    /// header — a row <see cref="ParseRow"/> deliberately skips. The run therefore
-    /// finished at <c>input_done=3733 input_total=3738</c> and pinned at 99.9%: five
-    /// header lines promised and never delivered. A denominator that counts something
-    /// the numerator cannot reach can never read 100%, so "did this finish?" stops being
-    /// answerable from the journal. Files here are catalogs (a few thousand rows), so an
-    /// exact pass costs milliseconds.
-    /// </summary>
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
@@ -221,16 +201,9 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         return n;
     }
 
-    /// <summary>
-    /// An empty run is expected when the novelty gate consumed every record it read —
-    /// see <see cref="ChessDropLedger.ExplainEmptyRun"/>. Re-ingesting an already-ingested
-    /// corpus used to exit 1 with "declares N input unit(s) but ingested 0".
-    /// </summary>
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
         => ChessDropLedger.ExplainEmptyRun(SourceName, declaredInputUnits);
 
-    // Zero matches THROWS — see ChessInput. `ingest openings <dir-with-no-tsv>` used to
-    // exit 0 with an empty substrate.
     private static IReadOnlyList<string> EnumerateFiles(string path, SearchOption scope)
         => ChessInput.Resolve(path, scope, ChessInput.OpeningsExtensions, "openings");
 }
