@@ -20,3 +20,58 @@ jobs:
           fetch-depth: 1
       - name: Enforce source-tree hygiene and strong secret signatures
         run: python3 scripts/repo-hygiene-gate.py
+
+  release-completed-diagnostic:
+    # One explicitly identified read-only invocation, not a cancellation policy.
+    if: github.event_name == 'push' && github.event.before == '8d673de0067192d4fa5a73b81bc20a68e42d5c4d'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Release only the stalled post-reconciliation diagnostic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base = 'https://api.github.com/repos/SaltyPatron/Laplace'
+          run_id = 35007795803
+          def request(path, method='GET'):
+              req = urllib.request.Request(base + path, method=method, headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              })
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  raw = response.read()
+                  return json.loads(raw) if raw else None
+
+          run = request(f'/actions/runs/{run_id}')
+          if run['status'] == 'completed':
+              print('The selected diagnostic already finished; no cancellation.')
+              raise SystemExit(0)
+          if run['head_sha'] != 'c2ceb323769946ed89c240d78fdbb1d5e10e79a7':
+              raise SystemExit('Selected run source changed; no cancellation.')
+          jobs = request(f'/actions/runs/{run_id}/jobs?per_page=100')['jobs']
+          job = next((j for j in jobs if j['id'] == 104511839355), None)
+          if job is None:
+              raise SystemExit('Selected job missing; no cancellation.')
+          steps = {s['name']: s for s in job['steps']}
+          fast = steps.get('Fast source/tooling proof and installed-product reconciliation', {})
+          full = steps.get('Run full product lifecycle', {})
+          diagnostic = steps.get('Retain bounded live recursive proof counterexamples', {})
+          if fast.get('conclusion') != 'success' or full.get('conclusion') != 'skipped':
+              raise SystemExit('Run is not a completed read-only reconciliation; no cancellation.')
+          if diagnostic.get('status') != 'in_progress':
+              print('Selected diagnostic no longer running; no cancellation.')
+              raise SystemExit(0)
+          request(f'/actions/runs/{run_id}/cancel', 'POST')
+          print(f'Cancelled only read-only diagnostic run {run_id}; full lifecycle was skipped.')
+          PY
