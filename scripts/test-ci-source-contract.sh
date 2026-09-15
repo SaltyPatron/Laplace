@@ -36,6 +36,7 @@ for f in \
   scripts/test-dataset-estate-refresh.py \
   scripts/test-dataset-estate-refresh.sh \
   scripts/test-forward-prompt-analysis.py \
+  scripts/test-refactor-cognition-convergence.py \
   scripts/test-upgrade-drop-order.py \
   scripts/test-installed-extension-current.py \
   docs/plan/DATASET_ESTATE_REFRESH_OPERATOR.md \
@@ -80,6 +81,11 @@ bash scripts/test-dataset-estate-refresh.sh
 # The dynamic forward pass may optimize duplicate orchestration work, but it may
 # not shorten the requested walk or introduce a second route/crawl definition.
 python3 scripts/test-forward-prompt-analysis.py
+
+# Cross-repository convergence keeps Laplace-Refactor as the cognition semantic
+# owner. Legacy may enumerate durable candidates, but must not grow a second
+# search/operation/completion loop or require a hidden activation switch.
+python3 scripts/test-refactor-cognition-convergence.py
 
 # The live recursive proof runs only on the seeded/shared profile, but its SQL
 # construction and floor wiring are source contracts and must fail before build if
