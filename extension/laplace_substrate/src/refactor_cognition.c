@@ -4,98 +4,37 @@
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/timestamp.h"
 
 #include "blake3.h"
 #include "laplace/cognition_observation_request.h"
+#include "laplace/core/sql_catalog.h"
 
 #include <limits.h>
 #include <stdint.h>
 #include <string.h>
 
 /*
- * Compatibility boundary only.  PostgreSQL owns durable legacy storage and
- * enumerates observation candidates; Laplace-Refactor owns request compilation,
- * search-state transitions, A*, cognition operations, completion and receipts.
- * Do not grow a second cognition loop in this file.
+ * Compatibility boundary only. PostgreSQL owns durable legacy storage and
+ * bounded retrieval; Laplace-Refactor owns request compilation, search-state
+ * transitions, A*, cognition operations, completion and receipts. Ordered
+ * trajectory relation crossings are derived here from the canonical expanded
+ * manifest returned by laplace_geom, not reimplemented in SQL.
  */
 
 #define LAPLACE_REFACTOR_MAX_RESULTS 64
 #define LAPLACE_REFACTOR_CANDIDATE_CAPACITY 256
 
-static const char *CANDIDATE_QUERY =
-    "WITH source_physicalities AS MATERIALIZED ("
-    "  SELECT p.id, p.entity_id, p.trajectory "
-    "  FROM laplace.physicalities p "
-    "  WHERE p.type = 1 AND p.trajectory IS NOT NULL "
-    "    AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1::bytea]"
-    "), source_runs AS MATERIALIZED ("
-    "  SELECT p.id AS physicality_id, p.entity_id AS container_id,"
-    "         u.ordinal::bigint AS ordinal, u.entity_id,"
-    "         u.run_length::bigint AS run_length,"
-    "         lag(u.entity_id) OVER (PARTITION BY p.id ORDER BY u.ordinal) AS prev_entity,"
-    "         lag(u.ordinal::bigint) OVER (PARTITION BY p.id ORDER BY u.ordinal) AS prev_ordinal,"
-    "         lag(u.run_length::bigint) OVER (PARTITION BY p.id ORDER BY u.ordinal) AS prev_run_length,"
-    "         lead(u.entity_id) OVER (PARTITION BY p.id ORDER BY u.ordinal) AS next_entity,"
-    "         lead(u.ordinal::bigint) OVER (PARTITION BY p.id ORDER BY u.ordinal) AS next_ordinal"
-    "  FROM source_physicalities p"
-    "  CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) u"
-    "), owned_runs AS MATERIALIZED ("
-    "  SELECT p.id AS physicality_id, u.ordinal::bigint AS ordinal,"
-    "         u.entity_id, u.run_length::bigint AS run_length"
-    "  FROM laplace.physicalities p"
-    "  CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) u"
-    "  WHERE p.type = 1 AND p.trajectory IS NOT NULL AND p.entity_id = $1"
-    "), candidates AS ("
-    "  SELECT r.physicality_id, r.container_id AS target_id,"
-    "         r.ordinal AS source_ordinal, 0::bigint AS target_ordinal,"
-    "         r.run_length AS multiplicity, 0::bigint AS gap, 1::int AS relation"
-    "  FROM source_runs r WHERE ($2 & 1) <> 0 AND r.entity_id = $1"
-    "  UNION ALL"
-    "  SELECT r.physicality_id, r.entity_id, 0::bigint, r.ordinal,"
-    "         r.run_length, 0::bigint, 2::int"
-    "  FROM owned_runs r WHERE ($2 & 2) <> 0"
-    "  UNION ALL"
-    "  SELECT r.physicality_id, r.entity_id, r.ordinal + 1, r.ordinal,"
-    "         r.run_length - 1, 1::bigint, 4::int"
-    "  FROM source_runs r"
-    "  WHERE ($2 & 4) <> 0 AND r.entity_id = $1 AND r.run_length > 1"
-    "  UNION ALL"
-    "  SELECT r.physicality_id, r.prev_entity, r.ordinal,"
-    "         r.prev_ordinal + r.prev_run_length - 1, 1::bigint, 1::bigint, 4::int"
-    "  FROM source_runs r"
-    "  WHERE ($2 & 4) <> 0 AND r.entity_id = $1 AND r.prev_entity IS NOT NULL"
-    "  UNION ALL"
-    "  SELECT r.physicality_id, r.entity_id,"
-    "         r.ordinal + r.run_length - 2, r.ordinal + r.run_length - 1,"
-    "         r.run_length - 1, 1::bigint, 8::int"
-    "  FROM source_runs r"
-    "  WHERE ($2 & 8) <> 0 AND r.entity_id = $1 AND r.run_length > 1"
-    "  UNION ALL"
-    "  SELECT r.physicality_id, r.next_entity,"
-    "         r.ordinal + r.run_length - 1, r.next_ordinal,"
-    "         1::bigint, 1::bigint, 8::int"
-    "  FROM source_runs r"
-    "  WHERE ($2 & 8) <> 0 AND r.entity_id = $1 AND r.next_entity IS NOT NULL"
-    "  UNION ALL"
-    "  SELECT s.physicality_id, t.entity_id, s.ordinal,"
-    "         CASE WHEN t.ordinal = s.ordinal THEN s.ordinal + 1 ELSE t.ordinal END,"
-    "         CASE WHEN t.ordinal = s.ordinal THEN s.run_length - 1 ELSE t.run_length END,"
-    "         abs(CASE WHEN t.ordinal = s.ordinal THEN 1 ELSE t.ordinal - s.ordinal END),"
-    "         16::int"
-    "  FROM source_runs s"
-    "  JOIN source_runs t ON t.physicality_id = s.physicality_id"
-    "  WHERE ($2 & 16) <> 0 AND s.entity_id = $1"
-    "    AND (t.ordinal <> s.ordinal OR s.run_length > 1)"
-    ")"
-    " SELECT physicality_id, target_id, source_ordinal, target_ordinal,"
-    "        multiplicity, gap, relation"
-    " FROM candidates"
-    " ORDER BY relation, physicality_id, source_ordinal, target_ordinal, target_id"
-    " LIMIT $3";
-
 static SPIPlanPtr candidate_plan = NULL;
+
+typedef struct logical_run
+{
+    laplace_id128 entity_id;
+    uint64_t start_ordinal;
+    uint64_t run_length;
+} logical_run;
 
 static void
 hash_start(blake3_hasher *hasher, const char *domain)
@@ -152,11 +91,20 @@ digest_to_bytea(const laplace_digest256 *digest)
     return value;
 }
 
+static bool
+id128_equal(const laplace_id128 *left, const laplace_id128 *right)
+{
+    return memcmp(left->bytes, right->bytes, sizeof(left->bytes)) == 0;
+}
+
 static uint64_t
 read_write_epoch(void)
 {
-    int rc = SPI_execute("SELECT last_value::bigint FROM laplace.apply_write_epoch",
-                         true, 1);
+    const char *sql = laplace_sql_query_text("refactor_cognition.write_epoch");
+    if (sql == NULL)
+        ereport(ERROR,
+                (errmsg("refactor cognition: write-epoch query missing from native catalog")));
+    int rc = SPI_execute(sql, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed != 1)
         ereport(ERROR,
                 (errmsg("refactor cognition: could not read apply_write_epoch")));
@@ -179,8 +127,12 @@ ensure_candidate_plan(void)
 {
     if (candidate_plan != NULL)
         return;
+    const char *sql = laplace_sql_query_text("refactor_cognition.physicalities");
+    if (sql == NULL)
+        ereport(ERROR,
+                (errmsg("refactor cognition: physicality query missing from native catalog")));
     Oid argtypes[3] = { BYTEAOID, INT4OID, INT4OID };
-    SPIPlanPtr plan = SPI_prepare(CANDIDATE_QUERY, 3, argtypes);
+    SPIPlanPtr plan = SPI_prepare(sql, 3, argtypes);
     if (plan == NULL)
         ereport(ERROR,
                 (errmsg("refactor cognition: SPI_prepare candidate query failed: %s",
@@ -199,6 +151,9 @@ candidate_observation_fingerprint(Datum physicality_id, uint32 relation,
                                   laplace_digest256 *out)
 {
     bytea *physicality = DatumGetByteaPP(physicality_id);
+    if (VARSIZE_ANY_EXHDR(physicality) != 16)
+        ereport(ERROR,
+                (errmsg("refactor cognition: physicality id must be exactly 16 bytes")));
     blake3_hasher hasher;
     hash_start(&hasher, "laplace.legacy.physicality-candidate/v1");
     blake3_hasher_update(&hasher, VARDATA_ANY(physicality),
@@ -209,6 +164,204 @@ candidate_observation_fingerprint(Datum physicality_id, uint32 relation,
     blake3_hasher_update(&hasher, &target_ordinal, sizeof(target_ordinal));
     blake3_hasher_update(&hasher, &relation, sizeof(relation));
     hash_finish(&hasher, out);
+}
+
+static logical_run *
+decode_manifest_runs(ArrayType *manifest, size_t *run_count)
+{
+    *run_count = 0;
+    if (ARR_NDIM(manifest) != 1 || ARR_ELEMTYPE(manifest) != BYTEAOID)
+        ereport(ERROR,
+                (errmsg("refactor cognition: expanded trajectory manifest must be bytea[]")));
+
+    Datum *elements = NULL;
+    bool *nulls = NULL;
+    int element_count = 0;
+    deconstruct_array(manifest, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &elements, &nulls, &element_count);
+    if (element_count <= 0)
+    {
+        if (elements != NULL) pfree(elements);
+        if (nulls != NULL) pfree(nulls);
+        return NULL;
+    }
+
+    logical_run *runs = (logical_run *) palloc0(
+        sizeof(logical_run) * (Size) element_count);
+    for (int index = 0; index < element_count; ++index)
+    {
+        if (nulls != NULL && nulls[index])
+            ereport(ERROR,
+                    (errmsg("refactor cognition: expanded trajectory contains NULL")));
+        bytea *member = DatumGetByteaPP(elements[index]);
+        laplace_id128 id;
+        bytea_to_id128(member, &id, "trajectory member");
+        if (*run_count != 0 &&
+            id128_equal(&runs[*run_count - 1].entity_id, &id))
+        {
+            ++runs[*run_count - 1].run_length;
+        }
+        else
+        {
+            logical_run *run = &runs[*run_count];
+            run->entity_id = id;
+            run->start_ordinal = (uint64_t) index + 1U;
+            run->run_length = 1U;
+            ++*run_count;
+        }
+    }
+    pfree(elements);
+    if (nulls != NULL) pfree(nulls);
+    return runs;
+}
+
+static bool
+append_candidate(laplace_cognition_observation_candidate *candidates,
+                 size_t candidate_capacity, size_t *candidate_count,
+                 laplace_cognition_observation_candidate_usage *usage,
+                 Datum physicality_id,
+                 const laplace_id128 *source,
+                 const laplace_id128 *target,
+                 uint64 source_ordinal, uint64 target_ordinal,
+                 uint64 multiplicity, uint64 gap, uint32 relation,
+                 size_t source_index)
+{
+    if (*candidate_count >= candidate_capacity)
+        return false;
+    laplace_cognition_observation_candidate *candidate =
+        &candidates[*candidate_count];
+    memset(candidate, 0, sizeof(*candidate));
+    candidate->target_entity_id = *target;
+    candidate->source_state_index = source_index;
+    candidate->source_logical_ordinal = source_ordinal;
+    candidate->target_logical_ordinal = target_ordinal;
+    candidate->multiplicity = multiplicity;
+    candidate->gap = gap;
+    candidate->relation = relation;
+    candidate->source_layer = LAPLACE_OBSERVATION_QUERY_SOURCE_PHYSICALITY;
+    candidate_observation_fingerprint(
+        physicality_id, relation, source, target,
+        source_ordinal, target_ordinal,
+        &candidate->observation_fingerprint);
+    ++*candidate_count;
+    ++usage->crossing_count;
+    return true;
+}
+
+static bool
+emit_physicality_candidates(
+    Datum physicality_id,
+    const laplace_id128 *container,
+    const logical_run *runs,
+    size_t run_count,
+    const laplace_id128 *source,
+    uint32 relation_mask,
+    size_t source_index,
+    laplace_cognition_observation_candidate *candidates,
+    size_t candidate_capacity,
+    size_t *candidate_count,
+    laplace_cognition_observation_candidate_usage *usage)
+{
+    if ((relation_mask & LAPLACE_OBSERVATION_QUERY_CONTAINER) != 0U)
+    {
+        for (size_t i = 0; i < run_count; ++i)
+            if (id128_equal(&runs[i].entity_id, source) &&
+                !append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                    physicality_id, source, container,
+                    runs[i].start_ordinal, 0U, runs[i].run_length, 0U,
+                    LAPLACE_OBSERVATION_QUERY_CONTAINER, source_index))
+                return false;
+    }
+
+    if ((relation_mask & LAPLACE_OBSERVATION_QUERY_CONSTITUENT) != 0U &&
+        id128_equal(container, source))
+    {
+        for (size_t i = 0; i < run_count; ++i)
+            if (!append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                    physicality_id, source, &runs[i].entity_id,
+                    0U, runs[i].start_ordinal, runs[i].run_length, 0U,
+                    LAPLACE_OBSERVATION_QUERY_CONSTITUENT, source_index))
+                return false;
+    }
+
+    if ((relation_mask & LAPLACE_OBSERVATION_QUERY_PREDECESSOR) != 0U)
+    {
+        for (size_t i = 0; i < run_count; ++i)
+        {
+            if (!id128_equal(&runs[i].entity_id, source)) continue;
+            if (i > 0 &&
+                !append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                    physicality_id, source, &runs[i - 1].entity_id,
+                    runs[i].start_ordinal,
+                    runs[i - 1].start_ordinal + runs[i - 1].run_length - 1U,
+                    1U, 1U, LAPLACE_OBSERVATION_QUERY_PREDECESSOR, source_index))
+                return false;
+            if (runs[i].run_length > 1U &&
+                !append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                    physicality_id, source, source,
+                    runs[i].start_ordinal + 1U, runs[i].start_ordinal,
+                    runs[i].run_length - 1U, 1U,
+                    LAPLACE_OBSERVATION_QUERY_PREDECESSOR, source_index))
+                return false;
+        }
+    }
+
+    if ((relation_mask & LAPLACE_OBSERVATION_QUERY_SUCCESSOR) != 0U)
+    {
+        for (size_t i = 0; i < run_count; ++i)
+        {
+            if (!id128_equal(&runs[i].entity_id, source)) continue;
+            if (runs[i].run_length > 1U &&
+                !append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                    physicality_id, source, source,
+                    runs[i].start_ordinal + runs[i].run_length - 2U,
+                    runs[i].start_ordinal + runs[i].run_length - 1U,
+                    runs[i].run_length - 1U, 1U,
+                    LAPLACE_OBSERVATION_QUERY_SUCCESSOR, source_index))
+                return false;
+            if (i + 1U < run_count &&
+                !append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                    physicality_id, source, &runs[i + 1U].entity_id,
+                    runs[i].start_ordinal + runs[i].run_length - 1U,
+                    runs[i + 1U].start_ordinal,
+                    1U, 1U, LAPLACE_OBSERVATION_QUERY_SUCCESSOR, source_index))
+                return false;
+        }
+    }
+
+    if ((relation_mask & LAPLACE_OBSERVATION_QUERY_COOCCUR) != 0U)
+    {
+        for (size_t source_run = 0; source_run < run_count; ++source_run)
+        {
+            const logical_run *s = &runs[source_run];
+            if (!id128_equal(&s->entity_id, source)) continue;
+            for (size_t target_run = 0; target_run < run_count; ++target_run)
+            {
+                const logical_run *t = &runs[target_run];
+                if (target_run == source_run)
+                {
+                    if (s->run_length <= 1U) continue;
+                    if (!append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                            physicality_id, source, source,
+                            s->start_ordinal, s->start_ordinal + 1U,
+                            s->run_length - 1U, 1U,
+                            LAPLACE_OBSERVATION_QUERY_COOCCUR, source_index))
+                        return false;
+                    continue;
+                }
+                uint64 gap = t->start_ordinal > s->start_ordinal
+                    ? t->start_ordinal - s->start_ordinal
+                    : s->start_ordinal - t->start_ordinal;
+                if (!append_candidate(candidates, candidate_capacity, candidate_count, usage,
+                        physicality_id, source, &t->entity_id,
+                        s->start_ordinal, t->start_ordinal,
+                        t->run_length, gap,
+                        LAPLACE_OBSERVATION_QUERY_COOCCUR, source_index))
+                    return false;
+            }
+        }
+    }
+    return true;
 }
 
 static int
@@ -247,7 +400,7 @@ legacy_enumerate_candidates(
         }
 
         bytea *source = id128_to_bytea(&source_entity_ids[source_index]);
-        int32 fetch_limit = remaining >= (size_t) INT_MAX - 1
+        int32 fetch_limit = remaining >= (size_t) INT_MAX - 1U
                             ? INT_MAX
                             : (int32) remaining + 1;
         Datum args[3] = {
@@ -277,56 +430,29 @@ legacy_enumerate_candidates(
             TupleDesc desc = SPI_tuptable->tupdesc;
             bool isnull = false;
             Datum physicality_id = SPI_getbinval(tuple, desc, 1, &isnull);
-            if (isnull)
-                return 3;
-            Datum target_id = SPI_getbinval(tuple, desc, 2, &isnull);
-            if (isnull)
-                return 4;
-            Datum source_ordinal_d = SPI_getbinval(tuple, desc, 3, &isnull);
-            if (isnull)
-                return 5;
-            Datum target_ordinal_d = SPI_getbinval(tuple, desc, 4, &isnull);
-            if (isnull)
-                return 6;
-            Datum multiplicity_d = SPI_getbinval(tuple, desc, 5, &isnull);
-            if (isnull)
-                return 7;
-            Datum gap_d = SPI_getbinval(tuple, desc, 6, &isnull);
-            if (isnull)
-                return 8;
-            Datum relation_d = SPI_getbinval(tuple, desc, 7, &isnull);
-            if (isnull)
-                return 9;
+            if (isnull) return 3;
+            Datum container_d = SPI_getbinval(tuple, desc, 2, &isnull);
+            if (isnull) return 4;
+            Datum manifest_d = SPI_getbinval(tuple, desc, 3, &isnull);
+            if (isnull) return 5;
 
-            int64 source_ordinal = DatumGetInt64(source_ordinal_d);
-            int64 target_ordinal = DatumGetInt64(target_ordinal_d);
-            int64 multiplicity = DatumGetInt64(multiplicity_d);
-            int64 gap = DatumGetInt64(gap_d);
-            int32 relation = DatumGetInt32(relation_d);
-            if (source_ordinal < 0 || target_ordinal < 0 || multiplicity <= 0 ||
-                gap < 0 || relation <= 0)
-                return 10;
-
-            laplace_cognition_observation_candidate *candidate =
-                &candidates[*candidate_count];
-            memset(candidate, 0, sizeof(*candidate));
-            bytea *target = DatumGetByteaPP(target_id);
-            bytea_to_id128(target, &candidate->target_entity_id, "candidate target");
-            candidate->source_state_index = source_index;
-            candidate->source_logical_ordinal = (uint64) source_ordinal;
-            candidate->target_logical_ordinal = (uint64) target_ordinal;
-            candidate->multiplicity = (uint64) multiplicity;
-            candidate->gap = (uint64) gap;
-            candidate->relation = (uint32) relation;
-            candidate->source_layer = LAPLACE_OBSERVATION_QUERY_SOURCE_PHYSICALITY;
-            candidate_observation_fingerprint(
-                physicality_id, candidate->relation,
-                &source_entity_ids[source_index], &candidate->target_entity_id,
-                candidate->source_logical_ordinal,
-                candidate->target_logical_ordinal,
-                &candidate->observation_fingerprint);
-            ++*candidate_count;
-            ++usage->crossing_count;
+            laplace_id128 container;
+            bytea_to_id128(DatumGetByteaPP(container_d), &container, "container entity");
+            ArrayType *manifest = DatumGetArrayTypeP(manifest_d);
+            size_t run_count = 0;
+            logical_run *runs = decode_manifest_runs(manifest, &run_count);
+            bool complete = emit_physicality_candidates(
+                physicality_id, &container, runs, run_count,
+                &source_entity_ids[source_index], binding->relation_mask, source_index,
+                candidates, candidate_capacity, candidate_count, usage);
+            if (runs != NULL) pfree(runs);
+            if (!complete)
+            {
+                SPI_freetuptable(SPI_tuptable);
+                usage->limiting_disposition = LAPLACE_QUERY_SEARCH_DISPOSITION_UNKNOWN;
+                *candidate_count = 0;
+                return 0;
+            }
         }
         SPI_freetuptable(SPI_tuptable);
     }
