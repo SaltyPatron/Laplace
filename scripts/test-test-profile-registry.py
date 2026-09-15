@@ -25,6 +25,7 @@ POLICY_IDS = {
     "policy-chess-dependencies", "policy-cutechess-release", "policy-chess-environment-benchmark",
     "policy-managed-services", "policy-managed-host", "policy-managed-tls",
     "policy-managed-database-quiescence", "policy-repair-transaction",
+    "policy-legacy-content-history", "policy-legacy-repair-evidence",
     "policy-pg-access", "policy-managed-publish-shellcheck", "policy-pipeline",
     "policy-eval-op-lane", "policy-sql-audit-tests", "policy-sql-audit",
     "policy-upgrade-drop-order", "policy-isa-gate", "policy-model-payload-gate",
