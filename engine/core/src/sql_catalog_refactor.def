@@ -1,0 +1,13 @@
+/* Recovered Legacy -> Laplace-Refactor boundary queries.
+ * SQL owns bounded storage retrieval only. Ordered trajectory decoding and
+ * relation-family crossing construction stay in native code. */
+SQL_QUERY("refactor_cognition.physicalities", "bytea,int4,int4",
+    "SELECT p.id,p.entity_id,"
+    "ARRAY(SELECT x.entity_id FROM public.laplace_trajectory_expanded_constituents(p.trajectory) x ORDER BY x.ordinal) "
+    "FROM laplace.physicalities p "
+    "WHERE p.type=1 AND p.trajectory IS NOT NULL AND ("
+    "(($2 & 2)<>0 AND p.entity_id=$1) OR "
+    "(($2 & 29)<>0 AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1::bytea])) "
+    "ORDER BY p.id LIMIT $3")
+SQL_QUERY("refactor_cognition.write_epoch", "",
+    "SELECT last_value::bigint FROM laplace.apply_write_epoch")
