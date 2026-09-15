@@ -6,6 +6,7 @@ typedef struct { const char *name, *parameters, *text; } SqlQuery;
 #define SQL_QUERY(name, parameters, text) {name, parameters, text},
 static const SqlQuery queries[] = {
 #include "sql_catalog.def"
+#include "sql_catalog_refactor.def"
 };
 #undef SQL_QUERY
 
