@@ -525,6 +525,81 @@ public sealed class ChessStockfishEvalTests
         }
     }
 
+    public static IEnumerable<object[]> JournalTailCases()
+        => Enumerable.Range(0, 21).SelectMany(bytes => new[]
+        {
+            new object[] { false, bytes }, new object[] { true, bytes },
+        });
+
+    [Theory]
+    [MemberData(nameof(JournalTailCases))]
+    public void EvalCache_AppendAfterTornTailPreservesCompleteResults(bool recipeScoped, int tailBytes)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"lpsf-tail-{Guid.NewGuid():N}.bin");
+        string selected = recipeScoped ? StockfishEvalCache.RecipePath(path, Recipe) : path;
+        string journal = selected + ".journal";
+        var snapshotId = Hash128.OfCanonical("tail/snapshot");
+        var firstId = Hash128.OfCanonical("tail/first-complete");
+        var nextId = Hash128.OfCanonical("tail/after-restart");
+        var laterId = Hash128.OfCanonical("tail/later-append");
+        void Save(ConcurrentDictionary<Hash128, int?> memo)
+        {
+            if (recipeScoped) StockfishEvalCache.Save(path, Recipe, memo);
+            else StockfishEvalCache.Save(path, 1, 10, 0, memo);
+        }
+        void Append(Hash128 id, int cp)
+        {
+            KeyValuePair<Hash128, int?>[] values = [new(id, cp)];
+            if (recipeScoped) StockfishEvalCache.Append(path, Recipe, values);
+            else StockfishEvalCache.Append(path, 1, 10, 0, values);
+        }
+        ConcurrentDictionary<Hash128, int?> Load() => recipeScoped
+            ? StockfishEvalCache.Load(path, Recipe) : StockfishEvalCache.Load(path, 1, 10, 0);
+
+        try
+        {
+            Save(new([new KeyValuePair<Hash128, int?>(snapshotId, 42)]));
+            byte[] snapshot = File.ReadAllBytes(selected);
+            Append(firstId, -88);
+            byte[] completeJournal = File.ReadAllBytes(journal);
+            using (var stream = new FileStream(journal, FileMode.Append, FileAccess.Write, FileShare.Read))
+                stream.Write(Enumerable.Repeat((byte)0xA5, tailBytes).ToArray());
+
+            // A restart can recover both complete paid results before any new
+            // work. The next append must remain readable by another fresh load.
+            var restarted = Load();
+            Assert.Equal(2, restarted.Count);
+            Assert.Equal(42, restarted[snapshotId]);
+            Assert.Equal(-88, restarted[firstId]);
+            Append(nextId, 317);
+            var recovered = Load();
+            Assert.Equal(3, recovered.Count);
+            Assert.Equal(42, recovered[snapshotId]);
+            Assert.Equal(-88, recovered[firstId]);
+            Assert.True(recovered.TryGetValue(nextId, out var cp), "new evaluation is lost after appending behind a torn tail");
+            Assert.Equal(317, cp);
+            byte[] repaired = File.ReadAllBytes(journal);
+            Assert.Equal(completeJournal, repaired[..completeJournal.Length]);
+            Assert.Equal(completeJournal.Length + 21, repaired.Length);
+            Assert.Equal(snapshot, File.ReadAllBytes(selected));
+
+            Append(laterId, -1234);
+            var later = Load();
+            Assert.Equal(4, later.Count);
+            Assert.Equal(-1234, later[laterId]);
+            Assert.Equal(317, later[nextId]);
+            Save(later);
+            Assert.False(File.Exists(journal));
+            Assert.Equal(later.OrderBy(x => x.Key.Hi).ThenBy(x => x.Key.Lo),
+                Load().OrderBy(x => x.Key.Hi).ThenBy(x => x.Key.Lo));
+        }
+        finally
+        {
+            File.Delete(selected);
+            File.Delete(journal);
+        }
+    }
+
     [Fact]
     public void DeriveGame_EmitsOnlyDeclaredRelations()
     {

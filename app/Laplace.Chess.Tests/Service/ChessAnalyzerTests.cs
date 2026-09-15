@@ -111,7 +111,9 @@ public sealed class ChessAnalyzerTests
             actual = shared.Build();
 
             Assert.Equal(expected.Metadata.IntentId, actual.Metadata.IntentId);
-            Assert.Equal(expected.Entities, actual.Entities);
+            // ImmutableArray.Equals compares its backing array. Select the
+            // sequence overload to compare every row field in original order.
+            Assert.Equal<EntityRow>(expected.Entities, actual.Entities);
             Assert.Equal(expected.Attestations.Select(a => a with { LastObservedAtUnixUs = 0 }),
                 actual.Attestations.Select(a => a with { LastObservedAtUnixUs = 0 }));
             var json = new System.Text.Json.JsonSerializerOptions { IncludeFields = true };
@@ -122,7 +124,7 @@ public sealed class ChessAnalyzerTests
                     .Select(p => p with { ObservedAtUnixUs = 0 }), json));
             Assert.Equal(IntentStage.SemanticDigestBatch(expected.IntentStages),
                 IntentStage.SemanticDigestBatch(actual.IntentStages));
-            Assert.Equal(expected.EphemeralFoldInputs, actual.EphemeralFoldInputs);
+            Assert.Equal<EphemeralFoldInput>(expected.EphemeralFoldInputs, actual.EphemeralFoldInputs);
             Assert.Empty(expected.TestimonyWalks);
             Assert.Empty(actual.TestimonyWalks);
             Assert.Equal(boardStates, replay.Boards.Select(board => board.ToFen()));

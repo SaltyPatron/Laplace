@@ -14,7 +14,7 @@ namespace Laplace.Chess.Service;
 /// The compact snapshot is accompanied by a fixed-record append journal. A successful
 /// Stockfish search is appended as soon as its line finishes, so canceling a long census
 /// cannot throw away paid engine work. Normal completion compacts the journal into the
-/// snapshot; a torn journal tail is ignored record-by-record.
+/// snapshot; a torn journal tail is ignored on read and discarded before the next append.
 /// </summary>
 public static class StockfishEvalCache
 {
@@ -97,7 +97,13 @@ public static class StockfishEvalCache
                     WriteHeader(rw, JournalMagic, censusVersion, depth, nodes, recipeId);
                 }
 
-                stream.Position = stream.Length;
+                // The validated (or newly written) header ends at the current
+                // position. Preserve every complete record before the torn tail.
+                long completeLength = stream.Length
+                    - (stream.Length - stream.Position) % JournalRecordBytes;
+                if (completeLength != stream.Length)
+                    stream.SetLength(completeLength);
+                stream.Position = completeLength;
                 foreach (var (id, cp) in successful)
                 {
                     rw.Write(id.ToBytes());
