@@ -3,12 +3,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// One planar RGBA recovery buffer (tightly packed, row-major) plus optional
-/// precomputed ladder root in <see cref="SourceId"/> (file-entity provenance,
-/// same convention as <see cref="ContentIngestRecord"/>). Buffer is packaging
-/// output; identity is the codepoint-floor image ladder.
-/// </summary>
 public readonly record struct ImageIngestRecord(
     byte[] Rgba,
     uint Width,
@@ -16,20 +10,12 @@ public readonly record struct ImageIngestRecord(
     Hash128 SourceId = default,
     FileMetadata? Metadata = null);
 
-/// <summary>
-/// One mono int16 recovery stream for the audio ladder (channel is a partition,
-/// not a tier). Packaging decode lands here; identity is the codepoint-floor
-/// audio ladder, not blake3 of PCM.
-/// </summary>
 public readonly record struct AudioIngestRecord(
     short[] Pcm,
     int SampleRate,
     Hash128 SourceId = default,
     FileMetadata? Metadata = null);
 
-/// <summary>
-/// One video frame — image-ladder recovery payload plus temporal ordinal.
-/// </summary>
 public readonly record struct VideoFrameIngestRecord(
     byte[] Rgba,
     uint Width,
@@ -38,11 +24,6 @@ public readonly record struct VideoFrameIngestRecord(
     Hash128 SourceId = default,
     FileMetadata? Metadata = null);
 
-/// <summary>
-/// Video vendor records share the generic ingest pipeline. Frames compose normally;
-/// the terminal record materializes their one ordered container after every frame
-/// witness has drained.
-/// </summary>
 public abstract record VideoIngestRecord
 {
     public sealed record Frame(VideoFrameIngestRecord Value) : VideoIngestRecord;
@@ -208,11 +189,6 @@ public sealed class AudioIngestHandler : IIngestRecordHandler<AudioIngestRecord>
     }
 }
 
-/// <summary>
-/// Video frames share the image ladder. Their roots and coordinates accumulate during
-/// the ordinary ordered witness drain; the terminal vendor record composes one video
-/// trajectory without manufacturing membership or adjacency testimony.
-/// </summary>
 public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRecord>
 {
     private readonly Hash128 _sourceId;
@@ -306,14 +282,17 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
         return videoRoot;
     }
 
+    /// <summary>
+    /// Video content identity is the ordinary ordered content law: one frame collapses to
+    /// that frame; multiple frames are the same Merkle function used by every other Content
+    /// trajectory. Media kind belongs to typing/testimony, never to hidden hash salt.
+    /// </summary>
     public static Hash128 HashVideoRoot(IReadOnlyList<Hash128> orderedFrameRoots)
     {
-        ReadOnlySpan<byte> domain = "substrate/video/v1/frames"u8;
-        var buf = new byte[domain.Length + orderedFrameRoots.Count * 16];
-        domain.CopyTo(buf);
-        for (int i = 0; i < orderedFrameRoots.Count; i++)
-            orderedFrameRoots[i].WriteBytes(buf.AsSpan(domain.Length + i * 16, 16));
-        return Hash128.Blake3(buf);
+        if (orderedFrameRoots.Count == 0) return Hash128.Zero;
+        if (orderedFrameRoots.Count == 1) return orderedFrameRoots[0];
+        var ids = orderedFrameRoots as Hash128[] ?? orderedFrameRoots.ToArray();
+        return Hash128.Merkle(EntityTier.Document, ids);
     }
 
     internal readonly record struct FramePlacement(
