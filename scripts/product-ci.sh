@@ -51,6 +51,10 @@ run_install_and_db() (
   local args=()
   [[ "${LAPLACE_FRESH_DB:-}" != 1 ]] || args+=(--fresh-db)
   bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
+  # Highway is part of the query execution plane. Once the registry is active,
+  # replay any exact pairs retained while it was unavailable and reconcile the
+  # pre-deposit estate exactly once. New ingest deposits masks inline thereafter.
+  bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
 )
 
@@ -73,8 +77,9 @@ restore_foundation_if_requested() {
 }
 
 reconcile_installed_product() {
-  # Fast source/tooling path: prove installed structure and application health only.
-  # Never build and never seed. Corpus restoration is an explicit operator choice.
+  # Fast source/tooling path: reconcile installed derived state and prove
+  # application health. Never build and never seed corpus content.
+  bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   python3 scripts/verify-application-release.py --timeout-seconds 120
 }

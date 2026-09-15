@@ -1,13 +1,14 @@
 -- Recompute entities.highway_mask for the given entity ids from their CONSENSUS
--- participation (subject or object) — the one derivation of the relation-membership
--- mask, matching the foundry's authoritative fallback (FoundryExport
--- FillHighwayMasksAsync): OR of the relation bits over every distinct governed
--- relation type the entity has edges under. Recompute-not-accumulate: idempotent,
--- self-healing, no drift. Entities whose every edge type is ungoverned keep NULL.
--- Called per fold epoch by the ingest spine (every decomposer rides it) and by
--- highway_mask_rebuild for full population. No-ops with a warning when the highway
--- perfcache is not configured (hart-server before its blob deploys) so the fold
--- never faults on mask maintenance.
+-- participation (subject or object): OR of the relation bits over every distinct
+-- governed relation type the entity has edges under. Recompute-not-accumulate is
+-- intentionally different from the ingest-time deposit path: this repair function
+-- must also turn bits OFF after eviction removes the final governed edge.
+--
+-- Every requested identity participates in the final desired-mask relation, including
+-- identities with zero governed bits. Those identities resolve to NULL and therefore
+-- clear a previously stored mask. The former implementation grouped only the `bits`
+-- rows, so an entity with no remaining governed bit vanished from `m` and could never
+-- be cleared despite the function's stated contract.
 DROP FUNCTION IF EXISTS laplace.highway_mask_refresh(bytea[]);
 CREATE OR REPLACE FUNCTION consensus.highway_mask_refresh(p_ids bytea[])
     RETURNS bigint
@@ -16,24 +17,31 @@ DECLARE
     updated bigint;
 BEGIN
     IF NOT consensus.highway_ready() THEN
-        RAISE WARNING 'highway_mask_refresh: highway perfcache not configured — masks not refreshed (set laplace_substrate.highway_perfcache_path)';
+        INSERT INTO laplace.highway_mask_dirty(id)
+        SELECT DISTINCT u.id FROM unnest(p_ids) AS u(id)
+        WHERE u.id IS NOT NULL ORDER BY u.id
+        ON CONFLICT(id) DO NOTHING;
+        RAISE LOG 'highway_mask_refresh: registry unavailable; exact dirty identities retained';
         RETURN 0;
     END IF;
 
-    WITH t AS (SELECT DISTINCT u.id FROM unnest(p_ids) AS u(id)),
+    WITH t AS (
+        SELECT DISTINCT u.id
+        FROM unnest(p_ids) AS u(id)
+        WHERE u.id IS NOT NULL
+    ),
     tp AS (
-        SELECT t.id, c.type_id FROM t JOIN laplace.consensus c ON c.subject_id = t.id
+        SELECT t.id, c.type_id
+        FROM t JOIN laplace.consensus c ON c.subject_id = t.id
         GROUP BY t.id, c.type_id
         UNION
-        SELECT t.id, c.type_id FROM t JOIN laplace.consensus c ON c.object_id = t.id
+        SELECT t.id, c.type_id
+        FROM t JOIN laplace.consensus c ON c.object_id = t.id
         GROUP BY t.id, c.type_id
     ),
     bits AS (
-        -- A DYNAMIC relation (EDEP_nsubj, DEP_obj, FEAT_case, ... minted at ingest) has NO
-        -- highway bit of its own — bits are codegen-assigned to the static governed set only.
-        -- So it contributes its FAMILY ROOT's bit: SeedDynamic emits `<child> IS_A <root>`, and
-        -- the root (ENHANCED_DEPENDS_ON, DEPENDS_ON, HAS_FEATURE, ...) is static and has a bit.
-        -- Without this the entire UD dependency/feature layer is invisible to mask-gated walks.
+        -- A dynamic relation (EDEP_nsubj, DEP_obj, FEAT_case, ...) has no
+        -- Highway bit of its own. Its governed family root contributes the bit.
         SELECT q.id, q.bit
         FROM (
             SELECT tp.id,
@@ -46,14 +54,19 @@ BEGIN
         ) q
         WHERE q.bit IS NOT NULL
     ),
-    m AS (
-        SELECT bits.id, consensus.highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
-        FROM bits GROUP BY bits.id
+    desired AS (
+        SELECT t.id,
+               consensus.highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
+        FROM t
+        LEFT JOIN bits ON bits.id = t.id
+        GROUP BY t.id
     ),
     upd AS (
-        UPDATE laplace.entities e SET highway_mask = m.mask
-        FROM m
-        WHERE e.id = m.id AND m.mask IS DISTINCT FROM e.highway_mask
+        UPDATE laplace.entities e
+           SET highway_mask = desired.mask
+          FROM desired
+         WHERE e.id = desired.id
+           AND desired.mask IS DISTINCT FROM e.highway_mask
         RETURNING 1
     )
     SELECT count(*) INTO updated FROM upd;

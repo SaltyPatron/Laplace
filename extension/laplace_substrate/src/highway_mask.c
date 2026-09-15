@@ -4,8 +4,10 @@
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
+#include "nodes/parsenodes.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/memutils.h"
 
 #include "spi_common.h"
 #include "spi_nested.h"
@@ -135,7 +137,9 @@ pg_laplace_highway_match(PG_FUNCTION_ARGS)
     uint64      acc = 0;
     Size        i = 0;
 
-    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+    if (PG_ARGISNULL(0))
+        PG_RETURN_BOOL(false);
+    if (PG_ARGISNULL(1))
         PG_RETURN_BOOL(false);
 
     a = PG_GETARG_BYTEA_PP(0);
@@ -249,9 +253,9 @@ PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_from_bits);
  * exactly the numbering laplace_highway_mask_bits decodes via ctz. Out-of-range
  * (or NULL) positions are skipped. NULL input -> NULL; a mask with no bits set
  * -> NULL (the plpgsql any_set contract), so an empty or all-skipped array
- * yields NULL, never a zero mask. Called by highway_mask_refresh every fold
- * epoch, so both the round trip mask_bits(mask_from_bits(x)) = sorted(x) and the
- * emitted bytes must be preserved.
+ * yields NULL, never a zero mask. Used by the batched bit-clearing repair;
+ * ingest deposits masks directly. The round trip
+ * mask_bits(mask_from_bits(x)) = sorted(x) and emitted bytes are preserved.
  */
 Datum
 pg_laplace_highway_mask_from_bits(PG_FUNCTION_ARGS)
@@ -307,23 +311,82 @@ require_highway_table(const char *fn)
                          "(install-extensions.cmd stages and configures it).")));
 }
 
+/* Availability is a routing decision for recoverable writes. The loader has
+ * no SQL side effects: catch only its configuration failure, retain the exact
+ * work, and leave cancellation, allocation and database errors untouched.
+ * Read operators that require a registry still use require_highway_table. */
+static bool
+highway_registry_available(void)
+{
+    volatile bool ready = false;
+    MemoryContext caller = CurrentMemoryContext;
+
+    PG_TRY();
+    {
+        ready = laplace_highway_ready();
+    }
+    PG_CATCH();
+    {
+        MemoryContextSwitchTo(caller);
+        ErrorData *error = CopyErrorData();
+        FlushErrorState();
+        if (error->sqlerrcode != ERRCODE_CONFIG_FILE_ERROR)
+            ReThrowError(error);
+        ereport(LOG,
+                (errmsg("Highway registry unavailable; exact mask work remains recoverable"),
+                 errdetail_internal("%s", error->message)));
+        FreeErrorData(error);
+    }
+    PG_END_TRY();
+    return ready;
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_highway_ready);
 
-/* () -> bool: whether the highway perfcache is mmap'd and the bit table is
- * usable. Write paths (highway_mask_refresh) gate on this instead of faulting
- * the ingest fold on hosts whose GUC is not configured yet. */
+/* () -> bool: availability, not authorization to discard a deposit. */
 Datum
 pg_laplace_highway_ready(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_BOOL(laplace_highway_ready());
+    PG_RETURN_BOOL(highway_registry_available());
+}
+
+/* One prepared, set-sized SPI write, only on the unavailable-registry path.
+ * PostgreSQL persists the already-known pairs; it computes no Highway bits.
+ * Pair order prevents opposite unique-index acquisition by overlapping callers. */
+static void
+deposit_retain_pending(ArrayType *entities, ArrayType *types)
+{
+    static SPIPlanPtr pending_plan = NULL;
+    Oid argtypes[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
+    Datum args[2] = {PointerGetDatum(entities), PointerGetDatum(types)};
+    bool spi_top = false;
+
+    if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
+        elog(ERROR, "highway_mask_deposit: pending SPI_connect failed");
+    if (!pending_plan)
+    {
+        /* This is an INSERT: explicitly retain write-plan options, not
+         * CURSOR_OPT_PARALLEL_OK. The family SELECT below is independent. */
+        SPIPlanPtr plan = SPI_prepare_cursor(
+            laplace_sql_query_text("entities.mask_pending"), 2, argtypes, 0);
+        if (!plan || SPI_keepplan(plan) != 0)
+            elog(ERROR, "highway_mask_deposit: pending prepare failed");
+        pending_plan = plan;
+    }
+    int rc = SPI_execute_plan(pending_plan, args, NULL, false, 0);
+    if (rc != SPI_OK_INSERT)
+        elog(ERROR, "highway_mask_deposit: retaining exact pairs failed: %s",
+             SPI_result_code_string(rc));
+    laplace_spi_finish(spi_top);
 }
 
 /*
  * Native deposit lane. Pair reduction and all highway-table work stay in C;
- * SPI is used only for dynamic-relation family lookup and one indexed target
- * read. The shared native writer locks and updates those physical tuples in
- * bytewise identity/tier order, rechecking masks after lock waits. The caller owns the
- * apply_write_epoch bump -- this function deliberately does not advance it.
+ * SPI is used for durable pending pairs when unavailable, dynamic-relation
+ * family lookup and one indexed target read. The shared native writer locks
+ * and updates those physical tuples in bytewise identity/tier order,
+ * rechecking masks after lock waits. The caller owns the apply_write_epoch
+ * bump -- this function deliberately does not advance it.
  */
 PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_deposit);
 
@@ -345,13 +408,6 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
     bool spi_top = false;
     int rc;
 
-    if (!laplace_highway_ready())
-    {
-        ereport(WARNING,
-                (errmsg("highway_mask_deposit: highway perfcache not configured — masks not deposited (set laplace_substrate.highway_perfcache_path)")));
-        PG_RETURN_INT64(0);
-    }
-
     if (!PG_ARGISNULL(0))
     {
         entity_arr = PG_GETARG_ARRAYTYPE_P(0);
@@ -364,10 +420,15 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
         deconstruct_array(type_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                           &type_values, &type_nulls, &n_types_in);
     }
+    if (n_entities != n_types_in)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("highway_mask_deposit: entity/type arrays must share length (%d vs %d)",
+                        n_entities, n_types_in)));
 
-    /* Validate before doing any native hash lookup. A suffix-bearing bytea
-     * must never alias its first 16 bytes to a governed relation. NULL array
-     * elements retain unnest's SQL semantics and contribute no pair. */
+    /* Validate before lookup OR retention. An unavailable registry must not
+     * change the identity contract or silently truncate a zipped batch.
+     * NULL elements contribute no pair, on either execution path. */
     for (int i = 0; i < n_entities; i++)
         if (!entity_nulls[i])
         {
@@ -381,8 +442,14 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
             deposit_read_id(type_values[i], ignored, "type id");
         }
 
-    if (n_entities == 0 || n_types_in == 0)
+    if (n_entities == 0)
         PG_RETURN_INT64(0);
+    if (!highway_registry_available())
+    {
+        deposit_retain_pending(entity_arr, type_arr);
+        /* Zero means no entity masks updated, not zero retained work. */
+        PG_RETURN_INT64(0);
+    }
 
     types = (highway_deposit_type *) palloc0(sizeof(*types) * n_types_in);
     for (int i = 0; i < n_types_in; i++)
@@ -429,6 +496,7 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
 
         if (n_missing > 0)
         {
+            static SPIPlanPtr family_plan = NULL;
             Datum *missing = (Datum *) palloc(sizeof(Datum) * n_missing);
             ArrayType *missing_arr;
             hash128_t isa;
@@ -449,7 +517,16 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
 
             if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
                 elog(ERROR, "highway_mask_deposit: SPI_connect failed");
-            rc = SPI_execute_with_args(laplace_sql_query_text("entities.mask_families"), 2, argtypes, args, NULL, true, 0);
+            if (!family_plan)
+            {
+                SPIPlanPtr plan = SPI_prepare_cursor(
+                    laplace_sql_query_text("entities.mask_families"),
+                    2, argtypes, CURSOR_OPT_PARALLEL_OK);
+                if (!plan || SPI_keepplan(plan) != 0)
+                    elog(ERROR, "highway_mask_deposit: family prepare failed");
+                family_plan = plan;
+            }
+            rc = SPI_execute_plan(family_plan, args, NULL, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "highway_mask_deposit: family lookup failed: %s",
                      SPI_result_code_string(rc));
@@ -488,8 +565,8 @@ pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS)
     /* Map the zipped arrays and collapse duplicate entities to one 256-bit
      * delta. qsort is bytea's memcmp order, matching the writer and lock ORDER. */
     deposits = (highway_deposit_entity *)
-        palloc0(sizeof(*deposits) * Min(n_entities, n_types_in));
-    for (int i = 0; i < Min(n_entities, n_types_in); i++)
+        palloc0(sizeof(*deposits) * n_entities);
+    for (int i = 0; i < n_entities; i++)
     {
         unsigned char eid[HASH128_BYTES];
         unsigned char tid[HASH128_BYTES];
@@ -659,7 +736,8 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
     if (n_types == 0)
         return (Datum) 0;
 
-    type_arr = construct_array(type_ids, n_types, BYTEAOID, -1, false, TYPALIGN_INT);
+    type_arr = construct_array(type_ids, n_types, BYTEAOID, -1,
+                               false, TYPALIGN_INT);
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "consensus_band_edges: SPI_connect failed");
