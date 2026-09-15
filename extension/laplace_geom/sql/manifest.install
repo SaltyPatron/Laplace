@@ -17,6 +17,7 @@ functions/laplace_angular_distance_4d.sql.in
 functions/laplace_direction_4d.sql.in
 functions/laplace_dwithin_4d.sql.in
 functions/laplace_centroid_4d.sql.in
+functions/laplace_karcher_mean_4d.sql.in
 functions/laplace_radius_origin.sql.in
 functions/laplace_frechet_4d.sql.in
 functions/laplace_hausdorff_4d.sql.in

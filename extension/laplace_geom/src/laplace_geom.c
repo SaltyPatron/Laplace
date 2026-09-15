@@ -364,6 +364,81 @@ pg_laplace_centroid_4d(PG_FUNCTION_ARGS)
     return gserialized_point4d_datum(c[0], c[1], c[2], c[3]);
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_karcher_mean_4d);
+
+/* Coarse geometry boundary for the same canonical kernel/defaults used by
+ * Math4d.KarcherMean. Input vertices are actual constituent placements, never
+ * packed trajectory carriers; unpack and resolve IDs before invoking this. */
+Datum
+pg_laplace_karcher_mean_4d(PG_FUNCTION_ARGS)
+{
+    GSERIALIZED *g;
+    LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
+
+    if (!FLAGS_GET_Z(l->flags) || !FLAGS_GET_M(l->flags))
+    {
+        lwgeom_free(l);
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("laplace_karcher_mean_4d: expected ZM constituent coordinates")));
+    }
+    /* The shared extraction helper expects one vertex per MULTIPOINT member.
+     * Reject empty members before it reads their first coordinate. */
+    if (l->type == MULTIPOINTTYPE)
+    {
+        LWMPOINT *mp = (LWMPOINT *) l;
+        for (uint32_t i = 0; i < mp->ngeoms; ++i)
+        {
+            LWPOINT *point = mp->geoms[i];
+            if (point->point->npoints != 1
+                || !FLAGS_GET_Z(point->flags) || !FLAGS_GET_M(point->flags))
+            {
+                lwgeom_free(l);
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("laplace_karcher_mean_4d: each constituent must be a nonempty POINT ZM")));
+            }
+        }
+    }
+
+    size_t npoints;
+    double *buf = geom_to_xyzm_buffer(l, "laplace_karcher_mean_4d", &npoints);
+    if (npoints == 0)
+    {
+        pfree(buf);
+        lwgeom_free(l);
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("laplace_karcher_mean_4d: empty geometry has no mean")));
+    }
+    for (size_t i = 0; i < npoints; ++i)
+    {
+        CHECK_FOR_INTERRUPTS();
+        for (size_t axis = 0; axis < 4; ++axis)
+        {
+            if (!isfinite(buf[i * 4 + axis]))
+            {
+                pfree(buf);
+                lwgeom_free(l);
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("laplace_karcher_mean_4d: constituent coordinates must be finite")));
+            }
+        }
+    }
+
+    double mean[4];
+    math4d_karcher_mean(buf, npoints, NULL, 1e-12, 64, mean);
+    pfree(buf);
+    lwgeom_free(l);
+    for (size_t axis = 0; axis < 4; ++axis)
+        if (!isfinite(mean[axis]))
+            ereport(ERROR,
+                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                     errmsg("laplace_karcher_mean_4d: mean is not finite")));
+    return gserialized_point4d_datum(mean[0], mean[1], mean[2], mean[3]);
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_radius_origin);
 
 Datum
