@@ -15,13 +15,19 @@ typedef struct {
 
 void hash128_blake3(const uint8_t* data, size_t len, hash128_t* out);
 void hash128_merkle(uint8_t tier, const hash128_t* children, size_t n, hash128_t* out);
+
+/* Allocation-free peer of hash128_merkle for RLE/streamed child manifests.
+ * reader returns 0 with one (child,run) pair, 1 at end, negative on failure.
+ * child_count is the exact expanded count and must be >= 2. The resulting bytes
+ * are bit-identical to hash128_merkle over the fully expanded child array. */
+typedef int (*hash128_run_reader_t)(void* context, hash128_t* child, size_t* run);
+int hash128_merkle_runs(size_t child_count, hash128_run_reader_t reader,
+                        void* context, hash128_t* out);
+
 int  hash128_compare(const hash128_t* a, const hash128_t* b);
 int  hash128_equals(const hash128_t* a, const hash128_t* b);
 void hash128_zero(hash128_t* out);
 
-/* BLAKE3 of a NUL-terminated string's bytes (sans the NUL). The one canonical
- * string hash -- callers minting a content id from a label share this instead
- * of re-wrapping strlen+blake3. */
 static inline void hash128_blake3_str(const char* s, hash128_t* out) {
     hash128_blake3((const uint8_t*)s, strlen(s), out);
 }
