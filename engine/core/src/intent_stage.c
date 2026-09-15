@@ -1,4 +1,6 @@
 #include "laplace/core/intent_stage.h"
+#include "laplace/core/content_witness_batch.h"
+#include "laplace/core/trajectory.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -287,18 +289,6 @@ intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
     intent_stage_t* s = (intent_stage_t*)calloc(1, sizeof(*s));
     if (!s) return NULL;
     if (row_capacity_hint > 0) {
-        
-
-
-
-
-
-
-
-
-
-
-
         if (buf_reserve(&s->entities,      row_capacity_hint * 80)  != 0
             || buf_reserve(&s->physicalities, row_capacity_hint * 256) != 0
             || buf_reserve(&s->attestations,  row_capacity_hint * 192) != 0) {
@@ -372,8 +362,23 @@ int intent_stage_add_physicality(
     if (!stage || !id || !entity_id || !coord || !hilbert_index) return -1;
     if (n_constituents < 0) return -1;
     if (trajectory_n_vertices > 0 && !trajectory_xyzm) return -1;
-    byte_buf_t* b = &stage->physicalities;
+    if (trajectory_n_vertices == 0 && n_constituents != 0) return -2;
 
+    hash128_t expected_physicality_id;
+    laplace_physicality_id_compute(*entity_id, type, &expected_physicality_id);
+    if (!hash128_equals(id, &expected_physicality_id)) return -2;
+
+    if (trajectory_n_vertices > 0) {
+        hash128_t manifest_id;
+        size_t logical_count = 0;
+        if (trajectory_content_identity(
+                trajectory_xyzm, trajectory_n_vertices, &manifest_id, &logical_count) != 0)
+            return -3;
+        if (logical_count != (size_t)n_constituents) return -3;
+        if (type == 1 && !hash128_equals(entity_id, &manifest_id)) return -4;
+    }
+
+    byte_buf_t* b = &stage->physicalities;
     if (buf_append_be16(b, PHYSICALITY_COL_COUNT) != 0) return -1;
     if (buf_append_field_hash128(b, id) != 0) return -1;
     if (buf_append_field_hash128(b, entity_id) != 0) return -1;
@@ -509,37 +514,9 @@ static int row_field_at(const uint8_t* data, size_t len, size_t off, int field_1
     return -1;
 }
 
-/*
- * Referential-locality partition key.
- *
- * Rows in one intent_stage_t can reference each other by id (a physicality's
- * `entity_id` column, an attestation's `subject_id` column). NpgsqlSubstrateWriter
- * commits each output partition in its OWN independent transaction and may run those
- * transactions in parallel -- so if a referencing row and the row it references land
- * in different partitions, there is no guarantee both land together, or even that
- * both land at all if one partition's transaction fails after a sibling's already
- * committed. That is the "fake parallelism" defect: partitioning entities by their own
- * id hash while partitioning physicalities by an unrelated Hilbert-range value (and
- * attestations by their own id hash) has zero cross-linkage, so an entity and the
- * physicality/attestation that references it were only ever co-located by chance.
- *
- * The fix: every table partitions by the SAME key -- the id of the entity a row is
- * "about". For entities that's their own id (nothing references an entity's own row
- * from below it); for physicalities and attestations it's the id of the entity they
- * reference (`entity_id` / `subject_id`, both column 2 in the row layout), NOT their
- * own row id and NOT a Hilbert value. This guarantees an entity and every physicality/
- * attestation whose subject is that entity always land in the same partition, hence
- * the same transaction.
- *
- * Hilbert order is still valuable for physicalities' storage locality, but it must be
- * applied as an ORDER BY of rows already assigned to a partition (see
- * physicalities_sort_by_hilbert below), never as the mechanism that decides which
- * transaction a row ends up in.
- */
 static size_t partition_row(const uint8_t* data, size_t len, size_t off, size_t part_count,
                             int table_kind) {
-    int field_1based = (table_kind == 0) ? 1 /* entities.id */
-                                          : 2 /* physicalities.entity_id / attestations.subject_id */;
+    int field_1based = (table_kind == 0) ? 1 : 2;
 
     const uint8_t* fld;
     int32_t fld_len;
@@ -549,10 +526,6 @@ static size_t partition_row(const uint8_t* data, size_t len, size_t off, size_t 
         return (size_t)(lo % (uint64_t)part_count);
     }
 
-    /* Malformed row (should be unreachable given the writers above) -- fall back to the
-     * row's own id so partitioning still terminates deterministically rather than
-     * crashing; this only ever loses referential co-location for a row that was already
-     * unparseable by the field-aware path. */
     size_t id_off = off + 2 + 4;
     uint64_t lo;
     memcpy(&lo, data + id_off + 8, 8);
@@ -590,14 +563,6 @@ static int cmp_phys_row_span_hilbert(const void* a, const void* b) {
     return memcmp(ra->hilbert, rb->hilbert, 16);
 }
 
-/*
- * Reorders the physicality rows already assigned to a single partition by their Hilbert
- * index (column 5, big-endian bytes so a plain memcmp gives correct numeric order), for
- * sequential I/O locality against physicalities_coord_gist-adjacent storage on COPY.
- * This is purely a within-partition ORDER BY -- it never changes which partition/
- * transaction a row belongs to, unlike the old hilbert_range_partition scheme it
- * replaces.
- */
 static int physicalities_sort_by_hilbert(byte_buf_t* buf) {
     if (buf->row_count <= 1) return 0;
 
@@ -687,8 +652,6 @@ int intent_stage_partition(
         }
 
         if (t == 1) {
-            /* Physicalities are now grouped by referenced entity_id (correctness); apply
-             * the Hilbert-order I/O locality win within each partition's own rows. */
             for (size_t i = 0; i < part_count; ++i) {
                 if (physicalities_sort_by_hilbert(&parts[i]->physicalities) != 0) {
                     for (size_t j = 0; j < part_count; ++j) { intent_stage_free(parts[j]); parts[j] = NULL; }
@@ -744,7 +707,6 @@ const uint8_t* intent_stage_tuple_ptr(
     return src->data;
 }
 
-
 static int semantic_hash_compare(const void* a, const void* b) {
     return memcmp(a, b, sizeof(hash128_t));
 }
@@ -762,7 +724,6 @@ int intent_stage_semantic_digest_batch(const intent_stage_t* const* stages,
         }
     }
     if (rows > (SIZE_MAX - 8) / sizeof(hash128_t)) return -1;
-    /* Stable version prefix followed by sorted, table-tagged row digests. */
     uint8_t* hashes = (uint8_t*)malloc(8 + rows * sizeof(hash128_t));
     if (!hashes) return -1;
     memcpy(hashes, "LPISv001", 8);
