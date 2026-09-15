@@ -92,20 +92,16 @@ public sealed record PhysicalityRow(
 
         // Every trajectory type owes an exact logical constituent count. Only Content
         // additionally owns the identity of that ordered manifest.
-        _ = Trajectory.ContentIdentity(trajectoryXyzm, out int logicalCount);
+        Hash128 manifestId = Trajectory.ContentIdentity(trajectoryXyzm, out int logicalCount);
         if (logicalCount != nConstituents)
             throw new InvalidOperationException(
                 $"physicality trajectory count mismatch: entity={entityId} type={(short)type} "
                 + $"declared={nConstituents} decoded={logicalCount}");
 
-        if (type == PhysicalityType.Content)
-        {
-            Hash128 contentId = Trajectory.ContentIdentity(trajectoryXyzm, out _);
-            if (contentId != entityId)
-                throw new InvalidOperationException(
-                    $"content trajectory identity mismatch: entity={entityId} "
-                    + $"recomputed={contentId} constituents={logicalCount}");
-        }
+        if (type == PhysicalityType.Content && manifestId != entityId)
+            throw new InvalidOperationException(
+                $"content trajectory identity mismatch: entity={entityId} "
+                + $"recomputed={manifestId} constituents={logicalCount}");
         return true;
     }
 }
