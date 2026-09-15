@@ -106,6 +106,39 @@ jobs:
           export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
           bash scripts/pr-proof.sh
 
+      - name: Read source exemplars when the operational diagnostic changes
+        if: always() && env.LAPLACE_PR_FULL_PROOF == '1' && env.LAPLACE_PR_WORKTREE != ''
+        run: |
+          set -euo pipefail
+          cd "$LAPLACE_PR_WORKTREE"
+          if git diff --quiet "$LAPLACE_PR_BASE_SHA" "$LAPLACE_PR_TARGET_SHA" -- scripts/read-operational-source.py; then
+            exit 0
+          fi
+          source scripts/lib/storage.sh
+          laplace_storage_init
+          evidence="/build/laplace/work/operational-source-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$evidence"
+          echo "LAPLACE_OPERATIONAL_SOURCE_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          python3 scripts/test-operational-source-readback.py
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          export PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=laplace_admin
+          export LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            python3 scripts/read-operational-source.py "$PGDATABASE" \
+              --core "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
+              --receipt "$evidence/source-readback.json"
+
+      - name: Retain operational source evidence
+        if: always() && env.LAPLACE_OPERATIONAL_SOURCE_EVIDENCE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: operational-source-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.LAPLACE_OPERATIONAL_SOURCE_EVIDENCE }}
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Remove isolated pull-request worktree
         if: always()
         run: |

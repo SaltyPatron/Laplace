@@ -30,6 +30,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_normalize_nfc.cpp
     test_identity_key.cpp
     test_text_decomposer.cpp
+    test_content_root_placement.cpp
     test_text_roundtrip_gate.cpp
     test_xml_stream.cpp
     test_grammar_decomposer.cpp

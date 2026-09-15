@@ -8,6 +8,7 @@ set(EXT_EXECUTION_SOURCES
     src/execution_module.c
     ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c
     src/content_resolve.c
+    src/text_root_placements.c
     src/content_trajectory_read.c
     src/identity_scan.c
     src/content_membership_read.c
