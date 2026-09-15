@@ -44,7 +44,9 @@ public sealed class FrameVideoTrajectoryTests
             .ToList();
         var video = Assert.Single(videoPhysicalities);
         Assert.Equal(2, video.NConstituents);
-        Assert.Equal(2, Trajectory.Constituents(video.TrajectoryXyzm!).Length);
+        var constituents = Trajectory.Constituents(video.TrajectoryXyzm!);
+        Assert.Equal(2, constituents.Length);
+        Assert.Equal(video.EntityId, Hash128.Merkle(EntityTier.Document, constituents));
 
         var relationTypes = changes.SelectMany(static c => c.Attestations)
             .Select(static a => a.TypeId).ToHashSet();
@@ -54,7 +56,7 @@ public sealed class FrameVideoTrajectoryTests
     }
 
     [Fact]
-    public void VideoSequence_IsOneOrderedPhysicality_NotStructuralTestimony()
+    public void VideoSequence_IsOneOrderedContentPhysicality_NotStructuralTestimony()
     {
         Hash128 source = Hash128.OfCanonical("test/video/source");
         var roots = new[]
@@ -78,10 +80,19 @@ public sealed class FrameVideoTrajectoryTests
         Assert.Equal(video, entity.Id);
         Assert.Equal(EntityTypeRegistry.Video, entity.TypeId);
         var physicality = Assert.Single(change.Physicalities);
+        Assert.Equal(PhysicalityType.Content, physicality.Type);
         Assert.Equal(video, physicality.EntityId);
         Assert.Equal(roots, Trajectory.Constituents(physicality.TrajectoryXyzm!));
+        Assert.Equal(Hash128.Merkle(EntityTier.Document, roots), video);
         Assert.Equal(roots.Length, physicality.NConstituents);
         Assert.Empty(change.Attestations);
+    }
+
+    [Fact]
+    public void SingleFrameVideo_CollapsesToFrameContentIdentity()
+    {
+        Hash128 frame = Hash128.OfCanonical("frame/single");
+        Assert.Equal(frame, VideoFrameIngestHandler.HashVideoRoot([frame]));
     }
 
     [Fact]
