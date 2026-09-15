@@ -435,7 +435,7 @@ jobs:
           printf 'ready=true\n' >> "$GITHUB_OUTPUT"
           printf 'source_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Retain bounded live recursive proof counterexamples
+      - name: Retain existing live recursive proof receipts
         if: always()
         env:
           TARGET_SHA: ${{ github.sha }}
@@ -453,9 +453,6 @@ jobs:
             args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
           fi
           python3 scripts/collect-recursive-proof-evidence.py "${args[@]}"
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            python3 scripts/inspect-recursive-proof-counterexamples.py \
-              --collection "$evidence" --expected-source "$TARGET_SHA"
 
       - name: Upload retained live recursive proof diagnostics
         if: always()

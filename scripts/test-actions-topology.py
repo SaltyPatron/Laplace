@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import copy
+import fcntl
+import hashlib
 import json
 import os
 import shutil
@@ -30,6 +32,57 @@ def commands(job: dict) -> str:
 
 
 class ActionsAuthorityTests(unittest.TestCase):
+    def test_recursive_receipt_retention_does_not_wait_for_host_or_query_history(self):
+        """Run all three real workflow blocks while another job owns the host."""
+        blocks = []
+        for path, job in ((MAIN, "product"), (PR, "prove")):
+            blocks.extend(step["run"] for step in load(path)["jobs"][job]["steps"]
+                          if "scripts/collect-recursive-proof-evidence.py" in step.get("run", ""))
+        self.assertEqual(3, len(blocks))
+        with tempfile.TemporaryDirectory(prefix="retained-proof-", dir=os.environ.get("TMPDIR", "/build/laplace/work")) as directory:
+            root = Path(directory)
+            checkout = root / "checkout"
+            scripts = checkout / "scripts"
+            scripts.mkdir(parents=True)
+            shutil.copyfile(ROOT / "scripts/collect-recursive-proof-evidence.py", scripts / "collect-recursive-proof-evidence.py")
+            forbidden = root / "unexpected-live-query"
+            (scripts / "inspect-recursive-proof-counterexamples.py").write_text(
+                "from pathlib import Path\nPath(" + repr(str(forbidden)) + ").touch()\nraise SystemExit(91)\n")
+            old = checkout / "build/test-receipts/live-recursive-substrate.json"
+            old.parent.mkdir(parents=True)
+            old.write_text(json.dumps({"schema": "laplace.proof.live-recursive-substrate/v1",
+                                      "source_sha": "previous-source", "ok": False, "finished_unix_nanoseconds": 1,
+                                      "identity": {"failure_examples": [{"parent_id": "a" * 32}]}}))
+            current_build = root / "current-build"
+            current = current_build / "test-receipts/live-recursive-substrate.json"
+            current.parent.mkdir(parents=True)
+            current.write_text(json.dumps({"schema": "laplace.proof.live-recursive-substrate/v1",
+                                          "source_sha": "current-source", "ok": True, "finished_unix_nanoseconds": 2}))
+            environment = {**os.environ, "GITHUB_WORKSPACE": str(checkout), "LAPLACE_PR_WORKTREE": str(checkout),
+                           "LAPLACE_BUILD_DIRECTORY": str(current_build), "GITHUB_RUN_ID": "1234", "GITHUB_RUN_ATTEMPT": "2",
+                           "LAPLACE_PR_TARGET_SHA": "current-source", "TARGET_SHA": "current-source", "PROOF_OUTCOME": "success"}
+            host_lock = root / "host-resource.lock"
+            with host_lock.open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                for index, block in enumerate(blocks):
+                    with self.subTest(block=index):
+                        evidence = root / f"evidence-{index}"
+                        shell = block.replace("/build/laplace/work/recursive-proof-evidence", str(evidence)).replace(
+                            "/build/laplace/work/host-resource.lock", str(host_lock))
+                        result = subprocess.run(["bash", "-euo", "pipefail"], input=shell, cwd=checkout,
+                                                env=environment, text=True, capture_output=True, timeout=3)
+                        self.assertEqual(0, result.returncode, result.stderr)
+                        self.assertFalse(forbidden.exists(), "retention launched a historical live query")
+                        manifests = list(evidence.glob("*/manifest.json"))
+                        self.assertEqual(1, len(manifests))
+                        manifest = json.loads(manifests[0].read_text())
+                        for original in (old, current):
+                            item = next(item for item in manifest["receipts"] if item["requested_path"] == str(original))
+                            self.assertEqual("retained", item["disposition"])
+                            self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), item["sha256"])
+                            self.assertEqual(original.read_bytes(), (manifests[0].parent / item["artifact_file"]).read_bytes())
+                        self.assertFalse((manifests[0].parent / "counterexample-structure.json").exists())
+
     def test_post_stockfish_operational_proof_precedes_upload_and_measurement(self):
         steps = load(MAIN)["jobs"]["product"]["steps"]
         names = [step.get("name") for step in steps]

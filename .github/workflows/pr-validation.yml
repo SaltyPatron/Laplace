@@ -60,17 +60,13 @@ jobs:
           echo "LAPLACE_PR_FULL_PROOF=$full" >> "$GITHUB_ENV"
           echo "PR proof classification: full=$full"
 
-      - name: Inspect retained baseline before full proof
+      - name: Retain existing proof receipts before full proof
         id: baseline_diagnostic
         if: env.LAPLACE_PR_FULL_PROOF == '1'
         continue-on-error: true
         run: |
           set -euo pipefail
           umask 0002
-          mkdir -p /build/laplace/work
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            bash -e -o pipefail <<'PR_BASELINE'
-          set -euo pipefail
           evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr-baseline"
           args=(
             --checkout "$LAPLACE_PR_WORKTREE"
@@ -83,9 +79,6 @@ jobs:
             args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
           fi
           python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
-          python3 "$LAPLACE_PR_WORKTREE/scripts/inspect-recursive-proof-counterexamples.py" \
-            --collection "$evidence" --expected-source "$LAPLACE_PR_TARGET_SHA"
-          PR_BASELINE
 
       - name: Upload retained baseline before full proof
         if: always() && steps.baseline_diagnostic.outcome != 'skipped' && env.LAPLACE_PR_FULL_PROOF == '1'
@@ -246,7 +239,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Retain bounded recursive proof counterexamples
+      - name: Retain existing recursive proof receipts
         if: always() && env.LAPLACE_PR_WORKTREE != ''
         env:
           PROOF_OUTCOME: ${{ job.status }}
@@ -264,9 +257,6 @@ jobs:
             args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
           fi
           python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            python3 "$LAPLACE_PR_WORKTREE/scripts/inspect-recursive-proof-counterexamples.py" \
-              --collection "$evidence" --expected-source "$LAPLACE_PR_TARGET_SHA"
 
       - name: Upload retained recursive proof diagnostics
         if: always() && env.LAPLACE_PR_WORKTREE != ''

@@ -581,7 +581,13 @@ DECLARE
     no_curve geometry;
     plan json;
     actual bytea[];
+    previous_settings jsonb;
+    setting record;
 BEGIN
+    SELECT jsonb_object_agg(name,current_setting(name)) INTO previous_settings
+      FROM unnest(ARRAY['work_mem','enable_seqscan','enable_indexscan',
+                        'enable_indexonlyscan','enable_bitmapscan',
+                        'max_parallel_workers_per_gather']) settings(name);
     SELECT public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(needle,i,1,4) ORDER BY i)),
            public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(noise,i,1,4) ORDER BY i))
       INTO yes_curve,no_curve FROM generate_series(1,40) i;
@@ -596,15 +602,24 @@ BEGIN
     ) inputs
     WHERE pg_catalog.satisfies_hash_partition('laplace.physicalities'::regclass,64,0,id)
     LIMIT 10000;
+    -- This tests bitmap recheck, so require a bitmap access path explicitly.
+    -- Disabling only sequential scans still permits ordinary type/partial
+    -- B-tree scans, especially with the installed host's lower random_page_cost.
+    -- Keep the oracle serial so its page counts cover the complete scan.
     PERFORM set_config('work_mem','64kB',true);
     PERFORM set_config('enable_seqscan','off',true);
+    PERFORM set_config('enable_indexscan','off',true);
+    PERFORM set_config('enable_indexonlyscan','off',true);
+    PERFORM set_config('enable_bitmapscan','on',true);
+    PERFORM set_config('max_parallel_workers_per_gather','0',true);
     EXECUTE 'EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) SELECT entity_id
         FROM laplace.physicalities WHERE type=1 AND trajectory IS NOT NULL
         AND public.laplace_trajectory_constituent_ids(trajectory) @> $1'
         INTO plan USING ARRAY[needle];
     IF NOT EXISTS (SELECT 1 FROM jsonb_path_query(plan::jsonb,'$.**."Lossy Heap Blocks"') v
                    WHERE v::text::bigint > 0) THEN
-        RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap';
+        RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap'
+            USING DETAIL = plan::text;
     END IF;
     SELECT array_agg(entity_id) INTO actual
       FROM structural.containers_containing_all(ARRAY[needle,needle]);
@@ -615,8 +630,9 @@ BEGIN
     IF actual IS DISTINCT FROM ARRAY[matched] THEN
         RAISE EXCEPTION 'FAIL: lossy OR membership admitted a wrong entity/type';
     END IF;
-    PERFORM set_config('work_mem','4MB',true);
-    PERFORM set_config('enable_seqscan','on',true);
+    FOR setting IN SELECT key,value FROM jsonb_each_text(previous_settings) LOOP
+        PERFORM set_config(setting.key,setting.value,true);
+    END LOOP;
 END
 $membership_bitmap$;
 

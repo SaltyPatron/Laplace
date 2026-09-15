@@ -202,9 +202,9 @@ def result_authority(name: str, workflow: dict) -> None:
                 if upload_step.get("if") != expected_upload or not upload_step.get("uses", "").startswith("actions/upload-artifact@") or "run" in upload_step:
                     fail(f"{context}: optional baseline upload may only retain the attempted diagnostic")
                 baseline_command = baseline_step.get("run", "")
-                for token in ("--proof-outcome baseline-before-proof", "scripts/collect-recursive-proof-evidence.py", "scripts/inspect-recursive-proof-counterexamples.py", "flock --exclusive --close /build/laplace/work/host-resource.lock"):
+                for token in ("--proof-outcome baseline-before-proof", "scripts/collect-recursive-proof-evidence.py"):
                     if token not in baseline_command:
-                        fail(f"{context}: baseline lacks bounded read-only diagnostic contract: {token}")
+                        fail(f"{context}: baseline lacks existing-file retention contract: {token}")
                 if "if" in proof_step or "baseline_diagnostic" in str(proof_step):
                     fail(f"{context}: actual PR proof must remain independent of optional baseline success")
                 for token in ("ci-session.py", "--kind pr", "set -euo pipefail"):
