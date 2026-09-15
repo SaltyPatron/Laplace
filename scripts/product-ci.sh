@@ -5,6 +5,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Completion state belongs to this shell invocation, never its inherited environment.
+stockfish_corpus_passed=0
+operational_postchecks_passed=0
+operational_seed_run_id=
 stage="${1:-all}"
 case "$stage" in
   reconcile|check|build|test|deploy|integrate|all|application-check|applications) ;;
@@ -90,35 +94,98 @@ seed_operational_memory() {
 }
 
 verify_operational_execution() {
+  local receipt_prefix="${1:-}" seed_run_id remaining deadline=$((SECONDS + 900))
+  case "$receipt_prefix" in ''|post-stockfish-) ;; *) return 2 ;; esac
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
     echo "fresh DB intentionally left unseeded — operational execution proof skipped"
     return 0
   fi
   # Consume only this invocation's verified seed receipt. Never select a latest
   # source run or reuse a receipt from another publication attempt.
-  local seed_run_id
   seed_run_id="$(python3 - "$operational_proof_directory/seed.json" <<'PY'
 import json
 import sys
 import uuid
 from pathlib import Path
-report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+path = Path(sys.argv[1])
+if path.stat().st_size > 1048576:
+    raise SystemExit("operational seed receipt exceeds the 1 MiB metadata envelope")
+report = json.loads(path.read_text(encoding="utf-8"))
 if report.get("disposition") != "verified":
     raise SystemExit("operational seed receipt is not a verified invocation")
 run_id = report["run"]["run_id"]
-if str(uuid.UUID(run_id)) != run_id:
+if not isinstance(run_id, str) or str(uuid.UUID(run_id)) != run_id:
     raise SystemExit("operational seed receipt has an invalid run identity")
 print(run_id)
 PY
 )"
-  python3 scripts/verify-operational-task.py \
+  if [[ "$receipt_prefix" == post-stockfish- ]]; then
+    [[ "$seed_run_id" == "${operational_seed_run_id:?initial operational proof did not select its seed}" ]] || {
+      echo "post-Stockfish seed differs from this process's initial verified seed" >&2
+      return 1
+    }
+  else
+    operational_seed_run_id="$seed_run_id"
+  fi
+  remaining=$((deadline - SECONDS))
+  (( remaining > 0 )) || return 124
+  timeout --signal=TERM --kill-after=5s "${remaining}s" python3 scripts/verify-operational-task.py \
     --shape-file seeds/operational/tasks/en_define.json --seed-run-id "$seed_run_id" \
-    --receipt "$operational_proof_directory/task.json"
-  python3 scripts/verify-operational-task.py \
+    --receipt "$operational_proof_directory/${receipt_prefix}task.json"
+  remaining=$((deadline - SECONDS))
+  (( remaining > 0 )) || return 124
+  timeout --signal=TERM --kill-after=5s "${remaining}s" python3 scripts/verify-operational-task.py \
     --proof-mode direct-relation --prompt 'The opposite of hot is' --operand hot \
     --shape-file seeds/operational/tasks/en_antonym.json \
     --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
-    --receipt "$operational_proof_directory/antonym-task.json"
+    --receipt "$operational_proof_directory/${receipt_prefix}antonym-task.json"
+  if [[ "$receipt_prefix" == post-stockfish- ]]; then operational_postchecks_passed=1; fi
+}
+
+run_stockfish_corpus_acceptance() {
+  # The caller already owns the shared host lock through publication, repaired
+  # service restoration and both ordinary proofs. The common CLI additionally
+  # owns the canonical ingest lane for its two exact observations.
+  local output="${LAPLACE_STOCKFISH_CORPUS_DIRECTORY:-$operational_proof_directory/stockfish-corpus}"
+  export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
+  dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --nologo -v minimal
+  bash scripts/sync-managed-native-artifacts.sh
+  python3 scripts/ingest-stockfish-corpus.py \
+    --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --output "$output"
+  stockfish_corpus_passed=1
+}
+
+record_chess_completion() {
+  # These variables only become true after this invocation's actual commands
+  # finish. Neither a prior receipt nor a later test outcome can authorize them.
+  [[ "${stockfish_corpus_passed:-0}" == 1 && "${operational_postchecks_passed:-0}" == 1 ]] || return 0
+  local source_sha
+  source_sha="$(git rev-parse HEAD)"
+  [[ -z "${GITHUB_SHA:-}" || "$source_sha" == "$GITHUB_SHA" ]] || {
+    echo "completed chess acceptance source differs from this workflow revision" >&2
+    return 1
+  }
+  case "$stage" in all|applications) ;; *) return 1 ;; esac
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    [[ "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ && "${GITHUB_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]*$ ]] || return 1
+    printf 'chess_benchmark_ready=true\nactivated_ref=%s\nchess_acceptance_stage=%s\n' \
+      "$source_sha" "$stage" >> "$GITHUB_OUTPUT"
+  fi
+}
+
+run_recorded_chess_benchmark() {
+  # Use the activated application's ordinary recording path while this lifecycle
+  # still owns the host lock. Retain the runner's failure receipt before exit.
+  python3 scripts/benchmark-recorded-chess.py \
+    --output-dir "${LAPLACE_RECORDED_CHESS_DIRECTORY:-$operational_proof_directory/recorded-chess}"
+}
+
+observe_chess_runtime() {
+  # Observe the already-published services before corpus work can fail. This
+  # starts one owned Stockfish probe, preserving the actual service lifetimes.
+  python3 scripts/benchmark-chess-environment.py --runtime-only \
+    --output-dir "${LAPLACE_CHESS_RUNTIME_DIRECTORY:-$operational_proof_directory/chess-runtime}" \
+    --reserve-cpus 0 --cpu-budget 1 --memory-mb 512 --max-seconds 60
 }
 
 reconcile_installed_product() {
@@ -215,6 +282,16 @@ if [[ "$stage" == application-check || "$stage" == applications ]]; then
     bash scripts/publish-applications.sh deploy
     recover_publish
     trap - EXIT
+    observe_chess_runtime
+    # This path retains its unchanged-native publication contract. It does not
+    # claim installation, migration or corpus repair; it explicitly admits and
+    # proves the operational source used by this application's corpus checks.
+    seed_operational_memory
+    verify_operational_execution
+    run_stockfish_corpus_acceptance
+    verify_operational_execution post-stockfish-
+    record_chess_completion
+    run_recorded_chess_benchmark
   fi
   exit 0
 fi
@@ -236,10 +313,15 @@ fi
 trap recover_publish EXIT
 run_publish
 trap - EXIT
+observe_chess_runtime
 # Repair owns its restoration and unknown transaction outcomes. Publication's
 # API recovery must not restart a writer after unresolved repair quiescence.
 run_repair_installed_corpus
 verify_operational_execution
+run_stockfish_corpus_acceptance
+verify_operational_execution post-stockfish-
+record_chess_completion
+run_recorded_chess_benchmark
 run_integration
 run_live_if_expected
 run_perf

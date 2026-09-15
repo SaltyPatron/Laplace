@@ -31,4 +31,8 @@ public sealed record ChessWitnessedGame(
     /// resolution of ids the hydrator already held.
     /// </summary>
     public IReadOnlyList<Hash128> MoveIds { get; init; } = Array.Empty<Hash128>();
+
+    /// <summary>The exact first constituent read from the stored line Content manifest.
+    /// Null means this record was constructed without that native readback.</summary>
+    public Hash128? StartPositionId { get; init; }
 }

@@ -10,6 +10,26 @@ public static unsafe class ChessPositionFloor
 {
     // mmap ROM after load: concurrent readers are safe. Only load/unload take the gate.
     private static volatile bool _ready;
+    private static long _lookupHits;
+    private static long _lookupMisses;
+
+    public readonly record struct Observation(
+        bool IsLoaded, long RecordCount, long LookupHits, long LookupMisses);
+
+    /// <summary>Actual native map state and completed managed lookup counters. Counters
+    /// cover this process lifetime, including earlier mappings; observation never loads a file.</summary>
+    public static Observation Observe()
+    {
+        lock (LaplaceCoreGate.Native)
+        {
+            bool loaded = IsLoadedUnlockedSafe();
+            ulong count = 0;
+            if (loaded && NativeInterop.ChessPositionTableRecordCount(&count) != 0)
+                throw new InvalidOperationException("Loaded chess position map has no record count.");
+            return new(loaded, checked((long)count),
+                Interlocked.Read(ref _lookupHits), Interlocked.Read(ref _lookupMisses));
+        }
+    }
 
     public static void Load(string path)
     {
@@ -98,18 +118,26 @@ public static unsafe class ChessPositionFloor
         hb = default;
         n = 0;
         tier = 0;
-        if (!_ready && !IsLoadedUnlockedSafe()) return false;
+        if (!_ready && !IsLoadedUnlockedSafe())
+        {
+            Interlocked.Increment(ref _lookupMisses);
+            return false;
+        }
         double* coord = stackalloc double[4];
         Hilbert128 hbLocal;
         uint nLocal;
         byte tierLocal;
         if (NativeInterop.ChessPositionTableLookupGeom(
                 &id, coord, &hbLocal, &nLocal, &tierLocal) != 0)
+        {
+            Interlocked.Increment(ref _lookupMisses);
             return false;
+        }
         x = coord[0]; y = coord[1]; z = coord[2]; m = coord[3];
         hb = hbLocal;
         n = nLocal;
         tier = tierLocal;
+        Interlocked.Increment(ref _lookupHits);
         return true;
     }
 

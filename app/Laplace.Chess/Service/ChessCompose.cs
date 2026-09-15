@@ -139,26 +139,27 @@ public static class ChessCompose
             board, rules ?? ChessVariantRules.Standard, atoms);
         var subs = new ChessNode[count];
         var ids = new Hash128[count];
-        var childCoords = new double[count * 4];
         for (int i = 0; i < count; i++)
         {
             ChessNode node = AtomMemo.GetOrAdd(atoms[i], ComposeAtom);
             subs[i] = node;
             ids[i] = node.Id;
-            node.Coord.CopyTo(childCoords, i * 4);
         }
 
         Hash128 id = Hash128.Merkle(PositionTier, ids);
-        double[] trajectory = Trajectory.Build(ids);
-        Hash128 physicalityId = PhysicalityId.Compute(id, PhysicalityType.Content);
         if (ChessPositionFloor.TryLookup(id, out var x, out var y, out var z, out var m,
                 out var hb, out var n, out var tier))
         {
             return new ChessComposed(
-                new ChessNode(id, [x, y, z, m], hb, trajectory, physicalityId,
+                new ChessNode(id, [x, y, z, m], hb, Trajectory.Build(ids),
+                    PhysicalityId.Compute(id, PhysicalityType.Content),
                     n == 0 ? count : checked((int)n), tier == 0 ? PositionTier : tier), subs);
         }
-        return new ChessComposed(ComposeOver(ids, childCoords, count, PositionTier), subs);
+        // Allocate the geometric input only for a real miss. Identity, trajectory,
+        // and physicality are each derived once; a miss does not restart composition.
+        var childCoords = new double[count * 4];
+        for (int i = 0; i < count; i++) subs[i].Coord.CopyTo(childCoords, i * 4);
+        return new ChessComposed(ComposeMissing(id, ids, childCoords, count, PositionTier), subs);
     }
 
     public static Hash128 PositionId(string surface)
@@ -206,21 +207,20 @@ public static class ChessCompose
         Span<byte> bytes = stackalloc byte[33];
         int count = ChessPositionIdentity.FillAtomBytes(atom, bytes);
         var ids = new Hash128[count];
-        var coords = new double[count * 4];
         for (int i = 0; i < count; i++)
         {
             byte value = bytes[i];
             ids[i] = ByteAtoms.Id(value);
-            ByteAtoms.Coord(value).CopyTo(coords.AsSpan(i * 4, 4));
         }
         Hash128 id = Hash128.Merkle(SubstructureTier, ids);
-        double[] trajectory = Trajectory.Build(ids);
-        Hash128 physicalityId = PhysicalityId.Compute(id, PhysicalityType.Content);
         if (ChessPositionFloor.TryLookup(id, out var x, out var y, out var z, out var m,
                 out var hb, out var n, out var tier))
-            return new ChessNode(id, [x, y, z, m], hb, trajectory, physicalityId,
+            return new ChessNode(id, [x, y, z, m], hb, Trajectory.Build(ids),
+                PhysicalityId.Compute(id, PhysicalityType.Content),
                 n == 0 ? count : checked((int)n), tier == 0 ? SubstructureTier : tier);
-        return ComposeOver(ids, coords, count, SubstructureTier);
+        var coords = new double[count * 4];
+        for (int i = 0; i < count; i++) ByteAtoms.Coord(bytes[i]).CopyTo(coords.AsSpan(i * 4, 4));
+        return ComposeMissing(id, ids, coords, count, SubstructureTier);
     }
 
     private static ChessNode ComposeOver(Hash128[] childIds, double[] childCoords, int n, byte tier)
@@ -237,6 +237,14 @@ public static class ChessCompose
                 nFloor != 0 ? (int)nFloor : n, tierFloor != 0 ? tierFloor : tier);
         }
 
+        return ComposeMissing(id, childIds, childCoords, n, tier, traj, physId);
+    }
+
+    private static ChessNode ComposeMissing(Hash128 id, Hash128[] childIds, double[] childCoords,
+        int n, byte tier, double[]? trajectory = null, Hash128? physicalityId = null)
+    {
+        double[] traj = trajectory ?? Trajectory.Build(childIds);
+        Hash128 physId = physicalityId ?? PhysicalityId.Compute(id, PhysicalityType.Content);
         // Karcher, not Centroid — intrinsic mean, lands on S3 at norm 1. The floor
         // hit above returns ROM geometry untouched; only the computed branch moves.
         // Requires a reseed.
@@ -247,6 +255,9 @@ public static class ChessCompose
 
     private static volatile bool _composeReady;
     private static readonly object ComposeReadyGate = new();
+
+    /// <summary>Initialize the same immutable floors used by composition and report their state separately.</summary>
+    public static void InitializePerfcaches() => EnsureLoaded();
 
     /// <summary>
     /// One-time compose warmup. The <c>_composeReady</c> read is the fast path, but it

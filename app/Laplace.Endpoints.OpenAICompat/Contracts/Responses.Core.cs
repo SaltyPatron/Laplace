@@ -18,7 +18,37 @@ public sealed record ReadinessResponse(
     [property: JsonPropertyName("entities")] long Entities,
     [property: JsonPropertyName("consensus_relations")] long ConsensusRelations,
     [property: JsonPropertyName("perfcache_ready")] bool PerfcacheReady,
-    [property: JsonPropertyName("detail"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Detail = null);
+    [property: JsonPropertyName("detail"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Detail = null,
+    [property: JsonPropertyName("chess_perfcache"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChessPerfcacheObservation? ChessPerfcache = null);
+
+public sealed record ChessPositionPerfcacheObservation(
+    [property: JsonPropertyName("is_loaded")] bool IsLoaded,
+    [property: JsonPropertyName("record_count")] long RecordCount,
+    [property: JsonPropertyName("lookup_hits")] long LookupHits,
+    [property: JsonPropertyName("lookup_misses")] long LookupMisses);
+
+public sealed record ChessTransitionPerfcacheObservation(
+    [property: JsonPropertyName("is_loaded")] bool IsLoaded,
+    [property: JsonPropertyName("record_count")] long RecordCount,
+    [property: JsonPropertyName("novel_count")] int NovelCount,
+    [property: JsonPropertyName("persistent_hits")] long PersistentHits,
+    [property: JsonPropertyName("novel_hits")] long NovelHits,
+    [property: JsonPropertyName("lookup_misses")] long LookupMisses);
+
+public sealed record ChessPerfcacheObservation(
+    [property: JsonPropertyName("process_id")] int ProcessId,
+    [property: JsonPropertyName("observed_utc")] DateTimeOffset ObservedUtc,
+    [property: JsonPropertyName("counter_scope")] string CounterScope,
+    [property: JsonPropertyName("initialization_completed")] bool InitializationCompleted,
+    [property: JsonPropertyName("position")] ChessPositionPerfcacheObservation? Position,
+    [property: JsonPropertyName("transition")] ChessTransitionPerfcacheObservation? Transition,
+    [property: JsonPropertyName("failure_type"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureType = null)
+{
+    [JsonPropertyName("ready")]
+    public bool Ready => InitializationCompleted && FailureType is null
+        && Position is { IsLoaded: true, RecordCount: > 0 }
+        && Transition is { IsLoaded: true, RecordCount: > 0 };
+}
 
 public sealed record ModelList(
     [property: JsonPropertyName("object")] string Object,

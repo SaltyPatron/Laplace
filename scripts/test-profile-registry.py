@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -245,6 +246,56 @@ def _run(
     return returncode, output, int(elapsed_ms)
 
 
+def _ctest_failure_diagnostics(output: str) -> list[dict[str, Any]]:
+    """Expose pg_regress's actual diff without changing the authoritative verdict.
+
+    CTest prints only the path to regression.diffs. Read only named regular files
+    inside this invocation's configured build tree, with finite output bounds.
+    Prefix every diagnostic line so fixture text is not an Actions command.
+    """
+    records: list[dict[str, Any]] = []
+    paths = list(dict.fromkeys(re.findall(
+        r'file "([^"\r\n]*[/\\]regression\.diffs)"', output
+    )))
+    budget = 2 * 1024 * 1024
+    build_root = (ROOT / "build").resolve()
+    for name in paths[:8]:
+        record: dict[str, Any] = {"path": name, "status": "unavailable"}
+        records.append(record)
+        try:
+            selected = Path(name)
+            if not selected.is_absolute():
+                selected = ROOT / selected
+            selected = selected.resolve(strict=True)
+            selected.relative_to(build_root)
+            if selected.name != "regression.diffs":
+                raise ValueError("diagnostic is not a regression diff")
+            if budget == 0:
+                raise ValueError("aggregate diagnostic output bound exhausted")
+            fd = os.open(selected, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                         | getattr(os, "O_NONBLOCK", 0))
+            with os.fdopen(fd, "rb") as stream:
+                observed = os.fstat(stream.fileno())
+                if not stat.S_ISREG(observed.st_mode):
+                    raise ValueError("diagnostic is not a regular file")
+                data = stream.read(budget + 1)
+            truncated = len(data) > budget
+            data = data[:budget]
+            budget -= len(data)
+            record.update(status="read", file_bytes=observed.st_size,
+                          emitted_bytes=len(data), truncated=truncated,
+                          emitted_sha256=hashlib.sha256(data).hexdigest())
+            print("NATIVE_REGRESSION " + json.dumps(record, sort_keys=True))
+            for line in data.decode("utf-8", errors="replace").splitlines():
+                print("NATIVE_REGRESSION | " + line)
+        except (OSError, ValueError) as exc:
+            record["reason"] = str(exc)
+            print("NATIVE_REGRESSION " + json.dumps(record, sort_keys=True))
+    if len(paths) > 8:
+        print(f"NATIVE_REGRESSION omitted_paths={len(paths) - 8} limit=8")
+    return records
+
+
 def _count_dotnet_list(output: str) -> int:
     # Solution-level discovery writes one stream per test assembly concurrently.
     # A later assembly's unindented "Test run for"/"No test matches" line can
@@ -456,6 +507,8 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
             record["status"] = "success" if rc == 0 else "failed"
         if rc != 0:
             status = "failed"
+            if suite["runner"] == "ctest":
+                record["failure_diagnostics"] = _ctest_failure_diagnostics(output)
             break
 
     receipt = _finish_receipt(request, started_wall, records, status)

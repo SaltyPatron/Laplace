@@ -79,11 +79,102 @@ public sealed class SubstrateRootBiasTests
         _ = bias.Bonus(fixture.Board, fixture.Moves);
         Assert.Equal(1, reads);
         Assert.Equal(1, bias.BackendReads);
+        Assert.Equal(1, bias.FrontierBuilds);
+        Assert.Equal(1, bias.EvidenceCacheHits);
+        long lookups = bias.TransitionPerfcacheHits + bias.TransitionNovelHits + bias.TransitionCompositions;
+        Assert.Equal(fixture.Moves.Count, lookups);
 
         version++;
         _ = bias.Bonus(fixture.Board, fixture.Moves);
         Assert.Equal(2, reads);
         Assert.Equal(2, bias.BackendReads);
+        Assert.Equal(1, bias.FrontierBuilds);
+        Assert.Equal(lookups, bias.TransitionPerfcacheHits + bias.TransitionNovelHits + bias.TransitionCompositions);
+    }
+
+    [Fact]
+    public void SamePositionWithDifferentOrderedLegalFrontierCannotReuseWrongEvidence()
+    {
+        var fixture = Start("e2e4");
+        var bias = Bias((ids, type) => type == ChessVocabulary.MoveType
+            && ids.Contains(fixture.TransitionEdge) ? Present(ids, fixture.TransitionEdge, +10) : Empty());
+        ChessMove selected = fixture.Moves[fixture.Index];
+        var other = fixture.Moves.First(move => move != selected);
+        Assert.Equal(new[] { 80 }, bias.Bonus(fixture.Board, new[] { selected }));
+        Assert.Equal(new[] { 0 }, bias.Bonus(fixture.Board, new[] { other }));
+        Assert.Equal(new[] { 0, 80 }, bias.Bonus(fixture.Board, new[] { other, selected }));
+        Assert.Equal(new[] { 80, 0 }, bias.Bonus(fixture.Board, new[] { selected, other }));
+        Assert.Equal(4, bias.BackendReads);
+        Assert.Equal(4, bias.FrontierBuilds);
+        Assert.Equal(new[] { 0, 80 }, bias.Bonus(fixture.Board, new[] { other, selected }));
+        Assert.Equal(4, bias.FrontierBuilds);
+        Assert.Equal(1, bias.EvidenceCacheHits);
+    }
+
+    [Fact]
+    public void CrossProcessExpiryRefreshesEvidenceWithoutRepeatingImmutableFrontierOrGrowingQueue()
+    {
+        var fixture = Start("e2e4");
+        long clock = 0;
+        int reads = 0;
+        var bias = new SubstrateRootBias((_, _, _, _) => { reads++; return (Empty(), Empty()); },
+            clock: () => clock);
+        for (int i = 0; i < 100; i++)
+        {
+            _ = bias.Bonus(fixture.Board, fixture.Moves);
+            clock += 2_001;
+        }
+        Assert.Equal(100, reads);
+        Assert.Equal(1, bias.FrontierBuilds);
+        Assert.Equal(1, bias.CachedFrontiers);
+        Assert.Equal(1, bias.EvictionQueueCount);
+    }
+
+    [Fact]
+    public void CallerMutationDoesNotChangeTheRetainedOrderedFrontier()
+    {
+        var fixture = Start("e2e4");
+        var bias = Bias((ids, type) => type == ChessVocabulary.MoveType
+            && ids.Contains(fixture.TransitionEdge) ? Present(ids, fixture.TransitionEdge, +10) : Empty());
+        var moves = new[] { fixture.Moves[fixture.Index] };
+        Assert.Equal(new[] { 80 }, bias.Bonus(fixture.Board, moves));
+        moves[0] = fixture.Moves.First(move => move != moves[0]);
+        Assert.Equal(new[] { 0 }, bias.Bonus(fixture.Board, moves));
+        Assert.Equal(new[] { 80 }, bias.Bonus(fixture.Board, new[] { fixture.Moves[fixture.Index] }));
+        Assert.Equal(2, bias.FrontierBuilds);
+    }
+
+    [Fact]
+    public async Task FailedOldObservationCannotDiscardACompletedNewEvidenceGeneration()
+    {
+        var fixture = Start("e2e4");
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        long version = 0;
+        int reads = 0;
+        var bias = new SubstrateRootBias((_, _, _, _) =>
+        {
+            if (Interlocked.Increment(ref reads) == 1)
+            {
+                entered.Set();
+                if (!release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException();
+                throw new InvalidOperationException("old database observation failed");
+            }
+            return (Empty(), Empty());
+        }, version: (_, _) => Interlocked.Read(ref version));
+        var old = Task.Run(() => Record.Exception(() => bias.Bonus(fixture.Board, fixture.Moves)));
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+            Interlocked.Increment(ref version);
+            _ = bias.Bonus(fixture.Board, fixture.Moves);
+        }
+        finally { release.Set(); }
+        Assert.IsType<InvalidOperationException>(await old);
+        _ = bias.Bonus(fixture.Board, fixture.Moves);
+        Assert.Equal(2, reads);
+        Assert.Equal(1, bias.FrontierBuilds);
+        Assert.Equal(1, bias.CachedFrontiers);
     }
 
     private static SubstrateRootBias Bias(

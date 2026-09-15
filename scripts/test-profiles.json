@@ -145,6 +145,19 @@
       "required": true
     },
     {
+      "id": "policy-recorded-chess-benchmark",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-recorded-chess-benchmark.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-chess-environment-benchmark",
       "profile": "policy",
       "owner": "chess",

@@ -8,6 +8,7 @@ Raw commands, transcripts, PGNs and a versioned report remain in --output-dir.
 from __future__ import annotations
 
 import argparse
+import csv
 import ctypes
 import datetime as dt
 import hashlib
@@ -17,17 +18,376 @@ import math
 import os
 from pathlib import Path
 import platform
+import queue
 import random
 import re
+import shutil
 import signal
 import socket
 import statistics
 import subprocess
+import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
 SCHEMA = "laplace.benchmark.chess-environment/v1"
+SERVICE_PROPERTIES = ("Id", "LoadState", "UnitFileState", "ActiveState", "SubState", "MainPID",
+    "Type", "Result", "ExecMainCode", "ExecMainStatus", "ConditionResult",
+    "ExecMainStartTimestamp", "ExecMainStartTimestampMonotonic", "ExecMainExitTimestamp",
+    "ExecMainExitTimestampMonotonic", "ActiveEnterTimestamp", "ActiveEnterTimestampMonotonic",
+    "InactiveExitTimestamp", "InactiveExitTimestampMonotonic", "StateChangeTimestampMonotonic")
+SERVICE_UNITS = ("laplace-api.service", "laplace-lichess.service")
+
+
+def service_observations(text):
+    """Retain only explicitly requested non-secret systemd properties."""
+    records = {}
+    for block in re.split(r"\n\s*\n", text.strip()):
+        fields = dict(line.split("=", 1) for line in block.splitlines()
+                      if "=" in line and line.split("=", 1)[0] in SERVICE_PROPERTIES)
+        unit = fields.get("Id")
+        if unit not in SERVICE_UNITS:
+            continue
+        pid = int(fields["MainPID"]) if fields.get("MainPID", "").isdigit() else None
+        clocks = {name: int(value) if value.isdigit() else None for name, value in fields.items()
+                  if name.endswith("Monotonic")}
+        start, active = clocks.get("ExecMainStartTimestampMonotonic"), clocks.get("ActiveEnterTimestampMonotonic")
+        records[unit] = {"properties": fields, "main_pid": pid,
+            "installed": fields.get("LoadState") in ("loaded", "masked"),
+            "enabled": fields.get("UnitFileState") in ("enabled", "enabled-runtime"),
+            "running": fields.get("ActiveState") == "active" and pid is not None and pid > 0,
+            "systemd_monotonic_microseconds": clocks,
+            "manager_start_to_active_seconds": (active - start) / 1e6 if start and active and active >= start else None,
+            "startup_scope": "Service-manager timestamps only; Type=simple activation does not establish application readiness or application startup duration."}
+    return records
+
+
+def chess_perfcache_observation(value):
+    """Retain only typed process/map evidence; never retain arbitrary health detail."""
+    if not isinstance(value, dict) or type(value.get("process_id")) is not int or value["process_id"] <= 0:
+        raise ValueError("invalid chess process identity")
+    if type(value.get("initialization_completed")) is not bool:
+        raise ValueError("invalid chess initialization status")
+    if type(value.get("ready")) is not bool:
+        raise ValueError("invalid chess readiness status")
+    stamp = value.get("observed_utc")
+    if not isinstance(stamp, str) or dt.datetime.fromisoformat(stamp.replace("Z", "+00:00")).tzinfo is None:
+        raise ValueError("invalid chess observation timestamp")
+    scope = "process-lifetime completed managed lookups; counters include earlier mappings"
+    if value.get("counter_scope") != scope:
+        raise ValueError("unknown chess counter scope")
+    result = {name: value[name] for name in ("process_id", "observed_utc", "counter_scope", "initialization_completed", "ready")}
+    for name, counters in (("position", ("record_count", "lookup_hits", "lookup_misses")),
+                           ("transition", ("record_count", "novel_count", "persistent_hits", "novel_hits", "lookup_misses"))):
+        part = value.get(name)
+        if part is None:
+            result[name] = None
+            continue
+        if not isinstance(part, dict) or type(part.get("is_loaded")) is not bool:
+            raise ValueError("invalid chess map state")
+        if any(type(part.get(key)) is not int or part[key] < 0 for key in counters):
+            raise ValueError("invalid chess lookup counters")
+        if not part["is_loaded"] and part["record_count"] != 0:
+            raise ValueError("unloaded chess map claims records")
+        result[name] = {key: part[key] for key in ("is_loaded", *counters)}
+    failure = value.get("failure_type")
+    if failure is not None:
+        if not isinstance(failure, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,80}Exception", failure):
+            raise ValueError("invalid chess failure type")
+        result["failure_type"] = failure
+    expected_ready = result["initialization_completed"] and failure is None and all(
+        result[name] is not None and result[name]["is_loaded"] and result[name]["record_count"] > 0
+        for name in ("position", "transition"))
+    if result["ready"] != expected_ready:
+        raise ValueError("inconsistent chess readiness status")
+    return result
+
+
+def local_http_opener():
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, request, fp, code, message, headers, newurl):
+            return None
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+
+
+def api_base(value):
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username \
+            or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("API base must be an HTTP(S) URL without credentials or query")
+    return value.rstrip("/")
+
+
+def normal_api_headers():
+    headers = {"Content-Type": "application/json", "X-Laplace-Tenant": os.environ.get("LAPLACE_PROOF_TENANT", "ci")}
+    for variable, header in (("LAPLACE_API_KEY", "Authorization"), ("LAPLACE_QUOTE_ID", "X-Laplace-Quote-Id")):
+        if os.environ.get(variable):
+            headers[header] = ("Bearer " if header == "Authorization" else "") + os.environ[variable]
+    return headers
+
+
+def http_readiness(timeout, opener=None, base="http://127.0.0.1:5187"):
+    url = api_base(base) + "/health/ready"
+    started = time.monotonic()
+    result = {"url": url, "ready": False, "http_status": None,
+              "scope": "One current readiness request; elapsed time is HTTP response latency, not application startup time."}
+    opener = opener or local_http_opener()
+    try:
+        try:
+            response = opener.open(urllib.request.Request(url, headers=normal_api_headers()), timeout=timeout)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            result["http_status"] = response.code
+            raw = response.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("readiness response exceeds bound")
+        body = json.loads(raw)
+        names = ("ready", "substrate_reachable", "perfcache_ready")
+        if not isinstance(body, dict) or any(type(body.get(name)) is not bool for name in names):
+            raise ValueError("readiness booleans unavailable")
+        result["observed"] = {name: body[name] for name in names}
+        for name in ("entities", "consensus_relations"):
+            if type(body.get(name)) is int and body[name] >= 0:
+                result["observed"][name] = body[name]
+        result["response_sha256"] = hashlib.sha256(raw).hexdigest()
+        result["ready"] = result["http_status"] == 200 and all(body[name] for name in names)
+        result["status"] = "ready" if result["ready"] else "not-ready"
+        if body.get("chess_perfcache") is not None:
+            try:
+                result["observed"]["chess_perfcache"] = chess_perfcache_observation(body["chess_perfcache"])
+            except (ValueError, TypeError, OverflowError):
+                result["chess_perfcache_status"] = "invalid-observation"
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        # Response detail and exception messages can contain database settings.
+        result.update(status="unavailable", error_type=type(error).__name__)
+    result["request_wall_seconds"] = time.monotonic() - started
+    return result
+
+
+def chess_lookup_deltas(before, after):
+    first = before.get("observed", {}).get("chess_perfcache")
+    last = after.get("observed", {}).get("chess_perfcache")
+    if first is None or last is None:
+        return {"status": "missing-chess-observation"}
+    if first["process_id"] != last["process_id"]:
+        return {"status": "process-changed", "before_process_id": first["process_id"], "after_process_id": last["process_id"]}
+    delta = {}
+    for name, counters in (("position", ("lookup_hits", "lookup_misses")),
+                           ("transition", ("persistent_hits", "novel_hits", "lookup_misses"))):
+        if first[name] is None or last[name] is None:
+            return {"status": "missing-map-observation"}
+        delta[name] = {key: last[name][key] - first[name][key] for key in counters}
+        if any(value < 0 for value in delta[name].values()):
+            return {"status": "counter-regressed"}
+    return {"status": "observed", "process_id": first["process_id"], "deltas": delta,
+            "scope": "Process-wide changes during one ordinary read-only chess request; concurrent requests may contribute. Zero is retained and does not prove catalog use."}
+
+
+def chess_read_request(timeout, opener=None, base="http://127.0.0.1:5187"):
+    """One ordinary depth-one substrate search through the API's read-only host."""
+    url = api_base(base) + "/chess/eval"
+    payload = {"fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "depth": 1, "substrate": True}
+    result = {"url": url, "method": "POST", "request": payload, "http_status": None}
+    started = time.monotonic()
+    try:
+        request = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                         headers=normal_api_headers(), method="POST")
+        try:
+            response = (opener or local_http_opener()).open(request, timeout=timeout)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            result["http_status"] = response.code
+            raw = response.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("chess response exceeds bound")
+        result["response_sha256"] = hashlib.sha256(raw).hexdigest()
+        body = json.loads(raw)
+        if not isinstance(body, dict) or type(body.get("depth")) is not int or body["depth"] != 1 \
+                or type(body.get("nodes")) is not int or body["nodes"] <= 0 \
+                or body.get("substrate") is not True:
+            raise ValueError("chess search receipt unavailable")
+        result["observed"] = {key: body[key] for key in ("depth", "nodes", "substrate")}
+        result["status"] = "completed" if result["http_status"] == 200 else "failed"
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        result.update(status="unavailable", error_type=type(error).__name__)
+    result["request_wall_seconds"] = time.monotonic() - started
+    return result
+
+
+def gpu_observations(text, with_compute=True):
+    devices = []
+    for row in csv.reader(text.splitlines(), skipinitialspace=True):
+        if not row:
+            continue
+        if len(row) != (7 if with_compute else 6):
+            raise ValueError("NVIDIA query column count differs")
+        index, identity, name, driver = [value.strip() for value in row[:4]]
+        compute = row[4].strip() if with_compute else None
+        total, free = [value.strip() for value in row[-2:]]
+        devices.append({"index": int(index), "uuid": identity, "name": name, "driver_version": driver,
+            "compute_capability": compute if compute and re.fullmatch(r"\d+\.\d+", compute) else None,
+            "memory_total_bytes": int(total) * MIB if total.isdigit() else None,
+            "memory_free_bytes": int(free) * MIB if free.isdigit() else None})
+    return devices
+
+
+def runtime_capabilities(deadline, base="http://127.0.0.1:5187"):
+    def remaining():
+        value = deadline - time.monotonic()
+        if value <= 0:
+            raise TimeoutError("runtime capability observation exhausted the benchmark deadline")
+        return min(8, value)
+    result = {"observed_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+              "service_mutations_performed": False, "application_startup_measured": False}
+    command = ["systemctl", "show", "--no-pager", "--property=" + ",".join(SERVICE_PROPERTIES), *SERVICE_UNITS]
+    try:
+        observed = subprocess.run(command, capture_output=True, text=True, timeout=remaining())
+        units = service_observations(observed.stdout)
+        result["systemd"] = {"command": command, "returncode": observed.returncode,
+            "units": {unit: units.get(unit, {"installed": None, "running": None, "enabled": None,
+                "status": "unavailable"}) for unit in SERVICE_UNITS}}
+    except (OSError, subprocess.SubprocessError) as error:
+        result["systemd"] = {"status": "unavailable", "error_type": type(error).__name__}
+    result["api_readiness"] = http_readiness(remaining(), base=base)
+    if result["api_readiness"].get("ready") is True:
+        result["chess_read_request"] = chess_read_request(remaining(), base=base)
+        result["api_readiness_after_chess_request"] = http_readiness(remaining(), base=base)
+        result["chess_lookup_observation"] = chess_lookup_deltas(
+            result["api_readiness"], result["api_readiness_after_chess_request"])
+    else:
+        result["chess_read_request"] = {"status": "not-run-api-not-ready"}
+    executable = shutil.which("nvidia-smi")
+    result["nvidia"] = {"utility_installed": executable is not None, "executable": executable,
+                        "compute_execution_measured": False, "devices": [], "queries": []}
+    if executable:
+        try:
+            for with_compute in (True, False):
+                fields = "index,uuid,name,driver_version," + ("compute_cap," if with_compute else "") + "memory.total,memory.free"
+                command = [executable, "--query-gpu=" + fields, "--format=csv,noheader,nounits"]
+                observed = subprocess.run(command, capture_output=True, text=True, timeout=remaining())
+                result["nvidia"]["queries"].append({"command": command, "returncode": observed.returncode})
+                if observed.returncode == 0:
+                    result["nvidia"]["devices"] = gpu_observations(observed.stdout, with_compute)
+                    result["nvidia"]["driver_query_succeeded"] = True
+                    result["nvidia"]["compute_capability_query_succeeded"] = with_compute
+                    break
+            else:
+                result["nvidia"]["driver_query_succeeded"] = False
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            result["nvidia"].update(driver_query_succeeded=False, error_type=type(error).__name__)
+    return result
+
+
+def uci_bootstrap(executable, log, budget, timeout, repeats=3):
+    """Time a new owned process and sequential ready probes in that same process."""
+    started = time.monotonic()
+    deadline = started + timeout
+    events = queue.Queue(maxsize=1024)
+    timings = {"clock": "time.monotonic", "reused_process_isready_seconds": [],
+        "scope": "New process spawn to uciok, then command-write to readyok; filesystem cache is uncontrolled. These probes do not perform a search or prove NNUE evaluation."}
+    kwargs = {"start_new_session": True} if os.name != "nt" else {}
+    if hasattr(os, "sched_setaffinity"):
+        kwargs["preexec_fn"] = lambda: os.sched_setaffinity(0, budget["cpu_affinity"])
+    process = None
+    reader = None
+    failure = None
+    peak_rss = 0
+    next_sample = started
+    can_sample = platform.system() == "Linux" and proc_namespace_matches()
+    with Path(log).open("w", encoding="utf-8") as transcript:
+        try:
+            process = subprocess.Popen([str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, text=True, bufsize=1, **kwargs)
+            def receive():
+                total = 0
+                try:
+                    while line := process.stdout.readline(65537):
+                        arrived = time.monotonic()
+                        total += len(line.encode("utf-8"))
+                        if len(line) > 65536 or total > 4 * MIB:
+                            events.put_nowait((None, arrived))
+                            return
+                        transcript.write(line)
+                        transcript.flush()
+                        events.put_nowait((line.rstrip("\r\n"), arrived))
+                    events.put_nowait((None, time.monotonic()))
+                except (OSError, ValueError, queue.Full):
+                    return
+            reader = threading.Thread(target=receive, daemon=True)
+            reader.start()
+            def send(command):
+                process.stdin.write(command + "\n")
+                process.stdin.flush()
+            def wait_for(expected, sent=started):
+                nonlocal peak_rss, next_sample
+                while time.monotonic() < deadline:
+                    if can_sample and time.monotonic() >= next_sample:
+                        peak_rss = max(peak_rss, sum(item["rss_bytes"] for item in proc_sample(process.pid).values()))
+                        next_sample = time.monotonic() + 0.05
+                        if peak_rss > budget["memory_budget_bytes"]:
+                            raise ValueError("UCI bootstrap exceeded sampled memory budget")
+                    try:
+                        line, arrived = events.get(timeout=min(0.05, max(0.001, deadline - time.monotonic())))
+                    except queue.Empty:
+                        continue
+                    if line is None:
+                        raise ValueError("UCI stream ended before " + expected)
+                    if line == expected:
+                        if arrived < sent:
+                            raise ValueError("UCI acknowledgement preceded its command: " + expected)
+                        return arrived
+                raise TimeoutError("UCI bootstrap deadline exhausted waiting for " + expected)
+            send("uci")
+            timings["process_spawn_to_uciok_seconds"] = wait_for("uciok") - started
+            for index in range(repeats + 1):
+                sent = time.monotonic()
+                send("isready")
+                elapsed = wait_for("readyok", sent) - sent
+                if index == 0:
+                    timings["initial_isready_seconds"] = elapsed
+                else:
+                    timings["reused_process_isready_seconds"].append(elapsed)
+            send("compiler")
+            send("isready")
+            wait_for("readyok")
+            send("quit")
+            process.wait(timeout=max(0.001, deadline - time.monotonic()))
+            if process.returncode != 0:
+                raise ValueError("Stockfish exited unsuccessfully after UCI bootstrap")
+        except (OSError, ValueError, TimeoutError, subprocess.SubprocessError) as error:
+            failure = type(error).__name__ + ": " + str(error)
+        finally:
+            if process is not None:
+                if os.name != "nt":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                elif process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
+                if reader is not None:
+                    reader.join(timeout=5)
+                if process.stdin:
+                    try:
+                        process.stdin.close()
+                    except OSError:
+                        pass
+                if process.stdout:
+                    process.stdout.close()
+            transcript.flush()
+            os.fsync(transcript.fileno())
+    return {"command": [str(executable)], "pid": process.pid if process else None,
+        "returncode": process.returncode if process else None, "log": str(log),
+        "wall_seconds": time.monotonic() - started, "success": failure is None, "failure": failure,
+        "process_sampling_available": can_sample, "process_tree_peak_rss_bytes_sampled": peak_rss or None,
+        "bootstrap": timings}
 
 
 def module(name):
@@ -393,7 +753,9 @@ def source_identity(binary):
                     receipt.get("recipe", {}).get("commit") == result["source_commit"])
             header = read(candidate / "src/evaluate.h") or ""
             nets = sorted(set(re.findall(r"nn-[a-f0-9]{12}\.nnue", header)))
-            result["source_networks"] = [{"name": name, "present": (candidate / "src" / name).is_file(),
+            result["source_networks"] = [{"name": name, "path": str(candidate / "src" / name),
+                                           "present": (candidate / "src" / name).is_file(),
+                                           "size_bytes": (candidate / "src" / name).stat().st_size if (candidate / "src" / name).is_file() else None,
                                            "sha256": sha256(candidate / "src" / name) if (candidate / "src" / name).is_file() else None}
                                           for name in nets]
         except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -529,8 +891,13 @@ def main():
     parser.add_argument("--max-seconds", type=float, default=180)
     parser.add_argument("--case-timeout", type=float, default=60)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--api-base", type=api_base,
+                        default=os.environ.get("LAPLACE_API_BASE", "http://127.0.0.1:" + os.environ.get("LAPLACE_API_PORT", "5187")))
     parser.add_argument("--plan-only", action="store_true", help="Inspect capability/resource admission without launching benchmark tools")
+    parser.add_argument("--runtime-only", action="store_true", help="Observe services, chess readiness before/after one depth-one Laplace evaluation, GPU, NNUE files and Stockfish UCI bootstrap; skip Stockfish search calibration and tournaments")
     args = parser.parse_args()
+    if args.plan_only and args.runtime_only:
+        parser.error("--plan-only and --runtime-only describe different execution scopes")
     if min(args.repeats, args.match_threads, args.match_hash_mb, args.match_depth, args.max_moves, args.bench_limit,
            args.engine_overhead_mb, args.max_seconds, args.case_timeout) <= 0 or args.reserve_cpus < 0 or not 0 < args.memory_fraction <= 1:
         parser.error("counts/timeouts must be positive, reserve nonnegative, and memory fraction in (0,1]")
@@ -573,13 +940,30 @@ def main():
             raise TimeoutError("overall benchmark wall budget exhausted")
         return run_process(command, output / (name + ".log"), budget, min(args.case_timeout, remaining), stdin, env)
     try:
-        report["stockfish_identity"], report["cutechess_identity"] = source_identity(sf), source_identity(cc)
-        probe = execute([str(sf)], "stockfish-capabilities", "uci\ncompiler\nquit\n")
+        report["runtime_capabilities"] = runtime_capabilities(deadline, args.api_base)
+        save()
+        report["stockfish_identity"] = source_identity(sf)
+        if not args.runtime_only:
+            report["cutechess_identity"] = source_identity(cc)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("overall benchmark wall budget exhausted before Stockfish bootstrap")
+        probe = uci_bootstrap(sf, output / "stockfish-capabilities.log", budget,
+                              min(args.case_timeout, remaining), args.repeats)
         transcript = Path(probe["log"]).read_text()
         if not probe["success"] or "uciok" not in transcript:
             raise ValueError("Stockfish capability handshake failed")
         report["stockfish_identity"].update({"capability_process": probe, "uci_options": parse_options(transcript), "compiler_transcript": transcript})
         options = report["stockfish_identity"]["uci_options"]
+        report["stockfish_identity"]["advertised_nnue_files"] = {
+            name: value.get("default") for name, value in options.items() if name in ("EvalFile", "EvalFileSmall")}
+        if args.runtime_only:
+            if report["stockfish_identity"]["sha256"] != sha256(sf):
+                report["evidence_invalid"] = True
+                raise ValueError("Stockfish executable changed during bootstrap")
+            report["status"] = "complete"
+            print(f"CHESS_ENVIRONMENT_BENCHMARK status=complete scope=runtime_only report={report_path}")
+            return 0
         for name, values in (("Threads", budget["threads"] + [args.match_threads]), ("Hash", budget["hash_mib"] + [args.match_hash_mb])):
             option = options.get(name)
             if not option or any(not int(option["min"]) <= value <= int(option["max"]) for value in values):

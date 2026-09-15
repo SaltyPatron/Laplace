@@ -157,6 +157,7 @@ public sealed class ChessPgnDecomposerNovelGameTests
         Assert.Equal("1-0", game.Result.ResultToken);
         Assert.Empty(game.MoveIds);
         Assert.Single(game.PositionIds);
+        Assert.Equal(game.PositionIds[0], game.LineId);
         Assert.NotEqual(default, game.PlayingId);
         Assert.Equal(game.PlayingId, ChessPgnDecomposer.TryParseGame(pgn)!.PlayingId);
     }

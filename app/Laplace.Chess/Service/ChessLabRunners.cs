@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -66,6 +67,8 @@ public static class ChessLabRunners
         lab.Publish(slot, new ChessLabMetricEvent("search_depth", depth));
         lab.Publish(slot, new ChessLabMetricEvent("transition_trunk_reads", exactBias.RootReads));
         lab.Publish(slot, new ChessLabMetricEvent("transition_backend_reads", exactBias.BackendReads));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_frontier_builds", exactBias.FrontierBuilds));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_evidence_cache_hits", exactBias.EvidenceCacheHits));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_roots", exactBias.RootsWithExactEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("move_physicality_roots", exactBias.RootsWithMoveEvidence));
         lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.ExactTransitionSignals));
@@ -226,6 +229,44 @@ public static class ChessLabRunners
 
     public static async Task RunCutechessAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
+        var measurement = new ChessRecordingMeasurement(slot.Job.Id, int.Parse(Config(slot.Job.Config, "rounds", "10")));
+        (ChessLabJobState State, string? Message) outcome;
+        try
+        {
+            outcome = await RunCutechessCoreAsync(lab, slot, measurement, ct);
+            bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool value) && value;
+            measurement.Complete(outcome.State == ChessLabJobState.Completed
+                ? ingest ? "completed" : "not-requested"
+                : outcome.State.ToString().ToLowerInvariant(), outcome.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            measurement.Complete("cancelled", "cancelled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            measurement.Complete("failed", ex.Message);
+            throw;
+        }
+        finally
+        {
+            var path = Path.Combine(LabDir, slot.Job.Id, "recording.json");
+            await measurement.WriteAsync(path);
+            lab.AddArtifact(slot, "recording.json", path);
+        }
+        lab.Publish(slot, new ChessLabMetricEvent("games_committed_readback", measurement.ReadbackGames));
+        lab.Publish(slot, new ChessLabMetricEvent("plies_committed_readback", measurement.ReadbackPlies));
+        lab.Publish(slot, new ChessLabMetricEvent("play_seconds", measurement.ElapsedSeconds.Play));
+        lab.Publish(slot, new ChessLabMetricEvent("recording_seconds", measurement.ElapsedSeconds.Recording));
+        lab.Publish(slot, new ChessLabMetricEvent("commit_seconds", measurement.ElapsedSeconds.Commit));
+        lab.Publish(slot, new ChessLabMetricEvent("readback_seconds", measurement.ElapsedSeconds.Readback));
+        Finish(lab, slot, outcome.State, outcome.Message);
+    }
+
+    private static async Task<(ChessLabJobState State, string? Message)> RunCutechessCoreAsync(
+        ChessLabService lab, ChessLabService.JobSlot slot, ChessRecordingMeasurement measurement, CancellationToken ct)
+    {
         var cfg = slot.Job.Config;
         bool ingest = bool.TryParse(Config(cfg, "ingest", "true"), out bool ingestValue) && ingestValue;
         bool persistPgn = ChessLabStorage.PersistPgn(cfg, defaultValue: !ingest);
@@ -263,6 +304,7 @@ public static class ChessLabRunners
             transcript = new StreamWriter(transcriptPath) { AutoFlush = false };
         }
 
+        long playStarted = Stopwatch.GetTimestamp();
         try
         {
             await foreach (var evt in CutechessRunner.RunAsync(options, ct))
@@ -310,6 +352,7 @@ public static class ChessLabRunners
         }
         finally
         {
+            measurement.ElapsedSeconds.Play += Stopwatch.GetElapsedTime(playStarted).TotalSeconds;
             if (transcript is not null)
             {
                 await transcript.FlushAsync(CancellationToken.None);
@@ -336,14 +379,18 @@ public static class ChessLabRunners
             {
                 try
                 {
+                    measurement.ValidateMatch(receipt);
+                    var experimentJson = await File.ReadAllTextAsync(persistedReceiptPath!, ct);
+                    await measurement.IdentifyPgnAsync(pgnOut, experimentJson, ct);
                     lab.Publish(slot, new ChessLabLogEvent("info", "ingesting temporary games.pgn into substrate…"));
                     var liveHost = await lab.GetLiveHostAsync(ct);
                     await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
-                    var r = await ingestor.IngestFileAsync(
-                        pgnOut, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
-                        experimentReceiptJson: await File.ReadAllTextAsync(persistedReceiptPath!, ct));
+                    var r = await ingestor.IngestRecordedFileAsync(
+                        pgnOut, measurement, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
+                        experimentReceiptJson: experimentJson);
                     if (r.Parsed != options.Rounds)
                         throw new InvalidDataException($"expected {options.Rounds} PGN games but parsed {r.Parsed}");
+                    await measurement.VerifyPgnUnchangedAsync(pgnOut, ct);
                     lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
                     ingestSucceeded = true;
                 }
@@ -380,9 +427,10 @@ public static class ChessLabRunners
             ChessLabStorage.DeleteDirectoryIfEmpty(spoolDir);
             receipt.Ingested = ingest ? ingestSucceeded : null;
             await receipt.WriteAsync(persistedReceiptPath!);
+            await measurement.IdentifyFinalExperimentAsync(persistedReceiptPath!);
         }
 
-        Finish(lab, slot, final, finalMessage);
+        return (final, finalMessage);
     }
 
     public static async Task RunLichessBotAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)

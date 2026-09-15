@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Modality;
 using Laplace.SubstrateCRUD;
 using Xunit;
 
@@ -227,6 +228,208 @@ public sealed class ChessStockfishEvalTests
             await decomposer.DisposeAsync();
             File.Delete(StockfishEvalCache.RecipePath(path, Recipe));
             File.Delete(StockfishEvalCache.RecipePath(path, Recipe) + ".journal");
+        }
+    }
+
+    [Fact]
+    public async Task Decomposer_FullyCachedGameDoesNotAcquireAnEvaluator()
+    {
+        await using var fixture = new CachedDecomposerFixture(() =>
+            throw new InvalidOperationException("A cached game must not acquire an evaluator."));
+        using var unit = fixture.Decomposer.CreateEvalHandlerForTests().CreateDeferredUnit(fixture.Record);
+        Assert.NotNull(unit);
+        fixture.AssertCompleteMemo();
+    }
+
+    [Fact]
+    public async Task Decomposer_MixedGameSearchesOnlyTheMissAndReusesItsCompletedMemo()
+    {
+        int created = 0;
+        var engine = new TrackedEvaluator(_ => 23);
+        await using (var fixture = new CachedDecomposerFixture(() =>
+        {
+            Interlocked.Increment(ref created);
+            return engine;
+        }, missingPosition: 6))
+        {
+            var handler = fixture.Decomposer.CreateEvalHandlerForTests();
+            using var first = handler.CreateDeferredUnit(fixture.Record);
+            Assert.NotNull(first);
+            using var repeat = handler.CreateDeferredUnit(fixture.Record);
+            Assert.NotNull(repeat);
+            fixture.AssertCompleteMemo();
+            Assert.Equal(1, created);
+            Assert.Equal(new[] { fixture.MissingFen! }, engine.Fens.ToArray());
+            Assert.Equal(0, engine.DisposeCalls);
+        }
+        Assert.Equal(1, engine.DisposeCalls);
+    }
+
+    [Fact]
+    public async Task Decomposer_CachedGameCompletesWhileTheOnlyWorkerSearchesAnotherGame()
+    {
+        using var searching = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var engine = new TrackedEvaluator(_ =>
+        {
+            searching.Set();
+            if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Search was not released.");
+            return 23;
+        });
+        await using var fixture = new CachedDecomposerFixture(() => engine, missingPosition: 6);
+        var handler = fixture.Decomposer.CreateEvalHandlerForTests();
+        var pending = Task.Run(() => handler.CreateDeferredUnit(fixture.Record));
+        Task<IIngestDeferredUnit>? cached = null;
+        try
+        {
+            Assert.True(searching.Wait(TimeSpan.FromSeconds(5)), "The uncached position must reach the worker.");
+            var shortGame = WitnessedEvalFixture(["e4", "e5"]);
+            var shortRecord = new ChessStockfishEvalRecord(shortGame, fixture.Recipe);
+            cached = Task.Run(() => handler.CreateDeferredUnit(shortRecord));
+            using var cachedUnit = await cached.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.NotNull(cachedUnit);
+            Assert.False(pending.IsCompleted);
+            Assert.Single(engine.Fens);
+        }
+        finally
+        {
+            release.Set();
+            using var pendingUnit = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+            if (cached is not null) (await cached.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Decomposer_ConcurrentRequestsForOneMissAcquireOnlyTheSearchingWorker()
+    {
+        using var searching = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int created = 0;
+        var engines = new ConcurrentBag<TrackedEvaluator>();
+        await using var fixture = new CachedDecomposerFixture(() =>
+        {
+            Interlocked.Increment(ref created);
+            var engine = new TrackedEvaluator(_ =>
+            {
+                searching.Set();
+                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Search was not released.");
+                return 23;
+            });
+            engines.Add(engine);
+            return engine;
+        }, missingPosition: 6, processes: 2);
+        var handler = fixture.Decomposer.CreateEvalHandlerForTests();
+        var first = Task.Run(() => handler.CreateDeferredUnit(fixture.Record));
+        var second = new TaskCompletionSource<IIngestDeferredUnit>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondThread = new Thread(() =>
+        {
+            try { second.SetResult(handler.CreateDeferredUnit(fixture.Record)); }
+            catch (Exception error) { second.SetException(error); }
+        }) { IsBackground = true };
+        try
+        {
+            Assert.True(searching.Wait(TimeSpan.FromSeconds(5)));
+            secondThread.Start();
+            Assert.True(SpinWait.SpinUntil(() => second.Task.IsCompleted
+                || (secondThread.ThreadState & ThreadState.WaitSleepJoin) != 0, TimeSpan.FromSeconds(5)),
+                "The second request must reach the pending shared evaluation.");
+            Assert.False(second.Task.IsCompleted);
+        }
+        finally
+        {
+            release.Set();
+        }
+        using var firstUnit = await first.WaitAsync(TimeSpan.FromSeconds(5));
+        using var secondUnit = await second.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(firstUnit);
+        Assert.NotNull(secondUnit);
+        fixture.AssertCompleteMemo();
+        Assert.Equal(1, created);
+        Assert.Equal(new[] { fixture.MissingFen! }, engines.SelectMany(e => e.Fens).ToArray());
+    }
+
+    [Fact]
+    public async Task Decomposer_FailedSearchReturnsTheWorkerAndDoesNotCacheTheFailure()
+    {
+        int attempts = 0;
+        int created = 0;
+        var engine = new TrackedEvaluator(_ => Interlocked.Increment(ref attempts) == 1
+            ? throw new InvalidDataException("controlled search failure") : 23);
+        await using var fixture = new CachedDecomposerFixture(() =>
+        {
+            Interlocked.Increment(ref created);
+            return engine;
+        }, missingPosition: 6);
+        var handler = fixture.Decomposer.CreateEvalHandlerForTests();
+        var failure = Assert.Throws<InvalidDataException>(() => handler.CreateDeferredUnit(fixture.Record));
+        Assert.Equal("controlled search failure", failure.Message);
+        using var retry = await Task.Run(() => handler.CreateDeferredUnit(fixture.Record))
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(retry);
+        fixture.AssertCompleteMemo();
+        Assert.Equal(1, created);
+        Assert.Equal(new[] { fixture.MissingFen!, fixture.MissingFen! }, engine.Fens.ToArray());
+    }
+
+    // This handler consumes already witnessed moves; PGN parsing and deposition have
+    // their own tests. Keep the acquisition controls at that actual input boundary.
+    private static ChessWitnessedGame WitnessedEvalFixture(IReadOnlyList<string> moves)
+        => new(Hash128.OfCanonical("test/evaluator/line/" + string.Join(' ', moves)),
+            Hash128.OfCanonical("test/evaluator/playing/" + string.Join(' ', moves)),
+            moves, GameOutcome.WonBy(0), null, null, null, null, null, null);
+
+    private sealed class TrackedEvaluator(Func<string, int?> evaluate) : IPositionEvaluator, IDisposable
+    {
+        public ConcurrentQueue<string> Fens { get; } = new();
+        public int DisposeCalls;
+        public int? EvaluateCp(string fen)
+        {
+            Fens.Enqueue(fen);
+            return evaluate(fen);
+        }
+        public void Dispose() => Interlocked.Increment(ref DisposeCalls);
+    }
+
+    private sealed class CachedDecomposerFixture : IAsyncDisposable
+    {
+        private readonly string _path = Path.Combine(Path.GetTempPath(), $"lpsf-cached-handler-{Guid.NewGuid():N}.bin");
+        public StockfishEvaluationRecipe Recipe { get; }
+        public ChessStockfishEvalDecomposer Decomposer { get; }
+        public ChessStockfishEvalRecord Record { get; }
+        public string? MissingFen { get; }
+
+        public CachedDecomposerFixture(Func<IPositionEvaluator> factory, int? missingPosition = null, int processes = 1)
+        {
+            Recipe = StockfishEvaluationRecipe.ForTests("cached-handler/v1", new() { Processes = processes });
+            var witnessed = WitnessedEvalFixture(["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"]);
+            Record = new(witnessed, Recipe);
+            var memo = new ConcurrentDictionary<Hash128, int?>();
+            var seed = new ScriptedEvaluator();
+            var prepared = ChessStockfishEval.PrepareGame(witnessed, seed, Recipe, memo, null);
+            Assert.True(prepared?.Complete);
+            Assert.Equal(7, memo.Count);
+            if (missingPosition.HasValue)
+            {
+                MissingFen = seed.Fens[missingPosition.Value];
+                Assert.True(memo.TryRemove(Hash128.OfCanonical(Recipe.InputKey(MissingFen)), out _));
+            }
+            StockfishEvalCache.Save(_path, Recipe, memo);
+            Decomposer = new(evaluatorFactory: factory, evalCachePath: _path, evaluatorRecipe: Recipe);
+        }
+
+        public void AssertCompleteMemo()
+        {
+            var memo = StockfishEvalCache.Load(_path, Recipe);
+            Assert.Equal(7, memo.Count);
+            if (MissingFen is not null)
+                Assert.Equal(23, memo[Hash128.OfCanonical(Recipe.InputKey(MissingFen))]);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Decomposer.DisposeAsync();
+            File.Delete(StockfishEvalCache.RecipePath(_path, Recipe));
+            File.Delete(StockfishEvalCache.RecipePath(_path, Recipe) + ".journal");
         }
     }
 

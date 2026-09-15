@@ -147,8 +147,8 @@ def product_topology(main: dict) -> None:
         fail("laplace.yml: chess measurement must depend on the single product authority")
     if calibration.get("uses") != "./.github/workflows/benchmark-evidence.yml":
         fail("laplace.yml: chess measurement must use the canonical benchmark workflow")
-    if calibration.get("if") != "needs.product.result == 'success' && needs.product.outputs.chess_benchmark_ready == 'true'":
-        fail("laplace.yml: chess measurement requires successful product activation")
+    if calibration.get("if") != "always() && !cancelled() && needs.product.outputs.chess_benchmark_ready == 'true'":
+        fail("laplace.yml: chess measurement requires current-job completed corpus acceptance")
     options = calibration.get("with") or {}
     if options.get("suite") != "chess" or options.get("target_ref") != "${{ needs.product.outputs.activated_ref }}":
         fail("laplace.yml: post-activation measurement must bind chess to the activated source")
@@ -156,28 +156,37 @@ def product_topology(main: dict) -> None:
         fail("laplace.yml: post-activation measurement accepts only bounded chess inputs")
     product_job = jobs.get("product") or {}
     expected_outputs = {
-        "chess_benchmark_ready": "${{ steps.chess_benchmark_gate.outputs.ready }}",
-        "activated_ref": "${{ steps.chess_benchmark_gate.outputs.source_sha }}",
+        "chess_benchmark_ready": "${{ steps.full_product.outputs.chess_benchmark_ready }}",
+        "activated_ref": "${{ steps.full_product.outputs.activated_ref }}",
+        "chess_acceptance_stage": "${{ steps.full_product.outputs.chess_acceptance_stage }}",
     }
     if product_job.get("outputs") != expected_outputs:
-        fail("laplace.yml: measurement outputs must come from the successful activation gate")
+        fail("laplace.yml: measurement outputs must come from the current lifecycle completion")
     steps = product_job.get("steps") or []
     lifecycle = unique_step(steps, "name", "Run full product lifecycle", "laplace.yml:product")
-    gate = unique_step(steps, "id", "chess_benchmark_gate", "laplace.yml:product")
-    if lifecycle and gate:
-        gate_if = "env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')"
-        if gate[0] <= lifecycle[0] or gate[1].get("if") != gate_if:
-            fail("laplace.yml: successful activation must precede measurement authorization")
-        command = gate[1].get("run", "")
-        if "ready=true" not in command or '"$(git rev-parse HEAD)"' not in command or "source_sha=%s" not in command:
-            fail("laplace.yml: measurement gate must expose the exact activated checkout")
-        for name, expected in (
-            ("Admit official Stockfish source and verify native corpus readback", gate_if),
-            ("Retain official Stockfish corpus admission evidence", "always() && " + gate_if),
-        ):
-            corpus = unique_step(steps, "name", name, "laplace.yml:product")
-            if corpus and (corpus[0] <= lifecycle[0] or corpus[1].get("if") != expected):
-                fail("laplace.yml: installed corpus proof requires an application-publishing stage")
+    if lifecycle:
+        if lifecycle[1].get("id") != "full_product":
+            fail("laplace.yml: lifecycle must own its completion outputs")
+        corpus_if = "always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')"
+        corpus = unique_step(steps, "name", "Retain official Stockfish corpus admission evidence", "laplace.yml:product")
+        if corpus and (corpus[0] <= lifecycle[0] or corpus[1].get("if") != corpus_if):
+            fail("laplace.yml: installed corpus proof requires an application-publishing stage")
+        if corpus and not corpus[1].get("uses", "").startswith("actions/upload-artifact@"):
+            fail("laplace.yml: corpus failure evidence must remain an artifact upload")
+        environment = lifecycle[1].get("env") or {}
+        for key, directory in (("LAPLACE_OPERATIONAL_PROOF_DIRECTORY", "operational-proof"),
+                               ("LAPLACE_STOCKFISH_CORPUS_DIRECTORY", "stockfish-corpus-evidence"),
+                               ("LAPLACE_RECORDED_CHESS_DIRECTORY", "recorded-chess-evidence")):
+            if environment.get(key) != "/build/laplace/work/" + directory + "/${{ github.run_id }}-${{ github.run_attempt }}":
+                fail("laplace.yml: lifecycle evidence must identify this exact run and attempt")
+        recorded = unique_step(steps, "name", "Retain installed recorded-game benchmark evidence", "laplace.yml:product")
+        if recorded and (recorded[0] <= lifecycle[0] or recorded[1].get("if") != corpus_if
+                         or not recorded[1].get("uses", "").startswith("actions/upload-artifact@")):
+            fail("laplace.yml: recorded-game failure evidence must upload after the attempted lifecycle")
+    if any(step.get("id") == "chess_benchmark_gate" or "ready=true" in step.get("run", "")
+           or "scripts/ingest-stockfish-corpus.py" in step.get("run", "") for step in steps
+           if step.get("name") != "Classify source-only change"):
+        fail("laplace.yml: corpus execution and completion must stay inside the product lifecycle")
 
 
 paths = sorted([*WF.glob("*.yml"), *WF.glob("*.yaml")])
@@ -245,7 +254,9 @@ else:
     required_order = [
         "run_policy", "run_deps", "run_build", "run_dev",
         "run_install_and_db", "seed_operational_memory", "run_publish", "run_repair_installed_corpus",
-        "verify_operational_execution", "run_integration", "run_live_if_expected",
+        "verify_operational_execution", "run_stockfish_corpus_acceptance",
+        "verify_operational_execution post-stockfish-", "record_chess_completion",
+        "run_recorded_chess_benchmark", "run_integration", "run_live_if_expected",
     ]
     positions = [product.rfind(f"\n{name}\n") for name in required_order]
     if any(pos < 0 for pos in positions) or positions != sorted(positions):

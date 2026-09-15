@@ -32,6 +32,46 @@ public sealed class ChessTransitionFloorTests
         Path.Combine(Path.GetTempPath(), $"chess-transition-{Guid.NewGuid():N}.bin");
 
     [Fact]
+    public void ObservationSeparatesParallelPersistentNovelAndMissingLookups()
+    {
+        ChessTransitionFloor.Unload();
+        string path = TempBlob();
+        var pairs = Pairs("persistent");
+        try
+        {
+            ChessTransitionFloor.WriteBlob(path, pairs);
+            Assert.False(ChessTransitionFloor.Observe().IsLoaded);
+            ChessTransitionFloor.Load(path);
+            ChessTransitionFloor.Remember(K("novel"), V("novel"));
+            var before = ChessTransitionFloor.Observe();
+            Assert.True(before.IsLoaded);
+            Assert.Equal(1, before.RecordCount);
+            Assert.Equal(1, before.NovelCount);
+            Parallel.For(0, 64, iteration =>
+            {
+                Assert.True(ChessTransitionFloor.TryLookup(pairs[0].Key, out _, out var persistent));
+                Assert.Equal(ChessTransitionFloor.LookupSource.Persistent, persistent);
+                Assert.True(ChessTransitionFloor.TryLookup(K("novel"), out _, out var novel));
+                Assert.Equal(ChessTransitionFloor.LookupSource.Novel, novel);
+                Assert.False(ChessTransitionFloor.TryLookup(K("missing"), out _));
+            });
+            var after = ChessTransitionFloor.Observe();
+            Assert.Equal(before.PersistentHits + 64, after.PersistentHits);
+            Assert.Equal(before.NovelHits + 64, after.NovelHits);
+            Assert.Equal(before.LookupMisses + 64, after.LookupMisses);
+            ChessTransitionFloor.Unload();
+            var unloaded = ChessTransitionFloor.Observe();
+            Assert.False(unloaded.IsLoaded);
+            Assert.Equal(0, unloaded.RecordCount);
+            Assert.Equal(0, unloaded.NovelCount);
+            Assert.Equal(after.PersistentHits, unloaded.PersistentHits);
+            Assert.Equal(after.NovelHits, unloaded.NovelHits);
+            Assert.Equal(after.LookupMisses, unloaded.LookupMisses);
+        }
+        finally { ChessTransitionFloor.Unload(); File.Delete(path); }
+    }
+
+    [Fact]
     public void Roundtrip_WrittenTransitionsLoadAndLookUp()
     {
         var pairs = Pairs("a", "b", "c", "d", "e", "f", "g");
@@ -113,6 +153,8 @@ public sealed class ChessTransitionFloorTests
             ChessTransitionFloor.Load(path);
 
             Assert.Equal(0, ChessTransitionFloor.RecordCount);
+            Assert.True(ChessTransitionFloor.Observe().IsLoaded);
+            Assert.Equal(0, ChessTransitionFloor.Observe().RecordCount);
             Assert.False(ChessTransitionFloor.TryLookup(K("a"), out _));
         }
         finally

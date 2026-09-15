@@ -27,6 +27,18 @@ public static unsafe class ChessTransitionFloor
     private static long _count;
     private static string? _loadedPath;
     private static readonly ConcurrentDictionary<Hash128, Hash128> Novel = new();
+    private static long _persistentHits;
+    private static long _novelHits;
+    private static long _lookupMisses;
+
+    public readonly record struct Observation(bool IsLoaded, long RecordCount,
+        int NovelCount, long PersistentHits, long NovelHits, long LookupMisses);
+
+    /// <summary>Map state and completed managed lookup counters. Counters cover this
+    /// process lifetime, including earlier mappings; observation never loads a file.</summary>
+    public static Observation Observe() => new(IsLoaded, RecordCount, NovelCount,
+        Interlocked.Read(ref _persistentHits), Interlocked.Read(ref _novelHits),
+        Interlocked.Read(ref _lookupMisses));
 
     static ChessTransitionFloor()
     {
@@ -158,12 +170,14 @@ public static unsafe class ChessTransitionFloor
         if (Novel.TryGetValue(key, out toId))
         {
             source = LookupSource.Novel;
+            Interlocked.Increment(ref _novelHits);
             return true;
         }
         toId = default;
         if (_base == null || _count == 0)
         {
             source = LookupSource.None;
+            Interlocked.Increment(ref _lookupMisses);
             return false;
         }
         long lo = 0, hi = _count - 1;
@@ -176,6 +190,7 @@ public static unsafe class ChessTransitionFloor
             {
                 toId = rec->To;
                 source = LookupSource.Persistent;
+                Interlocked.Increment(ref _persistentHits);
                 return true;
             }
             if (cmp < 0) lo = mid + 1;
@@ -186,6 +201,7 @@ public static unsafe class ChessTransitionFloor
             }
         }
         source = LookupSource.None;
+        Interlocked.Increment(ref _lookupMisses);
         return false;
     }
 

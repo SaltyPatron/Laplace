@@ -381,14 +381,26 @@ internal static class ChessWitnessHydrator
                 && setupBoards.TryGetValue(gm.SetupObj, out var setupBoard)
                 ? setupBoard.ToFen() : null;
 
-            if (!lanes.TryGetValue((lineId, PhysicalityType.Content), out var contentManifest)
-                || contentManifest.Count == 0) continue;
-            Hash128 startPositionId = contentManifest[0];
-            Hash128[] moveIds = contentManifest.Skip(1).ToArray();
-
             var modality = new ChessModality();
             if (ChessAnalyze.InitialState(startFen, modality) is not { } initial) continue;
             Hash128 expectedStart = ChessCompose.PositionId(initial.Initial.Board);
+            Hash128 startPositionId;
+            Hash128[] moveIds;
+            if (lineId == expectedStart)
+            {
+                // A zero-move playing reuses its sole start constituent under the native
+                // singleton content law. Its board Content belongs to the position: do
+                // not reinterpret those children as moves or emit a self-reference.
+                startPositionId = expectedStart;
+                moveIds = [];
+            }
+            else
+            {
+                if (!lanes.TryGetValue((lineId, PhysicalityType.Content), out var contentManifest)
+                    || contentManifest.Count == 0) continue;
+                startPositionId = contentManifest[0];
+                moveIds = contentManifest.Skip(1).ToArray();
+            }
             if (startPositionId != expectedStart) continue;
             if (ChessCompose.LineId(startPositionId, moveIds) != lineId) continue;
 
@@ -412,7 +424,8 @@ internal static class ChessWitnessHydrator
                 lineId, eventId, moves, ParseResult(resultStr),
                 gm.White != default ? gm.White : null,
                 gm.Black != default ? gm.Black : null,
-                startFen, clockTokens, evalTokens, quality, spent) { MoveIds = moveIds });
+                startFen, clockTokens, evalTokens, quality, spent)
+                { MoveIds = moveIds, StartPositionId = startPositionId });
         }
         return outList;
     }
