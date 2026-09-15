@@ -11,19 +11,11 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-// Non-recursive by default: pointing at Games\Chess must not silently swallow every nested
-// corpus (Lumbras\otb, fetch outputs). Recursion is an explicit operator decision
-// (laplace ingest chess <dir> --recursive).
 public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInline = true)
     : ComposeDecomposerMultiFile<ChessGameRecord>, IIngestInventoryProvider, IIngestNoOpExplainer
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-
-    // GH #600: derive the calculated layer in the same Compose pass as the witnessed record,
-    // reusing the in-memory parse. false (via `chess --no-analyze`) records game-grain only and
-    // defers derivation to a later `chess-analyze` backfill — the pre-fusion two-step, kept as an
-    // opt-out for fast record-only ingest.
     private readonly bool _analyzeInline = analyzeInline;
 
     public override Hash128 SourceId => ChessVocabulary.PgnSourceId;
@@ -42,13 +34,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        // Three sources, because the fused pass writes witnessed, calculated, and bounded
-        // transition layers. ChessPgn carries the record; ChessAnalysis carries DeriveFromParsed
-        // deposits in the same Compose call. Only ChessPgn was ever bootstrapped, so the
-        // analyzer's source id had no HAS_NAME edge and resolved to nothing: on a live box it
-        // showed up as a bare hex id holding 705,141 rows -- the fourth largest source in the
-        // substrate, anonymous. A source that writes must be a source that is named, or its
-        // volume is invisible to source_counts and every audit that reads it.
         _canonicalNames = await ChessVocabulary.BootstrapManyAsync(context.Writer,
         [
             new(ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass),
@@ -58,30 +43,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 ChessPositionOutcomes.TrustClassId),
             new(ChessSyzygy.SourceId, ChessSyzygy.SourceName, ChessSyzygy.TrustClassId),
         ], ct, context.Reader);
-
-        // Ledger lifecycle moved here from ExtractRecordsAsync: with the file-worker pool there
-        // is no longer ONE record stream to bracket. Reset once per run at init, report once at
-        // dispose. The ledger itself is already concurrency-safe (ConcurrentDictionary +
-        // Interlocked), which is why per-file workers can all drop into it.
         ChessDropLedger.Reset();
     }
 
-    /// <summary>
-    /// Reported even on cancellation: a killed run's drop profile is exactly what the operator
-    /// needs to decide whether to resume or fix the corpus first.
-    /// </summary>
     public override ValueTask DisposeAsync()
     {
         ChessDropLedger.Report(SourceName);
         return base.DisposeAsync();
     }
 
-    // The corpus is many PGN files (Lumbras OTB is 11, 0.07-1.48 GB each) and they carry no
-    // cross-file ordering — game identity is content-addressed, so a game in the 1990s file and
-    // the same game in the 2000s file collide by hash, not by arrival order. That is exactly the
-    // claim the multi-file worker pool already makes for every other multi-file source; chess
-    // simply was not on it, and streamed all 11 through one thread (MEASURED: compose is the
-    // pipeline's ceiling at ~150 games/s, and the decompose side is a single pinned producer).
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
@@ -97,33 +67,22 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             .ToArray();
     }
 
-    // ONE file's games, novelty-gated in chunks exactly as before. The gate's proven-set lives on
-    // the shared reader (a ConcurrentDictionary, monotone: it only ever gains "present"), so two
-    // workers probing the same id race to the same answer. ChessDropLedger is likewise concurrent
-    // by construction — its own comment says the parse sites are static and run concurrently.
     protected override async IAsyncEnumerable<ChessGameRecord> ExtractFileAsync(
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
-        // --force / ReObservePresent: every game must be fully parsed+composed. Peek+probe
-        // before that is pure double tax (measured: 16s kill still on FILE_START).
         if (options.ReObservePresent)
         {
             await foreach (var g in ExtractFileParseDirectAsync(filePath, ws.Batch, ct))
                 yield return g;
             yield break;
         }
-
-        // Idempotent path: PlayingId peek+probe, full parse only for novel playings.
-        // The same resident-width source plan that sizes full compose also bounds this
-        // peek population; chess no longer owns a separate 2,048-game limiter.
         await foreach (var g in ExtractFileSerialPeekAsync(
                            filePath, ws.Batch, reObservePresent: false, ct))
             yield return g;
     }
 
-    /// <summary>Direct full parse — no PlayingId peek (re-observe / force path).</summary>
     private async IAsyncEnumerable<ChessGameRecord> ExtractFileParseDirectAsync(
         string filePath, int batch,
         [EnumeratorCancellation] CancellationToken ct)
@@ -151,8 +110,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             if (peeks.Count < batch) continue;
             var handoff = peeks;
             peeks = new List<ChessPlayingPeek>(batch);
-            // Start probe BEFORE awaiting the prior — peek of the next batch overlaps the
-            // EntitiesExistBitmap round-trip (serial await kept FILE_COMPOSED ~17–21s).
             var next = MaterializeNovelAsync(handoff, ContainmentReader, reObservePresent, ct);
             if (pending is not null)
             {
@@ -182,20 +139,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         await foreach (var g in YieldNovelParsedAsync(peeks, reader, reObservePresent, ct)
                            .ConfigureAwait(false))
             list.Add(g);
-        // ChessGraph.EmitNodes already trunk-short-circuits on PresenceOracle, but nothing
-        // was proving position ids into that oracle — only PlayingIds. MEASURED 2026-08-04:
-        // novel OTB year on a DB holding another year staged ~390k entities/WS with ~96%
-        // already present at apply verify (~28–50s bitmap). Prove line positions here so
-        // compose skips staging the deposited subgraph (entities+phys); attestations still
-        // emit and fold. Same EntitiesExistBitmap path Playing novelty already uses.
         await ProbeLinePositionsAsync(list, reader, ct).ConfigureAwait(false);
         return list;
     }
 
-    /// <summary>
-    /// Batch-prove <see cref="ChessGameRecord.PositionIds"/> into <paramref name="reader"/>
-    /// so <see cref="ChessGraph"/> trunk short-circuit can skip re-staging deposited positions.
-    /// </summary>
     internal static async Task ProbeLinePositionsAsync(
         List<ChessGameRecord> games, ISubstrateReader? reader, CancellationToken ct)
     {
@@ -220,11 +167,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             int n = Math.Min(chunk, ids.Length - i);
             var slice = new Hash128[n];
             Array.Copy(ids, i, slice, 0, n);
-            // Position identity is tier 2 by construction.  Send that partition key to
-            // the native tier probe instead of making the id-only entity probe descend
-            // every LIST(tier) partition.  Unlike EntitiesExistBitmapAsync, the tiered
-            // primitive deliberately leaves cache ownership with its caller, so mark
-            // only positive bits.
             byte[] bm = await reader.TierBatchExistenceProbeAsync(
                 slice, ChessCompose.PositionTier, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(n);
@@ -234,10 +176,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
     }
 
-    /// <summary>
-    /// Novelty gate on the semantic playing id. Parsing/replay happens before the probe because
-    /// the playing closes over the decomposed line, never over a digest of PGN serialization.
-    /// </summary>
     private static async IAsyncEnumerable<ChessGameRecord> YieldNovelParsedAsync(
         List<ChessPlayingPeek> peeks, ISubstrateReader? reader, bool reObservePresent,
         [EnumeratorCancellation] CancellationToken ct)
@@ -261,8 +199,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         {
             var ids = new Hash128[toProbe.Count];
             for (int k = 0; k < toProbe.Count; k++) ids[k] = peeks[toProbe[k]].PlayingId;
-            // A playing is emitted at Document (tier 4).  Keep the partition key
-            // attached all the way to the native C/SPI routing primitive.
             byte[] bm = await reader.TierBatchExistenceProbeAsync(
                 ids, (short)EntityTier.Document, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(toProbe.Count);
@@ -282,47 +218,20 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
     }
 
-    /// <summary>
-    /// Decompose before naming the playing. A PGN byte/token digest is a source encoding, not
-    /// the identity of the game it represents.
-    /// </summary>
     internal static ChessPlayingPeek? TryPeekPlaying(string gameText)
     {
         var game = TryParseGame(gameText);
         return game is null ? null : new ChessPlayingPeek(game, game.PlayingId);
     }
 
-    // ONE pass, ONE pipeline (GH #600): the witnessed record (ChessPgn source) AND the
-    // deterministic calculated derivation (positions, move/eval edges, motifs, opening —
-    // ChessAnalysis source, via DeriveFromParsed) from the SAME in-memory parse. record.Walk
-    // is the tree-sitter parse TryParseGame already produced; the standalone chess-analyze
-    // pass used to re-read serialized PGN out of Postgres and re-parse it — a full DB round-trip
-    // plus a second tree-sitter parse of a game we already held parsed in hand. SAN replay
-    // under chess's fixed rules is deterministic parsing, not a versioned judgment, so it
-    // belongs in the recording pass (matches ChessBookDecomposer.ComposeEmbeddedGame).
-    // DeriveFromParsed stamps ANALYZED_AT, so the standalone analyzer scan permanently skips
-    // games ingested through this fused path; that scan now backfills only games recorded
-    // before this fusion landed.
     protected override void Compose(ChessGameRecord record, SubstrateChangeBuilder b)
         => ComposeGame(record, b, _analyzeInline);
 
-    // The fused pass (GH #600), factored out so the fusion contract is directly testable
-    // (the class is sealed and Compose is protected). analyzeInline=false reproduces the
-    // pre-fusion game-grain-only record.
     internal static void ComposeGame(ChessGameRecord record, SubstrateChangeBuilder b, bool analyzeInline)
     {
         RecordGame(record, b);
         if (analyzeInline)
         {
-            // TryParseGame already resolved every SAN and retained the native move values.
-            // The fused calculated lanes used to ignore that work: ChessAnalyze resolved and
-            // replayed the SAN again, composed every interior board twice (as the previous
-            // move's `to` and the next move's `from`), then ChessPositionOutcomes replayed the
-            // game a third time and composed every board yet again for its constituents.
-            // Materialize the resolved line once in memory and share the exact same composed
-            // positions across both lanes. This is N+1 ChessCompose.Position calls and one
-            // cheap MoveApply walk, rather than ~3N full position compositions plus two SAN
-            // resolution/repetition-history walks per game.
             var replay = MaterializeParsedReplay(record);
             ChessAnalyze.DeriveFromParsed(b, record, replay);
             ChessTransitions.DepositFromParsed(b, record);
@@ -416,18 +325,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 yield return chunk[i];
     }
 
-    /// <summary>
-    /// ONE file's games. This is the unit the multi-file worker pool claims, so it must not
-    /// reach outside its own path — the serial directory walk lives in StreamAllGamesAsync,
-    /// which is now just this in a loop.
-    /// </summary>
     internal static async IAsyncEnumerable<string> StreamFileGamesAsync(
         string file, [EnumeratorCancellation] CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        // One file can hold several members (a TWIC weekly .zip wraps one .pgn); the
-        // enumerator owns each reader's lifetime, so a member must be drained before
-        // the next is requested — which is exactly what this loop does.
         foreach (var (_, reader) in ChessInput.OpenMembers(file))
         {
             ct.ThrowIfCancellationRequested();
@@ -452,9 +353,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         PgnMovetext.PgnWalkResult walk;
         using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
             walk = PgnMovetext.Walk(ast, gameBytes);
-        // A recorded resignation or forfeit may precede the first move. Its
-        // players, result and occurrence are still source facts; the line is
-        // the declared starting position followed by an empty move sequence.
         if (walk.Result is null)
         {
             ChessDropLedger.Drop(ChessDropLedger.NoResultOrMoves, Headline(gameText));
@@ -467,14 +365,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var (whiteName, blackName) = ParseNames(gameText);
         string date = PgnGames.TagStr(gameText, "Date");
 
-        // GH #736: line identity is minted HERE, by replay — the content id is the Merkle
-        // of the start position and ordered typed move ids, so two sources writing the
-        // same play differently ("O-O" vs "0-0", disambiguation variants) collide, and
-        // who/when never enters the hash. Replay under chess's fixed rules is deterministic
-        // parsing, not a versioned judgment (GH #600), and the novelty gate needs the ids
-        // before Compose runs. A game whose SAN does not resolve asserted a line the parser
-        // cannot name — dropped at this gate with a counted warning, the same rule the book
-        // lane and analyzer already apply.
         string? startFen = PgnGames.TagStr(gameText, "SetUp") == "1"
             ? PgnGames.TagStr(gameText, "FEN") : null;
         var replay = TryReplayLineDetailed(moves, startFen);
@@ -509,13 +399,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         };
     }
 
-    /// <summary>
-    /// Which refusal this is. A game that failed to replay from a NON-standard start is
-    /// usually a variant, not a corrupt record, and the two want different responses:
-    /// "add the variant" versus "the source's data is bad". Chess.com tags every one of
-    /// these, so the tag is the evidence; a bare unreadable FEN with no Variant tag stays
-    /// <see cref="ChessDropLedger.UnreadableStartPosition"/>.
-    /// </summary>
     private static string DropReason(string gameText, string? startFen)
     {
         if (startFen is null) return ChessDropLedger.UnreadableSan;
@@ -525,7 +408,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             : ChessDropLedger.UnmodelledVariant;
     }
 
-    /// <summary>The first header line of a game, for a drop sample that identifies it.</summary>
     private static string Headline(string gameText)
     {
         int nl = gameText.IndexOf('\n');
@@ -534,15 +416,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         return head.Length <= 120 ? head : head[..120];
     }
 
-    /// <summary>
-    /// Id-only replay of a mainline: the ordered position ids (start position included),
-    /// or null when a SAN fails to resolve.
-    ///
-    /// Uses <see cref="ChessCompose.PositionId(Board, ChessVariantRules?)"/> — never
-    /// <see cref="ChessCompose.Position"/> and never <see cref="ChessModality.Apply"/> (Apply
-    /// rebuilds the full surface string for repetition history; LineId needs only ids).
-    /// Geometry is analyze/ROM.
-    /// </summary>
     internal static Hash128[]? TryReplayLine(IReadOnlyList<string> sans, string? startFen)
         => TryReplayLineDetailed(sans, startFen)?.PositionIds;
 
@@ -550,9 +423,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         IReadOnlyList<string> sans, string? startFen)
     {
         var m = new ChessModality();
-        // Null start = a start position this parser cannot model. Refuse the line; the caller
-        // drops the game with a counted warning rather than replaying it from a board the PGN
-        // never asserted.
         if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
         var board = start.Initial.Board.Clone();
         var ids = new Hash128[sans.Count + 1];
@@ -580,34 +450,18 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             {
                 toId = ChessCompose.PositionId(board);
                 ids[ply + 1] = toId;
-                // Run saturation: next game through this transition is one lookup.
                 ChessTransitionFloor.Remember(tKey, toId);
             }
         }
         return new ChessLineReplay(ids, moves, movingPieces, moveIds);
     }
 
-    // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
-    // geometry, no consensus. Transcribes exactly what the PGN asserts. Everything derived
-    // (positions, motifs, opening classification, the Glicko fold) is the analyzer's job
-    // (ChessAnalyze). This method stays pure — Compose runs DeriveFromParsed alongside it so
-    // the derivation shares this pass's in-memory parse (GH #600); the standalone chess-analyze
-    // pass backfills games recorded before that fusion. See docs/specs/08_Record_vs_Calculate_Spec.txt.
-    // sourceId defaults to ChessPgn; the chess-book lane records its embedded games under
-    // ChessBook so provenance stays with the asserting source (the analyzer scan accepts both).
-    //
-    // GAME GRAIN ONLY. Per-ply record tokens are deliberately NOT attested: a PlyId is unique
-    // to one game, so every such row is a permanently single-witness consensus cell. The
-    // line's typed move trajectory is the ordered mainline; sparse parallel playing annotation
-    // trajectories retain comments and annotations. The game's HAS_RESULT is the only
-    // outcome evidence; queries join the playing to its line trajectory.
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
         var (gameText, _, result, lineId, eventId, playingId) = parsed;
         var src = sourceId ?? ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
-        // TryParseGame already scanned these header tags; only re-scan for records built elsewhere.
         var (whiteName, blackName) = parsed.WhiteName is { } wn
             ? (wn, parsed.BlackName!)
             : ParseNames(gameText);
@@ -616,10 +470,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var blackPlayer = EmitPlayer(b, blackName, src);
 
         EmitGame(b, lineId, eventId, playingId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
-        // Fused move-outcome fold (same law as the GH #600 inline analyze): the result
-        // this game witnesses lands on its MOVE objects at record time, so learned reads
-        // are consensus lookups with no separate pass to remember to run. The marker it
-        // writes lets the chess-move-outcomes backfill true-skip this line.
         if (parsed.MoveIds.Length > 0)
             ChessMoveOutcomes.AppendGame(
                 b, lineId, parsed.MoveIds, result, src, PgnWitnessWeight);
@@ -643,9 +493,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             lineId, "HAS_SETUP", positionId, src, eventId, PgnWitnessWeight));
     }
 
-    // Line-grain facts, ctx = null on purpose: each playing that asserts the same
-    // ECO/opening for the same line MERGES into one evidence row whose observation
-    // count accumulates — every playing is a witness that the line is that opening.
     private static void RecordOpeningHeaders(SubstrateChangeBuilder b, Hash128 lineId, string gameText, Hash128 src)
     {
         string eco = ChessCanonical.Eco(PgnGames.TagStr(gameText, "ECO")) ?? "";
@@ -664,7 +511,16 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         for (int i = 0; i < points.Length; i++)
             points[i] = ChessGraph.EmitMove(
                 b, parsed.MovingPieces[i], parsed.ResolvedMoves[i], src, nowUs);
-        ChessGraph.AppendLineTrajectory(b, parsed.LineId, points, src, nowUs);
+
+        var modality = new ChessModality();
+        if (ChessAnalyze.InitialState(parsed.StartFen, modality) is not { } start)
+            throw new InvalidOperationException("PGN line lost its admitted start position");
+        var startPoint = ChessGraph.ComposePositionPoint(start.Initial.Board);
+        if (parsed.PositionIds.Length == 0 || startPoint.Id != parsed.PositionIds[0])
+            throw new InvalidOperationException("PGN start-position identity diverged from parsed line preimage");
+
+        ChessGraph.AppendLineTrajectory(
+            b, parsed.LineId, startPoint, points, src, nowUs);
         RecordAlignedAnnotations(b, parsed, points, src, nowUs);
     }
 
@@ -769,14 +625,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     }
 
     private const double PgnWitnessWeight = 0.7;
-
-    /// <summary>
-    /// Surface relation name for both the playing→event edge and the line's event Meta
-    /// row. Named once because <c>NativeAttestation.Categorical</c> and <c>Meta</c> both
-    /// take the relation as a string, and a second spelled-out "HAS_EVENT" in this file is
-    /// a governed-vocabulary literal the ISA g3 ratchet counts — it is shrink-only, so the
-    /// second occurrence failed the build on main.
-    /// </summary>
     private const string HasEventRelation = "HAS_EVENT";
 
     private static void EmitGame(
@@ -785,19 +633,12 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo,
         Hash128 src)
     {
-        // LINE = game content (shared). EVENT = tournament/named event (many games).
-        // PLAYING = this PGN game record (novelty + attestation context).
         b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, src);
         b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, src);
         b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType, src);
 
-        // Playing → line is a structural occurrence/content join. The result is witnessed
-        // once through HAS_RESULT below; smuggling the score into this edge records the same
-        // observation twice and makes a structural link pretend to be a rating event.
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             playingId, ChessVocabulary.PlaysLineType, lineId, src, null, PgnWitnessWeight));
-
-        // Playing → event (this game belongs to the tournament/named event).
         b.AddAttestation(NativeAttestation.Categorical(
             playingId, HasEventRelation, eventId, src, null, PgnWitnessWeight));
 
@@ -888,17 +729,13 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         return Task.FromResult<long?>(games == 0 ? null : games);
     }
 
-    // Byte-level count of lines starting with "[Event " — same result as ReadLine +
-    // StartsWith without a string allocation per line. Line starts follow '\n' or '\r'
-    // (an '\r' of a CRLF ends the line; the '\n' then opens a line that can't match '[').
-    // A leading UTF-8 BOM is skipped for StreamReader parity.
     private static long CountEventHeaderLines(string path, CancellationToken ct)
     {
         ReadOnlySpan<byte> prefix = "[Event "u8;
         long games = 0;
         using var fs = IngestIo.OpenSequentialRead(path);
         var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
-        int matched = 0;   // prefix bytes matched on the current line; -1 = line can't match
+        int matched = 0;
         bool first = true;
         int read;
         while ((read = fs.Read(buf, 0, buf.Length)) > 0)
@@ -925,8 +762,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         return games;
     }
 
-    // Pre-ingest inventory (GH #492): unit = game, counted as "[Event " headers — the same
-    // boundary StreamGamesAsync splits on — so progress denominators match what actually flows.
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
@@ -938,10 +773,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         long total = 0;
         foreach (var p in paths)
         {
-            // Sample/exact byte estimate — StreamReader full decode blocked inventory on large PGNs.
-            // A compressed member cannot be byte-scanned in place; scale its uncompressed
-            // length by the density measured on the plain files, or by the corpus-wide
-            // average game size when the whole input is compressed.
             long n = ChessInput.IsCompressed(p)
                 ? EstimateCompressedGameCount(p)
                 : EtlInventory.EstimatePgnGameCount(p, ct);
@@ -951,34 +782,18 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         return Task.FromResult<IngestInventory?>(new IngestInventory("games", total, files));
     }
 
-    /// <summary>
-    /// Games in a compressed member, from its UNCOMPRESSED length over the measured mean
-    /// game size of this corpus family (~1.6 KiB across TWIC / Lumbras / chess.com — a
-    /// tagged game with clocks runs 1–3 KiB). Inventory is a progress denominator, not a
-    /// correctness gate: decompressing a 200 MB archive to count "[Event " before the first
-    /// batch would cost more than the ingest it is describing.
-    /// </summary>
     private const long MeanCompressedGameBytes = 1_600;
 
     private static long EstimateCompressedGameCount(string path)
         => Math.Max(1, ChessInput.UncompressedLength(path) / MeanCompressedGameBytes);
 
-    /// <summary>
-    /// An empty run is expected when the novelty gate consumed every record it read —
-    /// see <see cref="ChessDropLedger.ExplainEmptyRun"/>. Re-ingesting an already-ingested
-    /// corpus used to exit 1 with "declares N input unit(s) but ingested 0".
-    /// </summary>
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
         => ChessDropLedger.ExplainEmptyRun(SourceName, declaredInputUnits);
 
-    // Zero matches THROWS (ChessInput.Resolve). It used to yield nothing, which made
-    // `ingest chess <wrong-dir>` exit 0 having written not one row — a green that proved
-    // nothing, in CI as much as by hand.
     private static IReadOnlyList<string> EnumerateFiles(string path, SearchOption scope)
         => ChessInput.Resolve(path, scope, ChessInput.PgnExtensions, "chess");
 }
 
-/// <summary>Parsed novelty handle: one playing identity plus its decomposed source record.</summary>
 internal readonly record struct ChessPlayingPeek(ChessGameRecord Game, Hash128 PlayingId);
 
 internal sealed record ChessLineReplay(
@@ -987,12 +802,6 @@ internal sealed record ChessLineReplay(
     Piece[] MovingPieces,
     Hash128[] MoveIds);
 
-/// <summary>
-/// One compose-call lifetime materialization shared by the fused calculated chess lanes.
-/// It deliberately does not live in <see cref="ChessGameRecord"/>: novelty batches may retain
-/// thousands of parsed games while awaiting the database bitmap, whereas these board and
-/// substructure snapshots are only needed while composing one confirmed-novel game.
-/// </summary>
 internal sealed record ChessParsedReplay(
     Board[] Boards,
     ChessComposed[] Positions,
@@ -1006,11 +815,6 @@ internal sealed record ChessParsedReplay(
         && Moves.Length == game.ResolvedMoves.Length;
 }
 
-/// <summary>
-/// Parsed PGN game: <see cref="LineId"/> = content (Merkle of start position + move ids);
-/// <see cref="EventId"/> = tournament/named event (many games share one);
-/// <see cref="PlayingId"/> = this game record (novelty + attestation context).
-/// </summary>
 public sealed record ChessGameRecord(
     string GameText,
     List<string> Moves,
