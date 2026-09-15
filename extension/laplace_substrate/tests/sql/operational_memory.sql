@@ -514,7 +514,8 @@ BEGIN
     -- Its declared predicate supplies the result projection; higher-ranked
     -- unrelated cells cannot hide that result in an unmasked fanout window.
     FOR i IN 1..3 LOOP
-        metadata := public.laplace_hash128_blake3('test/structure/metadata/' || i::text);
+        metadata := public.laplace_hash128_blake3(convert_to(
+            'test/structure/metadata/' || i::text,'UTF8'));
         INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
         VALUES(metadata,2,laplace.entity_type_id('CodeConcept'),source);
         PERFORM pg_temp.operation_cell(lemma,laplace.relation_type_id('RELATED_TO'),metadata,source,scope);
