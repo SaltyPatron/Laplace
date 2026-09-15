@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -50,6 +52,45 @@ def verify_source(path, lock):
     if version != lock["version"] or not (path / "CMakeLists.txt").is_file():
         raise RuntimeError(f"{path} does not contain the locked CuteChess {lock['version']} source")
     return integrity
+
+
+def reset_build_cache(source, build, lock):
+    """Reset only CMake's generated configure metadata, without --fresh support."""
+    source = source.resolve()
+    build = build.resolve()
+    verify_source(source, lock)
+    entries = [(build / "CMakeCache.txt", False), (build / "CMakeFiles", True)]
+    present = []
+    # Validate both entries before removing either. A declared build path can be
+    # nested under the source or reached through a configured symlink; only the
+    # actual metadata entries may be removed, never source or tracked content.
+    for path, directory in entries:
+        if path == source or path in source.parents:
+            raise RuntimeError(f"CMake cache metadata would contain the source checkout: {path}")
+        if source in path.parents:
+            relative = path.relative_to(source).as_posix()
+            if run(["git", "-C", source, "ls-tree", "-r", "--name-only", "HEAD", "--", ":(literal)" + relative]):
+                raise RuntimeError(f"CMake cache metadata contains committed source: {path}")
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & reparse:
+            raise RuntimeError(f"CMake cache metadata must not be a link or reparse point: {path}")
+        expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+        if not expected_type(info.st_mode):
+            raise RuntimeError(f"Unexpected CMake cache metadata type: {path}")
+        present.append((path, directory))
+    build.mkdir(parents=True, exist_ok=True)
+    for path, directory in present:
+        if directory:
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    integrity = verify_source(source, lock)
+    return {"source_integrity": integrity, "build_dir": str(build),
+            "removed": [path.name for path, _ in present]}
 
 
 def provision(target, lock):
@@ -183,6 +224,7 @@ def main():
     parser.add_argument("--lock", type=Path, default=LOCK)
     parser.add_argument("--source-dir", type=Path)
     parser.add_argument("--verify-source", type=Path, help="Read-only exact source verification; never updates the checkout")
+    parser.add_argument("--reset-build-cache", type=Path, help="Remove only generated CMakeCache.txt/CMakeFiles for the verified source before configure")
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--receipt", type=Path, help="Retain verified source and binary identity after the build")
     parser.add_argument("--qt-version")
@@ -193,6 +235,8 @@ def main():
         parser.error("release lock must contain a complete source commit")
     if not (args.source_dir or args.verify_source or args.binary or args.check_latest):
         parser.error("choose --source-dir, --verify-source, --binary or --check-latest")
+    if args.reset_build_cache and (not args.verify_source or args.binary or args.receipt or args.source_dir or args.check_latest):
+        parser.error("--reset-build-cache requires --verify-source without another action")
     if args.receipt and not (args.verify_source and args.binary):
         parser.error("--receipt requires --verify-source and --binary")
     try:
@@ -200,7 +244,9 @@ def main():
             print(json.dumps(check_latest(lock)))
         if args.source_dir:
             print(provision(args.source_dir.resolve(), lock))
-        if args.verify_source and args.binary:
+        if args.reset_build_cache:
+            print(json.dumps(reset_build_cache(args.verify_source, args.reset_build_cache, lock)))
+        elif args.verify_source and args.binary:
             print(json.dumps(verify_build(args.verify_source, args.binary, lock, args.qt_version, args.receipt)))
         elif args.verify_source:
             print(json.dumps(verify_source(args.verify_source, lock)))

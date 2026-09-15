@@ -5,6 +5,9 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -16,7 +19,9 @@ spec.loader.exec_module(cutechess)
 
 class CuteChessReleaseTests(unittest.TestCase):
     def setUp(self):
-        self.work = tempfile.TemporaryDirectory(prefix='cutechess-release-test-')
+        temporary_root = Path(os.environ.get('LAPLACE_WORK_ROOT', '/build/laplace/work')) / 'tmp'
+        temporary_root.mkdir(parents=True, exist_ok=True)
+        self.work = tempfile.TemporaryDirectory(prefix='cutechess-release-test-', dir=temporary_root)
         self.addCleanup(self.work.cleanup)
         self.root = Path(self.work.name)
         self.lock = json.loads(cutechess.LOCK.read_text())
@@ -142,6 +147,210 @@ class CuteChessReleaseTests(unittest.TestCase):
         binary.chmod(0o755)
         (build / 'CMakeCache.txt').write_text('fixture build metadata\n')
         return source, binary, build / 'laplace-cutechess-build.json'
+
+    def update_fixture_release(self):
+        self.commit('cache reset fixture')
+        self.lock['commit'] = cutechess.run(['git', '-C', self.remote, 'rev-parse', 'HEAD'])
+        cutechess.run(['git', '-C', self.remote, 'tag', '--force', self.lock['tag']])
+
+    def test_cache_reset_preserves_binary_logs_receipts_and_verified_source(self):
+        source, binary, receipt = self.build_fixture()
+        receipt.write_text('prior verified build receipt\n')
+        log = binary.parent / 'operator.log'
+        log.write_text('retain this log\n')
+        metadata = binary.parent / 'CMakeFiles'
+        metadata.mkdir()
+        (metadata / 'old-compiler.cmake').write_text('stale compiler metadata\n')
+        retained = {path: path.read_bytes() for path in
+                    (binary, receipt, log, source / 'source.cpp', source / 'source.h')}
+        result = cutechess.reset_build_cache(source, binary.parent, self.lock)
+        self.assertEqual(str(binary.parent.resolve()), result['build_dir'])
+        self.assertEqual(self.lock['commit'], result['source_integrity']['commit'])
+        self.assertCountEqual(['CMakeCache.txt', 'CMakeFiles'], result['removed'])
+        self.assertFalse((binary.parent / 'CMakeCache.txt').exists())
+        self.assertFalse(metadata.exists())
+        for path, content in retained.items():
+            self.assertEqual(content, path.read_bytes(), str(path))
+        self.assertEqual([], cutechess.reset_build_cache(source, binary.parent, self.lock)['removed'])
+
+    def test_cache_reset_preflights_both_entry_types_before_any_deletion(self):
+        source, binary, _ = self.build_fixture()
+        cache = binary.parent / 'CMakeCache.txt'
+        before = cache.read_bytes()
+        files = binary.parent / 'CMakeFiles'
+        files.write_text('operator file occupying the directory name\n')
+        with self.assertRaises((ValueError, RuntimeError)):
+            cutechess.reset_build_cache(source, binary.parent, self.lock)
+        self.assertEqual(before, cache.read_bytes())
+        self.assertEqual('operator file occupying the directory name\n', files.read_text())
+        files.unlink()
+        files.mkdir()
+        (files / 'preserve').write_text('metadata retained when the other entry is unsafe')
+        cache.unlink()
+        cache.mkdir()
+        with self.assertRaises((ValueError, RuntimeError)):
+            cutechess.reset_build_cache(source, binary.parent, self.lock)
+        self.assertTrue(cache.is_dir())
+        self.assertTrue((files / 'preserve').is_file())
+
+    @unittest.skipIf(os.name == 'nt', 'Creating symlinks requires Windows privileges')
+    def test_cache_reset_rejects_metadata_links_but_supports_configured_root_link(self):
+        source, binary, _ = self.build_fixture()
+        build = binary.parent
+        outside = self.root / 'outside'
+        outside.mkdir()
+        sentinel = outside / 'preserve'
+        sentinel.write_text('outside the selected metadata\n')
+        cache = build / 'CMakeCache.txt'
+        cache_bytes = cache.read_bytes()
+        files = build / 'CMakeFiles'
+        files.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises((ValueError, RuntimeError)):
+            cutechess.reset_build_cache(source, build, self.lock)
+        self.assertEqual(cache_bytes, cache.read_bytes())
+        self.assertTrue(files.is_symlink())
+        files.unlink()
+        files.mkdir()
+        (files / 'old').write_text('old metadata')
+        cache.unlink()
+        cache.symlink_to(sentinel)
+        with self.assertRaises((ValueError, RuntimeError)):
+            cutechess.reset_build_cache(source, build, self.lock)
+        self.assertTrue((files / 'old').is_file())
+        self.assertEqual('outside the selected metadata\n', sentinel.read_text())
+        cache.unlink()
+        cache.write_bytes(cache_bytes)
+        configured = self.root / 'configured-build'
+        configured.symlink_to(build, target_is_directory=True)
+        result = cutechess.reset_build_cache(source, configured, self.lock)
+        self.assertEqual(str(build.resolve()), result['build_dir'])
+        self.assertTrue(configured.is_symlink())
+        self.assertTrue(binary.is_file())
+
+    def test_hidden_source_changes_prevent_any_cache_reset(self):
+        source, binary, _ = self.build_fixture()
+        cache = binary.parent / 'CMakeCache.txt'
+        before = cache.read_bytes()
+        cutechess.run(['git', '-C', source, 'update-index', '--assume-unchanged', 'source.h'])
+        (source / 'source.h').write_text('hidden operator source edit\n')
+        with self.assertRaisesRegex(ValueError, 'local byte changes'):
+            cutechess.reset_build_cache(source, binary.parent, self.lock)
+        self.assertEqual(before, cache.read_bytes())
+        self.assertEqual('hidden operator source edit\n', (source / 'source.h').read_text())
+
+    def test_cache_reset_cannot_remove_a_source_checkout_inside_metadata_directory(self):
+        build = self.root / 'build-containing-source'
+        source = cutechess.provision(build / 'CMakeFiles' / 'source', self.lock)
+        cache = build / 'CMakeCache.txt'
+        cache.write_text('retained until both deletion targets are safe\n')
+        with self.assertRaises((ValueError, RuntimeError)):
+            cutechess.reset_build_cache(source, build, self.lock)
+        self.assertEqual('retained until both deletion targets are safe\n', cache.read_text())
+        self.assertEqual(self.lock['commit'], cutechess.verify_source(source, self.lock)['commit'])
+
+    def test_cache_reset_preserves_tracked_source_entries_with_metadata_names(self):
+        (self.remote / 'CMakeCache.txt').write_text('this file is committed source\n')
+        self.update_fixture_release()
+        source = cutechess.provision(self.root / 'tracked-cache-source', self.lock)
+        with self.assertRaises((ValueError, RuntimeError)):
+            cutechess.reset_build_cache(source, source, self.lock)
+        self.assertEqual('this file is committed source\n', (source / 'CMakeCache.txt').read_text())
+        self.assertEqual(self.lock['commit'], cutechess.verify_source(source, self.lock)['commit'])
+
+    def test_cache_reset_preserves_tracked_source_below_cmakefiles(self):
+        (self.remote / 'CMakeFiles').mkdir()
+        (self.remote / 'CMakeFiles' / 'tracked.cmake').write_text('committed configure input\n')
+        (self.remote / '.gitignore').write_text('/CMakeCache.txt\n')
+        self.update_fixture_release()
+        source = cutechess.provision(self.root / 'tracked-metadata-directory', self.lock)
+        cache = source / 'CMakeCache.txt'
+        cache.write_text('must survive unsafe second deletion target\n')
+        with self.assertRaises((ValueError, RuntimeError)):
+            cutechess.reset_build_cache(source, source, self.lock)
+        self.assertEqual('must survive unsafe second deletion target\n', cache.read_text())
+        self.assertEqual('committed configure input\n', (source / 'CMakeFiles' / 'tracked.cmake').read_text())
+        self.assertEqual(self.lock['commit'], cutechess.verify_source(source, self.lock)['commit'])
+
+    def test_cache_reset_supports_ignored_in_source_and_nested_build_metadata(self):
+        (self.remote / '.gitignore').write_text('CMakeCache.txt\nCMakeFiles/\n/build/\n')
+        self.update_fixture_release()
+        source = cutechess.provision(self.root / 'in-source', self.lock)
+        for build in (source, source / 'build'):
+            with self.subTest(build=build):
+                build.mkdir(exist_ok=True)
+                (build / 'CMakeCache.txt').write_text('stale ignored metadata\n')
+                (build / 'CMakeFiles').mkdir()
+                (build / 'CMakeFiles' / 'old').write_text('stale generated file\n')
+                result = cutechess.reset_build_cache(source, build, self.lock)
+                self.assertCountEqual(['CMakeCache.txt', 'CMakeFiles'], result['removed'])
+                self.assertEqual(self.lock['commit'], cutechess.verify_source(source, self.lock)['commit'])
+
+    @unittest.skipIf(os.name == 'nt', 'Uses a POSIX command wrapper and compiler fixture')
+    def test_portable_reset_reconfigures_and_builds_after_verified_source_moves(self):
+        cmake = shutil.which('cmake')
+        if not cmake or not shutil.which('make') or not shutil.which('c++'):
+            self.skipTest('Real CMake, make and a C++ compiler are required')
+        (self.remote / 'CMakeLists.txt').write_text(
+            'cmake_minimum_required(VERSION 3.20)\n'
+            'project(cutechess_reset_fixture LANGUAGES CXX)\n'
+            'add_executable(cli main.cpp)\n')
+        (self.remote / 'main.cpp').write_text(
+            '#include <iostream>\nint main() { std::cout << "actual CMake fixture\\n"; }\n')
+        self.update_fixture_release()
+        source = cutechess.provision(self.root / 'original-source', self.lock)
+        build = self.root / 'configured-build'
+        wrapper = self.root / 'cmake-without-fresh'
+        invocations = self.root / 'cmake-invocations.jsonl'
+        wrapper.write_text(
+            '#!' + sys.executable + '\nimport json, os, sys\n'
+            'with open(' + repr(str(invocations)) + ', "a") as log:\n'
+            '    log.write(json.dumps(sys.argv[1:]) + "\\n")\n'
+            'if "--fresh" in sys.argv[1:]:\n'
+            '    sys.stderr.write("Unknown argument --fresh\\n")\n'
+            '    sys.exit(97)\n'
+            'os.execv(' + repr(cmake) + ', [' + repr(cmake) + ', *sys.argv[1:]])\n')
+        wrapper.chmod(0o755)
+        rejected = subprocess.run([str(wrapper), '--fresh'], capture_output=True, text=True)
+        self.assertEqual(97, rejected.returncode)
+        self.assertIn('Unknown argument --fresh', rejected.stderr)
+        configure = ['-G', 'Unix Makefiles', '-DCMAKE_BUILD_TYPE=Release']
+        cutechess.run([wrapper, '-S', source, '-B', build, *configure, '-DCMAKE_PREFIX_PATH=old-qt'])
+        cutechess.run([wrapper, '--build', build, '--clean-first', '--target', 'cli'])
+        binary = build / 'cli'
+        self.assertEqual('actual CMake fixture', cutechess.run([binary]))
+        receipt = build / 'laplace-cutechess-build.json'
+        receipt.write_text('retain prior build evidence\n')
+        log = build / 'operator.log'
+        log.write_text('retain operator log\n')
+        retained = {path: path.read_bytes() for path in (binary, receipt, log)}
+        moved = self.root / 'moved-source'
+        source.rename(moved)
+        stale = subprocess.run([str(wrapper), '-S', str(moved), '-B', str(build), *configure],
+                               text=True, capture_output=True)
+        self.assertNotEqual(0, stale.returncode)
+        self.assertIn('does not match the source', stale.stderr)
+        lock_path = self.root / 'fixture-release.json'
+        lock_path.write_text(json.dumps(self.lock))
+        result = json.loads(cutechess.run([
+            sys.executable, Path(cutechess.__file__), '--lock', lock_path,
+            '--verify-source', moved, '--reset-build-cache', build]))
+        self.assertCountEqual(['CMakeCache.txt', 'CMakeFiles'], result['removed'])
+        for path, content in retained.items():
+            self.assertEqual(content, path.read_bytes(), str(path))
+        self.assertFalse((build / 'CMakeCache.txt').exists())
+        self.assertFalse((build / 'CMakeFiles').exists())
+        cutechess.run([wrapper, '-S', moved, '-B', build, *configure, '-DCMAKE_PREFIX_PATH=new-qt'])
+        cutechess.run([wrapper, '--build', build, '--clean-first', '--target', 'cli'])
+        self.assertEqual('actual CMake fixture', cutechess.run([binary]))
+        cache = (build / 'CMakeCache.txt').read_text()
+        self.assertIn('CMAKE_HOME_DIRECTORY:INTERNAL=' + str(moved), cache)
+        self.assertIn('CMAKE_PREFIX_PATH:UNINITIALIZED=new-qt', cache)
+        self.assertEqual(retained[receipt], receipt.read_bytes())
+        self.assertEqual(retained[log], log.read_bytes())
+        self.assertEqual(self.lock['commit'], cutechess.verify_source(moved, self.lock)['commit'])
+        commands = [json.loads(line) for line in invocations.read_text().splitlines()]
+        self.assertEqual([['--fresh']], [args for args in commands if '--fresh' in args])
+        self.assertEqual(2, sum('--clean-first' in args for args in commands))
 
     def test_post_build_receipt_binds_exact_source_and_probed_binary(self):
         source, binary, receipt_path = self.build_fixture()
