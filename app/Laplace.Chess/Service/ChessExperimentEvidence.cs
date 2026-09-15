@@ -1,5 +1,5 @@
-using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -24,33 +24,42 @@ internal sealed record ChessExperimentEvidence(string ExperimentId, string PgnEv
 
     public static ChessExperimentEvidence Parse(string json)
     {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty("formatVersion", out var version) || version.ValueKind != JsonValueKind.Number
-            || !version.TryGetInt32(out int format) || format != 1
-            || !root.TryGetProperty("experimentId", out var id) || id.ValueKind != JsonValueKind.String
-            || string.IsNullOrWhiteSpace(id.GetString())
-            || !root.TryGetProperty("pgnEvent", out var pgnEvent) || pgnEvent.ValueKind != JsonValueKind.String
-            || pgnEvent.GetString() != "chess-lab/cutechess/" + id.GetString()
-            || !root.TryGetProperty("requestedOptions", out var options) || options.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty("artifacts", out var artifacts) || artifacts.ValueKind != JsonValueKind.Object)
-            throw new InvalidDataException("Invalid chess experiment receipt: expected its format, experiment id, PGN event, options, and artifact identities.");
-
-        using var output = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(output))
+        const string invalid = "Invalid chess experiment receipt: expected its format, experiment id, PGN event, options, and artifact identities.";
+        ReceiptEnvelope? envelope;
+        try
         {
-            writer.WriteStartObject();
-            foreach (var property in root.EnumerateObject())
-            {
-                // Ingestion status is transport bookkeeping. Excluding it keeps the recorded
-                // experiment identical on a retry after the downloadable receipt is marked ingested.
-                if (property.NameEquals("ingested")) continue;
-                property.WriteTo(writer);
-            }
-            writer.WriteEndObject();
+            envelope = JsonSerializer.Deserialize<ReceiptEnvelope>(json);
         }
-        return new(id.GetString()!, pgnEvent.GetString()!, Encoding.UTF8.GetString(output.ToArray()));
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(invalid, ex);
+        }
+        if (envelope is null || envelope.FormatVersion != 1
+            || string.IsNullOrWhiteSpace(envelope.ExperimentId)
+            || envelope.PgnEvent != "chess-lab/cutechess/" + envelope.ExperimentId
+            || envelope.RequestedOptions is null || envelope.Artifacts is null)
+            throw new InvalidDataException(invalid);
+
+        // Ingestion status is transport bookkeeping. Excluding it keeps the recorded
+        // experiment identical on a retry after the downloadable receipt is marked ingested.
+        envelope.AdditionalProperties?.Remove("ingested");
+        return new(envelope.ExperimentId, envelope.PgnEvent, JsonSerializer.Serialize(envelope));
+    }
+
+    // This is the application-owned receipt emitted by CutechessExperimentReceipt,
+    // using the same typed serialization boundary as ChessPlayerModelExport. The PGN
+    // corpus still goes through its grammar; no receipt fields are parsed as chess data.
+    // Extension values remain opaque so recording an older envelope contract cannot
+    // silently discard new execution observations or round their numeric values.
+    private sealed record ReceiptEnvelope(
+        [property: JsonPropertyName("formatVersion")] int FormatVersion,
+        [property: JsonPropertyName("experimentId")] string? ExperimentId,
+        [property: JsonPropertyName("pgnEvent")] string? PgnEvent,
+        [property: JsonPropertyName("requestedOptions")] Dictionary<string, JsonElement>? RequestedOptions,
+        [property: JsonPropertyName("artifacts")] Dictionary<string, JsonElement>? Artifacts)
+    {
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
     }
 
     public void ValidateGame(string pgn)

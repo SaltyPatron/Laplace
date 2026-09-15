@@ -11,10 +11,9 @@ namespace Laplace.Chess.Service;
 public sealed record CutechessOptions
 {
     /// <summary>
-    /// Games to play. cutechess's own manual: "for two-player tournaments this option
-    /// [-rounds] should be used to set the total number of games to play" — one game per
-    /// round. A valid paired gauntlet uses an even count so each opening is played from
-    /// both colours.
+    /// Total games to play. Paired gauntlets use two games per encounter and half as
+    /// many Cute Chess rounds, so each opening is played from both colours. Unpaired
+    /// gauntlets use one game per encounter.
     /// </summary>
     public int Rounds { get; init; } = 10;
 
@@ -167,6 +166,8 @@ public static partial class CutechessRunner
     public static IReadOnlyList<string> BuildArguments(CutechessOptions o, string laplaceUci, string stockfish)
     {
         o.ValidateStockfishConfiguration();
+        if (o.PairOpenings && (o.Rounds < 2 || (o.Rounds & 1) != 0))
+            throw new ArgumentOutOfRangeException(nameof(o.Rounds), "Paired games require an even total of at least two.");
         // Every key=value MUST be its own argv token: the old single-token form
         // ("name=Stockfish cmd=... arg=\"setoption ...\"") reached cutechess-cli as ONE
         // engine parameter whose value was the rest of the string, so the engine never
@@ -213,14 +214,17 @@ public static partial class CutechessRunner
             args.Add($"file={openings}");
             args.Add("format=epd");
             args.Add("order=sequential");
-            // Cute Chess's -repeat contract is exactly the color-swapped pair we need:
-            // same opening twice, players swap sides after the first game.
+            // Put both colour-swapped games in the same encounter and match the
+            // repetition count to games-per-encounter, as required by Cute Chess's
+            // scheduler. Total requested games remain unchanged below.
+            args.Add("-games");
+            args.Add("2");
             args.Add("-repeat");
             args.Add("2");
         }
 
         args.Add("-rounds");
-        args.Add(o.Rounds.ToString(CultureInfo.InvariantCulture));
+        args.Add((o.PairOpenings ? o.Rounds / 2 : o.Rounds).ToString(CultureInfo.InvariantCulture));
         if (o.Concurrency > 1)
         {
             args.Add("-concurrency");

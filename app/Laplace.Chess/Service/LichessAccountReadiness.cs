@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Laplace.Chess.Service;
 
@@ -40,19 +41,23 @@ public sealed record LichessAccountReadiness(
             if (!accountResponse.IsSuccessStatusCode)
                 return HttpFailure(result, accountResponse.StatusCode, "account authentication");
 
-            using var account = await ReadJsonAsync(accountResponse, budget.Token).ConfigureAwait(false);
-            if (account.RootElement.ValueKind != JsonValueKind.Object
-                || !account.RootElement.TryGetProperty("username", out var username)
-                || username.ValueKind != JsonValueKind.String
-                || string.IsNullOrWhiteSpace(username.GetString()))
+            AccountEnvelope? account;
+            try
+            {
+                account = await ReadEnvelopeAsync<AccountEnvelope>(accountResponse, budget.Token).ConfigureAwait(false);
+            }
+            catch (JsonException)
+            {
+                return result with { Error = "Lichess account response has invalid JSON or no username; account access could not be verified." };
+            }
+            if (string.IsNullOrWhiteSpace(account?.Username))
                 return result with { Error = "Lichess account response has no username; account access could not be verified." };
 
             result = result with
             {
                 TokenValid = true,
-                Username = username.GetString(),
-                BotAccount = account.RootElement.TryGetProperty("title", out var title)
-                    && title.ValueKind == JsonValueKind.String && title.GetString() == "BOT"
+                Username = account.Username,
+                BotAccount = account.Title == "BOT"
             };
 
             // Official scope probe: POST /api/token/test, not the OAuth exchange at /api/token.
@@ -66,20 +71,18 @@ public sealed record LichessAccountReadiness(
             if (!tokenResponse.IsSuccessStatusCode)
                 return HttpFailure(result, tokenResponse.StatusCode, "token scope verification");
 
-            using var tokenInfo = await ReadJsonAsync(tokenResponse, budget.Token).ConfigureAwait(false);
-            if (tokenInfo.RootElement.ValueKind != JsonValueKind.Object
-                || !tokenInfo.RootElement.TryGetProperty(token, out var info))
+            var tokenInfo = await ReadEnvelopeAsync<Dictionary<string, TokenEnvelope?>>(
+                tokenResponse, budget.Token).ConfigureAwait(false);
+            if (tokenInfo is null || !tokenInfo.TryGetValue(token, out var info))
                 return result with { Error = "Lichess token response omitted the token result; bot:play permission could not be verified." };
-            if (info.ValueKind == JsonValueKind.Null)
+            if (info is null)
                 return result with { TokenValid = false, Error = "Lichess token is invalid, expired, or revoked; configure a valid token with bot:play permission." };
-            if (info.ValueKind != JsonValueKind.Object
-                || !info.TryGetProperty("scopes", out var scopes)
-                || scopes.ValueKind != JsonValueKind.String)
+            if (info.Scopes is null)
                 return result with { Error = "Lichess token response omitted scopes; bot:play permission could not be verified." };
 
             result = result with
             {
-                BotPlayScope = (scopes.GetString() ?? "").Split(',', StringSplitOptions.TrimEntries)
+                BotPlayScope = info.Scopes.Split(',', StringSplitOptions.TrimEntries)
                     .Contains("bot:play", StringComparer.Ordinal)
             };
             var missing = new List<string>();
@@ -103,10 +106,18 @@ public sealed record LichessAccountReadiness(
         }
     }
 
-    private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken ct)
+    // These account/scope contracts govern API access only; they are not corpus
+    // records and never feed a decomposer or admit content into the substrate.
+    private sealed record AccountEnvelope(
+        [property: JsonPropertyName("username")] string? Username,
+        [property: JsonPropertyName("title")] string? Title);
+
+    private sealed record TokenEnvelope([property: JsonPropertyName("scopes")] string? Scopes);
+
+    private static async Task<T?> ReadEnvelopeAsync<T>(HttpResponseMessage response, CancellationToken ct)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+        return await JsonSerializer.DeserializeAsync<T>(stream, cancellationToken: ct).ConfigureAwait(false);
     }
 
     private static LichessAccountReadiness HttpFailure(

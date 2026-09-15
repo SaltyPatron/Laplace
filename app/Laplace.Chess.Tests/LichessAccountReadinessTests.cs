@@ -29,6 +29,24 @@ public sealed class LichessAccountReadinessTests
         Assert.DoesNotContain(Token, JsonSerializer.Serialize(result));
     }
 
+    [Fact]
+    public async Task AccountContractIgnoresUnrelatedProfilePayloadAndTokenMetadata()
+    {
+        const string account = """{"username":"LaplaceBot","title":"BOT","profile":{"bio":"profile content","future":[1,true,null]}}""";
+        var response = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            [Token] = new { scopes = "bot:play", futureMetadata = new { precise = 9007199254740993L } }
+        });
+        using var handler = new ProbeHandler(account, response);
+        using var http = Client(handler);
+
+        var result = await LichessAccountReadiness.CheckAsync(http, Token);
+
+        Assert.True(result.Ready);
+        Assert.DoesNotContain(Token, JsonSerializer.Serialize(result));
+        Assert.DoesNotContain("profile content", JsonSerializer.Serialize(result));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("board:play")]
@@ -101,6 +119,8 @@ public sealed class LichessAccountReadinessTests
     [InlineData("[]")]
     [InlineData("{\"username\":null}")]
     [InlineData("{\"username\":42}")]
+    [InlineData("null")]
+    [InlineData("{\"Username\":\"LaplaceBot\",\"title\":\"BOT\"}")]
     public async Task MissingAccountIdentityDoesNotClaimAuthenticatedReadiness(string account)
     {
         using var handler = new ProbeHandler(account, TokenResult("bot:play"));
@@ -119,6 +139,8 @@ public sealed class LichessAccountReadinessTests
     [InlineData("array")]
     [InlineData("wrong-scope-type")]
     [InlineData("invalid-json")]
+    [InlineData("null")]
+    [InlineData("missing-scopes")]
     public async Task MalformedTokenResponsesRemainUnknownAndNeverLeakTheToken(string shape)
     {
         var response = shape switch
@@ -126,6 +148,8 @@ public sealed class LichessAccountReadinessTests
             "missing" => "{}",
             "array" => "[]",
             "wrong-scope-type" => JsonSerializer.Serialize(new Dictionary<string, object> { [Token] = new { scopes = new[] { "bot:play" } } }),
+            "null" => "null",
+            "missing-scopes" => JsonSerializer.Serialize(new Dictionary<string, object> { [Token] = new { expires = 0 } }),
             _ => "{\"" + Token + "\": invalid JSON"
         };
         using var handler = new ProbeHandler(Bot, response);

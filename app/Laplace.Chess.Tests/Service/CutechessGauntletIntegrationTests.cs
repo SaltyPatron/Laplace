@@ -83,6 +83,7 @@ public sealed class CutechessGauntletIntegrationTests(ITestOutputHelper output)
 
         var pgnGames = ReadPgnTags(pgn);
         Assert.Equal(games.Count, pgnGames.Count);
+        Assert.Equal(pgnGames[0].Fen, pgnGames[1].Fen);
         for (int i = 0; i < games.Count; i++)
         {
             Assert.Equal(games[i].White, pgnGames[i].White);
@@ -96,20 +97,21 @@ public sealed class CutechessGauntletIntegrationTests(ITestOutputHelper output)
     private static string ResultToken(string result)
         => result.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries)[0];
 
-    private static List<(string White, string Black, string Result)> ReadPgnTags(string path)
+    private static List<(string White, string Black, string Result, string? Fen)> ReadPgnTags(string path)
     {
-        var games = new List<(string White, string Black, string Result)>();
-        string? white = null, black = null, result = null;
-        foreach (var line in File.ReadLines(path))
+        var games = new List<(string White, string Black, string Result, string? Fen)>();
+        string? white = null, black = null, result = null, fen = null;
+        foreach (var line in File.ReadLines(path).Append(""))
         {
             if (TryTag(line, "White", out var value)) white = value;
             else if (TryTag(line, "Black", out value)) black = value;
             else if (TryTag(line, "Result", out value)) result = value;
+            else if (TryTag(line, "FEN", out value)) fen = value;
 
-            if (white is not null && black is not null && result is not null)
+            if (string.IsNullOrWhiteSpace(line) && white is not null && black is not null && result is not null)
             {
-                games.Add((white, black, result));
-                white = black = result = null;
+                games.Add((white, black, result, fen));
+                white = black = result = fen = null;
             }
         }
         return games;

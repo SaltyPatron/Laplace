@@ -300,9 +300,20 @@ public sealed class ChessLabPathsTests
             ChessLabPaths.DeployedLaplaceUciPath);
     }
 
-    [Fact]
-    public void LabDir_UsesTempRoot()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void LabDir_WithoutSelectionUsesTempRoot(string? selection)
     {
-        Assert.StartsWith(Path.GetTempPath(), ChessLabPaths.LabDir, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Path.Combine(Path.GetTempPath(), "laplace-chess-lab"),
+            ChessLabPaths.ResolveLabDirCore(selection));
+    }
+
+    [Fact]
+    public void LabDir_PreservesConfiguredWorkingDirectory()
+    {
+        string configured = Path.Combine(Path.GetTempPath(), "selected-chess-work");
+        Assert.Equal(configured, ChessLabPaths.ResolveLabDirCore($"  {configured}  "));
     }
 }

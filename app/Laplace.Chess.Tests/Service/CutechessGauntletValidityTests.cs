@@ -28,16 +28,22 @@ public sealed class CutechessGauntletValidityTests
         int repeat = args.IndexOf("-repeat");
         Assert.True(repeat >= 0);
         Assert.Equal("2", args[repeat + 1]);
+        int games = args.IndexOf("-games");
+        Assert.True(games >= 0 && games < repeat);
+        Assert.Equal("2", args[games + 1]);
+        Assert.Equal("2", args[args.IndexOf("-rounds") + 1]);
     }
 
     [Fact]
     public void UnpairedScheduleMustBeExplicit()
     {
         var args = CutechessRunner.BuildArguments(
-            Paired with { PairOpenings = false }, "/bin/laplace-uci", "/bin/stockfish");
+            Paired with { PairOpenings = false }, "/bin/laplace-uci", "/bin/stockfish").ToList();
 
         Assert.DoesNotContain("-openings", args);
         Assert.DoesNotContain("-repeat", args);
+        Assert.DoesNotContain("-games", args);
+        Assert.Equal("4", args[args.IndexOf("-rounds") + 1]);
     }
 
     [Fact]
@@ -51,6 +57,16 @@ public sealed class CutechessGauntletValidityTests
         var done = parser.Complete(0);
         Assert.Equal(ChessLabJobState.Failed, done.FinalState);
         Assert.Contains("expected Stockfish", done.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(3)]
+    public void PairedPreviewCannotSilentlyDropAnUnpairedGame(int total)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => CutechessRunner.BuildArguments(
+            Paired with { Rounds = total }, "/bin/laplace-uci", "/bin/stockfish"));
     }
 
     [Fact]

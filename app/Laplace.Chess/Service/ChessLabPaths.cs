@@ -16,16 +16,12 @@ public static class ChessLabPaths
         LaplaceInstall.InstallRoot,
         OperatingSystem.IsWindows() ? "laplace-uci.exe" : "laplace-uci");
 
-    public static string LabDir
-    {
-        get
-        {
-            var fromConfig = ChessRuntimeConfiguration.Read("LAPLACE_CHESS_LAB_DIR");
-            return !string.IsNullOrWhiteSpace(fromConfig)
-                ? fromConfig.Trim()
-                : Path.Combine(Path.GetTempPath(), "laplace-chess-lab");
-        }
-    }
+    public static string LabDir => ResolveLabDirCore(ChessRuntimeConfiguration.Read("LAPLACE_CHESS_LAB_DIR"));
+
+    internal static string ResolveLabDirCore(string? configuredPath)
+        => !string.IsNullOrWhiteSpace(configuredPath)
+            ? configuredPath.Trim()
+            : Path.Combine(Path.GetTempPath(), "laplace-chess-lab");
 
     public static Probe Cutechess => ResolveExecutable(
         "LAPLACE_CUTECHESS",

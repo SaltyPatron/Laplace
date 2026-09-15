@@ -80,6 +80,21 @@ parents AS MATERIALIZED (
   FROM targets t JOIN laplace.physicalities p ON p.entity_id=t.id
   WHERE p.type=1
 ),
+projections AS MATERIALIZED (
+  SELECT p.id,p.entity_id,p.n_constituents,p.observed_at,p.trajectory,
+         ST_NPoints(p.trajectory) AS packed_vertices
+  FROM targets t JOIN laplace.physicalities p ON p.entity_id=t.id
+  WHERE p.type=3
+),
+projection_starts AS MATERIALIZED (
+  SELECT p.id AS physicality_id,p.entity_id AS parent_id,
+         c.ordinal,c.entity_id,c.run_length,c.flags
+  FROM projections p CROSS JOIN LATERAL (
+    SELECT c.* FROM public.laplace_trajectory_constituents(
+      CASE WHEN p.packed_vertices BETWEEN 1 AND 4096 THEN p.trajectory ELSE NULL END) c
+    ORDER BY c.ordinal LIMIT 1
+  ) c
+),
 vertices AS MATERIALIZED (
   SELECT p.id AS physicality_id,c.ordinal,c.entity_id,c.run_length,c.flags
   FROM parents p CROSS JOIN LATERAL (
@@ -127,9 +142,28 @@ lineage_candidates AS MATERIALIZED (
               ELSE NULL::boolean END AS exact_name_projection
   FROM logical_manifests p JOIN witnesses w ON w.subject_id=p.entity_id
 ),
+projection_lineage AS MATERIALIZED (
+  SELECT p.entity_id,s.physicality_id,s.entity_id AS start_id,
+         public.laplace_hash128_merkle(0::smallint,ARRAY[s.entity_id]||p.child_ids)
+           AS prefixed_content_id
+  FROM logical_manifests p JOIN projection_starts s ON s.parent_id=p.entity_id
+),
+session_memberships AS MATERIALIZED (
+  SELECT p.entity_id AS parent_id,v.entity_id AS child_id,a.*
+  FROM parents p JOIN vertices v ON v.physicality_id=p.id
+  CROSS JOIN LATERAL (
+    SELECT a.id,a.type_id,a.object_id,a.source_id,a.context_id,a.outcome,
+           a.observation_count,a.last_observed_at,count(*) OVER () AS available_witnesses
+    FROM laplace.attestations a
+    WHERE a.subject_id=v.entity_id AND a.object_id=p.entity_id
+      AND a.type_id=laplace.relation_type_id('APPEARS_IN')
+    ORDER BY a.id LIMIT {MAX_WITNESSES}
+  ) a
+),
 entity_ids AS MATERIALIZED (
   SELECT id FROM targets UNION SELECT entity_id FROM vertices
   UNION SELECT object_id FROM witnesses
+  UNION SELECT entity_id FROM projection_starts
 ),
 entities AS MATERIALIZED (
   SELECT e.id,e.tier,e.type_id,e.first_observed_by,e.created_at
@@ -169,11 +203,29 @@ SELECT json_build_object(
     'prefixed_content_id',encode(c.prefixed_content_id,'hex'),
     'prefix_recovers_parent_identity',c.prefixed_content_id=c.entity_id,
     'exact_name_projection',c.exact_name_projection)) FROM lineage_candidates c),'[]'::json),
+  'projection_start_candidates',COALESCE((SELECT json_agg(json_build_object(
+    'parent_id',encode(c.entity_id,'hex'),'projection_physicality_id',encode(c.physicality_id,'hex'),
+    'start_id',encode(c.start_id,'hex'),'prefixed_content_id',encode(c.prefixed_content_id,'hex'),
+    'prefix_recovers_parent_identity',c.prefixed_content_id=c.entity_id,
+    'start_has_content_physicality',EXISTS(SELECT 1 FROM laplace.physicalities p
+       WHERE p.entity_id=c.start_id AND p.type=1))) FROM projection_lineage c),'[]'::json),
+  'session_memberships',COALESCE((SELECT json_agg(json_build_object(
+    'parent_id',encode(w.parent_id,'hex'),'child_id',encode(w.child_id,'hex'),
+    'id',encode(w.id,'hex'),'type_id',encode(w.type_id,'hex'),
+    'object_id',encode(w.object_id,'hex'),'source_id',encode(w.source_id,'hex'),
+    'context_id',encode(w.context_id,'hex'),'outcome',w.outcome,
+    'observation_count',w.observation_count,'last_observed_at',w.last_observed_at,
+    'available_witnesses',w.available_witnesses,
+    'witnesses_truncated',w.available_witnesses>{MAX_WITNESSES})) FROM session_memberships w),'[]'::json),
   'existing_projections',COALESCE((SELECT json_agg(json_build_object(
     'entity_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex'),
-    'n_constituents',p.n_constituents,'packed_vertices',ST_NPoints(p.trajectory),
-    'observed_at',p.observed_at)) FROM targets t JOIN laplace.physicalities p
-      ON p.entity_id=t.id AND p.type=3),'[]'::json),
+    'n_constituents',p.n_constituents,'packed_vertices',p.packed_vertices,
+    'observed_at',p.observed_at,'first_vertex_decoding_skipped',p.packed_vertices>4096))
+      FROM projections p),'[]'::json),
+  'projection_first_vertices',COALESCE((SELECT json_agg(json_build_object(
+    'physicality_id',encode(s.physicality_id,'hex'),'parent_id',encode(s.parent_id,'hex'),
+    'entity_id',encode(s.entity_id,'hex'),'ordinal',s.ordinal,
+    'run_length',s.run_length,'flags',s.flags)) FROM projection_starts s),'[]'::json),
   'entities',COALESCE((SELECT json_agg(json_build_object(
     'id',encode(e.id,'hex'),'tier',e.tier,'type_id',encode(e.type_id,'hex'),
     'first_observed_by',encode(e.first_observed_by,'hex'),'created_at',e.created_at))
