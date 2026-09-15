@@ -95,7 +95,7 @@ recovery_parent_ids AS MATERIALIZED (
 recovery_carriers AS MATERIALIZED (
   SELECT p.id,p.entity_id,p.type,p.trajectory
   FROM recovery_parent_ids owner JOIN laplace.physicalities p ON p.entity_id=owner.parent_id
-  WHERE p.type=1 OR (owner.is_game AND p.type=3)
+  WHERE p.type=1 OR ((owner.is_game OR owner.is_player) AND p.type=3)
 ),
 recovery_carrier_members AS MATERIALIZED (
   SELECT p.id AS carrier_id,member.child_id

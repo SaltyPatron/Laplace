@@ -6,6 +6,7 @@ calculate identities, or activate a repair on its own.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 import hashlib
 import json
 import math
@@ -191,7 +192,8 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                        receipt_sql: str | None = None,
                        measurement_only: bool = False,
                        auxiliary_reserve_bytes: int = 0,
-                       deadline_monotonic: float | None = None) -> dict:
+                       deadline_monotonic: float | None = None,
+                       resource_validator: Callable[[dict], list[str]] | None = None) -> dict:
     """Durably retain an admitted locked plan before submitting its mutation.
 
     With receipt_sql, plan_sql emits one complete resource summary. Only a
@@ -216,6 +218,8 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
         raise ValueError("repair measurement requires the separate resource barrier")
     if receipt_sql is not None and not receipt_sql.strip():
         raise ValueError("repair receipt SQL must be nonempty")
+    if resource_validator is not None and (not callable(resource_validator) or receipt_sql is None):
+        raise ValueError("repair dependent resource validation requires the resource barrier")
     entered_monotonic = time.monotonic()
     deadline = entered_monotonic + timeout if deadline_monotonic is None else deadline_monotonic
     if type(deadline) not in (int, float) or not math.isfinite(deadline):
@@ -272,6 +276,13 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
                     max_native_inputs=max_native_inputs, max_bytes=max_bytes,
                     max_line_bytes=max_line_bytes, disk_free_bytes=disk_free,
                     auxiliary_reserve_bytes=auxiliary_reserve_bytes)
+                if resource_validator is not None:
+                    dependent_rejections = resource_validator(resources)
+                    if not isinstance(dependent_rejections, list) or any(
+                            not isinstance(reason, str) for reason in dependent_rejections):
+                        raise ValueError("repair dependent resource validation must return rejection messages")
+                    rejected.extend(dependent_rejections)
+                    tx.remaining()
                 if measurement_only:
                     rollback_marker = f"ROLLED_BACK_{token}"
                     tx.send(f"ROLLBACK;\n\\echo {rollback_marker}\n")
@@ -425,7 +436,10 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
             # Restore only the existing overall deadline, never a fresh budget.
             tx.deadline = deadline
             submitted = True
-            tx.send(apply_sql + f"\nCOMMIT;\n\\echo {commit_marker}\n")
+            # Planning and durability consume the same maintenance allowance.
+            apply_timeout_ms = max(1, math.floor((deadline - time.monotonic()) * 1000))
+            tx.send(f"SET LOCAL statement_timeout='{apply_timeout_ms}ms';\n"
+                    + apply_sql + f"\nCOMMIT;\n\\echo {commit_marker}\n")
             applied = None
             for raw in tx.lines(commit_marker):
                 if applied is not None:
@@ -442,6 +456,7 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
             phase = "outcome_durability"
             phase_started = confirmed_monotonic
             outcome = {**manifest, "disposition": "commit-confirmed", "applied": applied,
+                       "apply_statement_timeout_milliseconds": apply_timeout_ms,
                        "phase_timings": phase_timings, "finished_unix_nanoseconds": time.time_ns()}
             write_new_json(directory / "outcome.json", outcome)
             outcome_durable_monotonic = time.monotonic()

@@ -15,6 +15,15 @@ run_policy() {
   bash scripts/ci-policy.sh
 }
 
+resume_held_repair_if_needed() {
+  # Resolve this product's exact held repair before installation/publication can
+  # replace its native or managed generation. With no owned hold this is a no-op.
+  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" --resume-if-needed \
+    --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
+    --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
+    bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
+}
+
 run_deps() {
   bash scripts/ci-deps.sh
 }
@@ -92,7 +101,9 @@ run_repair_installed_corpus() {
   # Publication has activated this source generation. Reclassification must not
   # restart the previous managed producer after changing its cached identities.
   LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)" \
-    python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" -- \
+    python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
+      --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
+      --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
       bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
 }
 
@@ -140,6 +151,9 @@ run_perf() {
 }
 
 run_policy
+case "$stage" in
+  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;
+esac
 if [[ "$stage" == reconcile ]]; then
   reconcile_installed_product
   exit 0

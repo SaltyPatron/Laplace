@@ -115,7 +115,8 @@ jobs:
             bash -e -o pipefail -s -- "$PGDATABASE" "$evidence" <<'RECOVERY_DIAGNOSTIC'
           history_status=0
           python3 scripts/lib/legacy_content_history.py --receipt "$2/history.json" \
-            --max-bytes 4294967296 || history_status=$?
+            --max-bytes 4294967296 --max-prior-bytes 34359738368 \
+            --max-current-readback-bytes 8589934592 || history_status=$?
           classification_status=0
           python3 scripts/classify-legacy-content.py "$1" \
             --examples-per-stratum 10 --timeout-seconds 1800 --receipt "$2/classification.json" || classification_status=$?

@@ -263,9 +263,21 @@ else:
     delegation = r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --\s+\\\s+bash scripts/maintain-installed-database\.sh'
     if len(re.findall(delegation, product)) != 1 or product.count("maintain-installed-database.sh") != 1:
         fail("installed database maintenance must have one managed-quiescence owner")
-    post_publish_repair = r'LAPLACE_REPAIR_PUBLISHED_SOURCE="\$\(git rev-parse HEAD\)" \\\s+python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --\s+\\\s+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)'
-    if len(re.findall(post_publish_repair, product)) != 1 or product.count("repair-legacy-content-lifecycle.sh") != 1:
+    logical_product = re.sub(r'\\\n[ \t]*', ' ', product)
+    repair_envelope = (r'--max-bytes [1-9][0-9]*[ \t]+--max-line-bytes [1-9][0-9]*[ \t]+'
+                       r'--max-prior-bytes [1-9][0-9]*[ \t]+--max-current-readback-bytes [1-9][0-9]*[ \t]+'
+                       r'--timeout-seconds [1-9][0-9]*')
+    post_publish_repair = (r'LAPLACE_REPAIR_PUBLISHED_SOURCE="\$\(git rev-parse HEAD\)"[ \t]+'
+        r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}"[ \t]+'
+        + repair_envelope + r' --[ \t]+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)')
+    resume_repair = (r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --resume-if-needed[ \t]+'
+        + repair_envelope + r' --[ \t]+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)')
+    if len(re.findall(post_publish_repair, logical_product)) != 1 or product.count("repair-legacy-content-lifecycle.sh") != 2:
         fail("post-publication corpus repair must retain quiescence, source evidence, and failure propagation")
+    resume_call = "  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;"
+    if len(re.findall(resume_repair, logical_product)) != 1 or product.splitlines().count(resume_call) != 1 \
+            or not 0 <= product.find("\nrun_policy\n") < product.find(resume_call) < product.find("\nrun_deps\n"):
+        fail("owned repair resume must run unsuppressed before native install or application publication")
     if product.splitlines().count("run_repair_installed_corpus") != 1:
         fail("post-publication corpus repair must have one unsuppressed lifecycle invocation")
     published_tail = product.rsplit("\nrun_publish\n", 1)[-1]

@@ -61,15 +61,17 @@ def confirmed(directory: Path, manifest: dict) -> bool:
 
 def measure(root: Path, *, max_bytes: int = 4 * 1024**3,
             max_line_bytes: int = LEGACY_LINE_BYTES,
-            max_prior_bytes: int = LEGACY_BYTES) -> dict:
-    for limit in (max_bytes, max_line_bytes, max_prior_bytes):
+            max_prior_bytes: int = LEGACY_BYTES,
+            max_current_readback_bytes: int = 2 * LEGACY_BYTES) -> dict:
+    for limit in (max_bytes, max_line_bytes, max_prior_bytes, max_current_readback_bytes):
         positive(limit)
     root = root.resolve()
     result = {"schema": "laplace.legacy-content-repair-history/v1", "receipt_root": str(root),
-        "status": "complete", "scope": "Scheduled full-plan verification bytes across discovery, authenticated replay projection and closure, conditional on the existing verifier accepting retained bytes; no complete payload hashes were checked.",
+        "status": "complete", "scope": "Bounded metadata census of complete-plan authentication across managed resume, discovery, native transaction status, replay, closure and writer restoration. Repeated reference reads are counted; scenario bounds are conditional on retained-byte verification and no new unrelated history. No complete payload hashes were checked.",
         "metadata_bytes_per_file": METADATA_BYTES, "maximum_directories": MAX_DIRECTORIES,
         "maximum_report_bytes": MAX_REPORT_BYTES, "directories_inspected": 0,
         "max_bytes": max_bytes, "max_line_bytes": max_line_bytes, "max_prior_bytes": max_prior_bytes,
+        "max_current_readback_bytes": max_current_readback_bytes,
         "plans": [], "discovery_reads": [], "pending_receipts": [], "errors": []}
     plans: dict[Path, tuple[dict, os.stat_result]] = {}
 
@@ -168,26 +170,40 @@ def measure(root: Path, *, max_bytes: int = 4 * 1024**3,
         result["errors"].append({"error": str(error)[:512]})
     discovery = sum(item["plan_bytes"] for item in result["discovery_reads"])
     closure = sum(plans[root / name][0]["plan_bytes"] for name in result["pending_receipts"])
-    # Each unresolved prior journal is authenticated again while producing its
-    # compact replay, then again before its successful reconciliation closes.
-    # The canonical executor charges every read to one maintenance-wide budget.
+    # D is one estate scan, including every existing reference fan-in. P is one
+    # authentication of each unresolved journal. Fresh success costs at most
+    # 2D+3P; held resume adds D+P. A failed closure can leave pending status work
+    # for restoration, requiring one further P. Keep that bounded failure path
+    # visible instead of assuming restoration cannot consume more evidence.
     replay = closure
-    maintenance = discovery + replay + closure
+    fresh = 2 * discovery + 3 * closure
+    resumed = 3 * discovery + 4 * closure
+    maintenance = 3 * discovery + 5 * closure
+    current_reads = len(result["pending_receipts"]) + 2
     blockers = [item for item in result["plans"] if item["blockers"]]
     if result["errors"]:
         result["status"] = "incomplete"
     result.update(schedule_complete=not result["errors"],
         scheduled_discovery_plan_bytes=discovery, scheduled_closure_prior_plan_bytes=closure,
         scheduled_replay_authentication_plan_bytes=replay,
+        scheduled_native_status_plan_bytes=closure,
+        fresh_success_prior_bytes_upper_bound=fresh,
+        resumed_success_prior_bytes_upper_bound=resumed,
+        resumed_closure_failure_prior_bytes_upper_bound=maintenance,
         required_max_prior_bytes=maintenance,
-        prior_budget_scope="One aggregate allowance across discovery, replay authentication and closure; repeated reads are charged repeatedly.",
+        required_max_prior_bytes_basis="Conservative resumed closure-failure scenario; actual full reads consume the shared durable ledger.",
+        prior_budget_scope="One aggregate allowance across wrapper and recipe processes, including repeated status and restoration reads.",
         discovery_read_count=len(result["discovery_reads"]), distinct_plan_count=len(plans),
         pending_count=len(result["pending_receipts"]),
         pending_limit_exceeded=len(result["pending_receipts"]) > 32,
         declared_prior_budget_fits=not result["errors"] and maintenance <= max_prior_bytes,
         declared_plan_size_bounds_fit=not result["errors"] and not blockers,
         plan_line_validation="Complete payload line validation is deferred to the existing verifier.",
-        closure_new_plan_scope="The newly created plan is separately read under its own admitted plan limit and is not charged to the prior-receipt budget.")
+        current_plan_read_count=current_reads,
+        current_readback_bytes_at_maximum_plan=current_reads * max_bytes,
+        maximum_new_plan_bytes_within_current_readback=min(max_bytes, max_current_readback_bytes // current_reads),
+        declared_current_readback_covers_maximum_plan=current_reads * max_bytes <= max_current_readback_bytes,
+        closure_new_plan_scope="Current plan closure and restoration, including each new reconciliation reference, consume a separate shared readback allowance. Measured plan bytes times this read count must fit before reservation or APPLY.")
     return result
 
 
@@ -198,9 +214,11 @@ def main() -> int:
     parser.add_argument("--max-bytes", type=int, default=4 * 1024**3)
     parser.add_argument("--max-line-bytes", type=int, default=LEGACY_LINE_BYTES)
     parser.add_argument("--max-prior-bytes", type=int, default=LEGACY_BYTES)
+    parser.add_argument("--max-current-readback-bytes", type=int, default=2 * LEGACY_BYTES)
     args = parser.parse_args()
     report = measure(args.receipt_root, max_bytes=args.max_bytes,
-        max_line_bytes=args.max_line_bytes, max_prior_bytes=args.max_prior_bytes)
+        max_line_bytes=args.max_line_bytes, max_prior_bytes=args.max_prior_bytes,
+        max_current_readback_bytes=args.max_current_readback_bytes)
     raw = (json.dumps(report, sort_keys=True) + "\n").encode("utf-8")
     if len(raw) > MAX_REPORT_BYTES:
         report = {"schema": report["schema"], "status": "incomplete", "schedule_complete": False,

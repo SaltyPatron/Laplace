@@ -208,6 +208,7 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
             (original.replace("\nrun_repair_installed_corpus\n", "\nrun_repair_installed_corpus || true\n"), "one unsuppressed lifecycle invocation"),
             (original.replace(repair, repair + " || true"), "post-publication corpus repair"),
             (original.replace('LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)"', 'LAPLACE_REPAIR_PUBLISHED_SOURCE="unknown"'), "post-publication corpus repair"),
+            (original.replace('--max-current-readback-bytes 8589934592', ''), "post-publication corpus repair"),
         )
         for mutation, diagnostic in mutations:
             with self.subTest(diagnostic=diagnostic):
@@ -217,6 +218,21 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
                     self.check_audit(diagnostic=diagnostic)
                 finally:
                     path.write_text(original)
+
+    def test_owned_repair_resume_cannot_be_omitted_swallowed_or_moved_after_build(self):
+        path=self.root / "scripts/product-ci.sh"
+        original=path.read_text()
+        call="  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;"
+        block='case "$stage" in\n'+call+'\nesac\n'
+        for mutation in (original.replace("--resume-if-needed", "--wrong-resume-mode"),
+                         original.replace(call,call.replace(" ;;"," || true ;;")),
+                         original.replace(block,"").replace("\nrun_build\n","\nrun_build\n"+block)):
+            try:
+                self.assertNotEqual(original,mutation)
+                path.write_text(mutation)
+                self.check_audit(diagnostic="owned repair resume must run unsuppressed")
+            finally:
+                path.write_text(original)
 
     def test_publication_recovery_cannot_restart_api_after_unknown_repair_transaction(self):
         source = PRODUCT.read_text()

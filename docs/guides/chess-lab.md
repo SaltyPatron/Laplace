@@ -182,8 +182,9 @@ python3 scripts/benchmark-chess-environment.py \
   --hash-mib 16,64,256 --max-seconds 180
 ```
 
-The default thread sweep includes powers of two and the observed CPU-budget
-endpoint. `--threads`, `--cpu-budget`, `--concurrency` and `--hash-mib` select
+The default thread sweep includes powers of two, the observed physical-core count
+when it fits the admitted CPU budget, and the observed CPU-budget endpoint.
+`--threads`, `--cpu-budget`, `--concurrency` and `--hash-mib` select
 explicit points; requested points cannot consume the declared CPU reserve or
 exceed memory admission. Fractional CPU quota is retained in the report, and a
 sub-one-CPU grant is reported as insufficient for a full search thread rather

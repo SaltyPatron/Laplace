@@ -62,24 +62,37 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(["pending"], result["pending_receipts"])
         self.assertEqual(pending[1]["plan_bytes"], result["scheduled_closure_prior_plan_bytes"])
         self.assertEqual(pending[1]["plan_bytes"], result["scheduled_replay_authentication_plan_bytes"])
-        self.assertEqual(expected + 2 * pending[1]["plan_bytes"], result["required_max_prior_bytes"])
+        self.assertEqual(3 * expected + 5 * pending[1]["plan_bytes"], result["required_max_prior_bytes"])
+        self.assertEqual(2 * expected + 3 * pending[1]["plan_bytes"], result["fresh_success_prior_bytes_upper_bound"])
 
-    def test_pending_journal_requires_three_authenticated_reads_in_one_budget(self):
+    def test_pending_journal_accounts_for_resume_and_failed_closure_restoration(self):
         _, manifest = self.receipt("pending")
         size = manifest["plan_bytes"]
-        result = HISTORY.measure(self.root, max_prior_bytes=2 * size)
+        result = HISTORY.measure(self.root, max_prior_bytes=7 * size)
         self.assertEqual(size, result["scheduled_discovery_plan_bytes"])
-        self.assertEqual(3 * size, result["required_max_prior_bytes"])
+        self.assertEqual(5 * size, result["fresh_success_prior_bytes_upper_bound"])
+        self.assertEqual(7 * size, result["resumed_success_prior_bytes_upper_bound"])
+        self.assertEqual(8 * size, result["required_max_prior_bytes"])
         self.assertFalse(result["declared_prior_budget_fits"])
-        self.assertTrue(HISTORY.measure(self.root, max_prior_bytes=3 * size)["declared_prior_budget_fits"])
+        self.assertTrue(HISTORY.measure(self.root, max_prior_bytes=8 * size)["declared_prior_budget_fits"])
 
-    def test_confirmed_journal_only_requires_its_discovery_read(self):
+    def test_confirmed_journal_is_read_in_recipe_restore_and_optional_resume(self):
         _, manifest = self.receipt("complete", confirmed=True)
-        result = HISTORY.measure(self.root, max_prior_bytes=manifest["plan_bytes"])
-        self.assertEqual(manifest["plan_bytes"], result["required_max_prior_bytes"])
+        result = HISTORY.measure(self.root, max_prior_bytes=3 * manifest["plan_bytes"])
+        self.assertEqual(3 * manifest["plan_bytes"], result["required_max_prior_bytes"])
+        self.assertEqual(2 * manifest["plan_bytes"], result["fresh_success_prior_bytes_upper_bound"])
         self.assertEqual(0, result["scheduled_replay_authentication_plan_bytes"])
         self.assertEqual(0, result["scheduled_closure_prior_plan_bytes"])
         self.assertTrue(result["declared_prior_budget_fits"])
+
+    def test_current_receipt_bound_includes_each_pending_reconciliation_reference(self):
+        self.receipt("pending-one")
+        self.receipt("pending-two")
+        result = HISTORY.measure(self.root, max_bytes=1000, max_current_readback_bytes=3000)
+        self.assertEqual(4, result["current_plan_read_count"])
+        self.assertEqual(4000, result["current_readback_bytes_at_maximum_plan"])
+        self.assertEqual(750, result["maximum_new_plan_bytes_within_current_readback"])
+        self.assertFalse(result["declared_current_readback_covers_maximum_plan"])
 
     def test_reference_without_matching_context_keeps_old_pending(self):
         old = self.receipt("old")

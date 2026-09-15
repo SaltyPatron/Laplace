@@ -198,6 +198,33 @@ class RepairTransactionTests(unittest.TestCase):
             self.run_resource_repair(auxiliary_reserve_bytes=1024)
         self.assert_resource_plan_not_streamed()
 
+    def test_dependent_readback_admission_precedes_journal_reservation_and_stream(self):
+        calls = []
+        def reject(resources):
+            self.assertTrue((self.directory / "resources.json").is_file())
+            self.assertFalse((self.directory / "plan.jsonl").exists())
+            calls.append(resources["plan_bytes"])
+            return ["current receipt readback requires more than its admitted allowance"]
+        with patch.object(REPAIR.os, "posix_fallocate") as reserve, \
+                self.assertRaisesRegex(REPAIR.RepairProtocolError, "current receipt readback"):
+            self.run_resource_repair(resource_validator=reject)
+        reserve.assert_not_called()
+        self.assertEqual(1, len(calls))
+        self.assert_resource_plan_not_streamed()
+
+    def test_measurement_reports_dependent_readback_rejection_and_confirms_rollback(self):
+        with patch.object(REPAIR.os, "posix_fallocate") as reserve:
+            result = self.run_resource_repair(measurement_only=True,
+                resource_validator=lambda resources: ["current readback needs three complete reads"])
+        reserve.assert_not_called()
+        self.assertEqual("measurement-only-rollback-confirmed", result["disposition"])
+        self.assertFalse(result["envelope_admitted"])
+        self.assertIn("current readback needs three complete reads", result["resource_rejections"])
+        self.assertNotIn("STREAM_RETAINED_PLAN;", self.transcript.read_text())
+        self.assertNotIn("APPLY_RETAINED_PLAN;", self.transcript.read_text())
+        self.assertFalse((self.directory / "plan.jsonl").exists())
+        self.assertFalse((self.directory / "submission.json").exists())
+
     def test_resource_fsync_failure_never_submits_receipt_stream(self):
         fsync = REPAIR.os.fsync
         def fail_resource_sync(fd):
@@ -330,6 +357,23 @@ class RepairTransactionTests(unittest.TestCase):
             self.run_resource_repair(auxiliary_reserve_bytes=0)
         reserve.assert_not_called()
         self.assert_resource_plan_not_streamed()
+
+    def test_server_apply_timeout_is_refreshed_from_budget_remaining_after_durable_plan(self):
+        fsync = REPAIR.os.fsync
+        monotonic = REPAIR.time.monotonic
+        elapsed = [0]
+        def consume_budget(fd):
+            fsync(fd)
+            if os.readlink(f"/proc/self/fd/{fd}") == str(self.directory / "plan.jsonl"):
+                elapsed[0] += 2
+        with patch.object(REPAIR.os,"fsync",side_effect=consume_budget), \
+                patch.object(REPAIR.time,"monotonic",side_effect=lambda:monotonic()+elapsed[0]):
+            result=self.run_repair(timeout=5)
+        self.assertLessEqual(result["apply_statement_timeout_milliseconds"],3000)
+        self.assertGreater(result["initial_database_timeout_milliseconds"],4000)
+        sql=self.transcript.read_text()
+        refresh=f"SET LOCAL statement_timeout='{result['apply_statement_timeout_milliseconds']}ms';"
+        self.assertIn(refresh+"\nAPPLY_RETAINED_PLAN;",sql)
 
     def test_admission_and_persistence_share_one_deadline_without_reset(self):
         reject, fsync, monotonic = REPAIR.resource_rejections, REPAIR.os.fsync, REPAIR.time.monotonic

@@ -64,13 +64,13 @@ def nonnegative_argument(value: str) -> int:
 
 
 class PriorReceiptBudget:
-    """Bound historical plan reads across discovery, replay and closure."""
+    """Bound historical plan reads across discovery, native status, replay and closure."""
 
     def __init__(self, max_bytes: int):
         self.max_bytes = positive_integer(max_bytes)
         self.bytes_read = 0
 
-    def reserve(self, size: int) -> None:
+    def reserve(self, size: int, *, directory: Path | None = None) -> None:
         positive_integer(size)
         if size > self.max_bytes - self.bytes_read:
             raise ValueError("prior repair receipts exceed aggregate byte bound")
@@ -149,7 +149,7 @@ def verified_plan(directory: Path, *, replay_target=None, deadline: float | None
         if os.fstat(source.fileno()).st_size != declared:
             raise ValueError("prior repair evidence byte count changed")
         if budget is not None:
-            budget.reserve(declared)
+            budget.reserve(declared, directory=directory)
         while raw := source.readline(admitted_line + 2):
             check_deadline(deadline)
             if not raw.endswith(b"\n") or len(raw) - 1 > admitted_line:
@@ -259,10 +259,12 @@ def unresolved_submissions(root: Path, *, max_bytes: int = MAX_BYTES,
 def close_reconciled_submissions(root: Path, current: Path, *, max_bytes: int = MAX_BYTES,
                                  max_line_bytes: int = MAX_LINE_BYTES,
                                  budget: PriorReceiptBudget | None = None,
+                                 current_budget: PriorReceiptBudget | None = None,
                                  deadline: float | None = None) -> None:
     # The newly written plan has its own admitted write envelope. The separate
     # prior budget covers retained earlier plans read while closing references.
-    manifest, context = verified_plan(current, max_bytes=max_bytes, max_line_bytes=max_line_bytes, deadline=deadline)
+    manifest, context = verified_plan(current, max_bytes=max_bytes, max_line_bytes=max_line_bytes,
+        budget=current_budget, deadline=deadline)
     if budget is None:
         budget = PriorReceiptBudget(max_bytes)
     if not confirmed_outcome(current, manifest):
@@ -1183,7 +1185,7 @@ def main() -> int:
     parser.add_argument('--max-line-bytes', type=positive_argument, default=MAX_LINE_BYTES,
                         help='maximum UTF-8 bytes per JSON record, excluding the newline')
     parser.add_argument('--max-prior-bytes', type=positive_argument, default=MAX_BYTES,
-                        help='aggregate earlier plan bytes verified across discovery, replay and closure; repeated reads count')
+                        help='aggregate earlier plan bytes verified across discovery, native status, replay and closure; repeated reads count')
     parser.add_argument('--timeout-seconds', type=positive_argument, default=PHASE_TIMEOUT_SECONDS,
                         help='maintenance-wide deadline including historical receipt verification and database work')
     parser.add_argument('--persistence-timeout-seconds', type=positive_argument, default=PERSISTENCE_TIMEOUT_SECONDS,
@@ -1198,6 +1200,7 @@ def main() -> int:
     spec = importlib.util.spec_from_file_location("repair_quiescence", ROOT / "scripts/quiesce-managed-database.py")
     quiescence = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(quiescence)
+    resources = None
     producer_generation = None
     if args.database == "laplace":
         # Require the concrete installed-service exclusion receipt produced by
@@ -1206,6 +1209,10 @@ def main() -> int:
         receipt = Path(os.environ.get("LAPLACE_DATABASE_QUIESCENCE_RECEIPT", "/missing"))
         if receipt.resolve().parent != Path("/build/laplace/recovery/legacy-content-service-quiescence"):
             raise ValueError("canonical repair requires the active managed service quiescence receipt")
+        resources = quiescence.inherited_repair_resources(receipt, receipt_root=args.receipt_root,
+            max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes,
+            max_prior_bytes=args.max_prior_bytes, timeout_seconds=args.timeout_seconds)
+        deadline, prior_budget = resources.deadline, resources
         retained = json.loads((receipt / "quiescence-confirmed.json").read_text())
         active_transaction = quiescence.transaction_identity(quiescence.STATE)
         if not isinstance(retained.get("transaction_identity"), dict) or active_transaction is None \
@@ -1213,7 +1220,10 @@ def main() -> int:
                 or retained["transaction_identity"] != active_transaction:
             raise ValueError("canonical repair's managed service exclusion is no longer active")
         producer_generation = json.loads((receipt / "prior-services.json").read_text()).get("producer_generation")
-        if not isinstance(producer_generation, dict) or producer_generation != quiescence.published_application_generation():
+        resumed = any(receipt.glob('resume-confirmed-*.json'))
+        if not isinstance(producer_generation, dict) or producer_generation != quiescence.published_application_generation(
+                retained=producer_generation if resumed else None,
+                verification_receipt=receipt / 'producer-application-verification.json'):
             raise ValueError("canonical repair requires the same verified published managed generation")
         for name in ("api", "mcp", "lichess"):
             status = quiescence.service_status(name)
@@ -1232,9 +1242,14 @@ def main() -> int:
                "-p", os.environ.get("PGPORT", "5432"), "-U", os.environ.get("PGUSER", "laplace_admin"),
                "-d", args.database, "-v", "ON_ERROR_STOP=1"]
     args.receipt_root.mkdir(parents=True, mode=0o770, exist_ok=True)
+    directory = args.receipt_root / (str(time.time_ns()) + "-" + uuid.uuid4().hex)
+    if args.database == 'laplace':
+        quiescence.bind_repair_attempt(receipt, directory, source_sha=source_sha)
     pending = unresolved_submissions(args.receipt_root, max_bytes=args.max_bytes,
         max_line_bytes=args.max_line_bytes, budget=prior_budget, deadline=deadline)
-    directory = args.receipt_root / (str(time.time_ns()) + "-" + uuid.uuid4().hex)
+    statuses = quiescence.database_submission_statuses(pending, command=command, deadline=deadline,
+        max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes, budget=prior_budget)
+    quiescence.require_finished_database_submissions(statuses)
     outcome = preserve_and_apply(command,
         plan_sql(args.max_rows, pending, producer_generation, resource_preamble=True,
             deadline=deadline, max_prior_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes, prior_budget=prior_budget), apply_sql(), directory,
@@ -1242,11 +1257,14 @@ def main() -> int:
         max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes,
         timeout=args.timeout_seconds, persistence_timeout=args.persistence_timeout_seconds,
         receipt_sql=receipt_stream_sql(), measurement_only=args.measurement_only,
-        auxiliary_reserve_bytes=args.auxiliary_reserve_bytes, deadline_monotonic=deadline)
+        auxiliary_reserve_bytes=args.auxiliary_reserve_bytes, deadline_monotonic=deadline,
+        resource_validator=(lambda measured: resources.readback_rejections(
+            directory, measured['plan_bytes'], reads=len(pending)+2)) if resources is not None else None)
     if not args.measurement_only:
         try:
             close_reconciled_submissions(args.receipt_root, directory, max_bytes=args.max_bytes,
-                max_line_bytes=args.max_line_bytes, budget=prior_budget, deadline=deadline)
+                max_line_bytes=args.max_line_bytes, budget=prior_budget,
+                current_budget=resources, deadline=deadline)
         except BaseException as error:
             write_new_json(directory / "postcommit-reconciliation-failure.json", {
                 "disposition": "commit-confirmed-reconciliation-bookkeeping-failed",

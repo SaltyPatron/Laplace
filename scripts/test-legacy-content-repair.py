@@ -30,6 +30,10 @@ SPEC = importlib.util.spec_from_file_location("legacy_content_repair", ROOT / "s
 assert SPEC and SPEC.loader
 REPAIR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(REPAIR)
+QUIESCENCE_SPEC = importlib.util.spec_from_file_location("repair_quiescence", ROOT / "scripts/quiesce-managed-database.py")
+assert QUIESCENCE_SPEC and QUIESCENCE_SPEC.loader
+QUIESCENCE = importlib.util.module_from_spec(QUIESCENCE_SPEC)
+QUIESCENCE_SPEC.loader.exec_module(QUIESCENCE)
 
 
 FIXTURE = r"""
@@ -315,7 +319,9 @@ class PriorReceiptContracts(unittest.TestCase):
         ])
         write_new_json(current / "outcome.json", {"disposition": "commit-confirmed",
             "plan_sha256": current_manifest["plan_sha256"], "planned_rows": 0, "applied": {"count": 0}})
-        REPAIR.close_reconciled_submissions(self.root, current, budget=budget)
+        current_budget = REPAIR.PriorReceiptBudget(current_manifest["plan_bytes"])
+        REPAIR.close_reconciled_submissions(self.root, current, budget=budget, current_budget=current_budget)
+        self.assertEqual(current_budget.bytes_read, current_manifest["plan_bytes"])
         self.assertEqual(budget.bytes_read, 3 * manifest["plan_bytes"])
         with self.assertRaisesRegex(ValueError, "aggregate byte bound"):
             REPAIR.verified_plan(directory, budget=budget)
@@ -739,6 +745,8 @@ class NativeRepairProof:
             ("refuted-target-witness", "UPDATE laplace.attestations SET outcome=0,sum_score_fp1e9=0 WHERE object_id=repair_test.id('alias-target');"),
             ("context-only-target-witness", "UPDATE laplace.attestations SET context_id=repair_test.id('player') WHERE object_id=repair_test.id('alias-target');"),
             ("context-only-source-witness", "UPDATE laplace.attestations SET context_id=repair_test.id('player') WHERE object_id=repair_test.id('alias-old');"),
+            ("target-alignment", "UPDATE laplace.physicalities SET alignment_residual=0.5 WHERE id=repair_test.physicality_id('player',3::smallint);"),
+            ("target-source-dimension", "UPDATE laplace.physicalities SET source_dim=4 WHERE id=repair_test.physicality_id('player',3::smallint);"),
             ("nonzero-target-flags", "UPDATE laplace.physicalities SET trajectory=public.laplace_mantissa_pack(repair_test.id('alias-target'),1,1,4) WHERE id=repair_test.physicality_id('player',3::smallint);"),
             ("onepoint-linestring-target", "UPDATE laplace.physicalities SET trajectory=public.laplace_trajectory_build(ARRAY[repair_test.id('alias-target')]) WHERE id=repair_test.physicality_id('player',3::smallint);"),
             ("changed-target-trajectory-srid", "UPDATE laplace.physicalities SET trajectory=ST_SetSRID(trajectory,4326) WHERE id=repair_test.physicality_id('player',3::smallint);"),
@@ -773,6 +781,28 @@ class NativeRepairProof:
           CREATE TRIGGER alias_delete_corruption AFTER DELETE ON laplace.physicalities
             FOR EACH ROW EXECUTE FUNCTION pg_temp.change_alias_witness();
           """, "Witnessed player alias evidence changed after its durable receipt", setup=PLAYER_ALIAS_TARGET)
+
+    def native_transaction_statuses(self) -> None:
+        # A finished xid only permits the following exact row reconciliation;
+        # it does not authorize replay or permit restoring managed writers.
+        committed = self.receipts / "witnessed-player-alias" / "plan.jsonl"
+        aborted = self.receipts / "alias-target-input-changed-after-receipt" / "plan.jsonl"
+        paths = [committed, aborted]
+        expected_bytes = sum(path.stat().st_size for path in paths)
+        budget = REPAIR.PriorReceiptBudget(expected_bytes)
+        statuses = QUIESCENCE.database_submission_statuses(paths, command=self.command,
+            deadline=time.monotonic() + 60, max_bytes=REPAIR.MAX_BYTES,
+            max_line_bytes=REPAIR.MAX_LINE_BYTES, budget=budget)
+        assert {row["receipt"]: row["status"] for row in statuses} == {
+            str(committed.resolve()): "committed", str(aborted.resolve()): "aborted"}
+        assert all(row["database_identity_matches"] is True for row in statuses)
+        assert budget.bytes_read == expected_bytes, "native status reauthentication escaped the prior read budget"
+        QUIESCENCE.require_finished_database_submissions(statuses)
+        write_new_json(committed.parent / "native-transaction-statuses.json", {
+            "schema": "laplace.legacy-content-native-transaction-status-proof/v1",
+            "source_sha": self.source_sha, "statuses": statuses,
+            "scope": "pg_xact_status on authenticated receipts and exact database identity; row reconciliation remains required"})
+        self.completed.append("native-transaction-status-committed-and-aborted-receipts")
 
     def composite_player_alias_projection(self) -> None:
         self.sql("SELECT repair_test.reset();\n" + PLAYER_COMPOSITE_ALIAS_TARGET)
@@ -1337,6 +1367,7 @@ def main() -> int:
         proof.reuse_existing_projections()
         proof.legacy_projection_receipt_compatibility()
         proof.witnessed_player_alias_projection()
+        proof.native_transaction_statuses()
         proof.composite_player_alias_projection()
         proof.negative_cases()
         proof.hash_correct_missing_child()
