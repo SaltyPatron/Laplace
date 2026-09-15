@@ -180,7 +180,7 @@ def machine():
             "limitations": limitations}
 
 
-def points(value, maximum):
+def points(value, maximum, physical_boundary=None):
     if value:
         result = sorted(set(int(part) for part in value.split(",")))
     else:
@@ -188,6 +188,8 @@ def points(value, maximum):
         while point < maximum:
             result.append(point)
             point *= 2
+        if physical_boundary is not None and 1 <= physical_boundary <= maximum:
+            result.append(physical_boundary)
         result = sorted(set(result))
     if not result or min(result) < 1 or max(result) > maximum:
         raise ValueError(f"requested points must lie in 1..{maximum}: {result}")
@@ -210,7 +212,11 @@ def plan(args, host):
     if memory <= 0 or (available is not None and memory > available):
         raise ValueError("memory budget exceeds the observed currently available memory")
     overhead = args.engine_overhead_mb * MIB
-    threads = points(args.threads, logical_budget)
+    affinity = host["physical_first_cpu_order"][:logical_budget]
+    selected_cpus = set(affinity)
+    physical_cores = sum(bool(selected_cpus.intersection(group))
+                         for group in host.get("physical_core_groups_within_affinity", []))
+    threads = points(args.threads, logical_budget, physical_cores)
     hashes = sorted(set(int(value) for value in args.hash_mb.split(",")))
     if not hashes or min(hashes) < 1:
         raise ValueError("hash sizes must be positive MiB values")
@@ -219,7 +225,7 @@ def plan(args, host):
     if not hashes:
         raise ValueError("no hash setting fits the memory budget plus declared per-engine overhead")
     concurrency_cap = min(cpus // args.match_threads, memory // (2 * (args.match_hash_mb * MIB + overhead)))
-    concurrency = points(args.concurrency, int(concurrency_cap)) if concurrency_cap >= 1 else []
+    concurrency = points(args.concurrency, int(concurrency_cap), physical_cores // args.match_threads) if concurrency_cap >= 1 else []
     if args.concurrency and not concurrency:
         raise ValueError("no requested tournament concurrency fits CPU and two-resident-engines-per-game memory budgets")
     games = args.games if args.games else 2 * max(concurrency, default=1)
@@ -227,7 +233,7 @@ def plan(args, host):
         raise ValueError("--games must be even and at least the largest tournament concurrency")
     return {"cpu_budget": cpus, "whole_search_thread_budget": logical_budget,
             "fractional_cpu_capacity_not_used": cpus - logical_budget,
-            "cpu_affinity": host["physical_first_cpu_order"][:logical_budget],
+            "cpu_affinity": affinity,
             "reserved_cpu_capacity": max(0, capacity - cpus), "memory_budget_bytes": memory,
             "engine_overhead_estimate_bytes": overhead, "threads": threads, "hash_mib": hashes,
             "excluded_hash_mib": excluded_hashes, "concurrency": concurrency, "games_per_match_sample": games,
@@ -509,7 +515,7 @@ def main():
     parser.add_argument("--memory-mb", "--memory-mib", type=int)
     parser.add_argument("--memory-fraction", type=float, default=0.5)
     parser.add_argument("--engine-overhead-mb", type=int, default=256)
-    parser.add_argument("--threads", help="Comma-separated points; default powers of two plus the observed CPU-budget endpoint")
+    parser.add_argument("--threads", help="Comma-separated points; default powers of two plus the observed CPU-budget endpoint and physical-core boundary within selected affinity")
     parser.add_argument("--hash-mb", "--hash-mib", default="16,64,256")
     parser.add_argument("--concurrency", help="Comma-separated games-in-flight points; derived from CPU and two-engine memory budgets")
     parser.add_argument("--match-threads", type=int, default=1)

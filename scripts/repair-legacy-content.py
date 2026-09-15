@@ -20,13 +20,14 @@ import subprocess
 import time
 import uuid
 
-from lib.repair_transaction import preserve_and_apply, write_new_json
+from lib.repair_transaction import preserve_and_apply, sync_directory, write_new_json
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_ROWS = 25000
 MAX_CONSTITUENTS = 4096
-MAX_BYTES = 512 * 1024 * 1024
+MAX_LINE_BYTES = 2 * 1024 * 1024
+MAINTENANCE_TIMEOUT = 1800
 
 
 def snapshot_expression(alias: str) -> str:
@@ -46,26 +47,60 @@ def snapshot_expression(alias: str) -> str:
       'observed_at_binary',encode(timestamptz_send({p}.observed_at),'hex'))"""
 
 
-def verified_plan(directory: Path) -> tuple[dict, dict]:
+def check_deadline(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise TimeoutError("legacy repair maintenance deadline exceeded during receipt reconciliation")
+
+
+def verified_plan(directory: Path, *, replay_target=None, deadline: float | None = None) -> tuple[dict, dict]:
+    check_deadline(deadline)
     manifest = json.loads((directory / "manifest.json").read_text())
     if manifest.get("schema") != "laplace.legacy-content-repair-plan/v1":
         raise ValueError("unknown prior repair receipt schema")
-    size = 0
+    # Complete admitted receipts may exceed an earlier fixed byte envelope.
+    # Replay streams one bounded record at a time and verifies the retained
+    # measurement/digest instead of silently dropping dependency snapshots.
+    declared = manifest.get("plan_bytes")
+    if type(declared) is not int or declared <= 0 or (directory / "plan.jsonl").stat().st_size != declared:
+        raise ValueError("prior repair evidence byte count changed")
+    size = rows = native_inputs = 0
+    context = summary = None
     digest = hashlib.sha256()
     with (directory / "plan.jsonl").open("rb") as source:
-        first = source.readline(MAX_BYTES + 1)
-        size += len(first)
-        digest.update(first)
-        context = json.loads(first)
-        while chunk := source.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_BYTES:
-                raise ValueError("prior repair receipt exceeds byte bound")
-            digest.update(chunk)
-    if size != manifest.get("plan_bytes") or digest.hexdigest() != manifest.get("plan_sha256"):
+        while raw := source.readline(MAX_LINE_BYTES + 2):
+            check_deadline(deadline)
+            if not raw.endswith(b"\n") or len(raw) > MAX_LINE_BYTES + 1:
+                raise ValueError("prior repair record exceeds line bound")
+            size += len(raw)
+            digest.update(raw)
+            value = json.loads(raw)
+            if not isinstance(value, dict) or summary is not None:
+                raise ValueError("prior repair record contract is invalid")
+            kind = value.get("kind")
+            if replay_target is not None and kind != "native-input":
+                replay_target.write(raw)
+            if context is None:
+                if kind != "context":
+                    raise ValueError("prior repair context is missing")
+                context = value
+            elif kind == "native-input":
+                native_inputs += 1
+            elif kind == "physicality":
+                if value.get("operation", "rewrite-physicality") not in (
+                        "rewrite-physicality", "retire-redundant-content"):
+                    raise ValueError("prior repair operation is unknown")
+                rows += 1
+            elif kind == "plan":
+                summary = value
+            else:
+                raise ValueError("prior repair record kind is unknown")
+    if size != declared or digest.hexdigest() != manifest.get("plan_sha256"):
         raise ValueError("prior repair evidence changed")
-    if not isinstance(context, dict) or context.get("kind") != "context":
-        raise ValueError("prior repair context is missing")
+    if context is None or summary is None or rows != manifest.get("planned_rows") \
+            or native_inputs != manifest.get("native_input_rows", 0) \
+            or rows != summary.get("count") or native_inputs != summary.get("native_input_count", 0):
+        raise ValueError("prior repair receipt count changed")
+    check_deadline(deadline)
     return manifest, context
 
 
@@ -81,7 +116,7 @@ def confirmed_outcome(directory: Path, manifest: dict) -> bool:
         and outcome["applied"].get("count") == manifest["planned_rows"]
 
 
-def verified_reconciliation(directory: Path, manifest: dict, root: Path) -> bool:
+def verified_reconciliation(directory: Path, manifest: dict, root: Path, *, deadline: float | None = None) -> bool:
     path = directory / "reconciliation.json"
     if not path.exists():
         return False
@@ -90,7 +125,7 @@ def verified_reconciliation(directory: Path, manifest: dict, root: Path) -> bool
     if target.resolve().parent != root.resolve() or target.resolve() == directory.resolve() \
             or reference.get("original_plan_sha256") != manifest["plan_sha256"]:
         raise ValueError("prior reconciliation reference does not identify this receipt estate")
-    current_manifest, current_context = verified_plan(target)
+    current_manifest, current_context = verified_plan(target, deadline=deadline)
     if not confirmed_outcome(target, current_manifest) \
             or current_manifest["plan_sha256"] != reference.get("reconciliation_plan_sha256"):
         raise ValueError("prior reconciliation has no matching successful durable outcome")
@@ -99,15 +134,15 @@ def verified_reconciliation(directory: Path, manifest: dict, root: Path) -> bool
                for item in current_context.get("prior_submission_reconciliation", []))
 
 
-def unresolved_submissions(root: Path) -> list[Path]:
+def unresolved_submissions(root: Path, *, deadline: float | None = None) -> list[Path]:
     pending = []
     for directory in sorted(root.iterdir()):
         if not directory.is_dir() or not (directory / "submission.json").exists():
             continue
         if directory.is_symlink():
             raise ValueError("repair receipt directories cannot be symlinks")
-        manifest, _ = verified_plan(directory)
-        if confirmed_outcome(directory, manifest) or verified_reconciliation(directory, manifest, root):
+        manifest, _ = verified_plan(directory, deadline=deadline)
+        if confirmed_outcome(directory, manifest) or verified_reconciliation(directory, manifest, root, deadline=deadline):
             continue
         pending.append(directory / "plan.jsonl")
     if len(pending) > 32:
@@ -115,24 +150,50 @@ def unresolved_submissions(root: Path) -> list[Path]:
     return pending
 
 
-def close_reconciled_submissions(root: Path, current: Path) -> None:
-    manifest, context = verified_plan(current)
+def close_reconciled_submissions(root: Path, current: Path, *, deadline: float | None = None) -> None:
+    manifest, context = verified_plan(current, deadline=deadline)
     if not confirmed_outcome(current, manifest):
         raise ValueError("cannot close prior submissions without a successful durable reconciliation")
     for item in context.get("prior_submission_reconciliation", []):
         directory = Path(item["receipt"]).parent
         if directory.resolve().parent != root.resolve() or directory.resolve() == current.resolve():
             raise ValueError("reconciliation refers outside its receipt estate")
-        old_manifest, _ = verified_plan(directory)
+        old_manifest, _ = verified_plan(directory, deadline=deadline)
         reference = {"schema": "laplace.legacy-content-repair-reconciliation/v1",
                      "original_plan_sha256": old_manifest["plan_sha256"],
                      "reconciliation_directory": str(current.resolve()),
                      "reconciliation_plan_sha256": manifest["plan_sha256"],
                      "disposition": item["disposition"]}
+        check_deadline(deadline)
         write_new_json(directory / "reconciliation.json", reference)
+        check_deadline(deadline)
 
 
-def prior_sql(paths: list[Path]) -> str:
+def reconciliation_input(path: Path, *, deadline: float | None = None) -> Path:
+    """Keep the full journal immutable; project only authenticated row states.
+
+    Native inputs are required before mutation. Unknown-outcome reconciliation
+    compares the complete original/proposed rows, so it need not COPY the entire
+    dependency estate into PostgreSQL again. The count comes from streaming and
+    hashing every source record, never from an unverified summary alone.
+    """
+    if path.name != "plan.jsonl":
+        raise ValueError("prior repair must identify its complete plan journal")
+    projected = path.parent / ("reconciliation-input-" + uuid.uuid4().hex + ".jsonl")
+    with projected.open("xb") as target:
+        manifest, _ = verified_plan(path.parent, replay_target=target, deadline=deadline)
+        target.write((json.dumps({"kind": "verified-native-input-count",
+            "count": manifest.get("native_input_rows", 0),
+            "source_plan_sha256": manifest["plan_sha256"],
+            "source_plan_bytes": manifest["plan_bytes"]}, sort_keys=True) + "\n").encode())
+        target.flush()
+        os.fsync(target.fileno())
+    sync_directory(path.parent)
+    check_deadline(deadline)
+    return projected
+
+
+def prior_sql(paths: list[Path], *, deadline: float | None = None) -> str:
     statements = ["""CREATE TEMP TABLE repair_prior(document jsonb, receipt text) ON COMMIT DROP;
 CREATE TEMP TABLE repair_prior_input(document jsonb) ON COMMIT DROP;"""]
     for path in paths:
@@ -141,7 +202,8 @@ CREATE TEMP TABLE repair_prior_input(document jsonb) ON COMMIT DROP;"""]
         name = str(path.resolve())
         if not re.fullmatch(r"/[A-Za-z0-9/_.-]+", name):
             raise ValueError("prior receipt path is not a supported absolute path")
-        statements += [f"\\copy repair_prior_input(document) FROM '{name}' WITH (FORMAT csv, DELIMITER E'\\x01', QUOTE E'\\x02')",
+        replay = str(reconciliation_input(path, deadline=deadline).resolve())
+        statements += [f"\\copy repair_prior_input(document) FROM '{replay}' WITH (FORMAT csv, DELIMITER E'\\x01', QUOTE E'\\x02')",
                        f"INSERT INTO repair_prior SELECT document,'{name}' FROM repair_prior_input;",
                        "TRUNCATE repair_prior_input;"]
     statements.append("""
@@ -149,13 +211,14 @@ CREATE TEMP TABLE repair_prior_summary ON COMMIT DROP AS
 SELECT receipt,count(*) FILTER(WHERE document->>'kind'='context') AS contexts,
   count(*) FILTER(WHERE document->>'kind'='plan') AS plans,
   count(*) FILTER(WHERE document->>'kind'='physicality') AS physicalities,
-  count(*) FILTER(WHERE document->>'kind'='native-input') AS native_inputs,
+  count(*) FILTER(WHERE document->>'kind'='verified-native-input-count') AS count_receipts,
+  sum((document->>'count')::bigint) FILTER(WHERE document->>'kind'='verified-native-input-count') AS native_inputs,
   (jsonb_agg(document) FILTER(WHERE document->>'kind'='context'))->0 AS context,
   (jsonb_agg(document) FILTER(WHERE document->>'kind'='plan'))->0 AS plan
 FROM repair_prior GROUP BY receipt;
 DO $prior_contract$
 BEGIN
-  IF EXISTS(SELECT FROM repair_prior_summary s WHERE s.contexts<>1 OR s.plans<>1
+  IF EXISTS(SELECT FROM repair_prior_summary s WHERE s.contexts<>1 OR s.plans<>1 OR s.count_receipts<>1
       OR (s.plan->>'count')::bigint IS DISTINCT FROM s.physicalities
       OR (s.plan->>'native_input_count')::bigint IS DISTINCT FROM s.native_inputs
       OR (s.plan->>'unresolved')::bigint IS DISTINCT FROM 0
@@ -169,7 +232,9 @@ CREATE TEMP TABLE repair_reconciliation ON COMMIT DROP AS
 WITH compared AS (
   SELECT r.receipt,r.document,
          pg_temp.repair_snapshot(oldrow)=r.document->'original'
-           AND (oldrow.id=newrow.id OR newrow.id IS NULL) AS matches_original,
+           AND CASE WHEN r.document->>'operation'='retire-redundant-content'
+                 THEN pg_temp.repair_snapshot(newrow)=r.document->'proposed'
+                 ELSE oldrow.id=newrow.id OR newrow.id IS NULL END AS matches_original,
          pg_temp.repair_snapshot(newrow)=r.document->'proposed'
            AND (oldrow.id=newrow.id OR oldrow.id IS NULL) AS matches_proposed
   FROM repair_prior r
@@ -194,12 +259,13 @@ END $reconcile$;
     return "\n".join(statements)
 
 
-def plan_sql(max_rows: int, prior_paths: list[Path], producer_generation: dict | None = None) -> str:
+def plan_sql(max_rows: int, prior_paths: list[Path], producer_generation: dict | None = None, *, deadline: float | None = None) -> str:
     if not 1 <= max_rows <= 100000:
         raise ValueError("repair row envelope must be between 1 and 100000")
     producer_json = json.dumps(producer_generation, sort_keys=True).replace("'", "''")
     return f"""
 SET LOCAL timezone='UTC';
+SET LOCAL client_encoding='UTF8';
 SET LOCAL max_parallel_workers_per_gather=0;
 -- Acquire table locks in canonical apply order. These protect absent target IDs
 -- as well as retained rows. The outer managed measurement lane excludes full
@@ -207,7 +273,7 @@ SET LOCAL max_parallel_workers_per_gather=0;
 LOCK TABLE laplace.entities,laplace.physicalities,laplace.attestations IN SHARE ROW EXCLUSIVE MODE;
 CREATE FUNCTION pg_temp.repair_snapshot(p laplace.physicalities) RETURNS jsonb
 LANGUAGE sql IMMUTABLE STRICT AS $snapshot$ SELECT {snapshot_expression('p')} $snapshot$;
-{prior_sql(prior_paths)}
+{prior_sql(prior_paths, deadline=deadline)}
 
 CREATE TEMP TABLE repair_owner_inventory ON COMMIT DROP AS
 SELECT p.*,e.tier,e.type_id,e.first_observed_by,to_jsonb(e) AS entity_evidence,
@@ -222,6 +288,7 @@ WHERE p.type=1 AND e.type_id IN (realize.canonical_id('Chess_Game'),
 -- The row envelope bounds defects requiring repair, not corpus size. Screen all
 -- selected metadata, but expand/hash each carrier only after its packed run sum
 -- and declared counts prove the native logical-work envelope.
+ANALYZE repair_owner_inventory;
 CREATE TEMP TABLE repair_owner_bounds ON COMMIT DROP AS
 SELECT o.id,COALESCE(o.n_constituents BETWEEN 1 AND {MAX_CONSTITUENTS}
   AND ST_NPoints(o.trajectory) BETWEEN 1 AND {MAX_CONSTITUENTS}
@@ -236,6 +303,7 @@ CROSS JOIN LATERAL (
      AND ST_NPoints(o.trajectory) BETWEEN 1 AND {MAX_CONSTITUENTS}
     THEN o.trajectory ELSE NULL END) v
 ) b;
+ANALYZE repair_owner_bounds;
 CREATE TEMP TABLE repair_owner_identity ON COMMIT DROP AS
 SELECT o.id,b.bounded AND o.entity_rows=1 AND x.logical_count=o.n_constituents
     AND x.distinct_ordinals=o.n_constituents AND x.resolved AS well_formed,
@@ -252,6 +320,7 @@ CROSS JOIN LATERAL (
   LEFT JOIN laplace.entities e ON e.id=v.entity_id
   LEFT JOIN laplace.physicalities p ON p.entity_id=v.entity_id AND p.type=1
 ) x;
+ANALYZE repair_owner_identity;
 CREATE TEMP TABLE repair_owners ON COMMIT DROP AS
 SELECT o.* FROM repair_owner_inventory o JOIN repair_owner_identity i ON i.id=o.id
 WHERE NOT COALESCE(i.well_formed,false) OR i.content_id IS DISTINCT FROM o.entity_id
@@ -263,16 +332,19 @@ BEGIN
   END IF;
 END $bound$;
 
+ANALYZE repair_owners;
 CREATE TEMP TABLE repair_carriers ON COMMIT DROP AS
 SELECT p.*,o.repair_kind,o.tier AS parent_tier
 FROM repair_owners o JOIN laplace.physicalities p ON p.entity_id=o.entity_id
 WHERE p.type=1 OR (o.repair_kind='chess-line' AND p.type=3);
+ANALYZE repair_carriers;
 CREATE TEMP TABLE repair_packed ON COMMIT DROP AS
 SELECT p.id AS physicality_id,c.ordinal,c.entity_id,c.run_length,c.flags
 FROM repair_carriers p CROSS JOIN LATERAL public.laplace_trajectory_constituents(
   CASE WHEN p.n_constituents BETWEEN 1 AND {MAX_CONSTITUENTS}
          AND ST_NPoints(p.trajectory) BETWEEN 1 AND {MAX_CONSTITUENTS}
        THEN p.trajectory ELSE NULL END) c;
+ANALYZE repair_packed;
 CREATE TEMP TABLE repair_bounded ON COMMIT DROP AS
 SELECT p.id
 FROM repair_carriers p JOIN repair_packed v ON v.physicality_id=p.id
@@ -281,10 +353,12 @@ HAVING count(*)=ST_NPoints(p.trajectory)
    AND sum(GREATEST(v.run_length,1))=p.n_constituents
    AND min(v.ordinal)=1
    AND max(v.ordinal+GREATEST(v.run_length,1)-1)=p.n_constituents;
+ANALYZE repair_bounded;
 CREATE TEMP TABLE repair_logical ON COMMIT DROP AS
 SELECT p.id AS physicality_id,v.ordinal,v.entity_id,v.flags
 FROM repair_bounded b JOIN repair_carriers p ON p.id=b.id
 CROSS JOIN LATERAL public.laplace_trajectory_expanded_constituents(p.trajectory) v;
+ANALYZE repair_logical;
 CREATE TEMP TABLE repair_manifests ON COMMIT DROP AS
 SELECT c.id,c.entity_id,c.type,c.n_constituents,
        array_agg(v.entity_id ORDER BY v.ordinal) AS child_ids,
@@ -303,6 +377,7 @@ LEFT JOIN laplace.entities e ON e.id=v.entity_id
 LEFT JOIN laplace.physicalities p ON p.entity_id=v.entity_id AND p.type=1
 GROUP BY c.id,c.entity_id,c.type,c.n_constituents;
 
+ANALYZE repair_manifests;
 CREATE TEMP TABLE repair_candidates ON COMMIT DROP AS
 SELECT o.*,m.child_ids,m.zero_flags,m.resolved,m.descending,m.all_moves,m.all_messages,
        m.child_coords,
@@ -336,8 +411,16 @@ SELECT o.*,m.child_ids,m.zero_flags,m.resolved,m.descending,m.all_moves,m.all_me
         FROM laplace.physicalities occupied
         WHERE (occupied.entity_id=o.entity_id AND occupied.type=3)
            OR occupied.id=public.laplace_hash128_blake3(o.entity_id||decode('0300','hex')))
-         AS occupied_projection_evidence
-FROM repair_owners o LEFT JOIN repair_manifests m ON m.id=o.id
+         AS occupied_projection_evidence,
+       pg_temp.repair_snapshot(target) AS canonical_projection_evidence,
+       (pg_temp.repair_snapshot(target)-ARRAY['observed_at','observed_at_binary'])=
+         ((pg_temp.repair_snapshot(owner_row)||jsonb_build_object(
+             'id',encode(public.laplace_hash128_blake3(o.entity_id||decode('0300','hex')),'hex'),
+             'type',3))-ARRAY['observed_at','observed_at_binary'])
+         AS projection_semantically_equal
+FROM repair_owners o JOIN laplace.physicalities owner_row ON owner_row.id=o.id
+LEFT JOIN repair_manifests m ON m.id=o.id
+LEFT JOIN laplace.physicalities target ON target.id=public.laplace_hash128_blake3(o.entity_id||decode('0300','hex'))
 LEFT JOIN LATERAL (
   SELECT candidate.* FROM laplace.physicalities candidate
   WHERE candidate.entity_id=o.entity_id AND candidate.type=3 AND o.repair_kind='chess-line'
@@ -354,18 +437,19 @@ LEFT JOIN laplace.physicalities start_physicality ON start_physicality.entity_id
 CREATE TEMP TABLE repair_incoming ON COMMIT DROP AS
 SELECT p.id,p.entity_id,public.laplace_trajectory_constituent_ids(p.trajectory) AS members,
        pg_temp.repair_snapshot(p) AS original
-FROM laplace.physicalities p WHERE p.type=1
+FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL
   AND public.laplace_trajectory_constituent_ids(p.trajectory)
       && ARRAY(SELECT entity_id FROM repair_owners);
 
 -- One retained set of native coordinate/identity inputs, reused across all
 -- affected parents. Occurrence order and duplicates remain in each manifest.
+CREATE TEMP TABLE repair_native_input_ids ON COMMIT DROP AS
+SELECT v.entity_id FROM repair_carriers carrier
+  JOIN repair_logical v ON v.physicality_id=carrier.id
+UNION SELECT start_id FROM repair_candidates WHERE repair_kind='chess-line' AND start_id IS NOT NULL;
+CREATE UNIQUE INDEX repair_native_input_ids_identity ON repair_native_input_ids(entity_id);
+ANALYZE repair_native_input_ids;
 CREATE TEMP TABLE repair_native_inputs ON COMMIT DROP AS
-WITH needed AS (
-  SELECT v.entity_id FROM repair_carriers carrier
-    JOIN repair_logical v ON v.physicality_id=carrier.id
-  UNION SELECT start_id FROM repair_candidates WHERE repair_kind='chess-line' AND start_id IS NOT NULL
-)
 SELECT n.entity_id,to_jsonb(e) AS entity,pg_temp.repair_snapshot(p) AS content,
        p.id AS physicality_id,
        p.id=public.laplace_hash128_blake3(n.entity_id||decode('0100','hex'))
@@ -376,7 +460,7 @@ SELECT n.entity_id,to_jsonb(e) AS entity,pg_temp.repair_snapshot(p) AS content,
                 AND CASE WHEN proof.n=1 THEN proof.ids[1]
                          WHEN proof.n>1 THEN public.laplace_hash128_merkle(0::smallint,proof.ids)
                          ELSE NULL::bytea END=n.entity_id END AS valid_content
-FROM needed n JOIN laplace.entities e ON e.id=n.entity_id
+FROM repair_native_input_ids n JOIN laplace.entities e ON e.id=n.entity_id
 JOIN laplace.physicalities p ON p.entity_id=n.entity_id AND p.type=1
 CROSS JOIN LATERAL (
   SELECT COALESCE(p.n_constituents BETWEEN 1 AND {MAX_CONSTITUENTS}
@@ -397,6 +481,17 @@ CROSS JOIN LATERAL (
     CASE WHEN bounded.valid THEN p.trajectory ELSE NULL END) v
 ) proof;
 
+-- Resolve invalid dependencies once for the complete carrier set. Repeated
+-- per-owner scans over all retained native snapshots do not add evidence.
+ANALYZE repair_native_inputs;
+CREATE TEMP TABLE repair_invalid_input_owners ON COMMIT DROP AS
+SELECT DISTINCT carrier.entity_id
+FROM repair_carriers carrier JOIN repair_logical occurrence ON occurrence.physicality_id=carrier.id
+JOIN repair_native_inputs input ON input.entity_id=occurrence.entity_id
+WHERE NOT COALESCE(input.valid_content,false);
+CREATE UNIQUE INDEX repair_invalid_input_owner_identity ON repair_invalid_input_owners(entity_id);
+ANALYZE repair_invalid_input_owners;
+
 CREATE TEMP TABLE repair_eligibility ON COMMIT DROP AS
 SELECT c.*,
   CASE WHEN c.entity_rows<>1 THEN 'duplicate-owner-identity'
@@ -404,9 +499,8 @@ SELECT c.*,
        WHEN c.id<>public.laplace_hash128_blake3(c.entity_id||decode('0100','hex')) THEN 'noncanonical-physicality-id'
        WHEN EXISTS(SELECT FROM repair_incoming parent WHERE c.entity_id=ANY(parent.members))
          THEN 'incoming-content-requires-coupled-recovery'
-       WHEN EXISTS(SELECT FROM repair_native_inputs i
-                    WHERE (i.entity_id=ANY(c.child_ids) OR i.entity_id=ANY(c.position_ids))
-                      AND NOT COALESCE(i.valid_content,false)) THEN 'invalid-native-input-content'
+       WHEN EXISTS(SELECT FROM repair_invalid_input_owners invalid
+                    WHERE invalid.entity_id=c.entity_id) THEN 'invalid-native-input-content'
        WHEN c.repair_kind='player-projection' THEN
          CASE WHEN cardinality(c.child_ids)<>1 OR NOT EXISTS(
                 SELECT FROM jsonb_array_elements(c.name_witnesses) a
@@ -417,7 +511,10 @@ SELECT c.*,
                 WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
                    OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000)
                 THEN 'opposing-name-testimony'
-              WHEN c.projection_target_exists THEN 'occupied-projection-target' ELSE 'eligible' END
+              WHEN c.projection_target_exists AND NOT COALESCE(
+                c.projection_rows=1 AND jsonb_array_length(c.occupied_projection_evidence)=1
+                AND c.projection_semantically_equal,false)
+                THEN 'occupied-projection-target' ELSE 'eligible' END
        WHEN c.repair_kind='session-projection' THEN
          CASE WHEN NOT c.all_messages OR c.witnessed_messages<>(SELECT count(DISTINCT id) FROM unnest(c.child_ids) id)
                 THEN 'missing-exact-confirmed-session-membership'
@@ -425,7 +522,10 @@ SELECT c.*,
                 WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
                    OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000)
                 THEN 'opposing-session-membership'
-              WHEN c.projection_target_exists THEN 'occupied-projection-target' ELSE 'eligible' END
+              WHEN c.projection_target_exists AND NOT COALESCE(
+                c.projection_rows=1 AND jsonb_array_length(c.occupied_projection_evidence)=1
+                AND c.projection_semantically_equal,false)
+                THEN 'occupied-projection-target' ELSE 'eligible' END
        WHEN NOT c.zero_flags THEN 'nonzero-move-occurrence-flags'
        WHEN NOT c.all_moves THEN 'legacy-line-has-non-move-constituents'
        WHEN c.projection_rows>1 THEN 'ambiguous-position-projections'
@@ -452,6 +552,8 @@ FROM repair_candidates c;
 
 CREATE TEMP TABLE repair_plan ON COMMIT DROP AS
 SELECT c.id AS old_id,c.entity_id,c.repair_kind,c.disposition,
+       CASE WHEN c.repair_kind<>'chess-line' AND c.disposition='eligible' AND c.projection_target_exists
+         THEN 'retire-redundant-content' ELSE 'rewrite-physicality' END AS operation,
        c.id AS new_id,c.type AS new_type,c.coord AS new_coord,c.hilbert_index AS new_hilbert,
        c.trajectory AS new_trajectory,c.n_constituents AS new_count,
        pg_temp.repair_snapshot(p) AS original,
@@ -461,6 +563,8 @@ SELECT c.id AS old_id,c.entity_id,c.repair_kind,c.disposition,
            'name_witnesses',c.name_witnesses,'setup_witnesses',c.setup_witnesses,
            'membership_witnesses',c.membership_witnesses,
            'occupied_projections',c.occupied_projection_evidence,
+           'projection_semantically_equal',c.projection_semantically_equal,
+           'projection_preservation_rule','retain canonical target including its observation timestamp; retire only redundant Content',
            'incoming_content',(SELECT jsonb_agg(parent.original ORDER BY parent.id)
               FROM repair_incoming parent WHERE c.entity_id=ANY(parent.members)),
            'ordered_children',c.child_ids,
@@ -482,15 +586,55 @@ UPDATE repair_plan p SET
 FROM repair_eligibility c WHERE c.id=p.old_id AND p.disposition='eligible';
 UPDATE repair_plan SET new_hilbert=public.laplace_hilbert_encode(new_coord)
 WHERE repair_kind='chess-line' AND disposition='eligible';
-UPDATE repair_plan p SET proposed=p.original || jsonb_build_object(
-  'id',encode(p.new_id,'hex'),'type',p.new_type,
-  'coord_ewkb',encode(ST_AsEWKB(p.new_coord),'hex'),
-  'hilbert_index',encode(p.new_hilbert,'hex'),
-  'trajectory_ewkb',encode(ST_AsEWKB(p.new_trajectory),'hex'),
-  'radius_origin_bits',encode(float8send(public.laplace_radius_origin(p.new_coord)),'hex'),
-  'n_constituents',p.new_count);
+DO $proposed_rows$
+DECLARE expected bigint; captured bigint;
+BEGIN
+  SELECT count(*) INTO expected FROM repair_plan;
+  UPDATE repair_plan p SET proposed=p.original || jsonb_build_object(
+    'id',encode(p.new_id,'hex'),'type',p.new_type,
+    'coord_ewkb',encode(ST_AsEWKB(p.new_coord),'hex'),
+    'hilbert_index',encode(p.new_hilbert,'hex'),
+    'trajectory_ewkb',encode(ST_AsEWKB(p.new_trajectory),'hex'),
+    'radius_origin_bits',encode(float8send(public.laplace_radius_origin(p.new_coord)),'hex'),
+    'n_constituents',p.new_count)
+  FROM repair_eligibility admitted WHERE admitted.id=p.old_id AND p.proposed IS NULL;
+  GET DIAGNOSTICS captured=ROW_COUNT;
+  IF captured<>expected OR EXISTS(SELECT FROM repair_plan WHERE proposed IS NULL) THEN
+    RAISE EXCEPTION 'Proposed row snapshots covered % planned rows, expected %',captured,expected;
+  END IF;
+END $proposed_rows$;
+-- Coexistence is an explicit retirement. Keep the preexisting target exactly,
+-- including its independently observed timestamp; archive the removed Content.
+UPDATE repair_plan p SET proposed=c.canonical_projection_evidence
+FROM repair_eligibility c WHERE c.id=p.old_id AND p.operation='retire-redundant-content';
 
+-- Serialize each retained body record exactly once. The measured byte count
+-- includes every native input, original/proposed/evidence row and summary; the
+-- client adds the actual context line, reserves that complete journal and
+-- verifies its streamed count/bytes before it can submit any mutation.
+CREATE TEMP TABLE repair_output(phase smallint,identity bytea,document text) ON COMMIT DROP;
+INSERT INTO repair_output
+SELECT 1,entity_id,jsonb_build_object('kind','native-input','entity_id',encode(entity_id,'hex'),
+  'entity',entity,'content',content)::text FROM repair_native_inputs;
+INSERT INTO repair_output
+SELECT 2,old_id,jsonb_build_object('kind','physicality','repair_kind',repair_kind,'disposition',disposition,'operation',operation,
+  'original',original,'proposed',proposed,'evidence',evidence)::text
+FROM repair_plan;
+INSERT INTO repair_output
+SELECT 3,NULL::bytea,jsonb_build_object('kind','plan','count',count(*),
+  'native_input_count',(SELECT count(*) FROM repair_native_inputs),
+  'rewrites',count(*) FILTER(WHERE operation='rewrite-physicality'),
+  'retirements',count(*) FILTER(WHERE operation='retire-redundant-content'),
+  'unresolved',count(*) FILTER(WHERE disposition<>'eligible'),
+  'classifications',COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM (
+    SELECT repair_kind,disposition,count(*) AS rows FROM repair_plan GROUP BY repair_kind,disposition) g),'[]'::jsonb))::text
+FROM repair_plan;
 SELECT jsonb_build_object('kind','context','database',current_database(),
+  'resource_inventory',(SELECT jsonb_build_object(
+    'native_input_rows',count(*) FILTER(WHERE phase=1),
+    'physicality_rows',count(*) FILTER(WHERE phase=2),
+    'body_records',count(*),'body_bytes',COALESCE(sum(octet_length(convert_to(document,'UTF8'))+1),0),
+    'max_body_line_bytes',COALESCE(max(octet_length(convert_to(document,'UTF8'))+1),0)) FROM repair_output),
   'producer_generation','{producer_json}'::jsonb,
   'chess_coordinate_recipe',jsonb_build_object('sql_function','public.laplace_karcher_mean_4d',
     'native_kernel','math4d_karcher_mean','tolerance',1e-12,'max_iterations',64,
@@ -504,43 +648,27 @@ SELECT jsonb_build_object('kind','context','database',current_database(),
   'write_epoch_before',(SELECT last_value FROM laplace.apply_write_epoch),
   'prior_submission_reconciliation',COALESCE((SELECT jsonb_agg(to_jsonb(r)) FROM repair_reconciliation r),'[]'::jsonb),
   'owner_envelope',{max_rows},'typed_content_owners_screened',(SELECT count(*) FROM repair_owner_inventory),'logical_constituent_envelope',{MAX_CONSTITUENTS});
-SELECT jsonb_build_object('kind','native-input','entity_id',encode(entity_id,'hex'),
-  'entity',entity,'content',content) FROM repair_native_inputs ORDER BY entity_id;
-SELECT jsonb_build_object('kind','physicality','repair_kind',repair_kind,'disposition',disposition,
-  'original',original,'proposed',proposed,'evidence',evidence)
-FROM repair_plan ORDER BY old_id;
-SELECT jsonb_build_object('kind','plan','count',count(*),
-  'native_input_count',(SELECT count(*) FROM repair_native_inputs),
-  'unresolved',count(*) FILTER(WHERE disposition<>'eligible'),
-  'classifications',COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM (
-    SELECT repair_kind,disposition,count(*) AS rows FROM repair_plan GROUP BY repair_kind,disposition) g),'[]'::jsonb))
-FROM repair_plan;
+SELECT document FROM repair_output ORDER BY phase,identity;
+
 """
 
 
 def apply_sql() -> str:
     return """
-CREATE TEMP TABLE repair_applied_epoch(epoch bigint) ON COMMIT DROP;
-DO $apply$
-DECLARE expected bigint; changed bigint;
+CREATE FUNCTION pg_temp.repair_assert_immutable_evidence() RETURNS void
+LANGUAGE plpgsql AS $immutable$
 BEGIN
-  SELECT count(*) INTO expected FROM repair_plan;
-  IF EXISTS(SELECT FROM repair_plan WHERE disposition<>'eligible') THEN
-    RAISE EXCEPTION 'Repair eligibility changed before mutation';
-  END IF;
-  IF EXISTS(SELECT FROM repair_plan r LEFT JOIN laplace.physicalities p ON p.id=r.old_id
-            WHERE pg_temp.repair_snapshot(p) IS DISTINCT FROM r.original) THEN
-    RAISE EXCEPTION 'Original physicality changed after its durable receipt';
-  END IF;
   IF EXISTS(SELECT FROM repair_native_inputs i
             LEFT JOIN laplace.entities e ON e.id=i.entity_id
             LEFT JOIN laplace.physicalities p ON p.id=i.physicality_id
             WHERE to_jsonb(e) IS DISTINCT FROM i.entity
                OR pg_temp.repair_snapshot(p) IS DISTINCT FROM i.content)
-     OR EXISTS(SELECT FROM repair_native_inputs i
-               WHERE (SELECT count(*) FROM laplace.physicalities p
-                       WHERE p.entity_id=i.entity_id AND p.type=1)<>1
-                  OR (SELECT count(*) FROM laplace.entities e WHERE e.id=i.entity_id)<>1) THEN
+     OR EXISTS(SELECT ids.entity_id FROM repair_native_input_ids ids
+               LEFT JOIN laplace.physicalities p ON p.entity_id=ids.entity_id AND p.type=1
+               GROUP BY ids.entity_id HAVING count(p.id)<>1)
+     OR EXISTS(SELECT ids.entity_id FROM repair_native_input_ids ids
+               LEFT JOIN laplace.entities e ON e.id=ids.entity_id
+               GROUP BY ids.entity_id HAVING count(e.id)<>1) THEN
     RAISE EXCEPTION 'Native input changed after its durable receipt';
   END IF;
   IF EXISTS(SELECT FROM repair_candidates c
@@ -564,13 +692,27 @@ BEGIN
            IS DISTINCT FROM c.membership_witnesses) THEN
     RAISE EXCEPTION 'Applicable testimony changed after its durable receipt';
   END IF;
+END $immutable$;
+CREATE TEMP TABLE repair_applied_epoch(epoch bigint) ON COMMIT DROP;
+DO $apply$
+DECLARE expected bigint; changed bigint; retired bigint;
+BEGIN
+  SELECT count(*) INTO expected FROM repair_plan;
+  IF EXISTS(SELECT FROM repair_plan WHERE disposition<>'eligible') THEN
+    RAISE EXCEPTION 'Repair eligibility changed before mutation';
+  END IF;
+  IF EXISTS(SELECT FROM repair_plan r LEFT JOIN laplace.physicalities p ON p.id=r.old_id
+            WHERE pg_temp.repair_snapshot(p) IS DISTINCT FROM r.original) THEN
+    RAISE EXCEPTION 'Original physicality changed after its durable receipt';
+  END IF;
+  PERFORM pg_temp.repair_assert_immutable_evidence();
   IF EXISTS(SELECT FROM repair_candidates c WHERE
       (SELECT jsonb_agg(pg_temp.repair_snapshot(p) ORDER BY p.id) FROM laplace.physicalities p
         WHERE (p.entity_id=c.entity_id AND p.type=3)
            OR p.id=public.laplace_hash128_blake3(c.entity_id||decode('0300','hex')))
         IS DISTINCT FROM c.occupied_projection_evidence)
      OR (SELECT jsonb_agg(pg_temp.repair_snapshot(p) ORDER BY p.id)
-         FROM laplace.physicalities p WHERE p.type=1
+         FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL
            AND public.laplace_trajectory_constituent_ids(p.trajectory)
                && ARRAY(SELECT entity_id FROM repair_owners))
         IS DISTINCT FROM (SELECT jsonb_agg(original ORDER BY id) FROM repair_incoming) THEN
@@ -580,8 +722,12 @@ BEGIN
     INSERT INTO repair_applied_epoch SELECT nextval('laplace.apply_write_epoch');
     UPDATE laplace.physicalities p SET id=r.new_id,type=r.new_type,coord=r.new_coord,
       hilbert_index=r.new_hilbert,trajectory=r.new_trajectory,n_constituents=r.new_count
-    FROM repair_plan r WHERE p.id=r.old_id;
+    FROM repair_plan r WHERE p.id=r.old_id AND r.operation='rewrite-physicality';
     GET DIAGNOSTICS changed=ROW_COUNT;
+    DELETE FROM laplace.physicalities p USING repair_plan r
+      WHERE p.id=r.old_id AND r.operation='retire-redundant-content';
+    GET DIAGNOSTICS retired=ROW_COUNT;
+    changed:=changed+retired;
     IF changed<>expected THEN
       RAISE EXCEPTION 'Repair updated % rows, expected %; rolling back',changed,expected;
     END IF;
@@ -606,14 +752,31 @@ BEGIN
         OR public.laplace_radius_origin(r.new_coord)>1.0+1e-12)) THEN
       RAISE EXCEPTION 'Repair native content identity/descent/bounds proof failed; rolling back';
     END IF;
+    PERFORM pg_temp.repair_assert_immutable_evidence();
+    IF EXISTS(SELECT FROM repair_plan r JOIN repair_candidates c ON c.id=r.old_id WHERE
+      (SELECT jsonb_agg(pg_temp.repair_snapshot(p) ORDER BY p.id) FROM laplace.physicalities p
+        WHERE (p.entity_id=r.entity_id AND p.type=3)
+           OR p.id=public.laplace_hash128_blake3(r.entity_id||decode('0300','hex')))
+        IS DISTINCT FROM CASE WHEN r.repair_kind='chess-line' THEN c.occupied_projection_evidence
+                              ELSE jsonb_build_array(r.proposed) END)
+       OR (SELECT jsonb_agg(pg_temp.repair_snapshot(p) ORDER BY p.id)
+           FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL
+             AND public.laplace_trajectory_constituent_ids(p.trajectory)
+                 && ARRAY(SELECT entity_id FROM repair_owners))
+          IS DISTINCT FROM (SELECT jsonb_agg(original ORDER BY id) FROM repair_incoming) THEN
+      RAISE EXCEPTION 'Repair changed Projection occupation or incoming Content; rolling back';
+    END IF;
   END IF;
 END $apply$;
 SELECT jsonb_build_object('kind','applied','count',(SELECT count(*) FROM repair_plan),
+  'rewrites',(SELECT count(*) FROM repair_plan WHERE operation='rewrite-physicality'),
+  'retirements',(SELECT count(*) FROM repair_plan WHERE operation='retire-redundant-content'),
   'epoch',(SELECT epoch FROM repair_applied_epoch),'postconditions','exact-row-readback-and-native-content-proof');
 """
 
 
 def main() -> int:
+    deadline = time.monotonic() + MAINTENANCE_TIMEOUT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database', default=os.environ.get('PGDATABASE', 'laplace'))
     parser.add_argument('--receipt-root', type=Path, default=Path('/build/laplace/recovery/legacy-content-repair'))
@@ -656,11 +819,20 @@ def main() -> int:
                "-p", os.environ.get("PGPORT", "5432"), "-U", os.environ.get("PGUSER", "laplace_admin"),
                "-d", args.database, "-v", "ON_ERROR_STOP=1"]
     args.receipt_root.mkdir(parents=True, mode=0o770, exist_ok=True)
-    pending = unresolved_submissions(args.receipt_root)
+    pending = unresolved_submissions(args.receipt_root, deadline=deadline)
     directory = args.receipt_root / (str(time.time_ns()) + "-" + uuid.uuid4().hex)
-    outcome = preserve_and_apply(command, plan_sql(args.max_rows, pending, producer_generation), apply_sql(), directory,
-        source_sha=source_sha, max_rows=args.max_rows, max_bytes=MAX_BYTES)
-    close_reconciled_submissions(args.receipt_root, directory)
+    outcome = preserve_and_apply(command, plan_sql(args.max_rows, pending, producer_generation, deadline=deadline), apply_sql(), directory,
+        source_sha=source_sha, max_rows=args.max_rows, max_bytes=None, max_native_inputs=None,
+        require_resource_inventory=True, max_line_bytes=MAX_LINE_BYTES, timeout=MAINTENANCE_TIMEOUT,
+        deadline_monotonic=deadline)
+    try:
+        close_reconciled_submissions(args.receipt_root, directory, deadline=deadline)
+    except BaseException as error:
+        write_new_json(directory / "postcommit-reconciliation-failure.json", {
+            "disposition": "commit-confirmed-reconciliation-bookkeeping-failed",
+            "plan_sha256": outcome["plan_sha256"], "error_type": type(error).__name__,
+            "at_unix_nanoseconds": time.time_ns()})
+        raise
     print(json.dumps({"receipt_directory": str(directory), "outcome": outcome}, sort_keys=True))
     return 0
 

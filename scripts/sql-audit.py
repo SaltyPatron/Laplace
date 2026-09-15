@@ -384,12 +384,15 @@ def decode_quoted(literal: str) -> str | None:
         value = ast.literal_eval(literal)
         return value if isinstance(value, str) else None
     except (SyntaxError, ValueError):
-        quote = literal.find('"')
-        if quote < 0:
-            quote = literal.find("'")
-        if quote < 0:
+        opening = re.match("(?i)([rubf]*)(\"{3}|'{3}|\"|')", literal)
+        if opening is None:
             return None
-        body = literal[quote + 1:-1]
+        prefix, delimiter = opening.groups()
+        if not literal.endswith(delimiter) or len(literal) < opening.end() + len(delimiter):
+            return None
+        body = literal[opening.end():-len(delimiter)]
+        if "r" in prefix.lower():
+            return body
         escapes = {
             "\\": "\\", '"': '"', "'": "'", "n": "\n", "r": "\r",
             "t": "\t", "b": "\b", "f": "\f", "v": "\v", "0": "\0",
@@ -410,8 +413,45 @@ def python_string_chunks(text: str) -> list[tuple[str, int, int]]:
         pending.clear()
 
     try:
-        stream = tokenize.generate_tokens(iter(text.splitlines(keepends=True)).__next__)
+        lines = text.splitlines(keepends=True)
+        stream = tokenize.generate_tokens(iter(lines).__next__)
+        # Python 3.12 tokenizes formatted strings into separate start/middle/end
+        # tokens, including the Python expressions inside them. Recover the
+        # complete source literal so the audit sees the same SQL as Python 3.10
+        # and 3.11, without evaluating any interpolation or treating its nested
+        # string literals as separate SQL statements.
+        fstring_start = getattr(tokenize, "FSTRING_START", None)
+        fstring_end = getattr(tokenize, "FSTRING_END", None)
         for token in stream:
+            if token.type == fstring_start:
+                depth = 1
+                last = token
+                for last in stream:
+                    if last.type == fstring_start:
+                        depth += 1
+                    elif last.type == fstring_end:
+                        depth -= 1
+                        if depth == 0:
+                            break
+                if depth:
+                    flush()
+                    break
+                start_line, start_column = token.start
+                end_line, end_column = last.end
+                if start_line == end_line:
+                    literal = lines[start_line - 1][start_column:end_column]
+                else:
+                    literal = (
+                        lines[start_line - 1][start_column:]
+                        + "".join(lines[start_line:end_line - 1])
+                        + lines[end_line - 1][:end_column]
+                    )
+                value = decode_quoted(literal)
+                if value is not None:
+                    pending.append((value, start_line, end_line))
+                else:
+                    flush()
+                continue
             if token.type == tokenize.STRING:
                 value = decode_quoted(token.string)
                 if value is not None:

@@ -43,6 +43,29 @@ class ChessEnvironmentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "full search thread"):
             bench.plan(self.args(reserve_cpus=0), self.host(0.5))
 
+    def test_six_physical_cores_are_measured_below_twelve_logical_threads(self):
+        host = {**self.host(12), "physical_first_cpu_order": list(range(12)),
+                "physical_core_groups_within_affinity": [[core, core + 6] for core in range(6)]}
+        result = bench.plan(self.args(memory_mb=8192), host)
+        self.assertEqual(result["cpu_budget"], 10)
+        self.assertEqual(result["threads"], [1, 2, 4, 6, 8, 10])
+        self.assertEqual(result["concurrency"], [1, 2, 4, 6, 8, 10])
+        paired = bench.plan(self.args(memory_mb=8192, match_threads=2), host)
+        self.assertEqual(paired["concurrency"], [1, 2, 3, 4, 5])
+
+    def test_physical_boundary_respects_selected_affinity_and_explicit_points(self):
+        host = {**self.host(12), "physical_first_cpu_order": list(range(12)),
+                "physical_core_groups_within_affinity": [[core, core + 6] for core in range(6)]}
+        limited = bench.plan(self.args(cpu_budget=3), host)
+        self.assertEqual(limited["cpu_affinity"], [0, 1, 2])
+        self.assertEqual(limited["threads"], [1, 2, 3])
+        self.assertEqual(limited["concurrency"], [1, 2, 3])
+        explicit = bench.plan(self.args(memory_mb=8192, threads="1,8", concurrency="1,4"), host)
+        self.assertEqual(explicit["threads"], [1, 8])
+        self.assertEqual(explicit["concurrency"], [1, 4])
+        memory_limited = bench.plan(self.args(memory_mb=1100), host)
+        self.assertEqual(memory_limited["concurrency"], [1, 2])
+
     def test_tournament_memory_accounts_for_both_resident_engines(self):
         result = bench.plan(self.args(memory_mb=1100), self.host())
         self.assertEqual([1, 2], result["concurrency"])

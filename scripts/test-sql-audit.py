@@ -96,6 +96,67 @@ q = ("SELECT id "
         chunks = AUDIT.string_chunks(source, ".py")
         self.assertEqual([("SELECT id FROM things WHERE id = %s", 2, 4)], chunks)
 
+    def test_python_formatted_sql_is_audited_without_evaluating_expressions(self):
+        source = 'q = f"UPDATE repair_plan SET proposed = {fail_if_called()}"\n'
+        chunks = AUDIT.string_chunks(source, ".py")
+        self.assertEqual(
+            [("UPDATE repair_plan SET proposed = {fail_if_called()}", 1, 1)],
+            chunks,
+        )
+        statement = AUDIT.make_statement(
+            "repair.py", "script", "embedded", chunks[0][0], 1, 1, 1,
+            forced_kind="query",
+        )
+        self.assertIn(
+            "LPSQL103",
+            {item.rule for item in AUDIT.query_findings(statement, AUDIT.AuditConfig())},
+        )
+
+    def test_python_formatted_sql_keeps_nested_literals_in_the_outer_unit(self):
+        source = '''q = f"SELECT id FROM {f'table_{suffix}'} WHERE x = {'value'}"\n'''
+        chunks = AUDIT.string_chunks(source, ".py")
+        self.assertEqual(
+            [("SELECT id FROM {f'table_{suffix}'} WHERE x = {'value'}", 1, 1)],
+            chunks,
+        )
+
+    def test_python_multiline_formatted_sql_preserves_statement_and_line_boundaries(self):
+        source = '''# leading line
+q = f"""UPDATE repair_plan
+SET proposed = {value};
+SELECT id FROM repair_plan;"""
+r = (f"DELETE FROM {table} "
+     "WHERE id = %s")
+'''
+        chunks = AUDIT.string_chunks(source, ".py")
+        self.assertEqual(2, len(chunks))
+        self.assertEqual(
+            ("UPDATE repair_plan\nSET proposed = {value};\nSELECT id FROM repair_plan;", 2, 4),
+            chunks[0],
+        )
+        self.assertEqual(("DELETE FROM {table} WHERE id = %s", 5, 6), chunks[1])
+
+    def test_python_outer_single_quotes_are_not_confused_with_expression_quotes(self):
+        source = '''q = f'SELECT id FROM {"table"} WHERE x = {x}'\n'''
+        self.assertEqual(
+            [('SELECT id FROM {"table"} WHERE x = {x}', 1, 1)],
+            AUDIT.string_chunks(source, ".py"),
+        )
+
+    def test_python_raw_formatted_sql_preserves_backslashes(self):
+        source = r'''q = fr"SELECT id FROM {table} WHERE pattern = '\n'"'''
+        self.assertEqual(
+            [(r"SELECT id FROM {table} WHERE pattern = '\n'", 1, 1)],
+            AUDIT.string_chunks(source, ".py"),
+        )
+
+    def test_python_incomplete_formatted_literal_does_not_hide_previous_sql(self):
+        source = 'q = "DELETE FROM repair_plan"\nr = f"""SELECT id FROM {table}\n'
+        self.assertEqual(
+            [("DELETE FROM repair_plan", 1, 1)],
+            AUDIT.string_chunks(source, ".py"),
+        )
+
 
 class FindingTests(unittest.TestCase):
     def make(self, sql: str, kind: str | None = None):

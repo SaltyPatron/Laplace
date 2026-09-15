@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -101,6 +102,96 @@ class RecoveryEnvelopeTests(unittest.TestCase):
         envelope["player_session_destinations"]["canonical_target_equivalence_by_kind"][0]["semantic_difference_pairs"] = 0
         with self.assertRaisesRegex(RuntimeError, "every occupied target pair"):
             CLASSIFIER.validate_recovery_envelope(envelope)
+
+    def lineage_envelope(self, conflicts=4):
+        examples = []
+        for index in range(min(conflicts, 10)):
+            old, target = f"{index + 100:032x}", f"{index + 200:032x}"
+            examples.append({"parent_id":f"{index:032x}", "content_physicality_id":old,
+                "canonical_target_id":target, "semantic_equivalent":False,
+                "carriers":[{"role":role, "physicality":{"id":identity}, "expanded_count":1,
+                             "ordered_alias_occurrences":[{"ordinal":1,"entity_id":"name-root"}]}
+                            for role,identity in (("old-content",old),("existing-projection",target))]})
+        return {"native_inputs":{"prospective_snapshot_records":872007,
+                                 "joined_entity_content_snapshot_rows":872007},
+                "player_session_destinations":{
+                    "canonical_target_equivalence_by_kind":[{
+                        "parent_kind":"player", "occupied_target_pairs":198,
+                        "semantic_equivalent_pairs":198-conflicts, "semantic_difference_pairs":conflicts}],
+                    "player_projection_conflict_lineage":{
+                        "schema":"laplace.player-projection-conflict-lineage/v1", "conflicting_pairs":conflicts,
+                        "example_limit":10, "captured_pairs":len(examples), "examples_complete":conflicts<=10,
+                        "examples":examples}}}
+
+    def test_conflict_lineage_reconciles_complete_and_bounded_capture_separately(self):
+        for conflicts in (0, 4, 10, 11, 198):
+            with self.subTest(conflicts=conflicts):
+                CLASSIFIER.validate_recovery_envelope(self.lineage_envelope(conflicts))
+        envelope = self.lineage_envelope(11)
+        envelope["player_session_destinations"]["player_projection_conflict_lineage"]["examples_complete"] = True
+        with self.assertRaisesRegex(RuntimeError, "complete conflict set"):
+            CLASSIFIER.validate_recovery_envelope(envelope)
+
+    def test_conflict_lineage_rejects_missing_repeated_or_relabelled_rows(self):
+        original = self.lineage_envelope()
+        for corruption in ("count", "missing-target", "wrong-target", "missing-occurrence", "duplicate", "equivalent"):
+            with self.subTest(corruption=corruption):
+                envelope = copy.deepcopy(original)
+                lineage = envelope["player_session_destinations"]["player_projection_conflict_lineage"]
+                example = lineage["examples"][0]
+                if corruption == "count": lineage["captured_pairs"] = 3
+                elif corruption == "missing-target": example["carriers"].pop()
+                elif corruption == "wrong-target": example["carriers"][1]["physicality"]["id"] = "different"
+                elif corruption == "missing-occurrence": example["carriers"][1]["ordered_alias_occurrences"] = []
+                elif corruption == "duplicate": lineage["examples"][1] = copy.deepcopy(example)
+                elif corruption == "equivalent": example["semantic_equivalent"] = True
+                with self.assertRaises(RuntimeError):
+                    CLASSIFIER.validate_recovery_envelope(envelope)
+
+    def test_lineage_selection_uses_complete_conflict_set_before_fixed_example_bound(self):
+        sql = CLASSIFIER.projection_conflict_lineage_ctes()
+        self.assertIn("FROM recovery_projection_difference_examples", sql)
+        self.assertIn("WHERE parent_kind='player' AND example_number<=10", sql)
+        output = CLASSIFIER.projection_conflict_lineage_json()
+        self.assertIn("'conflicting_pairs',(SELECT count(*) FROM recovery_projection_difference_examples WHERE parent_kind='player')", output)
+        self.assertIn("'captured_pairs',(SELECT count(*) FROM recovery_conflict_lineage)", output)
+        self.assertIn("'examples_complete'", output)
+
+    def test_lineage_preserves_full_rows_and_all_testimony_outcomes_for_both_aliases(self):
+        sql = CLASSIFIER.projection_conflict_lineage_ctes()
+        self.assertIn(snapshot_expression("carrier") + " AS snapshot", sql)
+        self.assertIn(snapshot_expression("content") + " AS snapshot", sql)
+        self.assertIn("('old-content',example.content_physicality_id)", sql)
+        self.assertIn("('existing-projection',example.target_id)", sql)
+        testimony = sql.split("'has_name_alias_testimony'", 1)[1]
+        self.assertIn("jsonb_agg(to_jsonb(witness) ORDER BY witness.id)", testimony)
+        self.assertIn("witness.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')", testimony)
+        self.assertIn("witness.object_id IN (SELECT occurrence.child_id FROM recovery_conflict_occurrences", testimony)
+        for forbidden in ("witness.outcome", "witness.source_id=", "witness.observation_count", "LIMIT"):
+            self.assertNotIn(forbidden, testimony)
+
+    def test_lineage_reports_native_checks_and_direct_singleton_recipe_without_replacement_mean(self):
+        sql = CLASSIFIER.projection_conflict_lineage_ctes()
+        for fragment in ("public.laplace_trajectory_constituents(",
+                         "public.laplace_trajectory_expanded_constituents(",
+                         "public.laplace_hash128_merkle(0::smallint,proof.ids)",
+                         "public.laplace_radius_origin(content.coord)",
+                         "public.laplace_hilbert_encode(content.coord)",
+                         "ST_AsEWKB(carrier.coord)=ST_AsEWKB(content.coord)",
+                         "carrier.hilbert_index=content.hilbert_index",
+                         "item.flags", "'entities'", "'content_rows'", "'logical_manifest_complete'",
+                         "realize.reconstruct_content(child_id)", "'reconstruction_is_null'"):
+            self.assertIn(fragment, sql)
+        self.assertNotIn("karcher", sql.lower())
+        self.assertNotIn("centroid", sql.lower())
+        self.assertIn("TryDecomposeRoot(name)", CLASSIFIER.projection_conflict_lineage_json())
+
+    def test_lineage_occurrences_remain_scoped_to_the_exact_old_target_pair(self):
+        sql = CLASSIFIER.projection_conflict_lineage_ctes()
+        self.assertEqual(2, sql.count("AND occurrence.content_physicality_id=carrier.content_physicality_id"))
+        self.assertEqual(2, sql.count("AND occurrence.role=carrier.role"))
+        self.assertIn("CASE WHEN carrier.packed_bounds_valid THEN carrier.trajectory ELSE NULL END", sql)
+        self.assertIn("CASE WHEN packed.valid THEN content.trajectory ELSE NULL END", sql)
 
     @unittest.skipIf(parse_sql_json is None, "optional PostgreSQL parser is not installed")
     def test_postgresql_parser_accepts_only_select_query_without_mutating_statements(self):

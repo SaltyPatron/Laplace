@@ -175,6 +175,7 @@ class NativeRepairProof:
         assert manifest["plan_sha256"] == hashlib.sha256(contents).hexdigest(), "receipt digest changed"
         assert manifest["source_sha"] == self.source_sha, "receipt lost source identity"
         records = [json.loads(line) for line in contents.splitlines()]
+        assert REPAIR.verified_plan(directory) == (manifest, records[0])
         native_inputs = [row for row in records if row["kind"] == "native-input"]
         assert manifest["native_input_rows"] == len(native_inputs), "native input receipt count changed"
         assert records[-1]["native_input_count"] == len(native_inputs), "native input plan count changed"
@@ -285,6 +286,14 @@ class NativeRepairProof:
         self.readback("repeat", after, self.state())
         reconciliation = self.records("repeat")[0]["prior_submission_reconciliation"]
         assert len(reconciliation) == 1 and reconciliation[0]["disposition"] == "prior-commit-confirmed"
+        replay_files = list(prior.parent.glob("reconciliation-input-*.jsonl"))
+        assert len(replay_files) == 1
+        replay_rows = [json.loads(line) for line in replay_files[0].read_bytes().splitlines()]
+        assert all(row["kind"] != "native-input" for row in replay_rows)
+        assert replay_rows[-1] == {"kind": "verified-native-input-count", "count": 8,
+            "source_plan_sha256": hashlib.sha256(original_receipt).hexdigest(),
+            "source_plan_bytes": len(original_receipt)}
+        assert replay_rows[:-1] == [row for row in records if row["kind"] != "native-input"]
         self.completed.append("repeat-no-op-and-prior-commit-reconciliation")
 
         self.sql("SELECT repair_test.reset();")
@@ -315,6 +324,106 @@ class NativeRepairProof:
           FROM laplace.physicalities WHERE id=repair_test.physicality_id('player',3::smallint);""")
         self.planning_failure("prior-proposed-and-original-coexist", prior=[prior],
                               expected_error="Unknown repair submission diverged")
+
+    def compatible_projection_retirement(self) -> None:
+        setup = """
+          INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
+              n_constituents,alignment_residual,source_dim,observed_at)
+          SELECT public.laplace_hash128_blake3(entity_id||decode('0300','hex')),entity_id,3,
+            coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,
+            CASE WHEN entity_id=repair_test.id('session') THEN observed_at+interval '1 day'
+                 ELSE observed_at END
+          FROM laplace.physicalities WHERE id IN (repair_test.physicality_id('player'),
+            repair_test.physicality_id('session'));
+          """
+        self.sql("SELECT repair_test.reset();" + setup)
+        before = self.state()
+        result = self.run("compatible-projection-retirement")
+        after = self.state()
+        records = self.records("compatible-projection-retirement")
+        assert result["applied"]["count"] == 3
+        assert result["applied"]["rewrites"] == 1 and result["applied"]["retirements"] == 2
+        assert records[-1]["rewrites"] == 1 and records[-1]["retirements"] == 2
+        rows = [row for row in records if row["kind"] == "physicality"]
+        expected = dict(before["physicalities"])
+        for row in rows:
+            old, new = row["original"], row["proposed"]
+            assert expected.pop(old["id"]) == old
+            if row["repair_kind"] == "chess-line":
+                assert row["operation"] == "rewrite-physicality"
+                expected[new["id"]] = new
+            else:
+                assert row["operation"] == "retire-redundant-content"
+                assert row["evidence"]["occupied_projections"] == [new]
+                assert row["evidence"]["projection_semantically_equal"] is True
+                assert new == before["physicalities"][new["id"]] == after["physicalities"][new["id"]]
+                assert old["trajectory_ewkb"] == new["trajectory_ewkb"], "packed flags changed"
+                if row["repair_kind"] == "session-projection":
+                    assert old["observed_at_binary"] != new["observed_at_binary"], "independent observation lost"
+        assert after["physicalities"] == expected
+        assert after["entities"] == before["entities"] and after["attestations"] == before["attestations"]
+        self.readback("compatible-projection-retirement", before, after)
+        self.completed.append("compatible-projection-retirement-preserves-both-originals-and-target-time")
+
+        prior = self.receipts / "compatible-projection-retirement" / "plan.jsonl"
+        prior_bytes = prior.read_bytes()
+        repeat = self.run("retirement-prior-applied", prior=[prior], max_rows=1)
+        assert repeat["applied"]["count"] == 0 and self.state() == after
+        assert self.records("retirement-prior-applied")[0]["prior_submission_reconciliation"][0]["disposition"] == "prior-commit-confirmed"
+        self.completed.append("retirement-prior-applied-exact-target")
+
+        self.sql("SELECT repair_test.reset();" + setup)
+        assert self.state() == before
+        retry = self.run("retirement-prior-originals", prior=[prior])
+        assert retry["applied"]["count"] == 3 and self.state() == after
+        assert self.records("retirement-prior-originals")[0]["prior_submission_reconciliation"][0]["disposition"] == "originals-confirmed"
+        assert prior.read_bytes() == prior_bytes
+        self.completed.append("retirement-prior-originals-both-coexisting-rows")
+
+        self.sql("UPDATE laplace.physicalities SET observed_at=observed_at+interval '1 microsecond' WHERE id=repair_test.physicality_id('session',3::smallint);")
+        self.planning_failure("retirement-prior-target-diverged", prior=[prior],
+                              expected_error="Unknown repair submission diverged")
+        self.sql("SELECT repair_test.reset();" + setup + "DELETE FROM laplace.physicalities WHERE id=repair_test.physicality_id('session');")
+        self.planning_failure("retirement-prior-partial", prior=[prior],
+                              expected_error="Unknown repair submission diverged")
+        self.rollback("retirement-target-changed-after-receipt", "UPDATE laplace.physicalities SET observed_at=observed_at+interval '1 microsecond' WHERE id=repair_test.physicality_id('session',3::smallint);",
+                      "Projection or incoming Content changed after its durable receipt", setup=setup)
+        self.rollback("retirement-trigger-changes-native-child", """
+          CREATE FUNCTION pg_temp.corrupt_native_dependency() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            UPDATE laplace.physicalities SET alignment_residual=0.875
+            WHERE id=repair_test.physicality_id('m1');
+            RETURN OLD;
+          END $$;
+          CREATE TRIGGER repair_retirement_dependency AFTER DELETE ON laplace.physicalities
+            FOR EACH ROW EXECUTE FUNCTION pg_temp.corrupt_native_dependency();
+          """, "Native input changed after its durable receipt", setup=setup)
+        self.rollback("retirement-trigger-changes-owner-entity", """
+          CREATE FUNCTION pg_temp.corrupt_owner_entity() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            UPDATE laplace.entities SET created_at=created_at+interval '1 microsecond'
+            WHERE id=repair_test.id('session');
+            RETURN OLD;
+          END $$;
+          CREATE TRIGGER repair_retirement_owner AFTER DELETE ON laplace.physicalities
+            FOR EACH ROW EXECUTE FUNCTION pg_temp.corrupt_owner_entity();
+          """, "Owner or position evidence changed after its durable receipt", setup=setup)
+        self.rollback("retirement-trigger-changes-testimony", """
+          CREATE FUNCTION pg_temp.corrupt_membership_testimony() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            UPDATE laplace.attestations SET observation_count=observation_count+1
+            WHERE source_id=repair_test.id('source');
+            RETURN OLD;
+          END $$;
+          CREATE TRIGGER repair_retirement_testimony AFTER DELETE ON laplace.physicalities
+            FOR EACH ROW EXECUTE FUNCTION pg_temp.corrupt_membership_testimony();
+          """, "Applicable testimony changed after its durable receipt", setup=setup)
+        self.rollback("retirement-delete-trigger-keeps-content", """
+          CREATE FUNCTION pg_temp.keep_redundant_content() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN RETURN NULL; END $$;
+          CREATE TRIGGER repair_retirement_corruption BEFORE DELETE ON laplace.physicalities
+            FOR EACH ROW EXECUTE FUNCTION pg_temp.keep_redundant_content();
+          """, "Repair updated", setup=setup)
 
     def one_move(self) -> None:
         self.sql("SELECT repair_test.reset();")
@@ -425,8 +534,8 @@ class NativeRepairProof:
         self.completed.append(name)
         return records
 
-    def rollback(self, name: str, inject: str, expected_error: str) -> None:
-        self.sql("SELECT repair_test.reset();")
+    def rollback(self, name: str, inject: str, expected_error: str, *, setup: str = "") -> None:
+        self.sql("SELECT repair_test.reset();" + setup)
         before = self.state()
         try:
             self.run(name, apply=inject + "\n" + REPAIR.apply_sql())
@@ -464,11 +573,13 @@ class NativeRepairProof:
              "missing-exact-confirmed-session-membership"),
             ("unresolved-move", "DELETE FROM laplace.physicalities WHERE id=repair_test.physicality_id('m1');",
              "unresolved-or-malformed-original-manifest"),
+            ("invalid-native-child-hilbert", "UPDATE laplace.physicalities SET hilbert_index=decode(repeat('00',16),'hex') WHERE id=repair_test.physicality_id('m1');",
+             "invalid-native-input-content"),
             ("malformed-logical-count", "UPDATE laplace.physicalities SET n_constituents=3 WHERE id=repair_test.physicality_id('game');",
              "unresolved-or-malformed-original-manifest"),
             ("nonzero-move-flags", "UPDATE laplace.physicalities SET trajectory=ST_MakeLine(ARRAY[public.laplace_mantissa_pack(repair_test.id('m1'),1,1,2),public.laplace_mantissa_pack(repair_test.id('m2'),2,1,0)]) WHERE id=repair_test.physicality_id('game');",
              "nonzero-move-occurrence-flags"),
-            ("occupied-player-projection", "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT repair_test.physicality_id('player',3::smallint),entity_id,3,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at FROM laplace.physicalities WHERE id=repair_test.physicality_id('player');",
+            ("conflicting-player-projection", "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT repair_test.physicality_id('player',3::smallint),entity_id,3,coord,hilbert_index,trajectory,n_constituents,0.5,source_dim,observed_at FROM laplace.physicalities WHERE id=repair_test.physicality_id('player');",
              "occupied-projection-target"),
             ("occupied-noncanonical-player-projection", "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT realize.canonical_id('legacy-repair-regression/noncanonical-player-projection'),entity_id,3,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at FROM laplace.physicalities WHERE id=repair_test.physicality_id('player');",
              "occupied-projection-target"),
@@ -525,6 +636,13 @@ class NativeRepairProof:
           UPDATE laplace.physicalities SET coord=ST_MakePoint(0,0,0,1),
             hilbert_index=public.laplace_hilbert_encode(ST_MakePoint(0,0,0,1))
           WHERE id=repair_test.physicality_id('m1');
+          """, "Native input changed after its durable receipt")
+        self.rollback("duplicate-native-child-after-receipt", """
+          INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
+              n_constituents,alignment_residual,source_dim,observed_at)
+          SELECT realize.canonical_id('legacy-repair-regression/duplicate-m1'),entity_id,type,
+            coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at
+          FROM laplace.physicalities WHERE id=repair_test.physicality_id('m1');
           """, "Native input changed after its durable receipt")
         self.rollback("post-update-corruption", """
           CREATE FUNCTION pg_temp.corrupt_repair() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -685,6 +803,7 @@ def main() -> int:
         proof.sql(FIXTURE)
         proof.success()
         proof.one_move()
+        proof.compatible_projection_retirement()
         proof.negative_cases()
         proof.hash_correct_missing_child()
         proof.healthy_corpus_over_envelope()
