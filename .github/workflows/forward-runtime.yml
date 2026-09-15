@@ -1,0 +1,77 @@
+name: Forward runtime execution
+on:
+  push:
+    branches: [work/recover-closed-pr-implementations-20260915]
+    paths: [.github/workflows/forward-runtime.yml]
+permissions:
+  contents: read
+jobs:
+  forward:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 10
+    concurrency:
+      group: laplace-shared-workspace
+      cancel-in-progress: false
+    env:
+      LAPLACE_EXTERNAL: /build/external
+      LAPLACE_INSTALL_PREFIX: /opt/laplace
+      LAPLACE_PG_PREFIX: /opt/laplace/pgsql-18
+      PGDATABASE: laplace
+    steps:
+      - name: Execute failing source and inspect actual PostgreSQL call contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          evidence="/build/laplace/work/forward-runtime-${GITHUB_RUN_ID}"
+          mkdir -p "$evidence"
+          flock --exclusive --close /build/laplace/work/host-resource.lock bash -euo pipefail <<'BASH' 2>&1 | tee "$evidence/execution.log"
+          evidence="/build/laplace/work/forward-runtime-${GITHUB_RUN_ID}"
+          target=9a16d31c10184de77484f28990f248a366189c6a
+          git diff --binary > "$evidence/pre-checkout.patch"
+          git fetch --no-tags --depth=1 origin "$target"
+          git checkout --detach "$target"
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_REGRESS_DB="laplace_forward_${GITHUB_RUN_ID}"
+          export LAPLACE_CI_SESSION_DIRECTORY="$evidence/session"
+          mkdir -m 700 "$LAPLACE_CI_SESSION_DIRECTORY"
+          trap 'bash scripts/pr-db-proof.sh --phase cleanup' EXIT
+          bash scripts/pr-db-proof.sh --phase private-db-start
+          stage="$(python3 -c 'import json,os; print(json.load(open(os.environ["LAPLACE_CI_SESSION_DIRECTORY"]+"/private-db.json"))["stage"])')"
+          export PGHOST="$stage/socket" PGPORT=55432 PGUSER=laplace_admin PGDATABASE=postgres
+          export PGOPTIONS="-c extension_control_path=$stage/opt/laplace/share/postgresql/18:\$system -c dynamic_library_path=$PWD/build/extension/laplace_substrate:$PWD/build/extension/laplace_geom:$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:\$libdir"
+          export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
+          createdb "$LAPLACE_REGRESS_DB"
+          export PGDATABASE="$LAPLACE_REGRESS_DB"
+          psql -X -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION postgis; CREATE EXTENSION laplace_geom; CREATE EXTENSION laplace_substrate;'
+          psql -X -v ON_ERROR_STOP=1 -c "SELECT p.oid::regprocedure,p.proretset,p.prorettype::regtype,p.prosrc,pg_get_function_result(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='generation' AND p.proname IN ('forward_prompt','forward_program','forward_trace');"
+          python3 - "$evidence" <<'PY'
+          from pathlib import Path
+          import sys
+          root=Path(sys.argv[1])
+          source=Path('extension/laplace_substrate/tests/sql/generation_corpus.sql').read_text()
+          fixture=source.split('BEGIN;',1)[1].split('-- The declared relational operation',1)[0]
+          root.joinpath('whole-input.sql').write_text('\\set VERBOSITY verbose\nBEGIN;\n'+fixture+'\nROLLBACK;\n')
+          # Keep the exact witnessed sequence, print each public surface separately.
+          start=fixture.split('    SELECT array_agg(entity ORDER BY step)',1)[0]
+          end='END\n$whole_input$;\n'
+          calls=[]
+          args="('β',3,5,0.0,8,7,0,8,NULL,'{}'::bytea[])"
+          for name in ('forward_program','forward_prompt','forward_trace'):
+              calls += ['\\echo SURFACE '+name, 'EXPLAIN (VERBOSE, COSTS OFF) SELECT * FROM generation.'+name+args+';', 'SELECT * FROM generation.'+name+args+';']
+          root.joinpath('surfaces.sql').write_text('\\set VERBOSITY verbose\nBEGIN;\n'+start+end+'\n'+'\n'.join(calls)+'\nROLLBACK;\n')
+          PY
+          psql -X -f "$evidence/whole-input.sql"
+          psql -X -f "$evidence/surfaces.sql"
+          BASH
+      - name: Retain exact execution output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: forward-runtime-${{ github.run_id }}
+          path: /build/laplace/work/forward-runtime-${{ github.run_id }}/
+          retention-days: 7
+          if-no-files-found: warn
