@@ -96,14 +96,21 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             // Withdraw one actual fact, then deposit its replacement through the
             // shared native witness/fold path. The task declaration is unchanged.
             await using (var retract = pg.DataSource.CreateCommand(
-                "DELETE FROM laplace.attestations WHERE subject_id=$1 AND type_id=$2 AND object_id=$3 AND source_id=$4;"
-                + "DELETE FROM laplace.consensus WHERE subject_id=$1 AND type_id=$2 AND object_id=$3;"))
+                "DELETE FROM laplace.attestations WHERE subject_id=$1 AND type_id=$2 AND object_id=$3 AND source_id=$4"))
             {
                 retract.Parameters.AddWithValue(input.ToBytes());
                 retract.Parameters.AddWithValue(causes.ToBytes());
                 retract.Parameters.AddWithValue(answer.ToBytes());
                 retract.Parameters.AddWithValue(source.ToBytes());
-                await retract.ExecuteNonQueryAsync();
+                Assert.Equal(1, await retract.ExecuteNonQueryAsync());
+            }
+            await using (var retract = pg.DataSource.CreateCommand(
+                "DELETE FROM laplace.consensus WHERE subject_id=$1 AND type_id=$2 AND object_id=$3"))
+            {
+                retract.Parameters.AddWithValue(input.ToBytes());
+                retract.Parameters.AddWithValue(causes.ToBytes());
+                retract.Parameters.AddWithValue(answer.ToBytes());
+                Assert.Equal(1, await retract.ExecuteNonQueryAsync());
             }
             await Apply(new SubstrateChangeBuilder(source, "operational-execution-replacement/" + scope)
                 .AddAttestation(Fact(input, causes, changedAnswer)).Build());
