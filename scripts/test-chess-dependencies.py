@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Dependency report must fail missing tools and distinguish partial data coverage."""
 import importlib.util
+import contextlib
+import io
 import os
 from pathlib import Path
 import tempfile
@@ -13,6 +15,28 @@ spec.loader.exec_module(doctor)
 
 
 class DependencyReportTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Linux executable selection")
+    def test_linux_doctor_probes_configured_build_and_honors_explicit_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            build = prefix / "configured build"
+            for config, expected in (
+                ({"LAPLACE_CUTECHESS_BUILD": str(build)}, build / "cutechess-cli"),
+                ({"LAPLACE_CUTECHESS_BUILD": str(build), "LAPLACE_CUTECHESS": str(prefix / "explicit")}, prefix / "explicit"),
+                ({}, prefix / "bin/cutechess-cli"),
+            ):
+                def selected_probe(report, name, probe):
+                    if name == "cutechess":
+                        probe()
+                    report.append({"name": name, "required": True, "status": "ready"})
+                with self.subTest(config=config), patch.object(doctor, "configuration", return_value=config), \
+                        patch.object(doctor, "check", side_effect=selected_probe), \
+                        patch.object(doctor, "cutechess") as probe, \
+                        patch.object(doctor.sys, "argv", ["doctor", "--prefix", str(prefix)]), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(0, doctor.main())
+                    probe.assert_called_once_with(expected)
+
     def test_failed_executable_is_required_failure(self):
         report = []
         def absent():

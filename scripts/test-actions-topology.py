@@ -342,6 +342,16 @@ run_perf() { echo unexpected-perf; }
             with self.subTest(index=index):
                 self.check_audit(mutation, diagnostic)
 
+    def test_native_only_deploy_cannot_authorize_installed_corpus_or_measurement(self):
+        old_gate = "env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')"
+        for key, name, condition, diagnostic in (
+            ("id", "chess_benchmark_gate", old_gate, "activation must precede measurement authorization"),
+            ("name", "Admit official Stockfish source and verify native corpus readback", old_gate, "application-publishing stage"),
+            ("name", "Retain official Stockfish corpus admission evidence", "always() && " + old_gate, "application-publishing stage"),
+        ):
+            with self.subTest(name=name):
+                self.check_audit(lambda ws: self.step(ws, "laplace.yml", key, name).update({"if": condition}), diagnostic)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

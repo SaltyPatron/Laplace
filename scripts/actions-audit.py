@@ -165,12 +165,19 @@ def product_topology(main: dict) -> None:
     lifecycle = unique_step(steps, "name", "Run full product lifecycle", "laplace.yml:product")
     gate = unique_step(steps, "id", "chess_benchmark_gate", "laplace.yml:product")
     if lifecycle and gate:
-        gate_if = "env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')"
+        gate_if = "env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')"
         if gate[0] <= lifecycle[0] or gate[1].get("if") != gate_if:
             fail("laplace.yml: successful activation must precede measurement authorization")
         command = gate[1].get("run", "")
         if "ready=true" not in command or '"$(git rev-parse HEAD)"' not in command or "source_sha=%s" not in command:
             fail("laplace.yml: measurement gate must expose the exact activated checkout")
+        for name, expected in (
+            ("Admit official Stockfish source and verify native corpus readback", gate_if),
+            ("Retain official Stockfish corpus admission evidence", "always() && " + gate_if),
+        ):
+            corpus = unique_step(steps, "name", name, "laplace.yml:product")
+            if corpus and (corpus[0] <= lifecycle[0] or corpus[1].get("if") != expected):
+                fail("laplace.yml: installed corpus proof requires an application-publishing stage")
 
 
 paths = sorted([*WF.glob("*.yml"), *WF.glob("*.yaml")])

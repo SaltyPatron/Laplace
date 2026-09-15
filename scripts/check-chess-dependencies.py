@@ -122,8 +122,10 @@ def main():
     external = Path(config.get("LAPLACE_EXTERNAL", str(ROOT / "external") if os.name == "nt" else "/build/external"))
     source = Path(config.get("LAPLACE_STOCKFISH_SOURCE", str(external / "stockfish")))
     stockfish = Path(config.get("LAPLACE_STOCKFISH", str(source / "src" / ("stockfish" + suffix))))
-    cc_default = (Path(config.get("LAPLACE_CUTECHESS_BUILD", str(Path(os.environ.get("LAPLACE_BUILD_ROOT", "D:/Data/Laplace")) / "build-cutechess")))
-                  / "cutechess-cli.exe" if os.name == "nt" else args.prefix / "bin/cutechess-cli")
+    cc_default = (Path(config["LAPLACE_CUTECHESS_BUILD"]) / ("cutechess-cli" + suffix)
+                  if config.get("LAPLACE_CUTECHESS_BUILD") else
+                  Path(os.environ.get("LAPLACE_BUILD_ROOT", "D:/Data/Laplace")) / "build-cutechess/cutechess-cli.exe"
+                  if os.name == "nt" else args.prefix / "bin/cutechess-cli")
     cc = Path(config.get("LAPLACE_CUTECHESS", str(cc_default)))
     uci = args.uci or args.prefix / "app" / ("laplace-uci" + suffix)
     report = []

@@ -176,7 +176,7 @@ jobs:
           retention-days: 30
 
       - name: Admit official Stockfish source and verify native corpus readback
-        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')
+        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
         shell: bash
         run: |
           set -euo pipefail
@@ -193,7 +193,7 @@ jobs:
           '
 
       - name: Retain official Stockfish corpus admission evidence
-        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: laplace-stockfish-corpus-${{ github.run_id }}-${{ github.run_attempt }}
@@ -205,7 +205,7 @@ jobs:
 
       - name: Record successful activation for installed chess measurement
         id: chess_benchmark_gate
-        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')
+        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
         shell: bash
         run: |
           set -euo pipefail
