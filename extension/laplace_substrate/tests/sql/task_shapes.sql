@@ -343,7 +343,7 @@ BEGIN
     END LOOP;
     IF (SELECT count(*) FROM laplace.physicalities p WHERE p.type=8
          AND public.laplace_trajectory_constituent_ids(p.trajectory) &&
-             ARRAY[converse.word_id('ζξ'),v_original]
+             ARRAY[laplace.word_id('ζξ'),v_original]
          AND public.laplace_trajectory_constituent_ids(p.trajectory) @>
              ARRAY[public.laplace_hash128_blake3('ud/parse/schema/v1')]) <> 9 THEN
         RAISE EXCEPTION 'FAIL: eligible UD overflow fixture must contain exactly nine matching parses';
