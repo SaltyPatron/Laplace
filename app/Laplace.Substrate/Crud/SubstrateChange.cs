@@ -15,10 +15,6 @@ public sealed record SubstrateChange(
 {
     public bool CountsAsUnit { get; init; } = true;
 
-    /// <summary>
-    /// Optional retained source-input lifetime and transaction-bound verifier.
-    /// The ingest runner owns this lease after the change is emitted.
-    /// </summary>
     public SubstrateApplyEnvelope? ApplyEnvelope { get; init; }
 }
 
@@ -32,13 +28,6 @@ public sealed record TestimonyWalkRow(
     long GamesTotal,
     long ObservedAtUnixUs);
 
-/// <summary>
-/// A continuous score consumed by the canonical consensus fold in the same
-/// transaction as its categorical receipt.  Scores are process-local only and
-/// deliberately absent from COPY, evidence, and replay digests.  The receipt
-/// id and calculation receipt make a retry identity-sensitive without turning
-/// the score into durable witness data.
-/// </summary>
 public sealed record EphemeralFoldInput(
     Hash128 AttestationId,
     Hash128 CalculationReceiptId,
@@ -50,16 +39,8 @@ public sealed record SubstrateChangeMetadata(
     string SourceContentUnitName,
     DateTimeOffset BuiltAt,
     Hash128? ParentIntentId,
-
     long InputUnitsConsumed = 0,
-
-
-
-
     int CommitEpoch = 0,
-
-    // Physical artifact identity produced by the source-native composer. This is
-    // distinct from an execution resume fingerprint and is carried to the file journal.
     Hash128? FileId = null);
 
 public sealed record EntityRow(
@@ -82,7 +63,53 @@ public sealed record PhysicalityRow(
     int NConstituents,
     double? AlignmentResidual,
     int? SourceDim,
-    long ObservedAtUnixUs);
+    long ObservedAtUnixUs)
+{
+    // This initializer executes for every managed row construction, including hot
+    // AddPhysicalityPreSeen call sites. It prevents a producer from manufacturing
+    // a row that merely *looks* like Content while naming a different identity.
+    // Native validation streams the packed/RLE manifest directly; no expanded child
+    // array is allocated on this path.
+    private readonly bool _identityValidated = ValidateIdentity(
+        Id, EntityId, Type, TrajectoryXyzm, NConstituents);
+
+    private static bool ValidateIdentity(
+        Hash128 id, Hash128 entityId, PhysicalityType type,
+        double[]? trajectoryXyzm, int nConstituents)
+    {
+        if (nConstituents < 0)
+            throw new InvalidOperationException("physicality constituent count cannot be negative");
+
+        Hash128 expectedPhysicalityId = PhysicalityId.Compute(entityId, type);
+        if (id != expectedPhysicalityId)
+            throw new InvalidOperationException(
+                $"physicality identity mismatch: entity={entityId} type={(short)type} "
+                + $"declared={id} recomputed={expectedPhysicalityId}");
+
+        if (trajectoryXyzm is null || trajectoryXyzm.Length == 0)
+        {
+            if (nConstituents != 0)
+                throw new InvalidOperationException(
+                    $"physicality declares {nConstituents} constituents without a trajectory");
+            return true;
+        }
+        if (trajectoryXyzm.Length % 4 != 0)
+            throw new InvalidOperationException("physicality trajectory is not an XYZM vertex sequence");
+
+        if (type != PhysicalityType.Content) return true;
+
+        Hash128 contentId = Trajectory.ContentIdentity(trajectoryXyzm, out int logicalCount);
+        if (logicalCount != nConstituents)
+            throw new InvalidOperationException(
+                $"content trajectory count mismatch: entity={entityId} "
+                + $"declared={nConstituents} decoded={logicalCount}");
+        if (contentId != entityId)
+            throw new InvalidOperationException(
+                $"content trajectory identity mismatch: entity={entityId} "
+                + $"recomputed={contentId} constituents={logicalCount}");
+        return true;
+    }
+}
 
 public enum AttestationOutcome : short
 {
@@ -103,10 +130,6 @@ public sealed record AttestationRow(
     long ObservationCount,
     long ScoreFp1e9,
     long OpponentRdFp1e9,
-    // The opponent's RATING, the half that never existed (GH #1321). Defaulted so
-    // every existing construction site still compiles. Zero is reserved for evidence
-    // written by the broken pre-GH-1321 managed staging boundary and is repaired to the
-    // witnessed opponent rating (or neutral when the source did not publish one).
     long OpponentRatingFp1e9 = 1_500_000_000_000,
     long? SumScoreFp1e9 = null,
     Mask256 HighwayMask = default,
