@@ -142,10 +142,11 @@ public class NpgsqlSubstrateWriterTests
         var relTypeId = await EnsureTestRelationTypeAsync(src, "HAS_TEST");
 
         var subjId = H(4001);
+        var physicalityId = PhysicalityId.Compute(subjId, PhysicalityType.Content);
         var change = new SubstrateChangeBuilder(src, "full-unit")
             .AddEntity(subjId, 0, typeId)
             .AddPhysicality(new PhysicalityRow(
-                Id: H(4002), EntityId: subjId, SourceId: src,
+                Id: physicalityId, EntityId: subjId, SourceId: src,
                 Type: PhysicalityType.Content,
                 CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
                 HilbertIndex: Hilbert128.Encode(stackalloc double[] { 0.1, 0.2, 0.3, 0.4 }),
@@ -171,7 +172,7 @@ public class NpgsqlSubstrateWriterTests
 
         await using var pCmd = _pg.DataSource.CreateCommand(
             "SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord) FROM laplace.physicalities WHERE id = $1");
-        pCmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, H(4002).ToBytes());
+        pCmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, physicalityId.ToBytes());
         await using var rdr = await pCmd.ExecuteReaderAsync();
         Assert.True(await rdr.ReadAsync());
         Assert.Equal(0.1, rdr.GetDouble(0));
@@ -179,23 +180,16 @@ public class NpgsqlSubstrateWriterTests
     }
 
     [Fact]
-    public async Task ApplyAsync_PhysicalitiesSameEntityType_DistinctIds_CoexistAndDedupById()
+    public async Task ApplyAsync_SameEntityDistinctPhysicalityTypes_CoexistAndDedupByIdentity()
     {
-
-
-
-
-
-
-
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
-        var src = SubstrateCanonicalIds.Of("source", "test", "phys-natkey");
+        var src = SubstrateCanonicalIds.Of("source", "test", "phys-identity");
         var typeId = await EnsureTestTypeAsync(src);
         var entId = H(9001);
 
-        PhysicalityRow Phys(int idSeed, double x) => new(
-            Id: H(idSeed), EntityId: entId, SourceId: src,
-            Type: PhysicalityType.Content,
+        PhysicalityRow Phys(PhysicalityType physicalityType, double x) => new(
+            Id: PhysicalityId.Compute(entId, physicalityType), EntityId: entId, SourceId: src,
+            Type: physicalityType,
             CoordX: x, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
             HilbertIndex: Hilbert128.Encode(stackalloc double[] { x, 0.2, 0.3, 0.4 }),
             TrajectoryXyzm: null,
@@ -204,11 +198,10 @@ public class NpgsqlSubstrateWriterTests
             SourceDim: null,
             ObservedAtUnixUs: IntentStage.PgEpochUnixUs);
 
-
-        var change = new SubstrateChangeBuilder(src, "phys-natkey-unit")
+        var change = new SubstrateChangeBuilder(src, "phys-identity-unit")
             .AddEntity(entId, 0, typeId)
-            .AddPhysicality(Phys(9101, 0.10))
-            .AddPhysicality(Phys(9102, 0.99))
+            .AddPhysicality(Phys(PhysicalityType.Content, 0.10))
+            .AddPhysicality(Phys(PhysicalityType.Projection, 0.99))
             .Build();
 
         var result = await writer.ApplyAsync(change);
@@ -219,31 +212,27 @@ public class NpgsqlSubstrateWriterTests
         cnt.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, entId.ToBytes());
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-
-        var reapplySame = new SubstrateChangeBuilder(src, "phys-natkey-reapply-same")
-            .AddPhysicality(Phys(9101, 0.10))
-            .AddPhysicality(Phys(9102, 0.99))
+        var reapplySame = new SubstrateChangeBuilder(src, "phys-identity-reapply-same")
+            .AddPhysicality(Phys(PhysicalityType.Content, 0.10))
+            .AddPhysicality(Phys(PhysicalityType.Projection, 0.99))
             .Build();
         var same = await writer.ApplyAsync(reapplySame);
         Assert.Equal(0, same.PhysicalitiesInserted);
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-
-        var third = new SubstrateChangeBuilder(src, "phys-natkey-third")
-            .AddPhysicality(Phys(9103, 0.55))
+        // Same entity + same physicality type is the same identity. A changed
+        // coordinate cannot manufacture a second physicality row under a new id.
+        var changedSameIdentity = new SubstrateChangeBuilder(src, "phys-identity-changed")
+            .AddPhysicality(Phys(PhysicalityType.Content, 0.55))
             .Build();
-        var thirdResult = await writer.ApplyAsync(third);
-        Assert.Equal(1, thirdResult.PhysicalitiesInserted);
-        Assert.Equal(3L, (long)(await cnt.ExecuteScalarAsync())!);
+        var changed = await writer.ApplyAsync(changedSameIdentity);
+        Assert.Equal(0, changed.PhysicalitiesInserted);
+        Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
     }
 
     [Fact]
     public async Task ApplyAsync_AcceptsForwardReference_NoPreCheck()
     {
-
-
-
-
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var src = SubstrateCanonicalIds.Of("source", "test", "forwardref");
         var typeId = await EnsureTestTypeAsync(src);
@@ -292,12 +281,6 @@ public class NpgsqlSubstrateWriterTests
         Assert.Single(bitmap);
         Assert.Equal((byte)0b00000101, bitmap[0]);
     }
-
-
-
-
-
-
 
     [Fact]
     public async Task ApplyAsync_ReobservedAttestation_PreservesOriginalTestimony()
@@ -361,10 +344,6 @@ public class NpgsqlSubstrateWriterTests
         var result = await writer.ApplyManyAsync(batch);
         Assert.True(result.EntitiesInserted > 0);
 
-
-
-
-
         int parts = Math.Clamp(CpuTopology.PerformanceCoreCount, 1, 16);
         int perPartitionCalls = 5;
         int budget = parts * perPartitionCalls;
@@ -382,7 +361,7 @@ public class NpgsqlSubstrateWriterTests
         var typeId = await EnsureTestTypeAsync(src);
         var relationTypeId = await EnsureTestRelationTypeAsync(src, $"HAS_NATIVE_STAGE_{scope}");
         var entityId = Hash128.OfCanonical($"entity/test/native-stage-counts/{scope}");
-        var physicalityId = Hash128.OfCanonical($"physicality/test/native-stage-counts/{scope}");
+        var physicalityId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
         var attestationId = Hash128.OfCanonical($"attestation/test/native-stage-counts/{scope}");
         using var stage = IntentStage.New(3);
         stage.AddEntity(entityId, 2, typeId, src);
