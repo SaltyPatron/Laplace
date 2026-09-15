@@ -105,13 +105,19 @@ int chess_position_table_load(const char* path) {
         return -2;
     }
     if (h->record_size != LAPLACE_CHESS_PERFCACHE_RECORD_SIZE
-        || h->records_offset < LAPLACE_CHESS_PERFCACHE_HEADER_SIZE) {
+        || h->records_offset != LAPLACE_CHESS_PERFCACHE_HEADER_SIZE) {
         ch_unmap(base, len);
         return -3;
     }
 
     uint64_t body_end = len - LAPLACE_CHESS_PERFCACHE_TRAILER_BYTES;
-    if (h->records_offset + h->record_count * h->record_size > body_end) {
+    /* Divide the actual mapped byte envelope before trusting the stored count.
+     * Multiplication/addition of an untrusted count can wrap and admit a table
+     * whose binary search walks outside its mapping. Version 1 has no padding
+     * or extra sections after the records. */
+    uint64_t record_bytes = body_end - h->records_offset;
+    if (record_bytes % h->record_size != 0
+        || h->record_count != record_bytes / h->record_size) {
         ch_unmap(base, len);
         return -3;
     }
@@ -124,11 +130,20 @@ int chess_position_table_load(const char* path) {
         return -4;
     }
 
+    const laplace_chess_perfcache_record_t* records =
+        (const laplace_chess_perfcache_record_t*)(base + h->records_offset);
+    for (uint64_t i = 1; i < h->record_count; ++i) {
+        if (hash128_compare(&records[i - 1].id, &records[i].id) >= 0) {
+            ch_unmap(base, len);
+            return -3;
+        }
+    }
+
     chess_position_table_unload();
     g_ch.base = base;
     g_ch.length = len;
     g_ch.header = h;
-    g_ch.records = (const laplace_chess_perfcache_record_t*)(base + h->records_offset);
+    g_ch.records = records;
     g_ch.record_count = h->record_count;
     return 0;
 }

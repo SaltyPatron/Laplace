@@ -1,74 +1,11 @@
--- Recompute entities.highway_mask for the given entity ids from their CONSENSUS
--- participation (subject or object): OR of the relation bits over every distinct
--- governed relation type the entity has edges under. Recompute-not-accumulate is
--- intentionally different from the ingest-time deposit path: this repair function
--- must also turn bits OFF after eviction removes the final governed edge.
---
--- Every requested identity participates in the final desired-mask relation, including
--- identities with zero governed bits. Those identities resolve to NULL and therefore
--- clear a previously stored mask. The former implementation grouped only the `bits`
--- rows, so an entity with no remaining governed bit vanished from `m` and could never
--- be cleared despite the function's stated contract.
+-- Authoritative mask population/clearing enters native C, like deposits.
+-- PostgreSQL supplies indexed incident (entity,type) sets; C resolves governed
+-- bits once per distinct type, folds masks, and shares the native tuple writer.
+-- Every requested identity remains in the workset, including those with no
+-- remaining relations. Their desired NULL mask clears stale bits. Registry
+-- outages retain exact dirty identities without changing existing masks.
 DROP FUNCTION IF EXISTS laplace.highway_mask_refresh(bytea[]);
 CREATE OR REPLACE FUNCTION consensus.highway_mask_refresh(p_ids bytea[])
     RETURNS bigint
-    LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    updated bigint;
-BEGIN
-    IF NOT consensus.highway_ready() THEN
-        INSERT INTO laplace.highway_mask_dirty(id)
-        SELECT DISTINCT u.id FROM unnest(p_ids) AS u(id)
-        WHERE u.id IS NOT NULL ORDER BY u.id
-        ON CONFLICT(id) DO NOTHING;
-        RAISE LOG 'highway_mask_refresh: registry unavailable; exact dirty identities retained';
-        RETURN 0;
-    END IF;
-
-    WITH t AS (
-        SELECT DISTINCT u.id
-        FROM unnest(p_ids) AS u(id)
-        WHERE u.id IS NOT NULL
-    ),
-    tp AS (
-        SELECT t.id, c.type_id
-        FROM t JOIN laplace.consensus c ON c.subject_id = t.id
-        GROUP BY t.id, c.type_id
-        UNION
-        SELECT t.id, c.type_id
-        FROM t JOIN laplace.consensus c ON c.object_id = t.id
-        GROUP BY t.id, c.type_id
-    ),
-    bits AS (
-        -- A dynamic relation (EDEP_nsubj, DEP_obj, FEAT_case, ...) has no
-        -- Highway bit of its own. Its governed family root contributes the bit.
-        SELECT q.id, q.bit
-        FROM (
-            SELECT tp.id,
-                   COALESCE(consensus.relation_highway_bit(tp.type_id),
-                            consensus.relation_highway_bit(fam.object_id)) AS bit
-            FROM tp
-            LEFT JOIN laplace.consensus fam
-              ON fam.subject_id = tp.type_id
-             AND fam.type_id = laplace.relation_type_id('IS_A')
-        ) q
-        WHERE q.bit IS NOT NULL
-    ),
-    desired AS (
-        SELECT t.id,
-               consensus.highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
-        FROM t
-        LEFT JOIN bits ON bits.id = t.id
-        GROUP BY t.id
-    ),
-    upd AS (
-        UPDATE laplace.entities e
-           SET highway_mask = desired.mask
-          FROM desired
-         WHERE e.id = desired.id
-           AND desired.mask IS DISTINCT FROM e.highway_mask
-        RETURNING 1
-    )
-    SELECT count(*) INTO updated FROM upd;
-    RETURN updated;
-END $$;
+    AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_refresh'
+    LANGUAGE C VOLATILE;

@@ -364,6 +364,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         var changes = new List<SubstrateChange>(4);
         var expectedWitnesses = new List<AttestationRow>();
         var expectedCarriers = new List<PhysicalityRow>();
+        var expectedEntities = new List<EntityRow>();
         var selectedPlayings = measurement is null ? null : chunk.Select(g => g.PlayingId).ToHashSet();
         var selectedLines = measurement is null ? null : chunk.Where(g => g.MoveIds.Length > 0).Select(g => g.LineId).ToHashSet();
         if (novel > 0)
@@ -372,6 +373,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             changes.Add(recorded);
             if (selectedPlayings is not null)
             {
+                if (measurement?.RetainedPgn == true) expectedEntities.AddRange(recorded.Entities);
                 expectedWitnesses.AddRange(recorded.Attestations.Where(a => ChessRecordingMeasurement.IsGameWitness(a, selectedPlayings)));
                 expectedCarriers.AddRange(recorded.Physicalities.Where(p => p.Type == PhysicalityType.Content && selectedLines!.Contains(p.EntityId)));
             }
@@ -384,6 +386,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             var repairBuilt = await repair.BuildAsync(ct);
             if (selectedPlayings is not null)
             {
+                if (measurement?.RetainedPgn == true) expectedEntities.AddRange(repairBuilt.Entities);
                 expectedWitnesses.AddRange(repairBuilt.Attestations.Where(a => ChessRecordingMeasurement.IsGameWitness(a, selectedPlayings)));
                 expectedCarriers.AddRange(repairBuilt.Physicalities.Where(p => p.Type == PhysicalityType.Content && selectedLines!.Contains(p.EntityId)));
             }
@@ -408,6 +411,13 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             if (missing.Length > 0) changes.Add(evidence with { Attestations = missing });
         }
 
+        ChessRecordingMeasurement.ScopeRequest? scope = null;
+        if (measurement is { RetainedPgn: true })
+            scope = await measurement.ReadScopeBeforeAsync(_ds,
+                expectedEntities.Concat(experimentChange!.Entities).ToArray(),
+                expectedWitnesses.Concat(experimentChange!.Attestations).DistinctBy(a => a.Id).ToArray(),
+                expectedCarriers, ct);
+
         if (changes.Count > 0)
         {
             long commitStarted = Stopwatch.GetTimestamp();
@@ -428,6 +438,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             await measurement.VerifyChunkAsync(_ds, chunk, expectedWitnesses, expectedCarriers,
                 experimentChange ?? throw new InvalidOperationException("recording requires experiment provenance"),
                 experiment!, ct);
+        if (scope is not null)
+            await measurement!.ObserveScopeAfterAsync(_ds, scope, ct);
         return (novel, novel, repairedGames);
     }
 

@@ -16,7 +16,7 @@ namespace Laplace.Chess.Service;
 /// ApplyManyAsync, including its consensus continuation, rather than PostgreSQL COMMIT alone.
 /// No durable-success flag is set from the ingestor's Parsed/Novel/Applied counters.
 /// </summary>
-internal sealed class ChessRecordingMeasurement(string experimentId, int requestedGames)
+internal sealed partial class ChessRecordingMeasurement(string experimentId, int requestedGames, bool retainedPgn = false)
 {
     private readonly long _started = Stopwatch.GetTimestamp();
     private readonly HashSet<Hash128> _playingIds = [];
@@ -25,6 +25,8 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
     private bool _matchVerified;
     private bool _verified;
     public string Schema => "laplace.chess-recording/v2";
+    public string Purpose => retainedPgn ? "retained-pgn-ingestion" : "fresh-match-recording";
+    internal bool RetainedPgn => retainedPgn;
     public string ExperimentId { get; } = experimentId;
     public string PgnEvent => "chess-lab/cutechess/" + ExperimentId;
     public string Status { get; private set; } = "running";
@@ -107,15 +109,21 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
         ExperimentArtifactSha256 = Convert.ToHexStringLower(await SHA256.HashDataAsync(file));
     }
 
-    internal void ValidateMatch(CutechessExperimentReceipt receipt)
+    internal void ValidateMatch(CutechessExperimentReceipt receipt) =>
+        ValidateMatchObservation(receipt.ExperimentId, receipt.MatchState, receipt.ArtifactIdentitiesUnchanged,
+            receipt.Games, receipt.Command?.Arguments);
+
+    private void ValidateMatchObservation(string? experimentId, ChessLabJobState state, bool? unchanged,
+        IReadOnlyList<ChessLabGameEvent> games, IReadOnlyList<string>? arguments)
     {
-        if (receipt.ExperimentId != ExperimentId || receipt.MatchState != ChessLabJobState.Completed
-            || receipt.ArtifactIdentitiesUnchanged != true || receipt.Games.Count != RequestedGames
-            || receipt.Games.Select(g => g.Index).Distinct().Count() != RequestedGames || receipt.Command is null)
+        if (experimentId != ExperimentId || state != ChessLabJobState.Completed
+            || unchanged != true || games.Count != RequestedGames
+            || games.Select(g => g.Index).Distinct().Count() != RequestedGames || arguments is null
+            || games.Any(g => string.IsNullOrEmpty(g.Result)))
             throw new InvalidDataException("recording requires a verified completed match and exact game inventory");
-        _normalMatchVerified = !receipt.Command.Arguments.Any(a => a is "-maxmoves" or "-draw" or "-resign")
-            && receipt.Games.All(g => IsNormalResult(g.Result));
-        foreach (var game in receipt.Games)
+        _normalMatchVerified = !arguments.Any(a => a is "-maxmoves" or "-draw" or "-resign")
+            && games.All(g => IsNormalResult(g.Result));
+        foreach (var game in games)
         {
             var key = (game.White, game.Black, game.Result.Split(' ')[0]);
             _matchGames[key] = _matchGames.GetValueOrDefault(key) + 1;
@@ -318,7 +326,8 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
         if (status == "completed" && (!_matchVerified || _matchGames.Values.Any(n => n != 0)
             || ParsedGames != RequestedGames || ReadbackGames != RequestedGames
             || CommittedGames != RequestedGames || Pgn is null || ExperimentReceiptSha256 is null
-            || ExperimentArtifactSha256 is null || Durability is not { LocalWalFlushAcknowledged: true }))
+            || ExperimentArtifactSha256 is null
+            || (Durability is not { LocalWalFlushAcknowledged: true } && !IsVerifiedNoOpReplay)))
             throw new InvalidDataException("recording cannot complete without every requested committed game and exact readback");
         _verified = status == "completed";
         Status = status;

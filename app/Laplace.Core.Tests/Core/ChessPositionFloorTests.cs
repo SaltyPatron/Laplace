@@ -98,4 +98,58 @@ public sealed class ChessPositionFloorTests
         }
         finally { ChessPositionFloor.Unload(); File.Delete(path); }
     }
+
+    [Theory]
+    [InlineData(ulong.MaxValue)]
+    [InlineData(1UL << 63)]
+    [InlineData((1UL << 60) + 1)]
+    public void OverflowingCountIsRejectedBeforeLookupAndKeepsThePriorMap(ulong count)
+    {
+        string valid = Blob(), invalid = Blob();
+        try
+        {
+            ChessPositionFloor.Load(valid);
+            var bytes = File.ReadAllBytes(invalid);
+            BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), count);
+            SaveWithChecksum(invalid, bytes);
+            var error = Assert.Throws<InvalidOperationException>(() => ChessPositionFloor.Load(invalid));
+            Assert.Contains("layout mismatch", error.Message);
+            Assert.Equal(1, ChessPositionFloor.Observe().RecordCount);
+            Assert.True(ChessPositionFloor.TryLookup(new(1, 2), out _, out _, out _, out _, out _, out _, out _));
+        }
+        finally { ChessPositionFloor.Unload(); File.Delete(valid); File.Delete(invalid); }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ChecksummedExtraBytesDuplicateAndUnsortedRecordsAreRejected(int kind)
+    {
+        string path = Blob();
+        ChessPositionFloor.Unload();
+        try
+        {
+            var original = File.ReadAllBytes(path);
+            int extra = kind == 0 ? 1 : 80;
+            var bytes = new byte[original.Length + extra];
+            original.AsSpan(0, original.Length - 16).CopyTo(bytes);
+            if (kind != 0)
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), 2);
+                original.AsSpan(128, 80).CopyTo(bytes.AsSpan(208));
+                if (kind == 2) new Hash128(0, 0).WriteBytes(bytes.AsSpan(208));
+            }
+            SaveWithChecksum(path, bytes);
+            Assert.Throws<InvalidOperationException>(() => ChessPositionFloor.Load(path));
+            Assert.False(ChessPositionFloor.Observe().IsLoaded);
+        }
+        finally { ChessPositionFloor.Unload(); File.Delete(path); }
+    }
+
+    private static void SaveWithChecksum(string path, byte[] bytes)
+    {
+        Hash128.Blake3(bytes.AsSpan(0, bytes.Length - 16)).WriteBytes(bytes.AsSpan(bytes.Length - 16));
+        File.WriteAllBytes(path, bytes);
+    }
 }

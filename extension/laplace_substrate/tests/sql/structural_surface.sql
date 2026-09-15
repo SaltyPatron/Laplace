@@ -109,6 +109,17 @@ BEGIN
         RAISE EXCEPTION 'FAIL: NULL/empty cluster batch must be empty';
     END IF;
 
+    -- A missing anchor returns a pass-by-reference empty array. Keep it alive
+    -- across subsequent SPI work and repeated calls, rather than returning a
+    -- pointer into the SPI context which the native entry just released.
+    FOR iteration IN 1..32 LOOP
+        scalar_ids := lexical.word_shape_peers_fast(unresolved, 0.001);
+        PERFORM count(*) FROM structural.cluster_batch(ARRAY[seed], 0.001, 1);
+        IF scalar_ids IS DISTINCT FROM ARRAY[]::bytea[] THEN
+            RAISE EXCEPTION 'FAIL: shape peer array did not survive its SPI lifetime';
+        END IF;
+    END LOOP;
+
     RAISE NOTICE 'structural cluster: bounded non-empty scalar/batch parity and ordinality pass';
 END
 $cluster_fixture$;

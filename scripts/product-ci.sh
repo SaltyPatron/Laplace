@@ -19,14 +19,6 @@ run_policy() {
   bash scripts/ci-policy.sh
 }
 
-resume_held_repair_if_needed() {
-  # Resolve this product's exact held repair before installation/publication can
-  # replace its native or managed generation. With no owned hold this is a no-op.
-  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" --resume-if-needed \
-    --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
-    --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
-    bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
-}
 
 run_deps() {
   bash scripts/ci-deps.sh
@@ -39,18 +31,18 @@ run_build() {
   bash scripts/pipeline.sh "${args[@]}" build
 }
 
-run_dev() {
-  local args=(--engine)
-  [[ "${LAPLACE_TEST_SERIAL:-}" != 1 ]] || args=(--serial --engine)
-  bash scripts/test-parallel.sh "${args[@]}"
+run_suite() {
+  bash scripts/test-parallel.sh --profile "$1" --suite "$2"
 }
 
-run_install_and_db() (
+run_install() (
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash deploy/linux/managed-publish.sh preflight
   bash scripts/pipeline.sh install
   bash deploy/linux/managed-publish.sh preflight
+)
 
+run_database_maintenance() (
   # Use the already installed fixed service controls. The command holds their
   # managed transaction through migration, discards writer processes,
   # and restores only the services that were running before maintenance.
@@ -83,6 +75,9 @@ seed_operational_memory() {
   local proof_root="${LAPLACE_OPERATIONAL_PROOF_DIRECTORY:-/build/laplace/recovery/operational-product}"
   mkdir -p "$proof_root"
   operational_proof_directory="$(mktemp -d "$proof_root/invocation-XXXXXXXX")"
+  if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
+    printf '%s\n' "$operational_proof_directory" > "$LAPLACE_CI_SESSION_DIRECTORY/operational-proof-directory"
+  fi
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
     printf '%s\n' '{"disposition":"intentionally-unseeded","reason":"fresh database without foundation restoration"}' \
       > "$operational_proof_directory/disposition.json"
@@ -99,6 +94,10 @@ verify_operational_execution() {
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
     echo "fresh DB intentionally left unseeded — operational execution proof skipped"
     return 0
+  fi
+  if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
+    IFS= read -r operational_proof_directory < "$LAPLACE_CI_SESSION_DIRECTORY/operational-proof-directory"
+    [[ -d "$operational_proof_directory" ]] || { echo "missing operational proof directory" >&2; return 1; }
   fi
   # Consume only this invocation's verified seed receipt. Never select a latest
   # source run or reuse a receipt from another publication attempt.
@@ -120,8 +119,11 @@ print(run_id)
 PY
 )"
   if [[ "$receipt_prefix" == post-stockfish- ]]; then
+    if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
+      IFS= read -r operational_seed_run_id < "$LAPLACE_CI_SESSION_DIRECTORY/initial-operational-seed-run-id"
+    fi
     [[ "$seed_run_id" == "${operational_seed_run_id:?initial operational proof did not select its seed}" ]] || {
-      echo "post-Stockfish seed differs from this process's initial verified seed" >&2
+      echo "post-Stockfish seed differs from this lifecycle's initial verified seed" >&2
       return 1
     }
   else
@@ -139,12 +141,16 @@ PY
     --shape-file seeds/operational/tasks/en_antonym.json \
     --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
     --receipt "$operational_proof_directory/${receipt_prefix}antonym-task.json"
-  if [[ "$receipt_prefix" == post-stockfish- ]]; then operational_postchecks_passed=1; fi
+  if [[ "$receipt_prefix" == post-stockfish- ]]; then
+    operational_postchecks_passed=1
+  elif [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
+    printf '%s\n' "$seed_run_id" > "$LAPLACE_CI_SESSION_DIRECTORY/initial-operational-seed-run-id"
+  fi
 }
 
 run_stockfish_corpus_acceptance() {
-  # The caller already owns the shared host lock through publication, repaired
-  # service restoration and both ordinary proofs. The common CLI additionally
+  # The caller already owns the shared host lock through publication and both
+  # ordinary proofs. The common CLI additionally
   # owns the canonical ingest lane for its two exact observations.
   local output="${LAPLACE_STOCKFISH_CORPUS_DIRECTORY:-$operational_proof_directory/stockfish-corpus}"
   export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
@@ -156,9 +162,34 @@ run_stockfish_corpus_acceptance() {
 }
 
 record_chess_completion() {
-  # These variables only become true after this invocation's actual commands
-  # finish. Neither a prior receipt nor a later test outcome can authorize them.
-  [[ "${stockfish_corpus_passed:-0}" == 1 && "${operational_postchecks_passed:-0}" == 1 ]] || return 0
+  # Direct execution retains its local completion state. Visible CI steps use
+  # the same session owner's exact source, ordered results and run identity;
+  # no inherited flag or receipt from a different publication establishes this.
+  if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
+    python3 - "$LAPLACE_CI_SESSION_DIRECTORY" "$ROOT" "$stage" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+directory, root, stage = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+spec = importlib.util.spec_from_file_location("ci_session", root / "scripts/ci-session.py")
+owner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(owner)
+state = owner.read_state(directory)
+if (state.get("kind") != "product" or state.get("stage") != stage
+        or Path(state["checkout"]).resolve() != root.resolve()
+        or state["source"] != owner.source(root)
+        or (state.get("active") or {}).get("phase") != "chess-completion"):
+    raise SystemExit("chess completion belongs to another lifecycle or source")
+required = ["operational-seed", "publish", "chess-runtime", "operational-execution",
+            "stockfish-corpus", "post-stockfish-execution"]
+results = state["results"]
+completed = [item["phase"] for item in results if item["exit_code"] == 0]
+if any(item["exit_code"] != 0 for item in results) or [p for p in completed if p in required] != required:
+    raise SystemExit("chess completion requires this lifecycle's successful ordered prerequisites")
+PY
+  else
+    [[ "${stockfish_corpus_passed:-0}" == 1 && "${operational_postchecks_passed:-0}" == 1 ]] || return 0
+  fi
   local source_sha
   source_sha="$(git rev-parse HEAD)"
   [[ -z "${GITHUB_SHA:-}" || "$source_sha" == "$GITHUB_SHA" ]] || {
@@ -175,14 +206,21 @@ record_chess_completion() {
 
 run_recorded_chess_benchmark() {
   # Use the activated application's ordinary recording path while this lifecycle
-  # still owns the host lock. Both requested measurements retain their result;
+  # still owns the host lock. All requested measurements retain their result;
   # an unsuccessful match does not prevent measuring the underlying storage.
-  local recorded_status=0 geometry_status=0
+  local recorded_status=0 retained_status=0 geometry_status=0
   if python3 scripts/benchmark-recorded-chess.py \
+    --duration-seconds 30 --total-timeout 1800 \
     --output-dir "${LAPLACE_RECORDED_CHESS_DIRECTORY:-$operational_proof_directory/recorded-chess}"; then
     :
   else
     recorded_status=$?
+  fi
+  if python3 scripts/benchmark-retained-chess-ingestion.py \
+    --output-dir "${LAPLACE_RETAINED_CHESS_DIRECTORY:-$operational_proof_directory/retained-chess}"; then
+    :
+  else
+    retained_status=$?
   fi
   if PATH="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}/bin:$PATH" \
     python3 scripts/benchmark_suite.py run --suite geometry \
@@ -192,8 +230,10 @@ run_recorded_chess_benchmark() {
   else
     geometry_status=$?
   fi
-  printf 'CHESS_STORAGE_MEASUREMENT recorded_exit=%s geometry_exit=%s\n' "$recorded_status" "$geometry_status"
+  printf 'CHESS_STORAGE_MEASUREMENT recorded_exit=%s retained_exit=%s geometry_exit=%s\n' \
+    "$recorded_status" "$retained_status" "$geometry_status"
   if [[ "$recorded_status" != 0 ]]; then return "$recorded_status"; fi
+  if [[ "$retained_status" != 0 ]]; then return "$retained_status"; fi
   return "$geometry_status"
 }
 
@@ -218,15 +258,6 @@ run_publish() {
   bash scripts/publish-applications.sh deploy
 }
 
-run_repair_installed_corpus() {
-  # Publication has activated this source generation. Reclassification must not
-  # restart the previous managed producer after changing its cached identities.
-  LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)" \
-    python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
-      --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
-      --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
-      bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
-}
 
 ensure_api_running() {
   sudo -n systemctl start laplace-api || true
@@ -246,99 +277,108 @@ recover_publish() {
   [[ "$recovery_rc" -eq 0 && "$health_rc" -eq 0 ]]
 }
 
-run_integration() {
-  rm -rf build/extension/*/tests/regress_output
-  local args=(--integration)
-  [[ "${LAPLACE_TEST_SERIAL:-}" != 1 ]] || args=(--serial --integration)
-  bash scripts/test-parallel.sh "${args[@]}"
+run_publish_with_recovery() {
+  trap recover_publish EXIT
+  if [[ "$stage" == applications ]]; then
+    bash scripts/publish-applications.sh deploy
+    recover_publish
+  else
+    run_publish
+  fi
+  trap - EXIT
 }
 
-run_live() {
-  LAPLACE_API_BASE="${LAPLACE_API_BASE:-http://127.0.0.1:8080}" \
-    bash scripts/test-parallel.sh --app-live
-}
-
-run_live_if_expected() {
+run_live_suite() {
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
     echo "fresh DB intentionally left unseeded — seeded live product proof skipped"
     return 0
   fi
-  run_live
+  export LAPLACE_API_BASE="${LAPLACE_API_BASE:-http://127.0.0.1:8080}"
+  run_suite live "$1"
 }
 
-run_perf() {
-  [[ "${LAPLACE_GENERATION_BENCHMARK:-}" == 1 ]] || return 0
-  bash scripts/test-parallel.sh --perf
-}
-
-run_policy
-case "$stage" in
-  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;
-esac
-if [[ "$stage" == reconcile ]]; then
-  reconcile_installed_product
-  exit 0
-fi
-[[ "$stage" == check ]] && exit 0
-
-run_deps
-run_build
-[[ "$stage" == build ]] && exit 0
-
-run_dev
-[[ "$stage" == test ]] && exit 0
-
-if [[ "$stage" == application-check || "$stage" == applications ]]; then
-  [[ "${LAPLACE_FRESH_DB:-}" != 1 && "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || {
-    echo "application-only release cannot reset the database or discard install receipts" >&2
-    exit 1
-  }
-  bash scripts/publish-applications.sh check
-  if [[ "$stage" == applications ]]; then
-    trap recover_publish EXIT
-    bash scripts/publish-applications.sh deploy
-    recover_publish
-    trap - EXIT
-    observe_chess_runtime
-    # This path retains its unchanged-native publication contract. It does not
-    # claim installation, migration or corpus repair; it explicitly admits and
-    # proves the operational source used by this application's corpus checks.
-    seed_operational_memory
-    verify_operational_execution
-    run_stockfish_corpus_acceptance
-    verify_operational_execution post-stockfish-
-    record_chess_completion
-    run_recorded_chess_benchmark
+product_phases() {
+  echo policy
+  if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
+  [[ "$stage" != check ]] || return 0
+  printf '%s\n' dependencies build
+  [[ "$stage" != build ]] || return 0
+  printf '%s\n' native-dev managed-dev uci-dev browser-dev
+  [[ "$stage" != test ]] || return 0
+  if [[ "$stage" == application-check || "$stage" == applications ]]; then
+    echo application-check
+    if [[ "$stage" == applications ]]; then
+      printf '%s\n' operational-seed publish chess-runtime operational-execution \
+        stockfish-corpus post-stockfish-execution chess-completion recorded-chess
+    fi
+    return 0
   fi
-  exit 0
-fi
+  printf '%s\n' native-install database-maintenance
+  [[ "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]] || echo foundation
+  echo operational-seed
+  [[ "$stage" != deploy ]] || return 0
+  if [[ "$stage" == all ]]; then
+    printf '%s\n' publish chess-runtime
+    if [[ "${LAPLACE_FRESH_DB:-}" != 1 || "${LAPLACE_RESTORE_FOUNDATION:-}" == 1 ]]; then
+      printf '%s\n' operational-execution stockfish-corpus post-stockfish-execution chess-completion recorded-chess
+    fi
+  fi
+  printf '%s\n' db-health native-db managed-db
+  [[ "$stage" != integrate ]] || return 0
+  if [[ "${LAPLACE_FRESH_DB:-}" != 1 || "${LAPLACE_RESTORE_FOUNDATION:-}" == 1 ]]; then
+    printf '%s\n' live-floor live-api managed-live generation-eval
+  fi
+  [[ "${LAPLACE_GENERATION_BENCHMARK:-}" != 1 ]] || echo performance
+}
 
-run_install_and_db
-restore_foundation_if_requested
-seed_operational_memory
-if [[ "$stage" == deploy ]]; then
-  echo "native/database stage complete; application publication and corpus repair belong to the full lifecycle"
-  exit 0
-fi
+run_phase() {
+  if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" && -f "$LAPLACE_CI_SESSION_DIRECTORY/operational-proof-directory" ]]; then
+    IFS= read -r operational_proof_directory < "$LAPLACE_CI_SESSION_DIRECTORY/operational-proof-directory"
+  fi
+  case "$1" in
+    policy) run_policy ;;
+    reconcile) reconcile_installed_product ;;
+    dependencies) run_deps ;;
+    build) run_build ;;
+    native-dev) run_suite dev-native native-dev ;;
+    managed-dev|uci-dev|browser-dev) run_suite dev-managed "$1" ;;
+    application-check)
+      [[ "${LAPLACE_FRESH_DB:-}" != 1 && "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || {
+        echo "application-only release cannot reset the database or discard install receipts" >&2
+        return 1
+      }
+      bash scripts/publish-applications.sh check ;;
+    native-install) run_install ;;
+    database-maintenance) run_database_maintenance ;;
+    foundation) restore_foundation_if_requested ;;
+    operational-seed) seed_operational_memory ;;
+    publish) run_publish_with_recovery ;;
+    chess-runtime) observe_chess_runtime ;;
+    operational-execution) verify_operational_execution ;;
+    stockfish-corpus) run_stockfish_corpus_acceptance ;;
+    post-stockfish-execution) verify_operational_execution post-stockfish- ;;
+    chess-completion) record_chess_completion ;;
+    recorded-chess) run_recorded_chess_benchmark ;;
+    db-health|managed-db) run_suite db "$1" ;;
+    native-db)
+      rm -rf build/extension/*/tests/regress_output
+      run_suite db native-db ;;
+    live-floor|live-api|managed-live|generation-eval) run_live_suite "$1" ;;
+    performance) bash scripts/test-parallel.sh --perf ;;
+    *) echo "unknown product phase: $1" >&2; return 2 ;;
+  esac
+}
 
-if [[ "$stage" == integrate ]]; then
-  echo "integration-only stage verifies the installed database; it does not publish applications or repair retained content"
-  run_integration
-  exit 0
-fi
-
-trap recover_publish EXIT
-run_publish
-trap - EXIT
-observe_chess_runtime
-# Repair owns its restoration and unknown transaction outcomes. Publication's
-# API recovery must not restart a writer after unresolved repair quiescence.
-run_repair_installed_corpus
-verify_operational_execution
-run_stockfish_corpus_acceptance
-verify_operational_execution post-stockfish-
-record_chess_completion
-run_recorded_chess_benchmark
-run_integration
-run_live_if_expected
-run_perf
+case "${2:-}" in
+  --list-phases) product_phases ;;
+  --phase)
+    [[ $# == 3 ]] || { echo "--phase requires one phase name" >&2; exit 2; }
+    selected_phase="$3"
+    valid=0
+    while IFS= read -r phase; do [[ "$phase" != "$selected_phase" ]] || valid=1; done < <(product_phases)
+    [[ "$valid" == 1 ]] || { echo "phase $selected_phase is not selected by stage $stage" >&2; exit 2; }
+    run_phase "$selected_phase" ;;
+  '')
+    while IFS= read -r phase; do run_phase "$phase"; done < <(product_phases) ;;
+  *) echo "unknown product option: $2" >&2; exit 2 ;;
+esac

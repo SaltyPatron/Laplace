@@ -54,24 +54,15 @@ public static unsafe class ChessTransitionFloor
     }
 
     /// <summary>
-    /// Body length as the <see cref="ReadOnlySpan{T}"/> length the CRC covers, or a clear
-    /// throw. <c>body</c> is a <see cref="long"/> — <c>HeaderSize + count * RecordSize</c> —
-    /// so an unchecked <c>(int)</c> cast wraps once the blob passes int.MaxValue
-    /// (~67.1M transitions at RecordSize 32). That failure is silent and the wrong shape:
-    /// the span would cover a PREFIX of the body, the CRC would be computed over that
-    /// prefix on both the write and the load path, and the blob would verify clean while
-    /// every record past the wrap went unchecked. Refuse instead — the ceiling is real
-    /// (671k games at ~80 plies is already ~53M transitions), so it must announce itself.
+    /// Hash the complete mapped body through the existing native size_t interface.
+    /// A mapping may exceed the length of one managed span; no prefix checksum or
+    /// managed-sized copy is needed.
     /// </summary>
-    private static int BodySpanLength(long body)
+    private static Hash128 BodyHash(byte* data, long body)
     {
-        if (body < HeaderSize || body > int.MaxValue)
-            throw new InvalidOperationException(
-                $"chess transition floor body is {body} bytes ("
-                + $"{(body - HeaderSize) / RecordSize} records), outside the addressable "
-                + $"range [{HeaderSize}, {int.MaxValue}] of one ReadOnlySpan<byte>. "
-                + "Split the floor rather than CRC a prefix.");
-        return (int)body;
+        Hash128 result;
+        NativeInterop.Hash128Blake3(data, checked((nuint)body), &result);
+        return result;
     }
 
     public static void Load(string path)
@@ -83,33 +74,44 @@ public static unsafe class ChessTransitionFloor
         if (!fi.Exists || fi.Length < HeaderSize + TrailerBytes)
             throw new InvalidOperationException($"chess transition floor missing/short: {path}");
 
-        _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
-        _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-        _len = fi.Length;
-        byte* ptr = null;
-        _view.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
-        _base = ptr;
+        try
+        {
+            _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+            _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+            _len = _view.Capacity;
+            byte* ptr = null;
+            _view.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
+            _base = ptr;
 
-        if (ReadU32(0) != Magic || ReadU32(4) != Version)
+            if (_len < HeaderSize + TrailerBytes)
+                throw new InvalidOperationException("chess transition floor record layout mismatch");
+            if (ReadU32(0) != Magic || ReadU32(4) != Version)
+                throw new InvalidOperationException("bad chess transition floor magic/version");
+
+            // Derive the envelope from mapped bytes before trusting the count. This
+            // also rejects partial records and unchecksummed trailing data.
+            long recordBytes = _len - HeaderSize - TrailerBytes;
+            ulong count = ReadU64(8);
+            if (recordBytes % RecordSize != 0 || count != (ulong)(recordBytes / RecordSize))
+                throw new InvalidOperationException("chess transition floor record layout mismatch");
+            long body = _len - TrailerBytes;
+            if (BodyHash(_base, body) != *(Hash128*)(_base + body))
+                throw new InvalidOperationException("chess transition floor body CRC mismatch");
+            _count = checked((long)count);
+            for (long i = 1; i < _count; i++)
+            {
+                var previous = (TransitionRec*)(_base + HeaderSize + (i - 1) * RecordSize);
+                var current = previous + 1;
+                if (Compare(previous->Key, current->Key) >= 0)
+                    throw new InvalidOperationException("chess transition floor keys must be sorted and unique");
+            }
+            _loadedPath = fullPath;
+        }
+        catch
         {
             Unload();
-            throw new InvalidOperationException("bad chess transition floor magic/version");
+            throw;
         }
-        _count = (long)ReadU64(8);
-        long body = HeaderSize + _count * RecordSize;
-        if (body + TrailerBytes > _len)
-        {
-            Unload();
-            throw new InvalidOperationException("chess transition floor record layout mismatch");
-        }
-        var crc = Hash128.Blake3(new ReadOnlySpan<byte>(_base, BodySpanLength(body)));
-        var stored = *(Hash128*)(_base + body);
-        if (crc != stored)
-        {
-            Unload();
-            throw new InvalidOperationException("chess transition floor body CRC mismatch");
-        }
-        _loadedPath = fullPath;
     }
 
     public static void LoadDefault()
@@ -210,6 +212,10 @@ public static unsafe class ChessTransitionFloor
 
     public static void WriteBlob(string path, IReadOnlyList<(Hash128 Key, Hash128 To)> sortedUnique)
     {
+        ArgumentNullException.ThrowIfNull(sortedUnique);
+        for (int i = 1; i < sortedUnique.Count; i++)
+            if (Compare(sortedUnique[i - 1].Key, sortedUnique[i].Key) >= 0)
+                throw new ArgumentException("Chess transition keys must be sorted and unique.", nameof(sortedUnique));
         string fullPath = Path.GetFullPath(path);
         string directory = Path.GetDirectoryName(fullPath)!;
         Directory.CreateDirectory(directory);
@@ -253,11 +259,11 @@ public static unsafe class ChessTransitionFloor
                     *(ulong*)(ptr + 8) = (ulong)count;
                     for (int i = 0; i < sortedUnique.Count; i++)
                     {
-                        var rec = (TransitionRec*)(ptr + HeaderSize + i * RecordSize);
+                        var rec = (TransitionRec*)(ptr + HeaderSize + (long)i * RecordSize);
                         rec->Key = sortedUnique[i].Key;
                         rec->To = sortedUnique[i].To;
                     }
-                    var crc = Hash128.Blake3(new ReadOnlySpan<byte>(ptr, BodySpanLength(body)));
+                    var crc = BodyHash(ptr, body);
                     *(Hash128*)(ptr + body) = crc;
                 }
                 finally
@@ -265,6 +271,7 @@ public static unsafe class ChessTransitionFloor
                     view.SafeMemoryMappedViewHandle.ReleasePointer();
                 }
                 view.Flush();
+                fs.Flush(flushToDisk: true);
             }
 
             File.Move(temporary, fullPath, overwrite: true);

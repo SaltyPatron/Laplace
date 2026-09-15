@@ -1202,6 +1202,7 @@ pg_laplace_word_shape_peers_fast(PG_FUNCTION_ARGS)
     double frechet_max;
     bool   spi_top = false;
     Datum  result;
+    MemoryContext caller = CurrentMemoryContext;
 
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
@@ -1213,6 +1214,12 @@ pg_laplace_word_shape_peers_fast(PG_FUNCTION_ARGS)
 
     result = word_shape_peers_fast_impl(word, frechet_max);
 
+    /* The implementation constructs both empty and nonempty arrays in SPI's
+     * context. Copy into the original caller while the bytes are still live;
+     * SPI_finish releases the implementation's work, not the returned value. */
+    MemoryContext previous = MemoryContextSwitchTo(caller);
+    result = datumCopy(result, false, -1);
+    MemoryContextSwitchTo(previous);
     laplace_spi_finish(spi_top);
     PG_RETURN_ARRAYTYPE_P(DatumGetArrayTypeP(result));
 }

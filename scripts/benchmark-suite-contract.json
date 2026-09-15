@@ -69,5 +69,24 @@
     "requires_full_source_and_target_index_constraint_definitions": true,
     "wal_scope": "cluster-wide LSN deltas include any concurrent unrelated work",
     "measurement_scope": "COPY plus acknowledged synchronous COMMIT; readback separate; no native admission or gameplay claim"
+  },
+  "recorded_chess": {
+    "profile": "recorded-chess",
+    "suite": "recorded",
+    "requires_collector_core_build": false,
+    "requires_complete_normal_games": true,
+    "requires_synchronous_commit_and_exact_native_readback": true,
+    "requires_duration_qualification_for_capacity_target": true,
+    "minimum_duration_seconds": 30,
+    "aggregate_denominator": "one enclosing collector wall interval across sequential complete workflows; no sum of stage or overlapping case durations",
+    "requires_disjoint_new_playing_identities": true,
+    "bounds": [
+      "games per case",
+      "complete case count",
+      "total execution deadline",
+      "individual and cumulative retained artifact bytes"
+    ],
+    "retained_ingestion_and_replay": "separately measured; neither is generated-and-recorded capacity",
+    "daily_rate": "arithmetic extrapolation of the measured interval, never a day-long observation"
   }
 }

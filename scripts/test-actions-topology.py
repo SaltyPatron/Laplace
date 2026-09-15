@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import copy
+import fcntl
+import hashlib
+import importlib.util
+import itertools
 import json
 import os
 import shutil
@@ -11,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import yaml
 
@@ -30,68 +35,129 @@ def commands(job: dict) -> str:
 
 
 class ActionsAuthorityTests(unittest.TestCase):
+    def test_recursive_receipt_retention_does_not_wait_for_host_or_query_history(self):
+        """Run all three real workflow blocks while another job owns the host."""
+        blocks = []
+        for path, job in ((MAIN, "product"), (PR, "prove")):
+            blocks.extend(step["run"] for step in load(path)["jobs"][job]["steps"]
+                          if "scripts/collect-recursive-proof-evidence.py" in step.get("run", ""))
+        self.assertEqual(3, len(blocks))
+        with tempfile.TemporaryDirectory(prefix="retained-proof-", dir=os.environ.get("TMPDIR", "/build/laplace/work")) as directory:
+            root = Path(directory)
+            checkout = root / "checkout"
+            scripts = checkout / "scripts"
+            scripts.mkdir(parents=True)
+            shutil.copyfile(ROOT / "scripts/collect-recursive-proof-evidence.py", scripts / "collect-recursive-proof-evidence.py")
+            forbidden = root / "unexpected-live-query"
+            (scripts / "inspect-recursive-proof-counterexamples.py").write_text(
+                "from pathlib import Path\nPath(" + repr(str(forbidden)) + ").touch()\nraise SystemExit(91)\n")
+            old = checkout / "build/test-receipts/live-recursive-substrate.json"
+            old.parent.mkdir(parents=True)
+            old.write_text(json.dumps({"schema": "laplace.proof.live-recursive-substrate/v1",
+                                      "source_sha": "previous-source", "ok": False, "finished_unix_nanoseconds": 1,
+                                      "identity": {"failure_examples": [{"parent_id": "a" * 32}]}}))
+            current_build = root / "current-build"
+            current = current_build / "test-receipts/live-recursive-substrate.json"
+            current.parent.mkdir(parents=True)
+            current.write_text(json.dumps({"schema": "laplace.proof.live-recursive-substrate/v1",
+                                          "source_sha": "current-source", "ok": True, "finished_unix_nanoseconds": 2}))
+            environment = {**os.environ, "GITHUB_WORKSPACE": str(checkout), "LAPLACE_PR_WORKTREE": str(checkout),
+                           "LAPLACE_BUILD_DIRECTORY": str(current_build), "GITHUB_RUN_ID": "1234", "GITHUB_RUN_ATTEMPT": "2",
+                           "LAPLACE_PR_TARGET_SHA": "current-source", "TARGET_SHA": "current-source", "PROOF_OUTCOME": "success"}
+            host_lock = root / "host-resource.lock"
+            with host_lock.open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                for index, block in enumerate(blocks):
+                    with self.subTest(block=index):
+                        evidence = root / f"evidence-{index}"
+                        shell = block.replace("/build/laplace/work/recursive-proof-evidence", str(evidence)).replace(
+                            "/build/laplace/work/host-resource.lock", str(host_lock))
+                        result = subprocess.run(["bash", "-euo", "pipefail"], input=shell, cwd=checkout,
+                                                env=environment, text=True, capture_output=True, timeout=3)
+                        self.assertEqual(0, result.returncode, result.stderr)
+                        self.assertFalse(forbidden.exists(), "retention launched a historical live query")
+                        manifests = list(evidence.glob("*/manifest.json"))
+                        self.assertEqual(1, len(manifests))
+                        manifest = json.loads(manifests[0].read_text())
+                        for original in (old, current):
+                            item = next(item for item in manifest["receipts"] if item["requested_path"] == str(original))
+                            self.assertEqual("retained", item["disposition"])
+                            self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), item["sha256"])
+                            self.assertEqual(original.read_bytes(), (manifests[0].parent / item["artifact_file"]).read_bytes())
+                        self.assertFalse((manifests[0].parent / "counterexample-structure.json").exists())
+
     def test_post_stockfish_operational_proof_precedes_upload_and_measurement(self):
         workflow = load(MAIN)
-        steps = workflow["jobs"]["product"]["steps"]
-        names = [step.get("name") for step in steps]
-        lifecycle = names.index("Run full product lifecycle")
-        upload = names.index("Upload operational seed and execution receipts")
-        self.assertLess(lifecycle, upload)
-        self.assertNotIn("Admit official Stockfish source and verify native corpus readback", names)
-        self.assertNotIn("Verify ordinary operational execution after Stockfish admission", names)
-        self.assertEqual("always() && steps.full_product.outcome != 'skipped' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')",
-                         steps[upload]["if"])
-        self.assertEqual("/build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}/",
-                         steps[upload]["with"]["path"])
+        product = workflow["jobs"]["product"]
+        steps = product["steps"]
+        indexes = {step.get("id"): index for index, step in enumerate(steps) if step.get("id")}
+        phases = ["operational_seed", "publish", "chess_runtime", "operational_execution",
+                  "stockfish_corpus", "post_stockfish_execution", "chess_completion", "recorded_chess", "db_health"]
+        positions = [indexes["product_" + phase] for phase in phases]
+        self.assertEqual(sorted(positions), positions)
+        for phase in phases:
+            step = steps[indexes["product_" + phase]]
+            selected = phase.replace("_", "-")
+            self.assertEqual("contains(env.LAPLACE_CI_PHASES, '|" + selected + "|')", step["if"])
+            self.assertIn("ci-session.py", step["run"])
+            self.assertIn("--phase " + selected, step["run"])
+            self.assertNotIn("continue-on-error", step)
+        upload = next(step for step in steps if step.get("name") == "Upload operational seed and execution receipts")
+        self.assertLess(indexes["product_post_stockfish_execution"], steps.index(upload))
+        self.assertEqual("always() && steps.product_session.outcome != 'skipped' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')", upload["if"])
+        self.assertEqual("/build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}/", upload["with"]["path"])
         self.assertEqual("always() && !cancelled() && needs.product.outputs.chess_benchmark_ready == 'true'",
                          workflow["jobs"]["chess_environment"]["if"])
-        self.assertEqual("${{ steps.full_product.outputs.chess_benchmark_ready }}",
-                         workflow["jobs"]["product"]["outputs"]["chess_benchmark_ready"])
-        recorded = next(step for step in steps if step.get("name") == "Retain installed recorded-game benchmark evidence")
-        self.assertEqual("always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')",
-                         recorded["if"])
-        self.assertEqual("/build/laplace/work/recorded-chess-evidence/${{ github.run_id }}-${{ github.run_attempt }}/",
-                         recorded["with"]["path"])
-        runtime = next(step for step in steps if step.get("name") == "Retain installed chess service and bootstrap observations")
-        self.assertIn("always()", runtime["if"])
-        self.assertEqual("/build/laplace/work/chess-runtime-evidence/${{ github.run_id }}-${{ github.run_attempt }}/",
-                         runtime["with"]["path"])
-        geometry = next(step for step in steps if step.get("name") == "Retain PostgreSQL geometry write and readback measurements")
-        self.assertEqual(recorded["if"], geometry["if"])
-        self.assertEqual("/build/laplace/work/postgres-geometry-evidence/${{ github.run_id }}-${{ github.run_attempt }}/",
-                         geometry["with"]["path"])
+        self.assertEqual({name: "${{ steps.product_chess_completion.outputs." + name + " }}"
+                          for name in ("chess_benchmark_ready", "activated_ref", "chess_acceptance_stage")}, product["outputs"])
+        for name, directory, phase in (
+            ("Retain installed recorded-game benchmark evidence", "recorded-chess-evidence", "recorded_chess"),
+            ("Retain installed retained-PGN admission and replay evidence", "retained-chess-evidence", "recorded_chess"),
+            ("Retain installed chess service and bootstrap observations", "chess-runtime-evidence", "chess_runtime"),
+            ("Retain PostgreSQL geometry write and readback measurements", "postgres-geometry-evidence", "recorded_chess"),
+        ):
+            step = next(step for step in steps if step.get("name") == name)
+            self.assertLess(indexes["product_" + phase], steps.index(step))
+            self.assertEqual("always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')", step["if"])
+            self.assertEqual("/build/laplace/work/" + directory + "/${{ github.run_id }}-${{ github.run_attempt }}/", step["with"]["path"])
 
-    def test_recorded_and_geometry_measurements_both_run_and_preserve_each_failure(self):
+    def test_recorded_retained_and_geometry_measurements_run_and_preserve_each_failure(self):
         source = PRODUCT.read_text()
         function = "run_recorded_chess_benchmark() {" + source.split(
             "run_recorded_chess_benchmark() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
-        for recorded_status, geometry_status in ((0, 0), (17, 0), (0, 23), (17, 23)):
-            with self.subTest(recorded=recorded_status, geometry=geometry_status), tempfile.TemporaryDirectory() as directory:
+        for recorded_status, retained_status, geometry_status in itertools.product((0, 17), (0, 19), (0, 23)):
+            with self.subTest(recorded=recorded_status, retained=retained_status, geometry=geometry_status), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 calls = root / "calls.jsonl"
                 executable = root / "python3"
                 executable.write_text("#!" + sys.executable + "\n" + """import json, os, sys
 with open(os.environ['MEASUREMENT_CALLS'], 'a') as stream:
     stream.write(json.dumps(sys.argv[1:]) + '\\n')
-raise SystemExit(int(os.environ['RECORDED_STATUS' if sys.argv[1] == 'scripts/benchmark-recorded-chess.py' else 'GEOMETRY_STATUS']))
+statuses = {'scripts/benchmark-recorded-chess.py':'RECORDED_STATUS', 'scripts/benchmark-retained-chess-ingestion.py':'RETAINED_STATUS', 'scripts/benchmark_suite.py':'GEOMETRY_STATUS'}
+raise SystemExit(int(os.environ[statuses[sys.argv[1]]]))
 """)
                 executable.chmod(0o755)
                 environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
                     "MEASUREMENT_CALLS": str(calls), "RECORDED_STATUS": str(recorded_status),
-                    "GEOMETRY_STATUS": str(geometry_status), "PGDATABASE": "selected_database",
+                    "RETAINED_STATUS": str(retained_status), "GEOMETRY_STATUS": str(geometry_status), "PGDATABASE": "selected_database",
                     "LAPLACE_PG_PREFIX": str(root / "postgres"),
                     "LAPLACE_RECORDED_CHESS_DIRECTORY": str(root / "recorded"),
+                    "LAPLACE_RETAINED_CHESS_DIRECTORY": str(root / "retained"),
                     "LAPLACE_POSTGRES_GEOMETRY_DIRECTORY": str(root / "geometry")}
                 result = subprocess.run(["bash"], input="set -euo pipefail\n" + function
                     + "run_recorded_chess_benchmark\necho subsequent-acceptance\n",
                     text=True, capture_output=True, env=environment, timeout=10)
-                self.assertEqual(recorded_status or geometry_status, result.returncode, result.stderr)
+                self.assertEqual(recorded_status or retained_status or geometry_status, result.returncode, result.stderr)
                 observed = [json.loads(line) for line in calls.read_text().splitlines()]
-                self.assertEqual(["scripts/benchmark-recorded-chess.py", "scripts/benchmark_suite.py"],
+                self.assertEqual(["scripts/benchmark-recorded-chess.py", "scripts/benchmark-retained-chess-ingestion.py", "scripts/benchmark_suite.py"],
                                  [call[0] for call in observed])
+                self.assertEqual(["--duration-seconds", "30", "--total-timeout", "1800",
+                                  "--output-dir", str(root / "recorded")], observed[0][1:])
                 self.assertEqual(["run", "--suite", "geometry", "--database", "selected_database", "--repeats", "3",
-                                  "--receipt-dir", str(root / "geometry")], observed[1][1:])
-                self.assertEqual(not (recorded_status or geometry_status), "subsequent-acceptance" in result.stdout)
+                                  "--receipt-dir", str(root / "geometry")], observed[2][1:])
+                self.assertEqual(["--output-dir", str(root / "retained")], observed[1][1:])
+                self.assertIn(f"recorded_exit={recorded_status} retained_exit={retained_status} geometry_exit={geometry_status}", result.stdout)
+                self.assertEqual(not (recorded_status or retained_status or geometry_status), "subsequent-acceptance" in result.stdout)
 
     def run_post_stockfish_proof(self, receipt_values, first_rc=0, second_rc=0, *, fresh="0", restore="0", initial_seed="e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"):
         """Execute the actual lifecycle function and receipt reader under a real host lock."""
@@ -148,7 +214,7 @@ raise SystemExit(code)
                            "PROOF_CALLS": str(calls), "TEST_HOST_LOCK": str(lock),
                            "DEFINITION_RC": str(first_rc), "ANTONYM_RC": str(second_rc),
                            "LAPLACE_FRESH_DB": fresh, "LAPLACE_RESTORE_FOUNDATION": restore,
-                           "TEST_CURRENT_INVOCATION": str(current / "invocation-0"), "TEST_INITIAL_SEED": initial_seed}
+                           "TEST_CURRENT_INVOCATION": str(current / "invocation-0"), "TEST_INITIAL_SEED": initial_seed, "LAPLACE_CI_SESSION_DIRECTORY": ""}
             result = subprocess.run(["flock", "--exclusive", "--close", str(lock), "bash"],
                                     input=script, cwd=ROOT, env=environment,
                                     text=True, capture_output=True, timeout=20)
@@ -213,7 +279,7 @@ raise SystemExit(code)
         result, calls, _, _ = self.run_post_stockfish_proof(
             [seed], initial_seed="bf972cf5-0ca8-4cab-99e7-0b9b19482c34")
         self.assertNotEqual(0, result.returncode)
-        self.assertIn("differs from this process", result.stderr)
+        self.assertIn("differs from this lifecycle", result.stderr)
         self.assertEqual([], calls)
 
     def test_post_stockfish_preserves_only_the_explicit_fresh_unrestored_exception(self):
@@ -242,94 +308,86 @@ raise SystemExit(code)
         self.assertEqual("chess", calibration["with"]["suite"])
         product = workflow["jobs"]["product"]
         command = commands(product)
-        self.assertIn('bash scripts/product-ci.sh "$LAPLACE_STAGE"', command)
+        self.assertIn('--kind product --stage "$LAPLACE_STAGE"', command)
         self.assertIn("bash scripts/product-ci.sh reconcile", command)
         for split_job in ("deploy", "db-ops", "publish", "restore-api", "smoke", "integration-test"):
             self.assertNotIn(split_job, workflow["jobs"])
 
     def run_lifecycle_order(self, stage="all", failed="", *, wrong_source=False, skip_post=False):
-        """Run the real stage selection and completion publisher with boundary stubs."""
+        """Execute the actual selected phases/completion; stub only external work."""
         source = PRODUCT.read_text()
-        function = "record_chess_completion() {" + source.split(
-            "record_chess_completion() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
-        # Keep the actual initialization, including rejection of inherited ready state.
-        initialization = source.split('stage="${1:-all}"', 1)[0].split(
-            "# Completion state belongs", 1)[1]
-        initialization = "# Completion state belongs" + initialization
-        footer = "run_policy\n" + source.split("\nrun_policy\n", 1)[1]
-        stubs = """set -euo pipefail
+        initialization = source[source.index("# Completion state belongs"):source.index("run_policy() {")]
+        definitions = source[source.index("run_policy() {"):source.index('case "${2:-}" in')]
+        footer = source[source.index('case "${2:-}" in'):]
+        stubs = """
 step() { echo "$1"; [[ "$1" != "$TEST_FAIL" ]]; }
 git() { printf '%040d\n' 1; }
 run_policy() { step policy; }
-resume_held_repair_if_needed() { step resume; }
-run_deps() { step deps; }
+run_deps() { step dependencies; }
 run_build() { step build; }
-run_dev() { step dev; }
-run_install_and_db() { step install; }
-restore_foundation_if_requested() { step restore; }
-seed_operational_memory() { step seed; }
-run_publish() { step publish; }
+run_suite() { step "$2"; }
+run_live_suite() { step "$1"; }
+run_install() { step native-install; }
+run_database_maintenance() { step database-maintenance; }
+restore_foundation_if_requested() { step foundation; }
+seed_operational_memory() { step operational-seed; }
+run_publish_with_recovery() { step publish; }
 observe_chess_runtime() { step chess-runtime; }
-recover_publish() { step recover; }
-bash() { step "application-$2"; }
-run_repair_installed_corpus() { step repair; }
+bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else step application-check; fi; }
 verify_operational_execution() {
   if [[ "${1:-}" == post-stockfish- ]]; then
-    step postcheck
+    step post-stockfish-execution
     if [[ "$TEST_SKIP_POST" != 1 ]]; then operational_postchecks_passed=1; fi
   else
-    step initial
+    step operational-execution
   fi
 }
-run_stockfish_corpus_acceptance() { step corpus; stockfish_corpus_passed=1; }
-run_recorded_chess_benchmark() { step recorded-games; }
-run_integration() { step integration; }
-run_live_if_expected() { step live; }
-run_perf() { step perf; }
+run_stockfish_corpus_acceptance() { step stockfish-corpus; stockfish_corpus_passed=1; }
+run_recorded_chess_benchmark() { step recorded-chess; }
 """
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "github-output"
             environment = {**os.environ, "GITHUB_OUTPUT": str(output), "GITHUB_RUN_ID": "35001917982",
                 "GITHUB_RUN_ATTEMPT": "3", "GITHUB_SHA": ("2" if wrong_source else "1").zfill(40),
                 "TEST_FAIL": failed, "TEST_SKIP_POST": "1" if skip_post else "0", "LAPLACE_FRESH_DB": "0",
-                "LAPLACE_FULL_CLEAN": "0", "stockfish_corpus_passed": "1", "operational_postchecks_passed": "1"}
-            result = subprocess.run(["bash", "-s", stage], input=stubs + initialization
-                + 'stage="${1:-all}"\n' + function + footer, env=environment, text=True,
+                "LAPLACE_FULL_CLEAN": "0", "LAPLACE_RESTORE_FOUNDATION": "0", "LAPLACE_GENERATION_BENCHMARK": "1",
+                "LAPLACE_CI_SESSION_DIRECTORY": "", "stockfish_corpus_passed": "1", "operational_postchecks_passed": "1"}
+            result = subprocess.run(["bash", "-s", stage], input="set -euo pipefail\n" + initialization
+                + definitions + stubs + footer, cwd=directory, env=environment, text=True,
                 capture_output=True, timeout=20)
             outputs = dict(line.split("=", 1) for line in output.read_text().splitlines()) if output.exists() else {}
             return result, result.stdout.splitlines(), outputs
 
     def test_later_failure_preserves_current_job_corpus_completion_and_failed_lifecycle(self):
-        for failed in ("recorded-games", "integration", "live", "perf"):
+        for failed in ("recorded-chess", "db-health", "live-floor", "performance"):
             with self.subTest(failed=failed):
                 result, calls, outputs = self.run_lifecycle_order(failed=failed)
                 self.assertNotEqual(0, result.returncode, result.stderr)
                 self.assertEqual(failed, calls[-1])
-                self.assertLess(calls.index("repair"), calls.index("initial"))
-                self.assertLess(calls.index("publish"), calls.index("chess-runtime"))
-                self.assertLess(calls.index("chess-runtime"), calls.index("repair"))
-                self.assertLess(calls.index("initial"), calls.index("corpus"))
-                self.assertLess(calls.index("corpus"), calls.index("postcheck"))
-                self.assertLess(calls.index("postcheck"), calls.index(failed))
+                ordered = ["operational-seed", "publish", "chess-runtime", "operational-execution",
+                           "stockfish-corpus", "post-stockfish-execution", failed]
+                positions = [calls.index(name) for name in ordered]
+                self.assertEqual(sorted(positions), positions)
                 self.assertEqual({"chess_benchmark_ready": "true", "activated_ref": "1".zfill(40),
                                   "chess_acceptance_stage": "all"}, outputs)
 
     def test_prerequisite_failure_never_authorizes_measurement_or_later_tests(self):
-        for failed in ("publish", "repair", "initial", "corpus", "postcheck"):
+        for failed in ("operational-seed", "publish", "chess-runtime", "operational-execution", "stockfish-corpus", "post-stockfish-execution"):
             with self.subTest(failed=failed):
                 result, calls, outputs = self.run_lifecycle_order(failed=failed)
                 self.assertNotEqual(0, result.returncode, result.stderr)
                 self.assertEqual({}, outputs)
-                self.assertNotIn("integration", calls)
-                self.assertNotIn("live", calls)
+                self.assertNotIn("db-health", calls)
+                self.assertNotIn("live-floor", calls)
 
     def test_application_only_executes_its_explicit_prerequisites_without_claiming_repair(self):
         result, calls, outputs = self.run_lifecycle_order(stage="applications")
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(["policy", "resume", "deps", "build", "dev", "application-check",
-                          "application-deploy", "recover", "chess-runtime", "seed", "initial", "corpus", "postcheck", "recorded-games"], calls)
+        self.assertEqual(["policy", "dependencies", "build", "native-dev", "managed-dev", "uci-dev", "browser-dev",
+                          "application-check", "operational-seed", "publish", "chess-runtime", "operational-execution",
+                          "stockfish-corpus", "post-stockfish-execution", "recorded-chess"], calls)
         self.assertEqual("applications", outputs["chess_acceptance_stage"])
-        for failed in ("application-deploy", "seed", "initial", "corpus", "postcheck"):
+        for failed in ("publish", "operational-seed", "operational-execution", "stockfish-corpus", "post-stockfish-execution"):
             with self.subTest(failed=failed):
                 result, _, outputs = self.run_lifecycle_order(stage="applications", failed=failed)
                 self.assertNotEqual(0, result.returncode)
@@ -348,36 +406,134 @@ run_perf() { step perf; }
                 result, calls, outputs = self.run_lifecycle_order(stage=stage)
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertEqual({}, outputs)
-                self.assertNotIn("corpus", calls)
+                self.assertNotIn("stockfish-corpus", calls)
+
+    def test_visible_completion_requires_actual_session_source_and_ordered_successes(self):
+        """Exercise the real owner and shell completion against a tiny Git checkout."""
+        source = PRODUCT.read_text()
+        function = "record_chess_completion() {" + source.split(
+            "record_chess_completion() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        required = ["operational-seed", "publish", "chess-runtime", "operational-execution",
+                    "stockfish-corpus", "post-stockfish-execution"]
+        with tempfile.TemporaryDirectory(prefix="chess-completion-", dir=os.environ.get("TMPDIR", "/build/laplace/work")) as temporary:
+            root = Path(temporary) / "checkout"
+            scripts = root / "scripts"
+            scripts.mkdir(parents=True)
+            owner_path = scripts / "ci-session.py"
+            shutil.copyfile(ROOT / "scripts/ci-session.py", owner_path)
+            for args in (("init", "--quiet"), ("add", "scripts/ci-session.py"),
+                         ("-c", "user.name=Lifecycle Test", "-c", "user.email=lifecycle@example.invalid",
+                          "commit", "--quiet", "-m", "Retain actual session owner")):
+                subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+            session = Path(temporary) / "session"
+            session.mkdir(mode=0o700)
+            output = Path(temporary) / "github-output"
+            spec = importlib.util.spec_from_file_location("completion_ci_owner", owner_path)
+            owner = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(owner)
+            environment = {**os.environ, "GITHUB_REPOSITORY": "test/laplace", "GITHUB_RUN_ID": "345",
+                "GITHUB_RUN_ATTEMPT": "2", "GITHUB_JOB": "product", "RUNNER_TRACKING_ID": "completion-fixture",
+                "GITHUB_OUTPUT": str(output), "LAPLACE_CI_SESSION_DIRECTORY": str(session), "TEST_ROOT": str(root),
+                "stockfish_corpus_passed": "1", "operational_postchecks_passed": "1"}
+            with patch.dict(os.environ, environment):
+                source_identity = owner.source(root)
+                identity = owner.identity()
+            environment["GITHUB_SHA"] = source_identity["commit"]
+            baseline = {"schema": owner.SCHEMA, "identity": identity, "kind": "product", "stage": "all",
+                "checkout": str(root), "source": source_identity, "active": {"phase": "chess-completion"},
+                "results": [{"phase": phase, "exit_code": 0} for phase in required]}
+
+            def execute(state, **changes):
+                owner.save(session, state)
+                output.unlink(missing_ok=True)
+                result = subprocess.run(["bash"], input='set -euo pipefail\nROOT="$TEST_ROOT"\nstage=all\n'
+                    + function + '\nrecord_chess_completion\necho later-phase\n', cwd=root,
+                    env={**environment, **changes}, text=True, capture_output=True, timeout=10)
+                fields = dict(line.split("=", 1) for line in output.read_text().splitlines()) if output.exists() else {}
+                return result, fields
+
+            result, fields = execute(baseline)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual({"chess_benchmark_ready": "true", "activated_ref": source_identity["commit"],
+                              "chess_acceptance_stage": "all"}, fields)
+            mutations = []
+            for missing in required:
+                changed = copy.deepcopy(baseline)
+                changed["results"] = [row for row in changed["results"] if row["phase"] != missing]
+                mutations.append(("missing-" + missing, changed))
+            for name, change in (
+                ("failed-prerequisite", lambda value: value["results"][2].update(exit_code=37)),
+                ("wrong-order", lambda value: value["results"].reverse()),
+                ("duplicate-prerequisite", lambda value: value["results"].append(value["results"][0])),
+                ("wrong-kind", lambda value: value.update(kind="pr")),
+                ("wrong-stage", lambda value: value.update(stage="applications")),
+                ("wrong-checkout", lambda value: value.update(checkout=str(Path(temporary)))),
+                ("wrong-source", lambda value: value["source"].update(commit="0" * 40)),
+                ("wrong-active-phase", lambda value: value["active"].update(phase="stockfish-corpus")),
+                ("wrong-session-identity", lambda value: value.update(identity="0" * 64)),
+            ):
+                changed = copy.deepcopy(baseline)
+                change(changed)
+                mutations.append((name, changed))
+            for name, state in mutations:
+                with self.subTest(control=name):
+                    result, fields = execute(state)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertEqual({}, fields)
+                    self.assertNotIn("later-phase", result.stdout)
+            result, fields = execute(baseline, GITHUB_RUN_ATTEMPT="3")
+            self.assertNotEqual(0, result.returncode)
+            self.assertEqual({}, fields)
+            original = owner_path.read_bytes()
+            owner_path.write_bytes(original + b"\n# uncommitted source change\n")
+            result, fields = execute(baseline)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("tracked changes", result.stderr)
+            self.assertEqual({}, fields)
+            owner_path.write_bytes(original)
 
     def test_product_script_owns_order_once(self):
-        text = PRODUCT.read_text(encoding="utf-8")
-        ordered = [
-            "run_policy",
-            "run_deps",
-            "run_build",
-            "run_dev",
-            "run_install_and_db",
-            "seed_operational_memory",
-            "run_publish",
-            "observe_chess_runtime",
-            "run_repair_installed_corpus",
-            "verify_operational_execution",
-            "run_stockfish_corpus_acceptance",
-            "verify_operational_execution post-stockfish-",
-            "record_chess_completion",
-            "run_recorded_chess_benchmark",
-            "run_integration",
-            "run_live_if_expected",
-        ]
-        positions = [text.rfind(f"\n{name}\n") for name in ordered]
-        self.assertTrue(all(pos >= 0 for pos in positions), positions)
-        self.assertEqual(sorted(positions), positions)
-        self.assertIn('bash scripts/check-database-health.sh', text)
-        self.assertIn('bash scripts/ensure-foundation.sh --check-only', text)
-        self.assertIn('bash scripts/ensure-foundation.sh', text)
-        self.assertIn('bash scripts/publish-applications.sh deploy', text)
-        self.assertIn('bash scripts/publish-applications.sh recover', text)
+        result = subprocess.run(["bash", str(PRODUCT), "all", "--list-phases"],
+                                capture_output=True, text=True, check=True,
+                                env={**os.environ, "LAPLACE_GENERATION_BENCHMARK": "1", "LAPLACE_RESTORE_FOUNDATION": "1"})
+        self.assertEqual([
+            "policy", "dependencies", "build", "native-dev", "managed-dev",
+            "uci-dev", "browser-dev", "native-install", "database-maintenance", "foundation",
+            "operational-seed", "publish", "chess-runtime", "operational-execution",
+            "stockfish-corpus", "post-stockfish-execution", "chess-completion", "recorded-chess", "db-health", "native-db", "managed-db", "live-floor", "live-api", "managed-live",
+            "generation-eval", "performance"], result.stdout.splitlines())
+        text = PRODUCT.read_text()
+        for command in ("check-database-health.sh", "ensure-foundation.sh --check-only",
+                        "publish-applications.sh deploy", "publish-applications.sh recover"):
+            self.assertIn(command, text)
+
+    def test_stage_selection_keeps_mutations_and_fresh_database_exceptions_explicit(self):
+        def plan(stage, **flags):
+            result = subprocess.run(["bash", str(PRODUCT), stage, "--list-phases"],
+                env={**os.environ, "LAPLACE_RESTORE_FOUNDATION": "", "LAPLACE_FRESH_DB": "",
+                     "LAPLACE_GENERATION_BENCHMARK": "", **flags},
+                capture_output=True, text=True, check=True)
+            return result.stdout.splitlines()
+        self.assertEqual(["policy"], plan("check"))
+        self.assertEqual("build", plan("build")[-1])
+        self.assertEqual("browser-dev", plan("test")[-1])
+        self.assertEqual("application-check", plan("application-check")[-1])
+        self.assertEqual("recorded-chess", plan("applications")[-1])
+        self.assertNotIn("native-install", plan("applications"))
+        self.assertNotIn("publish", plan("deploy"))
+        self.assertNotIn("publish", plan("integrate"))
+        self.assertNotIn("live-floor", plan("integrate"))
+        fresh = plan("all", LAPLACE_FRESH_DB="1")
+        self.assertIn("operational-seed", fresh)
+        self.assertIn("managed-db", fresh)
+        self.assertIn("chess-runtime", fresh)
+        for phase in ("operational-execution", "stockfish-corpus", "post-stockfish-execution", "chess-completion", "recorded-chess"):
+            self.assertNotIn(phase, fresh)
+        self.assertNotIn("live-floor", fresh)
+        restored = plan("all", LAPLACE_FRESH_DB="1", LAPLACE_RESTORE_FOUNDATION="1")
+        self.assertIn("foundation", restored)
+        self.assertIn("operational-execution", restored)
+        self.assertIn("live-floor", restored)
 
     def test_tooling_only_main_changes_reconcile_without_native_rebuild_or_seed(self):
         source = MAIN.read_text(encoding="utf-8")
@@ -450,8 +606,8 @@ run_perf() { step perf; }
         prove = workflow["jobs"]["prove"]
         command = commands(prove)
         self.assertIn("LAPLACE_PR_FULL_PROOF", command)
-        self.assertIn("test-parallel.sh --policy", command)
-        self.assertIn("scripts/pr-proof.sh", command)
+        self.assertIn('--kind pr --stage "$stage"', command)
+        self.assertIn("--phase policy", command)
         self.assertIn("git worktree add --detach", command)
         self.assertIn("git worktree remove --force", command)
         for forbidden in ("pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh deploy", "sudo "):
@@ -570,7 +726,7 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
         cls.root = Path(cls.scratch.name)
         (cls.root / ".github/workflows").mkdir(parents=True)
         (cls.root / "scripts").mkdir()
-        for name in ("actions-audit.py", "product-ci.sh", "pr-proof.sh", "bootstrap-laplace-runner.sh", "test-profile-registry.py", "test-profiles.json", "test-parallel.sh", "ci-policy.sh", "maintain-installed-database.sh", "repair-legacy-content-lifecycle.sh"):
+        for name in ("actions-audit.py", "ci-session.py", "pr-db-proof.sh", "product-ci.sh", "pr-proof.sh", "bootstrap-laplace-runner.sh", "test-profile-registry.py", "test-profiles.json", "test-parallel.sh", "ci-policy.sh", "maintain-installed-database.sh", "repair-legacy-content-lifecycle.sh"):
             shutil.copy2(ROOT / "scripts" / name, cls.root / "scripts" / name)
 
     @classmethod
@@ -621,56 +777,46 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
             finally:
                 path.write_text(original)
 
-    def test_corpus_repair_requires_successful_publication_and_its_own_quiescence(self):
-        path = self.root / "scripts/product-ci.sh"
-        original = path.read_text()
-        repair = 'bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"'
-        mutations = (
-            (original.replace("\nrun_publish\n", "\nREPAIR_ORDER_PLACEHOLDER\n").replace("\nrun_repair_installed_corpus\n", "\nrun_publish\n").replace("\nREPAIR_ORDER_PLACEHOLDER\n", "\nrun_repair_installed_corpus\n"), "product lifecycle order drifted"),
-            (original.replace("\nrun_repair_installed_corpus\n", "\nrun_repair_installed_corpus || true\n"), "one unsuppressed lifecycle invocation"),
-            (original.replace(repair, repair + " || true"), "post-publication corpus repair"),
-            (original.replace('LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)"', 'LAPLACE_REPAIR_PUBLISHED_SOURCE="unknown"'), "post-publication corpus repair"),
-            (original.replace('--max-current-readback-bytes 8589934592', ''), "post-publication corpus repair"),
-        )
-        for mutation, diagnostic in mutations:
-            with self.subTest(diagnostic=diagnostic):
-                try:
-                    self.assertNotEqual(original, mutation)
-                    path.write_text(mutation)
-                    self.check_audit(diagnostic=diagnostic)
-                finally:
-                    path.write_text(original)
+    def test_build_and_deployment_do_not_repair_historical_content(self):
+        source = PRODUCT.read_text()
+        for token in ("repair-legacy-content", "resume_held_repair", "corpus-repair"):
+            self.assertNotIn(token, source)
+        main_commands = commands(load(MAIN)["jobs"]["product"])
+        self.assertNotIn("collect-legacy-repair-evidence", main_commands)
+        self.assertNotIn("classify-legacy-content", commands(load(PR)["jobs"]["prove"]))
 
-    def test_operational_proof_cannot_precede_repair_or_have_failure_suppressed(self):
+    def test_operational_proof_cannot_precede_publication_or_have_failure_suppressed(self):
         path = self.root / "scripts/product-ci.sh"
         original = path.read_text()
-        invocation = "\nverify_operational_execution\n"
+        invocation = "operational-execution) verify_operational_execution ;;"
         mutations = (
-            original.replace(invocation, ""),
-            original.replace(invocation, "\nverify_operational_execution || true\n"),
-            original.replace(invocation, "").replace("\nrun_publish\n", invocation + "run_publish\n"),
+            original.replace(invocation, "operational-execution) : ;;"),
+            original.replace(invocation, "operational-execution) verify_operational_execution || true ;;"),
+            original.replace("    printf '%s\\n' publish chess-runtime", "    printf '%s\\n' operational-execution publish chess-runtime"),
         )
         for mutation in mutations:
             try:
                 self.assertNotEqual(original, mutation)
                 path.write_text(mutation)
-                self.check_audit(diagnostic="product lifecycle order drifted")
+                self.check_audit(diagnostic="product lifecycle")
             finally:
                 path.write_text(original)
 
     def test_failed_operational_proof_stops_later_product_acceptance(self):
         source = PRODUCT.read_text()
-        footer = "run_repair_installed_corpus\n" + source.rsplit("\nrun_repair_installed_corpus\n", 1)[1]
-        script = """set -euo pipefail
-run_repair_installed_corpus() { echo repair-complete; }
+        definitions = source[source.index("run_policy() {"):source.index('case "${2:-}" in')]
+        script = "set -euo pipefail\nstage=all\n" + definitions + """
+run_publish_with_recovery() { echo publication-complete; }
 verify_operational_execution() { echo operational-proof-rejected; return 41; }
-run_integration() { echo unexpected-integration; }
-run_live_if_expected() { echo unexpected-live; }
-run_perf() { echo unexpected-perf; }
-""" + footer
+run_suite() { echo unexpected-integration; }
+run_live_suite() { echo unexpected-live; }
+for phase in publish operational-execution db-health native-db managed-db live-floor; do
+  run_phase "$phase"
+done
+"""
         result = subprocess.run(["bash"], input=script, text=True, capture_output=True)
         self.assertEqual(41, result.returncode, result.stderr)
-        self.assertEqual(["repair-complete", "operational-proof-rejected"], result.stdout.splitlines())
+        self.assertEqual(["publication-complete", "operational-proof-rejected"], result.stdout.splitlines())
 
     def test_both_operational_forms_require_the_same_seed_and_independent_passing_proofs(self):
         source = PRODUCT.read_text()
@@ -698,7 +844,7 @@ raise SystemExit(int(os.environ[mode]))
                 environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
                     "PROOF_CALLS": str(calls_path), "TEST_PROOF_DIR": str(root),
                     "DEFINITION_RC": str(first_rc), "ANTONYM_RC": str(second_rc),
-                    "LAPLACE_FRESH_DB": "0", "LAPLACE_RESTORE_FOUNDATION": "0"}
+                    "LAPLACE_FRESH_DB": "0", "LAPLACE_RESTORE_FOUNDATION": "0", "LAPLACE_CI_SESSION_DIRECTORY": ""}
                 script = 'set -euo pipefail\noperational_proof_directory="$TEST_PROOF_DIR"\n' \
                     + function + '\nverify_operational_execution\necho later-acceptance\n'
                 result = subprocess.run(["bash"], input=script, env=environment,
@@ -723,61 +869,26 @@ raise SystemExit(int(os.environ[mode]))
                         ("--receipt", str(root / "antonym-task.json"))):
                         self.assertEqual(expected, direct[direct.index(flag) + 1])
 
-    def test_owned_repair_resume_cannot_be_omitted_swallowed_or_moved_after_build(self):
-        path=self.root / "scripts/product-ci.sh"
-        original=path.read_text()
-        call="  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;"
-        block='case "$stage" in\n'+call+'\nesac\n'
-        for mutation in (original.replace("--resume-if-needed", "--wrong-resume-mode"),
-                         original.replace(call,call.replace(" ;;"," || true ;;")),
-                         original.replace(block,"").replace("\nrun_build\n","\nrun_build\n"+block)):
-            try:
-                self.assertNotEqual(original,mutation)
-                path.write_text(mutation)
-                self.check_audit(diagnostic="owned repair resume must run unsuppressed")
-            finally:
-                    path.write_text(original)
-
-    def test_publication_recovery_cannot_restart_api_after_unknown_repair_transaction(self):
+    def test_publication_recovery_is_scoped_to_publication(self):
         source = PRODUCT.read_text()
-        footer = "trap recover_publish EXIT\nrun_publish\n" + source.rsplit(
-            "trap recover_publish EXIT\nrun_publish\n", 1)[1]
-        recovery = "recover_publish() {" + source.split("recover_publish() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
-        script = """set -euo pipefail
+        definitions = source[source.index("run_policy() {"):source.index('case "${2:-}" in')]
+        script = "set -euo pipefail\nstage=all\n" + definitions + """
 bash() { echo publication-recovery; }
 ensure_api_running() { echo API-START; }
 run_publish() { echo published; }
-observe_chess_runtime() { echo runtime-observed; }
-run_repair_installed_corpus() { echo repair-transaction-unknown; return 37; }
-run_integration() { echo unexpected-integration; }
-run_live_if_expected() { echo unexpected-live; }
-run_perf() { echo unexpected-perf; }
-""" + recovery + footer
+verify_operational_execution() { echo operational-proof-rejected; return 37; }
+run_phase publish
+run_phase operational-execution
+"""
         result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, timeout=10)
         self.assertEqual(37, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(["published", "runtime-observed", "repair-transaction-unknown"], result.stdout.splitlines())
-        path = self.root / "scripts/product-ci.sh"
-        original = path.read_text()
-        try:
-            path.write_text(original.replace("\nrun_publish\ntrap - EXIT\n", "\nrun_publish\n"))
-            self.check_audit(diagnostic="publication recovery must end before repair")
-        finally:
-            path.write_text(original)
-
-    def test_database_repair_cannot_bypass_measurement_lane(self):
-        path = self.root / "scripts/repair-legacy-content-lifecycle.sh"
-        original = path.read_text()
-        try:
-            path.write_text(original.replace("bash scripts/measure-lane.sh --", "bash scripts/unlocked.sh --"))
-            self.check_audit(diagnostic="authoritative measurement lane")
-        finally:
-            path.write_text(original)
+        self.assertEqual(["published", "operational-proof-rejected"], result.stdout.splitlines())
 
     def test_failed_proof_cannot_be_hidden_at_step_or_job(self):
         mutations = [
-            lambda ws: self.step(ws, "pr-validation.yml", "id", "proof").update({"continue-on-error": "true"}),
+            lambda ws: self.step(ws, "pr-validation.yml", "id", "pr_session").update({"continue-on-error": "true"}),
             lambda ws: ws["pr-validation.yml"]["jobs"]["prove"].update({"continue-on-error": "${{ true }}"}),
-            lambda ws: self.step(ws, "laplace.yml", "name", "Run full product lifecycle").update({"continue-on-error": "True"}),
+            lambda ws: self.step(ws, "laplace.yml", "id", "product_build").update({"continue-on-error": "True"}),
             lambda ws: self.step(ws, "benchmark-evidence.yml", "name", "Upload complete benchmark evidence").update({"continue-on-error": "true"}),
         ]
         for index, mutation in enumerate(mutations):
@@ -811,7 +922,7 @@ run_perf() { echo unexpected-perf; }
         def move_proof_into_baseline(ws):
             self.step(ws, "pr-validation.yml", "id", "baseline_diagnostic")["run"] += "\nbash scripts/pr-proof.sh\n"
         self.check_audit(move_proof_into_baseline, "authoritative or mutating operation")
-        self.check_audit(lambda ws: self.step(ws, "pr-validation.yml", "id", "proof").update({"if": "steps.baseline_diagnostic.outcome == 'success'"}), "independent of optional baseline")
+        self.check_audit(lambda ws: self.step(ws, "pr-validation.yml", "id", "pr_session").update({"if": "steps.baseline_diagnostic.outcome == 'success'"}), "independent of optional baseline")
         self.check_audit(lambda ws: self.step(ws, "pr-validation.yml", "id", "baseline_diagnostic").update({"if": "always()"}), "limited to full proof scope")
         self.check_audit(lambda ws: self.step(ws, "pr-validation.yml", "name", "Upload retained baseline before full proof").update({"run": "bash scripts/pr-proof.sh"}), "only retain the attempted diagnostic")
 
@@ -841,7 +952,7 @@ run_perf() { echo unexpected-perf; }
             (lambda ws: ws["laplace.yml"]["jobs"]["chess_environment"]["with"].update({"target_ref": "main"}), "activated source"),
             (lambda ws: ws["laplace.yml"]["jobs"]["chess_environment"]["with"].update({"suite": "all"}), "activated source"),
             (lambda ws: ws["laplace.yml"]["jobs"]["product"]["outputs"].update({"chess_benchmark_ready": "true"}), "current lifecycle completion"),
-            (lambda ws: self.step(ws, "laplace.yml", "id", "full_product").update({"id": "other"}), "lifecycle must own its completion outputs"),
+            (lambda ws: self.step(ws, "laplace.yml", "id", "product_chess_completion").update({"id": "other"}), "stable individual result identity"),
         ]
         for index, (mutation, diagnostic) in enumerate(mutations):
             with self.subTest(index=index):
@@ -858,25 +969,34 @@ run_perf() { echo unexpected-perf; }
     def test_corpus_acceptance_and_recorded_measurement_cannot_move_after_independent_tests(self):
         path = self.root / "scripts/product-ci.sh"
         original = path.read_text()
-        for command in ("run_stockfish_corpus_acceptance", "verify_operational_execution post-stockfish-",
-                        "record_chess_completion", "run_recorded_chess_benchmark"):
-            invocation = "\n" + command + "\n"
-            for mutation in (original.replace(invocation, "\n" + command + " || true\n"),
-                             original.replace(invocation, "\n").replace("\nrun_integration\n", "\nrun_integration\n" + command + "\n")):
-                with self.subTest(command=command):
-                    try:
-                        self.assertNotEqual(original, mutation)
-                        path.write_text(mutation)
-                        self.check_audit(diagnostic="product lifecycle order drifted")
-                    finally:
-                        path.write_text(original)
+        for phase, command in (("stockfish-corpus", "run_stockfish_corpus_acceptance"),
+                               ("post-stockfish-execution", "verify_operational_execution post-stockfish-"),
+                               ("chess-completion", "record_chess_completion"),
+                               ("recorded-chess", "run_recorded_chess_benchmark")):
+            invocation = phase + ") " + command + " ;;"
+            mutation = original.replace(invocation, phase + ") " + command + " || true ;;")
+            with self.subTest(phase=phase, fault="suppressed"):
+                try:
+                    self.assertNotEqual(original, mutation)
+                    path.write_text(mutation)
+                    self.check_audit(diagnostic="product lifecycle")
+                finally:
+                    path.write_text(original)
+            def move_after_database(workflows):
+                steps = workflows["laplace.yml"]["jobs"]["product"]["steps"]
+                selected = next(step for step in steps if step.get("id") == "product_" + phase.replace("-", "_"))
+                steps.remove(selected)
+                database = next(step for step in steps if step.get("id") == "product_db_health")
+                steps.insert(steps.index(database) + 1, selected)
+            with self.subTest(phase=phase, fault="moved"):
+                self.check_audit(move_after_database, "visible phase order")
 
     def test_corpus_completion_cannot_be_reintroduced_as_an_unconditional_workflow_step(self):
         self.check_audit(lambda ws: ws["laplace.yml"]["jobs"]["product"]["steps"].append(
             {"run": "printf 'ready=true\\n' >> \"$GITHUB_OUTPUT\""}),
             "completion must stay inside the product lifecycle")
         self.check_audit(lambda ws: self.step(ws, "laplace.yml", "name", "Retain installed recorded-game benchmark evidence").update(
-            {"if": "success()"}), "recorded-game failure evidence must upload")
+            {"if": "success()"}), "failure evidence must upload")
 
 
 if __name__ == "__main__":

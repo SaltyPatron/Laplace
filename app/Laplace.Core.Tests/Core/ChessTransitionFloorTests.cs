@@ -238,8 +238,12 @@ public sealed class ChessTransitionFloorTests
         }
     }
 
-    [Fact]
-    public void CountPastFileLength_RefusesBeforeReadingRecords()
+    [Theory]
+    [InlineData(1_000_000UL)]
+    [InlineData(ulong.MaxValue)]
+    [InlineData(1UL << 63)]
+    [InlineData((1UL << 59) + 2)]
+    public void CountPastFileLength_RefusesBeforeReadingRecords(ulong count)
     {
         string path = TempBlob();
         try
@@ -247,7 +251,8 @@ public sealed class ChessTransitionFloorTests
             ChessTransitionFloor.WriteBlob(path, Pairs("a", "b"));
             // Claim far more records than the file holds. This must be caught by the layout
             // check, NOT by walking off the mapping during the CRC or a lookup.
-            Corrupt64(path, offset: 8, value: 1_000_000UL);
+            Corrupt64(path, offset: 8, value: count);
+            RewriteChecksum(path);
 
             var ex = Assert.Throws<InvalidOperationException>(() => ChessTransitionFloor.Load(path));
             Assert.Contains("layout mismatch", ex.Message, StringComparison.Ordinal);
@@ -258,6 +263,75 @@ public sealed class ChessTransitionFloorTests
             ChessTransitionFloor.Unload();
             File.Delete(path);
         }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(32)]
+    public void TrailingBytesAreRejectedEvenWhenTheOriginalChecksumMatches(int count)
+    {
+        string path = TempBlob();
+        try
+        {
+            ChessTransitionFloor.WriteBlob(path, Pairs("a", "b"));
+            using (var file = new FileStream(path, FileMode.Append)) file.Write(new byte[count]);
+            Assert.Throws<InvalidOperationException>(() => ChessTransitionFloor.Load(path));
+            Assert.False(ChessTransitionFloor.IsLoaded);
+            Assert.Equal(0, ChessTransitionFloor.RecordCount);
+        }
+        finally { ChessTransitionFloor.Unload(); File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ChecksummedUnsortedOrDuplicateRecordsAreRejected(bool duplicate)
+    {
+        string path = TempBlob();
+        try
+        {
+            ChessTransitionFloor.WriteBlob(path, Pairs("a", "b"));
+            var bytes = File.ReadAllBytes(path);
+            int start = ChessTransitionFloor.HeaderSize, size = ChessTransitionFloor.RecordSize;
+            var first = bytes.AsSpan(start, size).ToArray();
+            if (!duplicate) bytes.AsSpan(start + size, size).CopyTo(bytes.AsSpan(start));
+            first.CopyTo(bytes.AsSpan(start + size));
+            File.WriteAllBytes(path, bytes);
+            RewriteChecksum(path);
+            var error = Assert.Throws<InvalidOperationException>(() => ChessTransitionFloor.Load(path));
+            Assert.Contains("sorted and unique", error.Message);
+            Assert.False(ChessTransitionFloor.IsLoaded);
+        }
+        finally { ChessTransitionFloor.Unload(); File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InvalidWriterInputPreservesThePublishedFileAndMapping(bool duplicate)
+    {
+        string path = TempBlob();
+        try
+        {
+            var pairs = Pairs("a", "b");
+            ChessTransitionFloor.WriteBlob(path, pairs);
+            ChessTransitionFloor.Load(path);
+            var original = File.ReadAllBytes(path);
+            var invalid = duplicate ? new[] { pairs[0], pairs[0] } : new[] { pairs[1], pairs[0] };
+            Assert.Throws<ArgumentException>(() => ChessTransitionFloor.WriteBlob(path, invalid));
+            Assert.Equal(original, File.ReadAllBytes(path));
+            Assert.True(ChessTransitionFloor.TryLookup(pairs[0].Key, out var actual));
+            Assert.Equal(pairs[0].To, actual);
+        }
+        finally { ChessTransitionFloor.Unload(); File.Delete(path); }
+    }
+
+    private static void RewriteChecksum(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        Hash128.Blake3(bytes.AsSpan(0, bytes.Length - ChessTransitionFloor.TrailerBytes))
+            .WriteBytes(bytes.AsSpan(bytes.Length - ChessTransitionFloor.TrailerBytes));
+        File.WriteAllBytes(path, bytes);
     }
 
     [Fact]

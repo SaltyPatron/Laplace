@@ -411,13 +411,15 @@ def _append_summary(receipt: dict[str, Any]) -> None:
 
 
 def _finish_receipt(
-    request: str, started_wall: float, records: list[dict[str, Any]], status: str
+    request: str, started_wall: float, records: list[dict[str, Any]], status: str,
+    selected_suite: str | None = None,
 ) -> dict[str, Any]:
     prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
     ended_wall = time.time()
     return {
         "schema_version": 1,
         "profile": request,
+        "selection": {"scope": "suite" if selected_suite else "profile", "suite": selected_suite},
         "source_sha": _git_sha(),
         "built_native_sha256": _sha256(ROOT / "build/engine/core/liblaplace_core.so"),
         "installed_native_sha256": _sha256(prefix / "lib/liblaplace_core.so"),
@@ -433,7 +435,24 @@ def _finish_receipt(
     }
 
 
-def run_profile(request: str, registry_path: Path, receipt_path: Path | None) -> int:
+def _capture_native_failure(suite: dict[str, Any]) -> dict[str, Any]:
+    default_root = (Path("/build/laplace/work/native-regression-evidence") /
+                    f"{os.environ.get('GITHUB_RUN_ID', 'local')}-"
+                    f"{os.environ.get('GITHUB_RUN_ATTEMPT', '0')}-product")
+    output = Path(os.environ.get("LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY", str(default_root))) / "current"
+    command = [sys.executable, str(ROOT / "scripts/capture-native-regression.py"),
+               "--repo-root", str(ROOT), "--build-root", str(ROOT / "build"),
+               "--output-dir", str(output), "--label", suite["id"], "--print-diffs"]
+    try:
+        result = subprocess.run(command, cwd=ROOT, timeout=30, check=False)
+        return {"directory": str(output), "capture_exit_code": result.returncode}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"test-profile: native evidence capture failed: {exc}", file=sys.stderr)
+        return {"directory": str(output), "error": str(exc)}
+
+
+def run_profile(request: str, registry_path: Path, receipt_path: Path | None,
+                suite_id: str | None = None) -> int:
     # Every subprocess (including CTest setup/teardown and pg_regress) uses
     # the configured substrate socket, independent of pipeline.sh inheritance.
     for key, value in {"PGHOST": "/var/run/postgresql", "PGPORT": "5432",
@@ -441,6 +460,12 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
         os.environ.setdefault(key, value)
     suites = load_validated(registry_path)
     chosen = suites_for_request(suites, request)
+    if suite_id is not None:
+        selected = [suite for suite in chosen if suite["id"] == suite_id]
+        if len(selected) != 1:
+            raise RegistryError(f"suite {suite_id!r} is not a single member of profile {request!r}")
+        chosen = selected
+    default_name = f"{request}-{suite_id}" if suite_id is not None else request
     started_wall = time.time()
     records: list[dict[str, Any]] = []
 
@@ -465,8 +490,8 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
         records.append(record)
         if suite["required"] and discovered == 0:
             record["status"] = "failed-zero-discovery"
-            receipt = _finish_receipt(request, started_wall, records, "failed")
-            target = receipt_path or DEFAULT_RECEIPT_DIR / f"{request}.json"
+            receipt = _finish_receipt(request, started_wall, records, "failed", suite_id)
+            target = receipt_path or DEFAULT_RECEIPT_DIR / f"{default_name}.json"
             _write_receipt(target, receipt)
             _append_summary(receipt)
             print(
@@ -483,6 +508,10 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
             command, _env_for_suite(suite), TIMEOUT_SECONDS[suite["timeout_class"]]
         )
         sys.stdout.write(output)
+        if rc != 0 and suite["runner"] == "ctest":
+            # Capture immediately while this suite's output still exists. A
+            # collector failure must preserve the original native test failure.
+            record["native_diagnostics"] = _capture_native_failure(suite)
         record["elapsed_ms"] = elapsed_ms
         zero_selected = False
         try:
@@ -511,8 +540,8 @@ def run_profile(request: str, registry_path: Path, receipt_path: Path | None) ->
                 record["failure_diagnostics"] = _ctest_failure_diagnostics(output)
             break
 
-    receipt = _finish_receipt(request, started_wall, records, status)
-    target = receipt_path or DEFAULT_RECEIPT_DIR / f"{request}.json"
+    receipt = _finish_receipt(request, started_wall, records, status, suite_id)
+    target = receipt_path or DEFAULT_RECEIPT_DIR / f"{default_name}.json"
     _write_receipt(target, receipt)
     _append_summary(receipt)
     print(
@@ -533,6 +562,7 @@ def parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run")
     run.add_argument("--profile", required=True, choices=sorted(PROFILE_GROUPS))
     run.add_argument("--receipt", type=Path)
+    run.add_argument("--suite", action="append", help="execute exactly one registered suite in this profile")
     return p
 
 
@@ -552,7 +582,10 @@ def main(argv: list[str] | None = None) -> int:
             for suite in values:
                 print(suite["id"])
             return 0
-        return run_profile(args.profile, args.registry, args.receipt)
+        if args.suite is not None and len(args.suite) != 1:
+            raise RegistryError("--suite must be specified exactly once")
+        return run_profile(args.profile, args.registry, args.receipt,
+                           args.suite[0] if args.suite is not None else None)
     except RegistryError as exc:
         print(f"test-profile-registry: ERROR: {exc}", file=sys.stderr)
         return 2

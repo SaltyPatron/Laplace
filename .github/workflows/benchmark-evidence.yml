@@ -67,7 +67,7 @@ on:
         type: choice
         required: true
         default: quick
-        options: [quick, throughput, core, scale, moby, query, chess, geometry, all]
+        options: [quick, throughput, core, scale, moby, query, chess, geometry, recorded, all]
       repeats:
         description: "repeats per selected benchmark case/scaling point; all runs retained"
         type: string
@@ -149,7 +149,7 @@ jobs:
           printf 'resolved_sha=%s\n' "$resolved" >> "$LAPLACE_BENCH_RECEIPT/request.env"
 
       - uses: ./.github/actions/setup-laplace-env
-        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry' && inputs.suite != 'recorded'
 
       - name: Validate benchmark registry and dispatch inputs
         shell: bash
@@ -174,7 +174,7 @@ jobs:
           }
 
       - name: Resolve serviceable scaling plan
-        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry' && inputs.suite != 'recorded'
         shell: bash
         env:
           REQUESTED_SCALE_WORKERS: ${{ inputs.scale_workers }}
@@ -404,7 +404,7 @@ jobs:
           fi
 
       - name: Build exact revision without installing or mutating substrate state
-        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry' && inputs.suite != 'recorded'
         shell: bash
         env:
           FORCE_REBUILD: ${{ inputs.force_rebuild }}
@@ -419,7 +419,7 @@ jobs:
             | tee "$LAPLACE_BENCH_RECEIPT/build.log"
 
       - name: Bind the benchmark to exact built native artifacts
-        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry' && inputs.suite != 'recorded'
         shell: bash
         run: |
           set -euo pipefail
@@ -487,6 +487,8 @@ jobs:
             [[ -z "${LAPLACE_BENCH_CHESS_UCI:-}" ]] || args+=(--chess-laplace-uci "$LAPLACE_BENCH_CHESS_UCI")
           elif [[ "$SUITE" == geometry ]]; then
             export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
+          elif [[ "$SUITE" == recorded ]]; then
+            args+=(--recorded-duration-seconds 30 --recorded-total-timeout 1800)
           else
             args+=(--core "$LAPLACE_CORE" --t0 "$LAPLACE_T0")
             [[ -z "$scale_workers" ]] || args+=(--scale-workers "$scale_workers")
@@ -529,6 +531,9 @@ jobs:
             elif [[ '${{ inputs.suite }}' == geometry ]]; then
               echo '- Exact existing GeometryZM payloads: logged COPY plus synchronous commit; complete binary readback measured separately.'
               echo '- Raw storage rows/vertices are not game-recording or native admission throughput.'
+            elif [[ '${{ inputs.suite }}' == recorded ]]; then
+              echo '- Complete generated games, synchronous writes and exact readback over a duration-qualified wall interval.'
+              echo '- Retained-source ingestion and replay remain separately measured workloads.'
             else
               echo "- Scale workers: \`${LAPLACE_BENCH_SCALE_WORKERS:-unknown}\`"
             fi
@@ -614,6 +619,15 @@ jobs:
                       recommendation = result.get('recommendations', {}).get(goal)
                       if recommendation:
                           print(f"- {goal.replace('_', ' ')}: `{json.dumps(recommendation, sort_keys=True)}`")
+              elif profile == 'recorded-chess':
+                  window = result.get('sustained', {})
+                  print('- Complete recorded workflow receipt: `recorded-chess/receipt.json`')
+                  print(f"- Duration-qualified: {window.get('durationQualified', False)}")
+                  print(f"- Measured window seconds: {window.get('elapsedSeconds', 'unavailable')}")
+                  print(f"- Distinct newly recorded and verified games: {window.get('verifiedRecordedGames', 0)}")
+                  print(f"- Complete workflows per second: {window.get('gamesPerSecondSustainedEndToEnd', 'unavailable')}")
+                  print(f"- Target met over the complete interval: {result.get('targetMet', False)}")
+                  print(f"- Per-day arithmetic extrapolation: {window.get('gamesPerDayExtrapolated', 'unavailable')} (not a day-long observation)")
               if item.get('rapl_energy'):
                   energy = sum(x['energy_uj'] for x in item['rapl_energy']) / 1e6
                   print(f"- summed RAPL-domain energy: {energy:.3f} J (not wall energy; domains may overlap)")
