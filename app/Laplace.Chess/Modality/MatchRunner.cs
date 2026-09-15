@@ -177,6 +177,18 @@ public static class MatchRunner
         int aWins = 0, draws = 0, bWins = 0, done = 0;
         int reportEvery = Math.Max(1, games / 500);
         string learnCtx = liveLearnContext ?? "chess/lab/match";
+
+        // A benchmark that writes each finished game before its siblings have been measured
+        // changes the evidence epoch underneath itself. RecordPlyAsync is intentionally an
+        // in-memory witness buffer; CompleteGameAsync is the mutation boundary. Keep one
+        // deterministic completion slot per game and cross that boundary only after every
+        // measured game has closed. This preserves full game/player/analysis testimony while
+        // enforcing the frozen-ruler law: a match may become later evidence, never its own
+        // training set.
+        var deferredLive = liveHost is null
+            ? null
+            : new (Hash128 GameId, GameOutcome Outcome, bool Adjudicated)?[games];
+
         Parallel.For(0, games, new ParallelOptions
         {
             MaxDegreeOfParallelism = ResolveParallelism(concurrency),
@@ -235,8 +247,7 @@ public static class MatchRunner
             {
                 var terminal = played.Adjudicated ? GameOutcome.Draw
                     : outcome == 2 ? GameOutcome.Draw : GameOutcome.WonBy(outcome);
-                liveHost.CompleteGameAsync(gidDone, terminal, played.Adjudicated, ct)
-                    .GetAwaiter().GetResult();
+                deferredLive![g] = (gidDone, terminal, played.Adjudicated);
             }
             if (pgnMoves is not null)
                 pgnSink!.Add(new MatchPgnGame(
@@ -250,6 +261,20 @@ public static class MatchRunner
             if (progress is not null && (d % reportEvery == 0 || d == games))
                 progress.Report((d, Volatile.Read(ref aWins), Volatile.Read(ref draws), Volatile.Read(ref bWins)));
         });
+
+        // Deterministic post-measurement learning order. No game from this match can affect
+        // another game's decision, regardless of concurrency or which worker finished first.
+        if (liveHost is not null && deferredLive is not null)
+        {
+            for (int g = 0; g < deferredLive.Length; g++)
+            {
+                if (deferredLive[g] is not { } completed) continue;
+                liveHost.CompleteGameAsync(
+                    completed.GameId, completed.Outcome, completed.Adjudicated, ct)
+                    .GetAwaiter().GetResult();
+            }
+        }
+
         return new MatchResult(games, aWins, draws, bWins);
     }
 
