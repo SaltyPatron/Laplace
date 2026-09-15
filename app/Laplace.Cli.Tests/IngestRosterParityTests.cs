@@ -108,6 +108,14 @@ public sealed class IngestRosterParityTests
             + $"shrink-only ceiling is {OperationalOnlyRouteCeiling}.");
     }
 
+    [Fact]
+    public void ShellWrapper_ExposesChessTacticOutcomeRoute()
+    {
+        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "scripts", "ingest-source.sh"));
+        Assert.Contains("chess-tactic-outcomes)", script, StringComparison.Ordinal);
+        Assert.Contains("ingest chess-tactic-outcomes", script, StringComparison.Ordinal);
+    }
+
     private static HashSet<string> ReadManifestRoutes()
     {
         var path = Path.Combine(
