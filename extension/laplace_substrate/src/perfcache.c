@@ -1,20 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #include "postgres.h"
 
 #include "fmgr.h"
@@ -36,6 +19,11 @@ static char *perfcache_path = NULL;
 static char *highway_perfcache_path = NULL;
 static char *chess_position_perfcache_path = NULL;
 static int native_mkl_threads = 1;
+
+/* highway_mask.c owns the native pair reduction/storage implementation. This
+ * file owns the GUC and lazy-load contract, so the SQL entrypoint below gates
+ * that implementation here before a write can be accepted. */
+extern Datum pg_laplace_highway_mask_deposit(PG_FUNCTION_ARGS);
 
 void
 laplace_substrate_perfcache_init(void)
@@ -129,6 +117,27 @@ laplace_highway_ready(void)
     return true;
 }
 
+PG_FUNCTION_INFO_V1(pg_laplace_highway_mask_deposit_required);
+
+/* The fold already owns the exact (entity, relation-type) pairs. Losing this
+ * deposit while accepting the fold destroys the acceleration plane and leaves
+ * reads to rediscover relation membership from consensus. The old entrypoint
+ * warned and returned zero when the registry was unavailable; that made mask
+ * population optional. Writes now fail closed until the exact registry is
+ * loaded, while the underlying deposit remains the same native zero-reread
+ * OR accumulation. */
+Datum
+pg_laplace_highway_mask_deposit_required(PG_FUNCTION_ARGS)
+{
+    if (!laplace_highway_ready())
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("highway_mask_deposit requires the Highway perfcache"),
+                 errhint("Configure laplace_substrate.highway_perfcache_path and reload "
+                         "the server before accepting consensus writes.")));
+    return pg_laplace_highway_mask_deposit(fcinfo);
+}
+
 bool
 laplace_chess_position_ready(void)
 {
@@ -160,8 +169,6 @@ pg_laplace_chess_position_ready(PG_FUNCTION_ARGS)
 {
     PG_RETURN_BOOL(laplace_chess_position_ready());
 }
-
-
 
 /* PostgreSQL and managed callers share the core reverse index. Complete its
  * initialization in the postmaster so backends inherit one read-only index. */
@@ -237,8 +244,6 @@ laplace_perfcache_codepoint_for_id(const uint8_t id[16], uint32_t *out_cp)
     return codepoint_table_lookup_id(&key, out_cp) == 0;
 }
 
-
-
 PG_FUNCTION_INFO_V1(pg_laplace_word_id);
 
 Datum
@@ -287,10 +292,6 @@ pg_laplace_codepoint_for_id(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     PG_RETURN_INT32((int32) cp);
 }
-
-
-
-
 
 PG_FUNCTION_INFO_V1(pg_laplace_is_all_whitespace);
 

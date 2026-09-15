@@ -31,3 +31,28 @@
 CREATE UNLOGGED TABLE IF NOT EXISTS highway_mask_dirty (
     id bytea PRIMARY KEY
 );
+
+-- Exact deposit backlog. Unlike highway_mask_dirty, this table is LOGGED because it
+-- is the lossless continuation of the ingest-time fast path: if the Highway registry
+-- is temporarily unavailable, the writer already knows the exact (entity,type) pairs
+-- that need OR-ing. Persist those pairs instead of throwing them away and later
+-- rediscovering them by probing consensus. The primary key deduplicates repeated
+-- testimony without changing semantics.
+CREATE TABLE IF NOT EXISTS highway_mask_pending (
+    entity_id bytea NOT NULL CHECK (octet_length(entity_id) = 16),
+    type_id   bytea NOT NULL CHECK (octet_length(type_id) = 16),
+    PRIMARY KEY (entity_id, type_id)
+);
+
+-- One-time historical population state. A deployment that predates inline deposit can
+-- have a valid consensus estate and empty/partial entity masks. Current writes use the
+-- exact-pair path above; this bit records whether the pre-existing estate has received
+-- one full reconciliation under the current deposit implementation.
+CREATE TABLE IF NOT EXISTS highway_mask_population_state (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    complete boolean NOT NULL DEFAULT false,
+    completed_at timestamptz
+);
+INSERT INTO highway_mask_population_state(singleton, complete)
+VALUES (true, false)
+ON CONFLICT (singleton) DO NOTHING;

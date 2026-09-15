@@ -5,55 +5,105 @@
 -- consensus leaf per touched entity (measured: 75s of a 118s fold).
 -- OR-accumulate is correct at ingest: edges are only ever ADDED, so bits only
 -- ever turn on; idempotent and chunk-order-free. On a greenfield seed this
--- deposit IS the population — highway_mask_refresh/rebuild are legacy repair
--- verbs for pre-deposit databases and retire once no such DB exists.
+-- deposit IS the population — highway_mask_refresh/rebuild are repair verbs for
+-- pre-deposit databases and for bit-clearing maintenance.
 --
--- Deposits are entity-sharded BEFORE this function is called. Every entity has
--- one stable writer lane for the run, so concurrent ingest calls are row-disjoint.
--- The former global advisory lock survived that writer correction and silently
--- collapsed the topology-derived mask fanout back to one connection.
---
--- External/online writers can still overlap an ingest. Their safety boundary is
--- deterministic target-row acquisition below: every statement locks `(id,tier)`
--- in bytewise order before the set UPDATE. Two overlapping writers therefore
--- cannot acquire the same rows in opposite order; disjoint ingest shards never
--- wait on each other and no process-global mutex remains.
---
--- History of the earlier shapes, retained so none are repeated:
---
---   bd10fcf  moved the deposit server-side and CONCURRENT → AB/BA deadlocks
---            between fold lanes on shared entity rows (hot words appear in
---            every delta), 10/10 whole-batch retries lost.
---   #729     ordered the locks WITHIN one statement → still deadlocked: the
---            transaction ran a SEQUENCE of chunk statements holding prior
---            chunks' locks.
---   #732/#733 sorted the pairs client-side and committed per chunk → deadlock
---            gone, replaced by a MEASURED 6.4 ms/row FOR NO KEY UPDATE tax
---            (EXPLAIN ANALYZE: 84 ms to find+sort 5,000 rows, 32,039 ms in
---            LockRows) — concurrent lockers minting multixacts per tuple.
---            Fold masks/s: 3,305 (crashing run) → 333 (correct, convoyed).
---   #1112    sharded the lock — hash entities into N buckets, take each chunk's
---            buckets in ASCENDING order. Deadlock-free by the ordered-resource
---            argument, and unlike #729 the ordering is over a bounded set so it
---            survives the sequence of chunk statements; unlike #732/#733 it mints
---            no multixacts. BENCHED, NOT SHIPPED, and it is a dead end: MEASURED
---            2026-08-16, 8 workers x 12 chunks x 70% overlap, 4,000 real row
---            updates, identical to the installed form on every axis —
---            0 deadlocks / 78% lock_wait / 11-12 ms deposit delta, both, twice.
---            The reason is arithmetic: a 500-entity chunk touches 16/16 shards,
---            64/64, 223/256, 399/1024, 475/4096. Hashing entities AFTER the chunk
---            is formed scatters them across every bucket, so "take only the shards
---            you need" is "take them all" plus N acquisitions. Sharding can only
---            pay if the WORK is partitioned shard-locally when the chunk is BUILT,
---            which is a writer change (ConsensusAccumulatingWriter), not a lock
---            change. scripts/tests/highway-deposit-concurrency.sh is the bench;
---            a fifth attempt must beat 0 deadlocks at 78% before it ships.
---
--- #1183 supplied the missing writer change identified above: work is now
--- partitioned shard-locally when the chunk is built. Retaining a global lock
--- after that change was pure serialization, not a correctness mechanism.
+-- The Highway registry is an acceleration dependency, not permission to lose
+-- state. If it is temporarily unavailable, preserve the exact zipped
+-- (entity,type) pairs in laplace.highway_mask_pending. Once the registry is
+-- available, laplace.highway_mask_pending_drain() replays those exact pairs
+-- through the same native OR path. No consensus re-read is required for the
+-- missed-write window.
 DROP FUNCTION IF EXISTS laplace.highway_mask_deposit(bytea[], bytea[]);
-CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit(p_entity_ids bytea[], p_type_ids bytea[])
+DROP FUNCTION IF EXISTS consensus.highway_mask_deposit(bytea[], bytea[]);
+DROP FUNCTION IF EXISTS consensus.highway_mask_deposit_native(bytea[], bytea[]);
+
+CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit_native(
+    p_entity_ids bytea[], p_type_ids bytea[])
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_deposit'
     LANGUAGE C VOLATILE;
+
+CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit(
+    p_entity_ids bytea[], p_type_ids bytea[])
+    RETURNS bigint
+    LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    n_entities int := COALESCE(cardinality(p_entity_ids), 0);
+    n_types int := COALESCE(cardinality(p_type_ids), 0);
+BEGIN
+    IF n_entities <> n_types THEN
+        RAISE EXCEPTION 'highway_mask_deposit: entity/type arrays must share length (% vs %)',
+            n_entities, n_types;
+    END IF;
+    IF n_entities = 0 THEN
+        RETURN 0;
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM unnest(p_entity_ids, p_type_ids) AS p(entity_id, type_id)
+        WHERE (entity_id IS NOT NULL AND octet_length(entity_id) <> 16)
+           OR (type_id IS NOT NULL AND octet_length(type_id) <> 16)
+    ) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '22026',
+            MESSAGE = 'highway_mask_deposit: entity/type ids must be exactly 16 bytes';
+    END IF;
+
+    IF consensus.highway_ready() THEN
+        RETURN consensus.highway_mask_deposit_native(p_entity_ids, p_type_ids);
+    END IF;
+
+    INSERT INTO laplace.highway_mask_pending(entity_id, type_id)
+    SELECT p.entity_id, p.type_id
+    FROM unnest(p_entity_ids, p_type_ids) AS p(entity_id, type_id)
+    WHERE p.entity_id IS NOT NULL AND p.type_id IS NOT NULL
+    ON CONFLICT (entity_id, type_id) DO NOTHING;
+
+    -- The consensus write remains accepted because its exact mask work has been
+    -- durably retained. Returning zero preserves the historical "rows updated"
+    -- meaning of this function; queued pairs are not claimed as written masks.
+    RETURN 0;
+END $$;
+
+DROP PROCEDURE IF EXISTS laplace.highway_mask_pending_drain(int);
+CREATE OR REPLACE PROCEDURE laplace.highway_mask_pending_drain(p_batch int DEFAULT 250000)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    entity_ids bytea[];
+    type_ids bytea[];
+    drained bigint := 0;
+    n bigint;
+BEGIN
+    IF p_batch IS NULL OR p_batch < 1 THEN
+        RAISE EXCEPTION 'highway_mask_pending_drain: p_batch must be >= 1';
+    END IF;
+    IF NOT consensus.highway_ready() THEN
+        RAISE LOG 'highway_mask_pending_drain: Highway registry unavailable; exact pending pairs retained';
+        RETURN;
+    END IF;
+
+    LOOP
+        SELECT array_agg(q.entity_id ORDER BY q.entity_id, q.type_id),
+               array_agg(q.type_id ORDER BY q.entity_id, q.type_id)
+        INTO entity_ids, type_ids
+        FROM (
+            SELECT entity_id, type_id
+            FROM laplace.highway_mask_pending
+            ORDER BY entity_id, type_id
+            LIMIT p_batch
+            FOR UPDATE SKIP LOCKED
+        ) AS q;
+
+        EXIT WHEN entity_ids IS NULL;
+        PERFORM consensus.highway_mask_deposit_native(entity_ids, type_ids);
+
+        DELETE FROM laplace.highway_mask_pending p
+        USING unnest(entity_ids, type_ids) AS q(entity_id, type_id)
+        WHERE p.entity_id = q.entity_id AND p.type_id = q.type_id;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        drained := drained + n;
+        RAISE LOG 'highway_mask_pending_drain: % exact pairs drained', drained;
+        COMMIT;
+    END LOOP;
+END $$;
