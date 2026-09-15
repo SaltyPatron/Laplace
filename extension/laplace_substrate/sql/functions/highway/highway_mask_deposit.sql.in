@@ -8,12 +8,12 @@
 -- deposit IS the population — highway_mask_refresh/rebuild are repair verbs for
 -- pre-deposit databases and for bit-clearing maintenance.
 --
--- The Highway registry is an acceleration dependency, not permission to lose
--- state. If it is temporarily unavailable, preserve the exact zipped
--- (entity,type) pairs in laplace.highway_mask_pending. Once the registry is
--- available, laplace.highway_mask_pending_drain() replays those exact pairs
--- through the same native OR path. No consensus re-read is required for the
--- missed-write window.
+-- The normal path remains the native C implementation. A one-statement SQL
+-- dispatcher checks whether the mmap'd Highway registry is available. When it
+-- is, only the native deposit executes. When it is not, the exact zipped
+-- (entity,type) pairs are retained in laplace.highway_mask_pending instead of
+-- being thrown away. No consensus re-read is required for that missed-write
+-- window.
 DROP FUNCTION IF EXISTS laplace.highway_mask_deposit(bytea[], bytea[]);
 DROP FUNCTION IF EXISTS consensus.highway_mask_deposit(bytea[], bytea[]);
 DROP FUNCTION IF EXISTS consensus.highway_mask_deposit_native(bytea[], bytea[]);
@@ -27,44 +27,26 @@ CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit_native(
 CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit(
     p_entity_ids bytea[], p_type_ids bytea[])
     RETURNS bigint
-    LANGUAGE plpgsql VOLATILE AS $$
-DECLARE
-    n_entities int := COALESCE(cardinality(p_entity_ids), 0);
-    n_types int := COALESCE(cardinality(p_type_ids), 0);
-BEGIN
-    IF n_entities <> n_types THEN
-        RAISE EXCEPTION 'highway_mask_deposit: entity/type arrays must share length (% vs %)',
-            n_entities, n_types;
-    END IF;
-    IF n_entities = 0 THEN
-        RETURN 0;
-    END IF;
-    IF EXISTS (
-        SELECT 1
-        FROM unnest(p_entity_ids, p_type_ids) AS p(entity_id, type_id)
-        WHERE (entity_id IS NOT NULL AND octet_length(entity_id) <> 16)
-           OR (type_id IS NOT NULL AND octet_length(type_id) <> 16)
-    ) THEN
-        RAISE EXCEPTION USING
-            ERRCODE = '22026',
-            MESSAGE = 'highway_mask_deposit: entity/type ids must be exactly 16 bytes';
-    END IF;
-
-    IF consensus.highway_ready() THEN
-        RETURN consensus.highway_mask_deposit_native(p_entity_ids, p_type_ids);
-    END IF;
-
-    INSERT INTO laplace.highway_mask_pending(entity_id, type_id)
-    SELECT p.entity_id, p.type_id
-    FROM unnest(p_entity_ids, p_type_ids) AS p(entity_id, type_id)
-    WHERE p.entity_id IS NOT NULL AND p.type_id IS NOT NULL
-    ON CONFLICT (entity_id, type_id) DO NOTHING;
-
-    -- The consensus write remains accepted because its exact mask work has been
-    -- durably retained. Returning zero preserves the historical "rows updated"
-    -- meaning of this function; queued pairs are not claimed as written masks.
-    RETURN 0;
-END $$;
+    LANGUAGE sql VOLATILE AS $deposit$
+    WITH readiness AS MATERIALIZED (
+        SELECT consensus.highway_ready() AS ready
+    ),
+    queued AS (
+        INSERT INTO laplace.highway_mask_pending(entity_id, type_id)
+        SELECT p.entity_id, p.type_id
+        FROM readiness r,
+             unnest(p_entity_ids, p_type_ids) AS p(entity_id, type_id)
+        WHERE NOT r.ready
+          AND p.entity_id IS NOT NULL
+          AND p.type_id IS NOT NULL
+        ON CONFLICT (entity_id, type_id) DO NOTHING
+        RETURNING 1
+    )
+    SELECT CASE WHEN (SELECT ready FROM readiness)
+        THEN consensus.highway_mask_deposit_native(p_entity_ids, p_type_ids)
+        ELSE 0::bigint
+    END
+$deposit$;
 
 DROP PROCEDURE IF EXISTS laplace.highway_mask_pending_drain(int);
 CREATE OR REPLACE PROCEDURE laplace.highway_mask_pending_drain(p_batch int DEFAULT 250000)
