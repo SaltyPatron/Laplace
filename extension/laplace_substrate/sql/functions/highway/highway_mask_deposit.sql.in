@@ -45,7 +45,9 @@ BEGIN
         WHERE (entity_id IS NOT NULL AND octet_length(entity_id) <> 16)
            OR (type_id IS NOT NULL AND octet_length(type_id) <> 16)
     ) THEN
-        RAISE EXCEPTION 'highway_mask_deposit: entity/type ids must be exactly 16 bytes';
+        RAISE EXCEPTION USING
+            ERRCODE = '22026',
+            MESSAGE = 'highway_mask_deposit: entity/type ids must be exactly 16 bytes';
     END IF;
 
     IF consensus.highway_ready() THEN
