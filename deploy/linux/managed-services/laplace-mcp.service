@@ -23,10 +23,10 @@ StateDirectory=laplace-mcp
 LogsDirectory=laplace-mcp
 Environment=LAPLACE_OPS_LOG_DIR=/var/log/laplace-mcp
 UMask=0002
-Environment=TMPDIR=/build/laplace/work/legacy-mcp
-Environment=TMP=/build/laplace/work/legacy-mcp
-Environment=TEMP=/build/laplace/work/legacy-mcp
-ReadWritePaths=/build/laplace/work/legacy-mcp
+Environment=TMPDIR=/build/laplace/work/mcp
+Environment=TMP=/build/laplace/work/mcp
+Environment=TEMP=/build/laplace/work/mcp
+ReadWritePaths=/build/laplace/work/mcp
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
