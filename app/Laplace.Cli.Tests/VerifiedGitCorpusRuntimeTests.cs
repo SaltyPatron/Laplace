@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Xunit;
@@ -8,6 +7,12 @@ namespace Laplace.Cli.Tests;
 
 public sealed class VerifiedGitCorpusRuntimeTests
 {
+    [DllImport("libc", SetLastError = true)]
+    private static extern nint mmap(nint address, nuint length, int protection, int flags, int descriptor, nint offset);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int munmap(nint address, nuint length);
+
     private static byte[] HashFile(string path)
     {
         using var stream = File.OpenRead(path);
@@ -20,14 +25,31 @@ public sealed class VerifiedGitCorpusRuntimeTests
         if (!OperatingSystem.IsLinux()) return;
         string path = IngestCommands.ObserveLoadedCorePath();
         byte[] before = HashFile(path);
-        using var mapped = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0,
-            MemoryMappedFileAccess.ReadExecute);
-        using var view = mapped.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadExecute);
-        using var process = Process.GetCurrentProcess();
-        Assert.True(process.Modules.Cast<ProcessModule>().Count(module => module.FileName == path) > 1,
-            "The actual OS mapping counterexample must contain multiple entries for one core artifact.");
-        Assert.Equal(path, IngestCommands.ObserveLoadedCorePath());
-        Assert.Equal(before, HashFile(path));
+        nuint page = (nuint)Environment.SystemPageSize;
+        // Process.Modules combines adjacent mappings of the same file. Reserve guards on
+        // both sides so the added RX page cannot merge with the loader's original mapping.
+        nint reservation = mmap(0, 3 * page, 0, 0x02 | 0x20, -1, 0); // PRIVATE | ANONYMOUS
+        Assert.True(reservation != -1, $"mmap reservation failed: errno {Marshal.GetLastPInvokeError()}");
+        try
+        {
+            using var file = File.OpenRead(path);
+            nint middle = reservation + (nint)page;
+            nint mapped = mmap(middle, page, 0x01 | 0x04, 0x02 | 0x10,
+                file.SafeFileHandle.DangerousGetHandle().ToInt32(), 0); // READ | EXEC, PRIVATE | FIXED
+            Assert.True(mapped == middle, $"mmap file page failed: errno {Marshal.GetLastPInvokeError()}");
+            using var process = Process.GetCurrentProcess();
+            var entries = process.Modules.Cast<ProcessModule>()
+                .Where(module => Path.GetFullPath(module.FileName) == path).ToArray();
+            Assert.True(entries.Length > 1,
+                $"Expected separate actual core mappings, observed {entries.Length}: "
+                + string.Join(", ", entries.Select(module => $"{module.BaseAddress:x}:{module.ModuleMemorySize}")));
+            Assert.Equal(path, IngestCommands.ObserveLoadedCorePath());
+            Assert.Equal(before, HashFile(path));
+        }
+        finally
+        {
+            Assert.Equal(0, munmap(reservation, 3 * page));
+        }
     }
 
     [Fact]
