@@ -175,6 +175,34 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Admit official Stockfish source and verify native corpus readback
+        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          # The common CLI acquires the canonical ingest lane; the shared host
+          # lock also prevents source rebuilds during the two exact observations.
+          flock --exclusive --close /build/laplace/work/host-resource.lock bash -euo pipefail -c '
+            export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
+            dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --nologo -v minimal
+            python3 scripts/ingest-stockfish-corpus.py \
+              --prefix "$LAPLACE_INSTALL_PREFIX" \
+              --output "/build/laplace/work/stockfish-corpus-evidence/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          '
+
+      - name: Retain official Stockfish corpus admission evidence
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-stockfish-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /build/laplace/work/stockfish-corpus-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+            !/build/laplace/work/stockfish-corpus-evidence/${{ github.run_id }}-${{ github.run_attempt }}/selection.private.json
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Record successful activation for installed chess measurement
         id: chess_benchmark_gate
         if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'deploy' || env.LAPLACE_STAGE == 'applications')

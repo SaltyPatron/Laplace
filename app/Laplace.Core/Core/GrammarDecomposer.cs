@@ -40,6 +40,21 @@ public static unsafe class GrammarDecomposer
     }
 }
 
+/// <summary>Native parser diagnostics; counts retain recovery syntax and do not
+/// imply compiler or semantic validation of the source language.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct GrammarAstDiagnostics
+{
+    public readonly ulong AstNodeCount;
+    public readonly ulong SyntaxNodeCount;
+    public readonly ulong ErrorNodeCount;
+    public readonly ulong MissingNodeCount;
+    public readonly uint RootHasError;
+    private readonly uint _reserved;
+
+    public bool SyntaxComplete => RootHasError == 0 && ErrorNodeCount == 0 && MissingNodeCount == 0;
+}
+
 public sealed unsafe class GrammarAst : IDisposable
 {
     public const uint Root = uint.MaxValue;
@@ -61,6 +76,18 @@ public sealed unsafe class GrammarAst : IDisposable
         }
     }
 
+    public GrammarAstDiagnostics Diagnostics
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_ast == IntPtr.Zero, this);
+            GrammarAstDiagnostics result;
+            if (NativeInterop.AstGetDiagnostics(_ast, &result) != 0)
+                throw new InvalidOperationException("Native AST diagnostics are unavailable.");
+            return result;
+        }
+    }
+
     public LaplaceAstNode GetNode(int index)
     {
         ObjectDisposedException.ThrowIf(_ast == IntPtr.Zero, this);

@@ -149,6 +149,9 @@ def main():
             check(report, name + "-latest", latest)
     failed = any(item["required"] and item["status"] not in ("ready", "present") for item in report)
     print(json.dumps({"executable_ready": all(item["status"] == "ready" for item in report[:3]),
+                      "configured_settings": {
+                          "scope": "Selected environment and installed configuration files; live process settings require a separate runtime observation.",
+                          "values": config},
                       "checks": report}, indent=2))
     return 1 if failed else 0
 

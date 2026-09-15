@@ -6,6 +6,7 @@ Local edits and existing branch tips are preserved. Upstream make downloads and
 validates its selected NNUE network; no binary release packages are installed.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -18,6 +19,8 @@ import tempfile
 import threading
 import time
 from urllib.request import Request, urlopen
+
+from lib.chess_source_integrity import git, verify_checkout
 
 ROOT = Path(__file__).resolve().parents[1]
 LATEST_RELEASE = "https://api.github.com/repos/official-stockfish/Stockfish/releases/latest"
@@ -204,16 +207,15 @@ def probe(binary, version):
         process.stdout.close()
 
 
-def git(source, *arguments):
-    return subprocess.run(["git", "-c", "safe.directory=" + str(source), "-C", str(source), *arguments], text=True,
-                          capture_output=True, check=True).stdout.strip()
+def verify_source(source, expected_commit):
+    return verify_checkout(source, expected_commit, "Stockfish")
 
 
 def update_source(source, lock):
     """Fetch the stable source pin without resetting local edits or branch history."""
     if not source.exists():
         source.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "clone", "--branch", lock["tag"], "--depth", "1",
+        subprocess.run(["git", "--no-replace-objects", "clone", "--branch", lock["tag"], "--depth", "1",
                         lock["repository"], str(source)], check=True)
     if Path(git(source, "rev-parse", "--show-toplevel")).resolve() != source.resolve():
         raise ValueError(f"Stockfish source is not a repository root: {source}")
@@ -224,6 +226,8 @@ def update_source(source, lock):
         raise ValueError(f"Stockfish source origin is not the official repository: {source}")
     if git(source, "status", "--porcelain", "--untracked-files=all"):
         raise ValueError(f"Stockfish source has local changes; preserved without checkout or rebuild: {source}")
+    previous = git(source, "rev-parse", "HEAD")
+    verify_source(source, previous)
     try:
         selected = git(source, "rev-parse", "--verify", "refs/tags/" + lock["tag"] + "^{commit}")
     except subprocess.CalledProcessError:
@@ -231,10 +235,10 @@ def update_source(source, lock):
         selected = git(source, "rev-parse", "refs/tags/" + lock["tag"] + "^{commit}")
     if selected != lock["commit"]:
         raise ValueError("Stockfish release tag does not match the pinned official source commit")
-    previous = git(source, "rev-parse", "HEAD")
     if previous != selected:
         git(source, "update-ref", "refs/laplace/stockfish-before-update/" + previous, previous)
         git(source, "checkout", "--detach", selected)
+    verify_source(source, selected)
     return selected
 
 
@@ -274,6 +278,32 @@ def record_external_pin(source, lock):
                 fcntl.flock(output.fileno(), fcntl.LOCK_UN)
 
 
+@contextmanager
+def regenerate_dependencies(source, state_directory):
+    """Let upstream make regenerate .depend without executing an old include.
+
+    Preserve the operator's exact prior file or symlink. The backup stays in
+    Git metadata if restoration fails, so a cleanup error cannot erase it.
+    """
+    dependency = source / "src/.depend"
+    if not dependency.exists() and not dependency.is_symlink():
+        yield
+        return
+    if not dependency.is_file() and not dependency.is_symlink():
+        raise ValueError("Stockfish .depend has an unsupported file type; preserved")
+    temporary = Path(tempfile.mkdtemp(prefix="laplace-stockfish-depend-", dir=state_directory))
+    backup = temporary / ".depend"
+    os.replace(dependency, backup)
+    try:
+        yield
+    finally:
+        try:
+            os.replace(backup, dependency)
+        except OSError as error:
+            raise ValueError(f"Stockfish prior .depend remains preserved at {backup}; restoration failed") from error
+        temporary.rmdir()
+
+
 def build(source=None, jobs=None, make=None, compiler=None, rebuild=False):
     source = (source or source_root()).absolute()
     lock = load_lock()
@@ -291,13 +321,17 @@ def build(source=None, jobs=None, make=None, compiler=None, rebuild=False):
     if not (shutil.which("sha256sum") or shutil.which("shasum")):
         raise ValueError("Stockfish NNUE validation requires sha256sum or shasum")
     commit = update_source(source, lock)
+    build_environment = dict(os.environ, GIT_NO_REPLACE_OBJECTS="1")
     cpu = subprocess.run(["sh", str(source / "scripts/get_native_properties.sh")],
-                         cwd=source / "src", capture_output=True, text=True, check=True).stdout.strip()
+                         cwd=source / "src", env=build_environment,
+                         capture_output=True, text=True, check=True).stdout.strip()
     compiler_executable = os.environ.get("CXX", {"gcc": "g++", "mingw": "g++", "clang": "clang++", "icx": "icpx"}[compiler])
     compiler_version = subprocess.run([compiler_executable, "--version"], capture_output=True,
                                       text=True, check=True).stdout.splitlines()[0]
     recipe = {"commit": commit, "arch": "native", "cpu": cpu,
-              "compiler": compiler, "compiler_version": compiler_version}
+              "compiler": compiler, "compiler_version": compiler_version,
+              "source_integrity": "git-committed-bytes-and-modes-v1",
+              "dependency_include": "regenerated-by-upstream-make-with-prior-file-preserved"}
     state = Path(git(source, "rev-parse", "--git-path", "laplace-stockfish-build.json"))
     if not state.is_absolute():
         state = source / state
@@ -309,27 +343,30 @@ def build(source=None, jobs=None, make=None, compiler=None, rebuild=False):
             or os.cpu_count() or 1)
         if count < 1:
             raise ValueError("Stockfish build jobs must be positive")
-        # Use upstream's EXE build variable for a sibling candidate. Active
-        # launches keep the previous direct executable until the new native
-        # build has completed a real search.
+        # Upstream objclean removes stockfish even when EXE names a candidate.
+        # Keep the prior executable for rollback throughout the build; admit
+        # the candidate only after a real search and source verification.
         with tempfile.TemporaryDirectory(prefix="laplace-stockfish-previous-", dir=state.parent) as temporary:
             previous_binary = Path(temporary) / binary.name
             candidate = binary.with_name("stockfish.pending.exe" if platform.system() == "Windows" else "stockfish.pending")
-            if candidate.exists():
+            if candidate.exists() or candidate.is_symlink():
                 raise ValueError(f"Stockfish build candidate already exists; preserved: {candidate}")
             if binary.is_file():
                 shutil.copy2(binary, previous_binary)
             activated = False
             try:
-                subprocess.run([make, "-C", str(source / "src"), "-j", str(count),
-                                "profile-build", "ARCH=native", "COMP=" + compiler,
-                                "CXX=" + compiler_executable, "EXE=" + candidate.name], check=True)
-                capabilities = probe(candidate, lock["version"])
+                with regenerate_dependencies(source, state.parent):
+                    subprocess.run([make, "-C", str(source / "src"), "-j", str(count),
+                                    "profile-build", "ARCH=native", "COMP=" + compiler,
+                                    "CXX=" + compiler_executable, "EXE=" + candidate.name],
+                                   env=build_environment, check=True)
+                    capabilities = probe(candidate, lock["version"])
+                    verify_source(source, commit)
                 os.replace(candidate, binary)
                 activated = True
                 state.write_text(json.dumps({"recipe": recipe, "binary_sha256": digest(binary)}) + "\n")
             except BaseException:
-                if activated and previous_binary.exists():
+                if previous_binary.exists():
                     os.replace(previous_binary, binary)
                 elif activated and binary.exists():
                     binary.unlink()
@@ -339,6 +376,7 @@ def build(source=None, jobs=None, make=None, compiler=None, rebuild=False):
                     candidate.unlink()
     else:
         capabilities = probe(binary, lock["version"])
+        verify_source(source, commit)
     record_external_pin(source, lock)
     print(f"Stockfish {lock['version']} source {commit} verified at {binary}")
     print(capabilities)

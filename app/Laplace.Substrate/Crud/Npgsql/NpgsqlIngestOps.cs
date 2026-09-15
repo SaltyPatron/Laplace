@@ -10,6 +10,37 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlIngestOps
 {
+    public sealed record FileCarrierVertex(long Ordinal, byte[] ChildId, long RunLength, long Flags);
+
+    public static Task<IReadOnlyList<FileCarrierVertex>> VerifiedFileCarrierAsync(
+        NpgsqlDataSource ds, Hash128 fileId, CancellationToken ct = default)
+        => NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("ingest.verified_file_carrier"),
+            static row => new FileCarrierVertex(Convert.ToInt64(row.GetValue(0)), row.GetFieldValue<byte[]>(1),
+                Convert.ToInt64(row.GetValue(2)), Convert.ToInt64(row.GetValue(3))),
+            p => {
+                p.AddWithValue(NpgsqlDbType.Bytea, PhysicalityId.Compute(fileId, PhysicalityType.Content).ToBytes());
+                p.AddWithValue(NpgsqlDbType.Bytea, fileId.ToBytes());
+            }, ct: ct, label: "verified_file_carrier");
+
+    public sealed record ArtifactJournalRow(string FileLabel, string Status, string Disposition,
+        string RelativePath, byte[]? FileId);
+
+    public static async Task<IReadOnlyList<ArtifactJournalRow>> VerifiedArtifactJournalAsync(
+        NpgsqlDataSource ds, Guid runId, string sourceName, CancellationToken ct = default)
+    {
+        await using var conn = await ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        var statuses = await NpgsqlRead.ReadRowsAsync(conn,
+            SqlCatalog.Get("ingest.verified_artifact_run_status"), static row => row.GetString(0),
+            p => { p.AddWithValue(NpgsqlDbType.Uuid, runId); p.AddWithValue(NpgsqlDbType.Text, sourceName); },
+            ct: ct, label: "verified_artifact_run_status").ConfigureAwait(false);
+        if (statuses.Count != 1 || statuses[0] != "ok") throw new InvalidDataException("Actual ingest run journal does not confirm successful repository admission.");
+        return await NpgsqlRead.ReadRowsAsync(conn,
+            SqlCatalog.Get("ingest.verified_artifact_journal"),
+            static row => new ArtifactJournalRow(row.GetString(0), row.GetString(1), row.GetString(2),
+                row.GetString(3), row.IsDBNull(4) ? null : row.GetFieldValue<byte[]>(4)),
+            p => p.AddWithValue(NpgsqlDbType.Uuid, runId), ct: ct, label: "verified_artifact_journal").ConfigureAwait(false);
+    }
+
     public static async Task<bool> EvidenceExistsForTypeAndSourceAsync(
         NpgsqlDataSource ds, byte[] sourceId, byte[] typeId, CancellationToken ct = default)
     {

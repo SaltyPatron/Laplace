@@ -378,6 +378,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_ast_node_count")]
     internal static partial nuint AstNodeCount(IntPtr ast);
 
+    [LibraryImport(Library, EntryPoint = "laplace_ast_get_diagnostics")]
+    internal static partial int AstGetDiagnostics(IntPtr ast, GrammarAstDiagnostics* diagnostics);
+
     [LibraryImport(Library, EntryPoint = "laplace_ast_get_node")]
     internal static partial int AstGetNode(IntPtr ast, nuint idx, LaplaceAstNode* outNode);
 

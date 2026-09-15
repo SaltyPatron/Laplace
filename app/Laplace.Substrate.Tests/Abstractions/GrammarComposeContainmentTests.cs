@@ -1,5 +1,6 @@
 using System.Text;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -9,6 +10,57 @@ public sealed class GrammarComposeContainmentTests
 {
     private static readonly Hash128 Src =
         SubstrateCanonicalIds.OfVersioned("source", "test", "compose-containment");
+
+    [Theory]
+    [InlineData("README\nLicense and build instructions\n", true)]
+    [InlineData("caf\u00e9\n", true)]
+    [InlineData("cafe\u0301\n", false)]
+    [InlineData("embedded\0byte", false)]
+    [InlineData("", false)]
+    public void RawSourceRequiresExactNativeTextBytes(string source, bool admitted)
+        => Assert.Equal(admitted, GrammarSourceFileSupport.IsExactNativeText(Encoding.UTF8.GetBytes(source)));
+
+    [Fact]
+    public void RawSourceRejectsInvalidUtf8()
+        => Assert.False(GrammarSourceFileSupport.IsExactNativeText([0xff, 0xfe]));
+
+    [Fact]
+    public void RawSourceUsesExistingNativeContentAndFileIdentity()
+    {
+        byte[] source = Encoding.UTF8.GetBytes("License and build instructions\n");
+        var metadata = new FileMetadata("COPYING", "COPYING", source.Length, DateTime.UnixEpoch, "text");
+        var record = new GrammarComposeRecord(source, "text", FileMetadata: metadata, RawText: true);
+        var handler = new GrammarComposeHandler(Src, 1.0, null);
+        using var unit = handler.CreateDeferredUnit(record);
+        var builder = new SubstrateChangeBuilder(Src, "test/raw-source");
+        Hash128 actual = unit.DrainInto(builder, 1.0, null);
+        var expected = FileEntity.Resolve(source, metadata);
+        Assert.Equal(expected.FileId, actual);
+        Assert.Equal(expected.FileId, builder.Build().Metadata.FileId);
+    }
+
+    [Fact]
+    public void RawSourceCannotDiscardPromptOrMislabelMetadata()
+    {
+        byte[] source = Encoding.UTF8.GetBytes("source\n");
+        var metadata = new FileMetadata("COPYING", "COPYING", source.Length, DateTime.UnixEpoch, "text");
+        var record = new GrammarComposeRecord(source, "text", FileMetadata: metadata, RawText: true);
+        var handler = new GrammarComposeHandler(Src, 1.0, null);
+        Assert.Throws<InvalidDataException>(() => handler.CreateDeferredUnit(record with { ObservedPromptUtf8 = source }));
+        Assert.Throws<InvalidDataException>(() => handler.CreateDeferredUnit(record with { FileMetadata = metadata with { Modality = "cpp" } }));
+    }
+
+    [Fact]
+    public void CppRecoveryIsRetainedAsPartialSyntaxWithoutDroppingSource()
+    {
+        byte[] source = Encoding.UTF8.GetBytes("int main() { return ; broken = ; }\n");
+        using var ast = GrammarDecomposer.Parse(source, "cpp");
+        var diagnostics = GrammarSourceFileSupport.RequireNativeSourceAst(ast);
+        Assert.False(diagnostics.SyntaxComplete);
+        Assert.True(diagnostics.ErrorNodeCount + diagnostics.MissingNodeCount > 0);
+        using var composer = new GrammarRowComposer(source, ast, Src, "cpp", GrammarCompositionMode.FullSource);
+        Assert.NotEqual(default, composer.RootComponent().Id);
+    }
 
     [Theory]
     [InlineData("1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}")]

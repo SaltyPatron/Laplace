@@ -66,6 +66,110 @@ or checksums. A successful executable report alone does not claim complete data
 ingestion or online Lichess connectivity. The normal publish also runs an actual
 short Cute Chess match against the published Laplace UCI application.
 
+## Measured hart-server configuration (2026-09-15)
+
+[Candidate calibration run 34958542147](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/34958542147)
+completed on the actual Intel Core i7-6850K host: six physical cores, twelve logical
+CPUs, affinity 0–11 and one NUMA node. The accepted observation ran from
+10:51:49.006804 to 10:55:57.770316 UTC (248.764 seconds). Its memory grant was
+7,040 MiB including a 512 MiB margin; peak sampled RSS was 6,154.48 MiB. Binary
+identities and the observed resource envelope remained stable.
+
+| Workload | Best measured starting setting | Median result |
+| --- | --- | --- |
+| One Stockfish process, 51-position depth-12 suite | Threads=4, Hash=64 MiB | 2.186 seconds |
+| CuteChess short-game throughput | Concurrency=4; each engine Threads=1, Hash=16 MiB; ponder off | 11.518 games/second |
+| Next CuteChess concurrency point | Concurrency=6; same engine settings | 11.297 games/second |
+
+The full grid tested Stockfish Threads=1,2,4,6,8,12 with Hash=16,64,256 MiB, and
+CuteChess concurrency=1,2,4,6,8,12. Each profile has one warmup and three measured
+samples: 96 timed processes, 24 PGNs, and 384 games including warmups. Every game
+ended at the imposed 24-ply limit. All transcript/PGN hashes and the medians were
+independently checked. The single-process winner's measured range was
+2.128–2.511 seconds. CuteChess concurrency four led six by about 1.96%, with
+overlapping ranges. Repeat calibration for a different machine, CPU reservation,
+search budget, opening suite, tablebase configuration or executable.
+
+These settings describe two different measured workloads. Do not turn the
+single-process four-thread result into four threads for every concurrent game,
+or treat the CuteChess result as a measured Laplace evaluation-worker count.
+The captured fresh Stockfish defaults were Threads=1, Hash=16 MiB and
+NumaPolicy=auto. This candidate receipt does not establish the deployed services'
+configuration. It also does not establish Laplace playing strength or Elo.
+
+Retained evidence is the `candidate-chess-dependencies-34958542147-1` artifact,
+ID `10392833423`, ZIP SHA-256
+`15b902f010a6a4a9d1d0f5dd65e562ca91a4293af8337a34a879a69aef3afb62`.
+The earlier candidate attempt failed its final memory-headroom check and remains
+failed; only this completed attempt supports these provisional settings.
+
+## Official Stockfish source as a Laplace corpus
+
+The product lifecycle now runs `scripts/ingest-stockfish-corpus.py` after successful
+activation. It uses the same installed configuration and explicit source override as
+the dependency doctor and installer. An explicit executable must be the direct
+`src/stockfish` build of that checkout. The selected Git commit comes from
+`deploy/linux/stockfish-release.json`; the existing private build receipt must bind
+that commit to the executable's actual SHA-256.
+
+The opt-in `ingest repo` path observes the committed Git tree and verifies every
+tracked regular file's actual bytes against its Git blob identity. It does not
+write a manifest into the upstream checkout. Untracked/ignored build products
+are outside that selected source tree. Every tracked entry appears in the artifact
+graph, with its Git identity, actual regular-file SHA-256, and admission disposition.
+
+Files supported by the loaded native grammar registry enter the existing repository
+and source-file decomposition pipeline. The Stockfish selection requires C++;
+`.h` files use that declared C++ context. Native parser ERROR/missing-node counts
+and complete/partial concrete-syntax-tree coverage are retained explicitly. A partial
+syntax tree is not a claim of complete C++ understanding. The existing native
+full-source composer preserves all source spans and gaps; zero-width recovery nodes
+remain diagnostics and never invent bytes.
+
+Files without a grammar can enter the existing native text content owner only when
+native UTF-8/NFC normalization leaves their bytes exactly unchanged. They are labeled
+**raw text**, with no grammar or syntax-completeness claim. Other files and Git
+pointers remain explicitly **unadmitted**, even when their hashes are retained.
+Receipts distinguish native C++ and other grammar admission, partial syntax trees,
+raw-text admission, and unadmitted entries. Every admitted representation still
+requires exact reconstruction of the original tracked bytes from PostgreSQL.
+
+Public Git/build provenance is itself admitted through the existing native text
+content owner and linked from the repository through `REFERENCES`. Its body excludes
+raw Git remote configuration and private receipt paths. Successful acceptance
+requires the actual PostgreSQL run/file journals, exact native reconstruction of
+every admitted source file, its exact file metadata and the provenance content, and the stored provenance
+relation. A second ordinary ingest must reconstruct the same content, use existing
+per-file completion proofs, and insert zero entity, physicality or attestation rows
+with zero new consensus observations/cells. Both runs and their raw logs are retained.
+
+Each admission receipt binds the OS-reported loaded Laplace core module path and
+the native/managed files' SHA-256 before and after the run. Native grammar providers
+are linked into that core. `runtime-inventory.json` separately retains the selected
+CMake cache digest, configured core-byte comparison, external `PINS.tsv` digest and
+the actual C++ grammar/runtime Git identities where available. These current source
+observations do not establish which checkout bytes compiled the loaded binary;
+that stronger source-to-binary claim requires a build receipt. Missing or ambiguous
+inventory remains explicit. The final proof binds the inventory file's SHA-256 and
+requires the observed loaded core file to still match the admission receipt.
+
+Run the same proof against an already built, matching CLI:
+
+```sh
+LAPLACE_STOCKFISH_SOURCE=/vault/External/Stockfish/SF_19 \
+python3 scripts/ingest-stockfish-corpus.py \
+  --prefix /opt/laplace \
+  --cli /path/to/the/matching/Laplace.Cli \
+  --output /build/laplace/work/stockfish-corpus-proof-001
+```
+
+The output directory must be fresh and outside the upstream repository. `receipt.json`
+exists only after both actual database readbacks and the no-amplification check pass;
+partial runs retain their logs and completed observations. The lifecycle holds the
+existing shared host lock during this proof, while the CLI uses the canonical ingest
+lane. Source-corpus readiness is distinct from PGN/opening/evaluation ingestion,
+external engine benchmarks, and any playing-strength result.
+
 ## Data and online requirements
 
 Opening acquisition stores Lichess's files under

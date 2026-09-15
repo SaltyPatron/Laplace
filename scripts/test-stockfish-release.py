@@ -44,6 +44,11 @@ class StockfishSourceTests(unittest.TestCase):
         self.git("remote", "add", "origin", "https://github.com/official-stockfish/Stockfish.git")
         (self.source / "src").mkdir()
         (self.source / "src/source.cpp").write_text("release source\n")
+        (self.source / "src/source.h").write_text("release header\n")
+        (self.source / "scripts").mkdir()
+        native_script = self.source / "scripts/get_native_properties.sh"
+        native_script.write_text("#!/bin/sh\nprintf 'x86-64-avx2\\n'\n")
+        native_script.chmod(0o755)
         (self.source / ".gitignore").write_text("/src/stockfish\n/src/*.nnue\n")
         self.git("add", ".")
         self.git("commit", "--quiet", "-m", "fixture release")
@@ -96,6 +101,245 @@ class StockfishSourceTests(unittest.TestCase):
         installer.update_source(self.source, self.lock)
         self.assertEqual(self.commit, self.git("rev-parse", "HEAD"))
         self.assertEqual(previous, self.git("rev-parse", "refs/laplace/stockfish-before-update/" + previous))
+
+    def test_hidden_tracked_bytes_are_rejected_and_preserved(self):
+        for flag, filename in (("--assume-unchanged", "src/source.cpp"),
+                               ("--assume-unchanged", "src/source.h"),
+                               ("--skip-worktree", "src/source.h")):
+            with self.subTest(flag=flag, filename=filename):
+                path = self.source / filename
+                original = path.read_bytes()
+                self.git("update-index", flag, filename)
+                path.write_bytes(b"hidden operator change\n")
+                self.assertEqual("", self.git("status", "--porcelain"))
+                with self.assertRaisesRegex(ValueError, "local byte changes"):
+                    installer.update_source(self.source, self.lock)
+                self.assertEqual(b"hidden operator change\n", path.read_bytes())
+                self.assertEqual(self.commit, self.git("rev-parse", "HEAD"))
+                path.write_bytes(original)
+                self.git("update-index", flag.replace("--", "--no-", 1), filename)
+
+    @unittest.skipIf(os.name == "nt", "POSIX executable mode is not represented on Windows")
+    def test_hidden_executable_mode_changes_are_rejected(self):
+        self.git("config", "core.fileMode", "false")
+        for filename, changed_mode in (("src/source.h", 0o755),
+                                       ("scripts/get_native_properties.sh", 0o644)):
+            with self.subTest(filename=filename):
+                path = self.source / filename
+                original_mode = path.stat().st_mode
+                path.chmod(changed_mode)
+                self.assertEqual("", self.git("status", "--porcelain"))
+                with self.assertRaisesRegex(ValueError, "file type/mode changes"):
+                    installer.update_source(self.source, self.lock)
+                self.assertEqual(changed_mode, path.stat().st_mode & 0o777)
+                path.chmod(original_mode)
+
+    def test_blob_replacements_cannot_redefine_official_source(self):
+        original_blob = self.git("rev-parse", "HEAD:src/source.h")
+        changed = self.base / "replacement"
+        changed.write_bytes(b"replacement header\n")
+        replacement_blob = self.git("hash-object", "-w", str(changed))
+        self.git("replace", original_blob, replacement_blob)
+        # Genuine committed bytes remain admissible with replacement refs
+        # present; replacement bytes cannot impersonate that same object id.
+        installer.verify_source(self.source, self.commit)
+        self.git("update-index", "--assume-unchanged", "src/source.h")
+        (self.source / "src/source.h").write_bytes(changed.read_bytes())
+        self.assertEqual("", self.git("status", "--porcelain"))
+        with self.assertRaisesRegex(ValueError, "local byte changes"):
+            installer.update_source(self.source, self.lock)
+        self.assertEqual(changed.read_bytes(), (self.source / "src/source.h").read_bytes())
+
+    def test_commit_replacements_cannot_redefine_official_tree(self):
+        (self.source / "src/source.h").write_text("replacement header\n")
+        self.git("add", ".")
+        self.git("commit", "--quiet", "-m", "replacement commit")
+        replacement = self.git("rev-parse", "HEAD")
+        self.git("replace", self.commit, replacement)
+        self.git("update-ref", "HEAD", self.commit)
+        self.assertEqual("", self.git("status", "--porcelain"))
+        with self.assertRaisesRegex(ValueError, "local byte changes"):
+            installer.verify_source(self.source, self.commit)
+        self.assertEqual("replacement header\n", (self.source / "src/source.h").read_text())
+
+    def test_clean_filter_cannot_hide_different_compiler_input_bytes(self):
+        (self.source / ".gitattributes").write_text("src/source.h filter=header\n")
+        self.git("config", "filter.header.clean", "sed s/operator/release/g")
+        self.git("add", ".")
+        self.git("commit", "--quiet", "-m", "filter fixture")
+        commit = self.git("rev-parse", "HEAD")
+        (self.source / "src/source.h").write_text("operator header\n")
+        self.git("add", "src/source.h")
+        self.assertEqual("", self.git("status", "--porcelain"))
+        with self.assertRaisesRegex(ValueError, "local byte changes"):
+            installer.verify_source(self.source, commit)
+
+    def build_peer(self, mutation=None):
+        original_run = installer.subprocess.run
+        calls = []
+
+        def run(args, **kwargs):
+            if args[0] == "g++":
+                return subprocess.CompletedProcess(args, 0, stdout="gcc fixture\n")
+            if args[0] == "make":
+                calls.append(args)
+                self.assertEqual("1", kwargs["env"]["GIT_NO_REPLACE_OBJECTS"])
+                binary = installer.binary_path(self.source)
+                candidate = binary.with_name(next(arg.split("=", 1)[1] for arg in args if arg.startswith("EXE=")))
+                candidate.write_bytes(PROGRAM)
+                candidate.chmod(0o755)
+                if mutation:
+                    mutation()
+                return subprocess.CompletedProcess(args, 0)
+            return original_run(args, **kwargs)
+
+        return run, calls
+
+    def test_successful_build_is_receipted_and_reused_after_full_source_check(self):
+        run, calls = self.build_peer()
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            installer.build(self.source, jobs=1)
+            installer.build(self.source, jobs=1)
+        self.assertEqual(1, len(calls))
+        state = json.loads((self.source / ".git/laplace-stockfish-build.json").read_text())
+        self.assertEqual("git-committed-bytes-and-modes-v1", state["recipe"]["source_integrity"])
+        self.assertEqual(installer.digest(installer.binary_path(self.source)), state["binary_sha256"])
+
+    def test_old_receipt_without_source_integrity_requires_rebuild(self):
+        run, calls = self.build_peer()
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            installer.build(self.source, jobs=1)
+            path = self.source / ".git/laplace-stockfish-build.json"
+            state = json.loads(path.read_text())
+            del state["recipe"]["source_integrity"]
+            path.write_text(json.dumps(state))
+            installer.build(self.source, jobs=1)
+        self.assertEqual(2, len(calls))
+
+    def test_during_build_source_changes_prevent_promotion_or_official_receipt(self):
+        binary = self.executable(PROGRAM + b"# prior executable\n")
+        previous = binary.read_bytes()
+        self.git("update-index", "--assume-unchanged", "src/source.h")
+        header = self.source / "src/source.h"
+        run, calls = self.build_peer(lambda: header.write_bytes(b"during build mutation\n"))
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(ValueError, "local byte changes"):
+                installer.build(self.source, jobs=1)
+        self.assertEqual(1, len(calls))
+        self.assertEqual(previous, binary.read_bytes())
+        self.assertEqual(b"during build mutation\n", header.read_bytes())
+        self.assertFalse((self.source / "src/stockfish.pending").exists())
+        self.assertFalse((self.source / ".git/laplace-stockfish-build.json").exists())
+        self.assertFalse((self.source.parent / "PINS.tsv").exists())
+
+    def test_during_probe_source_changes_prevent_cached_receipt_success(self):
+        run, _ = self.build_peer()
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            installer.build(self.source, jobs=1)
+            self.git("update-index", "--assume-unchanged", "src/source.h")
+            old_probe = installer.probe
+
+            def probe(binary, version):
+                result = old_probe(binary, version)
+                (self.source / "src/source.h").write_bytes(b"during cached probe mutation\n")
+                return result
+
+            with patch.object(installer, "probe", side_effect=probe):
+                with self.assertRaisesRegex(ValueError, "local byte changes"):
+                    installer.build(self.source, jobs=1)
+
+    @unittest.skipIf(os.name == "nt", "POSIX executable mode is not represented on Windows")
+    def test_during_rebuild_mode_change_preserves_previous_binary_and_receipt(self):
+        run, _ = self.build_peer()
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            installer.build(self.source, jobs=1)
+        binary = installer.binary_path(self.source)
+        state = self.source / ".git/laplace-stockfish-build.json"
+        previous_binary, previous_state = binary.read_bytes(), state.read_bytes()
+        self.git("config", "core.fileMode", "false")
+        header = self.source / "src/source.h"
+        run, _ = self.build_peer(lambda: header.chmod(0o755))
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(ValueError, "file type/mode changes"):
+                installer.build(self.source, jobs=1, rebuild=True)
+        self.assertEqual(previous_binary, binary.read_bytes())
+        self.assertEqual(previous_state, state.read_bytes())
+        self.assertEqual(0o755, header.stat().st_mode & 0o777)
+
+    @unittest.skipIf(os.name == "nt", "Fixture requires POSIX symlinks")
+    def test_existing_dangling_build_candidate_is_preserved(self):
+        (self.source / ".git/info/exclude").write_text("/src/stockfish.pending\n")
+        candidate = self.source / "src/stockfish.pending"
+        target = self.base / "operator-target"
+        candidate.symlink_to(target)
+        run, calls = self.build_peer()
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(ValueError, "candidate already exists"):
+                installer.build(self.source, jobs=1)
+        self.assertEqual([], calls)
+        self.assertTrue(candidate.is_symlink())
+        self.assertEqual(str(target), os.readlink(candidate))
+        self.assertFalse(target.exists())
+
+    def real_make_fixture(self, failing=False):
+        # Exercise GNU make's actual ignored-include evaluation and the same
+        # hardcoded executable removal used by upstream Stockfish objclean.
+        (self.source / "src/fixture-engine").write_bytes(PROGRAM)
+        (self.source / "src/fixture-engine").chmod(0o755)
+        (self.source / "src/Makefile").write_text(
+            "-include .depend\n.PHONY: profile-build\nprofile-build:\n"
+            "\trm -f stockfish\n"
+            + ("\texit 9\n" if failing else "\tcp fixture-engine $(EXE)\n")
+            + ".depend:\n\tprintf '# generated from the admitted fixture\\n' > .depend\n")
+        with (self.source / ".gitignore").open("a") as output:
+            output.write("/src/.depend\n")
+        self.git("add", ".")
+        self.git("commit", "--quiet", "-m", "real make fixture")
+        self.commit = self.git("rev-parse", "HEAD")
+        self.git("tag", "-f", "sf_19")
+        self.lock["commit"] = self.commit
+        (self.base / "deploy/linux/stockfish-release.json").write_text(json.dumps(self.lock))
+
+    def test_real_upstream_cleanup_failure_restores_prior_executable_and_depend(self):
+        self.real_make_fixture(failing=True)
+        binary = self.executable(PROGRAM + b"# previous executable\n")
+        previous = binary.read_bytes()
+        dependency = self.source / "src/.depend"
+        dependency.write_text("$(shell touch ../unsafe-include-executed)\n")
+        original, inode = dependency.read_bytes(), dependency.stat().st_ino
+        with self.assertRaises(subprocess.CalledProcessError):
+            installer.build(self.source, jobs=1)
+        self.assertEqual(previous, binary.read_bytes())
+        self.assertEqual(original, dependency.read_bytes())
+        self.assertEqual(inode, dependency.stat().st_ino)
+        self.assertFalse((self.source / "unsafe-include-executed").exists())
+        self.assertFalse((self.source / ".git/laplace-stockfish-build.json").exists())
+
+    @unittest.skipIf(os.name == "nt", "Fixture requires POSIX symlinks and GNU make")
+    def test_real_make_regenerates_include_and_preserves_prior_symlink(self):
+        self.real_make_fixture()
+        target = self.base / "operator-dependencies"
+        target.write_text("$(shell touch ../unsafe-include-executed)\n")
+        dependency = self.source / "src/.depend"
+        dependency.symlink_to(target)
+        installer.build(self.source, jobs=1)
+        self.assertTrue(dependency.is_symlink())
+        self.assertEqual(str(target), os.readlink(dependency))
+        self.assertEqual("$(shell touch ../unsafe-include-executed)\n", target.read_text())
+        self.assertFalse((self.source / "unsafe-include-executed").exists())
+        state = json.loads((self.source / ".git/laplace-stockfish-build.json").read_text())
+        self.assertEqual("regenerated-by-upstream-make-with-prior-file-preserved",
+                         state["recipe"]["dependency_include"])
+
+    def test_dependency_restoration_failure_keeps_exact_backup(self):
+        dependency = self.source / "src/.depend"
+        dependency.write_text("operator dependency artifact\n")
+        with self.assertRaisesRegex(ValueError, "remains preserved at"):
+            with installer.regenerate_dependencies(self.source, self.source / ".git"):
+                dependency.mkdir()
+        backups = list((self.source / ".git").glob("laplace-stockfish-depend-*/.depend"))
+        self.assertEqual(1, len(backups))
+        self.assertEqual("operator dependency artifact\n", backups[0].read_text())
 
     def test_unofficial_origin_and_wrong_pin_are_rejected(self):
         self.git("remote", "set-url", "origin", "https://example.invalid/Stockfish.git")

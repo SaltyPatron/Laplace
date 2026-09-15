@@ -53,6 +53,7 @@ public static class NpgsqlRead
             var expected = scalar switch
             {
                 "bytea" => NpgsqlDbType.Bytea,
+                "uuid" => NpgsqlDbType.Uuid,
                 "int4" => NpgsqlDbType.Integer,
                 "int8" => NpgsqlDbType.Bigint,
                 "text" => NpgsqlDbType.Text,

@@ -232,3 +232,11 @@ SQL_QUERY("physicalities.present_ordinals", "bytea[]",
 
 SQL_QUERY("generation.task_shape_entity_types", "bytea[]",
     "SELECT id, type_id FROM laplace.entities WHERE id = ANY($1)")
+SQL_QUERY("ingest.verified_artifact_run_status", "uuid,text",
+    "SELECT status FROM laplace.ingest_run_journal WHERE run_id=$1 AND source_name=$2")
+SQL_QUERY("ingest.verified_artifact_journal", "uuid",
+    "SELECT file_label,status,disposition,relative_path,file_id FROM laplace.ingest_file_journal WHERE run_id=$1")
+SQL_QUERY("ingest.verified_file_carrier", "bytea,bytea",
+    "SELECT c.ordinal,c.entity_id,c.run_length,c.flags "
+    "FROM public.laplace_trajectory_constituents((SELECT trajectory FROM laplace.physicalities "
+    "WHERE id=$1 AND entity_id=$2 AND type=1 AND n_constituents=2)) c ORDER BY c.ordinal")

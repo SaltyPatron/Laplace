@@ -37,7 +37,7 @@ using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
 
-internal static class IngestCommands
+internal static partial class IngestCommands
 {
     internal sealed record IngestCliArgs(
         string Source,
@@ -51,10 +51,12 @@ internal static class IngestCommands
         bool NoAnalyze = false,
         bool Recursive = false,
         int AnalyzeDepth = 0,
-        long AnalyzeNodes = 0);
+        long AnalyzeNodes = 0,
+        string? GitCorpusSelection = null,
+        string? GitCorpusReceipt = null);
 
 
-    private static IngestCliArgs ParseIngestCliArgs(string[] args)
+    internal static IngestCliArgs ParseIngestCliArgs(string[] args)
     {
         var rest = new List<string>(args);
         LanguageFilter? langs = null;
@@ -66,9 +68,17 @@ internal static class IngestCommands
         bool recursive = false;
         int analyzeDepth = 0;
         long analyzeNodes = 0;
+        string? gitCorpusSelection = null, gitCorpusReceipt = null;
         for (int i = 0; i < rest.Count;)
         {
-            if (rest[i] == "--langs" && i + 1 < rest.Count)
+            if (rest[i] is "--git-corpus-selection" or "--git-corpus-receipt")
+            {
+                if (i + 1 >= rest.Count) throw new ArgumentException("Git corpus flag requires a path.");
+                if (rest[i] == "--git-corpus-selection") gitCorpusSelection = rest[i + 1];
+                else gitCorpusReceipt = rest[i + 1];
+                rest.RemoveAt(i + 1); rest.RemoveAt(i);
+            }
+            else if (rest[i] == "--langs" && i + 1 < rest.Count)
             {
                 langs = LanguageFilter.FromSpec(rest[i + 1]);
                 rest.RemoveAt(i + 1);
@@ -118,7 +128,7 @@ internal static class IngestCommands
             }
             else i++;
         }
-        return new(
+        var parsed = new IngestCliArgs(
             rest.Count > 0 ? rest[0] : "",
             rest.Count > 1 ? rest[1] : "",
             rest.Count > 2 ? rest[2] : "",
@@ -130,7 +140,17 @@ internal static class IngestCommands
             noAnalyze,
             recursive,
             analyzeDepth,
-            analyzeNodes);
+            analyzeNodes, gitCorpusSelection, gitCorpusReceipt);
+        ValidateVerifiedGitArguments(parsed);
+        return parsed;
+    }
+
+    private static void ValidateVerifiedGitArguments(IngestCliArgs cli)
+    {
+        if ((cli.GitCorpusSelection is not null || cli.GitCorpusReceipt is not null)
+            && (!cli.Source.Equals("repo", StringComparison.OrdinalIgnoreCase) || cli.GitCorpusSelection is null || cli.GitCorpusReceipt is null
+                || cli.Force || cli.SkipEvidence || cli.RegisterOnly || cli.Recursive || cli.SecondPath.Length > 0))
+            throw new ArgumentException("Verified Git corpus requires repo, both selection/receipt paths, and ordinary evidence with no force/recursive/register-only override.");
     }
 
     private static bool ResolvePersistEvidence(IngestCliArgs? cli)
@@ -186,13 +206,14 @@ internal static class IngestCommands
             return Fail("usage: laplace ingest chain \"<source [path] [flags]>\" ...\n"
                         + "  example: laplace ingest chain unicode iso639 cili wordnet \"document D:\\Data\\Ingest\\test-data\\text\"");
 
+        var parsed = specs.Select(spec => ParseIngestCliArgs(spec.Split(' ',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))).ToArray();
         CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
 
         for (int i = 0; i < specs.Length; i++)
         {
-            var tokens = specs[i].Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var cli = ParseIngestCliArgs(tokens);
+            var cli = parsed[i];
             if (string.IsNullOrEmpty(cli.Source))
                 return Fail($"ingest chain: spec {i + 1} is empty");
             Console.WriteLine($"==== chain [{i + 1}/{specs.Length}]: ingest {specs[i]} ====");
@@ -496,11 +517,28 @@ internal static class IngestCommands
 
     internal static async Task<int> IngestRepoAsync(IngestCliArgs cli)
     {
+        ValidateVerifiedGitArguments(cli);
         var path = ResolveRequiredIngestPath(cli.Path);
         if (path is null)
             return Fail("usage: laplace ingest repo <repository-root>");
+        IDecomposer decomposer = CliRuntime.Decomposers.Resolve("repo");
+        if (cli.GitCorpusSelection is not null)
+        {
+            var selection = System.Text.Json.JsonSerializer.Deserialize<VerifiedGitRepository.Selection>(
+                File.ReadAllBytes(cli.GitCorpusSelection)) ?? throw new InvalidDataException("Missing Git selection.");
+            ValidateGitCorpusOutputPaths(path, cli.GitCorpusSelection, cli.GitCorpusReceipt!);
+            var snapshot = VerifiedGitRepository.Capture(path, selection, (file, bytes) =>
+            {
+                string? modality = RepoDecomposer.VerifiedModalityFor(file, selection.RequiredModality);
+                if (modality is not null) return (modality, null);
+                return GrammarSourceFileSupport.IsExactNativeText(bytes)
+                    ? ("text", null)
+                    : (null, "No native grammar and bytes are not an exact nonempty UTF-8/NFC text representation.");
+            });
+            decomposer = new VerifiedGitRepoDecomposer(snapshot);
+        }
         return await IngestViaRunnerAsync(
-            CliRuntime.Decomposers.Resolve("repo"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
+            decomposer, path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
     internal static async Task<int> IngestAgentsAsync(IngestCliArgs cli)
@@ -653,6 +691,8 @@ internal static class IngestCommands
         LanguageReference.EnsureLoaded();
         var topo = IngestTopology.EnsureReady();
 
+        NativeCorpusRuntime? corpusRuntime = dec is RepoDecomposer { VerifiedRepository: not null }
+            ? ObserveCorpusRuntime() : null;
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var loggerFactory = CliRuntime.LoggerFactory;
         bool force = cli?.Force ?? false;
@@ -667,7 +707,9 @@ internal static class IngestCommands
         var runner = new IngestRunner(writer, reader, loggerFactory,
             new NpgsqlIngestObservability(ds, persistEvidence));
 
-        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {ConnString} ..."
+        string destination = dec is RepoDecomposer { VerifiedRepository: not null }
+            ? "configured PostgreSQL (verified Git corpus)" : ConnString;
+        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {destination} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(
@@ -707,6 +749,11 @@ internal static class IngestCommands
             catch (Exception ex)
             { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
         }
+        if (dec is RepoDecomposer { VerifiedRepository: not null } repository)
+            await WriteVerifiedGitCorpusReceiptAsync(ds, repository, result,
+                accumulator.ObservationsAccumulated, accumulator.CellsFolded,
+                cli?.GitCorpusReceipt ?? throw new InvalidDataException("Missing corpus receipt path."),
+                corpusRuntime ?? throw new InvalidDataException("Missing loaded runtime identity."));
         return 0;
     }
 

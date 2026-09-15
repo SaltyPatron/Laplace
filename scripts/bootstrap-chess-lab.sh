@@ -76,13 +76,15 @@ build_cutechess() {
   local src qt
   src="$(run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --source-dir "$EXTERNAL/cutechess")"
   qt="$(run_as_owner python3 "$SCRIPT_DIR/provision-chess-qt.py" --root "$QT_ROOT" --work "$WORK")"
+  run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src"
   # --fresh removes only generated CMake cache metadata, preserving source and
   # build outputs while admitting a source path/Qt SDK changed since last run.
-  run_as_owner cmake --fresh -S "$src" -B "$CC_BUILD" -G Ninja \
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake --fresh -S "$src" -B "$CC_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF -DCMAKE_PREFIX_PATH="$qt" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
-  run_as_owner cmake --build "$CC_BUILD" --target cli
-  run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "$CC_BUILD/cutechess-cli"
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake --build "$CC_BUILD" --clean-first --target cli
+  run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" \
+    --binary "$CC_BUILD/cutechess-cli" --receipt "$CC_BUILD/laplace-cutechess-build.json"
   local staged
   staged="$(mktemp "$CC_BIN_DIR/.cutechess-cli.XXXXXX")"
   if install -m 0755 "$CC_BUILD/cutechess-cli" "$staged"; then

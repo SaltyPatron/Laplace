@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Provision the locked CuteChess source and verify the executable's Qt closure."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
+
+from lib.chess_source_integrity import verify_checkout
 
 LOCK = Path(__file__).resolve().parents[1] / "deploy" / "cutechess-release.json"
 
@@ -16,7 +20,10 @@ def run(argv, **kwargs):
     if len(argv) >= 3 and argv[0:2] == ["git", "-C"]:
         # Operators and the CI runner share this one external checkout. Trust
         # only the explicitly selected path without changing global Git policy.
-        argv = ["git", "-c", f"safe.directory={Path(argv[2]).resolve()}", *argv[1:]]
+        argv = ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+                "-c", f"safe.directory={Path(argv[2]).resolve()}", *argv[1:]]
+    elif argv and argv[0] == "git":
+        argv = ["git", "--no-replace-objects", *argv[1:]]
     result = subprocess.run([str(arg) for arg in argv], capture_output=True, text=True,
                             timeout=120, **kwargs)
     if result.returncode:
@@ -38,9 +45,11 @@ def verify_source(path, lock):
         raise RuntimeError(f"{path} is at {actual}; expected {lock['commit']}")
     if run(["git", "-C", path, "status", "--porcelain", "--untracked-files=all"]):
         raise RuntimeError(f"{path} contains local changes; preserving it without building")
+    integrity = verify_checkout(path, actual, "CuteChess")
     version = (path / ".version").read_text().strip()
     if version != lock["version"] or not (path / "CMakeLists.txt").is_file():
         raise RuntimeError(f"{path} does not contain the locked CuteChess {lock['version']} source")
+    return integrity
 
 
 def provision(target, lock):
@@ -60,6 +69,7 @@ def provision(target, lock):
     if run(["git", "-C", target, "status", "--porcelain", "--untracked-files=all"]):
         raise RuntimeError(f"{target} contains local changes; preserving them without updating")
     actual = run(["git", "-C", target, "rev-parse", "HEAD"])
+    verify_checkout(target, actual, "CuteChess")
     if actual != lock["commit"]:
         run(["git", "-C", target, "fetch", "origin", f"refs/tags/{lock['tag']}"])
         fetched = run(["git", "-C", target, "rev-parse", "FETCH_HEAD^{commit}"])
@@ -134,25 +144,67 @@ def probe(binary, lock, qt_version=None):
             "qt_version": match[1], "path": str(binary), "ready": True}
 
 
+def digest(path):
+    result = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            result.update(chunk)
+    return result.hexdigest()
+
+
+def verify_build(source, binary, lock, qt_version=None, receipt_path=None):
+    """Verify post-build source and the tested binary before publication."""
+    source = source.resolve(strict=True)
+    binary = binary.resolve(strict=True)
+    verify_source(source, lock)
+    before = digest(binary)
+    runtime = probe(binary, lock, qt_version)
+    integrity = verify_source(source, lock)
+    if digest(binary) != before:
+        raise RuntimeError("CuteChess executable changed during the runtime probe")
+    cache = binary.parent / "CMakeCache.txt"
+    receipt = {"schema": "laplace.cutechess-source-build.v1", "repository": lock["repository"],
+               "commit": lock["commit"], "source": str(source), "source_integrity": integrity,
+               "binary": str(binary), "binary_sha256": before, "runtime": runtime,
+               "cmake_cache_sha256": digest(cache) if cache.is_file() else None,
+               "scope": "post-build committed source bytes/modes and probed executable identity"}
+    if receipt_path is not None:
+        receipt_path = receipt_path.absolute()
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".cutechess-receipt-", dir=receipt_path.parent) as temporary:
+            pending = Path(temporary) / "receipt.json"
+            pending.write_text(json.dumps(receipt, sort_keys=True) + "\n")
+            os.replace(pending, receipt_path)
+    return receipt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lock", type=Path, default=LOCK)
     parser.add_argument("--source-dir", type=Path)
+    parser.add_argument("--verify-source", type=Path, help="Read-only exact source verification; never updates the checkout")
     parser.add_argument("--binary", type=Path)
+    parser.add_argument("--receipt", type=Path, help="Retain verified source and binary identity after the build")
     parser.add_argument("--qt-version")
     parser.add_argument("--check-latest", action="store_true")
     args = parser.parse_args()
     lock = json.loads(args.lock.read_text())
     if not re.fullmatch(r"[0-9a-f]{40}", lock["commit"]):
         parser.error("release lock must contain a complete source commit")
-    if not (args.source_dir or args.binary or args.check_latest):
-        parser.error("choose --source-dir, --binary or --check-latest")
+    if not (args.source_dir or args.verify_source or args.binary or args.check_latest):
+        parser.error("choose --source-dir, --verify-source, --binary or --check-latest")
+    if args.receipt and not (args.verify_source and args.binary):
+        parser.error("--receipt requires --verify-source and --binary")
     try:
         if args.check_latest:
             print(json.dumps(check_latest(lock)))
         if args.source_dir:
             print(provision(args.source_dir.resolve(), lock))
-        if args.binary:
+        if args.verify_source and args.binary:
+            print(json.dumps(verify_build(args.verify_source, args.binary, lock, args.qt_version, args.receipt)))
+        elif args.verify_source:
+            print(json.dumps(verify_source(args.verify_source, lock)))
+        elif args.binary:
             print(json.dumps(probe(args.binary, lock, args.qt_version)))
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(f"CuteChess: {error}", file=sys.stderr)

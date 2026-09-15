@@ -268,7 +268,8 @@ public static class FileEntity
         return new FileIdentity(contentRoot.Id, metadataRoot.Id, result.Id);
     }
 
-    private static unsafe OrderedCompositionComponent RootComponent(TierTree tree)
+    /// <summary>Transport an already composed native tree root into the common file carrier.</summary>
+    public static unsafe OrderedCompositionComponent RootComponent(TierTree tree)
     {
         if (tree.NodeCount == 0)
             throw new InvalidOperationException("file component has no canonical root");

@@ -13,6 +13,7 @@ struct laplace_ast {
     size_t              cap;
     const TSLanguage*   lang;
     int                 oom;
+    laplace_ast_diagnostics_t diagnostics;
 };
 
 size_t laplace_ast_resident_bytes(const laplace_ast_t* ast) {
@@ -48,6 +49,7 @@ static uint32_t ast_append(laplace_ast_t* ast, uint32_t type_id,
 typedef struct { TSNode node; uint32_t parent; } ast_walk_item_t;
 
 static void ast_walk(laplace_ast_t* ast, TSNode root) {
+    ast->diagnostics.root_has_error = ts_node_has_error(root) ? 1u : 0u;
     size_t           cap = 256, top = 0;
     ast_walk_item_t* stack = (ast_walk_item_t*)malloc(cap * sizeof(*stack));
     if (!stack) { ast->oom = 1; return; }
@@ -60,6 +62,13 @@ static void ast_walk(laplace_ast_t* ast, TSNode root) {
         TSNode          node = it.node;
         uint32_t        parent_idx = it.parent;
         uint32_t        next_parent = parent_idx;
+
+        /* Inspect each parser node once before the retained-AST filter. Missing
+         * anonymous tokens must count too; has_error propagates to ancestors and
+         * therefore is not the number of actual ERROR nodes. */
+        ast->diagnostics.syntax_node_count++;
+        ast->diagnostics.error_node_count += ts_node_is_error(node) ? 1u : 0u;
+        ast->diagnostics.missing_node_count += ts_node_is_missing(node) ? 1u : 0u;
 
         if (ts_node_is_named(node) || ts_node_child_count(node) == 0) {
             uint32_t idx = ast_append(ast,
@@ -155,6 +164,13 @@ int laplace_grammar_parse(const uint8_t* utf8, size_t len,
 
 size_t laplace_ast_node_count(const laplace_ast_t* ast) {
     return ast ? ast->count : 0;
+}
+
+int laplace_ast_get_diagnostics(const laplace_ast_t* ast, laplace_ast_diagnostics_t* out) {
+    if (!ast || !out) return -1;
+    *out = ast->diagnostics;
+    out->ast_node_count = ast->count;
+    return 0;
 }
 
 int laplace_ast_get_node(const laplace_ast_t* ast, size_t idx, laplace_ast_node_t* out) {

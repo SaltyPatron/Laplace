@@ -30,6 +30,17 @@ typedef struct {
 
 typedef struct laplace_ast laplace_ast_t;
 
+/* Counts describe the parser tree and retained AST, including recovery nodes. They
+ * report grammar coverage and do not validate the source language semantically. */
+typedef struct {
+    uint64_t ast_node_count;
+    uint64_t syntax_node_count;
+    uint64_t error_node_count;
+    uint64_t missing_node_count;
+    uint32_t root_has_error;
+    uint32_t reserved;
+} laplace_ast_diagnostics_t;
+
 
 
 
@@ -41,6 +52,7 @@ int laplace_grammar_parse_with(TSParser* parser, const uint8_t* utf8, size_t len
                                const TSLanguage* recipe, laplace_ast_t** out_ast);
 
 size_t laplace_ast_node_count(const laplace_ast_t* ast);
+int laplace_ast_get_diagnostics(const laplace_ast_t* ast, laplace_ast_diagnostics_t* out);
 size_t laplace_ast_resident_bytes(const laplace_ast_t* ast);
 int    laplace_ast_get_node(const laplace_ast_t* ast, size_t idx, laplace_ast_node_t* out);
 const char* laplace_ast_type_name(const laplace_ast_t* ast, uint32_t type_id);

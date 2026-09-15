@@ -41,11 +41,14 @@ foreach ($line in $vcEnvironment) {
 $zstdSource = if ($env:LAPLACE_ZSTD_SOURCE) { $env:LAPLACE_ZSTD_SOURCE } else { Join-Path $external 'zstd' }
 $zstdBuild = if ($env:LAPLACE_ZSTD_BUILD) { $env:LAPLACE_ZSTD_BUILD } else { Join-Path $env:LAPLACE_BUILD_ROOT 'build-zstd' }
 Invoke-Checked python @((Join-Path $repo 'scripts\install-zstd.py'), '--source-dir', $zstdSource, '--build-dir', $zstdBuild)
+Invoke-Checked python @($helper, '--verify-source', $source)
+$env:GIT_NO_REPLACE_OBJECTS = '1'
 Invoke-Checked cmake @('--fresh', '-S', $source, '-B', $build, '-G', 'Ninja',
     '-DCMAKE_BUILD_TYPE=Release', '-DWITH_TESTS=OFF', '-DCMAKE_C_COMPILER=cl',
     '-DCMAKE_CXX_COMPILER=cl', "-DCMAKE_PREFIX_PATH=$qt")
-Invoke-Checked cmake @('--build', $build, '--target', 'cli')
+Invoke-Checked cmake @('--build', $build, '--clean-first', '--target', 'cli')
 $binary = Join-Path $build 'cutechess-cli.exe'
 Invoke-Checked (Join-Path $qt 'bin\windeployqt.exe') @('--release', '--compiler-runtime', '--no-translations', '--dir', $build, $binary)
-Invoke-Checked python @($helper, '--binary', $binary, '--qt-version', $lock.qt_version)
+Invoke-Checked python @($helper, '--verify-source', $source, '--binary', $binary,
+    '--qt-version', $lock.qt_version, '--receipt', (Join-Path $build 'laplace-cutechess-build.json'))
 Write-Host "CuteChess $($lock.version) and Qt $($lock.qt_version) ready: $binary"
