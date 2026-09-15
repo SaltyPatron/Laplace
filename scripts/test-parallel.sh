@@ -10,10 +10,13 @@ source "$ROOT/scripts/lib/storage.sh"
 laplace_storage_init
 
 MODE=all
+SUITE=
 SERIAL="${LAPLACE_TEST_SERIAL:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --profile)    [[ $# -ge 2 ]] || { echo "--profile needs a name" >&2; exit 2; }; MODE="$2"; shift 2 ;;
+    --suite)      [[ $# -ge 2 && -z "$SUITE" && -n "$2" ]] || { echo "--suite needs exactly one name" >&2; exit 2; }; SUITE="$2"; shift 2 ;;
     --engine)      MODE=dev; shift ;;
     --regress)     MODE=db; shift ;;
     --app)         MODE=app; shift ;;
@@ -28,6 +31,8 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage: scripts/test-parallel.sh [profile alias] [--serial]
+  --profile NAME select one canonical registry profile
+  --suite ID     select exactly one registered suite from that profile
   --engine       DEV/BAT: native + managed + UCI + browser
   --regress      database QA (health + pg_regress + managed DB fixtures)
   --app          managed DEV/BAT followed by database QA
@@ -60,8 +65,15 @@ if [[ "$MODE" != policy ]]; then
 fi
 
 run_profile() {
-  python3 scripts/test-profile-registry.py run --profile "$1"
+  local args=()
+  [[ -z "$SUITE" ]] || args+=(--suite "$SUITE")
+  python3 scripts/test-profile-registry.py run --profile "$1" "${args[@]}"
 }
+
+if [[ "$MODE" == app && -n "$SUITE" ]]; then
+  echo "--suite requires one registry profile; use --profile" >&2
+  exit 2
+fi
 
 if [[ "$MODE" == app ]]; then
   run_profile dev-managed

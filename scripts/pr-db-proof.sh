@@ -19,6 +19,132 @@ PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 REGRESS_DB="${LAPLACE_REGRESS_DB:-}"
 
+action="${2:-all}"
+[[ $# == 0 || ( $# == 2 && "$1" == --phase ) ]] || { echo "usage: pr-db-proof.sh [--phase PHASE]" >&2; exit 2; }
+state_file="${LAPLACE_CI_SESSION_DIRECTORY:-$BUILD/test-results/pr-session}/private-db.json"
+
+private_paths() {
+  pgdata="$stage/pgdata"
+  socket_dir="$stage/socket"
+  control_root="$stage${INSTALL_PREFIX}/share/postgresql/18"
+  build_library_path="$BUILD/extension/laplace_substrate:$BUILD/extension/laplace_geom:$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis"
+  branch_host="$BUILD/extension/laplace_substrate/laplace_substrate"
+  t0_perfcache="$BUILD/engine/core/perfcache/laplace_t0_perfcache.bin"
+  highway_perfcache="$BUILD/engine/core/perfcache/laplace_highway_perfcache.bin"
+  chess_position_perfcache="$BUILD/engine/core/perfcache/laplace_chess_position_perfcache.bin"
+  export PGHOST="$socket_dir" PGPORT=55432 PGUSER=laplace_admin PGDATABASE=postgres
+  export PGOPTIONS="-c extension_control_path=${control_root}:\$system -c dynamic_library_path=${build_library_path}:\$libdir"
+}
+
+# This file is data, never shell code. Pin the private directory to this exact
+# checkout/build and workflow invocation before starting any daemon.
+private_state() {
+  python3 - "$1" "$state_file" "$ROOT" "$BUILD" "$PG_PREFIX" "$INSTALL_PREFIX" "${stage:-}" "$REGRESS_DB" <<'PY_STATE'
+import json, os, pathlib, stat, subprocess, sys
+operation, name, root, build, pg, install, stage, database = sys.argv[1:]
+path = pathlib.Path(name)
+identity = {key: os.environ.get(key, '') for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')}
+expected = dict(schema='laplace.private-db-session/v1', checkout=str(pathlib.Path(root).resolve()),
+                build=str(pathlib.Path(build).resolve()), pg_prefix=str(pathlib.Path(pg).resolve()),
+                install_prefix=install, identity=identity)
+def owned_directory(directory):
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise SystemExit('private database directory is not an owned private directory')
+if operation == 'write':
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    owned_directory(path.parent)
+    expected.update(stage=stage, database=database,
+                    source=subprocess.check_output(['git', '-C', root, 'rev-parse', 'HEAD'], text=True).strip())
+    temporary = path.with_name(path.name + '.next')
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'w') as output:
+        json.dump(expected, output); output.flush(); os.fsync(output.fileno())
+    temporary.replace(path)
+else:
+    owned_directory(path.parent)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 8192:
+            raise SystemExit('invalid private database session receipt')
+        saved = json.load(source)
+    if set(saved) != set(expected) | {'stage', 'database', 'source'} or any(saved.get(k) != v for k, v in expected.items()):
+        raise SystemExit('private database session belongs to another checkout, build, or run')
+    if operation != 'cleanup' and (saved['database'] != database or saved['source'] != subprocess.check_output(['git', '-C', root, 'rev-parse', 'HEAD'], text=True).strip()):
+        raise SystemExit('private database source or database identity changed')
+    directory = pathlib.Path(saved['stage'])
+    if not directory.is_absolute() or directory.name.removeprefix('laplace-pr-db-proof.') == directory.name or any(c in str(directory) for c in "\n\r\x00'"):
+        raise SystemExit('invalid private database stage path')
+    if directory.exists():
+        owned_directory(directory)
+        if directory.resolve() != directory:
+            raise SystemExit('private database stage traverses a symlink')
+    elif operation != 'cleanup':
+        raise SystemExit('private database stage is missing')
+    print(directory)
+PY_STATE
+}
+
+load_state() {
+  stage="$(private_state "${1:-read}")" || return $?
+  private_paths
+}
+
+cleanup() {
+  [[ -f "$state_file" || -L "$state_file" ]] || return 0
+  load_state cleanup || return $?
+  # Bind the signal to the actual private postmaster, not a reusable PID. The
+  # receipt also exists during startup, before pg_ctl has returned successfully.
+  python3 - "$pgdata" "$PG_PREFIX/bin/postgres" <<'PY_STOP' || return $?
+import os, pathlib, select, signal, sys
+pgdata, executable = map(pathlib.Path, sys.argv[1:])
+path = pgdata / 'postmaster.pid'
+if not path.exists():
+    raise SystemExit(0)
+lines = path.read_text().splitlines()
+if len(lines) < 2 or pathlib.Path(lines[1]).resolve() != pgdata.resolve():
+    raise SystemExit('private postmaster PID file has another data directory')
+try:
+    pid = int(lines[0])
+    if pid <= 0:
+        raise ValueError()
+    descriptor = os.pidfd_open(pid)
+except ProcessLookupError:
+    raise SystemExit(0)
+except ValueError:
+    raise SystemExit('invalid private postmaster PID')
+try:
+    process = pathlib.Path('/proc') / str(pid)
+    try:
+        arguments = (process / 'cmdline').read_bytes().split(b'\0')
+        actual_executable = (process / 'exe').resolve(strict=True)
+        owner = process.stat().st_uid
+    except FileNotFoundError:
+        if select.select([descriptor], [], [], 0)[0]:
+            raise SystemExit(0)
+        raise SystemExit('live private postmaster identity is unavailable; retaining its directory')
+    if (owner != os.getuid() or actual_executable != executable.resolve()
+            or b'-D' not in arguments or arguments[arguments.index(b'-D') + 1] != os.fsencode(pgdata)):
+        raise SystemExit('refusing to signal a process that is not this private postmaster')
+    try:
+        signal.pidfd_send_signal(descriptor, signal.SIGQUIT)
+    except ProcessLookupError:
+        raise SystemExit(0)
+    if not select.select([descriptor], [], [], 110)[0]:
+        raise SystemExit('private postmaster did not stop; retaining its directory')
+finally:
+    os.close(descriptor)
+PY_STOP
+  rm -rf -- "$stage" || return $?
+  rm -f -- "$state_file"
+}
+
+if [[ "$action" == cleanup ]]; then
+  cleanup
+  exit $?
+fi
+
 [[ -n "$REGRESS_DB" ]] || {
   echo "pr-db-proof: LAPLACE_REGRESS_DB is required" >&2
   exit 2
@@ -43,19 +169,13 @@ for tool in initdb pg_ctl psql createdb dropdb; do
   }
 done
 
-stage="$(mktemp -d -t laplace-pr-db-proof.XXXXXXXX)"
-pgdata="$stage/pgdata"
-socket_dir="$stage/socket"
+
+prepare_private_database() {
+stage="$(realpath "$(mktemp -d -t laplace-pr-db-proof.XXXXXXXX)")"
+private_paths
 mkdir -p "$socket_dir"
-postmaster_started=0
-cleanup() {
-  set +e
-  if (( postmaster_started )); then
-    "$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -m immediate -w stop >/dev/null 2>&1 || true
-  fi
-  rm -rf "$stage"
-}
-trap cleanup EXIT INT TERM
+private_state write
+
 
 # Materialize the branch's generated extension SQL/control files without writing
 # the live prefix. The installed-form SQL is the same artifact main delivery
@@ -111,8 +231,7 @@ laplace_substrate.highway_perfcache_path = '$highway_perfcache'
 laplace_substrate.chess_position_perfcache_path = '$chess_position_perfcache'
 EOF
 
-"$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -w start >/dev/null
-postmaster_started=1
+"$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -l "$stage/postgresql.log" -w start >/dev/null
 export PGHOST="$socket_dir"
 export PGPORT=55432
 export PGUSER=laplace_admin
@@ -120,6 +239,24 @@ export PGDATABASE=postgres
 # Keep the branch resolution settings explicit on every client as well. This
 # prevents a caller-provided PGOPTIONS from redirecting extension discovery.
 export PGOPTIONS="-c extension_control_path=${control_root}:\$system -c dynamic_library_path=${build_library_path}:\$libdir"
+
+validate_private_server
+}
+
+validate_private_server() {
+actual_data="$("$PG_PREFIX/bin/psql" -XAt -d postgres -v ON_ERROR_STOP=1 -c 'SHOW data_directory')"
+[[ "$(realpath "$actual_data")" == "$pgdata" ]] || { echo "private database data directory changed" >&2; return 2; }
+for setting in extension_control_path dynamic_library_path laplace_substrate.perfcache_path laplace_substrate.highway_perfcache_path laplace_substrate.chess_position_perfcache_path; do
+  case "$setting" in
+    extension_control_path) expected_value="$control_root:\$system" ;;
+    dynamic_library_path) expected_value="$build_library_path:\$libdir" ;;
+    laplace_substrate.perfcache_path) expected_value="$t0_perfcache" ;;
+    laplace_substrate.highway_perfcache_path) expected_value="$highway_perfcache" ;;
+    laplace_substrate.chess_position_perfcache_path) expected_value="$chess_position_perfcache" ;;
+  esac
+  actual_value="$("$PG_PREFIX/bin/psql" -XAt -d postgres -v ON_ERROR_STOP=1 -c "SHOW $setting")"
+  [[ "$actual_value" == "$expected_value" ]] || { echo "private database setting changed: $setting" >&2; return 2; }
+done
 
 # Fail before pg_regress if the isolated server cannot discover the staged branch
 # extensions through the same settings the regress clients inherit.
@@ -139,6 +276,9 @@ if [[ "$preload" != "$branch_host" ]]; then
   exit 2
 fi
 
+}
+
+prove_native_database() {
 # Every SQL regression executes CREATE EXTENSION against staged branch control/SQL
 # and loads branch-native modules through dynamic_library_path. Preserve the
 # pg_regress diffs in the job log on failure so a red gate names the actual SQL or
@@ -149,19 +289,15 @@ ctest_rc=$?
 set -e
 
 if (( ctest_rc != 0 )); then
-  for f in \
-    "$BUILD/extension/laplace_geom/tests/regress_output/regression.diffs" \
-    "$BUILD/extension/laplace_substrate/tests/regress_output/regression.diffs" \
-    "$BUILD/extension/laplace_geom/tests/regress_output/regression.out" \
-    "$BUILD/extension/laplace_substrate/tests/regress_output/regression.out"; do
-    if [[ -f "$f" ]]; then
-      echo "===== $f ====="
-      cat "$f"
-    fi
-  done
+  python3 scripts/capture-native-regression.py --repo-root "$ROOT" --build-root "$BUILD" \
+    --output-dir "${LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY:-/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-pr}/current" \
+    --label native-db --print-diffs || true
   exit "$ctest_rc"
 fi
 
+}
+
+prove_operational_database() {
 # Exercise source admission, native execution and stable session Projection writes
 # while the private branch postmaster is still alive. This DB-tier acceptance is
 # excluded from the later managed DEV profile, so its exact selection must run
@@ -217,12 +353,18 @@ print("OPERATIONAL_EXEMPLAR_ADMISSION_OK selected=1 executed=1 passed=1 skipped=
 print("SESSION_PROJECTION_EXECUTION_OK selected=3 executed=3 passed=3 skipped=0 postgres=isolated")
 PY
 
+}
+
+prove_highway_recovery() {
 # Exercise actual registry unavailability and WAL recovery in this private
 # postmaster. The normal public C deposit and SQL batch orchestrators run
 # unchanged; the fixture varies only the real registry file and process lifetime.
 LAPLACE_PG_PREFIX="$PG_PREFIX" bash scripts/test-highway-registry-recovery.sh \
   "$pgdata" "$highway_perfcache" "${REGRESS_DB}_highway"
 
+}
+
+prove_legacy_repairs() {
 # Use the same isolated branch-native postmaster to prove exact legacy row
 # repairs, durable pre-mutation receipts, rejected evidence, and SQL rollback.
 # The harness creates a unique disposable database and keeps receipts with the
@@ -231,4 +373,42 @@ LAPLACE_PG_PREFIX="$PG_PREFIX" python3 scripts/test-legacy-content-repair.py \
   --pgdata "$pgdata" --database-stem "$REGRESS_DB" \
   --receipt-root "$BUILD/test-results/legacy-content-repair"
 
-echo "PR_DB_PROOF_OK database_stem=$REGRESS_DB postgres=isolated controls=staged modules=build-tree canonical_mutations=0"
+}
+
+run_private_phase() {
+  case "$1" in
+    native-db|operational-db|highway-recovery|legacy-repair-db) validate_private_server ;;
+  esac
+  case "$1" in
+    private-db-start) prepare_private_database ;;
+    native-db) prove_native_database ;;
+    operational-db) prove_operational_database ;;
+    highway-recovery) prove_highway_recovery ;;
+    legacy-repair-db) prove_legacy_repairs ;;
+    private-db-stop) cleanup ;;
+    *) echo "unknown private database phase: $1" >&2; return 2 ;;
+  esac
+}
+
+if [[ "$action" == all ]]; then
+  [[ ! -e "$state_file" && ! -L "$state_file" ]] || { echo "private database session already exists" >&2; exit 2; }
+  trap 'rc=$?; cleanup_rc=0; cleanup || cleanup_rc=$?; (( rc != 0 )) || rc=$cleanup_rc; exit "$rc"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  for phase in private-db-start native-db operational-db highway-recovery legacy-repair-db private-db-stop; do
+    run_private_phase "$phase"
+  done
+else
+  if [[ "$action" != private-db-start ]]; then
+    [[ -f "$state_file" ]] || { echo "private database session is missing" >&2; exit 2; }
+    load_state
+  else
+    [[ ! -e "$state_file" && ! -L "$state_file" ]] || { echo "private database session already exists" >&2; exit 2; }
+  fi
+  # A successful step leaves the private cluster for the next named phase.
+  # Failure or cancellation cleans it before returning the original exit status.
+  trap 'rc=$?; if (( rc != 0 )); then cleanup || true; fi; exit "$rc"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  run_private_phase "$action"
+fi

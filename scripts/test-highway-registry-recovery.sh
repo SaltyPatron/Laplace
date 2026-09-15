@@ -28,7 +28,7 @@ SQL
 # A new backend must retain valid mask work even when loading the configured
 # file raises CONFIG_FILE_ERROR. All input contracts remain native and exact.
 printf "\nlaplace_substrate.highway_perfcache_path = '%s/absent-highway.bin'\n" "$private_root" >> "$pgdata/postgresql.conf"
-"$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -m fast -w restart >/dev/null
+"$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -l "$private_root/postgresql.log" -m fast -w restart >/dev/null
 "$PG_PREFIX/bin/psql" -X -d "$DB" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
 DECLARE
@@ -72,7 +72,7 @@ SQL
 # prove both WAL-logged worksets survive, then run the normal native replay.
 "$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -m immediate -w stop >/dev/null
 printf "\nlaplace_substrate.highway_perfcache_path = '%s'\n" "$highway" >> "$pgdata/postgresql.conf"
-"$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -w start >/dev/null
+"$PG_PREFIX/bin/pg_ctl" -D "$pgdata" -l "$private_root/postgresql.log" -w start >/dev/null
 "$PG_PREFIX/bin/psql" -X -d "$DB" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$ BEGIN
     IF NOT consensus.highway_ready() THEN RAISE EXCEPTION 'registry did not recover'; END IF;

@@ -26,6 +26,10 @@ for f in \
   scripts/test-profiles.json \
   scripts/test-test-profile-registry.py \
   scripts/pr-proof.sh \
+  scripts/ci-session.py \
+  scripts/test-ci-session.py \
+  scripts/capture-native-regression.py \
+  scripts/test-native-regression-evidence.py \
   scripts/lib/fp.sh \
   scripts/affected-app.py \
   scripts/test-app-fingerprints.py \
@@ -108,3 +112,7 @@ python3 scripts/test-ingest-source-exit.py
 # An external seeded source edit must invalidate its real project consumers,
 # their tests, the ingest CLI build, and the application publish domain.
 python3 scripts/test-app-fingerprints.py
+
+# Phase orchestration and retained native failures are executable CI contracts.
+python3 scripts/test-ci-session.py
+python3 scripts/test-native-regression-evidence.py

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Fail closed when Actions stops describing one Laplace product lifecycle."""
 from pathlib import Path
+import os
 import re
+import subprocess
 import sys
 import yaml
 
@@ -54,13 +56,80 @@ def unique_step(steps: list, key: str, value: str, context: str):
     return matches[0]
 
 
+def canonical_phases(kind: str, stage: str) -> list[str]:
+    """Read the shared lifecycle's selection without executing a lifecycle phase."""
+    script = ROOT / "scripts" / ("product-ci.sh" if kind == "product" else "pr-proof.sh")
+    if "--list-phases" not in script.read_text(encoding="utf-8"):
+        fail(f"{script.name}: missing independently selectable lifecycle phases")
+        return []
+    command = ["bash", str(script)]
+    if kind == "product":
+        command.append(stage)
+    else:
+        command.extend(["--stage", stage])
+    command.append("--list-phases")
+    env = dict(os.environ, LAPLACE_GENERATION_BENCHMARK="1", LAPLACE_FRESH_DB="",
+               LAPLACE_RESTORE_FOUNDATION="1")
+    result = subprocess.run(command, cwd=ROOT, env=env, text=True,
+                            capture_output=True, timeout=15)
+    phases = result.stdout.splitlines()
+    if result.returncode or not phases or len(phases) != len(set(phases)) \
+            or any(not re.fullmatch(r"[a-z]+(?:-[a-z]+)*", phase) for phase in phases):
+        fail(f"{script.name}: invalid canonical phase plan for {stage}")
+        return []
+    return phases
+
+
+def visible_phases(job: dict, kind: str) -> tuple[list[str], int, int]:
+    """The workflow exposes each selected shared command as its own result."""
+    steps = job.get("steps") or []
+    context = f"{kind} lifecycle"
+    session = unique_step(steps, "id", f"{kind}_session", context)
+    stops = [(i, step) for i, step in enumerate(steps)
+             if "ci-session.py" in step.get("run", "")
+             and re.search(r"ci-session\.py[\"']?\s+stop\b", step.get("run", ""))]
+    if len(stops) != 1:
+        fail(f"{context}: requires one always-run session cleanup")
+    if not session or len(stops) != 1:
+        return [], -1, -1
+    start_index, start_step = session
+    stop_index, stop_step = stops[0]
+    start_command = start_step.get("run", "")
+    for token in ("ci-session.py", "start", f"--kind {kind}", "--checkout", "--lock",
+                  "/build/laplace/work/host-resource.lock"):
+        if token not in start_command:
+            fail(f"{context}: session start lacks {token}")
+    if stop_step.get("if") != f"always() && steps.{kind}_session.outcome == 'success'":
+        fail(f"{context}: cleanup must run after phase failure or cancellation")
+    found = []
+    for index, step in enumerate(steps):
+        command = step.get("run", "")
+        matches = re.findall(r"--phase\s+([a-z]+(?:-[a-z]+)*)", command)
+        if not matches:
+            continue
+        if len(matches) != 1 or "ci-session.py" not in command:
+            fail(f"{context}: a visible step must execute exactly one shared phase")
+            continue
+        phase = matches[0]
+        found.append(phase)
+        if not start_index < index < stop_index:
+            fail(f"{context}: phase {phase} escapes session ownership")
+        if step.get("if") != f"contains(env.LAPLACE_CI_PHASES, '|{phase}|')":
+            fail(f"{context}: phase {phase} must use canonical selection and normal failure propagation")
+        if step.get("id") != f"{kind}_{phase.replace('-', '_')}":
+            fail(f"{context}: phase {phase} has no stable individual result identity")
+    if len(found) != len(set(found)):
+        fail(f"{context}: duplicated lifecycle phase")
+    return found, start_index, stop_index
+
+
 def result_authority(name: str, workflow: dict) -> None:
     """Optional diagnostics never acquire proof authority; readiness is deferred."""
     if name == "benchmark-evidence.yml":
         if set(workflow.get("jobs") or {}) != {"benchmark"}:
             fail("benchmark-evidence.yml: the reusable workflow may expose only its measurement job")
         for job in (workflow.get("jobs") or {}).values():
-            for token in ("product-ci.sh", "pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh", "systemctl ", "sudo "):
+            for token in ("product-ci.sh", "ci-session.py", "pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh", "systemctl ", "sudo "):
                 if token in runs(job):
                     fail(f"benchmark-evidence.yml: measurement may not acquire product mutation authority: {token}")
     for job_name, job in (workflow.get("jobs") or {}).items():
@@ -69,6 +138,24 @@ def result_authority(name: str, workflow: dict) -> None:
             fail(f"{context}: hidden red job result")
         steps = job.get("steps") or []
         allowed = set()
+        if (name, job_name) in (("laplace.yml", "product"), ("pr-validation.yml", "prove")):
+            prefix = "product" if name == "laplace.yml" else "pr"
+            baseline = unique_step(steps, "id", f"{prefix}_native_baseline", context)
+            upload = unique_step(steps, "name", "Upload retained native baseline before build", context)
+            policy = unique_step(steps, "id", f"{prefix}_policy", context)
+            if baseline and upload and policy:
+                allowed.update((baseline[0], upload[0]))
+                if not baseline[0] < upload[0] < policy[0]:
+                    fail(f"{context}: retained native diagnostics must precede build execution")
+                expected = "env.LAPLACE_FAST_ONLY != '1'" if prefix == "product" else "env.LAPLACE_PR_FULL_PROOF == '1'"
+                if baseline[1].get("if") != expected:
+                    fail(f"{context}: retained native diagnostics have incorrect selection")
+                if "capture-native-regression.py" not in baseline[1].get("run", ""):
+                    fail(f"{context}: native baseline must use the shared read-only capture")
+                expected_upload = f"always() && steps.{prefix}_native_baseline.outcome != 'skipped'"
+                if upload[1].get("if") != expected_upload or "run" in upload[1] \
+                        or not upload[1].get("uses", "").startswith("actions/upload-artifact@"):
+                    fail(f"{context}: optional native baseline upload may only retain the attempted diagnostic")
         if (name, job_name) == ("benchmark-evidence.yml", "benchmark"):
             readiness = unique_step(steps, "id", "chess_readiness", context)
             upload = unique_step(steps, "name", "Upload complete benchmark evidence", context)
@@ -101,7 +188,7 @@ def result_authority(name: str, workflow: dict) -> None:
         elif (name, job_name) == ("pr-validation.yml", "prove"):
             baseline = unique_step(steps, "id", "baseline_diagnostic", context)
             upload = unique_step(steps, "name", "Upload retained baseline before full proof", context)
-            proof = unique_step(steps, "id", "proof", context)
+            proof = unique_step(steps, "id", "pr_session", context)
             if baseline and upload and proof:
                 baseline_index, baseline_step = baseline
                 upload_index, upload_step = upload
@@ -120,14 +207,14 @@ def result_authority(name: str, workflow: dict) -> None:
                         fail(f"{context}: baseline lacks bounded read-only diagnostic contract: {token}")
                 if "if" in proof_step or "baseline_diagnostic" in str(proof_step):
                     fail(f"{context}: actual PR proof must remain independent of optional baseline success")
-                for token in ("scripts/pr-proof.sh", "test-parallel.sh --policy", "set -euo pipefail"):
+                for token in ("ci-session.py", "--kind pr", "set -euo pipefail"):
                     if token not in proof_step.get("run", ""):
                         fail(f"{context}: actual PR proof lost authority: {token}")
         for index in allowed:
             step = steps[index]
             if step.get("continue-on-error") != "true":
                 fail(f"{context}: diagnostic failure deferral must be explicit")
-            for token in ("pr-proof.sh", "test-parallel.sh", "product-ci.sh", "pipeline.sh", "publish-applications.sh", "systemctl ", "sudo ", "prove-live-recursive-substrate.py"):
+            for token in ("pr-proof.sh", "ci-session.py", "test-parallel.sh", "product-ci.sh", "pipeline.sh", "publish-applications.sh", "systemctl ", "sudo ", "prove-live-recursive-substrate.py"):
                 if token in step.get("run", ""):
                     fail(f"{context}: optional diagnostic contains an authoritative or mutating operation: {token}")
         for index, step in enumerate(steps):
@@ -162,11 +249,21 @@ def product_topology(main: dict) -> None:
     if product_job.get("outputs") != expected_outputs:
         fail("laplace.yml: measurement outputs must come from the successful activation gate")
     steps = product_job.get("steps") or []
-    lifecycle = unique_step(steps, "name", "Run full product lifecycle", "laplace.yml:product")
+    phases, start_index, stop_index = visible_phases(product_job, "product")
+    plans = [canonical_phases("product", stage) for stage in (
+        "check", "build", "test", "deploy", "integrate", "all",
+        "application-check", "applications")]
+    required = {phase for plan in plans for phase in plan}
+    if set(phases) != required:
+        fail(f"laplace.yml: visible phases differ from the complete shared lifecycle: {sorted(required ^ set(phases))}")
+    for plan in plans:
+        selected = [phase for phase in phases if phase in plan]
+        if selected != plan:
+            fail("laplace.yml: visible phase order differs from the shared lifecycle")
     gate = unique_step(steps, "id", "chess_benchmark_gate", "laplace.yml:product")
-    if lifecycle and gate:
+    if start_index >= 0 and gate:
         gate_if = "env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')"
-        if gate[0] <= lifecycle[0] or gate[1].get("if") != gate_if:
+        if gate[0] <= stop_index or gate[1].get("if") != gate_if:
             fail("laplace.yml: successful activation must precede measurement authorization")
         command = gate[1].get("run", "")
         if "ready=true" not in command or '"$(git rev-parse HEAD)"' not in command or "source_sha=%s" not in command:
@@ -176,7 +273,7 @@ def product_topology(main: dict) -> None:
             ("Retain official Stockfish corpus admission evidence", "always() && " + gate_if),
         ):
             corpus = unique_step(steps, "name", name, "laplace.yml:product")
-            if corpus and (corpus[0] <= lifecycle[0] or corpus[1].get("if") != expected):
+            if corpus and (corpus[0] <= stop_index or corpus[1].get("if") != expected):
                 fail("laplace.yml: installed corpus proof requires an application-publishing stage")
 
 
@@ -225,8 +322,8 @@ if restore.get("default") != "false":
     fail("main restore_foundation must be explicit opt-in (default false)")
 if "product" in main_jobs:
     command = runs(main_jobs["product"])
-    if 'bash scripts/product-ci.sh "$LAPLACE_STAGE"' not in command:
-        fail("main product job bypasses scripts/product-ci.sh")
+    if "ci-session.py" not in command or "--kind product" not in command:
+        fail("main product job bypasses the shared product phase executor")
     if "bash scripts/product-ci.sh reconcile" not in command:
         fail("main fast path bypasses installed-product reconciliation")
     if "LAPLACE_FAST_ONLY" not in command:
@@ -243,13 +340,13 @@ if not PRODUCT.exists():
 else:
     product = PRODUCT.read_text(encoding="utf-8")
     required_order = [
-        "run_policy", "run_deps", "run_build", "run_dev",
-        "run_install_and_db", "seed_operational_memory", "run_publish", "run_repair_installed_corpus",
-        "verify_operational_execution", "run_integration", "run_live_if_expected",
+        "policy", "dependencies", "build", "native-dev", "managed-dev", "uci-dev", "browser-dev",
+        "native-install", "database-maintenance", "foundation", "operational-seed", "publish",
+        "operational-execution", "db-health", "native-db", "managed-db", "live-floor", "live-api",
+        "managed-live", "generation-eval", "performance",
     ]
-    positions = [product.rfind(f"\n{name}\n") for name in required_order]
-    if any(pos < 0 for pos in positions) or positions != sorted(positions):
-        fail(f"product lifecycle order drifted: {list(zip(required_order, positions))}")
+    if canonical_phases("product", "all") != required_order:
+        fail("product lifecycle phase selection/order drifted")
     for token in (
         "managed-publish.sh preflight",
         "pipeline.sh install",
@@ -260,42 +357,21 @@ else:
         "foundation restore not requested — no ingest",
         "publish-applications.sh deploy",
         "publish-applications.sh recover",
-        "local args=(--integration)",
-        'bash scripts/test-parallel.sh "${args[@]}"',
-        "test-parallel.sh --app-live",
+        'test-parallel.sh --profile "$1" --suite "$2"',
+        'db-health|managed-db) run_suite db "$1"',
+        'run_suite db native-db',
+        'operational-execution) verify_operational_execution ;;',
     ):
         if token not in product:
             fail(f"product lifecycle missing {token}")
     maintenance_path = ROOT / "scripts" / "maintain-installed-database.sh"
-    repair_path = ROOT / "scripts" / "repair-legacy-content-lifecycle.sh"
     delegation = r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --\s+\\\s+bash scripts/maintain-installed-database\.sh'
     if len(re.findall(delegation, product)) != 1 or product.count("maintain-installed-database.sh") != 1:
         fail("installed database maintenance must have one managed-quiescence owner")
-    logical_product = re.sub(r'\\\n[ \t]*', ' ', product)
-    repair_envelope = (r'--max-bytes [1-9][0-9]*[ \t]+--max-line-bytes [1-9][0-9]*[ \t]+'
-                       r'--max-prior-bytes [1-9][0-9]*[ \t]+--max-current-readback-bytes [1-9][0-9]*[ \t]+'
-                       r'--timeout-seconds [1-9][0-9]*')
-    post_publish_repair = (r'LAPLACE_REPAIR_PUBLISHED_SOURCE="\$\(git rev-parse HEAD\)"[ \t]+'
-        r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}"[ \t]+'
-        + repair_envelope + r' --[ \t]+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)')
-    resume_repair = (r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --resume-if-needed[ \t]+'
-        + repair_envelope + r' --[ \t]+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)')
-    if len(re.findall(post_publish_repair, logical_product)) != 1 or product.count("repair-legacy-content-lifecycle.sh") != 2:
-        fail("post-publication corpus repair must retain quiescence, source evidence, and failure propagation")
-    resume_call = "  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;"
-    if len(re.findall(resume_repair, logical_product)) != 1 or product.splitlines().count(resume_call) != 1 \
-            or not 0 <= product.find("\nrun_policy\n") < product.find(resume_call) < product.find("\nrun_deps\n"):
-        fail("owned repair resume must run unsuppressed before native install or application publication")
-    if product.splitlines().count("run_repair_installed_corpus") != 1:
-        fail("post-publication corpus repair must have one unsuppressed lifecycle invocation")
-    published_tail = product.rsplit("\nrun_publish\n", 1)[-1]
-    if not published_tail.startswith("trap - EXIT\n") or "recover_publish" in published_tail or "ensure_api_running" in published_tail:
-        fail("publication recovery must end before repair owns service restoration")
-    if not maintenance_path.exists() or not repair_path.exists():
-        fail("installed database maintenance or measurement-lane wrapper is missing")
+    if not maintenance_path.exists():
+        fail("installed database maintenance wrapper is missing")
     else:
         maintenance = maintenance_path.read_text(encoding="utf-8")
-        repair = repair_path.read_text(encoding="utf-8")
         commands = (
             'bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env',
             'bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"',
@@ -305,9 +381,6 @@ else:
         positions = [lines.index(command) if lines.count(command) == 1 else -1 for command in commands]
         if "set -euo pipefail" not in lines or any(pos < 0 for pos in positions) or positions != sorted(positions):
             fail("installed database maintenance sequence must migrate, reconcile, and verify once")
-        measured = r'bash scripts/measure-lane\.sh --\s+\\\s+python3 scripts/repair-legacy-content\.py --database "\$database"'
-        if len(re.findall(measured, repair)) != 1 or "set -euo pipefail" not in repair:
-            fail("legacy content repair must execute inside the authoritative measurement lane")
     reconcile = product.split("reconcile_installed_product() {", 1)[1].split("\n}", 1)[0]
     if "ensure-foundation.sh" in reconcile or "ensure_product_foundation" in reconcile:
         fail("fast installed-product reconciliation may not auto-seed")
@@ -317,8 +390,11 @@ else:
 proof = (ROOT / "scripts" / "pr-proof.sh").read_text(encoding="utf-8")
 if proof.count("test-parallel.sh --policy") != 1:
     fail("full PR proof must execute policy profile exactly once")
-if proof.count("test-parallel.sh --engine") != 1:
-    fail("full PR proof must execute DEV/BAT profile exactly once")
+pr_expected = ["policy", "build", "private-db-start", "native-db", "operational-db",
+               "highway-recovery", "legacy-repair-db", "private-db-stop", "native-dev",
+               "managed-dev", "uci-dev", "browser-dev", "proof-complete"]
+if canonical_phases("pr", "all") != pr_expected or canonical_phases("pr", "check") != ["policy"]:
+    fail("PR proof must run its isolated database phases before the separate DEV/BAT suites")
 for forbidden in (
     "pipeline.sh install", "pipeline.sh migrate", "sync-extension",
     "publish-applications.sh deploy", "systemctl ", "sudo ", "--fresh-db",
@@ -330,6 +406,9 @@ pr = workflows.get("pr-validation.yml", {})
 prove = (pr.get("jobs") or {}).get("prove", {})
 pr_source = (WF / "pr-validation.yml").read_text(encoding="utf-8")
 pr_commands = runs(prove)
+pr_phases, _, _ = visible_phases(prove, "pr")
+if pr_phases != pr_expected:
+    fail("PR workflow must expose the complete canonical proof as individual ordered steps")
 if "pull_request" not in triggers(pr):
     fail("PR proof workflow has no pull_request trigger")
 if "head.repo.full_name == github.repository" not in str(prove.get("if", "")):
@@ -337,7 +416,7 @@ if "head.repo.full_name == github.repository" not in str(prove.get("if", "")):
 if "${{ secrets." in pr_source:
     fail("PR proof reads repository secrets")
 for token in (
-    "LAPLACE_PR_FULL_PROOF", "test-parallel.sh --policy", "scripts/pr-proof.sh",
+    "LAPLACE_PR_FULL_PROOF", "ci-session.py", "--kind pr",
     "git worktree add --detach", "LAPLACE_PR_WORKTREE", "git worktree remove --force",
 ):
     if token not in pr_commands:
@@ -400,7 +479,7 @@ registry_data = ROOT / "scripts" / "test-profiles.json"
 if not registry_tool.exists() or not registry_data.exists():
     fail("executable test-profile registry is missing")
 test_runner = (ROOT / "scripts" / "test-parallel.sh").read_text(encoding="utf-8")
-if "test-profile-registry.py run --profile" not in test_runner:
+if 'python3 scripts/test-profile-registry.py run --profile "$1" "${args[@]}"' not in test_runner:
     fail("test entry point bypasses registry executor")
 policy_alias = (ROOT / "scripts" / "ci-policy.sh").read_text(encoding="utf-8")
 if "test-profile-registry.py run --profile policy" not in policy_alias:
