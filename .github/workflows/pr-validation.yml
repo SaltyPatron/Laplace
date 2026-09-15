@@ -229,6 +229,9 @@ jobs:
           flock --exclusive --close /build/laplace/work/host-resource.lock \
             python3 scripts/read-operational-source.py "$PGDATABASE" \
               --core "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
+              --cue opposite --operand hot --operand empty --operand cold \
+              --relation IS_ANTONYM_OF --relation HAS_NAME --relation IS_EXAMPLE_OF \
+              --relation CALLS --relation HAS_INPUT --relation IS_LEMMA_OF --relation HAS_NAME_ALIAS \
               --receipt "$evidence/source-readback.json"
 
       - name: Retain operational source evidence

@@ -41,9 +41,9 @@ foreach ($line in $vcEnvironment) {
 $zstdSource = if ($env:LAPLACE_ZSTD_SOURCE) { $env:LAPLACE_ZSTD_SOURCE } else { Join-Path $external 'zstd' }
 $zstdBuild = if ($env:LAPLACE_ZSTD_BUILD) { $env:LAPLACE_ZSTD_BUILD } else { Join-Path $env:LAPLACE_BUILD_ROOT 'build-zstd' }
 Invoke-Checked python @((Join-Path $repo 'scripts\install-zstd.py'), '--source-dir', $zstdSource, '--build-dir', $zstdBuild)
-Invoke-Checked python @($helper, '--verify-source', $source)
+Invoke-Checked python @($helper, '--verify-source', $source, '--reset-build-cache', $build)
 $env:GIT_NO_REPLACE_OBJECTS = '1'
-Invoke-Checked cmake @('--fresh', '-S', $source, '-B', $build, '-G', 'Ninja',
+Invoke-Checked cmake @('-S', $source, '-B', $build, '-G', 'Ninja',
     '-DCMAKE_BUILD_TYPE=Release', '-DWITH_TESTS=OFF', '-DCMAKE_C_COMPILER=cl',
     '-DCMAKE_CXX_COMPILER=cl', "-DCMAKE_PREFIX_PATH=$qt")
 Invoke-Checked cmake @('--build', $build, '--clean-first', '--target', 'cli')
