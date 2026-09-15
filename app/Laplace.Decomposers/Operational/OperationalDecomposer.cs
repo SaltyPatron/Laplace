@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.UD;
 using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Operational;
@@ -17,11 +19,22 @@ public sealed class OperationalDecomposer
     protected override double SourceTrust => Abstractions.SourceTrust.SubstrateMandate;
     public override bool PerFileCompletion => true;
 
+    private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
+    private ConcurrentIdSet _seenSourceDeclarations = new();
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
+    protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
+
+    protected override Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct)
+    {
+        _seenSourceDeclarations = new ConcurrentIdSet();
+        return Task.CompletedTask;
+    }
+
     public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "seeds", "operational");
 
     private static string? ModalityFor(string file) => Path.GetExtension(file).ToLowerInvariant() switch
     {
-        ".md" or ".txt" => "markdown",
+        ".md" or ".txt" or ".conllu" => "markdown",
         ".json" => "json",
         _ => null,
     };
@@ -31,7 +44,7 @@ public sealed class OperationalDecomposer
         if (File.Exists(root))
         {
             if (ModalityFor(root) is null)
-                throw new InvalidDataException("Operational artifacts must be .md/.txt contracts or declared .json task shapes.");
+                throw new InvalidDataException("Operational artifacts must be .md/.txt contracts, authored .conllu annotations, or declared .json task shapes.");
             return [Path.GetFullPath(root)];
         }
         if (!Directory.Exists(root))
@@ -56,20 +69,42 @@ public sealed class OperationalDecomposer
     {
         string relative = fileLabel.StartsWith("operational/", StringComparison.Ordinal)
             ? fileLabel["operational/".Length..] : Path.GetFileName(filePath);
-        yield return await ReadContractAsync(filePath, relative, ct);
+        yield return await ReadContractAsync(filePath, relative, ct, _canonicalNames, _seenSourceDeclarations);
     }
 
     internal static async Task<GrammarComposeRecord> ReadContractAsync(
-        string filePath, string relativePath, CancellationToken ct = default)
+        string filePath, string relativePath, CancellationToken ct = default,
+        ConcurrentDictionary<string, byte>? canonicalNames = null,
+        ConcurrentIdSet? seenSourceDeclarations = null)
     {
         string modality = ModalityFor(filePath)
             ?? throw new InvalidDataException($"Unsupported operational source artifact: {filePath}");
         byte[] bytes = await File.ReadAllBytesAsync(filePath, ct);
         if (bytes.Length == 0)
             throw new InvalidDataException($"Operational source contract is empty: {filePath}");
+        IGrammarWitness? witness = modality == "json" ? OperationalTaskShapeWitness.Instance : null;
+        if (Path.GetExtension(filePath).Equals(".conllu", StringComparison.OrdinalIgnoreCase))
+        {
+            string languageCode = UdIngestSupport.ExtractLangCode(Path.GetFileName(filePath));
+            if (languageCode == "und")
+                throw new InvalidDataException("An authored CoNLL-U file must declare its language in the filename prefix.");
+            Hash128 languageId = LanguageReference.Resolve(languageCode);
+            var records = new List<UdIngestRecord>();
+            await using var input = new MemoryStream(bytes, writable: false);
+            await foreach (UdSentence sentence in UdConlluParser.ParseSentencesAsync(input, ct))
+            {
+                if (sentence.TextUtf8 is not { Length: > 0 })
+                    throw new InvalidDataException("An authored CoNLL-U exemplar must retain its exact # text surface.");
+                records.Add(new UdIngestRecord(sentence, languageId, languageCode));
+            }
+            if (records.Count == 0)
+                throw new InvalidDataException("An authored CoNLL-U artifact must contain a complete sentence annotation.");
+            witness = new OperationalConlluWitness(records, "operational/" + relativePath,
+                canonicalNames ?? new(StringComparer.Ordinal), seenSourceDeclarations ?? new());
+        }
         return new GrammarComposeRecord(bytes, modality,
             FileMetadata: GrammarSourceFileSupport.MetadataFromPath(filePath, relativePath, modality),
-            StructureWitness: modality == "json" ? OperationalTaskShapeWitness.Instance : null);
+            StructureWitness: witness);
     }
 
     public Task<IngestArtifactGraph?> DescribeArtifactsAsync(

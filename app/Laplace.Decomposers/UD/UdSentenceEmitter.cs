@@ -50,7 +50,9 @@ public sealed class UdSentenceEmitContext
         ConcurrentIdSet seenSourceDeclarations,
         ConcurrentDictionary<string, byte> canonicalNames,
         UdSentenceEmitContext ctx,
-        Hash128 sourceId)
+        Hash128 sourceId,
+        double witnessWeight = SourceTrust.AcademicCurated,
+        Hash128? sourceFileContext = null)
     {
         b.AddEntity(new EntityRow(langId, EntityTier.Word, LanguageTypeId, sourceId));
         VocabularyNames.TrackLanguage(canonicalNames, langCode);
@@ -59,14 +61,14 @@ public sealed class UdSentenceEmitContext
         string xposScope = XposIdentityScope(langCode, fileLabel);
         Hash128 parseId = UdParseStructure.Emit(
             b, s, langId, xposScope, fileLabel, seenEntBatch,
-            seenSourceDeclarations, canonicalNames, ctx, sourceId);
+            seenSourceDeclarations, canonicalNames, ctx, sourceId, witnessWeight, sourceFileContext);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             sentenceRoot ?? parseId,
             UDSource.HasLanguageTypeId,
             langId,
             sourceId,
-            null,
-            SourceTrust.AcademicCurated));
+            sourceFileContext,
+            witnessWeight));
     }
 
     internal static string XposIdentityScope(string langCode, string fileLabel)

@@ -10,9 +10,12 @@ public readonly struct OperationalSource : ISeedSource
     public static string SourceName => "OperationalDecomposer";
     public static Hash128 TrustClass { get; } = SubstrateCanonicalIds.TrustClass("SubstrateMandate");
     public static IReadOnlyList<string> Relations { get; } =
-        ["CONTAINS", "DEFINES", "CALLS", "REFERENCES", "HAS_INPUT", "IS_EXAMPLE_OF"];
+        ["CONTAINS", "DEFINES", "CALLS", "REFERENCES", "HAS_INPUT", "IS_EXAMPLE_OF",
+         "HAS_LANGUAGE", "IS_A", "HAS_PARSE"];
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["Document", "SourceFile", "CodeConcept", "Source_Reference"];
+        ["Document", "SourceFile", "CodeConcept", "Source_Reference",
+         "UD_Annotation_Marker", "UD_Annotation_Value", "UD_Feature", "UD_Parse",
+         "UD_Parse_Occurrence", "UD_Token_Ref", "UD_XPOS"];
     internal static readonly Hash128 CallsTypeId = RelationTypeRegistry.Resolve(Relations[2]).Id;
     internal static readonly Hash128 InputTypeId = RelationTypeRegistry.Resolve(Relations[4]).Id;
     internal static readonly Hash128 ExampleOfTypeId = RelationTypeRegistry.Resolve(Relations[5]).Id;

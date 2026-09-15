@@ -1,6 +1,8 @@
 using System.Reflection;
+using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Operational;
+using Laplace.Decomposers.UD;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -14,6 +16,7 @@ public sealed class OperationalDecomposerTests
     {
         if (!CodepointPerfcache.IsLoaded)
             CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
+        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
     [Fact]
@@ -28,7 +31,7 @@ public sealed class OperationalDecomposerTests
         Assert.NotNull(graph);
         Assert.Contains(graph.Selected, a => a.RelativePath == "docs/specs/37_Substrate_Operation_ISA.md");
         Assert.Contains(graph.Selected, a => a.RelativePath == "docs/INVENTION.md");
-        Assert.Equal(11, graph.Selected.Count);
+        Assert.Equal(12, graph.Selected.Count);
         foreach (var artifact in graph.Selected)
         {
             byte[] original = await File.ReadAllBytesAsync(Path.Combine(repo, artifact.RelativePath));
@@ -40,6 +43,55 @@ public sealed class OperationalDecomposerTests
             Assert.Null(record.ConceptAnchorKey);
             Assert.Null(record.ObservedPromptUtf8);
         }
+    }
+
+    [Fact]
+    public async Task AuthoredConllu_RetainsBytesAndWitnessesOperationalFileOccurrence()
+    {
+        const string relative = "seeds/operational/exemplars/en_define.conllu";
+        string path = Path.Combine(OperationalDecomposer.BundledPath, relative);
+        byte[] original = await File.ReadAllBytesAsync(path);
+        var record = await OperationalDecomposer.ReadContractAsync(path, relative);
+        Assert.Equal(original, record.Utf8);
+        var (file, change) = Compose(record);
+        try
+        {
+            Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;
+            AttestationRow claim = Assert.Single(change.Attestations.Where(a => a.TypeId == hasParse));
+            Assert.Equal(OperationalSource.SourceId, claim.SourceId);
+            Assert.NotEqual(UDSource.SourceId, claim.SourceId);
+            Assert.Equal(ContentTierSpine.ResolveRoot("define justice"), claim.SubjectId);
+            Assert.NotNull(claim.ContextId);
+            Assert.Contains(change.Attestations, a => a.SubjectId == file
+                && a.TypeId == RelationTypeRegistry.Resolve("CONTAINS").Id
+                && a.ObjectId == claim.ContextId && a.ContextId == file
+                && a.SourceId == OperationalSource.SourceId);
+            PhysicalityRow physicality = Assert.Single(change.Physicalities.Where(p =>
+                p.EntityId == claim.ObjectId && p.Type == PhysicalityType.ParseStructure));
+            Hash128[] flat = Trajectory.Constituents(physicality.TrajectoryXyzm!);
+            Assert.True(UdParseStructure.TryDecode(flat, out var parsed));
+            Assert.Equal(2, parsed!.Tokens.Count);
+            Assert.Equal(UdParseStructure.TokenRefId("2"), parsed.Tokens[1].RefId);
+            Assert.Equal(UdParseStructure.TokenRefId("1"), parsed.Tokens[1].HeadRefId);
+            Assert.Equal(RelationTypeRegistry.ResolveDeprel("obj").Id, parsed.Tokens[1].DeprelId);
+            Assert.Empty(parsed.Mwts);
+            Assert.DoesNotContain(change.Attestations, a => a.SourceId == UDSource.SourceId);
+        }
+        finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+    }
+
+    [Fact]
+    public async Task CoNlluMemoryAndFileReadersPreserveTheSameAnnotation()
+    {
+        string path = Path.Combine(OperationalDecomposer.BundledPath,
+            "seeds/operational/exemplars/en_define.conllu");
+        var fromFile = new List<UdSentence>();
+        await foreach (var sentence in UdConlluParser.ParseSentencesAsync(path)) fromFile.Add(sentence);
+        using var stream = new MemoryStream(await File.ReadAllBytesAsync(path), writable: false);
+        var fromMemory = new List<UdSentence>();
+        await foreach (var sentence in UdConlluParser.ParseSentencesAsync(stream)) fromMemory.Add(sentence);
+        Assert.Single(fromFile);
+        Assert.Equal(JsonSerializer.Serialize(fromFile), JsonSerializer.Serialize(fromMemory));
     }
 
     [Fact]

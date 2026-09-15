@@ -10,6 +10,7 @@ The selected inputs are declared as literal `Content` items in
 
 - `docs/INVENTION.md` and `docs/INVENTIONS.md`.
 - Binding specifications 05, 06, 08, 09, 11, 33, 34, 36, and 37.
+- The explicitly authored annotation `seeds/operational/exemplars/en_define.conllu`.
 
 After the Unicode and language foundation, admit the bundled source with:
 
@@ -23,7 +24,7 @@ zero, preserving per-file completion skips. An optional
 `LAPLACE_INGEST_RUN_RECEIPT_PATH` lets the journal publish the actual generated
 run UUID and source identity after its initial durable write; the verifier owns
 a new private receipt path for each invocation and never substitutes the latest
-source run. It derives all 11 expected artifact paths from the project's literal
+source run. It derives the complete expected artifact paths from the project's literal
 `Content` selection, verifies the bundled bytes against the authored files, and
 uses the existing native BLAKE3/Merkle file-resume recipe to read back the exact
 byte fingerprint and source-scoped layer-2 completion attestation for every file.
@@ -40,7 +41,7 @@ dotnet app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll ingest operational /p
 ```
 
 This lane assigns `SubstrateMandate` provenance to the selected operational
-contract source. It accepts Markdown and plain-text contract artifacts, plus
+contract source. It accepts Markdown and plain-text contract artifacts, authored CoNLL-U annotations, plus
 explicit JSON task-shape declarations described below. The
 source adapter supplies each artifact's unchanged bytes and file metadata to the
 existing whole-source native grammar composition pipeline. Markdown parsing also
@@ -62,6 +63,23 @@ Admitting the ISA document makes its authored content and structure available in
 the substrate. Executing the ISA still requires the runtime to consume grounded
 program structure through the canonical native operations. Document admission
 alone does not establish that execution behavior.
+
+## Authored linguistic exemplars
+
+An operational `.conllu` file is an explicit annotation authored for Laplace.
+It is witnessed by `OperationalSource` with `SubstrateMandate` trust, separately
+from observations attributed to the upstream Universal Dependencies source.
+The filename's language prefix declares its language, and each sentence must
+retain its exact `# text` surface. The existing CoNLL-U reader and native content
+and UD structure composer retain token identities, lemmas, roles, features,
+order and source occurrences. The original file bytes enter the same whole-file
+grammar admission, shared writer and per-file completion boundary as the other
+operational artifacts. The file identity participates in its annotation
+provenance. No separate source worker or database writer is introduced.
+
+The bundled `define justice` annotation supplies a syntactic exemplar. A parse
+alone does not declare an executable task. The separate task-shape contract
+must name its actual admitted parse identity, predicate and variable token slots.
 
 ## Declared relation-read task shapes
 

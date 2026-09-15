@@ -25,10 +25,10 @@ class OperationalSeedTests(unittest.TestCase):
         self.receipt = dict(run_id=str(uuid.uuid4()), source_name=SEED.SOURCE,
                             source_id="ab" * 16, layer=2)
         self.selected = {f"docs/contract-{i}.md": f"Contract {i}: 水 🧪\n".encode()
-                         for i in range(11)}
+                         for i in range(SEED.EXPECTED_ARTIFACTS)}
         self.report = dict(expected_source_id=self.receipt["source_id"],
                            run=dict(self.receipt, status="ok", evidence_persisted=True,
-                                    files_done=11, files_total=11, units_failed=0,
+                                    files_done=len(self.selected), files_total=len(self.selected), units_failed=0,
                                     ended_at="2026-09-15T12:00:00Z", error=None), files=[])
         for i, (path, content) in enumerate(self.selected.items()):
             fingerprint = f"{i + 1:032x}"
@@ -67,7 +67,7 @@ class OperationalSeedTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "source identity"):
             self.verify()
 
-    def test_missing_file_fails_even_when_run_totals_claim_eleven(self):
+    def test_missing_file_fails_even_when_run_totals_claim_complete_selection(self):
         self.report["files"].pop()
         with self.assertRaisesRegex(RuntimeError, "exact selected artifact set"):
             self.verify()

@@ -146,6 +146,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Retain authored operational exemplar proof
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: operational-exemplar-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.LAPLACE_PR_WORKTREE }}/build/test-results/operational-exemplar/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Remove isolated pull-request worktree
         if: always()
         run: |

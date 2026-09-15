@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.UD;
 
@@ -8,6 +9,15 @@ public static class UdConlluParser
     public static async IAsyncEnumerable<UdSentence> ParseSentencesAsync(
         string path, [EnumeratorCancellation] CancellationToken ct = default)
     {
+        await using var stream = IngestIo.OpenSequentialRead(path, useAsync: true);
+        await foreach (var sentence in ParseSentencesAsync(stream, ct))
+            yield return sentence;
+    }
+
+    /// <summary>Parse an already opened source artifact through the same CoNLL-U reader.</summary>
+    public static async IAsyncEnumerable<UdSentence> ParseSentencesAsync(
+        Stream stream, [EnumeratorCancellation] CancellationToken ct = default)
+    {
         var tokens = new List<UdToken>(48);
         var mwts = new List<UdMwt>(4);
         byte[]? textUtf8 = null;
@@ -15,7 +25,7 @@ public static class UdConlluParser
         long sentenceOrdinal = 0;
         int maxId = 0;
 
-        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(stream, ct))
         {
             ReadOnlySpan<byte> line = lineMem.Span;
             if (line.IsEmpty)
