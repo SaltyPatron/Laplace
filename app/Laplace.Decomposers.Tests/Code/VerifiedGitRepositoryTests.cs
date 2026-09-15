@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Laplace.Decomposers.Code;
 using Xunit;
 
@@ -25,7 +26,9 @@ public sealed class VerifiedGitRepositoryTests : IDisposable
         string receipt = Path.Combine(root, ".git", "laplace-stockfish-build.json");
         string commit = Git("rev-parse", "HEAD");
         File.WriteAllText(receipt, JsonSerializer.Serialize(new {
-            recipe = new { commit, arch = "fixture", cpu = "fixture", compiler = "fixture", compiler_version = "fixture" },
+            recipe = new { commit, arch = "fixture", cpu = "fixture", compiler = "fixture", compiler_version = "fixture",
+                source_integrity = "git-committed-bytes-and-modes-v1",
+                dependency_include = "regenerated-by-upstream-make-with-prior-file-preserved" },
             binary_sha256 = VerifiedGitRepository.HashFile(binary), private_secret = "must-not-be-public" }));
         selection = new("https://github.com/official-stockfish/Stockfish", commit, "fixture-license", binary, receipt, "cpp");
     }
@@ -42,9 +45,34 @@ public sealed class VerifiedGitRepositoryTests : IDisposable
         Assert.All(snapshot.Entries, e => Assert.Equal(64, e.Sha256.Length));
         Assert.DoesNotContain("must-not-be-public", Encoding.UTF8.GetString(snapshot.ProvenanceUtf8));
         Assert.DoesNotContain(root, Encoding.UTF8.GetString(snapshot.ProvenanceUtf8));
+        using var provenance = JsonDocument.Parse(snapshot.ProvenanceUtf8);
+        var recipe = provenance.RootElement.GetProperty("build").GetProperty("recipe");
+        Assert.Equal("git-committed-bytes-and-modes-v1", recipe.GetProperty("source_integrity").GetString());
+        Assert.Equal("regenerated-by-upstream-make-with-prior-file-preserved", recipe.GetProperty("dependency_include").GetString());
         Assert.DoesNotContain(snapshot.Entries, e => e.Path.EndsWith("stockfish", StringComparison.Ordinal));
         Assert.Equal(snapshot.ProvenanceUtf8, Capture().ProvenanceUtf8);
         Assert.False(File.Exists(Path.Combine(root, "MANIFEST.tsv")));
+    }
+
+    [Theory]
+    [InlineData("source_integrity", null)]
+    [InlineData("dependency_include", null)]
+    [InlineData("source_integrity", "status-only")]
+    [InlineData("dependency_include", "retained-unverified-include")]
+    public void LegacyOrUnverifiedBuildRecipeRequiresRealInstallerRebuild(string field, string? value)
+    {
+        var document = JsonNode.Parse(File.ReadAllText(selection.BuildReceiptPath))!.AsObject();
+        var recipe = document["recipe"]!.AsObject();
+        if (value is null) recipe.Remove(field);
+        else recipe[field] = value;
+        File.WriteAllText(selection.BuildReceiptPath, document.ToJsonString());
+        byte[] previousReceipt = File.ReadAllBytes(selection.BuildReceiptPath);
+        byte[] previousBinary = File.ReadAllBytes(selection.BinaryPath);
+        var error = Assert.Throws<InvalidDataException>(() => Capture());
+        Assert.Contains("scripts/install-stockfish.py", error.Message);
+        Assert.Contains("--rebuild", error.Message);
+        Assert.Equal(previousReceipt, File.ReadAllBytes(selection.BuildReceiptPath));
+        Assert.Equal(previousBinary, File.ReadAllBytes(selection.BinaryPath));
     }
 
     [Fact]

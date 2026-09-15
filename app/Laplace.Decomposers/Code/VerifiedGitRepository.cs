@@ -80,6 +80,14 @@ public sealed class VerifiedGitRepository
         var recipe = build.RootElement.GetProperty("recipe");
         if (recipe.GetProperty("commit").GetString() != selection.Commit)
             throw new InvalidDataException("Retained engine build belongs to another Git commit.");
+        if (!recipe.TryGetProperty("source_integrity", out var sourceIntegrity)
+            || sourceIntegrity.ValueKind != JsonValueKind.String
+            || sourceIntegrity.GetString() != "git-committed-bytes-and-modes-v1"
+            || !recipe.TryGetProperty("dependency_include", out var dependencyInclude)
+            || dependencyInclude.ValueKind != JsonValueKind.String
+            || dependencyInclude.GetString() != "regenerated-by-upstream-make-with-prior-file-preserved")
+            throw new InvalidDataException("Retained Stockfish build lacks the required source-byte/mode and dependency-include verification. "
+                + "Rebuild this checkout with scripts/install-stockfish.py --source-dir <checkout> --rebuild before corpus admission.");
         if (Path.GetFullPath(selection.BinaryPath) != Path.Combine(root, "src", OperatingSystem.IsWindows() ? "stockfish.exe" : "stockfish"))
             throw new InvalidDataException("Selected engine must be the direct executable of this source checkout.");
         string binaryHash = HashFile(selection.BinaryPath);
@@ -89,7 +97,8 @@ public sealed class VerifiedGitRepository
         var publicRecipe = JsonSerializer.SerializeToElement(new {
             commit = recipe.GetProperty("commit").GetString(), arch = recipe.GetProperty("arch").GetString(),
             cpu = recipe.GetProperty("cpu").GetString(), compiler = recipe.GetProperty("compiler").GetString(),
-            compiler_version = recipe.GetProperty("compiler_version").GetString() });
+            compiler_version = recipe.GetProperty("compiler_version").GetString(),
+            source_integrity = sourceIntegrity.GetString(), dependency_include = dependencyInclude.GetString() });
         var entries = new List<Entry>();
         foreach (string line in new UTF8Encoding(false, true).GetString(Git(root, "ls-tree", "-rz", "--full-tree", "HEAD")).Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
