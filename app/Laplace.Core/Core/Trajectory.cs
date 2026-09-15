@@ -53,6 +53,23 @@ public static unsafe class Trajectory
         return Trim(xyzm, checked((int)vertexCount));
     }
 
+    public static Hash128 ContentIdentity(ReadOnlySpan<double> xyzm, out int constituentCount)
+    {
+        if (xyzm.Length == 0 || xyzm.Length % 4 != 0)
+            throw new ArgumentException("content trajectory must contain one or more XYZM vertex groups", nameof(xyzm));
+        Hash128 id;
+        nuint count;
+        fixed (double* x = xyzm)
+        {
+            int rc = NativeInterop.TrajectoryContentIdentity(
+                x, (nuint)(xyzm.Length / 4), &id, &count);
+            if (rc != 0)
+                throw new InvalidOperationException($"trajectory_content_identity returned {rc}");
+        }
+        constituentCount = checked((int)count);
+        return id;
+    }
+
     public static Hash128[] Constituents(ReadOnlySpan<double> xyzm)
     {
         if (xyzm.Length % 4 != 0)
