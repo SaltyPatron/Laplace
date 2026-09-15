@@ -173,8 +173,7 @@ internal sealed class OpenSubtitlesAlignedHandler
             Hash128[] constituents, double[] coord, PhysicalityType type)
         {
             Hash128 physicalityId = PhysicalityId.Compute(entityId, type);
-            if (!builder.TrySeePhysicality(physicalityId)) return;
-            builder.AddPhysicalityPreSeen(new PhysicalityRow(
+            builder.AddPhysicality(new PhysicalityRow(
                 physicalityId, entityId, _source, type,
                 coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
                 Trajectory.Build(constituents), constituents.Length,

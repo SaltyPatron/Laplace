@@ -24,6 +24,11 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_merkle_dedup.cpp
     test_hash_composer.cpp
     test_physicality_id.cpp
+    test_physicality_descriptor.cpp
+    test_physicality_descriptor_provider.cpp
+    test_centroid_workspace.cpp
+    test_physicality_descriptor_transport.cpp
+    test_physicality_descriptor_admission.cpp
     test_grapheme_break.cpp
     test_word_break.cpp
     test_sentence_break.cpp
@@ -35,6 +40,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_xml_stream.cpp
     test_grammar_decomposer.cpp
     test_grammar_compose.cpp
+    test_grammar_physicality.cpp
     test_grammar_tags.cpp
     test_relation_law.cpp
 )

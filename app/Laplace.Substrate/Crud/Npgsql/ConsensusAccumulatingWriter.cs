@@ -356,7 +356,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 {
                     result = await ((NpgsqlSubstrateWriter)_inner).ApplyWorkingSetAtomicAsync(
                         forwarded,
-                        async (connection, transaction, admittedAttestations, token) =>
+                        async (connection, transaction, acceptance, token) =>
                         {
                             if (_bulkRun)
                             {
@@ -365,12 +365,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                                     System.Diagnostics.Stopwatch.GetTimestamp(),
                                     comparand: 0);
                             }
-                            var acceptedDelta = BuildDelta(changes, admittedAttestations);
+                            var acceptedDelta = BuildDelta(
+                                acceptance.OriginalReplay ? [] : changes,
+                                acceptance.AttestationIds, acceptance.GeneratedAttestations);
                             if (acceptedDelta is { Count: > 0 })
                                 atomicStats = await UpsertDeltaInTransactionAsync(
                                     acceptedDelta, connection, transaction, token).ConfigureAwait(false);
-                            if (appendConversation is not null)
+                            if (!acceptance.OriginalReplay && appendConversation is not null)
                                 await appendConversation(connection, transaction, token).ConfigureAwait(false);
+                            // A descriptor backfill is a new commit and must still
+                            // verify its captured source before accepting evidence.
                             if (precommitVerifier is not null)
                                 await precommitVerifier(token).ConfigureAwait(false);
                         },
@@ -427,7 +431,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     }
 
     private Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta>? BuildDelta(
-        IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null)
+        IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null,
+        IReadOnlyList<AttestationRow>? generatedAttestations = null)
     {
         // Flatten to the attestation arrays that actually carry testimony. The
         // merge below is over a contiguous index space across those arrays, so
@@ -465,6 +470,17 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (accepted.IsEmpty) continue;
             (blocks ??= new()).Add(accepted);
             total += accepted.Length;
+        }
+        if (generatedAttestations is { Count: > 0 })
+        {
+            var accepted = generatedAttestations
+                .Where(a => admittedAttestations is null || admittedAttestations.Contains(a.Id))
+                .ToImmutableArray();
+            if (!accepted.IsEmpty)
+            {
+                (blocks ??= new()).Add(accepted);
+                total += accepted.Length;
+            }
         }
         if (blocks is null || total == 0)
         {

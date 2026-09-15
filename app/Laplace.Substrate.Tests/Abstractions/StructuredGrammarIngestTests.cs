@@ -90,7 +90,7 @@ public sealed class StructuredGrammarIngestTests
             var witness = new NullGrammarWitness("tsv");
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
+                path, "tsv", Src, sourceTrust: 1.0, witness, batchSize: 4, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null, IngestSourceProfile.Default, maxInputUnits: 7))
             {
                 changes.Add(change);
@@ -122,7 +122,7 @@ public sealed class StructuredGrammarIngestTests
             var witness = new NullGrammarWitness("tsv");
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", Src, witness, batchSize: 2, witnessWeight: 1.0,
+                path, "tsv", Src, sourceTrust: 1.0, witness, batchSize: 2, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null, IngestSourceProfile.Default))
             {
                 changes.Add(change);
@@ -150,7 +150,7 @@ public sealed class StructuredGrammarIngestTests
             var witness = new NullGrammarWitness("tsv");
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", Src, witness, batchSize: 8, witnessWeight: 1.0,
+                path, "tsv", Src, sourceTrust: 1.0, witness, batchSize: 8, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null, IngestSourceProfile.Default,
                 acceptRow: line => !line.StartsWith("skip"u8)))
             {
@@ -177,7 +177,7 @@ public sealed class StructuredGrammarIngestTests
             var witness = new NullGrammarWitness("csv");
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                path, "csv", Src, witness, batchSize: 8, witnessWeight: 1.0,
+                path, "csv", Src, sourceTrust: 1.0, witness, batchSize: 8, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null, IngestSourceProfile.Default))
             {
                 changes.Add(change);
@@ -237,7 +237,7 @@ public sealed class StructuredGrammarIngestTests
 
             var baseline = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
+                path, "tsv", Src, sourceTrust: 1.0, witness, batchSize: 4, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null, IngestSourceProfile.Default))
                 baseline.Add(change);
             Assert.True(ContentEntityCount(baseline) > 0);
@@ -245,7 +245,7 @@ public sealed class StructuredGrammarIngestTests
             var present = new UniformReader(present: true);
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", Src, witness, batchSize: 4, witnessWeight: 1.0,
+                path, "tsv", Src, sourceTrust: 1.0, witness, batchSize: 4, witnessWeight: 1.0,
                 batchLabelPrefix: "test", reportUnits: null, IngestSourceProfile.Default,
                 containmentReader: present))
                 changes.Add(change);

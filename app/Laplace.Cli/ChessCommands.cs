@@ -213,7 +213,8 @@ internal static class ChessCommands
         if (reIngest)
         {
             var m = new ChessModality();
-            var b = new SubstrateChangeBuilder(ChessVocabulary.ReviewSourceId, "chess/review");
+            var b = new SubstrateChangeBuilder(ChessVocabulary.ReviewSourceId, "chess/review")
+                .DeclareSourcePrior(SourceTrust.UserPrompt);
             int n = ChessReviewIngest.IngestPath(b, m, path, depth);
             await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
             var inner = new NpgsqlSubstrateWriter(ds);

@@ -161,7 +161,7 @@ public sealed class IngestBatchPipelineTests
 
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileViaPipelineAsync(
-                path, "tsv", TestSource, witness, batchSize: 8, witnessWeight: 1.0,
+                path, "tsv", TestSource, sourceTrust: 1.0, witness, batchSize: 8, witnessWeight: 1.0,
                 batchLabelPrefix: "present-attest", reportUnits: null, containmentReader: reader))
                 changes.Add(change);
 
@@ -616,7 +616,7 @@ public sealed class IngestBatchPipelineTests
 
             var changes = new List<SubstrateChange>();
             await foreach (var change in StructuredGrammarIngest.IngestFileViaPipelineAsync(
-                path, "tsv", TestSource, witness, batchSize: 4, witnessWeight: 1.0,
+                path, "tsv", TestSource, sourceTrust: 1.0, witness, batchSize: 4, witnessWeight: 1.0,
                 batchLabelPrefix: "via-pipeline", reportUnits: null, containmentReader: reader))
                 changes.Add(change);
 
@@ -647,7 +647,7 @@ public sealed class IngestBatchPipelineTests
             var reader = new ProbeTrackingReader(present: false);
 
             await foreach (var _ in StructuredGrammarIngest.IngestFileAsync(
-                path, "tsv", TestSource, witness, batchSize: 64, witnessWeight: 1.0,
+                path, "tsv", TestSource, sourceTrust: 1.0, witness, batchSize: 64, witnessWeight: 1.0,
                 batchLabelPrefix: "grammar-probe", reportUnits: null, IngestSourceProfile.Default,
                 containmentReader: reader))
             { }

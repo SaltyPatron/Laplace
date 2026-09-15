@@ -73,6 +73,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                 records,
                 (utf8, b) => ContentTierSpine.TryStageIntoBuilder(b, utf8, SourceId, out _),
                 SourceId,
+                sourceTrust: 1.0,
                 "synthetic",
                 context.Reader,
                 options,

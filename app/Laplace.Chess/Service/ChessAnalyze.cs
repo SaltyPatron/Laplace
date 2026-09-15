@@ -38,6 +38,9 @@ public static class ChessAnalyze
         SubstrateChangeBuilder b, ChessWitnessedGame witnessed,
         ChessParsedReplay? replay, int engineDepth = 0)
     {
+        b.DeclareSourcePrior(SourceId, SourceTrust.StructuredCorpus)
+            .DeclareSourcePrior(ChessTacticOutcomes.SourceId, SourceTrust.StructuredCorpus)
+            .DeclareSourcePrior(ChessVocabulary.TrajectorySourceId, SourceTrust.StructuredCorpus);
         var (lineId, playingId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens, spentSeconds) = witnessed;
 
         var clocks = clockTokens is not null

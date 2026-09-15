@@ -229,9 +229,12 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     internal static void ComposeGame(ChessGameRecord record, SubstrateChangeBuilder b, bool analyzeInline)
     {
+        b.DeclareSourcePrior(ChessVocabulary.PgnSourceId, TC.StructuredCorpus);
         RecordGame(record, b);
         if (analyzeInline)
         {
+            b.DeclareSourcePrior(ChessTransitions.SourceId, TC.StructuredCorpus)
+                .DeclareSourcePrior(ChessPositionOutcomes.SourceId, TC.StructuredCorpus);
             var replay = MaterializeParsedReplay(record);
             ChessAnalyze.DeriveFromParsed(b, record, replay);
             ChessTransitions.DepositFromParsed(b, record);

@@ -1,0 +1,6 @@
+-- Native physicality admission: exact source forms and one snapshot provider.
+\set ECHO none
+NOTICE:  physicality admission: two raw forms, exact source mapping, admitted winner, batch/single identity and finite receipts
+NOTICE:  physicality admission: nine malformed-source, prior, absent-provider and finite-grant controls refused
+NOTICE:  physicality admission: actual current Content set resolves without an admitted fallback
+

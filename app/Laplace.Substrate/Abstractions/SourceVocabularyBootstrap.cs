@@ -158,7 +158,8 @@ public static class SourceVocabularyBootstrap
 
         var b = new SubstrateChangeBuilder(
             manifest.SourceId, $"bootstrap/license/{manifest.SourceName}", null,
-            entityCapacity: 16, physicalityCapacity: 0, attestationCapacity: 16);
+            entityCapacity: 16, physicalityCapacity: 0, attestationCapacity: 16)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate);
         bool any = false;
 
         void Attest(string relation, string? value)

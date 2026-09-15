@@ -250,6 +250,8 @@ SQL_QUERY("ingest.verified_artifact_run_status", "uuid,text",
     "SELECT status FROM laplace.ingest_run_journal WHERE run_id=$1 AND source_name=$2")
 SQL_QUERY("ingest.verified_artifact_journal", "uuid",
     "SELECT file_label,status,disposition,relative_path,file_id FROM laplace.ingest_file_journal WHERE run_id=$1")
+SQL_QUERY("ingest.flush_receipt_exists", "bytea",
+    "SELECT EXISTS(SELECT FROM laplace.ingest_flush_journal WHERE working_set_id=$1)")
 SQL_QUERY("ingest.verified_file_carrier", "bytea,bytea",
     "SELECT c.ordinal,c.entity_id,c.run_length,c.flags "
     "FROM public.laplace_trajectory_constituents((SELECT trajectory FROM laplace.physicalities "
@@ -259,6 +261,19 @@ SQL_QUERY("write.commit_settings", "",
     "SELECT current_setting('synchronous_commit'), current_setting('fsync')::boolean, "
     "current_setting('full_page_writes')::boolean")
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
+
+SQL_QUERY("ingest.physicality_descriptor_provider_metadata", "bytea[]",
+    "SELECT p.id,p.entity_id,p.type,p.coord,p.hilbert_index,p.trajectory,"
+    "p.n_constituents,p.alignment_residual,p.source_dim,p.observed_at "
+    "FROM laplace.physicalities p WHERE p.id=ANY($1)")
+SQL_QUERY("ingest.physicality_descriptor_provider_payload", "bytea[]",
+    "SELECT p.id,p.entity_id,p.type,public.ST_AsBinary(p.coord,'NDR'),p.hilbert_index,"
+    "public.ST_AsBinary(p.trajectory,'NDR'),p.n_constituents,p.alignment_residual,"
+    "p.source_dim,p.observed_at FROM laplace.physicalities p WHERE p.id=ANY($1)")
+SQL_QUERY("ingest.physicality_descriptor_materialize",
+    "bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],int8,int8,int4,int8",
+    "SELECT * FROM ops.physicality_descriptor_materialize("
+    "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
 
 SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
     "SELECT 1::int2 AS kind,e.id,0::int8 AS observation_count FROM laplace.entities e WHERE e.id=ANY($1) "

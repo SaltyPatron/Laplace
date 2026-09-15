@@ -268,6 +268,7 @@ public sealed class ModelJointCorroborationETL
                 source, $"model/joint-corroboration/{orchestration}",
                 entityCapacity: 0, physicalityCapacity: 0,
                 attestationCapacity: admitted.Count)
+            .DeclareSourcePrior(sourceTrust)
             .SetCommitEpoch(commitEpoch)
             .SetInputUnitsConsumed(proposals.Count);
         foreach (int i in admitted)

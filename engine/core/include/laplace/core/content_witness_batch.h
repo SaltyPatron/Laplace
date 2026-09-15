@@ -56,6 +56,22 @@ int laplace_content_source_root_id(
     size_t         len,
     hash128_t*     out_root_id);
 
+/* Observe the exact loaded atomic Content physicality. The expected E must
+ * match the floor's atom record. Copies coord/Hilbert, null trajectory, zero
+ * constituents and null optional fields; emits no entity or wrapper. Returns
+ * 0 on success, -1 for invalid arguments, -3 without a loaded floor, and -2 for
+ * an unknown/mismatched atom or stage failure. */
+int content_witness_emit_floor_atom(
+    intent_stage_t* stage, uint32_t atom, const hash128_t* expected_id,
+    int64_t observed_at_unix_us);
+
+/* Emit each computed compositional physicality observation, including forms
+ * whose E is already witnessed or covered by the supplied presence bitmap.
+ * Those filters still suppress duplicate entity creation. The previous novel
+ * placement winners precede remaining raw forms. A tier-0 natural root observes
+ * its exact existing atomic floor body; interior floor leaves and collapsed
+ * scaffolds produce no extra rows. No wrapper/self composition is created. The caller binds
+ * the actual appended physicality span to this source and source-unit receipt. */
 int content_witness_emit_tree(
     intent_stage_t*    stage,
     const tier_tree_t* tree,
@@ -85,12 +101,12 @@ int laplace_content_root_id(
     size_t         len,
     hash128_t*     out_root_id);
 
-/* Physicality identity is (entity_id, physicality_type) ONLY. The centroid coord
- * and trajectory are DERIVED, non-exact geometry (centroids collide, e.g.
- * cat/act) and MUST NOT enter the id -- hashing the float geometry forged
- * spurious duplicate physicalities (observed: 319 chess-move rows with identical
- * coords but float-divergent trajectories). Every compose path shares this one
- * definition; do not reimplement it. */
+/* Legacy placement lookup address: (entity_id, physicality_type). Preserve its
+ * exact layout for existing typed readers and rows. It is not an immutable
+ * identity for every body that may be observed at that address. An exact body
+ * can be represented as ordinary content by physicality_descriptor without
+ * changing this address or the realized entity's identity. Derived geometry
+ * never replaces the realized entity's canonical constituent identity. */
 void laplace_physicality_id_compute(
     hash128_t  entity_id,
     int16_t    physicality_type,

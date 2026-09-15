@@ -115,6 +115,56 @@ int trajectory_constituent_count(const double* trajectory_xyzm,
     return 0;
 }
 
+int trajectory_manifest_scan(const double* trajectory_xyzm, size_t n_points,
+    size_t* out_ordinary_count, int* out_typed_payload) {
+    size_t count = 0u;
+    int typed = 0;
+    if (out_ordinary_count == NULL || out_typed_payload == NULL ||
+        (n_points != 0u && trajectory_xyzm == NULL)) return -1;
+    for (size_t i = 0u; i < n_points; ++i) {
+        mantissa_payload_t payload;
+        double restored[4];
+        const double* vertex = trajectory_xyzm + i * 4u;
+        mantissa_unpack(vertex, &payload);
+        mantissa_pack(restored, &payload);
+        if (memcmp(restored, vertex, sizeof(restored)) != 0) return -1;
+        if ((payload.flags & LAPLACE_VFLAG_HAS_ATOM) == 0u &&
+            (payload.flags & (LAPLACE_VFLAG_TESTIMONY | LAPLACE_VFLAG_FACTOR)) != 0u) {
+            typed = 1;
+            if ((payload.flags & LAPLACE_VFLAG_TESTIMONY) == 0u) {
+                float values[6];
+                uint8_t width;
+                if (laplace_factor_unpack_vertex(vertex, values, &width) != 0) return -1;
+            }
+        } else {
+            const size_t run = payload.run_length == 0u ? 1u : payload.run_length;
+            if (run > SIZE_MAX - count) return -1;
+            count += run;
+        }
+    }
+    *out_typed_payload = typed;
+    *out_ordinary_count = typed ? 0u : count;
+    return 0;
+}
+
+int laplace_physicality_manifest_validate(const hash128_t* entity_id, int16_t type,
+    const double* trajectory_xyzm, size_t n_points, int32_t n_constituents) {
+    size_t count;
+    int typed;
+    if (entity_id == NULL || type <= 0 || n_constituents < 0 ||
+        (n_points != 0u && trajectory_xyzm == NULL)) return -1;
+    if (n_points == 0u) return n_constituents == 0 ? 0 : -3;
+    if (trajectory_manifest_scan(trajectory_xyzm, n_points, &count, &typed) != 0) return -3;
+    if (typed) return type == 1 ? -3 : 0;
+    if (count != (size_t)n_constituents) return -3;
+    if (type == 1) {
+        hash128_t manifest;
+        if (trajectory_content_identity(trajectory_xyzm, n_points, &manifest, &count) != 0) return -3;
+        if (!hash128_equals(entity_id, &manifest)) return -4;
+    }
+    return 0;
+}
+
 int trajectory_visit_vertices(const double* trajectory_xyzm, size_t n_points,
     trajectory_vertex_visitor_t visitor, void* context) {
     if (!visitor || (trajectory_xyzm == NULL && n_points > 0)) return -1;

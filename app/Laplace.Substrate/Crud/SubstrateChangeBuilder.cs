@@ -7,6 +7,9 @@ public sealed class SubstrateChangeBuilder
 {
     private readonly ImmutableArray<EntityRow>.Builder _entities;
     private readonly ImmutableArray<PhysicalityRow>.Builder _physicalities;
+    private readonly ImmutableArray<PhysicalityRow>.Builder _physicalityObservations;
+    private readonly ImmutableDictionary<Hash128, double>.Builder _sourcePriors =
+        ImmutableDictionary.CreateBuilder<Hash128, double>();
     private readonly ImmutableArray<AttestationRow>.Builder _attestations;
     private readonly Hash128 _sourceId;
     private readonly string _sourceContentUnitName;
@@ -46,6 +49,7 @@ public sealed class SubstrateChangeBuilder
         _parentIntentId = parentIntentId;
         _entities = ImmutableArray.CreateBuilder<EntityRow>(entityCapacity);
         _physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(physicalityCapacity);
+        _physicalityObservations = ImmutableArray.CreateBuilder<PhysicalityRow>(physicalityCapacity);
         _attestations = ImmutableArray.CreateBuilder<AttestationRow>(attestationCapacity);
     }
 
@@ -54,6 +58,19 @@ public sealed class SubstrateChangeBuilder
         _inputUnitsConsumed = n;
         return this;
     }
+
+    public SubstrateChangeBuilder DeclareSourcePrior(Hash128 sourceId, double sourceTrust)
+    {
+        SubstrateChange.ValidateSourcePrior(sourceTrust);
+        if (_sourcePriors.TryGetValue(sourceId, out double prior)
+            && BitConverter.DoubleToInt64Bits(prior) != BitConverter.DoubleToInt64Bits(sourceTrust))
+            throw new InvalidOperationException($"source {sourceId} has conflicting priors in one physicality observation unit");
+        _sourcePriors[sourceId] = sourceTrust;
+        return this;
+    }
+
+    public SubstrateChangeBuilder DeclareSourcePrior(double sourceTrust) =>
+        DeclareSourcePrior(_sourceId, sourceTrust);
 
     public SubstrateChangeBuilder SetCommitEpoch(int epoch)
     {
@@ -93,33 +110,10 @@ public sealed class SubstrateChangeBuilder
     public SubstrateChangeBuilder AddPhysicality(PhysicalityRow row)
     {
         ArgumentNullException.ThrowIfNull(row);
+        // The placement address does not identify an immutable body. Capture
+        // source forms before selecting the compatible first placement row.
+        _physicalityObservations.Add(row);
         if (_seenPhysicalities.Add(row.Id)) _physicalities.Add(row);
-        return this;
-    }
-
-    /// <summary>
-    /// Stage a physicality whose id the caller has ALREADY claimed through
-    /// <see cref="TrySeePhysicality"/>. Lets a hot path skip constructing the row at all when the
-    /// id is a repeat, instead of building it and discarding it here. Calling this without having
-    /// claimed the id first bypasses dedup and can stage a duplicate — pair the two, always:
-    /// <c>if (b.TrySeePhysicality(id)) b.AddPhysicalityPreSeen(new PhysicalityRow(id, ...));</c>
-    /// </summary>
-    public SubstrateChangeBuilder AddPhysicalityPreSeen(PhysicalityRow row)
-    {
-        ArgumentNullException.ThrowIfNull(row);
-        // The precondition is unenforceable at zero cost in release — the whole point of this
-        // overload is to skip the hash lookup AddPhysicality would do. But a mistaken call site
-        // stages a duplicate SILENTLY, and a duplicate physicality is exactly the class of bug
-        // that surfaces later as a COPY dying on 23505 with no pointer to who staged it
-        // (NpgsqlWorkingSetApply:468 records that failure mode costing a whole batch retry).
-        // So assert it in DEBUG, where tests run: _seenPhysicalities is authoritative and the
-        // check is exact.
-        System.Diagnostics.Debug.Assert(
-            _seenPhysicalities.Contains(row.Id),
-            "AddPhysicalityPreSeen called without a prior TrySeePhysicality(row.Id) claim — "
-            + "this bypasses dedup and stages a duplicate. Pair them: "
-            + "if (b.TrySeePhysicality(id)) b.AddPhysicalityPreSeen(new PhysicalityRow(id, ...));");
-        _physicalities.Add(row);
         return this;
     }
 
@@ -248,8 +242,7 @@ public sealed class SubstrateChangeBuilder
         AddEntity(id, tier, typeId, sourceId);
 
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Set);
-        if (TrySeePhysicality(physId))
-            AddPhysicalityPreSeen(new PhysicalityRow(
+        AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: id, SourceId: sourceId,
                 Type: PhysicalityType.Set,
                 CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
@@ -273,13 +266,24 @@ public sealed class SubstrateChangeBuilder
 
     public bool TrySeeEntity(Hash128 id) => _seenEntities.Add(id);
 
-    public bool TrySeePhysicality(Hash128 id) => _seenPhysicalities.Add(id);
+    /// <summary>Mark a placement already carried by a native source stage.
+    /// This cannot establish that another physicality body has been observed.</summary>
+    public void NoteStagedPhysicalityPlacement(Hash128 id) => _seenPhysicalities.Add(id);
 
     public SubstrateChangeBuilder AddIntentStage(IntentStage stage)
     {
         ArgumentNullException.ThrowIfNull(stage);
         _intentStages.Add(stage);
         return this;
+    }
+
+    /// <summary>Attach a stage whose complete native physicality row set has one
+    /// explicitly declared source. Mixed-source stages carry their own append ranges.</summary>
+    public SubstrateChangeBuilder AddIntentStage(IntentStage stage, Hash128 sourceId)
+    {
+        ArgumentNullException.ThrowIfNull(stage);
+        stage.RecordPhysicalitySourceRange(0, stage.PhysicalityCount, sourceId);
+        return AddIntentStage(stage);
     }
 
     private IntentStage? _contentStage;
@@ -346,9 +350,10 @@ public sealed class SubstrateChangeBuilder
             foreach (var s in _intentStages)
                 if (!s.IsInvalid) total += s.TotalTupleBytes;
             total += (long)_entities.Count * 72
-                   + (long)_physicalities.Count * 160
+                   + (long)_physicalityObservations.Count * 160
+                   + (long)_physicalities.Count * IntPtr.Size
                    + (long)_attestations.Count * 152;
-            foreach (var p in _physicalities)
+            foreach (var p in _physicalityObservations)
                 if (p.TrajectoryXyzm is { } t) total += (long)t.Length * 8;
             return total;
         }
@@ -469,7 +474,11 @@ public sealed class SubstrateChangeBuilder
             stages,
             walks,
             default,
-            ephemeralFolds);
+            ephemeralFolds)
+        {
+            PhysicalityObservations = _physicalityObservations.ToImmutable(),
+            PhysicalitySourcePriors = _sourcePriors.ToImmutable(),
+        };
     }
 
     private static Hash128 ComputeIntentId(

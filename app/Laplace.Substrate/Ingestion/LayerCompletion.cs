@@ -64,6 +64,7 @@ public static class LayerCompletion
         return new SubstrateChangeBuilder(
                 decomposer.SourceId, $"layer-complete/{decomposer.LayerOrder}", null,
                 entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate)
             .AddEntity(typeId, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, decomposer.SourceId)
             .AddAttestation(NativeAttestation.CategoricalResolved(
                 decomposer.SourceId,

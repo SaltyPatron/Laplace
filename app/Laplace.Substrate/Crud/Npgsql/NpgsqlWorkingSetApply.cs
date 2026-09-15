@@ -417,14 +417,16 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt,
         bool journalHit, PostgresCommitReceipt commit, CopyTransactionCounts copy)>
-        ApplyStagesCoreAsync(
+        ApplyPreparedStagesCoreAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, bool epochRoute,
+        PhysicalityAdmissionBatch? physicalityAdmission,
         IReadOnlyList<IntentStage> stages,
         Hash128? workingSetToken,
         Hash128? legacyWorkingSetToken,
         Hash128? legacySingletonToken,
         Hash128? workingSetSource,
         IReadOnlyList<Hash128> workingSetSources,
-        Func<NpgsqlConnection, NpgsqlTransaction, IReadOnlySet<Hash128>, CancellationToken, Task>? transactionParticipant,
+        Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct)
     {
@@ -533,8 +535,8 @@ public sealed partial class NpgsqlSubstrateWriter
             prepMs, blobMs, parseMs - blobMs, entDedupeMs, prepMs - parseMs - entDedupeMs,
             ents.Ids.Count, distinctStagedEntities, phys.Ids.Count, atts.Ids.Count);
 
-        // Entity sort+pack before advisory lock / verify — overlaps
-        // open+lock+invert. Contended pack-during-parse was a net loss.
+        // Entity sort+pack overlaps verification. The outer control transaction
+        // already holds the apply lock and the physicality provider observation.
         Task<(byte[][] Payloads, int Groups)>? optimisticEntCopy = null;
         long firstEntBytes = TotalEntityBytes(ents, firstEntIdx);
         int optimisticGroups = ResolveCopyGroups(firstEntIdx.Count, firstEntBytes);
@@ -552,24 +554,7 @@ public sealed partial class NpgsqlSubstrateWriter
             }, ct);
         }
 
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        // Resolved before the lock: a read-only catalog probe, cached for the
-        // writer's lifetime, so only the very first apply pays it.
-        bool epochRoute = await SupportsApplyWriteEpochAsync(conn, ct);
-        // Apply session semantics only (FK-trigger bypass, caller-selected commit
-        // acknowledgement, no JIT for COPY). Magnitude tuning — work_mem,
-        // maintenance_work_mem, parallel workers — is owned by tune-pg.cmd (derived from
-        // Cpu/MemoryTopology) and INHERITED here, never re-set with a hardcoded literal.
-        //
-        // Presence sets make novelty probes cheap, but they do not coordinate with a
-        // second process. The advisory transaction lock remains the cross-process
-        // apply mutex and supplies the bounded lock-timeout diagnostics.
-        string applyGucs = TransactionGucs(Durability);
-        NpgsqlTransaction tx = await AdvisoryTxLock.BeginWithLockAsync(
-            conn, "laplace_apply_batch", applyGucs, _log, ct);
         PostgresCommitReceipt commit;
-        await using (tx)
-        {
         try
         {
             rtLock++;
@@ -644,11 +629,26 @@ public sealed partial class NpgsqlSubstrateWriter
 
                 if (reconciliation is not null)
                 {
+                    var verifyEntities = physicalityAdmission is null ? entBlobs
+                        : CollectBlobs(physicalityAdmission.OriginalStages, IntentStageTable.Entities, 4, "entities");
+                    var verifyPhysicalities = physicalityAdmission is null ? physBlobs
+                        : CollectBlobs(physicalityAdmission.OriginalStages, IntentStageTable.Physicalities, 10, "physicalities");
+                    var verifyAttestations = physicalityAdmission is null ? attBlobs
+                        : CollectBlobs(physicalityAdmission.OriginalStages, IntentStageTable.Attestations, 14, "attestations");
                     var verified = await LegacyBootstrapVerifier.VerifyAsync(
-                        conn, tx, reconciliation, entBlobs, ents.Rows,
-                        physBlobs, phys.Rows, attBlobs, atts.Rows, ct).ConfigureAwait(false);
+                        conn, tx, reconciliation, verifyEntities,
+                        physicalityAdmission is null ? ents.Rows : CopyTupleParser.ParseEntities(verifyEntities).Rows,
+                        verifyPhysicalities,
+                        physicalityAdmission is null ? phys.Rows : CopyTupleParser.ParsePhysicalities(verifyPhysicalities).Rows,
+                        verifyAttestations,
+                        physicalityAdmission is null ? atts.Rows : CopyTupleParser.ParseAttestations(verifyAttestations).Rows,
+                        ct).ConfigureAwait(false);
                     rtJournal += verified.RoundTrips;
-                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled)
+                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled
+                        && physicalityAdmission is not null)
+                        physicalityAdmission.OriginalReplay = true;
+                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled
+                        && physicalityAdmission is null)
                     {
                         await InsertJournalReceiptAsync(
                             conn, tx, token, workingSetSource, workingSetSources,
@@ -1155,8 +1155,20 @@ public sealed partial class NpgsqlSubstrateWriter
             // journal claim, while a retry that sees the claim cannot refold.
             if (transactionParticipant is not null && workingSetToken is not null)
                 await transactionParticipant(conn, tx,
-                    novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(), ct);
+                    new WorkingSetAcceptedEvidence(
+                        novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(),
+                        physicalityAdmission?.GeneratedAttestations ?? [],
+                        physicalityAdmission?.OriginalReplay ?? false), ct);
 
+            // Keep the pre-descriptor semantic source receipt in this same commit.
+            // It prevents backfilling forms from repeating conversation/participant work.
+            if (physicalityAdmission is { OriginalReceiptPresent: false, OriginalToken: { } originalToken }
+                && originalToken != workingSetToken)
+            {
+                await InsertJournalReceiptAsync(conn, tx, originalToken, workingSetSource,
+                    workingSetSources, "applied", ct).ConfigureAwait(false);
+                rtJournal++;
+            }
             await tx.CommitAsync(ct);
             copyTransactions.CommitControl();
             commit = commit with { WriteCommitAcknowledged = workingSetToken is not null
@@ -1250,8 +1262,6 @@ public sealed partial class NpgsqlSubstrateWriter
             catch { }
             throw;
         }
-        }
-
         int rt = rtLock + rtJournal + rtEpoch + rtProbe + rtCopy + rtMerge;
         _log.LogInformation(
             "WS_APPLY round-trips: {Total} = {Lock} lock + {Journal} journal + {Epoch} epoch + {Probe} probe + {Copy} copy + {Merge} merge "

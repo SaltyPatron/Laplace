@@ -44,7 +44,8 @@ public sealed class TabularDecomposer
     protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/tabular-vocab", null,
-            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 2);
+            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 2)
+            .DeclareSourcePrior(SourceTrust);
         seed.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
         _canonicalNames.Add($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
         if (ContentEmitter.Emit(seed, _targetColumn, Source) is { } targetNameId)

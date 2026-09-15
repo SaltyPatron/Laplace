@@ -217,7 +217,8 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
         var builder = new SubstrateChangeBuilder(
             scope.Source,
             $"user-content/{scope.Tenant}/{metadata.RelativePath}",
-            parentIntentId: null);
+            parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.UserPrompt * scope.TenantTrust);
 
         using var ast = GrammarDecomposer.Parse(utf8, modality);
         using var composer = new GrammarRowComposer(

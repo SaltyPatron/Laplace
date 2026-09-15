@@ -276,6 +276,7 @@ functions/ops/source_tier_census.sql.in
 functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
+functions/ingest/physicality_descriptor_materialize.sql.in
 functions/generation/drop_retired_content_lane.sql.in
 functions/generation/relation_plane.sql.in
 functions/generation/entity_relation_plane.sql.in

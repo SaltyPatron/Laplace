@@ -8,14 +8,10 @@
 
 namespace {
 
-// Regression guard for the forged-duplicate-physicality bug: composing the same
-// content once forged 319 chess-move physicality rows with identical coords but
-// float-divergent trajectories, because a compose path hashed the centroid coord
-// and trajectory INTO the physicality id. Identity is (entity_id,
-// physicality_type) ONLY -- geometry is payload and MUST NOT enter the id. The
-// fix gave the one shared laplace_physicality_id_compute no geometry parameter;
-// these tests pin that contract so a future edit that re-introduces geometry into
-// the id fails here, loudly, instead of silently minting duplicates on re-ingest.
+// Compatibility guard for the existing typed placement lookup key. Immutable
+// exact body descriptors are ordinary entities and may have distinct IDs while
+// the realized E and this lookup key remain unchanged. These tests pin the
+// existing byte layout; they do not assert that E+type identifies every form.
 
 TEST(LaplacePhysicalityId, IsHashOfEntityIdAndTypeOnly) {
     hash128_t entity = { 0x0123456789abcdefULL, 0xfedcba9876543210ULL };

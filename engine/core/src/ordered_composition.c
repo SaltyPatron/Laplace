@@ -3,8 +3,10 @@
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/codepoint_table.h"
 #include "laplace/core/hash_composer.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/trajectory.h"
@@ -96,6 +98,8 @@ static int compose_batch_validated(
         const laplace_ordered_composition_request_t* r = &requests[i];
         const size_t n = r->component_count;
         laplace_ordered_composition_result_t* result = &out_results[i];
+        result->first_physicality_row = 0u;
+        result->emitted_physicality_rows = 0u;
 
         if (n == 1) {
             result->id = r->components[0].id;
@@ -164,6 +168,20 @@ int laplace_ordered_composition_stage_batch(
         || max_components > SIZE_MAX / sizeof(uint64_t)
         || max_components > SIZE_MAX / (4 * sizeof(double))) return rc ? rc : -3;
 
+    /* A singleton floor observation must name the actual loaded atom. Validate
+     * the entire batch before emitting any row. Other singleton operands carry
+     * no full child body, so their identity alone does not select a form. */
+    for (size_t i = 0; i < request_count; ++i) {
+        const laplace_ordered_composition_request_t* r = &requests[i];
+        if (r->component_count != 1 || r->components[0].tier != 0) continue;
+        hash128_t id;
+        double coord[4];
+        hilbert128_t hilbert;
+        if (codepoint_table_resolve_atom(r->components[0].atom, &id, coord, &hilbert) != 0
+            || !hash128_equals(&id, &r->components[0].id)
+            || memcmp(coord, r->components[0].coord, sizeof(coord)) != 0) return -1;
+    }
+
     compose_scratch_t scratch = {
         .ids = (hash128_t*)malloc(max_components * sizeof(*scratch.ids)),
         .coords = (double*)malloc(max_components * 4 * sizeof(*scratch.coords)),
@@ -182,53 +200,76 @@ int laplace_ordered_composition_stage_batch(
     rc = minimum_floor_representatives(out_results, request_count, &representatives);
     if (rc != 0) goto done;
 
-    for (size_t i = 0; i < request_count; ++i) {
-        const laplace_ordered_composition_request_t* r = &requests[i];
-        const size_t n = r->component_count;
-        const laplace_ordered_composition_result_t* result = &out_results[i];
-        if (n == 1 || representatives[i] != i) continue;
+    for (size_t i = 0; i < request_count; ++i)
+        out_results[i].first_physicality_row = intent_stage_physicality_count(stage);
 
-        if (intent_stage_witness_seen(stage, &result->id)) {
-            if (intent_stage_lower_entity_tier(stage, &result->id, (int16_t)result->tier) < 0) {
+    /* Preserve the previous first-placement winners before adding the raw
+     * candidates which entity/witness dedup used to discard. Both passes use
+     * the same native trajectory and serializer owners. */
+    for (int pass = 0; pass < 2; ++pass) {
+        for (size_t i = 0; i < request_count; ++i) {
+            const laplace_ordered_composition_request_t* r = &requests[i];
+            const size_t n = r->component_count;
+            laplace_ordered_composition_result_t* result = &out_results[i];
+            if (n == 1) {
+                if (pass == 0 && r->components[0].tier == 0) {
+                    result->first_physicality_row = intent_stage_physicality_count(stage);
+                    if (content_witness_emit_floor_atom(stage, r->components[0].atom,
+                            &result->id, r->observed_at_unix_us) != 0) { rc = -3; break; }
+                    result->emitted_physicality_rows =
+                        intent_stage_physicality_count(stage) - result->first_physicality_row;
+                }
+                continue;
+            }
+            if ((pass == 0 && representatives[i] != i) ||
+                (pass == 1 && result->emitted_physicality_rows != 0u)) continue;
+
+            if (pass == 0 && intent_stage_witness_seen(stage, &result->id)) {
+                if (intent_stage_lower_entity_tier(stage, &result->id, (int16_t)result->tier) < 0) {
+                    rc = -3;
+                    break;
+                }
+                continue;
+            }
+            for (size_t j = 0; j < n; ++j) {
+                const laplace_ordered_component_t* child = &r->components[j];
+                scratch.ids[j] = child->id;
+                child_flags[j] = laplace_vertex_flags(
+                    child->tier, child->has_atom != 0, child->atom);
+            }
+            size_t trajectory_vertices = 0;
+            if (trajectory_build_flagged_rle(
+                    scratch.ids, child_flags, n, trajectory, &trajectory_vertices) != 0
+                || trajectory_vertices > UINT32_MAX) {
                 rc = -3;
                 break;
             }
-            continue;
-        }
-        for (size_t j = 0; j < n; ++j) {
-            const laplace_ordered_component_t* child = &r->components[j];
-            scratch.ids[j] = child->id;
-            child_flags[j] = laplace_vertex_flags(
-                child->tier, child->has_atom != 0, child->atom);
-        }
-        size_t trajectory_vertices = 0;
-        if (trajectory_build_flagged_rle(
-                scratch.ids, child_flags, n, trajectory, &trajectory_vertices) != 0
-            || trajectory_vertices > UINT32_MAX) {
-            rc = -3;
-            break;
-        }
 
-        if (intent_stage_add_entity(
-                stage, &result->id, (int16_t)result->tier,
-                &r->type_id, &r->source_id) != 0) {
-            rc = -3;
-            break;
+            if (pass == 0 && intent_stage_add_entity(
+                    stage, &result->id, (int16_t)result->tier,
+                    &r->type_id, &r->source_id) != 0) {
+                rc = -3;
+                break;
+            }
+            hash128_t physicality_id;
+            laplace_physicality_id_compute(result->id, 1, &physicality_id);
+            result->first_physicality_row = intent_stage_physicality_count(stage);
+            if (intent_stage_add_physicality(
+                    stage, &physicality_id, &result->id, 1,
+                    result->coord, &result->hilbert,
+                    trajectory, (uint32_t)trajectory_vertices, (int32_t)n,
+                    1, 0.0, 1, 0, r->observed_at_unix_us) != 0) {
+                rc = -3;
+                break;
+            }
+            result->emitted_physicality_rows = intent_stage_physicality_count(stage) - result->first_physicality_row;
+            if (pass == 0 && (intent_stage_witness_record(stage, &result->id) != 0
+                || intent_stage_allocation_failed(stage))) {
+                rc = -3;
+                break;
+            }
         }
-        hash128_t physicality_id;
-        laplace_physicality_id_compute(result->id, 1, &physicality_id);
-        if (intent_stage_add_physicality(
-                stage, &physicality_id, &result->id, 1,
-                result->coord, &result->hilbert,
-                trajectory, (uint32_t)trajectory_vertices, (int32_t)n,
-                1, 0.0, 1, 0, r->observed_at_unix_us) != 0) {
-            rc = -3;
-            break;
-        }
-        if (intent_stage_witness_record(stage, &result->id) != 0) {
-            rc = -3;
-            break;
-        }
+        if (rc != 0) break;
     }
 
 done:

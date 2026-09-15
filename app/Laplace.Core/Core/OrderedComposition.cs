@@ -108,6 +108,18 @@ public static unsafe class OrderedComposition
             if (rc != 0)
                 throw new InvalidOperationException($"laplace_ordered_composition batch returned {rc}");
         }
+        if (stage is not null)
+        {
+            var ranges = new PhysicalitySourceRange[requests.Count];
+            for (int i = 0; i < requests.Count; i++)
+                ranges[i] = new PhysicalitySourceRange(
+                    checked((int)nativeResults[i].FirstPhysicalityRow),
+                    checked((int)nativeResults[i].EmittedPhysicalityRows), requests[i].SourceId);
+            // The native owner preserves legacy selected-row order, then appends
+            // additional raw forms. Requests therefore need not arrive in row order.
+            Array.Sort(ranges, static (left, right) => left.FirstRow.CompareTo(right.FirstRow));
+            stage.RecordPhysicalitySourceRanges(ranges);
+        }
         for (int i = 0; i < requests.Count; i++)
             results[i] = new OrderedCompositionResult(
                 nativeResults[i].Id, nativeResults[i].Tier,

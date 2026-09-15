@@ -178,7 +178,6 @@ public static class ChessVocabulary
         Hash128? expectedNameRoot = null)
     {
         Hash128 physId = PhysicalityId.Compute(playerId, PhysicalityType.Projection);
-        if (!b.TrySeePhysicality(physId)) return;
 
         byte[] utf8 = Encoding.UTF8.GetBytes(name);
         if (!TextEntityBuilder.TryDecomposeRoot(
@@ -188,7 +187,7 @@ public static class ChessVocabulary
                 $"player name '{name}' did not reproduce its deposited content root");
 
         double[] coord = [x, y, z, m];
-        b.AddPhysicalityPreSeen(new PhysicalityRow(
+        b.AddPhysicality(new PhysicalityRow(
             Id: physId,
             EntityId: playerId,
             SourceId: sourceId,

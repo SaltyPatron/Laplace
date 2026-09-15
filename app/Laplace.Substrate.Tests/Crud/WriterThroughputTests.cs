@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
@@ -112,6 +113,9 @@ public sealed class WriterThroughputTests
     internal static SubstrateChange NativeOnly(
         IntentStage stage, Hash128 src, string unitName, long inputUnits = 0)
     {
+        // This fixture explicitly owns every staged physicality; entity-only and
+        // attestation-only stages have an empty source range.
+        stage.RecordPhysicalitySourceSince(0, src);
         return new SubstrateChange(
             ImmutableArray<EntityRow>.Empty,
             ImmutableArray<PhysicalityRow>.Empty,
@@ -123,7 +127,7 @@ public sealed class WriterThroughputTests
                 DateTimeOffset.UtcNow,
                 null,
                 InputUnitsConsumed: inputUnits),
-            IntentStages: [stage]);
+            IntentStages: [stage]).WithSourcePrior(src, SourceTrust.StructuredCorpus);
     }
 
     [Fact]
@@ -172,28 +176,46 @@ public sealed class WriterThroughputTests
         var writer = Writer(_pg.DataSource);
 
         const int totalRows = 500_000;
-        int entBase = 60_000_000;
-
+        CodepointPerfcache.LoadDefault();
+        var entityIds = new Hash128[totalRows];
         var entStage = IntentStage.New(totalRows);
-        for (int i = 0; i < totalRows; i++)
-            entStage.AddEntity(Id(entBase + i), 2, ThroughputTypeId, null);
-
-        // Mantissa-pack each entity id into a 4-double vertex, then hilbert-encode.
-        // Identical raw coords (old fixture) collapsed every row onto one RANGE band /
-        // GiST leaf — the opposite of the bit-pack locality channel. Indexes stay up.
         var physStage = IntentStage.New(totalRows);
-        Span<Hash128> one = stackalloc Hash128[1];
-        for (int i = 0; i < totalRows; i++)
+        // Real three-atom ordered compositions from the installed Unicode floor.
+        // 95^3 distinct printable-ASCII sequences cover this fixture. Construction
+        // is outside the timer; normal writer descriptor admission stays inside it.
+        const int width = 4096;
+        for (int start = 0; start < totalRows; start += width)
         {
-            var entId = Id(entBase + i);
-            one[0] = entId;
-            double[] vertex = Trajectory.Build(one);
-            var hilbert = Hilbert128.Encode(vertex);
-            physStage.AddPhysicality(
-                Id(70_000_000 + i), entId, (short)PhysicalityType.Content,
-                vertex, hilbert,
-                ReadOnlySpan<double>.Empty, 1, 0.0, 4, IntentStage.PgEpochUnixUs);
+            int count = Math.Min(width, totalRows - start);
+            var requests = new OrderedCompositionRequest[count];
+            for (int offset = 0; offset < count; offset++)
+            {
+                int ordinal = start + offset;
+                int[] codepoints = [32 + ordinal / (95 * 95), 32 + ordinal / 95 % 95, 32 + ordinal % 95];
+                var children = codepoints.Select(codepoint =>
+                {
+                    var atom = CodepointPerfcache.Records[codepoint];
+                    return new OrderedCompositionComponent(atom.Hash, 0,
+                        atom.CoordX, atom.CoordY, atom.CoordZ, atom.CoordM, checked((uint)codepoint), true);
+                }).ToArray();
+                requests[offset] = new OrderedCompositionRequest(children, ThroughputTypeId,
+                    ThroughputSrc, IntentStage.PgEpochUnixUs);
+            }
+            var results = OrderedComposition.ComposeBatch(requests);
+            Assert.Equal(count, results.Length);
+            for (int offset = 0; offset < count; offset++)
+            {
+                var body = results[offset];
+                entityIds[start + offset] = body.Id;
+                entStage.AddEntity(body.Id, body.Tier, ThroughputTypeId, ThroughputSrc);
+                physStage.AddPhysicality(PhysicalityId.Compute(body.Id, PhysicalityType.Content),
+                    body.Id, (short)PhysicalityType.Content,
+                    new double[] { body.CoordX, body.CoordY, body.CoordZ, body.CoordM }, body.Hilbert,
+                    Trajectory.Build(requests[offset].Components.Select(c => c.Id).ToArray()),
+                    3, null, null, IntentStage.PgEpochUnixUs);
+            }
         }
+        Assert.Equal(totalRows, entityIds.Distinct().Count());
 
         await writer.BeginBulkRunAsync();
         await writer.ApplyAsync(NativeOnly(entStage, ThroughputSrc, "tp-phys-seed"));
@@ -202,12 +224,16 @@ public sealed class WriterThroughputTests
         sw.Stop();
         await writer.CompleteBulkRunAsync();
 
-        Assert.Equal(totalRows, result.PhysicalitiesInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 0, totalRows, 0, totalRows);
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            entityIds, entityIds.Select(id => PhysicalityId.Compute(id, PhysicalityType.Content)), []);
         Assert.InRange(result.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
-        double rowsPerSec = result.PhysicalitiesInserted / sw.Elapsed.TotalSeconds;
+        // Count source physicalities, not the larger generated graph, in this rate.
+        double rowsPerSec = totalRows / sw.Elapsed.TotalSeconds;
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
-            $"Physicality apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
-            + $"({result.PhysicalitiesInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
+            $"Physicality admission {rowsPerSec:F0} source forms/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
+            + $"({totalRows:N0} source forms; {result.PhysicalitiesInserted:N0} total P rows inserted "
+            + $"in {sw.Elapsed.TotalSeconds:F2}s, logical_round_trips={result.RoundTrips})");
     }
 
     [Fact]

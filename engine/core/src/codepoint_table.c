@@ -111,6 +111,13 @@ int codepoint_table_is_loaded(void) {
     return g_pc.records != NULL;
 }
 
+int codepoint_table_copy_receipt(hash128_t* out_receipt) {
+    if (out_receipt == NULL || g_pc.records == NULL) return -1;
+    memcpy(out_receipt, g_pc.base + g_pc.length - LAPLACE_PERFCACHE_TRAILER_BYTES,
+        sizeof(*out_receipt));
+    return 0;
+}
+
 static int pc_version_matches(const char actual[8], const char* expected) {
     const size_t expected_len = strlen(expected);
     if (expected_len >= 8) return 0;
@@ -246,26 +253,52 @@ int codepoint_table_resolve_atom(uint32_t atom, hash128_t* out_id,
     return 0;
 }
 
-static int rev_cmp(const void* pa, const void* pb) {
-    uint32_t a = *(const uint32_t*)pa;
-    uint32_t b = *(const uint32_t*)pb;
+static int rev_cmp(uint32_t a, uint32_t b) {
     return memcmp(&g_pc.records[a].hash, &g_pc.records[b].hash, sizeof(hash128_t));
 }
 
-static void rev_index_ensure(void) {
-    if (g_pc.rev_idx || !g_pc.records || g_pc.record_count == 0) return;
-    uint32_t* idx = (uint32_t*)malloc(sizeof(uint32_t) * g_pc.record_count);
-    if (!idx) return;
+static void rev_sift(uint32_t* idx, size_t count, size_t root) {
+    while (root < count / 2u) {
+        size_t child = root * 2u + 1u;
+        if (child + 1u < count && rev_cmp(idx[child], idx[child + 1u]) < 0) ++child;
+        if (rev_cmp(idx[root], idx[child]) >= 0) return;
+        const uint32_t temporary = idx[root]; idx[root] = idx[child]; idx[child] = temporary;
+        root = child;
+    }
+}
+
+int codepoint_table_prepare_id_index(size_t maximum_additional_bytes, size_t* out_added_bytes) {
+    if (out_added_bytes != NULL) *out_added_bytes = 0u;
+    if (g_pc.rev_idx) return 0;
+    if (!g_pc.records || g_pc.record_count == 0) return -1;
+    if (g_pc.record_count > UINT32_MAX || g_pc.record_count > SIZE_MAX / sizeof(uint32_t)) return -2;
+    const size_t bytes = (size_t)g_pc.record_count * sizeof(uint32_t);
+    if (bytes > maximum_additional_bytes) return -2;
+    uint32_t* idx = (uint32_t*)malloc(bytes);
+    if (!idx) return -2;
     for (uint64_t i = 0; i < g_pc.record_count; ++i)
         idx[i] = (uint32_t)i;
-    qsort(idx, g_pc.record_count, sizeof(uint32_t), rev_cmp);
+    const size_t count = (size_t)g_pc.record_count;
+    for (size_t i = count / 2u; i != 0u; --i) rev_sift(idx, count, i - 1u);
+    for (size_t end = count; end > 1u; --end) {
+        const uint32_t temporary = idx[0]; idx[0] = idx[end - 1u]; idx[end - 1u] = temporary;
+        rev_sift(idx, end - 1u, 0u);
+    }
     g_pc.rev_idx = idx;
     g_pc.rev_count = g_pc.record_count;
+    if (out_added_bytes != NULL) *out_added_bytes = bytes;
+    return 0;
+}
+
+int codepoint_table_id_index_ready(void) { return g_pc.rev_idx != NULL; }
+
+size_t codepoint_table_id_index_bytes(void) {
+    return g_pc.rev_idx == NULL ? 0u : (size_t)g_pc.rev_count * sizeof(uint32_t);
 }
 
 int codepoint_table_lookup_id(const hash128_t* id, uint32_t* out_cp) {
     if (!id || !g_pc.records) return -1;
-    rev_index_ensure();
+    (void)codepoint_table_prepare_id_index(SIZE_MAX, NULL);
     if (!g_pc.rev_idx) return -1;
 
     uint64_t lo = 0, hi = g_pc.rev_count;

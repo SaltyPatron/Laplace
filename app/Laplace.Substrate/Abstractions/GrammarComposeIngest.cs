@@ -328,7 +328,7 @@ public static class GrammarComposeIngestSupport
         var config = IngestPipelineDefaults.ApplyMaxInputUnits(
             IngestPipelineDefaults.GrammarCompose(sourceId, batchLabelPrefix, options, reader),
             options);
-        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct).WithSourcePrior(sourceId, trust, ct);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> Empty()

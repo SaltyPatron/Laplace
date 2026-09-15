@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 using System.Collections.Immutable;
 using System.Text;
 using global::Npgsql;
@@ -144,6 +145,7 @@ public class NpgsqlSubstrateWriterTests
         var subjId = H(4001);
         var physicalityId = PhysicalityId.Compute(subjId, PhysicalityType.Content);
         var change = new SubstrateChangeBuilder(src, "full-unit")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddEntity(subjId, 0, typeId)
             .AddPhysicality(new PhysicalityRow(
                 Id: physicalityId, EntityId: subjId, SourceId: src,
@@ -166,9 +168,9 @@ public class NpgsqlSubstrateWriterTests
             .Build();
 
         var result = await writer.ApplyAsync(change);
-        Assert.Equal(1, result.EntitiesInserted);
-        Assert.Equal(1, result.PhysicalitiesInserted);
-        Assert.Equal(1, result.AttestationsInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 1, 1, 1);
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            [subjId], [physicalityId], [H(4003)]);
 
         await using var pCmd = _pg.DataSource.CreateCommand(
             "SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord) FROM laplace.physicalities WHERE id = $1");
@@ -199,13 +201,14 @@ public class NpgsqlSubstrateWriterTests
             ObservedAtUnixUs: IntentStage.PgEpochUnixUs);
 
         var change = new SubstrateChangeBuilder(src, "phys-identity-unit")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddEntity(entId, 0, typeId)
             .AddPhysicality(Phys(PhysicalityType.Content, 0.10))
             .AddPhysicality(Phys(PhysicalityType.Projection, 0.99))
             .Build();
 
         var result = await writer.ApplyAsync(change);
-        Assert.Equal(2, result.PhysicalitiesInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 2, 0, 2);
 
         await using var cnt = _pg.DataSource.CreateCommand(
             "SELECT count(*) FROM laplace.physicalities WHERE entity_id = $1");
@@ -213,21 +216,38 @@ public class NpgsqlSubstrateWriterTests
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
         var reapplySame = new SubstrateChangeBuilder(src, "phys-identity-reapply-same")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddPhysicality(Phys(PhysicalityType.Content, 0.10))
             .AddPhysicality(Phys(PhysicalityType.Projection, 0.99))
             .Build();
         var same = await writer.ApplyAsync(reapplySame);
-        Assert.Equal(0, same.PhysicalitiesInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(same, 0, 2, 0, 2);
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-        // Same entity + same physicality type is the same identity. A changed
-        // coordinate cannot manufacture a second physicality row under a new id.
+        // The legacy E/type placement still has one selected row. The new
+        // descriptor/evidence graph separately preserves the alternate raw body.
         var changedSameIdentity = new SubstrateChangeBuilder(src, "phys-identity-changed")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddPhysicality(Phys(PhysicalityType.Content, 0.55))
             .Build();
         var changed = await writer.ApplyAsync(changedSameIdentity);
-        Assert.Equal(0, changed.PhysicalitiesInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(changed, 0, 1, 0, 1);
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
+        await using var original = _pg.DataSource.CreateCommand(
+            "SELECT ST_X(coord) FROM laplace.physicalities WHERE id=$1");
+        original.Parameters.AddWithValue(PhysicalityId.Compute(entId, PhysicalityType.Content).ToBytes());
+        Assert.Equal(0.1, (double)(await original.ExecuteScalarAsync())!);
+        await using var observations = _pg.DataSource.CreateCommand("""
+            SELECT count(*),count(DISTINCT object_id) FROM laplace.attestations
+            WHERE subject_id=$1 AND source_id=$2 AND type_id=$3
+            """);
+        observations.Parameters.AddWithValue(entId.ToBytes());
+        observations.Parameters.AddWithValue(src.ToBytes());
+        observations.Parameters.AddWithValue(RelationTypeRegistry.Resolve("HAS_PHYSICALITY").Id.ToBytes());
+        await using var rows = await observations.ExecuteReaderAsync();
+        Assert.True(await rows.ReadAsync());
+        Assert.Equal(5L, rows.GetInt64(0)); // two original, two next-unit, one alternate body
+        Assert.Equal(3L, rows.GetInt64(1));
     }
 
     [Fact]
@@ -334,7 +354,8 @@ public class NpgsqlSubstrateWriterTests
         var batch = Enumerable.Range(0, 8)
             .Select(i =>
             {
-                var b = new SubstrateChangeBuilder(src, $"u{i}");
+                var b = new SubstrateChangeBuilder(src, $"u{i}")
+                    .DeclareSourcePrior(SourceTrust.StructuredCorpus);
                 Assert.True(b.ContentStage.TryAddContentWitness(
                     Encoding.UTF8.GetBytes($"word{i}"), src, out _));
                 return b.Build();
@@ -378,15 +399,13 @@ public class NpgsqlSubstrateWriterTests
 
         ApplyResult result = await writer.ApplyAsync(
             new SubstrateChangeBuilder(src, "native-stage-counts")
-                .AddIntentStage(stage)
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
+                .AddIntentStage(stage, src)
                 .Build());
 
-        Assert.Equal(1, result.EntitiesAttempted);
-        Assert.Equal(1, result.PhysicalitiesAttempted);
-        Assert.Equal(1, result.AttestationsAttempted);
-        Assert.Equal(1, result.EntitiesInserted);
-        Assert.Equal(1, result.PhysicalitiesInserted);
-        Assert.Equal(1, result.AttestationsInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 1, 1, 1);
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            [entityId], [physicalityId], [attestationId]);
     }
 
     [Fact]

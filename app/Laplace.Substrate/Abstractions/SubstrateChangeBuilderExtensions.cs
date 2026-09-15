@@ -5,6 +5,15 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class SubstrateChangeBuilderExtensions
 {
+    public static async IAsyncEnumerable<SubstrateChange> WithSourcePrior(
+        this IAsyncEnumerable<SubstrateChange> changes, Hash128 sourceId, double sourceTrust,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        SubstrateChange.ValidateSourcePrior(sourceTrust);
+        await foreach (var change in changes.WithCancellation(ct).ConfigureAwait(false))
+            yield return change.WithSourcePrior(sourceId, sourceTrust);
+    }
+
     public static Hash128? AddContentEdge(
         this SubstrateChangeBuilder builder,
         Hash128 subjectId,

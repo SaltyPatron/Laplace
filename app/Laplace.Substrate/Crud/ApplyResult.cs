@@ -23,10 +23,26 @@ public sealed record ApplyResult(
     /// <summary>Actual PostgreSQL transaction settings and acknowledgement for this apply.
     /// Null means the writer did not establish this PostgreSQL-specific contract.</summary>
     public PostgresCommitReceipt? PostgresCommit { get; init; }
+    public PhysicalityAdmissionReceipt? PhysicalityAdmission { get; init; }
     /// <summary>Actual transactions containing COPY, counted once per transaction.
     /// These are not estimates of physical network round trips.</summary>
     public int CopyTransactionsStarted { get; init; }
     public int CopyTransactionsCommitted { get; init; }
+}
+
+public sealed record PhysicalityAdmissionReceipt(
+    Hash128 FloorReceipt, Hash128 GeneratedSourceId, string SnapshotReceipt, long SourceForms,
+    long CurrentContentBodies, long MissingContentBodies, int ProviderRounds,
+    int DatabaseOperations, long ReservedPeakBytes, long TupleBytes,
+    long FloorIndexAddedBytes, long LogicalWork, long StoredVertices)
+{
+    public long ClientPayloadGrantBytes { get; init; }
+    public long SqlPayloadGrantBytes { get; init; }
+    public long LogicalWorkGrant { get; init; }
+    public int DatabaseOperationGrant { get; init; }
+    public int GeneratedEntityRows { get; init; }
+    public int GeneratedPhysicalityRows { get; init; }
+    public int GeneratedAttestationRows { get; init; }
 }
 
 /// <summary>Caller-selected acknowledgement policy; neither mode changes the staged rows,

@@ -58,7 +58,8 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/framenet-vocab", null,
             entityCapacity: CorenessValues.Length + 1,
-            physicalityCapacity: 0, attestationCapacity: 0);
+            physicalityCapacity: 0, attestationCapacity: 0)
+            .DeclareSourcePrior(SourceTrust);
         seed.AddEntity(new EntityRow(CorenessTypeId, EntityTier.Word,
             BootstrapIntentBuilder.TypeMetaTypeId, Source));
         foreach (var c in CorenessValues)
@@ -175,10 +176,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                 sentenceUtf8, out _, out _, out double x, out double y, out double z, out double m))
             throw new InvalidOperationException("FrameNet span annotation has no sentence placement");
         Hash128 physicalityId = PhysicalityId.Compute(annotationId, PhysicalityType.ParseStructure);
-        if (b.TrySeePhysicality(physicalityId))
         {
             double[] coord = [x, y, z, m];
-            b.AddPhysicalityPreSeen(new PhysicalityRow(
+            b.AddPhysicality(new PhysicalityRow(
                 physicalityId, annotationId, Source, PhysicalityType.ParseStructure,
                 x, y, z, m, Hilbert128.Encode(coord),
                 Trajectory.Build(flat), flat.Length, null, null, 0));

@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
@@ -31,13 +32,14 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
         var turn = Hash128.Merkle(4, atoms);
         var type = Hash128.OfCanonical("catalog-conversation/type");
         var builder = new SubstrateChangeBuilder(source, tag)
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddEntity(new EntityRow(session, 4, type, source))
             .AddEntity(new EntityRow(turn, 4, type, source))
             .AddPhysicality(new PhysicalityRow(
                 Id: PhysicalityId.Compute(turn, PhysicalityType.Content),
                 EntityId: turn, SourceId: source, Type: PhysicalityType.Content,
                 CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
-                HilbertIndex: default,
+                HilbertIndex: Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]),
                 TrajectoryXyzm: Trajectory.Build(atoms,
                     [Trajectory.VertexFlags(0, false, 0), Trajectory.VertexFlags(0, false, 0)]),
                 NConstituents: atoms.Length,
@@ -53,7 +55,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
             builder.AddEntity(new EntityRow(atom, 0, type, source));
             builder.AddPhysicality(new PhysicalityRow(
                 PhysicalityId.Compute(atom, PhysicalityType.Content), atom, source,
-                PhysicalityType.Content, 0.1, 0.2, 0.3, 0.4, default, null, 0,
+                PhysicalityType.Content, 0.1, 0.2, 0.3, 0.4, Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]), null, 0,
                 null, null, IntentStage.PgEpochUnixUs));
         }
         if (batchPrefix)
@@ -62,7 +64,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
             // native appender must retain the batch prefix even without flags.
             builder.AddPhysicality(new PhysicalityRow(
                 PhysicalityId.Compute(session, PhysicalityType.Projection), session, source,
-                PhysicalityType.Projection, 0.1, 0.2, 0.3, 0.4, default,
+                PhysicalityType.Projection, 0.1, 0.2, 0.3, 0.4, Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]),
                 Trajectory.Build(new[] { turn }), 1, null, null, IntentStage.PgEpochUnixUs));
         }
         var change = builder.Build();

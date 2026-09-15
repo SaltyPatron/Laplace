@@ -9,6 +9,7 @@ set(EXT_EXECUTION_SOURCES
     ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/text_root_placements.c
+    src/physicality_descriptor_admission.c
     src/content_trajectory_read.c
     src/content_carrier_vertices.c
     src/identity_scan.c

@@ -4,46 +4,18 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Run-scoped record of content roots whose tier ladder is proven durably present in
-/// the target substrate. Consulted by <see cref="ContentTierSpine.TryStageIntoBuilder"/>
-/// to answer "has this surface's ladder already been deposited?" BEFORE the ladder is
-/// derived.
+/// Run-scoped record of roots whose entity ladder is proven present in the
+/// target substrate. Membership contains only positive database/readback or
+/// committed-apply evidence and is bounded by the shared cache envelope.
 ///
-/// The defect this closes: <c>content_witness_batch_add</c> builds the entire ladder
-/// (decompose to codepoints, walk the grapheme ladder, Merkle-hash every node) and only
-/// THEN asks whether it has been seen — <c>content_witness_batch.c:364</c>, and it asks
-/// an <c>intent_stage_t</c>, whose seen-set lives exactly one record batch. Across a
-/// corpus the same surface is therefore re-derived AND RE-EMITTED once per batch it
-/// appears in. The re-emitted nodes already exist, so they arrive at the working-set
-/// apply as PRESENT rows and pour into the merge lane instead of the COPY lane.
+/// This is an entity-presence cache, not a source-unit observation receipt.
+/// A known root cannot suppress a source's physicality observation. Native
+/// emission preserves the observed bodies; descriptor admission reuses exact
+/// form identities and excludes replay of the same source-unit association.
 ///
-/// MEASURED on the 2026-07-26 OMW seed (1226 language files over a shared Latin
-/// alphabet — a near-total repeat class): merge applies of 149,247 and 242,563 present
-/// rows, PRECEDES carrying 4,955,844 observations across 785,637 rows with a single
-/// codepoint-adjacency edge at observation_count 290,320, and PRECEDES alone accounting
-/// for more than half of all attestation UPDATEs on the run.
-///
-/// Those counts were never testimony. <c>intent_stage_witness_seen</c> already suppresses
-/// the second emission WITHIN a batch, so the recorded count is a function of where the
-/// batch boundaries fell — not of the corpus. Re-deriving a surface's ladder observes
-/// nothing new: the decomposition of content into its codepoints is identity, owned by
-/// the spine, not evidence about the world. Attest each fact once, at the tier and
-/// provenance the source asserts it.
-///
-/// Membership must have NO false positives — a wrongly-skipped ladder is a dropped
-/// entity, not a slow one. Ids enter only from <c>presentEntities</c>: probed present in
-/// the target, or written by an apply of this run that has COMMITTED. A miss is always
-/// safe and merely costs the derivation that happens today.
-///
-/// Root presence proves ladder presence — the same premise
-/// <c>merkle_dedup_trunk_shortcircuit</c> already runs on: a present trunk short-circuits
-/// its whole subtree. This ledger reaches that conclusion one step earlier, before the
-/// subtree is built.
-///
-/// <see cref="End"/> disarms skips but KEEPS membership so a warm re-ingest of the
-/// same source (new bulk bracket, same process) does not re-derive every surface.
-/// <see cref="Reset"/> clears membership — call on source change or DB recreate so a
-/// later source cannot inherit another source's skip set (provenance).
+/// End disarms lookups while retaining membership for a warm run. Reset clears
+/// membership on source change or database recreation. Missing membership may
+/// cost another indexed presence probe; it must never alter content identity.
 /// </summary>
 public static class ContentLadderLedger
 {
@@ -72,7 +44,7 @@ public static class ContentLadderLedger
     }
 
     /// <summary>
-    /// Disarms skips. Membership is retained for warm re-ingest of the same source —
+    /// Disarms presence lookups. Membership is retained for warm re-ingest of the same source —
     /// <see cref="Reset"/> is what forgets.
     /// </summary>
     public static void End() => Volatile.Write(ref _armed, 0);
@@ -90,12 +62,8 @@ public static class ContentLadderLedger
     public static bool Armed => Volatile.Read(ref _armed) != 0;
 
     /// <summary>
-    /// True iff at least one root is recorded. Armed-but-empty is pure cost at the
-    /// staging site — the 2026-08-06 full-file Wiktionary run paid a second, globally
-    /// serialized derivation per surface for a membership test that could never pass
-    /// (the fill gate never admitted its 738k-distinct working sets). Callers must
-    /// check this before probing membership. The armed-empty staging path may still
-    /// compute its memo key so the first post-commit recurrence can skip derivation.
+    /// True iff at least one positively proven root is recorded. This does not
+    /// prove that an independent source-unit observation has been admitted.
     /// </summary>
     public static bool HasEntries => Volatile.Read(ref _count) > 0;
 

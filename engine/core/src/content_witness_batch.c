@@ -48,19 +48,11 @@ static int codepoint_resolver(uint32_t atom, void* ctx,
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hb);
 }
 
-/* Physicality identity is CONTENT-derived, exactly like entity identity.
- * entity_id is already blake3-Merkle(tier, child_ids) -- an exact, collision-
- * resistant hash of the content -- and the geometry (centroid coord + trajectory)
- * is a DERIVED, non-exact function of that same content (Substrate Invariant
- * Rule #1: "Content-hash identity is exact. Centroid/hilbert identity is not" --
- * centroids collide, e.g. cat/act). So identity is (entity_id, physicality_type)
- * ONLY; the coord/trajectory are stored as payload but MUST NOT enter the id.
- * Hashing the float geometry made identity fragile to sub-ULP float divergence
- * across the several compose paths and re-ingests, forging spurious duplicate
- * physicalities (observed: 319 chess-move entities with paired coord-identical,
- * trajectory-float-divergent rows). This also makes the old length-1-trajectory
- * gate moot for identity: a single-child composition now yields the same id as
- * the atomic seed automatically, because neither hashes the trajectory. */
+/* This is the compatibility address for the current typed placement of E.
+ * Immutable physicality bodies have their own ordinary descriptor content;
+ * multiple such forms can refer to one unchanged E and this same lookup key.
+ * Exact descriptor fields do not redefine E or certify a divergent geometry
+ * calculation: recipe/observation validation remains a separate obligation. */
 /* LAYOUT IS LITTLE-ENDIAN BY SPECIFICATION, not by host accident (GH #904).
  * `memcpy(&physicality_type, 2)` wrote the host's byte order. The C# twin
  * (PhysicalityId.Compute) used BitConverter, also host order, so the two agreed
@@ -79,6 +71,23 @@ void laplace_physicality_id_compute(hash128_t entity_id, int16_t physicality_typ
     buf[16] = (uint8_t)(t & 0xFF);
     buf[17] = (uint8_t)((t >> 8) & 0xFF);
     hash128_blake3(buf, sizeof(buf), out);
+}
+
+int content_witness_emit_floor_atom(
+    intent_stage_t* stage, uint32_t atom, const hash128_t* expected_id,
+    int64_t observed_at_unix_us) {
+    if (!stage || !expected_id) return -1;
+    if (!codepoint_table_is_loaded()) return -3;
+    hash128_t entity, placement;
+    double coord[4];
+    hilbert128_t hilbert;
+    if (codepoint_table_resolve_atom(atom, &entity, coord, &hilbert) != 0
+        || !hash128_equals(&entity, expected_id)) return -2;
+    laplace_physicality_id_compute(entity, 1, &placement);
+    /* This is the existing atomic floor body, not a composition of itself.
+     * Root observation creates no E and carries no invented child trajectory. */
+    return intent_stage_add_physicality(stage, &placement, &entity, 1, coord,
+        &hilbert, NULL, 0, 0, 1, 0.0, 1, 0, observed_at_unix_us) == 0 ? 0 : -2;
 }
 
 
@@ -393,17 +402,20 @@ static int emit_node(
     uint32_t           idx,
     const hash128_t*   source_id,
     int64_t            now_us,
-    emit_scratch_t*    scratch) {
+    emit_scratch_t*    scratch,
+    int                emit_entity,
+    uint8_t*           emitted) {
     tier_node_view_t node;
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
     if (node.tier == 0) return 0;
     if (!should_emit_compositional(tree, idx)) return 0;
 
-    if (intent_stage_witness_record(stage, &node.id)) return 0;
-
-    hash128_t type_id = laplace_content_tier_type_id(node.tier);
-    if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
-        return -2;
+    if (emit_entity) {
+        if (intent_stage_witness_seen(stage, &node.id)) return 0;
+        hash128_t type_id = laplace_content_tier_type_id(node.tier);
+        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
+            return -2;
+    }
 
     double* traj = NULL;
     size_t m = node.child_count;
@@ -439,6 +451,11 @@ static int emit_node(
             (int32_t)(m > 1 ? m : 0), 1, 0.0, 1, 0, now_us) != 0) {
         return -2;
     }
+    if (emit_entity) {
+        if (intent_stage_witness_record(stage, &node.id) != 0
+            || intent_stage_allocation_failed(stage)) return -2;
+    }
+    *emitted = 1;
     return 0;
 }
 
@@ -487,41 +504,51 @@ int content_witness_emit_tree(
     if (!stage || !tree || !source_id || !out_root_id) return -1;
 
     size_t nc = tier_tree_node_count(tree);
+    if (nc == 0 || nc > UINT32_MAX) return -2;
 
     uint32_t root_idx = natural_unit_index(tree);
     tier_node_view_t root;
-    tier_tree_get_node(tree, root_idx, &root);
+    if (tier_tree_get_node(tree, root_idx, &root) != 0) return -2;
     *out_root_id = root.id;
 
-    if (intent_stage_witness_seen(stage, &root.id)) return 0;
-
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+    if (root.tier == 0)
+        return content_witness_emit_floor_atom(stage, root.atom, &root.id, now_us);
     emit_scratch_t scratch = {0};
+    uint8_t* emitted = (uint8_t*)calloc(nc, 1);
+    if (!emitted) return -2;
+    uint32_t* novel = NULL;
+    size_t novel_n = 0;
+    int rc = 0;
 
     if (existing_bitmap && bitmap_bits > 0) {
-        uint32_t* novel = (uint32_t*)malloc(nc * sizeof(uint32_t));
-        if (!novel) return -2;
-        size_t novel_n = 0;
+        if (nc > SIZE_MAX / sizeof(uint32_t)) { rc = -2; goto done; }
+        novel = (uint32_t*)malloc(nc * sizeof(uint32_t));
+        if (!novel) { rc = -2; goto done; }
         if (merkle_dedup_trunk_shortcircuit(
                 tree, existing_bitmap, bitmap_bits, novel, &novel_n) != 0) {
-            free(novel);
-            return -2;
+            rc = -2;
+            goto done;
         }
-        int rc = 0;
-        for (size_t k = 0; k < novel_n; ++k) {
-            rc = emit_node(stage, tree, novel[k], source_id, now_us, &scratch);
-            if (rc != 0) break;
-        }
-        free(novel);
-        emit_scratch_free(&scratch);
-        return rc;
     }
 
-    int rc = 0;
-    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        rc = emit_node(stage, tree, idx, source_id, now_us, &scratch);
-        if (rc != 0) break;
+    /* Presence proofs and stage witnesses govern entity novelty. Preserve the
+     * former placement winners first, then retain every remaining computed
+     * compositional form as a raw observation for the calling source unit. */
+    for (size_t k = 0; k < (novel ? novel_n : nc); ++k) {
+        const uint32_t idx = novel ? novel[k] : (uint32_t)k;
+        rc = emit_node(stage, tree, idx, source_id, now_us, &scratch, 1, &emitted[idx]);
+        if (rc != 0) goto done;
     }
+    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
+        if (emitted[idx]) continue;
+        rc = emit_node(stage, tree, idx, source_id, now_us, &scratch, 0, &emitted[idx]);
+        if (rc != 0) goto done;
+    }
+
+done:
+    free(novel);
+    free(emitted);
     emit_scratch_free(&scratch);
     return rc;
 }

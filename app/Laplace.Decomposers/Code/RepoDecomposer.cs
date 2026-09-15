@@ -52,7 +52,8 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
         _repoId = Hash128.OfCanonical(repoCanonical);
 
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/repo-root", null,
-            entityCapacity: 16, physicalityCapacity: 16, attestationCapacity: 0);
+            entityCapacity: 16, physicalityCapacity: 16, attestationCapacity: 0)
+            .DeclareSourcePrior(SourceTrust);
         StageRepoRoot(seed, repoCanonical, _repoId);
         if (verifiedRepository is null) await context.Writer.ApplyAsync(seed.Build(), ct);
         else

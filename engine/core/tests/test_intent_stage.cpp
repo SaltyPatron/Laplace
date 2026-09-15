@@ -7,6 +7,8 @@
 #include "laplace/core/intent_stage.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
+#include "laplace/core/content_witness_batch.h"
+#include "laplace/core/trajectory.h"
 
 namespace {
 
@@ -182,15 +184,17 @@ TEST(LaplaceCoreIntentStage, MultipleEntitiesAccumulate) {
 TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
     intent_stage_t* s = intent_stage_new(1);
     ASSERT_NE(nullptr, s);
-    hash128_t id = make_hash(0x01);
-    hash128_t eid = make_hash(0x02);
-    hash128_t sid = make_hash(0x03);
+    hash128_t id{}, eid{};
     double coord[4] = { 0.25, 0.5, 0.75, 1.0 };
     hilbert128_t hb;
     for (int i = 0; i < 16; ++i) hb.bytes[i] = (uint8_t)(0x40 + i);
-    double traj[8] = { 1.0, 2.0, 3.0, 4.0,  5.0, 6.0, 7.0, 8.0 };
-
-    (void)sid;
+    const hash128_t members[] = {make_hash(0x02), make_hash(0x03)};
+    double traj[8];
+    ASSERT_EQ(0, trajectory_build(members, 2u, traj));
+    size_t logical = 0u;
+    ASSERT_EQ(0, trajectory_content_identity(traj, 2u, &eid, &logical));
+    ASSERT_EQ(logical, 2u);
+    laplace_physicality_id_compute(eid, 1, &id);
     ASSERT_EQ(0, intent_stage_add_physicality(
         s, &id, &eid,
         1,
@@ -212,9 +216,9 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
     const uint8_t* p = buf.data() + kHeader;
     EXPECT_EQ(10, (int16_t)read_be16(p)); p += 2;
     EXPECT_EQ(16u, read_be32(p)); p += 4;
-    for (int i = 0; i < 16; ++i) EXPECT_EQ(0x01, *p++);
+    EXPECT_EQ(0, std::memcmp(&id, p, 16u)); p += 16u;
     EXPECT_EQ(16u, read_be32(p)); p += 4;
-    for (int i = 0; i < 16; ++i) EXPECT_EQ(0x02, *p++);
+    EXPECT_EQ(0, std::memcmp(&eid, p, 16u)); p += 16u;
     EXPECT_EQ(2u, read_be32(p)); p += 4;
     EXPECT_EQ(1, (int16_t)read_be16(p)); p += 2;
     EXPECT_EQ(37u, read_be32(p)); p += 4;
@@ -232,7 +236,7 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityRoundTripsAllFields) {
     EXPECT_EQ(2u, read_le_u32(p)); p += 4;
     for (int v = 0; v < 2; ++v) {
         for (int c = 0; c < 4; ++c) {
-            const double expected = (double)(v * 4 + c + 1);
+            const double expected = traj[v * 4 + c];
             EXPECT_EQ(expected, read_le_double(p));
             p += 8;
         }
@@ -256,10 +260,12 @@ TEST(LaplaceCoreIntentStage, AddPhysicalityNullTrajectoryIsValid) {
     intent_stage_t* s = intent_stage_new(1);
     ASSERT_NE(nullptr, s);
     hash128_t z = make_hash(0);
+    hash128_t placement;
+    laplace_physicality_id_compute(z, 1, &placement);
     double coord[4] = {0, 0, 0, 0};
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
     ASSERT_EQ(0, intent_stage_add_physicality(
-        s, &z, &z, 1, coord, &hb, nullptr, 0, 0,
+        s, &placement, &z, 1, coord, &hb, nullptr, 0, 0,
         1, 0.0, 1, 0, 0));
     EXPECT_EQ(1u, intent_stage_physicality_count(s));
     intent_stage_free(s);
@@ -355,10 +361,12 @@ TEST(LaplaceCoreIntentStage, AddAttestationNullObjectAndContext) {
 TEST(LaplaceCoreIntentStage, EachTableHasIndependentRowCount) {
     intent_stage_t* s = intent_stage_new(1);
     hash128_t z = make_hash(0);
+    hash128_t placement;
+    laplace_physicality_id_compute(z, 1, &placement);
     double coord[4] = {0, 0, 0, 0};
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
     ASSERT_EQ(0, intent_stage_add_entity(s, &z, 0, &z, nullptr));
-    ASSERT_EQ(0, intent_stage_add_physicality(s, &z, &z, 1, coord, &hb, nullptr, 0, 0, 1, 0, 1, 0, 0));
+    ASSERT_EQ(0, intent_stage_add_physicality(s, &placement, &z, 1, coord, &hb, nullptr, 0, 0, 1, 0, 1, 0, 0));
     ASSERT_EQ(0, intent_stage_add_attestation(s, &z, &z, &z, nullptr, &z, nullptr, 1, 0, 0, 0, 0, 0, NULL));
     EXPECT_EQ(1u, intent_stage_entity_count(s));
     EXPECT_EQ(1u, intent_stage_physicality_count(s));
@@ -450,18 +458,19 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
         for (size_t i = 0; i < kPhysicalities; ++i) {
             const uint32_t verts = (uint32_t)(1 + (i % 50));
             traj.resize((size_t)verts * 4);
-            for (uint32_t v = 0; v < verts; ++v) {
-                traj[(size_t)v * 4 + 0] = (double)v;
-                traj[(size_t)v * 4 + 1] = (double)(v + 1);
-                traj[(size_t)v * 4 + 2] = (double)(v + 2);
-                traj[(size_t)v * 4 + 3] = (double)(v + 3);
-            }
-            hash128_t id  = make_hash((uint8_t)(i));
-            hash128_t ent = make_hash((uint8_t)(i % kEntities));
+            std::vector<hash128_t> members(verts);
+            for (uint32_t v = 0; v < verts; ++v) members[v] = make_hash((uint8_t)(i + v));
+            ASSERT_EQ(0, trajectory_build(members.data(), verts, traj.data()));
+            hash128_t id{}, ent{};
+            size_t logical = 0u;
+            ASSERT_EQ(0, trajectory_content_identity(traj.data(), verts, &ent, &logical));
+            ASSERT_EQ(logical, verts);
+            const int16_t type = (int16_t)(1 + i % 3);
+            laplace_physicality_id_compute(ent, type, &id);
             ASSERT_EQ(0, intent_stage_add_physicality(
-                s, &id, &ent, (int16_t)(i % 3), coord, &hb,
+                s, &id, &ent, type, coord, &hb,
                 traj.data(), verts, (int32_t)verts,
-                0, 0.5, 0, (int32_t)(i % 16),
+                0, 0.5, 0, (int32_t)(1 + i % 16),
                 INTENT_STAGE_PG_EPOCH_UNIX_US + (int64_t)i))
                 << "physicality add failed at i=" << i;
         }
@@ -569,8 +578,9 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
         ASSERT_EQ(0, intent_stage_add_entity(s, &id, (int16_t)(i % 7), &t, nullptr));
     }
     for (size_t i = 0; i < kPhys; ++i) {
-        hash128_t id; id.hi = 0x2222; id.lo = i * 40503ULL + 13;
+        hash128_t id;
         hash128_t e; e.hi = 0x33; e.lo = i * 6700417ULL + 11;
+        laplace_physicality_id_compute(e, 1, &id);
         ASSERT_EQ(0, intent_stage_add_physicality(
             s, &id, &e, 1, coord, &hb, nullptr, 0, 0, 1, 0.0, 1, 0,
             INTENT_STAGE_PG_EPOCH_UNIX_US));
@@ -751,9 +761,11 @@ TEST(LaplaceCoreIntentStage, SemanticDigestIgnoresOrderPartitionAndObservationCl
     ASSERT_EQ(0, intent_stage_add_entity(second, &b, 2, &type, nullptr));
     ASSERT_EQ(0, intent_stage_add_entity(split, &a, 1, &type, nullptr));
     double coord[4] = {1, 0, 0, 0}; hilbert128_t hilbert{};
-    ASSERT_EQ(0, intent_stage_add_physicality(first, &a, &a, 1, coord, &hilbert,
+    hash128_t placement;
+    laplace_physicality_id_compute(a, 1, &placement);
+    ASSERT_EQ(0, intent_stage_add_physicality(first, &placement, &a, 1, coord, &hilbert,
         nullptr, 0, 0, 1, 0, 1, 0, 1000000));
-    ASSERT_EQ(0, intent_stage_add_physicality(second, &a, &a, 1, coord, &hilbert,
+    ASSERT_EQ(0, intent_stage_add_physicality(second, &placement, &a, 1, coord, &hilbert,
         nullptr, 0, 0, 1, 0, 1, 0, 2000000));
     ASSERT_EQ(0, intent_stage_add_attestation(first, &b, &a, &type, &b, &a,
         nullptr, 2, 1000000, 1, 1000000000, 100000000, 1500000000, nullptr));

@@ -23,6 +23,36 @@ public sealed class ChessFusedIngestTests
         return b.SetInputUnitsConsumed(1).Build();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActualComposedRawObservationsRetainEveryOwningSourcePrior(bool analyzeInline)
+    {
+        var change = Compose(analyzeInline);
+        Assert.NotEmpty(change.PhysicalityObservations);
+        var declared = new Dictionary<Hash128, double>
+        {
+            [ChessVocabulary.PgnSourceId] = SourceTrust.StructuredCorpus,
+            [ChessAnalyze.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessTransitions.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessPositionOutcomes.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessTacticOutcomes.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessVocabulary.TrajectorySourceId] = SourceTrust.StructuredCorpus,
+            [ChessSyzygy.SourceId] = SourceTrust.StandardsDerived,
+        };
+        Assert.All(change.PhysicalityObservations, row =>
+        {
+            Assert.True(declared.TryGetValue(row.SourceId, out var expected),
+                $"unexpected raw physicality source {row.SourceId}");
+            Assert.Equal(expected, change.RequireSourcePrior(row.SourceId));
+        });
+        Assert.Contains(change.PhysicalityObservations,
+            row => row.SourceId == ChessVocabulary.PgnSourceId);
+        if (analyzeInline)
+            Assert.Contains(change.PhysicalityObservations,
+                row => row.SourceId == ChessAnalyze.SourceId);
+    }
+
     [Fact]
     public void FusedCompose_EmitsWitnessedAndDerivedLayersTogether()
     {

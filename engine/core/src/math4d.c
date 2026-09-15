@@ -1,6 +1,7 @@
 #include "laplace/core/math4d.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 double math4d_dot(const double a[4], const double b[4]) {
@@ -106,12 +107,55 @@ static int laplace_pt_cmp(const void* a, const void* b) {
     return laplace_dbl_cmp(x->w, y->w);
 }
 
+static void laplace_pts_sift(laplace_pt_t* points, size_t root, size_t count) {
+    while (root < count / 2u) {
+        size_t child = root * 2u + 1u;
+        if (child + 1u < count && laplace_pt_cmp(&points[child], &points[child + 1u]) < 0)
+            ++child;
+        if (laplace_pt_cmp(&points[root], &points[child]) >= 0) return;
+        const laplace_pt_t swap = points[root];
+        points[root] = points[child];
+        points[child] = swap;
+        root = child;
+    }
+}
+
+/* In-place heapsort has a fixed stack footprint and never asks libc for a
+ * hidden merge/sort workspace. Both centroid surfaces use this same ordering. */
+static void laplace_pts_sort(laplace_pt_t* points, size_t count) {
+    for (size_t root = count / 2u; root > 0u; --root)
+        laplace_pts_sift(points, root - 1u, count);
+    for (size_t end = count; end > 1u; --end) {
+        const laplace_pt_t swap = points[0];
+        points[0] = points[end - 1u];
+        points[end - 1u] = swap;
+        laplace_pts_sift(points, 0u, end - 1u);
+    }
+}
+
+static void laplace_pts_fill(const double* points, size_t count, const double* weights,
+                            laplace_pt_t* ordered) {
+    for (size_t i = 0; i < count; ++i) {
+        ordered[i].p = points + i * 4u;
+        ordered[i].w = weights != NULL ? weights[i] : 1.0;
+    }
+    laplace_pts_sort(ordered, count);
+}
+
+static void laplace_centroid_reduce(const laplace_pt_t* points, size_t count, double out[4]) {
+    double sum[4] = {0.0, 0.0, 0.0, 0.0};
+    for (size_t i = 0; i < count; ++i)
+        for (size_t axis = 0; axis < 4u; ++axis) sum[axis] += points[i].p[axis];
+    const double inv = count == 0u ? 0.0 : 1.0 / (double)count;
+    for (size_t axis = 0; axis < 4u; ++axis) out[axis] = sum[axis] * inv;
+}
+
 #define LAPLACE_PT_STACK 64
 
-/* Sorts the constituents into canonical order. Returns the array to use, which
- * is `stackbuf` for small n, a malloc'd block for large n, or NULL if
- * allocation failed (callers then fall back to input order: the result stays
- * correct, it only loses reproducibility). Free with laplace_pts_release. */
+/* Sorts the constituents into canonical order. Returns stackbuf for small n,
+ * a malloc'd block for large n, or NULL on allocation failure. Centroid then
+ * uses its allocation-free canonical scan; existing weighted callers retain
+ * their separate failure policy. Free with laplace_pts_release. */
 static laplace_pt_t* laplace_pts_canonical(const double* points, size_t n_points,
                                            const double* weights,
                                            laplace_pt_t* stackbuf) {
@@ -120,11 +164,7 @@ static laplace_pt_t* laplace_pts_canonical(const double* points, size_t n_points
         pts = (laplace_pt_t*) malloc(sizeof(laplace_pt_t) * n_points);
         if (pts == NULL) return NULL;
     }
-    for (size_t i = 0; i < n_points; ++i) {
-        pts[i].p = points + i * 4;
-        pts[i].w = (weights != NULL) ? weights[i] : 1.0;
-    }
-    qsort(pts, n_points, sizeof(laplace_pt_t), laplace_pt_cmp);
+    laplace_pts_fill(points, n_points, weights, pts);
     return pts;
 }
 
@@ -132,30 +172,77 @@ static void laplace_pts_release(laplace_pt_t* pts, laplace_pt_t* stackbuf) {
     if (pts != NULL && pts != stackbuf) free(pts);
 }
 
-void math4d_centroid(const double* points, size_t n_points, double out[4]) {
-    out[0] = 0.0;
-    out[1] = 0.0;
-    out[2] = 0.0;
-    out[3] = 0.0;
-    if (n_points == 0) return;
+int math4d_centroid_workspace_size(size_t n_points, size_t* out_bytes) {
+    const size_t padding = _Alignof(laplace_pt_t) - 1u;
+    if (out_bytes == NULL) return -1;
+    *out_bytes = 0u;
+    if (n_points > SIZE_MAX / (4u * sizeof(double)) ||
+        n_points > (SIZE_MAX - padding) / sizeof(laplace_pt_t)) return -1;
+    if (n_points != 0u) *out_bytes = n_points * sizeof(laplace_pt_t) + padding;
+    return 0;
+}
 
-    laplace_pt_t  stackbuf[LAPLACE_PT_STACK];
-    laplace_pt_t* pts = laplace_pts_canonical(points, n_points, NULL, stackbuf);
-
-    for (size_t i = 0; i < n_points; ++i) {
-        const double* p = (pts != NULL) ? pts[i].p : points + i * 4;
-        out[0] += p[0];
-        out[1] += p[1];
-        out[2] += p[2];
-        out[3] += p[3];
+int math4d_centroid_with_workspace(const double* points, size_t n_points,
+    void* workspace, size_t workspace_bytes, double out[4]) {
+    size_t required;
+    if (out == NULL || math4d_centroid_workspace_size(n_points, &required) != 0 ||
+        workspace_bytes < required || (n_points != 0u && (points == NULL || workspace == NULL)))
+        return -1;
+    laplace_pt_t* ordered = NULL;
+    if (n_points != 0u) {
+        const size_t alignment = _Alignof(laplace_pt_t);
+        const uintptr_t address = (uintptr_t)workspace;
+        const size_t padding = (alignment - address % alignment) % alignment;
+        if (address > UINTPTR_MAX - padding) return -1;
+        ordered = (laplace_pt_t*)((uint8_t*)workspace + padding);
+        laplace_pts_fill(points, n_points, NULL, ordered);
     }
-    laplace_pts_release(pts, stackbuf);
+    laplace_centroid_reduce(ordered, n_points, out);
+    return 0;
+}
 
-    const double inv = 1.0 / (double)n_points;
-    out[0] *= inv;
-    out[1] *= inv;
-    out[2] *= inv;
-    out[3] *= inv;
+/* The historical void surface cannot return an allocation error. Its rare OOM
+ * path walks equal-key groups in canonical order without allocating; it never
+ * substitutes input-order arithmetic. Bounded callers use the status-returning
+ * workspace surface above and do not enter this slower path. */
+static void laplace_centroid_without_allocation(const double* points, size_t count, double out[4]) {
+    const double* previous = NULL;
+    double sum[4] = {0.0, 0.0, 0.0, 0.0};
+    size_t reduced = 0u;
+    while (reduced < count) {
+        const double* next = NULL;
+        size_t equal_count = 0u;
+        for (size_t i = 0; i < count; ++i) {
+            const laplace_pt_t candidate = {points + i * 4u, 1.0};
+            if (previous != NULL) {
+                const laplace_pt_t last = {previous, 1.0};
+                if (laplace_pt_cmp(&candidate, &last) <= 0) continue;
+            }
+            if (next == NULL) {
+                next = candidate.p;
+                equal_count = 1u;
+            } else {
+                const laplace_pt_t selected = {next, 1.0};
+                const int order = laplace_pt_cmp(&candidate, &selected);
+                if (order < 0) { next = candidate.p; equal_count = 1u; }
+                else if (order == 0) ++equal_count;
+            }
+        }
+        for (size_t i = 0; i < equal_count; ++i)
+            for (size_t axis = 0; axis < 4u; ++axis) sum[axis] += next[axis];
+        reduced += equal_count;
+        previous = next;
+    }
+    const double inv = count == 0u ? 0.0 : 1.0 / (double)count;
+    for (size_t axis = 0; axis < 4u; ++axis) out[axis] = sum[axis] * inv;
+}
+
+void math4d_centroid(const double* points, size_t n_points, double out[4]) {
+    laplace_pt_t stackbuf[LAPLACE_PT_STACK];
+    laplace_pt_t* pts = laplace_pts_canonical(points, n_points, NULL, stackbuf);
+    if (pts != NULL) laplace_centroid_reduce(pts, n_points, out);
+    else laplace_centroid_without_allocation(points, n_points, out);
+    laplace_pts_release(pts, stackbuf);
 }
 
 static double normalize4d(double v[4]) {
