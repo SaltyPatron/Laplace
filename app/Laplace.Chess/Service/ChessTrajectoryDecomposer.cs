@@ -9,64 +9,16 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-/// <summary>
-/// Backfills missing chess physicalities without replaying testimony: game trajectories and
-/// governed player → name compositions recorded before those physicalities existed.
-///
-/// The obvious way to reach those games would be to bump ChessAnalyze.Version and re-run the
-/// analyzer. That is exactly wrong here: rows are idempotent but TESTIMONY IS NOT. Attestation
-/// merge ACCUMULATES observation_count (attestation_merge regress pins 3+5=8), so re-deriving
-/// ~29M ChessAnalysis attestations over the standing corpus would double every witness count in
-/// the calculated layer — the runner refuses source re-ingest for this exact reason ("a re-ingest
-/// would double-count testimony into consensus"). Inflating consensus to add geometry would be a
-/// far worse trade than not having the geometry.
-///
-/// A trajectory is not testimony. It is a PHYSICALITY, keyed by id and written as an upsert —
-/// no counter, nothing to double. So this pass deposits ONLY the game's linestring plus its own
-/// completion marker, and touches no attestation at all. Re-running it is a no-op on rows already
-/// present, and safe on rows that are.
-///
-/// The marker is versioned independently of ChessAnalyze.Version so this backfill and a future
-/// analysis re-derive can never be mistaken for one another.
-///
-/// COMMIT CADENCE — read this before running it over a large corpus. In working-set mode the
-/// runner's only flush trigger is accumulated apply bytes reaching the flush envelope (RAM/64,
-/// ceiling 512 MiB). These records are unusually small — two rows plus one linestring, ~2.9 KB
-/// for an 80-ply game — so the envelope is not reached until roughly 176,000 games. A full run
-/// over a 200k corpus therefore commits ONCE, near the end: it is idempotent across completed
-/// runs, but a run killed before that first flush loses everything it composed. Marker-based
-/// skipping resumes across runs, not within one.
-///
-/// Set LAPLACE_WS_FLUSH_MB to commit sooner — e.g. 32 flushes about every 11,000 games, which
-/// makes an interrupted run resumable at that granularity. Nothing about correctness changes
-/// either way; only how much work an interruption costs.
-///
-/// Run: `laplace ingest chess-trajectory` (no path — the substrate is the source of truth)
-///      `LAPLACE_WS_FLUSH_MB=32 laplace ingest chess-trajectory`  (frequent commits)
-/// </summary>
 public sealed class ChessTrajectoryDecomposer
     : ComposeDecomposer<ChessTrajectoryRecord>, IIngestNoOpExplainer
 {
-    // EstimateUnitCountAsync declares every RECORDED line; the stream yields only lines
-    // still missing this pass's marker. A caught-up backfill therefore applies zero, which
-    // the runner's silent-no-op guard turned into a hard failure — measured:
-    // `ingest chess-trajectory` on a current substrate exited 1.
     private long _candidatesStreamed;
 
-    /// <summary>
-    /// Marker generation for THIS pass. Bump only when the trajectory encoding itself changes;
-    /// deliberately distinct from ChessAnalyze.Version, which governs the testimony re-derive.
-    /// </summary>
     public const int TrajectoryVersion = 1;
 
-    // GH #736: the linestring is a pure function of the LINE, so the marker is per line —
-    // a line shared by many playings deposits ONE trajectory, and the duplicate-linestring
-    // disease #736 names is structurally gone.
     public static Hash128 MarkerId(Hash128 lineId)
         => Hash128.OfCanonical($"chess/trajectory/{lineId}/{TrajectoryVersion}");
 
-    // GH #736 source split (#508): the trajectory lane writes under its OWN source so
-    // source-grain eviction never conflates it with ChessAnalysis testimony.
     public override Hash128 SourceId => ChessVocabulary.TrajectorySourceId;
     public override string SourceName => "ChessTrajectory";
     public override int LayerOrder => 21;
@@ -96,10 +48,6 @@ public sealed class ChessTrajectoryDecomposer
                 + "Record games first: laplace ingest chess <pgn>");
 
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
-        // LINE-grain stream (GH #736), gated on THIS pass's per-line marker: a line whose
-        // trajectory has already been COMMITTED is skipped before compose, so a second run
-        // costs a bitmap probe per line rather than a replay. Composed-but-uncommitted work is
-        // not skipped — see the commit-cadence note above.
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, ws.Batch, MarkerId, ct))
@@ -116,7 +64,6 @@ public sealed class ChessTrajectoryDecomposer
         }
     }
 
-    /// <summary>Nothing streamed means the backfill has caught up, not that it broke.</summary>
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
         => _candidatesStreamed == 0
             ? ("already-complete",
@@ -132,17 +79,9 @@ public sealed class ChessTrajectoryDecomposer
             ChessVocabulary.AppendPlayerPhysicality(b, playerId, name, SourceId);
     }
 
-    /// <summary>
-    /// The pass itself, as a pure function of a hydrated game: replay the line, deposit its
-    /// trajectory and this pass's marker. Public so the geometry can be pinned without a live
-    /// substrate — and static because nothing about it depends on decomposer instance state.
-    /// </summary>
     public static void Deposit(SubstrateChangeBuilder b, ChessWitnessedGame w, Hash128 sourceId)
     {
         var m = new ChessModality();
-        // Same refuse-not-invent law as ChessAnalyze.InitialState: an unreadable
-        // start (X-FEN Chess960, garbage) deposits nothing so a later run can retry
-        // once the parser models it — never substitute the standard array.
         if (ChessAnalyze.InitialState(w.StartFen, m) is not { } start) return;
         var state = start.Initial;
 
@@ -153,8 +92,6 @@ public sealed class ChessTrajectoryDecomposer
             foreach (var san in w.Moves)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
-                // A line that will not replay is a line this game never walked. Deposit
-                // nothing — not the trajectory, not the marker — so a later run can retry.
                 if (mv is null) return;
                 state = m.Apply(state, mv.Value);
                 line.Add(ChessCompose.Position(state.Board).Position);
@@ -174,13 +111,12 @@ public sealed class ChessTrajectoryDecomposer
             return null;
         var linesTask = ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct);
         var playersTask = NpgsqlSubstrateReads.CountChessPlayersMissingPhysicalityAsync(
-            ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Content, ct);
+            ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Projection, ct);
         await Task.WhenAll(linesTask, playersTask).ConfigureAwait(false);
         return (linesTask.Result ?? 0) + playersTask.Result;
     }
 }
 
-/// <summary>Trunk root is this pass's marker, so its batches never collide with the analyzer's.</summary>
 public sealed record ChessTrajectoryRecord : ITrunkRootRecord
 {
     private ChessTrajectoryRecord(ChessWitnessedGame? game, Hash128? playerId, string? playerName)
@@ -198,5 +134,5 @@ public sealed record ChessTrajectoryRecord : ITrunkRootRecord
 
     public Hash128 TrunkRootId => Game is { } game
         ? ChessTrajectoryDecomposer.MarkerId(game.LineId)
-        : PhysicalityId.Compute(PlayerId!.Value, PhysicalityType.Content);
+        : PhysicalityId.Compute(PlayerId!.Value, PhysicalityType.Projection);
 }
