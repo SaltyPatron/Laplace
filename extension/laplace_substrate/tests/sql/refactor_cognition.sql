@@ -1,4 +1,4 @@
--- The legacy extension supplies only durable physicality candidates.  The
+-- The legacy extension supplies only durable physicality candidates. The
 -- selected terminal entity/path and forward receipt must come back through the
 -- canonical Laplace-Refactor cognition engine.
 BEGIN;
@@ -6,15 +6,21 @@ BEGIN;
 DO $$
 DECLARE
     type_t bytea := public.laplace_hash128_blake3('Type'::bytea);
-    container_id bytea := public.laplace_hash128_blake3('test/refactor/container'::bytea);
     a bytea := public.laplace_hash128_blake3('test/refactor/a'::bytea);
     b bytea := public.laplace_hash128_blake3('test/refactor/b'::bytea);
-    p bytea := public.laplace_hash128_blake3('test/refactor/physicality'::bytea);
+    container_id bytea;
+    p bytea;
     got bytea;
     got_set bytea[];
     receipt bytea;
     output_fp bytea;
 BEGIN
+    -- Keep the regression fixture inside the same exact identity law enforced by
+    -- the native writer: Content parent = ordered manifest identity and
+    -- physicality id = BLAKE3(entity_id || int16_le(type)).
+    container_id := public.laplace_hash128_merkle(0::smallint, ARRAY[a, b]);
+    p := public.laplace_hash128_blake3(container_id || decode('0100', 'hex'));
+
     INSERT INTO laplace.entities(id, tier, type_id, created_at)
     VALUES
         (container_id, 0, type_t, now()),
