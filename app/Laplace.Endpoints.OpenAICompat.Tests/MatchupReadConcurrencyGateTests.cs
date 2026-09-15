@@ -29,14 +29,23 @@ public sealed class MatchupReadConcurrencyGateTests
     public void ChessPlayers_SelectChessComparator_AndKeepEloSeparateFromStanding()
     {
         var client = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.Matchup.cs");
+        var contract = Read("app/Laplace.Endpoints.OpenAICompat/Contracts/Matchup.cs");
         var web = Read("web/src/explore/matchup/MatchupView.tsx");
+        var overview = Read("web/src/explore/entity/tabs/OverviewTab.tsx");
 
         Assert.Contains("IsChessPlayerAsync", client);
         Assert.Contains("ChessTapeAsync", client);
         Assert.Contains("ChessPlayerRatingsAsync", client);
-        Assert.Contains("source_rating_peak", Read("app/Laplace.Endpoints.OpenAICompat/Contracts/Matchup.cs"));
+        Assert.Contains("ChessPlayerRecordAsync", client);
+        Assert.Contains("ChessMeetingsAsync", client);
+        Assert.Contains("\"played against\", \"chess pairing\"", client);
+        Assert.Contains("ChessMatchupSide", contract);
+        Assert.Contains("source_rating_peak", contract);
 
         Assert.Contains("peak source Elo", web);
+        Assert.Contains("chess.wins", web);
+        Assert.Contains("played against", web);
+        Assert.Contains("played against", overview);
         Assert.Contains("top standing", web);
         Assert.DoesNotContain(">top rating ·", web, StringComparison.Ordinal);
     }
