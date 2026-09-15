@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
-public static unsafe partial class NativeInterop
+internal static unsafe partial class NativeInterop
 {
     [LibraryImport(Library, EntryPoint = "trajectory_content_identity")]
     internal static partial int TrajectoryContentIdentity(

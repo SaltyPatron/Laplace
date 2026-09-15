@@ -18,6 +18,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_trajectory.cpp
     test_tier_tree.cpp
     test_intent_stage.cpp
+    test_intent_stage_physicality_law.cpp
     test_ordered_composition.cpp
     test_absence_filter.cpp
     test_merkle_dedup.cpp
@@ -47,6 +48,18 @@ add_compile_definitions(
 add_compile_definitions(
     LAPLACE_SYZYGY_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../test-data/syzygy")
 
+# This one historical test file is a binary COPY serializer/partition fixture and
+# deliberately contains arbitrary ids/synthetic XYZM bytes. Isolate those fixture
+# bytes from the new semantic law without weakening the production function. The
+# dedicated physicality-law test above compiles without this adapter.
+if(MSVC)
+    set_source_files_properties(test_intent_stage.cpp PROPERTIES
+        COMPILE_OPTIONS "/FI${CMAKE_CURRENT_SOURCE_DIR}/intent_stage_fixture_adapter.h")
+else()
+    set_source_files_properties(test_intent_stage.cpp PROPERTIES
+        COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/intent_stage_fixture_adapter.h")
+endif()
+
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
 
 add_dependencies(laplace_core_tests laplace_t0_perfcache laplace_modality_number_perfcache)
@@ -63,7 +76,6 @@ gtest_discover_tests(laplace_syzygy_tests
     DISCOVERY_MODE PRE_TEST
     DISCOVERY_TIMEOUT 120
 )
-
 
 
 gtest_discover_tests(laplace_core_tests
