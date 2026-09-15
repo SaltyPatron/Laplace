@@ -7,6 +7,20 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class CutechessResourceOptionsTests
 {
     [Fact]
+    public async Task ReceiptRetainsDifferentSettingsForSeparateEngineInstances()
+    {
+        var receipt = new CutechessExperimentReceipt("instances", new CutechessOptions(), new Dictionary<string, string>());
+        await receipt.ObserveAsync(new ChessLabTerminalEvent(ChessLabStream.Uci,
+            "setoption name Threads value 1", "Stockfish", ChessLabDirection.Send, 1), CancellationToken.None);
+        await receipt.ObserveAsync(new ChessLabTerminalEvent(ChessLabStream.Uci,
+            "setoption name Threads value 4", "Stockfish", ChessLabDirection.Send, 3), CancellationToken.None);
+
+        Assert.Equal(new[] { "send: setoption name Threads value 1" }, receipt.UciConfigurationByInstance["Stockfish(1)"]);
+        Assert.Equal(new[] { "send: setoption name Threads value 4" }, receipt.UciConfigurationByInstance["Stockfish(3)"]);
+        Assert.Equal(2, receipt.UciConfiguration["Stockfish"].Count);
+    }
+
+    [Fact]
     public void DefaultsLeaveStockfishResourcesAtItsAdvertisedDefaults()
     {
         var options = new CutechessOptions().WithStockfishConfiguration(new Dictionary<string, string>

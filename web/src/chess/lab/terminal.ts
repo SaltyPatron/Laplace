@@ -15,6 +15,8 @@ export interface TerminalLine {
   stream: TerminalStream;
   text: string;
   engine?: string | null;
+  /** Cute Chess engine-instance identity; independent of the tournament game number. */
+  engineInstance?: number | null;
   direction?: TerminalDirection | null;
 }
 

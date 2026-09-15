@@ -329,12 +329,10 @@ public static class ChessGraph
         // Same primitives the position tier composes with — one implementation of "pack an
         // ordered id sequence into a trajectory", not a chess-specific second one.
         double[] traj = Trajectory.Build(ids);
-        // Canonical Content uses the same Euclidean centroid as the native
-        // composer. A spherical mean would move the declared constituent
-        // centroid and disagree with recursive bounded-composition geometry.
-        double[] centroid = type == PhysicalityType.Content
-            ? Math4d.Centroid(coords)
-            : Math4d.KarcherMean(coords);
+        // Preserve the established chess placement recipe for both Content and
+        // Projection. The generic centroid/Karcher reconciliation is a separate
+        // declared migration; trajectory identity repair does not choose it.
+        double[] centroid = Math4d.KarcherMean(coords);
 
         b.AddPhysicality(new PhysicalityRow(
             Id: PhysicalityId.Compute(entityId, type),

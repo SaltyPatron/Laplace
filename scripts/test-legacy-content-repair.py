@@ -213,6 +213,10 @@ class NativeRepairProof:
         assert outcome["disposition"] == "commit-confirmed"
         assert outcome["applied"]["count"] == 3
         assert records[-1]["native_input_count"] == outcome["native_input_rows"] == 8
+        recipe = records[0]["chess_coordinate_recipe"]
+        assert recipe["sql_function"] == "public.laplace_karcher_mean_4d"
+        assert recipe["native_kernel"] == "math4d_karcher_mean"
+        assert recipe["tolerance"] == 1e-12 and recipe["max_iterations"] == 64
         assert {row["repair_kind"] for row in rows} == {
             "chess-line", "player-projection", "session-projection"}
         self.native_inputs(records, before, ["m1", "m2", "p0", "p1", "p2", "name", "msg1", "msg2"])
@@ -249,15 +253,20 @@ class NativeRepairProof:
           FROM laplace.physicalities p CROSS JOIN LATERAL
             public.laplace_trajectory_expanded_constituents(p.trajectory) v
           WHERE p.id=repair_test.physicality_id('game');""") == "t"
-        assert self.sql("""SELECT ST_AsEWKB(coord)=ST_AsEWKB(
-            public.laplace_karcher_mean_4d(ST_Collect(ARRAY[
-              ST_MakePoint(1,0,0,0),ST_MakePoint(0,1,0,0),ST_MakePoint(0,0,1,0)])))
+        expected_input = self.sql("""SELECT encode(ST_AsEWKB(ST_Collect(array_agg(p.coord ORDER BY v.ordinal))),'hex')
+          FROM unnest(ARRAY[repair_test.id('p0'),repair_test.id('m1'),repair_test.id('m2')])
+            WITH ORDINALITY v(id,ordinal)
+          JOIN laplace.physicalities p ON p.entity_id=v.id AND p.type=1;""")
+        line = next(row for row in rows if row["repair_kind"] == "chess-line")
+        assert line["evidence"]["native_placement_input_ewkb"] == expected_input
+        assert self.sql(f"""WITH input AS (SELECT ST_GeomFromEWKB(decode('{expected_input}','hex')) AS points)
+          SELECT ST_AsEWKB(coord)=ST_AsEWKB(public.laplace_karcher_mean_4d(points))
             AND public.laplace_distance_4d(coord,ST_MakePoint(
-              1.0::float8/sqrt(3.0::float8),1.0::float8/sqrt(3.0::float8),
-              1.0::float8/sqrt(3.0::float8),0))<1e-12
+              1.0/sqrt(3.0),1.0/sqrt(3.0),1.0/sqrt(3.0),0))<1e-12
+            AND public.laplace_distance_4d(coord,public.laplace_centroid_4d(points))>0.1
             AND hilbert_index=public.laplace_hilbert_encode(coord)
             AND abs(public.laplace_radius_origin(coord)-1)<1e-12
-          FROM laplace.physicalities WHERE id=repair_test.physicality_id('game');""") == "t"
+          FROM laplace.physicalities CROSS JOIN input WHERE id=repair_test.physicality_id('game');""") == "t"
         assert self.sql("""SELECT array_agg(v.entity_id ORDER BY v.ordinal)=ARRAY[
             repair_test.id('msg1'),repair_test.id('msg2'),repair_test.id('msg1')]
             AND bool_and(v.flags=8)
@@ -524,11 +533,34 @@ class NativeRepairProof:
             FOR EACH ROW EXECUTE FUNCTION pg_temp.corrupt_repair();
           """, "Repair exact row readback failed")
 
+    def hash_correct_missing_child(self) -> None:
+        self.sql("SELECT repair_test.reset();")
+        assert self.run("canonical-parent-control")["applied"]["count"] == 3
+        self.sql("DELETE FROM laplace.physicalities WHERE id=repair_test.physicality_id('m1');")
+        before = self.state()
+        name = "hash-correct-content-with-missing-child"
+        try:
+            self.run(name)
+        except RepairProtocolError:
+            pass
+        else:
+            raise AssertionError("hash-correct dangling Content was incorrectly accepted as healthy")
+        assert self.state() == before
+        self.readback(name, before, self.state())
+        records = self.records(name)
+        rows = [row for row in records if row["kind"] == "physicality"]
+        assert len(rows) == 2
+        assert all(row["disposition"] == "unresolved-or-malformed-original-manifest" for row in rows)
+        assert all(row["original"] == before["physicalities"][row["original"]["id"]] for row in rows)
+        assert records[-1]["unresolved"] == 2
+        assert not (self.receipts / name / "submission.json").exists()
+        self.completed.append("hash-correct-dangling-content-is-not-a-healthy-no-op")
+
     def healthy_corpus_over_envelope(self) -> None:
         self.sql("""SELECT repair_test.reset();
           CREATE TABLE repair_test.healthy_extra AS
           SELECT public.laplace_hash128_merkle(0::smallint,ids) AS id,ids,
-            public.laplace_centroid_4d(ST_Collect(coords)) AS coord
+            public.laplace_karcher_mean_4d(ST_Collect(coords)) AS coord
           FROM generate_series(3,12) repetitions
           CROSS JOIN LATERAL (SELECT ARRAY[repair_test.id('p0')]
             ||array_fill(repair_test.id('m1'),ARRAY[repetitions])
@@ -601,12 +633,19 @@ class NativeRepairProof:
           FROM laplace.physicalities p CROSS JOIN LATERAL
             public.laplace_trajectory_expanded_constituents(p.trajectory) v
           WHERE p.id=repair_test.physicality_id('game');""") == "t"
-        assert self.sql("""SELECT ST_AsEWKB(coord)=ST_AsEWKB(
-            public.laplace_karcher_mean_4d(ST_Collect(ARRAY[
-              ST_MakePoint(1,0,0,0),ST_MakePoint(0,1,0,0),ST_MakePoint(0,1,0,0)])))
-            AND public.laplace_distance_4d(coord,ST_MakePoint(0.5,sqrt(3.0::float8)/2,0,0))<1e-12
-            AND n_constituents=3 AND hilbert_index=public.laplace_hilbert_encode(coord)
-          FROM laplace.physicalities WHERE id=repair_test.physicality_id('game');""") == "t"
+        expected_input = self.sql("""SELECT encode(ST_AsEWKB(ST_Collect(array_agg(p.coord ORDER BY v.ordinal))),'hex')
+          FROM unnest(ARRAY[repair_test.id('p0'),repair_test.id('m1'),repair_test.id('m1')])
+            WITH ORDINALITY v(id,ordinal)
+          JOIN laplace.physicalities p ON p.entity_id=v.id AND p.type=1;""")
+        line = next(row for row in records if row.get("repair_kind") == "chess-line")
+        assert line["evidence"]["native_placement_input_ewkb"] == expected_input
+        assert self.sql(f"""WITH input AS (SELECT ST_GeomFromEWKB(decode('{expected_input}','hex')) AS points)
+          SELECT ST_AsEWKB(coord)=ST_AsEWKB(public.laplace_karcher_mean_4d(points))
+            AND public.laplace_distance_4d(coord,ST_MakePoint(0.5,sqrt(3.0)/2.0,0,0))<1e-12
+            AND public.laplace_distance_4d(coord,public.laplace_centroid_4d(points))>0.1
+            AND ST_NPoints(points)=3 AND n_constituents=3
+            AND hilbert_index=public.laplace_hilbert_encode(coord)
+          FROM laplace.physicalities CROSS JOIN input WHERE id=repair_test.physicality_id('game');""") == "t"
         after = self.state()
         expected = dict(before["physicalities"])
         for row in records:
@@ -647,6 +686,7 @@ def main() -> int:
         proof.success()
         proof.one_move()
         proof.negative_cases()
+        proof.hash_correct_missing_child()
         proof.healthy_corpus_over_envelope()
         proof.compressed_run()
         result = {"schema": "laplace.legacy-content-native-regression/v1", "source_sha": proof.source_sha,

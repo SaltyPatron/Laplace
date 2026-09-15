@@ -27,6 +27,7 @@ internal sealed class CutechessExperimentReceipt(string id, CutechessOptions opt
     public Dictionary<string, ArtifactIdentity> ArtifactsAfterMatch { get; } = new(StringComparer.Ordinal);
     public bool? ArtifactIdentitiesUnchanged { get; private set; }
     public Dictionary<string, List<string>> UciConfiguration { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<string>> UciConfigurationByInstance { get; } = new(StringComparer.Ordinal);
     public List<ChessLabGameEvent> Games { get; } = [];
     public Dictionary<string, double> Metrics { get; } = new(StringComparer.Ordinal);
 
@@ -68,6 +69,13 @@ internal sealed class CutechessExperimentReceipt(string id, CutechessOptions opt
                 if (!UciConfiguration.TryGetValue(name, out var lines)) UciConfiguration[name] = lines = [];
                 var line = $"{terminal.Direction}: {terminal.Text}";
                 if (!lines.Contains(line, StringComparer.Ordinal)) lines.Add(line);
+                if (terminal.EngineInstance is { } instance)
+                {
+                    string key = $"{name}({instance})";
+                    if (!UciConfigurationByInstance.TryGetValue(key, out var instanceLines))
+                        UciConfigurationByInstance[key] = instanceLines = [];
+                    if (!instanceLines.Contains(line, StringComparer.Ordinal)) instanceLines.Add(line);
+                }
                 break;
             case ChessLabGameEvent game:
                 Games.RemoveAll(g => g.Index == game.Index);

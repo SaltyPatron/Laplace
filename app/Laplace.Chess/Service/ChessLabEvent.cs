@@ -73,4 +73,5 @@ public sealed record ChessLabTerminalEvent(
     string Stream,
     string Text,
     string? Engine = null,
-    string? Direction = null) : ChessLabEvent;
+    string? Direction = null,
+    int? EngineInstance = null) : ChessLabEvent;

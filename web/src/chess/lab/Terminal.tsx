@@ -169,7 +169,7 @@ export function Terminal({ jobId, command, className }: TerminalProps) {
 function Row({ row }: { row: TranscriptRow }) {
   const { line, hidden, lost } = row;
   const tag = line.stream === 'uci' && line.engine
-    ? `${line.direction === 'send' ? '▸' : '◂'} ${line.engine}`
+    ? `${line.direction === 'send' ? '▸' : '◂'} ${line.engine}${line.engineInstance == null ? '' : `(${line.engineInstance})`}`
     : line.stream;
 
   return (

@@ -237,16 +237,20 @@ CROSS JOIN LATERAL (
     THEN o.trajectory ELSE NULL END) v
 ) b;
 CREATE TEMP TABLE repair_owner_identity ON COMMIT DROP AS
-SELECT o.id,b.bounded AND x.logical_count=o.n_constituents
-    AND x.distinct_ordinals=o.n_constituents AS well_formed,
+SELECT o.id,b.bounded AND o.entity_rows=1 AND x.logical_count=o.n_constituents
+    AND x.distinct_ordinals=o.n_constituents AND x.resolved AS well_formed,
   CASE WHEN x.logical_count=1 THEN x.child_ids[1]
        WHEN x.logical_count>1 THEN public.laplace_hash128_merkle(0::smallint,x.child_ids)
        ELSE NULL::bytea END AS content_id
 FROM repair_owner_inventory o JOIN repair_owner_bounds b ON b.id=o.id
 CROSS JOIN LATERAL (
   SELECT count(*) AS logical_count,count(DISTINCT v.ordinal) AS distinct_ordinals,
-    array_agg(v.entity_id ORDER BY v.ordinal) AS child_ids
+    array_agg(v.entity_id ORDER BY v.ordinal) AS child_ids,
+    bool_and(e.id IS NOT NULL AND p.id IS NOT NULL
+      AND p.id=public.laplace_hash128_blake3(v.entity_id||decode('0100','hex'))) AS resolved
   FROM public.laplace_trajectory_expanded_constituents(CASE WHEN b.bounded THEN o.trajectory ELSE NULL END) v
+  LEFT JOIN laplace.entities e ON e.id=v.entity_id
+  LEFT JOIN laplace.physicalities p ON p.entity_id=v.entity_id AND p.type=1
 ) x;
 CREATE TEMP TABLE repair_owners ON COMMIT DROP AS
 SELECT o.* FROM repair_owner_inventory o JOIN repair_owner_identity i ON i.id=o.id
@@ -460,7 +464,9 @@ SELECT c.id AS old_id,c.entity_id,c.repair_kind,c.disposition,
            'incoming_content',(SELECT jsonb_agg(parent.original ORDER BY parent.id)
               FROM repair_incoming parent WHERE c.entity_id=ANY(parent.members)),
            'ordered_children',c.child_ids,
-           'original_move_occurrence_flags_all_zero',c.zero_flags) AS evidence
+           'original_move_occurrence_flags_all_zero',c.zero_flags,
+           'native_placement_input_ewkb',CASE WHEN c.repair_kind='chess-line' AND c.disposition='eligible'
+             THEN encode(ST_AsEWKB(ST_Collect(ARRAY[c.start_coord]||c.child_coords)),'hex') ELSE NULL END) AS evidence
 FROM repair_eligibility c JOIN laplace.physicalities p ON p.id=c.id;
 UPDATE repair_plan p SET
   new_id=CASE WHEN p.repair_kind='chess-line' THEN p.old_id
@@ -486,6 +492,9 @@ UPDATE repair_plan p SET proposed=p.original || jsonb_build_object(
 
 SELECT jsonb_build_object('kind','context','database',current_database(),
   'producer_generation','{producer_json}'::jsonb,
+  'chess_coordinate_recipe',jsonb_build_object('sql_function','public.laplace_karcher_mean_4d',
+    'native_kernel','math4d_karcher_mean','tolerance',1e-12,'max_iterations',64,
+    'weights','one per logical constituent occurrence','inputs','retained start Content followed by ordered move Content'),
   'database_oid',(SELECT oid::text FROM pg_database WHERE datname=current_database()),
   'system_identifier',(SELECT system_identifier::text FROM pg_control_system()),
   'transaction',pg_current_xact_id()::text,'observed_at',clock_timestamp(),

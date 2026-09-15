@@ -485,7 +485,11 @@ public static partial class CutechessRunner
     /// </summary>
     internal sealed class TranscriptParser
     {
-        private readonly LiveBoardTracker _tracker = new();
+        private readonly Dictionary<int, GameBoardTracking> _boardGames = new();
+        private readonly Dictionary<int, GameBoardTracking> _engineBoardGames = new();
+        private readonly HashSet<int> _unresolvedBoardEngines = new();
+        private readonly HashSet<int> _unboundBoardWarnings = new();
+        private bool _sawBoardReset;
         private readonly int? _requestedElo;
         private readonly bool _requireEngineIdentity;
         private readonly bool _requirePairedSchedule;
@@ -546,6 +550,106 @@ public static partial class CutechessRunner
         public IEnumerable<ChessLabEvent> Line(string stream, string text)
             => stream == ChessLabStream.Stderr ? Stderr(text) : Stdout(text);
 
+        private sealed class EngineBoardSlot(string name)
+        {
+            public string Name { get; } = name;
+            public int? Instance { get; set; }
+            public bool Ambiguous { get; set; }
+        }
+
+        private sealed class GameBoardTracking
+        {
+            public int Number { get; }
+            public EngineBoardSlot[] Slots { get; }
+            public LiveBoardTracker Tracker { get; } = new();
+
+            public GameBoardTracking(int number, string white, string black)
+            {
+                Number = number;
+                Slots = [new(white), new(black)];
+                Tracker.Reset(number, white, black);
+            }
+        }
+
+        private List<(GameBoardTracking Game, EngineBoardSlot Slot)> BoardCandidates(string engine)
+            => _boardGames.Values.SelectMany(game => game.Slots
+                .Where(slot => slot.Instance is null && slot.Name.Equals(engine, StringComparison.Ordinal))
+                .Select(slot => (Game: game, Slot: slot))).ToList();
+
+        private IEnumerable<ChessLabEvent> BeginEngineBoardSession(string engine, int instance)
+        {
+            _sawBoardReset = true;
+            _unboundBoardWarnings.Remove(instance);
+            _unresolvedBoardEngines.Remove(instance);
+            bool resetBeforeFinish = _engineBoardGames.Remove(instance, out var previous);
+            if (resetBeforeFinish)
+            {
+                foreach (var slot in previous!.Slots.Where(slot => slot.Instance == instance))
+                {
+                    slot.Instance = null;
+                    slot.Ambiguous = true;
+                }
+            }
+
+            // Official Cute Chess identifies engine instances in debug traffic, but its
+            // Started-game banner contains only names. Threads can interleave their starts.
+            // Consider every matching unfilled slot, including earlier ambiguous resets;
+            // neither banner recency nor engine-id arithmetic proves a game association.
+            var candidates = BoardCandidates(engine);
+            if (!resetBeforeFinish && candidates.Count == 1 && !candidates[0].Slot.Ambiguous)
+            {
+                candidates[0].Slot.Instance = instance;
+                _engineBoardGames[instance] = candidates[0].Game;
+                yield break;
+            }
+
+            foreach (var candidate in candidates) candidate.Slot.Ambiguous = true;
+            _unresolvedBoardEngines.Add(instance);
+            foreach (var evt in UnboundBoardWarning(engine, instance,
+                         resetBeforeFinish ? "received another ucinewgame before its game finished" : "has no unique Started-game association"))
+                yield return evt;
+        }
+
+        private IEnumerable<ChessLabEvent> TrackPosition(string engine, int instance, string positionArgs)
+        {
+            if (!_engineBoardGames.TryGetValue(instance, out var game)
+                && !_sawBoardReset && !_unresolvedBoardEngines.Contains(instance) && _boardGames.Count == 1)
+            {
+                // Older transcripts may omit ucinewgame. A sole active game is usable;
+                // an unresolved concurrent session is never reassigned by elimination.
+                var candidates = BoardCandidates(engine);
+                if (candidates.Count == 1 && !candidates[0].Slot.Ambiguous)
+                {
+                    candidates[0].Slot.Instance = instance;
+                    _engineBoardGames[instance] = game = candidates[0].Game;
+                }
+            }
+
+            if (game is null)
+            {
+                _unresolvedBoardEngines.Add(instance);
+                foreach (var evt in UnboundBoardWarning(engine, instance, "has no proven game association"))
+                    yield return evt;
+                yield break;
+            }
+
+            foreach (var evt in game.Tracker.ApplyPositionLine(positionArgs)) yield return evt;
+        }
+
+        private IEnumerable<ChessLabEvent> UnboundBoardWarning(string engine, int instance, string reason)
+        {
+            if (_unboundBoardWarnings.Add(instance))
+                yield return new ChessLabLogEvent("warning",
+                    $"live board: {engine}({instance}) {reason}; retaining UCI traffic without assigning a numbered board");
+        }
+
+        private void FinishBoardGame(int number)
+        {
+            if (!_boardGames.Remove(number, out var game)) return;
+            foreach (var instance in _engineBoardGames.Where(pair => ReferenceEquals(pair.Value, game)).Select(pair => pair.Key).ToArray())
+                _engineBoardGames.Remove(instance);
+        }
+
         private IEnumerable<ChessLabEvent> Stderr(string text)
         {
             yield return new ChessLabTerminalEvent(ChessLabStream.Stderr, text);
@@ -563,7 +667,7 @@ public static partial class CutechessRunner
                 string engine = traffic.Groups[3].Value;
                 int engineIndex = int.Parse(traffic.Groups[4].Value, CultureInfo.InvariantCulture);
                 string payload = traffic.Groups[5].Value;
-                yield return new ChessLabTerminalEvent(ChessLabStream.Uci, payload, engine, direction);
+                yield return new ChessLabTerminalEvent(ChessLabStream.Uci, payload, engine, direction, engineIndex);
 
                 if (direction == ChessLabDirection.Recv
                     && payload.StartsWith("id name ", StringComparison.OrdinalIgnoreCase))
@@ -598,12 +702,16 @@ public static partial class CutechessRunner
                     }
                 }
 
-                if (direction == ChessLabDirection.Send && payload.StartsWith("position ", StringComparison.Ordinal))
+                if (direction == ChessLabDirection.Send && payload == "ucinewgame")
+                {
+                    foreach (var evt in BeginEngineBoardSession(engine, engineIndex)) yield return evt;
+                }
+                else if (direction == ChessLabDirection.Send && payload.StartsWith("position ", StringComparison.Ordinal))
                 {
                     // The "position" line cutechess sends before every "go" carries the full move
                     // list of the game so far — replaying it (instead of per-engine bestmove lines)
                     // makes the live board robust to ordering and to which engine is about to move.
-                    foreach (var evt in _tracker.ApplyPositionLine(payload["position ".Length..]))
+                    foreach (var evt in TrackPosition(engine, engineIndex, payload["position ".Length..]))
                         yield return evt;
                 }
                 else if (direction == ChessLabDirection.Recv && !_eloRangeChecked && _requestedElo is { } want)
@@ -633,7 +741,7 @@ public static partial class CutechessRunner
                 _total = int.Parse(started.Groups[2].Value, CultureInfo.InvariantCulture);
                 string white = started.Groups[3].Value;
                 string black = started.Groups[4].Value;
-                _tracker.Reset(index, white, black);
+                _boardGames[index] = new GameBoardTracking(index, white, black);
                 _startedGames[index] = (white, black);
 
                 if (_requirePairedSchedule)
@@ -657,6 +765,8 @@ public static partial class CutechessRunner
 
             var finished = GameEndRegex().Match(text);
             if (finished.Success)
+            {
+                FinishBoardGame(int.Parse(finished.Groups[1].Value, CultureInfo.InvariantCulture));
                 yield return new ChessLabGameEvent(
                     int.Parse(finished.Groups[1].Value, CultureInfo.InvariantCulture),
                     finished.Groups[2].Value,
@@ -664,6 +774,7 @@ public static partial class CutechessRunner
                     finished.Groups[5].Success && finished.Groups[5].Value.Length > 0
                         ? $"{finished.Groups[4].Value} ({finished.Groups[5].Value})"
                         : finished.Groups[4].Value);
+            }
 
             var score = ScoreRegex().Match(text);
             if (score.Success)
@@ -692,7 +803,8 @@ public static partial class CutechessRunner
     private sealed class LiveBoardTracker
     {
         private Board _board = Board.FromFen(ChessModality.StartFen);
-        private int _plyCount;
+        private readonly List<string> _appliedMoves = new();
+        private string? _baseFen;
         private int _game;
         private string? _white, _black;
 
@@ -701,7 +813,8 @@ public static partial class CutechessRunner
             _game = game;
             _white = white;
             _black = black;
-            _plyCount = 0;
+            _appliedMoves.Clear();
+            _baseFen = null;
             _board = Board.FromFen(ChessModality.StartFen);
         }
 
@@ -712,23 +825,29 @@ public static partial class CutechessRunner
             int movesIdx = Array.IndexOf(tok, "moves");
             var moves = movesIdx >= 0 ? tok[(movesIdx + 1)..] : [];
 
-            if (moves.Length < _plyCount)
+            string baseFen;
+            if (tok is ["startpos", ..]) baseFen = ChessModality.StartFen;
+            else if (tok is ["fen", ..] && tok.Length >= 7) baseFen = string.Join(' ', tok[1..7]);
+            else return [];
+
+            if (_baseFen != baseFen || moves.Length < _appliedMoves.Count
+                || !_appliedMoves.SequenceEqual(moves.Take(_appliedMoves.Count), StringComparer.Ordinal))
             {
-                // Shorter list than we've seen: a new game's first position line beat the
-                // "Started game" banner (or a takeback) — restart from scratch.
-                _plyCount = 0;
-                _board = tok is ["fen", ..] && movesIdx >= 7
-                    ? Board.FromFen(string.Join(' ', tok[1..7]))
-                    : Board.FromFen(ChessModality.StartFen);
+                // Each UCI position declares its starting board and exact move prefix.
+                // Initialize from that board even when no moves follow it yet; a changed
+                // base, takeback, or divergent prefix must not reuse the previous board.
+                _board = Board.FromFen(baseFen);
+                _baseFen = baseFen;
+                _appliedMoves.Clear();
             }
 
-            var events = new List<ChessLabBoardEvent>(Math.Max(0, moves.Length - _plyCount));
-            for (int i = _plyCount; i < moves.Length; i++)
+            var events = new List<ChessLabBoardEvent>(Math.Max(0, moves.Length - _appliedMoves.Count));
+            for (int i = _appliedMoves.Count; i < moves.Length; i++)
             {
                 if (!TryApplyUci(_board, moves[i])) break;
+                _appliedMoves.Add(moves[i]);
                 events.Add(new ChessLabBoardEvent(_game, i + 1, moves[i], _board.ToFen(), _white, _black));
             }
-            _plyCount = moves.Length;
             return events;
         }
 

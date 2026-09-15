@@ -24,6 +24,16 @@ public sealed class ChessLabTerminalTests
     }
 
     [Fact]
+    public void EngineInstanceSurvivesScrollbackAndDownloadedFormatting()
+    {
+        var terminal = new ChessLabTerminal();
+        terminal.Append(ChessLabStream.Uci, "position startpos", "Stockfish", ChessLabDirection.Send, engineInstance: 3);
+        var line = Assert.Single(terminal.Snapshot());
+        Assert.Equal(3, line.EngineInstance);
+        Assert.Contains("[uci/Stockfish(3) >] position startpos", ChessLabTerminal.Format(line));
+    }
+
+    [Fact]
     public void Snapshot_AfterSeq_ReturnsOnlyNewerLines()
     {
         var terminal = new ChessLabTerminal(capacity: 10);
