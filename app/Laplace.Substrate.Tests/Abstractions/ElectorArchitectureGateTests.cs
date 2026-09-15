@@ -213,8 +213,17 @@ public sealed class ElectorArchitectureGateTests
         Assert.Contains("!output_relations", native);
         Assert.Contains("ArrayGetNItems(ARR_NDIM(output_relations), ARR_DIMS(output_relations)) == 0", native);
         Assert.Contains("forward_prompt(FunctionCallInfo fcinfo, bool trace)", native);
-        Assert.Contains("laplace_prompt_intent_compile(input, CurrentMemoryContext)", native);
-        Assert.Matches(@"walk_continuations\(\s*walk_call,\s*input,\s*hops,\s*trace,\s*intent\.relation_count\s*>\s*0\s*\?\s*&intent\s*:\s*NULL\s*\)", native);
+        var promptEntry = native[native.IndexOf(
+            "forward_prompt(FunctionCallInfo fcinfo, bool trace)", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("laplace_prompt_intent_compile(", promptEntry);
+        Assert.Contains("laplace_prompt_intent_compile(&coupled_intent, invocation_context, fanout)", native);
+        Assert.Contains("laplace_task_shape_compile(&coupled_intent, fanout)", native);
+        var queryOffset = native.IndexOf("query_state = laplace_query_state_create(", StringComparison.Ordinal);
+        var coupleOffset = native.IndexOf("laplace_prompt_intent_couple(", StringComparison.Ordinal);
+        var compileOffset = native.IndexOf("laplace_prompt_intent_compile(", StringComparison.Ordinal);
+        Assert.True(queryOffset >= 0 && queryOffset < coupleOffset && coupleOffset < compileOffset,
+            "Operational interpretation must consume the coupled substrate response after query creation.");
+        Assert.Matches(@"walk_continuations\(\s*walk_call,\s*input,\s*hops,\s*trace,\s*NULL,\s*invocation_context\s*\)", native);
         Assert.Contains("return forward_prompt(fcinfo, false);", native);
         Assert.Contains("return forward_prompt(fcinfo, true);", native);
         Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);

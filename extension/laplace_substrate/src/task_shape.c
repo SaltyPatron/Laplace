@@ -258,7 +258,7 @@ shape_read_entity_types(ShapeRead *read)
         Oid types[1] = {BYTEAARRAYOID};
         const char *sql = laplace_sql_query_text("generation.task_shape_entity_types");
         if (!sql) elog(ERROR, "task shape: typed input query is absent from native catalog");
-        plan = SPI_prepare(sql, 1, types);
+        plan = SPI_prepare_cursor(sql, 1, types, CURSOR_OPT_PARALLEL_OK);
         if (!plan || SPI_keepplan(plan) != 0)
             elog(ERROR, "task shape: failed to prepare typed input set read");
     }
