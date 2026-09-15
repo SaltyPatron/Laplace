@@ -22,6 +22,18 @@ public sealed class ChessSyzygyPackageInventoryTests
     }
 
     [Fact]
+    public void IndependentRootsPreserveRepeatedPhysicalPackageLabels()
+    {
+        string first = Path.Combine(Path.GetTempPath(), "syzygy-first");
+        string second = Path.Combine(Path.GetTempPath(), "syzygy-second");
+        string[] paths = [Path.Combine(first, "KQvK.rtbw"), Path.Combine(second, "KQvK.rtbw")];
+        var scheduled = ChessSyzygyDecomposer.SchedulePackages(paths,
+            string.Join(Path.PathSeparator, first, second));
+        Assert.Equal(paths.Order(StringComparer.Ordinal), scheduled.Select(static entry => entry.Path));
+        Assert.Equal(paths.Order(StringComparer.Ordinal), scheduled.Select(static entry => entry.Label));
+    }
+
+    [Fact]
     public void SchedulePackages_KeepsWdlDtzAndLargerMaterials_AsIndependentFiles()
     {
         string[] paths =

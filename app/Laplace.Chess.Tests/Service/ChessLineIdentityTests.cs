@@ -85,6 +85,41 @@ public sealed class ChessLineIdentityTests
         Assert.Equal(ChessCompose.LineId(parsed.PositionIds[0], parsed.MoveIds), parsed.LineId);
     }
 
+    [Fact]
+    public void LinePlacement_PreservesStartAndMovesAtTheirEuclideanCentroid()
+    {
+        static ChessNode Node(string key, double[] coordinate)
+        {
+            var id = Hash128.OfCanonical($"line-placement/{key}");
+            return new ChessNode(id, coordinate, Hilbert128.Encode(coordinate), [],
+                PhysicalityId.Compute(id, PhysicalityType.Content), 0, ChessCompose.PositionTier);
+        }
+        var start = Node("start", [1, 0, 0, 0]);
+        var moves = new[] { Node("move-a", [0, 1, 0, 0]), Node("move-b", [0, 0, 1, 0]) };
+        var expectedIds = new[] { start.Id, moves[0].Id, moves[1].Id };
+        var lineId = ChessCompose.LineId(start.Id, moves.Select(move => move.Id).ToArray());
+        var builder = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/line-placement");
+
+        ChessGraph.AppendLineTrajectory(builder, lineId, start, moves,
+            ChessVocabulary.PgnSourceId, IntentStage.PgEpochUnixUs);
+
+        var physicality = Assert.Single(builder.Build().Physicalities);
+        Assert.Equal(PhysicalityType.Content, physicality.Type);
+        Assert.Equal(PhysicalityId.Compute(lineId, PhysicalityType.Content), physicality.Id);
+        Assert.Equal(expectedIds, Trajectory.Constituents(physicality.TrajectoryXyzm!));
+        Assert.Equal(lineId, Trajectory.ContentIdentity(physicality.TrajectoryXyzm!, out int count));
+        Assert.Equal(3, count);
+        Assert.Equal(count, physicality.NConstituents);
+        double[] expected = [1d / 3, 1d / 3, 1d / 3, 0];
+        var observed = new[] { physicality.CoordX, physicality.CoordY,
+            physicality.CoordZ, physicality.CoordM };
+        for (int axis = 0; axis < 4; axis++) Assert.Equal(expected[axis], observed[axis], 12);
+        Assert.Equal(Hilbert128.Encode(expected), physicality.HilbertIndex);
+        // A spherical mean would land on the boundary and fail this interior
+        // centroid check even while the content identity and trajectory passed.
+        Assert.True(observed.Sum(component => component * component) < 1);
+    }
+
     // Cross-lane collision, the book path: a prose line replayed through TryReplayLine
     // must land on the same line entity a PGN playing of those moves mints.
     [Fact]

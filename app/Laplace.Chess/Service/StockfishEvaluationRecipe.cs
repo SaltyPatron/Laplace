@@ -20,8 +20,8 @@ public sealed record StockfishEvaluationOptions
 
     public static StockfishEvaluationOptions FromEnvironment(int depth, long nodes)
     {
-        static string? Read(string suffix) => LaplaceInstall.TryReadConfig(
-            "LAPLACE_STOCKFISH_EVAL_" + suffix, "chess-lab.env");
+        static string? Read(string suffix) => ChessRuntimeConfiguration.Read(
+            "LAPLACE_STOCKFISH_EVAL_" + suffix);
         static int ReadInt(string suffix, int fallback)
         {
             var value = Read(suffix);

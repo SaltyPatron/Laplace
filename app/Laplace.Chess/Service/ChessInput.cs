@@ -1,6 +1,8 @@
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Globalization;
+using Laplace.Engine.Core.IO;
 
 namespace Laplace.Chess.Service;
 
@@ -26,8 +28,8 @@ namespace Laplace.Chess.Service;
 /// </summary>
 internal static class ChessInput
 {
-    /// <summary>Extensions the PGN lane reads. <c>.zip</c>/<c>.gz</c> are decompressed inline.</summary>
-    internal static readonly string[] PgnExtensions = [".pgn", ".pgn.gz", ".gz", ".zip"];
+    /// <summary>Extensions the PGN lane reads, including streaming Zstandard archives.</summary>
+    internal static readonly string[] PgnExtensions = [".pgn", ".pgn.gz", ".pgn.zst", ".gz", ".zst", ".zip"];
 
     internal static readonly string[] OpeningsExtensions = [".tsv"];
 
@@ -37,23 +39,17 @@ internal static class ChessInput
     internal static readonly string[] SyzygyExtensions = [".rtbw"];
 
     /// <summary>
-    /// Package root for <c>chess-syzygy</c>: explicit path with nested tables, else
+    /// Package roots for <c>chess-syzygy</c>: explicit native path list with nested tables, else
     /// <see cref="ChessLabPaths.SyzygyDir"/>. Null when nothing is resolvable (documented no-op).
     /// </summary>
     internal static string? ResolveSyzygyPackagingDir(string? ecosystemPath)
     {
         if (!string.IsNullOrWhiteSpace(ecosystemPath))
-        {
-            string full = Path.GetFullPath(ecosystemPath);
-            if (!Directory.Exists(full)
-                || !Directory.EnumerateFiles(full, "*.rtbw", SearchOption.AllDirectories).Any())
-                throw new ChessInputException(
-                    $"chess-syzygy: selected package root '{full}' contains no .rtbw tables. "
-                    + "Use the installed Syzygy root containing its WDL/DTZ directories.");
-            return full;
-        }
+            return ChessSyzygyPaths.Resolve(ecosystemPath);
 
         var probe = ChessLabPaths.SyzygyDir;
+        if (!probe.Found && probe.Source == "config")
+            return ChessSyzygyPaths.Resolve(probe.Path!); // preserve the selected dependency error
         return probe.Found ? probe.Path : null;
     }
 
@@ -62,12 +58,7 @@ internal static class ChessInput
     /// directories. Include every package directory, including separate DTZ-only folders.
     /// </summary>
     internal static string SyzygyProbePath(string packageRoot)
-        => string.Join(Path.PathSeparator,
-            Resolve(packageRoot, SearchOption.AllDirectories,
-                    ChessSyzygyDecomposer.PackageExtensions, "chess-syzygy")
-                .Select(static p => Path.GetDirectoryName(p)!)
-                .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
-                .OrderBy(static p => p, StringComparer.Ordinal));
+        => ChessSyzygyPaths.ProbePath(packageRoot);
 
     /// <summary>
     /// Archive formats a chess corpus ships in that the BCL cannot open in-process.
@@ -78,7 +69,6 @@ internal static class ChessInput
     [
         (".7z",  "7z x '{0}' -o'{1}'"),
         (".rar", "unrar x '{0}' '{1}'"),
-        (".zst", "zstd -d '{0}'"),
         (".bz2", "bunzip2 -k '{0}'"),
         (".xz",  "unxz -k '{0}'"),
     ];
@@ -189,7 +179,7 @@ internal static class ChessInput
 
     /// <summary>
     /// Every readable text member of one input path: the file itself, the gunzipped
-    /// stream for <c>.gz</c>, or one reader per entry for <c>.zip</c>. TWIC ships each
+    /// stream for <c>.gz</c>/<c>.zst</c>, or one reader per entry for <c>.zip</c>. TWIC ships each
     /// weekly issue as <c>twicNNNN.zip</c> holding one <c>.pgn</c>; that used to be
     /// invisible to a <c>*.pgn</c> glob even though the BCL opens it in-process.
     /// </summary>
@@ -220,14 +210,29 @@ internal static class ChessInput
             yield break;
         }
 
+        if (name.EndsWith(".zst", StringComparison.OrdinalIgnoreCase))
+        {
+            int windowLogMax = ZstdDecompressionStream.DefaultWindowLogMax;
+            if (ChessRuntimeConfiguration.Read("LAPLACE_ZSTD_WINDOW_LOG_MAX") is { } configured
+                && (!int.TryParse(configured, NumberStyles.None, CultureInfo.InvariantCulture, out windowLogMax)
+                    || windowLogMax is < 10 or > 31 || (IntPtr.Size == 4 && windowLogMax > 30)))
+                throw new ChessInputException("LAPLACE_ZSTD_WINDOW_LOG_MAX must be 10 through 31 (30 on 32-bit hosts).");
+            using var fs = File.OpenRead(path);
+            using var zstd = new ZstdDecompressionStream(fs,
+                ChessRuntimeConfiguration.Read("LAPLACE_ZSTD_LIBRARY"), windowLogMax);
+            using var reader = new StreamReader(zstd, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            yield return (name, reader);
+            yield break;
+        }
+
         using var plain = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         yield return (name, plain);
     }
 
     /// <summary>
-    /// Uncompressed byte length, used by the inventory estimators. A compressed member's
-    /// real size is what the progress denominator needs; <c>FileInfo.Length</c> on a
-    /// <c>.zip</c> is the compressed size and under-counts the corpus by ~4x.
+    /// ZIP's declared uncompressed byte length; otherwise the physical file length.
+    /// Streaming gzip/Zstandard frames need not declare the full decoded length.
+    /// Inventory uses their compressed bytes for its explicitly approximate game count.
     /// </summary>
     internal static long UncompressedLength(string path)
     {
@@ -249,7 +254,8 @@ internal static class ChessInput
     {
         string name = Path.GetFileName(path);
         return name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-            || name.EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
+            || name.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".zst", StringComparison.OrdinalIgnoreCase);
     }
 }
 

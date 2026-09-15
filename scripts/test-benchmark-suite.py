@@ -124,7 +124,8 @@ class BenchmarkSuiteTests(unittest.TestCase):
         commands = "\n".join(step.get("run", "") for step in job["steps"] if isinstance(step, dict))
         self.assertIn("python3 scripts/benchmark_suite.py validate", commands)
         self.assertIn("python3 scripts/benchmark_scale_plan.py", commands)
-        self.assertIn("python3 scripts/benchmark_suite.py \"${args[@]}\"", commands)
+        self.assertIn("runner=(python3 scripts/benchmark_suite.py)", commands)
+        self.assertIn('"${runner[@]}" "${args[@]}"', commands)
         self.assertNotIn("python3 scripts/bench-compose.py", commands)
         self.assertNotIn("python3 scripts/bench-compose-scale.py", commands)
         self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", commands)
@@ -308,6 +309,38 @@ WORK_SHAPE tier_tree_nodes=8 nodes_per_codepoint=1.000000000000 nodes_per_tok4=4
         self.assertIn("independent-stream", text.lower())
 
 
+class ChessRuntimeEnvironmentTests(unittest.TestCase):
+    def test_installed_runtime_reaches_child_without_artifact_or_log_export(self):
+        import contextlib
+        import io
+        import os
+        wrapper = load_module("chess_runtime_env", "scripts/chess-runtime-env.py")
+        with tempfile.TemporaryDirectory() as folder:
+            prefix = Path(folder)
+            (prefix / "app").mkdir()
+            (prefix / "app/laplace-api.env").write_text(
+                'LAPLACE_DB="Host=installed;Password=fixture-password;Database=corpus"\n'
+                'LAPLACE_PERFCACHE_BIN=/configured/native/perfcache.bin\n'
+                'LAPLACE_UCI_SUBSTRATE=substrate\n'
+                'LD_LIBRARY_PATH=/configured/native/lib\n'
+                'LAPLACE_OPERATOR_TOKEN=must-not-forward\n')
+            output = io.StringIO()
+            with mock.patch.dict(os.environ, {"PATH": "/usr/bin", "LAPLACE_PERFCACHE_BIN": "/explicit/cache.bin"}, clear=True), \
+                 mock.patch.object(wrapper.os, "execvpe") as execute, \
+                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                wrapper.main(["--prefix", str(prefix), "--", "python3", "check.py", "argument with spaces"])
+            executable, command, environment = execute.call_args.args
+            self.assertEqual("python3", executable)
+            self.assertEqual(["python3", "check.py", "argument with spaces"], command)
+            self.assertEqual("Host=installed;Password=fixture-password;Database=corpus", environment["LAPLACE_DB"])
+            self.assertEqual("/explicit/cache.bin", environment["LAPLACE_PERFCACHE_BIN"])
+            self.assertEqual("/configured/native/lib", environment["LD_LIBRARY_PATH"])
+            self.assertEqual("substrate", environment["LAPLACE_UCI_SUBSTRATE"])
+            self.assertNotIn("LAPLACE_OPERATOR_TOKEN", environment)
+            self.assertEqual("", output.getvalue())
+            self.assertEqual({"app"}, {item.name for item in prefix.iterdir()})
+
+
 class ChessReadinessEvidenceTests(unittest.TestCase):
     def run_collector(self, *, required_failure=False, doctor_timeout=False, status=None, http_error=None):
         import contextlib
@@ -337,7 +370,7 @@ class ChessReadinessEvidenceTests(unittest.TestCase):
                    "LAPLACE_BENCH_CHESS_STOCKFISH": "/shared source/src/stockfish",
                    "LAPLACE_BENCH_CHESS_CUTECHESS": "/configured build/cutechess-cli",
                    "LAPLACE_BENCH_CHESS_UCI": "/configured prefix/app/laplace-uci",
-                   "LAPLACE_CHESS_STATUS_BASE": "http://127.0.0.1:5187"}
+                   "LAPLACE_LICHESS_STATUS_BASE": "http://127.0.0.1:5189"}
             with mock.patch.dict(os.environ, env, clear=True), \
                  mock.patch("subprocess.run", return_value=result) as process, \
                  mock.patch("urllib.request.build_opener", return_value=opener), \
@@ -355,6 +388,7 @@ class ChessReadinessEvidenceTests(unittest.TestCase):
         command = process.call_args.args[0]
         self.assertIn("--check-latest", command)
         self.assertIn("240s", command)
+        self.assertIn("scripts/chess-runtime-env.py", command)
         self.assertEqual("/configured prefix/app/laplace-uci", command[command.index("--uci") + 1])
         self.assertEqual("/configured build/cutechess-cli", process.call_args.kwargs["env"]["LAPLACE_CUTECHESS"])
 
@@ -384,7 +418,7 @@ class ChessReadinessEvidenceTests(unittest.TestCase):
         self.assertEqual("not-ready", online["status"])
         self.assertFalse(online["account"]["botAccount"])
         self.assertTrue(online["service"]["error_present"])
-        opener.open.assert_called_once_with("http://127.0.0.1:5187/chess/lichess/status", timeout=8)
+        opener.open.assert_called_once_with("http://127.0.0.1:5189/status", timeout=8)
         self.assertIn(mock.call(10), alarm.call_args_list)
         self.assertEqual(mock.call(0), alarm.call_args_list[-1])
 

@@ -233,7 +233,8 @@ jobs:
                       digest.update(chunk)
               identities[name] = {'configured_path': str(configured), 'path': str(binary), 'sha256': digest.hexdigest()}
               exports['LAPLACE_BENCH_CHESS_' + name.upper()] = str(binary)
-          uci = Path(os.environ.get('LAPLACE_UCI', str(prefix / 'app/laplace-uci')))
+          uci_config = doctor.configuration(prefix, keys={'LAPLACE_UCI'})
+          uci = Path(uci_config.get('LAPLACE_UCI', str(prefix / 'app/laplace-uci')))
           if uci.is_file() and os.access(uci, os.X_OK):
               exports['LAPLACE_BENCH_CHESS_UCI'] = str(uci.resolve())
           reserve = 0 if os.environ['ALLOW_SATURATION'] == 'true' else int(os.environ['RESERVE_LOGICAL_CPUS'])
@@ -259,7 +260,7 @@ jobs:
         timeout-minutes: 5
         shell: bash
         env:
-          LAPLACE_CHESS_STATUS_BASE: ${{ vars.LAPLACE_API_BASE || 'http://127.0.0.1:5187' }}
+          LAPLACE_LICHESS_STATUS_BASE: ${{ vars.LAPLACE_LICHESS_STATUS_BASE || 'http://127.0.0.1:5189' }}
         run: |
           set -euo pipefail
           umask 0002
@@ -278,6 +279,7 @@ jobs:
               if selected:
                   env['LAPLACE_' + name] = selected
           command = ['timeout', '--signal=TERM', '--kill-after=5s', '240s', sys.executable,
+                     'scripts/chess-runtime-env.py', '--prefix', str(prefix), '--', sys.executable,
                      'scripts/check-chess-dependencies.py', '--prefix', str(prefix), '--uci', uci, '--check-latest']
           observed = datetime.datetime.now(datetime.timezone.utc).isoformat()
           execution = {'observed_utc': observed, 'timeout_seconds': 240, 'prefix': str(prefix), 'uci': uci}
@@ -303,6 +305,8 @@ jobs:
 
           # The endpoint returns tokenPreview, logs and free-text errors. Keep
           # only typed capability fields; never retain the raw response or auth.
+          # Read the same loopback service endpoint used by LichessStatusClient;
+          # the public /chess route separately requires a tenant API key.
           status = {'observed_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'required': False, 'status': 'unverified',
                     'verification': 'read-only service snapshot; no account upgrade, bot start or game creation'}
           def deadline(signum, frame):
@@ -311,10 +315,10 @@ jobs:
               def redirect_request(self, request, response, code, message, headers, newurl):
                   return None
           try:
-              base = urllib.parse.urlsplit(os.environ['LAPLACE_CHESS_STATUS_BASE'])
+              base = urllib.parse.urlsplit(os.environ['LAPLACE_LICHESS_STATUS_BASE'])
               if base.scheme not in ('http', 'https') or not base.netloc or base.username or base.password or base.query or base.fragment:
                   raise ValueError('invalid status base')
-              url = urllib.parse.urlunsplit((base.scheme, base.netloc, base.path.rstrip('/') + '/chess/lichess/status', '', ''))
+              url = urllib.parse.urlunsplit((base.scheme, base.netloc, base.path.rstrip('/') + '/status', '', ''))
               status['endpoint'] = url
               signal.signal(signal.SIGALRM, deadline)
               signal.alarm(10)
@@ -470,7 +474,9 @@ jobs:
             --moby-path "$MOBY_PATH"
             --database "$PGDATABASE"
           )
+          runner=(python3 scripts/benchmark_suite.py)
           if [[ "$SUITE" == chess ]]; then
+            runner=(python3 scripts/chess-runtime-env.py --prefix "$LAPLACE_INSTALL_PREFIX" -- "${runner[@]}")
             args+=(
               --chess-stockfish "$LAPLACE_BENCH_CHESS_STOCKFISH"
               --chess-cutechess "$LAPLACE_BENCH_CHESS_CUTECHESS"
@@ -488,7 +494,7 @@ jobs:
           # Laplace and Laplace-Refactor share this measured host. Keep their
           # builds/deployments/calibrations out of each other's timing interval.
           flock --exclusive --close /build/laplace/work/host-resource.lock \
-            python3 scripts/benchmark_suite.py "${args[@]}" 2>&1 \
+            "${runner[@]}" "${args[@]}" 2>&1 \
             | tee "$LAPLACE_BENCH_RECEIPT/suite.log"
 
       - name: Record post-run accelerator state

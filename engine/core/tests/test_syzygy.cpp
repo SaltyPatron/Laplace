@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <chrono>
+#include <filesystem>
 #include <string>
 
 #include "laplace/core/syzygy.h"
@@ -87,6 +89,46 @@ TEST(LaplaceCoreSyzygy, EmptyDirYieldsZeroLargest) {
     EXPECT_EQ(laplace_syzygy_init("."), 0);
     EXPECT_EQ(laplace_syzygy_largest(), 0);
     laplace_syzygy_free();
+}
+
+TEST(LaplaceCoreSyzygy, IndependentWdlAndDtzDirectoriesProbeOneTableSet) {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    struct ScopedTables {
+        std::filesystem::path root;
+        ~ScopedTables() {
+            laplace_syzygy_free();
+            std::error_code ignored;
+            std::filesystem::remove_all(root, ignored);
+        }
+    } tables{std::filesystem::temp_directory_path() /
+             ("laplace-syzygy-paths-" + std::to_string(unique))};
+    const auto wdl_dir = tables.root / "wdl" / "3-4-5";
+    const auto dtz_dir = tables.root / "dtz" / "3-4-5";
+    ASSERT_TRUE(std::filesystem::create_directories(wdl_dir));
+    ASSERT_TRUE(std::filesystem::create_directories(dtz_dir));
+    for (const char* material : {"KQvK", "KRvK"}) {
+        for (const char* extension : {".rtbw", ".rtbz"}) {
+            const std::string name = std::string(material) + extension;
+            const auto& destination = std::strcmp(extension, ".rtbw") == 0 ? wdl_dir : dtz_dir;
+            ASSERT_TRUE(std::filesystem::copy_file(
+                std::filesystem::path(LAPLACE_SYZYGY_FIXTURE_DIR) / name, destination / name));
+        }
+    }
+#ifdef _WIN32
+    const std::string selected = wdl_dir.string() + ";" + dtz_dir.string();
+#else
+    const std::string selected = wdl_dir.string() + ":" + dtz_dir.string();
+#endif
+    ASSERT_EQ(laplace_syzygy_init(selected.c_str()), 3);
+    for (const char* fen : {"4k3/8/8/8/8/8/8/3QK3 w - - 0 1",
+                            "4k3/8/8/8/8/8/8/R3K3 w - - 0 1"}) {
+        const auto position = from_fen(fen);
+        EXPECT_EQ(probe_wdl(position), LAPLACE_SYZYGY_WIN);
+        int wdl = -1, dtz = -1;
+        ASSERT_EQ(probe_root(position, &wdl, &dtz), 0);
+        EXPECT_EQ(wdl, LAPLACE_SYZYGY_WIN);
+        EXPECT_GT(dtz, 0);
+    }
 }
 
 TEST_F(LaplaceCoreSyzygyFixture, KQvK_WhiteToMoveWins) {

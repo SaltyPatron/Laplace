@@ -20,6 +20,8 @@ import types
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -365,8 +367,21 @@ class EntryPointTests(unittest.TestCase):
         policy = (ROOT / "scripts/ci-policy.sh").read_text()
         registry = json.loads((ROOT / "scripts/test-profiles.json").read_text())
 
-        self.assertIn('run: bash scripts/product-ci.sh reconcile', workflow)
-        self.assertIn('run: bash scripts/product-ci.sh "$LAPLACE_STAGE"', workflow)
+        jobs = yaml.load(workflow, Loader=yaml.BaseLoader)["jobs"]
+        steps = jobs["product"]["steps"]
+        commands = {
+            step["name"]: step.get("run", "")
+            for step in steps if "name" in step
+        }
+        for step_name, invocation in (
+            ("Fast source/tooling proof and installed-product reconciliation", "bash scripts/product-ci.sh reconcile"),
+            ("Run full product lifecycle", 'bash scripts/product-ci.sh "$LAPLACE_STAGE"'),
+        ):
+            command = commands[step_name]
+            self.assertIn("set -euo pipefail", command)
+            # The host lock is shared across repositories; --close prevents
+            # service children from retaining it after activation finishes.
+            self.assertRegex(command, r"flock --exclusive --close /build/laplace/work/host-resource\.lock\s+\\\s+" + re.escape(invocation))
         self.assertIn("test-profile-registry.py run --profile policy", policy)
         self.assertNotIn("python3 scripts/test-managed-host.py", policy)
         managed_host = [suite for suite in registry["suites"] if suite["id"] == "policy-managed-host"]

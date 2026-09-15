@@ -38,6 +38,9 @@ if ($LASTEXITCODE -ne 0) { throw 'MSVC environment setup failed' }
 foreach ($line in $vcEnvironment) {
     if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') }
 }
+$zstdSource = if ($env:LAPLACE_ZSTD_SOURCE) { $env:LAPLACE_ZSTD_SOURCE } else { Join-Path $external 'zstd' }
+$zstdBuild = if ($env:LAPLACE_ZSTD_BUILD) { $env:LAPLACE_ZSTD_BUILD } else { Join-Path $env:LAPLACE_BUILD_ROOT 'build-zstd' }
+Invoke-Checked python @((Join-Path $repo 'scripts\install-zstd.py'), '--source-dir', $zstdSource, '--build-dir', $zstdBuild)
 Invoke-Checked cmake @('--fresh', '-S', $source, '-B', $build, '-G', 'Ninja',
     '-DCMAKE_BUILD_TYPE=Release', '-DWITH_TESTS=OFF', '-DCMAKE_C_COMPILER=cl',
     '-DCMAKE_CXX_COMPILER=cl', "-DCMAKE_PREFIX_PATH=$qt")

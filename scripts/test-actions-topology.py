@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import copy
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 import yaml
 
@@ -129,6 +135,120 @@ class ActionsAuthorityTests(unittest.TestCase):
                     continue
                 use = line.split("uses:", 1)[1].strip()
                 self.assertRegex(use, r"^[^@\s]+@[0-9a-f]{40}$", path.name)
+
+
+class ActionsAuditFailurePropagationTests(unittest.TestCase):
+    """Execute the real audit against mutated workflows, never a parallel model."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.originals = {path.name: load(path) for path in WORKFLOWS.glob("*.yml")}
+        cls.scratch = tempfile.TemporaryDirectory(prefix="actions-audit-", dir=os.environ.get("TMPDIR", "/build/laplace/work"))
+        cls.root = Path(cls.scratch.name)
+        (cls.root / ".github/workflows").mkdir(parents=True)
+        (cls.root / "scripts").mkdir()
+        for name in ("actions-audit.py", "product-ci.sh", "pr-proof.sh", "bootstrap-laplace-runner.sh", "test-profile-registry.py", "test-profiles.json", "test-parallel.sh", "ci-policy.sh"):
+            shutil.copy2(ROOT / "scripts" / name, cls.root / "scripts" / name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.scratch.cleanup()
+
+    def check_audit(self, mutate=None, diagnostic=None):
+        workflows = copy.deepcopy(self.originals)
+        if mutate:
+            mutate(workflows)
+        for name, workflow in workflows.items():
+            (self.root / ".github/workflows" / name).write_text(yaml.safe_dump(workflow, sort_keys=False), encoding="utf-8")
+        result = subprocess.run([sys.executable, str(self.root / "scripts/actions-audit.py")], capture_output=True, text=True, timeout=20)
+        if diagnostic:
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn(diagnostic, result.stderr)
+        else:
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("ACTIONS_AUDIT_OK", result.stdout)
+
+    @staticmethod
+    def step(workflows, filename, key, value):
+        job = next(iter(workflows[filename]["jobs"].values()))
+        return next(step for step in job["steps"] if step.get(key) == value)
+
+    def test_deferred_readiness_and_optional_baseline_are_accepted(self):
+        self.check_audit()
+
+    def test_failed_proof_cannot_be_hidden_at_step_or_job(self):
+        mutations = [
+            lambda ws: self.step(ws, "pr-validation.yml", "id", "proof").update({"continue-on-error": "true"}),
+            lambda ws: ws["pr-validation.yml"]["jobs"]["prove"].update({"continue-on-error": "${{ true }}"}),
+            lambda ws: self.step(ws, "laplace.yml", "name", "Run full product lifecycle").update({"continue-on-error": "True"}),
+            lambda ws: self.step(ws, "benchmark-evidence.yml", "name", "Upload complete benchmark evidence").update({"continue-on-error": "true"}),
+        ]
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index):
+                self.check_audit(mutation, "hidden red")
+
+    def test_readiness_uses_raw_outcome_and_is_not_swallowed(self):
+        def set_gate(ws, **changes):
+            self.step(ws, "benchmark-evidence.yml", "name", "Require installed chess tools and verified release checks").update(changes)
+        mutations = [
+            (lambda ws: set_gate(ws, **{"if": "success()"}), "raw failed outcome"),
+            (lambda ws: set_gate(ws, **{"if": "${{ !cancelled() && inputs.suite == 'chess' && steps.chess_readiness.conclusion == 'failure' }}"}), "raw failed outcome"),
+            (lambda ws: set_gate(ws, run="echo failed\nexit 0\n"), "fail unconditionally"),
+            (lambda ws: set_gate(ws, **{"continue-on-error": "true"}), "hidden red"),
+            (lambda ws: self.step(ws, "benchmark-evidence.yml", "id", "chess_readiness").update({"if": "false"}), "every attempted chess path"),
+        ]
+        for index, (mutation, diagnostic) in enumerate(mutations):
+            with self.subTest(index=index):
+                self.check_audit(mutation, diagnostic)
+
+    def test_readiness_gate_must_follow_success_independent_upload(self):
+        def move_gate(ws):
+            steps = ws["benchmark-evidence.yml"]["jobs"]["benchmark"]["steps"]
+            gate = steps.pop()
+            steps.insert(0, gate)
+        self.check_audit(move_gate, "enforced after evidence upload")
+        self.check_audit(lambda ws: self.step(ws, "benchmark-evidence.yml", "name", "Upload complete benchmark evidence").update({"if": "success()"}), "upload on failure")
+        self.check_audit(lambda ws: self.step(ws, "benchmark-evidence.yml", "name", "Upload complete benchmark evidence")["with"].update({"if-no-files-found": "warn"}), "missing benchmark evidence must fail")
+
+    def test_baseline_cannot_acquire_or_gate_real_proof(self):
+        def move_proof_into_baseline(ws):
+            self.step(ws, "pr-validation.yml", "id", "baseline_diagnostic")["run"] += "\nbash scripts/pr-proof.sh\n"
+        self.check_audit(move_proof_into_baseline, "authoritative or mutating operation")
+        self.check_audit(lambda ws: self.step(ws, "pr-validation.yml", "id", "proof").update({"if": "steps.baseline_diagnostic.outcome == 'success'"}), "independent of optional baseline")
+        self.check_audit(lambda ws: self.step(ws, "pr-validation.yml", "id", "baseline_diagnostic").update({"if": "always()"}), "limited to full proof scope")
+        self.check_audit(lambda ws: self.step(ws, "pr-validation.yml", "name", "Upload retained baseline before full proof").update({"run": "bash scripts/pr-proof.sh"}), "only retain the attempted diagnostic")
+
+    def test_optional_readiness_cannot_swallow_authoritative_proof(self):
+        def hide_proof(ws):
+            self.step(ws, "benchmark-evidence.yml", "id", "chess_readiness")["run"] += "\nbash scripts/pr-proof.sh\n"
+        self.check_audit(hide_proof, "authoritative or mutating operation")
+
+    def test_reusable_measurement_cannot_gain_a_deployment_job(self):
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"].update({"deploy": {"runs-on": "self-hosted", "timeout-minutes": "30", "steps": [{"run": "bash scripts/pipeline.sh install"}]}}), "only its measurement job")
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["benchmark"]["steps"].insert(0, {"run": "bash scripts/pipeline.sh install"}), "product mutation authority")
+
+    def test_duplicate_optional_step_cannot_mask_another_failure(self):
+        def duplicate(ws):
+            steps = ws["pr-validation.yml"]["jobs"]["prove"]["steps"]
+            steps.append(copy.deepcopy(self.step(ws, "pr-validation.yml", "id", "baseline_diagnostic")))
+        self.check_audit(duplicate, "requires exactly one id=baseline_diagnostic")
+
+    def test_no_extra_product_mutation_job(self):
+        self.check_audit(lambda ws: ws["laplace.yml"]["jobs"].update({"deploy": {"runs-on": "self-hosted", "timeout-minutes": "30", "steps": [{"run": "bash scripts/pipeline.sh install"}]}}), "one product job and its chess measurement")
+        self.check_audit(lambda ws: ws["laplace.yml"]["jobs"]["chess_environment"].update({"steps": [{"run": "bash scripts/pipeline.sh install"}]}), "may only call the bounded reusable workflow")
+
+    def test_measurement_requires_successful_activation_and_exact_source(self):
+        mutations = [
+            (lambda ws: ws["laplace.yml"]["jobs"]["chess_environment"].update({"if": "always()"}), "requires successful product activation"),
+            (lambda ws: ws["laplace.yml"]["jobs"]["chess_environment"].update({"needs": []}), "single product authority"),
+            (lambda ws: ws["laplace.yml"]["jobs"]["chess_environment"]["with"].update({"target_ref": "main"}), "activated source"),
+            (lambda ws: ws["laplace.yml"]["jobs"]["chess_environment"]["with"].update({"suite": "all"}), "activated source"),
+            (lambda ws: ws["laplace.yml"]["jobs"]["product"]["outputs"].update({"chess_benchmark_ready": "true"}), "successful activation gate"),
+            (lambda ws: self.step(ws, "laplace.yml", "id", "chess_benchmark_gate").update({"if": "always()"}), "activation must precede measurement authorization"),
+        ]
+        for index, (mutation, diagnostic) in enumerate(mutations):
+            with self.subTest(index=index):
+                self.check_audit(mutation, diagnostic)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,71 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessLabPathsTests
 {
     [Fact]
+    public void InstalledChessSelectionAndEvaluationSettingsAreSharedByCliAndService()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"chess-config-{Guid.NewGuid():N}");
+        string source = Path.Combine(root, "operator-source");
+        string binary = Path.Combine(source, "src", OperatingSystem.IsWindows() ? "stockfish.exe" : "stockfish");
+        string explicitBinary = Path.Combine(root, "explicit-engine");
+        string[] keys = ["LAPLACE_INSTALL_PREFIX", "LAPLACE_STOCKFISH", "LAPLACE_STOCKFISH_SOURCE",
+            "LAPLACE_EXTERNAL", "LAPLACE_STOCKFISH_EVAL_THREADS", "LAPLACE_STOCKFISH_EVAL_HASH_MB",
+            "LAPLACE_STOCKFISH_EVAL_NUMA_POLICY", "LAPLACE_STOCKFISH_EVAL_PROCESSES",
+            "LAPLACE_STOCKFISH_EVAL_SYZYGY_PATH", "LAPLACE_STOCKFISH_EVAL_FILE",
+            "LAPLACE_STOCKFISH_EVAL_TIMEOUT_SECONDS"];
+        var previous = keys.ToDictionary(static key => key, Environment.GetEnvironmentVariable);
+        try
+        {
+            foreach (var key in keys) Environment.SetEnvironmentVariable(key, null);
+            Environment.SetEnvironmentVariable("LAPLACE_INSTALL_PREFIX", root);
+            Directory.CreateDirectory(Path.GetDirectoryName(binary)!);
+            Directory.CreateDirectory(Path.Combine(root, "app"));
+            Directory.CreateDirectory(Path.Combine(root, "secrets"));
+            File.WriteAllText(binary, "source engine");
+            File.WriteAllText(explicitBinary, "explicit engine");
+            File.WriteAllText(Path.Combine(root, "app", "laplace-api.env"),
+                $"LAPLACE_STOCKFISH_SOURCE=/stale\nLAPLACE_STOCKFISH_SOURCE=\"{source}\"\n"
+                + "LAPLACE_STOCKFISH_EVAL_THREADS=4\nLAPLACE_STOCKFISH_EVAL_NUMA_POLICY=none\n");
+            File.WriteAllText(Path.Combine(root, "secrets", "chess-lab.env"),
+                "LAPLACE_STOCKFISH_SOURCE=/stale-secret\nLAPLACE_STOCKFISH_EVAL_THREADS=8\n"
+                + "LAPLACE_STOCKFISH_EVAL_HASH_MB=64\n");
+
+            // A direct CLI process has no service EnvironmentFile loaded.
+            var cliPath = ChessLabPaths.Stockfish;
+            var cliOptions = StockfishEvaluationOptions.FromEnvironment(12, 1000);
+            Assert.Equal(new ChessLabPaths.Probe(binary, true, "source"), cliPath);
+            Assert.Equal(4, cliOptions.Threads);
+            Assert.Equal(64, cliOptions.HashMb);
+            Assert.Equal("none", cliOptions.NumaPolicy);
+
+            // The API service receives those same installed assignments in its environment.
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH_SOURCE", source);
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH_EVAL_THREADS", "4");
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH_EVAL_NUMA_POLICY", "none");
+            Assert.Equal(cliPath, ChessLabPaths.Stockfish);
+            Assert.Equal(cliOptions, StockfishEvaluationOptions.FromEnvironment(12, 1000));
+
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH", explicitBinary);
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH_EVAL_THREADS", "2");
+            Assert.Equal(new ChessLabPaths.Probe(explicitBinary, true, "config"), ChessLabPaths.Stockfish);
+            Assert.Equal(2, StockfishEvaluationOptions.FromEnvironment(12, 1000).Threads);
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH", null);
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH_SOURCE", null);
+            File.AppendAllText(Path.Combine(root, "app", "laplace-api.env"),
+                $"LAPLACE_STOCKFISH={explicitBinary}\n");
+            Assert.Equal(new ChessLabPaths.Probe(explicitBinary, true, "config"), ChessLabPaths.Stockfish);
+            Environment.SetEnvironmentVariable("LAPLACE_STOCKFISH_SOURCE", source);
+            Assert.Equal(new ChessLabPaths.Probe(binary, true, "source"), ChessLabPaths.Stockfish);
+            File.Delete(binary);
+            Assert.Equal(new ChessLabPaths.Probe(binary, false, "source"), ChessLabPaths.Stockfish);
+        }
+        finally
+        {
+            foreach (var (key, value) in previous) Environment.SetEnvironmentVariable(key, value);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SourceStockfishPrecedesInstalledBuildAndPathButPreservesExplicitBinary()
     {
         string root = Path.Combine(Path.GetTempPath(), $"stockfish-source-{Guid.NewGuid():N}");
@@ -23,6 +88,17 @@ public sealed class ChessLabPathsTests
                     installedCandidate: installed, sourceCandidate: source));
             Assert.Equal(new ChessLabPaths.Probe(explicitPath, true, "config"),
                 ChessLabPaths.ResolveExecutableForTest(explicitPath, _ => installed, ["stockfish"],
+                    installedCandidate: installed, sourceCandidate: source));
+            File.Delete(explicitPath);
+            Assert.Equal(new ChessLabPaths.Probe(explicitPath, false, "config"),
+                ChessLabPaths.ResolveExecutableForTest(explicitPath, _ => installed, ["stockfish"],
+                    installedCandidate: installed, sourceCandidate: source));
+            File.Delete(source);
+            Assert.Equal(new ChessLabPaths.Probe(source, false, "source"),
+                ChessLabPaths.ResolveExecutableForTest(null, _ => installed, ["stockfish"],
+                    installedCandidate: installed, sourceCandidate: source, sourceAuthoritative: true));
+            Assert.Equal(new ChessLabPaths.Probe(installed, true, "install"),
+                ChessLabPaths.ResolveExecutableForTest(null, _ => installed, ["stockfish"],
                     installedCandidate: installed, sourceCandidate: source));
         }
         finally { Directory.Delete(root, recursive: true); }
@@ -42,6 +118,9 @@ public sealed class ChessLabPathsTests
             Assert.False(ChessLabPaths.ResolveSyzygyDirCore(null, root).Found);
             File.WriteAllBytes(Path.Combine(smaller, "KQvK.rtbw"), [0]);
             File.WriteAllBytes(Path.Combine(larger, "KPPvKPP.rtbw"), [0]);
+            Assert.False(ChessLabPaths.ResolveSyzygyDirCore(null, root).Found);
+            File.WriteAllBytes(Path.Combine(smaller, "KQvK.rtbz"), [0]);
+            File.WriteAllBytes(Path.Combine(larger, "KPPvKPP.rtbz"), [0]);
             Assert.Equal(new ChessLabPaths.Probe(packageRoot, true, "data-root"),
                 ChessLabPaths.ResolveSyzygyDirCore(null, root));
             Assert.Equal(new ChessLabPaths.Probe(smaller, true, "config"),

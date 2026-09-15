@@ -5,8 +5,6 @@ namespace Laplace.Chess.Service;
 
 public static class ChessLabPaths
 {
-    private const string ChessLabEnvFile = "chess-lab.env";
-
     private static readonly string[] CutechessPathNames = ["cutechess-cli.exe", "cutechess-cli"];
     private static readonly string[] StockfishPathNames = ["stockfish.exe", "stockfish"];
     private static readonly string[] LaplaceUciPathNames = ["laplace-uci.exe", "laplace-uci"];
@@ -22,7 +20,7 @@ public static class ChessLabPaths
     {
         get
         {
-            var fromConfig = LaplaceInstall.TryReadConfig("LAPLACE_CHESS_LAB_DIR", ChessLabEnvFile);
+            var fromConfig = ChessRuntimeConfiguration.Read("LAPLACE_CHESS_LAB_DIR");
             return !string.IsNullOrWhiteSpace(fromConfig)
                 ? fromConfig.Trim()
                 : Path.Combine(Path.GetTempPath(), "laplace-chess-lab");
@@ -39,9 +37,9 @@ public static class ChessLabPaths
         _ => TryDefaultCutechessCandidate(OperatingSystem.IsWindows() ? "stockfish.exe" : "stockfish"),
         StockfishPathNames,
         installedCandidate: OperatingSystem.IsWindows() ? null : Path.Combine(
-            Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX") is { Length: > 0 } prefix
-                ? prefix : "/opt/laplace", "bin", "stockfish"),
-        sourceCandidate: TryDefaultStockfishSourceCandidate());
+            ChessRuntimeConfiguration.InstallPrefix!, "bin", "stockfish"),
+        sourceCandidate: TryDefaultStockfishSourceCandidate(),
+        sourceAuthoritative: !string.IsNullOrWhiteSpace(ChessRuntimeConfiguration.Read("LAPLACE_STOCKFISH_SOURCE")));
 
     public static Probe LaplaceUci => ResolveLaplaceUci();
 
@@ -57,11 +55,11 @@ public static class ChessLabPaths
 
     private static Probe ResolveSyzygyDir()
     {
-        string root = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT") is { Length: > 0 } r
+        string root = ChessRuntimeConfiguration.Read("LAPLACE_DATA_ROOT") is { Length: > 0 } r
             ? r
             : OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
         return ResolveSyzygyDirCore(
-            LaplaceInstall.TryReadConfig("LAPLACE_SYZYGY", ChessLabEnvFile), root);
+            ChessRuntimeConfiguration.Read("LAPLACE_SYZYGY"), root);
     }
 
     internal static Probe ResolveSyzygyDirCore(string? configuredPath, string dataRoot)
@@ -69,8 +67,16 @@ public static class ChessLabPaths
         bool configured = !string.IsNullOrWhiteSpace(configuredPath);
         string path = configured ? configuredPath!.Trim()
             : Path.Combine(dataRoot, "Games", "Chess", "syzygy");
-        bool found = Directory.Exists(path)
-            && Directory.EnumerateFiles(path, "*.rtbw", SearchOption.AllDirectories).Any();
+        bool found;
+        try
+        {
+            path = ChessSyzygyPaths.Resolve(path);
+            found = true;
+        }
+        catch (Exception error) when (error is ChessInputException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            found = false;
+        }
         return new Probe(path, found, configured ? "config" : found ? "data-root" : "missing");
     }
 
@@ -95,8 +101,9 @@ public static class ChessLabPaths
         string[] pathNames,
         string? assemblyNeighbor = null,
         string? installedCandidate = null,
-        string? sourceCandidate = null)
-        => ResolveExecutableCore(configValue, repoCandidate, pathNames, assemblyNeighbor, installedCandidate, sourceCandidate);
+        string? sourceCandidate = null,
+        bool sourceAuthoritative = false)
+        => ResolveExecutableCore(configValue, repoCandidate, pathNames, assemblyNeighbor, installedCandidate, sourceCandidate, sourceAuthoritative);
 
     internal static Probe ResolveLaplaceUciForTest(string? installExe, Func<string, string?>? buildOutput = null)
     {
@@ -130,14 +137,16 @@ public static class ChessLabPaths
         string[] pathNames,
         string? assemblyNeighbor = null,
         string? installedCandidate = null,
-        string? sourceCandidate = null)
+        string? sourceCandidate = null,
+        bool sourceAuthoritative = false)
         => ResolveExecutableCore(
-            LaplaceInstall.TryReadConfig(configKey, ChessLabEnvFile),
+            ChessRuntimeConfiguration.Read(configKey),
             repoCandidate,
             pathNames,
             assemblyNeighbor,
             installedCandidate,
-            sourceCandidate);
+            sourceCandidate,
+            sourceAuthoritative);
 
     private static Probe ResolveLaplaceUci()
     {
@@ -157,11 +166,11 @@ public static class ChessLabPaths
     private static string? TryDefaultCutechessCandidate(string? name = null)
     {
         name ??= OperatingSystem.IsWindows() ? "cutechess-cli.exe" : "cutechess-cli";
-        var fromEnv = Environment.GetEnvironmentVariable("LAPLACE_CUTECHESS_BUILD");
+        var fromEnv = ChessRuntimeConfiguration.Read("LAPLACE_CUTECHESS_BUILD");
         if (string.IsNullOrWhiteSpace(fromEnv) && OperatingSystem.IsWindows())
             fromEnv = Path.Combine(LaplaceInstall.DefaultBuildRoot, "build-cutechess");
         if (string.IsNullOrWhiteSpace(fromEnv) && !OperatingSystem.IsWindows())
-            fromEnv = "/opt/laplace/build-cutechess";
+            fromEnv = "/build/cutechess";
         if (string.IsNullOrWhiteSpace(fromEnv))
             return null;
         return Path.Combine(fromEnv.Trim(), name);
@@ -169,10 +178,10 @@ public static class ChessLabPaths
 
     private static string? TryDefaultStockfishSourceCandidate()
     {
-        string? source = LaplaceInstall.TryReadConfig("LAPLACE_STOCKFISH_SOURCE", ChessLabEnvFile);
+        string? source = ChessRuntimeConfiguration.Read("LAPLACE_STOCKFISH_SOURCE");
         if (string.IsNullOrWhiteSpace(source))
         {
-            string? external = Environment.GetEnvironmentVariable("LAPLACE_EXTERNAL");
+            string? external = ChessRuntimeConfiguration.Read("LAPLACE_EXTERNAL");
             if (string.IsNullOrWhiteSpace(external))
             {
                 if (!OperatingSystem.IsWindows()) external = "/build/external";
@@ -216,19 +225,21 @@ public static class ChessLabPaths
         string[] pathNames,
         string? assemblyNeighbor,
         string? installedCandidate,
-        string? sourceCandidate)
+        string? sourceCandidate,
+        bool sourceAuthoritative = false)
     {
         if (!string.IsNullOrWhiteSpace(configPath))
         {
             var p = configPath.Trim();
-            if (File.Exists(p))
-                return new Probe(p, true, "config");
+            // An explicit engine selection is authoritative even when unavailable.
+            // Replacing it with a different binary would change the experiment.
+            return new Probe(p, File.Exists(p), "config");
         }
 
         // CLI, ingest and API callers share the locally built upstream source artifact.
         // Older install/PATH copies are fallback locations after the selected source tree.
-        if (!string.IsNullOrEmpty(sourceCandidate) && File.Exists(sourceCandidate))
-            return new Probe(sourceCandidate, true, "source");
+        if (!string.IsNullOrEmpty(sourceCandidate) && (sourceAuthoritative || File.Exists(sourceCandidate)))
+            return new Probe(sourceCandidate, File.Exists(sourceCandidate), "source");
 
         if (!string.IsNullOrEmpty(installedCandidate) && File.Exists(installedCandidate))
             return new Probe(installedCandidate, true, "install");
@@ -256,7 +267,7 @@ public static class ChessLabPaths
 
     private static Probe ResolveQtBin()
     {
-        var fromConfig = LaplaceInstall.TryReadConfig("LAPLACE_QT_BIN", ChessLabEnvFile);
+        var fromConfig = ChessRuntimeConfiguration.Read("LAPLACE_QT_BIN");
         if (!string.IsNullOrWhiteSpace(fromConfig))
         {
             var p = fromConfig.Trim();

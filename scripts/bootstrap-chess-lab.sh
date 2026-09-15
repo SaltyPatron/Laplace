@@ -45,7 +45,11 @@ run_as_owner() {
 }
 
 resolve_stockfish() {
-  python3 "$SCRIPT_DIR/install-stockfish.py" --print-path
+  if [[ -n "${LAPLACE_STOCKFISH:-}" ]]; then
+    printf '%s\n' "$LAPLACE_STOCKFISH"
+  else
+    python3 "$SCRIPT_DIR/install-stockfish.py" --print-path
+  fi
 }
 
 resolve_qt_bin() {
@@ -89,6 +93,15 @@ build_cutechess() {
   fi
 }
 
+build_zstd() {
+  say "update and build native Zstandard from its official source"
+  local library
+  library="$(run_as_owner python3 "$SCRIPT_DIR/install-zstd.py" \
+    --source-dir "${LAPLACE_ZSTD_SOURCE:-$EXTERNAL/zstd}" \
+    --build-dir "${LAPLACE_ZSTD_BUILD:-${LAPLACE_BUILD_ROOT:-/build/laplace/build}/zstd}")"
+  if [[ -z "${LAPLACE_ZSTD_LIBRARY:-}" ]]; then export LAPLACE_ZSTD_LIBRARY="$library"; fi
+}
+
 write_api_env() {
   say "api env chess-lab paths → $ENV_FILE"
   if [ ! -d "$APP_DIR" ]; then
@@ -99,7 +112,7 @@ write_api_env() {
   local sf qt cc
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
-  cc="$CC_BIN_DIR/cutechess-cli"
+  cc="${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}"
   [ -x "$cc" ] || cc=""
 
   if [ ! -f "$ENV_FILE" ]; then
@@ -124,6 +137,12 @@ write_api_env() {
     [ -n "$cc" ] && echo "LAPLACE_CUTECHESS=$cc"
     [ -n "$sf" ] && echo "LAPLACE_STOCKFISH=$sf"
     [ -n "$qt" ] && echo "LAPLACE_QT_BIN=$qt"
+    echo "LAPLACE_EXTERNAL=$EXTERNAL"
+    [ -z "${LAPLACE_STOCKFISH_SOURCE:-}" ] || echo "LAPLACE_STOCKFISH_SOURCE=$LAPLACE_STOCKFISH_SOURCE"
+    [ -z "${LAPLACE_ZSTD_LIBRARY:-}" ] || echo "LAPLACE_ZSTD_LIBRARY=$LAPLACE_ZSTD_LIBRARY"
+    [ -z "${LAPLACE_ZSTD_SOURCE:-}" ] || echo "LAPLACE_ZSTD_SOURCE=$LAPLACE_ZSTD_SOURCE"
+    [ -z "${LAPLACE_ZSTD_BUILD:-}" ] || echo "LAPLACE_ZSTD_BUILD=$LAPLACE_ZSTD_BUILD"
+    [ -z "${LAPLACE_ZSTD_WINDOW_LOG_MAX:-}" ] || echo "LAPLACE_ZSTD_WINDOW_LOG_MAX=$LAPLACE_ZSTD_WINDOW_LOG_MAX"
     echo "LAPLACE_CUTECHESS_BUILD=$CC_BUILD"
     echo "LAPLACE_CHESS_LAB_DIR=$PREFIX/chess-lab-work"
     echo "$marker_end"
@@ -147,11 +166,13 @@ write_api_env() {
 
 verify() {
   say "verify"
-  local fail=0 sf qt
+  local fail=0 sf qt zstd_version
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
-  python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "$CC_BIN_DIR/cutechess-cli" || { red "✗ cutechess-cli / Qt runtime"; fail=1; }
-  [ -n "$sf" ] || { red "✗ stockfish"; fail=1; }
+  python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}" || { red "✗ cutechess-cli / Qt runtime"; fail=1; }
+  python3 "$SCRIPT_DIR/install-stockfish.py" --check-binary "$sf" || { red "✗ stockfish"; fail=1; }
+  zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO_ROOT/deploy/zstd-release.json")"
+  python3 "$SCRIPT_DIR/check-zstd-runtime.py" --require-version "$zstd_version" || { red "✗ native Zstandard PGN decoder"; fail=1; }
   [ -n "$qt" ] || { red "✗ Qt6"; fail=1; }
   [ "$fail" -eq 0 ] || return 1
   green "===== CHESS LAB OK ====="
@@ -160,9 +181,10 @@ verify() {
 main() {
   ensure_dirs
   build_cutechess
+  build_zstd
   run_as_owner python3 "$SCRIPT_DIR/install-stockfish.py"
-  write_api_env
   verify
+  write_api_env
 }
 
 main "$@"

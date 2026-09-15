@@ -357,10 +357,13 @@ if __name__ == "__main__":
     action.add_argument("--snapshot", type=Path, help="Save the previous application launch configuration for CI rollback")
     action.add_argument("--restore", type=Path, help="Restore the previous CI launch configuration")
     action.add_argument("--check-latest", action="store_true", help="Check the official latest stable tag and source commit")
+    action.add_argument("--check-binary", type=Path, help="Verify the selected executable version, UCI readiness and legal search")
     action.add_argument("--print-path", "--print-binary", action="store_true", help="Print the direct source-build executable path without installing")
     args = parser.parse_args()
     if args.check_latest:
         check_latest()
+    elif args.check_binary:
+        print(probe(args.check_binary, load_lock()["version"]))
     elif args.print_path:
         print(binary_path(args.source_dir))
     elif args.snapshot:

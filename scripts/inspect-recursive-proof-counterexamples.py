@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 2 * 1024 * 1024
 MAX_PARENTS = 24
 MAX_VERTICES = 256
+MAX_WITNESSES = 32
+MAX_LOGICAL_CONSTITUENTS = 4096
 
 
 def read_json(path: Path) -> tuple[dict, bytes]:
@@ -86,8 +88,48 @@ vertices AS MATERIALIZED (
     ORDER BY c.ordinal LIMIT {MAX_VERTICES}
   ) c
 ),
+witnesses AS MATERIALIZED (
+  SELECT a.* FROM targets t CROSS JOIN LATERAL (
+    SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,
+           a.outcome,a.observation_count,a.last_observed_at,
+           count(*) OVER () AS available_witnesses
+    FROM laplace.attestations a
+    WHERE a.subject_id=t.id
+      AND a.type_id IN (laplace.relation_type_id('HAS_SETUP'),
+                       laplace.relation_type_id('HAS_NAME_ALIAS'))
+      AND a.object_id IS NOT NULL
+    ORDER BY a.id LIMIT {MAX_WITNESSES}
+  ) a
+),
+bounded_manifests AS MATERIALIZED (
+  SELECT p.id,p.entity_id,p.n_constituents
+  FROM parents p JOIN vertices v ON v.physicality_id=p.id
+  WHERE p.packed_vertices BETWEEN 1 AND {MAX_VERTICES}
+    AND p.n_constituents BETWEEN 1 AND {MAX_LOGICAL_CONSTITUENTS}
+  GROUP BY p.id,p.entity_id,p.n_constituents,p.packed_vertices
+  HAVING count(*)=p.packed_vertices
+     AND sum(GREATEST(v.run_length,1))=p.n_constituents
+),
+logical_manifests AS MATERIALIZED (
+  SELECT p.id,p.entity_id,
+         array_agg(v.entity_id ORDER BY v.ordinal,r.repeat) AS child_ids
+  FROM bounded_manifests p JOIN vertices v ON v.physicality_id=p.id
+  CROSS JOIN LATERAL generate_series(1,GREATEST(v.run_length,1)) r(repeat)
+  GROUP BY p.id,p.entity_id
+),
+lineage_candidates AS MATERIALIZED (
+  SELECT p.entity_id,w.id AS witness_id,w.type_id,w.object_id,
+         CASE WHEN w.type_id=laplace.relation_type_id('HAS_SETUP')
+              THEN public.laplace_hash128_merkle(0::smallint,ARRAY[w.object_id]||p.child_ids)
+              ELSE NULL::bytea END AS prefixed_content_id,
+         CASE WHEN w.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')
+              THEN cardinality(p.child_ids)=1 AND p.child_ids[1]=w.object_id
+              ELSE NULL::boolean END AS exact_name_projection
+  FROM logical_manifests p JOIN witnesses w ON w.subject_id=p.entity_id
+),
 entity_ids AS MATERIALIZED (
   SELECT id FROM targets UNION SELECT entity_id FROM vertices
+  UNION SELECT object_id FROM witnesses
 ),
 entities AS MATERIALIZED (
   SELECT e.id,e.tier,e.type_id,e.first_observed_by,e.created_at
@@ -109,6 +151,29 @@ SELECT json_build_object(
     'entity_id',encode(v.entity_id,'hex'),'run_length',v.run_length,'flags',v.flags,
     'contextual_tier',realize.vertex_tier(v.flags)) ORDER BY v.physicality_id,v.ordinal)
     FROM vertices v),'[]'::json),
+  'lineage_bounds',json_build_object('witnesses_per_parent',{MAX_WITNESSES},
+    'logical_constituents_per_parent',{MAX_LOGICAL_CONSTITUENTS},
+    'scope','Retained typed witnesses and exact hash checks only; no text rendering or data mutation.'),
+  'witnesses',COALESCE((SELECT json_agg(json_build_object(
+    'id',encode(w.id,'hex'),'subject_id',encode(w.subject_id,'hex'),
+    'type_id',encode(w.type_id,'hex'),'object_id',encode(w.object_id,'hex'),
+    'source_id',encode(w.source_id,'hex'),'context_id',encode(w.context_id,'hex'),
+    'outcome',w.outcome,'observation_count',w.observation_count,
+    'last_observed_at',w.last_observed_at,'available_witnesses',w.available_witnesses,
+    'witnesses_truncated',w.available_witnesses>{MAX_WITNESSES},
+    'object_has_content_physicality',EXISTS(SELECT 1 FROM laplace.physicalities p
+      WHERE p.entity_id=w.object_id AND p.type=1))) FROM witnesses w),'[]'::json),
+  'lineage_candidates',COALESCE((SELECT json_agg(json_build_object(
+    'parent_id',encode(c.entity_id,'hex'),'witness_id',encode(c.witness_id,'hex'),
+    'witness_type_id',encode(c.type_id,'hex'),'witness_object_id',encode(c.object_id,'hex'),
+    'prefixed_content_id',encode(c.prefixed_content_id,'hex'),
+    'prefix_recovers_parent_identity',c.prefixed_content_id=c.entity_id,
+    'exact_name_projection',c.exact_name_projection)) FROM lineage_candidates c),'[]'::json),
+  'existing_projections',COALESCE((SELECT json_agg(json_build_object(
+    'entity_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex'),
+    'n_constituents',p.n_constituents,'packed_vertices',ST_NPoints(p.trajectory),
+    'observed_at',p.observed_at)) FROM targets t JOIN laplace.physicalities p
+      ON p.entity_id=t.id AND p.type=3),'[]'::json),
   'entities',COALESCE((SELECT json_agg(json_build_object(
     'id',encode(e.id,'hex'),'tier',e.tier,'type_id',encode(e.type_id,'hex'),
     'first_observed_by',encode(e.first_observed_by,'hex'),'created_at',e.created_at))

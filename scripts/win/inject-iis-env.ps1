@@ -63,6 +63,11 @@ $managedChess = [ordered]@{
   LAPLACE_CUTECHESS = Join-Path $cuteBuild 'cutechess-cli.exe'
   LAPLACE_STOCKFISH = Join-Path $stockfishSource 'src\stockfish.exe'
   LAPLACE_QT_BIN = $cuteBuild
+  LAPLACE_ZSTD_LIBRARY = Join-Path (Split-Path -Parent $WebConfigPath) 'libzstd.dll'
+}
+foreach ($key in @('LAPLACE_ZSTD_LIBRARY', 'LAPLACE_ZSTD_WINDOW_LOG_MAX')) {
+  $value = [Environment]::GetEnvironmentVariable($key, 'Process')
+  if (-not [string]::IsNullOrWhiteSpace($value)) { $envVars[$key] = $value.Trim() }
 }
 foreach ($entry in $managedChess.GetEnumerator()) {
   if (-not $envVars.Contains($entry.Key)) { $envVars[$entry.Key] = $entry.Value }

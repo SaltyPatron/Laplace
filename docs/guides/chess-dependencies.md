@@ -81,13 +81,48 @@ and passes the required subdirectories to Fathom. A larger-piece directory must
 not hide the smaller sets. Six- and seven-piece downloads are substantial data
 choices; ordinary UCI play does not require downloading every tablebase.
 
+`LAPLACE_SYZYGY` and the explicit `chess-syzygy` input also accept multiple roots:
+separate them with `:` on Unix or `;` on Windows. Runtime, input inventory and
+ingestion recurse through every selected root, including WDL and DTZ kept on
+different volumes, and pass the actual containing directories to Fathom. Every
+selected directory must exist and the aggregate material names must have nonempty
+WDL/DTZ pairs. An invalid explicit selection fails without substituting a default
+directory. These packaging checks do not certify table checksums, full material
+coverage, or the result of a native probe.
+
 Use the [official Lichess tablebase mirror](https://tablebase.lichess.ovh/tables/standard/)
 and its checksum lists when acquiring tables. The existing dataset acquisition
 workflow owns resumable downloads and source admission. Downloading PGN archives,
 opening files or tablebases does not by itself prove that their content has been
-ingested into the substrate. Compressed Lichess PGN datasets require the existing
-zstd codec path; Stockfish and Cute Chess matches do not require the entire
-Lichess game database.
+ingested into the substrate. The chess input reader opens `.pgn.zst` and `.zst`
+files through native `libzstd`, including concatenated frames; input inventory
+and execution use the same file selection. It streams through two 128 KiB buffers
+and defaults to a 128 MiB decoder history window. Truncated frames, bad checksums
+and missing libraries fail ingestion. A cancelled or failed reader releases its
+file and decoder. Archive size does not require an equally large memory allocation.
+
+Chess setup updates and builds Zstandard 1.5.7 from the official
+[`facebook/zstd` repository](https://github.com/facebook/zstd/releases/tag/v1.5.7)
+under the configured external source root. It records the exact shared library in
+`LAPLACE_ZSTD_LIBRARY`, preserving PostgreSQL's system library. Bootstrap and
+`check-chess-dependencies.py` verify the actual streaming ABI and selected release
+by decoding a checksummed PGN fixture. Use `LAPLACE_ZSTD_LIBRARY` for an explicit
+absolute shared-library path. That selection must load successfully; it is never
+replaced by another library. On Windows, publication carries the selected Zstandard
+DLL beside the application. `LAPLACE_ZSTD_WINDOW_LOG_MAX` explicitly changes the
+admitted native history window (`2^value` bytes, default `27`) if a corpus requires
+a larger window and the machine has the memory. This controls decoder history,
+not a limit on archive length. The Python readiness probe tests that selected
+library and records its version, path and SHA-256 when the loader exposes the path.
+These codec checks do not claim that a downloaded corpus has been ingested.
+
+Chess API, CLI and corpus jobs share installed configuration. Explicit process
+settings take precedence over `<prefix>/app/laplace-api.env`, followed by the
+legacy chess environment files. An explicitly selected missing engine fails
+instead of silently choosing a different executable. Benchmark children inherit
+the installed database, perfcache and substrate settings through their private
+environment; receipts do not retain secret values. Stockfish and Cute Chess matches
+do not require the entire Lichess game database.
 
 `GET /chess/lichess/status` reports account readiness separately from process
 health. Startup verifies the token, its `bot:play` scope and the account's BOT

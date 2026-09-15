@@ -18,7 +18,11 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 KEYS = {"LAPLACE_STOCKFISH", "LAPLACE_CUTECHESS", "LAPLACE_SYZYGY",
         "LAPLACE_CHESS_OPENINGS", "LAPLACE_DATA_ROOT", "LAPLACE_EXTERNAL",
-        "LAPLACE_STOCKFISH_SOURCE", "LAPLACE_CUTECHESS_BUILD"}
+        "LAPLACE_STOCKFISH_SOURCE", "LAPLACE_CUTECHESS_BUILD", "LAPLACE_QT_BIN",
+        "LAPLACE_CHESS_LAB_DIR", "LAPLACE_ZSTD_LIBRARY", "LAPLACE_ZSTD_WINDOW_LOG_MAX",
+        "LAPLACE_ZSTD_SOURCE", "LAPLACE_ZSTD_BUILD"}
+KEYS.update("LAPLACE_STOCKFISH_EVAL_" + suffix for suffix in
+            ("THREADS", "HASH_MB", "NUMA_POLICY", "SYZYGY_PATH", "FILE", "TIMEOUT_SECONDS", "PROCESSES"))
 
 
 def module(name):
@@ -28,16 +32,31 @@ def module(name):
     return result
 
 
-def configuration(prefix):
+def configuration(prefix, keys=None):
+    allowed = KEYS if keys is None else keys
     result = {}
+    # Match ChessRuntimeConfiguration: explicit environment, then the service's
+    # installed env, then legacy chess files. Last assignment within a file wins.
     for path in (prefix / "app/laplace-api.env", prefix / "app/chess-lab.env",
-                 prefix / "chess-lab.env"):
+                 prefix / "chess-lab.env", prefix / "secrets/chess-lab.env",
+                 ROOT / "deploy/secrets/chess-lab.env"):
         if path.is_file():
+            selected = {}
             for line in path.read_text(encoding="utf-8").splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
                 key, sep, value = line.partition("=")
-                if sep and key.strip() in KEYS:
-                    result[key.strip()] = value.strip().strip('"').strip("'")
-    result.update({key: os.environ[key] for key in KEYS if os.environ.get(key)})
+                if sep and key.strip() in allowed:
+                    value = value.strip()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        value = value[1:-1]
+                    selected[key.strip()] = value
+            for key, value in selected.items():
+                if value.strip():
+                    result.setdefault(key, value)
+    result.update({key: os.environ[key].strip() for key in allowed if os.environ.get(key, "").strip()})
+    if os.environ.get("LAPLACE_STOCKFISH_SOURCE", "").strip() and not os.environ.get("LAPLACE_STOCKFISH", "").strip():
+        result.pop("LAPLACE_STOCKFISH", None)
     return result
 
 
@@ -60,13 +79,18 @@ def cutechess(binary):
 def data_inventory(config, data_root):
     chess = data_root / "Games/Chess"
     configured = config.get("LAPLACE_SYZYGY")
-    roots = [Path(part) for part in configured.split(os.pathsep)] if configured else [chess / "syzygy"]
-    files = [file for root in roots if root.is_dir() for file in root.rglob("*")
-             if file.is_file() and file.suffix in (".rtbw", ".rtbz")]
-    wdl = {file.stem for file in files if file.suffix == ".rtbw" and file.stat().st_size > 0}
-    dtz = {file.stem for file in files if file.suffix == ".rtbz" and file.stat().st_size > 0}
+    roots = list(dict.fromkeys(Path(os.path.abspath(part.strip())) for part in configured.split(os.pathsep)
+                               if part.strip())) if configured else [chess / "syzygy"]
+    missing_roots = [str(root) for root in roots if not root.is_dir()]
+    files = list(dict.fromkeys(file for root in roots if root.is_dir() for file in root.rglob("*")
+                              if file.is_file() and file.suffix.lower() in (".rtbw", ".rtbz")))
+    empty_files = sorted(str(file) for file in files if file.stat().st_size == 0)
+    wdl = {file.stem for file in files if file.suffix.lower() == ".rtbw" and file.stat().st_size > 0}
+    dtz = {file.stem for file in files if file.suffix.lower() == ".rtbz" and file.stat().st_size > 0}
     # Pairing detects missing companions; it is not a checksum or complete-roster proof.
     tables = {"paths": [str(root) for root in roots], "wdl": len(wdl), "dtz": len(dtz),
+              "missing_roots": missing_roots, "empty_files": empty_files,
+              "native_path": os.pathsep.join(sorted({str(file.parent) for file in files})),
               "missing_dtz": sorted(wdl - dtz), "missing_wdl": sorted(dtz - wdl),
               "verification": "nonempty files and matching material names; checksums not verified"}
     candidates = ([Path(config["LAPLACE_CHESS_OPENINGS"])] if config.get("LAPLACE_CHESS_OPENINGS")
@@ -75,7 +99,7 @@ def data_inventory(config, data_root):
                                                           for letter in "abcde")), candidates[0])
     opening_files = [letter + ".tsv" for letter in "abcde" if (opening_root / (letter + ".tsv")).is_file()]
     return [
-        {"name": "syzygy", "status": "present" if wdl and wdl == dtz else "incomplete",
+        {"name": "syzygy", "status": "present" if roots and not missing_roots and not empty_files and wdl and wdl == dtz else "incomplete",
          "required": False, "detail": tables},
         {"name": "openings", "status": "present" if len(opening_files) == 5 else "incomplete",
          "required": False, "detail": {"path": str(opening_root), "files": opening_files}},
@@ -108,13 +132,16 @@ def main():
           "search": module("install-stockfish").probe(stockfish, version)})
     check(report, "cutechess", lambda: cutechess(cc))
     check(report, "laplace-uci", lambda: {"path": str(uci), "bestmove": module("check-uci-runtime").check_runtime(uci)})
+    check(report, "zstandard-pgn-codec", lambda: module("check-zstd-runtime").probe(
+        config.get("LAPLACE_ZSTD_LIBRARY"), int(config.get("LAPLACE_ZSTD_WINDOW_LOG_MAX", "27")),
+        json.loads((ROOT / "deploy/zstd-release.json").read_text())["version"]))
     data_root = Path(config.get("LAPLACE_DATA_ROOT", "D:/Data/Ingest" if os.name == "nt" else "/vault/Data"))
     data = data_inventory(config, data_root)
     for item in data[:2]:
         item["required"] = args.require_data
     report.extend(data)
     if args.check_latest:
-        for name in ("install-stockfish", "provision-cutechess"):
+        for name in ("install-stockfish", "provision-cutechess", "install-zstd"):
             def latest(helper=name):
                 reply = subprocess.run([sys.executable, str(ROOT / "scripts" / (helper + ".py")), "--check-latest"],
                                        check=True, capture_output=True, text=True, timeout=60)
