@@ -186,15 +186,39 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     [Fact]
     public async Task AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding()
     {
+        object[] executions =
+        [
+            await AssertAntonymExecution(inputIsStoredSubject: true),
+            await AssertAntonymExecution(inputIsStoredSubject: false),
+        ];
+        string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
+        if (!string.IsNullOrWhiteSpace(receiptPath))
+        {
+            string receiptDirectory = Path.GetDirectoryName(Path.GetFullPath(receiptPath))!;
+            Directory.CreateDirectory(receiptDirectory);
+            byte[] receipt = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schema = "laplace.operational-antonym-execution-proof/v2", disposition = "complete",
+                candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"),
+                storage_orientations_verified = new[] { "input-subject", "input-object" }, executions,
+            }, new JsonSerializerOptions { WriteIndented = true });
+            Assert.InRange(receipt.Length, 1, 64 * 1024);
+            await File.WriteAllBytesAsync(Path.Combine(receiptDirectory, "antonym-execution.json"), receipt);
+        }
+    }
+
+    private async Task<object> AssertAntonymExecution(bool inputIsStoredSubject)
+    {
         CodepointPerfcache.LoadDefault();
         LanguageReference.EnsureLoaded();
-        string scope = Guid.NewGuid().ToString("N");
+        var fixture = SelectAntonymFixture(inputIsStoredSubject);
+        string scope = fixture.Scope;
         string directory = Path.Combine(Path.GetTempPath(), "laplace-antonym-execution-" + scope);
-        string operand = "ñébulo" + scope;
+        string operand = fixture.Operand;
         string prompt = "The opposite of " + operand + " is";
-        Hash128 source = Hash128.OfCanonical("test/antonym-execution/source/" + scope);
-        Hash128 context = Hash128.OfCanonical("test/antonym-execution/context/" + scope);
-        Hash128 answer = Hash128.OfCanonical("test/antonym-execution/answer/" + scope);
+        Hash128 source = fixture.Source;
+        Hash128 context = fixture.Context;
+        Hash128 answer = fixture.Answer;
         Hash128 changedAnswer = Hash128.OfCanonical("test/antonym-execution/changed-answer/" + scope);
         Hash128 alternativeAnswerA = Hash128.OfCanonical("test/antonym-execution/alternative-answer-a/" + scope);
         Hash128 alternativeAnswerB = Hash128.OfCanonical("test/antonym-execution/alternative-answer-b/" + scope);
@@ -227,7 +251,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             facts.AddEntity(alternativeAnswerA, EntityTier.Word, EntityTypeRegistry.WordNetSynset, source);
             facts.AddEntity(alternativeAnswerB, EntityTier.Word, EntityTypeRegistry.WordNetSynset, source);
             Assert.True(ContentTierSpine.TryStageIntoBuilder(facts, Encoding.UTF8.GetBytes(prompt), source, out Hash128 promptRoot));
-            Hash128 input = ContentTierSpine.ResolveRoot(operand)!.Value;
+            Hash128 input = fixture.Input;
             Assert.NotEqual(ContentTierSpine.ResolveRoot("empty"), input);
             Assert.True(ContentTierSpine.TryStageIntoBuilder(facts, Encoding.UTF8.GetBytes("próbulo" + scope), source, out Hash128 alternativeA));
             Assert.True(ContentTierSpine.TryStageIntoBuilder(facts, Encoding.UTF8.GetBytes("plúvulo" + scope), source, out Hash128 alternativeB));
@@ -263,32 +287,33 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             Assert.False(absent.Complete);
             Assert.Empty(absent.Emitted);
 
-            Hash128 originalWitness = await AdmitFact(answer, "antonym-execution-fact/" + scope);
+            AttestationRow originalWitness = await AdmitFact(answer, "antonym-execution-fact/" + scope);
+            Assert.Equal(inputIsStoredSubject, originalWitness.SubjectId == input);
+            Assert.Equal(!inputIsStoredSubject, originalWitness.ObjectId == input);
             Receipt original = await Forward(prompt, ordinaryDefaults: true);
             AssertComplete(original, answer);
             await AssertNoCurrentParseOrInvocation(promptRoot);
 
-            // Change the source fact while preserving every byte of the task.
-            // The ordinary program must read the new witnessed result.
+            // The native writer orients symmetric relations before persistence.
+            // Withdraw that exact witnessed row and its oriented consensus cell,
+            // independently of which endpoint the prompt names as its input.
             await using (var retract = pg.DataSource.CreateCommand(
-                "DELETE FROM laplace.attestations WHERE subject_id=$1 AND type_id=$2 AND object_id=$3 AND source_id=$4 AND context_id=$5"))
+                "DELETE FROM laplace.attestations WHERE id=$1 AND source_id=$2 AND context_id=$3"))
             {
-                retract.Parameters.AddWithValue(input.ToBytes());
-                retract.Parameters.AddWithValue(task.Shape.PredicateId.ToBytes());
-                retract.Parameters.AddWithValue(answer.ToBytes());
-                retract.Parameters.AddWithValue(source.ToBytes());
-                retract.Parameters.AddWithValue(context.ToBytes());
+                retract.Parameters.AddWithValue(originalWitness.Id.ToBytes());
+                retract.Parameters.AddWithValue(originalWitness.SourceId.ToBytes());
+                retract.Parameters.AddWithValue(originalWitness.ContextId!.Value.ToBytes());
                 Assert.Equal(1, await retract.ExecuteNonQueryAsync());
             }
             await using (var retract = pg.DataSource.CreateCommand(
                 "DELETE FROM laplace.consensus WHERE subject_id=$1 AND type_id=$2 AND object_id=$3"))
             {
-                retract.Parameters.AddWithValue(input.ToBytes());
-                retract.Parameters.AddWithValue(task.Shape.PredicateId.ToBytes());
-                retract.Parameters.AddWithValue(answer.ToBytes());
+                retract.Parameters.AddWithValue(originalWitness.SubjectId.ToBytes());
+                retract.Parameters.AddWithValue(originalWitness.TypeId.ToBytes());
+                retract.Parameters.AddWithValue(originalWitness.ObjectId!.Value.ToBytes());
                 Assert.Equal(1, await retract.ExecuteNonQueryAsync());
             }
-            Hash128 changedWitness = await AdmitFact(changedAnswer, "antonym-execution-changed-fact/" + scope);
+            AttestationRow changedWitness = await AdmitFact(changedAnswer, "antonym-execution-changed-fact/" + scope);
             Receipt changed = await Forward(prompt, ordinaryDefaults: true);
             AssertComplete(changed, changedAnswer);
             Assert.Equal(task.Bytes, await File.ReadAllBytesAsync(Path.Combine(directory, task.RelativePath)));
@@ -299,49 +324,44 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             await AssertNoCurrentParseOrInvocation(promptRoot);
             foreach (AttestationRow witness in alternatives) await AssertWitness(witness);
 
-            string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
-            if (!string.IsNullOrWhiteSpace(receiptPath))
+            return new
             {
-                string receiptDirectory = Path.GetDirectoryName(Path.GetFullPath(receiptPath))!;
-                Directory.CreateDirectory(receiptDirectory);
-                byte[] receipt = JsonSerializer.SerializeToUtf8Bytes(new
-                {
-                    schema = "laplace.operational-antonym-execution-proof/v1", disposition = "complete",
-                    candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"), run_id = exemplar.RunId,
-                    prompt, root_id = Hex(promptRoot), input_surface_id = Hex(input), input_id = Hex(input),
-                    accepted_entity_type_id = Hex(Assert.Single(task.Shape.Slots).AcceptedTypeId),
-                    binding_mode_id = Hex(Assert.Single(task.Shape.Slots).BindingModeId),
-                    predicate_id = Hex(task.Shape.PredicateId), fact_source_id = Hex(source), fact_context_id = Hex(context),
-                    fact_witness_id = Hex(originalWitness), changed_fact_witness_id = Hex(changedWitness),
-                    retained_word_lemma_alternative_ids = new[] { Hex(alternativeA), Hex(alternativeB) },
-                    retained_alternative_witness_ids = alternatives.Select(witness => Hex(witness.Id)).ToArray(),
-                    exemplar_parse_id = Hex(task.Shape.ExemplarParseId), shape_id = Hex(task.Shape.Id),
-                    shape_file_id = Hex(task.File), bundled_shape_relative_path = task.RelativePath,
-                    bundled_shape_bytes = task.Bytes.Length,
-                    bundled_shape_sha256 = Convert.ToHexString(SHA256.HashData(task.Bytes)).ToLowerInvariant(),
-                    program_id = Hex(original.ProgramId), changed_fact_program_id = Hex(changed.ProgramId),
-                    emitted_id = Hex(Assert.Single(original.Emitted)), changed_fact_emitted_id = Hex(Assert.Single(changed.Emitted)),
-                    required_obligations = original.Required, satisfied_obligations = original.Satisfied,
-                    remaining_required = original.Remaining,
-                    execution_defaults = new { steps = 128, max_stride = 5, spread = 0.6, top_k = 10,
-                        hops = 2, fanout = 8, seed_recipe = "hash128_lo(blake3(prompt UTF8))", prior_frontier = "NULL" },
-                    direct_word_binding_verified = true, missing_fact_rejected = true, changed_fact_read = true,
-                    competing_word_lemma_bindings_retained = true,
-                    task_bytes_unchanged = true, current_parse_or_invocation_manufactured = false,
-                    selected_files = 15, admitted_file_journals = 15, completion_markers = 15,
-                }, new JsonSerializerOptions { WriteIndented = true });
-                Assert.InRange(receipt.Length, 1, 64 * 1024);
-                await File.WriteAllBytesAsync(Path.Combine(receiptDirectory, "antonym-execution.json"), receipt);
-            }
+                schema = "laplace.operational-antonym-execution-proof/v1", disposition = "complete",
+                candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"), run_id = exemplar.RunId,
+                prompt, root_id = Hex(promptRoot), input_surface_id = Hex(input), input_id = Hex(input),
+                accepted_entity_type_id = Hex(Assert.Single(task.Shape.Slots).AcceptedTypeId),
+                binding_mode_id = Hex(Assert.Single(task.Shape.Slots).BindingModeId),
+                predicate_id = Hex(task.Shape.PredicateId), fact_source_id = Hex(source), fact_context_id = Hex(context),
+                fact_witness_id = Hex(originalWitness.Id), changed_fact_witness_id = Hex(changedWitness.Id),
+                stored_subject_id = Hex(originalWitness.SubjectId), stored_object_id = Hex(originalWitness.ObjectId!.Value),
+                input_storage_endpoint = inputIsStoredSubject ? "subject" : "object",
+                retained_word_lemma_alternative_ids = new[] { Hex(alternativeA), Hex(alternativeB) },
+                retained_alternative_witness_ids = alternatives.Select(witness => Hex(witness.Id)).ToArray(),
+                exemplar_parse_id = Hex(task.Shape.ExemplarParseId), shape_id = Hex(task.Shape.Id),
+                shape_file_id = Hex(task.File), bundled_shape_relative_path = task.RelativePath,
+                bundled_shape_bytes = task.Bytes.Length,
+                bundled_shape_sha256 = Convert.ToHexString(SHA256.HashData(task.Bytes)).ToLowerInvariant(),
+                program_id = Hex(original.ProgramId), changed_fact_program_id = Hex(changed.ProgramId),
+                emitted_id = Hex(Assert.Single(original.Emitted)), changed_fact_emitted_id = Hex(Assert.Single(changed.Emitted)),
+                required_obligations = original.Required, satisfied_obligations = original.Satisfied,
+                remaining_required = original.Remaining,
+                execution_defaults = new { steps = 128, max_stride = 5, spread = 0.6, top_k = 10,
+                    hops = 2, fanout = 8, seed_recipe = "hash128_lo(blake3(prompt UTF8))", prior_frontier = "NULL" },
+                direct_word_binding_verified = true, missing_fact_rejected = true, changed_fact_read = true,
+                competing_word_lemma_bindings_retained = true,
+                task_bytes_unchanged = true, current_parse_or_invocation_manufactured = false,
+                selected_files = 15, admitted_file_journals = 15, completion_markers = 15,
+            };
 
             AttestationRow Fact(Hash128 result) => NativeAttestation.CategoricalResolved(input,
                 task.Shape.PredicateId, result, source, context, SourceTrust.SubstrateMandate);
 
-            async Task<Hash128> AdmitFact(Hash128 result, string label)
+            async Task<AttestationRow> AdmitFact(Hash128 result, string label)
             {
                 AttestationRow witness = Fact(result);
                 await Apply(new SubstrateChangeBuilder(source, label).AddAttestation(witness).Build());
-                return await AssertWitness(witness);
+                await AssertWitness(witness);
+                return witness;
             }
 
             async Task<Hash128> AssertWitness(AttestationRow witness)
@@ -387,6 +407,31 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             try { await writer.ApplyAsync(change); }
             finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
         }
+    }
+
+    private sealed record AntonymFixture(string Scope, string Operand, Hash128 Input,
+        Hash128 Source, Hash128 Context, Hash128 Answer);
+
+    private static AntonymFixture SelectAntonymFixture(bool inputIsStoredSubject)
+    {
+        Hash128 predicate = RelationTypeRegistry.Resolve("IS_ANTONYM_OF").Id;
+        // Ask the native orientation law to classify fresh fixture candidates.
+        // Both cases must run; random identity ordering must not choose coverage.
+        for (int attempt = 0; attempt < 128; attempt++)
+        {
+            string scope = Guid.NewGuid().ToString("N");
+            string operand = "ñébulo" + scope;
+            Hash128 input = ContentTierSpine.ResolveRoot(operand)!.Value;
+            Hash128 source = Hash128.OfCanonical("test/antonym-execution/source/" + scope);
+            Hash128 context = Hash128.OfCanonical("test/antonym-execution/context/" + scope);
+            Hash128 answer = Hash128.OfCanonical("test/antonym-execution/answer/" + scope);
+            if (input == answer) continue;
+            AttestationRow witness = NativeAttestation.CategoricalResolved(input, predicate,
+                answer, source, context, SourceTrust.SubstrateMandate);
+            if ((witness.SubjectId == input) == inputIsStoredSubject)
+                return new AntonymFixture(scope, operand, input, source, context, answer);
+        }
+        throw new InvalidOperationException("Native fixture selection did not produce the required symmetric storage orientation.");
     }
 
     private static async Task<(OperationalTaskShapeWitness.Definition Shape, Hash128 File,
