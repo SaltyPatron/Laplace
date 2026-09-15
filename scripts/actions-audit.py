@@ -41,6 +41,145 @@ def uses(value):
             yield from uses(child)
 
 
+def enabled(value) -> bool:
+    """BaseLoader retains scalar strings; expressions must also fail closed."""
+    return value is not None and str(value).lower() != "false"
+
+
+def unique_step(steps: list, key: str, value: str, context: str):
+    matches = [(i, step) for i, step in enumerate(steps) if step.get(key) == value]
+    if len(matches) != 1:
+        fail(f"{context}: requires exactly one {key}={value}, found {len(matches)}")
+        return None
+    return matches[0]
+
+
+def result_authority(name: str, workflow: dict) -> None:
+    """Optional diagnostics never acquire proof authority; readiness is deferred."""
+    if name == "benchmark-evidence.yml":
+        if set(workflow.get("jobs") or {}) != {"benchmark"}:
+            fail("benchmark-evidence.yml: the reusable workflow may expose only its measurement job")
+        for job in (workflow.get("jobs") or {}).values():
+            for token in ("product-ci.sh", "pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh", "systemctl ", "sudo "):
+                if token in runs(job):
+                    fail(f"benchmark-evidence.yml: measurement may not acquire product mutation authority: {token}")
+    for job_name, job in (workflow.get("jobs") or {}).items():
+        context = f"{name}:{job_name}"
+        if enabled(job.get("continue-on-error")):
+            fail(f"{context}: hidden red job result")
+        steps = job.get("steps") or []
+        allowed = set()
+        if (name, job_name) == ("benchmark-evidence.yml", "benchmark"):
+            readiness = unique_step(steps, "id", "chess_readiness", context)
+            upload = unique_step(steps, "name", "Upload complete benchmark evidence", context)
+            gate = unique_step(steps, "name", "Require installed chess tools and verified release checks", context)
+            if readiness and upload and gate:
+                read_index, read_step = readiness
+                upload_index, upload_step = upload
+                gate_index, gate_step = gate
+                allowed.add(read_index)
+                if not read_index < upload_index < gate_index == len(steps) - 1:
+                    fail(f"{context}: deferred readiness must be enforced after evidence upload as the final step")
+                if read_step.get("if") != "${{ !cancelled() && inputs.suite == 'chess' && steps.chess_paths.outcome != 'skipped' }}":
+                    fail(f"{context}: readiness must inspect every attempted chess path resolution")
+                if read_step.get("timeout-minutes") != "5":
+                    fail(f"{context}: readiness must retain its bounded timeout")
+                read_command = read_step.get("run", "")
+                for token in ("scripts/check-chess-dependencies.py", "--check-latest", "chess-dependency-readiness.json", "chess-readiness-execution.json", "raise SystemExit(1 if failed else 0)"):
+                    if token not in read_command:
+                        fail(f"{context}: readiness no longer exposes required checks: {token}")
+                if upload_step.get("if") != "always()" or not upload_step.get("uses", "").startswith("actions/upload-artifact@"):
+                    fail(f"{context}: benchmark evidence must upload on failure")
+                if (upload_step.get("with") or {}).get("if-no-files-found") != "error":
+                    fail(f"{context}: missing benchmark evidence must fail")
+                expected_gate = "${{ !cancelled() && inputs.suite == 'chess' && steps.chess_readiness.outcome == 'failure' }}"
+                if gate_step.get("if") != expected_gate:
+                    fail(f"{context}: deferred readiness gate must propagate the raw failed outcome")
+                gate_lines = gate_step.get("run", "").strip().splitlines()
+                if len(gate_lines) != 2 or not gate_lines[0].startswith("echo '::error::") or gate_lines[1] != "exit 1":
+                    fail(f"{context}: deferred readiness gate must fail unconditionally when selected")
+        elif (name, job_name) == ("pr-validation.yml", "prove"):
+            baseline = unique_step(steps, "id", "baseline_diagnostic", context)
+            upload = unique_step(steps, "name", "Upload retained baseline before full proof", context)
+            proof = unique_step(steps, "id", "proof", context)
+            if baseline and upload and proof:
+                baseline_index, baseline_step = baseline
+                upload_index, upload_step = upload
+                proof_index, proof_step = proof
+                allowed.update((baseline_index, upload_index))
+                if not baseline_index < upload_index < proof_index:
+                    fail(f"{context}: optional baseline must precede the authoritative proof")
+                if baseline_step.get("if") != "env.LAPLACE_PR_FULL_PROOF == '1'":
+                    fail(f"{context}: baseline must be limited to full proof scope")
+                expected_upload = "always() && steps.baseline_diagnostic.outcome != 'skipped' && env.LAPLACE_PR_FULL_PROOF == '1'"
+                if upload_step.get("if") != expected_upload or not upload_step.get("uses", "").startswith("actions/upload-artifact@") or "run" in upload_step:
+                    fail(f"{context}: optional baseline upload may only retain the attempted diagnostic")
+                baseline_command = baseline_step.get("run", "")
+                for token in ("--proof-outcome baseline-before-proof", "scripts/collect-recursive-proof-evidence.py", "scripts/inspect-recursive-proof-counterexamples.py", "flock --exclusive --close /build/laplace/work/host-resource.lock"):
+                    if token not in baseline_command:
+                        fail(f"{context}: baseline lacks bounded read-only diagnostic contract: {token}")
+                if "if" in proof_step or "baseline_diagnostic" in str(proof_step):
+                    fail(f"{context}: actual PR proof must remain independent of optional baseline success")
+                for token in ("scripts/pr-proof.sh", "test-parallel.sh --policy", "set -euo pipefail"):
+                    if token not in proof_step.get("run", ""):
+                        fail(f"{context}: actual PR proof lost authority: {token}")
+        for index in allowed:
+            step = steps[index]
+            if step.get("continue-on-error") != "true":
+                fail(f"{context}: diagnostic failure deferral must be explicit")
+            for token in ("pr-proof.sh", "test-parallel.sh", "product-ci.sh", "pipeline.sh", "publish-applications.sh", "systemctl ", "sudo ", "prove-live-recursive-substrate.py"):
+                if token in step.get("run", ""):
+                    fail(f"{context}: optional diagnostic contains an authoritative or mutating operation: {token}")
+        for index, step in enumerate(steps):
+            if enabled(step.get("continue-on-error")) and index not in allowed:
+                fail(f"{context}: hidden red step result: {step.get('id', step.get('name', index))}")
+
+
+def product_topology(main: dict) -> None:
+    jobs = main.get("jobs") or {}
+    if set(jobs) != {"product", "chess_environment"}:
+        fail(f"laplace.yml must expose one product job and its chess measurement, found {sorted(jobs)}")
+    calibration = jobs.get("chess_environment") or {}
+    allowed_keys = {"name", "needs", "if", "uses", "with"}
+    if set(calibration) - allowed_keys:
+        fail("laplace.yml: chess measurement may only call the bounded reusable workflow")
+    if calibration.get("needs") != "product":
+        fail("laplace.yml: chess measurement must depend on the single product authority")
+    if calibration.get("uses") != "./.github/workflows/benchmark-evidence.yml":
+        fail("laplace.yml: chess measurement must use the canonical benchmark workflow")
+    if calibration.get("if") != "needs.product.result == 'success' && needs.product.outputs.chess_benchmark_ready == 'true'":
+        fail("laplace.yml: chess measurement requires successful product activation")
+    options = calibration.get("with") or {}
+    if options.get("suite") != "chess" or options.get("target_ref") != "${{ needs.product.outputs.activated_ref }}":
+        fail("laplace.yml: post-activation measurement must bind chess to the activated source")
+    if set(options) - {"suite", "target_ref", "repeats", "reserve_logical_cpus", "allow_saturation"}:
+        fail("laplace.yml: post-activation measurement accepts only bounded chess inputs")
+    product_job = jobs.get("product") or {}
+    expected_outputs = {
+        "chess_benchmark_ready": "${{ steps.chess_benchmark_gate.outputs.ready }}",
+        "activated_ref": "${{ steps.chess_benchmark_gate.outputs.source_sha }}",
+    }
+    if product_job.get("outputs") != expected_outputs:
+        fail("laplace.yml: measurement outputs must come from the successful activation gate")
+    steps = product_job.get("steps") or []
+    lifecycle = unique_step(steps, "name", "Run full product lifecycle", "laplace.yml:product")
+    gate = unique_step(steps, "id", "chess_benchmark_gate", "laplace.yml:product")
+    if lifecycle and gate:
+        gate_if = "env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')"
+        if gate[0] <= lifecycle[0] or gate[1].get("if") != gate_if:
+            fail("laplace.yml: successful activation must precede measurement authorization")
+        command = gate[1].get("run", "")
+        if "ready=true" not in command or '"$(git rev-parse HEAD)"' not in command or "source_sha=%s" not in command:
+            fail("laplace.yml: measurement gate must expose the exact activated checkout")
+        for name, expected in (
+            ("Admit official Stockfish source and verify native corpus readback", gate_if),
+            ("Retain official Stockfish corpus admission evidence", "always() && " + gate_if),
+        ):
+            corpus = unique_step(steps, "name", name, "laplace.yml:product")
+            if corpus and (corpus[0] <= lifecycle[0] or corpus[1].get("if") != expected):
+                fail("laplace.yml: installed corpus proof requires an application-publishing stage")
+
+
 paths = sorted([*WF.glob("*.yml"), *WF.glob("*.yaml")])
 workflows = {path.name: load(path) for path in paths}
 
@@ -58,8 +197,7 @@ for path in paths:
         fail(f"{path.name}: post-run delivery is forbidden")
     if "pull_request_target:" in source:
         fail(f"{path.name}: privileged PR trigger is forbidden")
-    if "continue-on-error: true" in source:
-        fail(f"{path.name}: hidden red result")
+    result_authority(path.name, workflow)
     permissions = workflow.get("permissions")
     if not isinstance(permissions, dict) or permissions.get("contents") != "read":
         fail(f"{path.name}: top-level contents permission must be read-only")
@@ -75,8 +213,7 @@ for path in paths:
 
 main = workflows.get("laplace.yml", {})
 main_jobs = main.get("jobs") or {}
-if set(main_jobs) != {"product"}:
-    fail(f"laplace.yml must expose exactly one product job, found {sorted(main_jobs)}")
+product_topology(main)
 main_concurrency = main.get("concurrency") or {}
 if main_concurrency.get("group") != "laplace-substrate-lifecycle":
     fail("main product lifecycle does not own the shared substrate lifecycle lock")
@@ -86,7 +223,7 @@ main_inputs = ((main.get("on") or {}).get("workflow_dispatch") or {}).get("input
 restore = main_inputs.get("restore_foundation") or {}
 if restore.get("default") != "false":
     fail("main restore_foundation must be explicit opt-in (default false)")
-if main_jobs:
+if "product" in main_jobs:
     command = runs(main_jobs["product"])
     if 'bash scripts/product-ci.sh "$LAPLACE_STAGE"' not in command:
         fail("main product job bypasses scripts/product-ci.sh")
@@ -107,7 +244,8 @@ else:
     product = PRODUCT.read_text(encoding="utf-8")
     required_order = [
         "run_policy", "run_deps", "run_build", "run_dev",
-        "run_install_and_db", "run_publish", "run_integration", "run_live_if_expected",
+        "run_install_and_db", "seed_operational_memory", "run_publish", "run_repair_installed_corpus",
+        "verify_operational_execution", "run_integration", "run_live_if_expected",
     ]
     positions = [product.rfind(f"\n{name}\n") for name in required_order]
     if any(pos < 0 for pos in positions) or positions != sorted(positions):
@@ -115,7 +253,6 @@ else:
     for token in (
         "managed-publish.sh preflight",
         "pipeline.sh install",
-        "migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
         "check-database-health.sh",
         "ensure-foundation.sh --check-only",
         "check-substrate-floor.sh",
@@ -129,6 +266,48 @@ else:
     ):
         if token not in product:
             fail(f"product lifecycle missing {token}")
+    maintenance_path = ROOT / "scripts" / "maintain-installed-database.sh"
+    repair_path = ROOT / "scripts" / "repair-legacy-content-lifecycle.sh"
+    delegation = r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --\s+\\\s+bash scripts/maintain-installed-database\.sh'
+    if len(re.findall(delegation, product)) != 1 or product.count("maintain-installed-database.sh") != 1:
+        fail("installed database maintenance must have one managed-quiescence owner")
+    logical_product = re.sub(r'\\\n[ \t]*', ' ', product)
+    repair_envelope = (r'--max-bytes [1-9][0-9]*[ \t]+--max-line-bytes [1-9][0-9]*[ \t]+'
+                       r'--max-prior-bytes [1-9][0-9]*[ \t]+--max-current-readback-bytes [1-9][0-9]*[ \t]+'
+                       r'--timeout-seconds [1-9][0-9]*')
+    post_publish_repair = (r'LAPLACE_REPAIR_PUBLISHED_SOURCE="\$\(git rev-parse HEAD\)"[ \t]+'
+        r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}"[ \t]+'
+        + repair_envelope + r' --[ \t]+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)')
+    resume_repair = (r'python3 scripts/quiesce-managed-database\.py --database "\$\{PGDATABASE:-laplace\}" --resume-if-needed[ \t]+'
+        + repair_envelope + r' --[ \t]+bash scripts/repair-legacy-content-lifecycle\.sh "\$\{PGDATABASE:-laplace\}"(?:\n|$)')
+    if len(re.findall(post_publish_repair, logical_product)) != 1 or product.count("repair-legacy-content-lifecycle.sh") != 2:
+        fail("post-publication corpus repair must retain quiescence, source evidence, and failure propagation")
+    resume_call = "  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;"
+    if len(re.findall(resume_repair, logical_product)) != 1 or product.splitlines().count(resume_call) != 1 \
+            or not 0 <= product.find("\nrun_policy\n") < product.find(resume_call) < product.find("\nrun_deps\n"):
+        fail("owned repair resume must run unsuppressed before native install or application publication")
+    if product.splitlines().count("run_repair_installed_corpus") != 1:
+        fail("post-publication corpus repair must have one unsuppressed lifecycle invocation")
+    published_tail = product.rsplit("\nrun_publish\n", 1)[-1]
+    if not published_tail.startswith("trap - EXIT\n") or "recover_publish" in published_tail or "ensure_api_running" in published_tail:
+        fail("publication recovery must end before repair owns service restoration")
+    if not maintenance_path.exists() or not repair_path.exists():
+        fail("installed database maintenance or measurement-lane wrapper is missing")
+    else:
+        maintenance = maintenance_path.read_text(encoding="utf-8")
+        repair = repair_path.read_text(encoding="utf-8")
+        commands = (
+            'bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env',
+            'bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"',
+            'bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"',
+        )
+        lines = [line.strip() for line in maintenance.splitlines()]
+        positions = [lines.index(command) if lines.count(command) == 1 else -1 for command in commands]
+        if "set -euo pipefail" not in lines or any(pos < 0 for pos in positions) or positions != sorted(positions):
+            fail("installed database maintenance sequence must migrate, reconcile, and verify once")
+        measured = r'bash scripts/measure-lane\.sh --\s+\\\s+python3 scripts/repair-legacy-content\.py --database "\$database"'
+        if len(re.findall(measured, repair)) != 1 or "set -euo pipefail" not in repair:
+            fail("legacy content repair must execute inside the authoritative measurement lane")
     reconcile = product.split("reconcile_installed_product() {", 1)[1].split("\n}", 1)[0]
     if "ensure-foundation.sh" in reconcile or "ensure_product_foundation" in reconcile:
         fail("fast installed-product reconciliation may not auto-seed")

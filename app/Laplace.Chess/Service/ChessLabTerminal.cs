@@ -48,7 +48,8 @@ public sealed record ChessLabTerminalLine(
     string Stream,
     string Text,
     string? Engine = null,
-    string? Direction = null);
+    string? Direction = null,
+    int? EngineInstance = null);
 
 /// <summary>
 /// The raw transcript of a lab job: a bounded scrollback ring plus live fan-out.
@@ -91,13 +92,13 @@ public sealed class ChessLabTerminal
 
     public bool IsCompleted { get { lock (_gate) return _completed; } }
 
-    public ChessLabTerminalLine Append(string stream, string text, string? engine = null, string? direction = null)
+    public ChessLabTerminalLine Append(string stream, string text, string? engine = null, string? direction = null, int? engineInstance = null)
     {
         ChessLabTerminalLine line;
         Channel<ChessLabTerminalLine>[] subscribers;
         lock (_gate)
         {
-            line = new ChessLabTerminalLine(_nextSeq++, DateTimeOffset.UtcNow, stream, text, engine, direction);
+            line = new ChessLabTerminalLine(_nextSeq++, DateTimeOffset.UtcNow, stream, text, engine, direction, engineInstance);
             int slot = (_start + _count) % _ring.Length;
             if (_count == _ring.Length) _start = (_start + 1) % _ring.Length;
             else _count++;
@@ -118,7 +119,7 @@ public sealed class ChessLabTerminal
     public static string Format(ChessLabTerminalLine line)
     {
         string tag = line.Engine is { Length: > 0 } engine
-            ? $"[{line.Stream}/{engine}{(line.Direction == ChessLabDirection.Send ? " >" : " <")}]"
+            ? $"[{line.Stream}/{engine}{(line.EngineInstance is { } instance ? $"({instance})" : "")}{(line.Direction == ChessLabDirection.Send ? " >" : " <")}]"
             : $"[{line.Stream}]";
         return $"{line.At.ToString("HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture)} {tag} {line.Text}";
     }

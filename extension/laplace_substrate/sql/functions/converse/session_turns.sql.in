@@ -1,7 +1,7 @@
 -- session_turns: exact prior-turn recall FROM THE SESSION TRAJECTORY (spec 34
 -- acceptance: "Exact prior-turn recall comes from the session trajectory") — the
 -- geometric read the agent-trace lane finally makes possible. The session entity's
--- Content physicality holds the ordered, versioned turn manifest; this realizes it
+-- Projection physicality holds the ordered, growing turn manifest; this realizes it
 -- back: ordinal, turn id, role and model (via the HAS_ROLE / AUTHORED_BY consensus
 -- edges, names resolved through IS_INSTANCE_OF), the turn's witnessed EVENT time
 -- (APPEARS_IN evidence under this session's context — the log's clock, not ingest
@@ -11,6 +11,9 @@
 -- invalidatable accelerator), this reads the substrate's own order authority. A
 -- session with no deposited trajectory returns zero rows — absence is unknown,
 -- never an empty fabrication.
+-- The session's stable handle is not an immutable snapshot content identity. Its
+-- projection points to canonical turn content admitted through the governed writer.
+-- Legacy Content session manifests require explicit, evidenced typed recovery.
 --
 -- RANK THEN LABEL (ISA gate G2, Rule #3): ids are selected and LIMITed first, then
 -- resolved through exactly two realize.render_batch calls — one positionally aligned

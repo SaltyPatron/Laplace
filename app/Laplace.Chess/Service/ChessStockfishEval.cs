@@ -12,12 +12,12 @@ namespace Laplace.Chess.Service;
 /// CALCULATED stockfish eval pass (GH #573): replay a witnessed line, evaluate every
 /// position with stockfish (side-to-move cp), attest HAS_EVAL deposits and eval-delta
 /// MOVE_QUALITY classes under the ChessStockfish source. Versioned and marker-gated
-/// like ChessAnalyze; GH #736: an engine verdict is a pure function of the position, so
-/// the unit is the LINE — a second playing of an analyzed line re-deposits nothing.
+/// like ChessAnalyze; GH #736: each complete FEN is evaluated under one exact recipe.
+/// The unit is the LINE — another playing of an analyzed line under that recipe re-deposits nothing.
 /// </summary>
 public static class ChessStockfishEval
 {
-    public const int Version = 1;
+    public const int Version = 2;
 
     public const string SourceName = "ChessStockfish";
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
@@ -26,11 +26,21 @@ public static class ChessStockfishEval
     public static Hash128 MarkerId(Hash128 lineId, int version)
         => Hash128.OfCanonical($"chess/stockfish-eval/{lineId}/{version}");
 
+    internal static string MarkerKey(Hash128 lineId, StockfishEvaluationRecipe recipe)
+        => recipe.MarkerKey(lineId.ToString());
+
+    public static Hash128 MarkerId(Hash128 lineId, StockfishEvaluationRecipe recipe)
+        => Hash128.OfCanonical(MarkerKey(lineId, recipe));
+
+    internal static string InputKey(string fen, StockfishEvaluationRecipe recipe)
+        => recipe.InputKey(fen);
+
     private const double EvalWeight = 0.95;
     private const double QualityWeight = 0.9;
 
     internal sealed record PreparedLine(
         ChessWitnessedGame Game,
+        StockfishEvaluationRecipe Recipe,
         ChessComposed?[] Positions,
         int?[] Evals,
         KeyValuePair<Hash128, int?>[] FreshEvaluations,
@@ -46,9 +56,10 @@ public static class ChessStockfishEval
 
     public static void DeriveGame(
         SubstrateChangeBuilder b, ChessWitnessedGame game, IPositionEvaluator eval,
+        StockfishEvaluationRecipe recipe,
         ConcurrentDictionary<Hash128, int?>? evalMemo = null)
     {
-        var prepared = PrepareGame(game, eval, evalMemo, evalInflight: null);
+        var prepared = PrepareGame(game, eval, recipe, evalMemo, evalInflight: null);
         if (prepared is not null)
             DepositPrepared(b, prepared);
     }
@@ -62,6 +73,7 @@ public static class ChessStockfishEval
     internal static PreparedLine? PrepareGame(
         ChessWitnessedGame game,
         IPositionEvaluator eval,
+        StockfishEvaluationRecipe recipe,
         ConcurrentDictionary<Hash128, int?>? evalMemo,
         ConcurrentDictionary<Hash128, Lazy<int?>>? evalInflight)
     {
@@ -83,15 +95,16 @@ public static class ChessStockfishEval
 
             if (m.Terminal(cur) is null)
             {
+                string fen = cur.Board.ToFen();
+                var evaluationInput = Hash128.OfCanonical(InputKey(fen, recipe));
                 evals[ply] = EvaluatePosition(
-                    node.Position.Id,
-                    cur.Board.ToFen(),
+                    evaluationInput, fen,
                     eval,
                     evalMemo,
                     evalInflight,
                     out bool newlyCached);
                 if (newlyCached)
-                    fresh.Add(new KeyValuePair<Hash128, int?>(node.Position.Id, evals[ply]));
+                    fresh.Add(new KeyValuePair<Hash128, int?>(evaluationInput, evals[ply]));
                 if (!evals[ply].HasValue)
                     complete = false;
             }
@@ -107,7 +120,7 @@ public static class ChessStockfishEval
             carried = ChessCompose.Position(cur.Board);
         }
 
-        return new PreparedLine(game, composed, evals, fresh.ToArray(), complete);
+        return new PreparedLine(game, recipe, composed, evals, fresh.ToArray(), complete);
     }
 
     /// <summary>
@@ -115,20 +128,22 @@ public static class ChessStockfishEval
     /// retried/reused on the next pass; it never becomes partial substrate testimony and never
     /// receives the line completion marker.
     /// </summary>
-    internal static void DepositPrepared(SubstrateChangeBuilder b, PreparedLine prepared)
+    internal static void DepositPrepared(SubstrateChangeBuilder b, PreparedLine prepared,
+        Hash128? recipeMetadataRoot = null)
     {
         if (!prepared.Complete) return;
 
         var game = prepared.Game;
         var composed = prepared.Positions;
         var evals = prepared.Evals;
+        var context = MarkerId(game.LineId, prepared.Recipe);
 
         for (int ply = 0; ply < composed.Length; ply++)
         {
             if (composed[ply] is not { } node) continue;
             ChessGraph.EmitComposed(b, node, SourceId);
             if (evals[ply] is { } cp)
-                ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, game.LineId);
+                ChessGraph.AppendEval(b, node, cp, games: 1, EvalWeight, SourceId, context);
         }
 
         int moveCount = Math.Min(game.Moves.Count, Math.Max(0, evals.Length - 1));
@@ -139,17 +154,19 @@ public static class ChessStockfishEval
             if (ClassifyLoss(before + after) is not { } token) continue;
             ChessGraph.AppendMoveQuality(
                 b, from.Position.Id, token, games: 1, QualityWeight,
-                SourceId, game.LineId);
+                SourceId, context);
         }
 
-        b.AddEntity(MarkerId(game.LineId, Version), EntityTier.Document,
+        b.AddEntity(context, EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, SourceId);
-        if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
+        // The existing source family remains addressable. Each new calculated context names
+        // its exact inputs; legacy anonymous v1 contexts and their evidence are left intact.
+        if ((recipeMetadataRoot ?? ContentEmitter.Emit(b, prepared.Recipe.CanonicalManifest, SourceId)) is { } vId)
             b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
                     BootstrapIntentBuilder.RelationTypeMetaTypeId, SourceId)
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     game.LineId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
-                    SourceId, contextId: null, ChessVocabulary.Trust));
+                    SourceId, contextId: context, ChessVocabulary.Trust));
     }
 
     private static int? EvaluatePosition(

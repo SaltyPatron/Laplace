@@ -171,7 +171,7 @@ managed_results="$stage/managed-results"
 mkdir -p "$managed_results"
 exemplar_results="$BUILD/test-results/operational-exemplar"
 mkdir -p "$exemplar_results"
-rm -f "$exemplar_results/exemplar.json" "$exemplar_results/execution.json"
+rm -f "$exemplar_results/exemplar.json" "$exemplar_results/execution.json" "$exemplar_results/bundle.json"
 PATH="$PG_PREFIX/bin:$PATH" \
 LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=laplace_substratecrud_test" \
 LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
@@ -199,5 +199,13 @@ PY
 # unchanged; the fixture varies only the real registry file and process lifetime.
 LAPLACE_PG_PREFIX="$PG_PREFIX" bash scripts/test-highway-registry-recovery.sh \
   "$pgdata" "$highway_perfcache" "${REGRESS_DB}_highway"
+
+# Use the same isolated branch-native postmaster to prove exact legacy row
+# repairs, durable pre-mutation receipts, rejected evidence, and SQL rollback.
+# The harness creates a unique disposable database and keeps receipts with the
+# build's other test results for inspection after the private cluster is gone.
+LAPLACE_PG_PREFIX="$PG_PREFIX" python3 scripts/test-legacy-content-repair.py \
+  --pgdata "$pgdata" --database-stem "$REGRESS_DB" \
+  --receipt-root "$BUILD/test-results/legacy-content-repair"
 
 echo "PR_DB_PROOF_OK database_stem=$REGRESS_DB postgres=isolated controls=staged modules=build-tree canonical_mutations=0"

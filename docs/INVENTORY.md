@@ -34,7 +34,7 @@ Test projects:
 - `Laplace.Endpoints.OpenAICompat.Tests`
 - `Laplace.Substrate.Tests`
 
-## Decomposers — 30 in `Laplace.Decomposers`, 13 in `Laplace.Chess`
+## Decomposers — 31 in `Laplace.Decomposers`, 13 in `Laplace.Chess`
 
 - `AgentTraceDecomposer`
 - `Atomic2020Decomposer`
@@ -63,6 +63,7 @@ Test projects:
 - `UDDecomposer`
 - `UnicodeDecomposer`
 - `VerbNetDecomposer`
+- `VerifiedGitRepoDecomposer`
 - `WiktionaryDecomposer`
 - `WordFrameNetDecomposer`
 - `WordNetDecomposer`

@@ -1,0 +1,11 @@
+{
+  "schema": "laplace/task-shape/relation-read/token-slots/v1",
+  "exemplar_parse_id": "233628ad8de38a2507005c546c16febd",
+  "predicate_id": "5c90e904dd802ac50a07945b1ac1e2c5",
+  "slots": [
+    {
+      "exemplar_token_ref_id": "65608a603668fb5769ce4954920f1ab8",
+      "accepted_entity_type_id": "46c95f3590b2d1b45686741f67600ed3"
+    }
+  ]
+}

@@ -36,17 +36,11 @@ public sealed class SubstrateStateValuer : IStateValuer
             }
         }
 
-        // MEASURED 2026-08-21: this returns neutral for everything today -- zero consensus
-        // rows and zero attestations carry a position-constituent subject. An earlier
-        // rewrite of this comment claimed the promotion pass "has never existed in this
-        // tree". That was FALSE and is retracted: ChessStockfishEval.DeriveGame IS the
-        // pass -- it materializes each position (ChessGraph.EmitComposed) and deposits
-        // HAS_EVAL / MOVE_QUALITY -- dispatched as ingest source "chess-eval"
-        // (IngestDispatchTable) and by seed-chess-eval.yml. AppendEval and
-        // AppendMoveQuality each have exactly one caller, both in that lane, and the
-        // ingest_run_journal holds no ChessStockfish run, so the lane has simply never
-        // been dispatched for this corpus. Neutral-until-census is the design working;
-        // the original comment here was accurate all along.
+        // This reader values position constituents through OUTCOME consensus.
+        // ChessStockfishEval deposits HAS_EVAL on complete positions and MOVE_QUALITY
+        // for observed moves; running that ingest does not populate this lookup.
+        // Consumption of those different evidence planes requires its own explicit
+        // path and proof. A constituent with no OUTCOME evidence contributes no value.
         var stats = await ReadOutcomeStatsAsync(distinct, ct).ConfigureAwait(false);
 
         for (int i = 0; i < n; i++)

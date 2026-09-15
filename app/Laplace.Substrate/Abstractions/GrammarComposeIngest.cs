@@ -24,7 +24,9 @@ public readonly record struct GrammarComposeRecord(
     byte[]? ObservedPromptUtf8 = null,
     // A source's declared structural semantics reuse the retained native AST.
     // The ordinary full-source grammar/file admission remains the record owner.
-    IGrammarWitness? StructureWitness = null) : IIngestResidentRecord
+    IGrammarWitness? StructureWitness = null,
+    bool RequireSourceAst = false,
+    bool RawText = false) : IIngestResidentRecord
 {
     public long ResidentInputBytes => (Utf8?.LongLength ?? 0) + (ObservedPromptUtf8?.LongLength ?? 0);
 }
@@ -49,7 +51,8 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     }
 
     public IIngestDeferredUnit CreateDeferredUnit(GrammarComposeRecord record) =>
-        new Unit(record, _sourceId, _trust, _reader);
+        record.RawText ? new RawFileUnit(record, _sourceId)
+            : new Unit(record, _sourceId, _trust, _reader);
 
     /// <summary>
     /// Source-scoped witnesses remain attached to the native source root even when
@@ -87,6 +90,37 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             conceptId, ExampleRelation, rootId, sourceId, null, trust));
         builder.AddAttestation(NativeAttestation.Categorical(
             rootId, "HAS_DEFINITION", conceptId, sourceId, trust));
+    }
+
+    private sealed class RawFileUnit : IIngestDeferredUnit
+    {
+        private readonly GrammarComposeRecord _record;
+        private readonly Hash128 _sourceId;
+        private readonly IIngestDeferredUnit _content;
+        public RawFileUnit(GrammarComposeRecord record, Hash128 sourceId)
+        {
+            if (record.Modality != "text" || record.FileMetadata is null || record.FileMetadata.Value.Modality != "text"
+                || record.StructureWitness is not null || record.ObservedPromptUtf8 is not null
+                || !GrammarSourceFileSupport.IsExactNativeText(record.Utf8))
+                throw new InvalidDataException("Raw source admission requires exact native text and physical file metadata.");
+            _record = record; _sourceId = sourceId;
+            _content = new ContentIngestHandler(sourceId).CreateDeferredUnit(new ContentIngestRecord(record.Utf8));
+        }
+        public TierTree? TreeForBatchProbe => _content.TreeForBatchProbe;
+        public long ResidentBytes => _content.ResidentBytes;
+        public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct)
+            => _content.ProbeDescentAsync(reader, ct);
+        public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? bitmap)
+        {
+            Hash128 content = _content.DrainInto(builder, witnessWeight, bitmap);
+            var tree = _content.TreeForBatchProbe ?? throw new InvalidDataException("Raw source native content tree is absent.");
+            FileIdentity file = FileEntity.Emit(builder, _sourceId, FileEntity.RootComponent(tree), _record.FileMetadata!.Value);
+            if (content == default || content != file.ContentRootId)
+                throw new InvalidDataException("Raw source changed between native content and file composition.");
+            builder.SetFileId(file.FileId);
+            return file.FileId;
+        }
+        public void Dispose() => _content.Dispose();
     }
 
     private sealed class Unit : IIngestDeferredUnit
@@ -212,6 +246,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             try
             {
                 _ast = GrammarDecomposer.Parse(_record.Utf8, recipe);
+                if (_record.RequireSourceAst) GrammarSourceFileSupport.RequireNativeSourceAst(_ast);
                 _composer = new GrammarRowComposer(_record.Utf8, _ast, _sourceId,
                     _record.Modality, GrammarCompositionMode.FullSource);
                 _root = _composer.RootComponent();
@@ -310,6 +345,33 @@ public static class GrammarComposeIngestSupport
 /// </summary>
 public static class GrammarSourceFileSupport
 {
+    public static GrammarAstDiagnostics RequireNativeSourceAst(GrammarAst ast)
+    {
+        var diagnostics = ast.Diagnostics;
+        if (diagnostics.AstNodeCount == 0 || ast.GetNode(0).Parent != GrammarAst.Root)
+            throw new InvalidDataException("Native source grammar produced no rooted AST.");
+        // Error/missing nodes describe a partial concrete syntax tree. The existing
+        // native full-source composer retains exact source spans and gaps; it does
+        // not invent bytes for zero-width recovery nodes. Receipts retain diagnostics.
+        return diagnostics;
+    }
+
+    public static unsafe bool IsExactNativeText(byte[] bytes)
+    {
+        if (bytes.Length == 0 || bytes.AsSpan().Contains((byte)0)) return false;
+        byte* normalized = null;
+        nuint length = 0;
+        try
+        {
+            fixed (byte* input = bytes)
+                if (NativeInterop.NormalizeNfcUtf8(input, (nuint)bytes.Length, &normalized, &length) != 0)
+                    return false;
+            return length == (nuint)bytes.Length
+                && bytes.AsSpan().SequenceEqual(new ReadOnlySpan<byte>(normalized, bytes.Length));
+        }
+        finally { if (normalized != null) System.Runtime.InteropServices.NativeMemory.Free(normalized); }
+    }
+
     public static FileMetadata MetadataFromPath(
         string absolutePath, string relativePath, string modality)
     {

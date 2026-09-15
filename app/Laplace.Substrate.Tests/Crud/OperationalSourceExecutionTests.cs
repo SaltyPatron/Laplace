@@ -64,21 +64,28 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             // The other case retains the upstream UD source admission contract.
             const string authoredRelative = "seeds/operational/exemplars/en_define.conllu";
             string udPath;
+            string authoredRoot = Path.Combine(directory, "authored");
             DateTime? authoredStartedAt = null;
             Hash128 parseSource;
             if (throughWordNetSense)
             {
-                string authoredRoot = Path.Combine(directory, "authored");
-                string bundled = Path.Combine(OperationalDecomposer.BundledPath, authoredRelative);
-                byte[] bundledBytes = await File.ReadAllBytesAsync(bundled);
-                Assert.InRange(bundledBytes.Length, 1, 64 * 1024);
+                string[] bundledFiles = Directory.GetFiles(OperationalDecomposer.BundledPath, "*", SearchOption.AllDirectories);
+                Assert.Equal(13, bundledFiles.Length);
+                foreach (string bundled in bundledFiles)
+                {
+                    string relative = Path.GetRelativePath(OperationalDecomposer.BundledPath, bundled);
+                    string destination = Path.Combine(authoredRoot, relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    byte[] bundledBytes = await File.ReadAllBytesAsync(bundled);
+                    await File.WriteAllBytesAsync(destination, bundledBytes);
+                    Assert.Equal(bundledBytes, await File.ReadAllBytesAsync(destination));
+                }
                 udPath = Path.Combine(authoredRoot, authoredRelative);
-                Directory.CreateDirectory(Path.GetDirectoryName(udPath)!);
-                await File.WriteAllBytesAsync(udPath, bundledBytes);
-                Assert.Equal(bundledBytes, await File.ReadAllBytesAsync(udPath));
                 await using (var clock = pg.DataSource.CreateCommand("SELECT clock_timestamp()"))
                     authoredStartedAt = (DateTime)(await clock.ExecuteScalarAsync())!;
-                await Ingest(new OperationalDecomposer(), authoredRoot);
+                // One real generic source run owns the entire distributed bundle;
+                // parse/shape admission ordering is not arranged by the fixture.
+                await Ingest(new OperationalDecomposer(), authoredRoot, expectedFiles: 13);
                 parseSource = OperationalSource.SourceId;
             }
             else
@@ -107,7 +114,11 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             }
 
             if (throughWordNetSense)
-                await RetainAuthoredExemplar(udPath, authoredRelative, authoredStartedAt!.Value, exemplarRoot, parse);
+            {
+                Guid authoredRun = await RetainAuthoredExemplar(udPath, authoredRelative,
+                    authoredStartedAt!.Value, exemplarRoot, parse);
+                await AssertFullBundleReceipt(authoredRoot, authoredRun);
+            }
 
             var facts = new SubstrateChangeBuilder(source, "operational-execution-facts/" + scope);
             facts.AddEntity(source, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
@@ -219,6 +230,9 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                         sense_id = Hex(sense), synset_id = Hex(input),
                         exemplar_parse_id = Hex(parse), shape_id = Hex(first.Shape.Id),
                         shape_file_id = Hex(first.File), program_id = Hex(original.ProgramId),
+                        bundled_shape_relative_path = first.RelativePath,
+                        bundled_shape_bytes = first.Bytes.Length,
+                        bundled_shape_sha256 = Convert.ToHexString(SHA256.HashData(first.Bytes)).ToLowerInvariant(),
                         emitted_id = Hex(Assert.Single(original.Emitted)),
                         changed_fact_emitted_id = Hex(Assert.Single(changed.Emitted)),
                         replacement_shape_id = Hex(second.Shape.Id),
@@ -231,27 +245,54 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                     }, new JsonSerializerOptions { WriteIndented = true }) + "\n");
             }
 
-            async Task<(OperationalTaskShapeWitness.Definition Shape, Hash128 File)> AdmitShape(Hash128 predicate)
+            async Task<(OperationalTaskShapeWitness.Definition Shape, Hash128 File,
+                string RelativePath, byte[] Bytes)> AdmitShape(Hash128 predicate)
             {
-                string json = $$"""
-                    {
-                      "schema": "laplace/task-shape/relation-read/token-slots/v1",
-                      "exemplar_parse_id": "{{Hex(parse)}}",
-                      "predicate_id": "{{Hex(predicate)}}",
-                      "slots": [{"exemplar_token_ref_id": "{{Hex(UdParseStructure.TokenRefId("2"))}}",
-                                 "accepted_entity_type_id": "{{Hex(acceptedType)}}"}]
-                    }
-                    """;
-                await File.WriteAllTextAsync(shapePath, json);
-                await Ingest(new OperationalDecomposer(), shapePath);
-                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                string relativePath = "shape.json";
+                string path = shapePath;
+                string ecosystem = path;
+                byte[] bytes;
+                if (throughWordNetSense && predicate.Equals(firstPredicate))
+                {
+                    // Execute the exact distributed declaration. Its native
+                    // reference identities must match this actual source admission.
+                    relativePath = "seeds/operational/tasks/en_define.json";
+                    bytes = await File.ReadAllBytesAsync(Path.Combine(OperationalDecomposer.BundledPath, relativePath));
+                    Assert.InRange(bytes.Length, 1, 64 * 1024);
+                    path = Path.Combine(authoredRoot, relativePath);
+                    Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
+                }
+                else
+                {
+                    // The alternate declaration is an explicit source mutation,
+                    // independently admitted with its own file identity.
+                    string json = $$"""
+                        {
+                          "schema": "laplace/task-shape/relation-read/token-slots/v1",
+                          "exemplar_parse_id": "{{Hex(parse)}}",
+                          "predicate_id": "{{Hex(predicate)}}",
+                          "slots": [{"exemplar_token_ref_id": "{{Hex(UdParseStructure.TokenRefId("2"))}}",
+                                     "accepted_entity_type_id": "{{Hex(acceptedType)}}"}]
+                        }
+                        """;
+                    bytes = Encoding.UTF8.GetBytes(json);
+                }
+                if (!(throughWordNetSense && predicate.Equals(firstPredicate)))
+                {
+                    await File.WriteAllBytesAsync(path, bytes);
+                    await Ingest(new OperationalDecomposer(), ecosystem);
+                }
                 using var ast = GrammarDecomposer.Parse(bytes, "json");
                 var declared = OperationalTaskShapeWitness.Read(ast, bytes);
+                Assert.Equal(parse, declared.ExemplarParseId);
+                Assert.Equal(predicate, declared.PredicateId);
+                Assert.Equal(UdParseStructure.TokenRefId("2"), Assert.Single(declared.Slots).TokenRefId);
+                Assert.Equal(acceptedType, Assert.Single(declared.Slots).AcceptedTypeId);
                 using var composer = new GrammarRowComposer(bytes, ast, OperationalSource.SourceId,
                     "json", GrammarCompositionMode.FullSource);
                 FileIdentity file = FileEntity.Resolve(composer.RootComponent(),
-                    GrammarSourceFileSupport.MetadataFromPath(shapePath, "shape.json", "json"));
-                return (declared, file.FileId);
+                    GrammarSourceFileSupport.MetadataFromPath(path, relativePath, "json"));
+                return (declared, file.FileId, relativePath, bytes);
             }
         }
         finally { Directory.Delete(directory, recursive: true); }
@@ -259,7 +300,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
         AttestationRow Fact(Hash128 subject, Hash128 predicate, Hash128 result) =>
             NativeAttestation.CategoricalResolved(subject, predicate, result, source, context, SourceTrust.SubstrateMandate);
 
-        async Task Ingest(IDecomposer decomposer, string path)
+        async Task Ingest(IDecomposer decomposer, string path, int expectedFiles = 1)
         {
             IngestRunResult result = await runner.RunAsync(decomposer, IngestRunOptions.Default with
             {
@@ -269,8 +310,8 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             });
             Assert.Empty(result.Failures);
             Assert.Equal(0, result.UnitsFailed);
-            Assert.Equal(1, result.FilesDone);
-            Assert.Equal(1, result.InputUnitsDone);
+            Assert.Equal(expectedFiles, result.FilesDone);
+            Assert.Equal(expectedFiles, result.InputUnitsDone);
         }
 
         async Task Apply(SubstrateChange change)
@@ -280,7 +321,7 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
         }
     }
 
-    private async Task RetainAuthoredExemplar(
+    private async Task<Guid> RetainAuthoredExemplar(
         string path, string relativePath, DateTime startedAt, Hash128 root, Hash128 parse)
     {
         byte[] bytes = await File.ReadAllBytesAsync(path);
@@ -385,6 +426,53 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
             }, new JsonSerializerOptions { WriteIndented = true });
             await File.WriteAllTextAsync(receiptPath, json + "\n");
         }
+        return runId;
+    }
+
+    private async Task AssertFullBundleReceipt(string root, Guid runId)
+    {
+        string[] files = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
+        Assert.Equal(13, files.Length);
+        var expected = files.ToDictionary(path => Path.GetRelativePath(root, path).Replace('\\', '/'),
+            path => (Path: path, Bytes: File.ReadAllBytes(path), Fingerprint: IngestBatchPipeline.TryResolveFileIdentity(path)!.Value),
+            StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var manifest = new List<object>();
+        await using var query = pg.DataSource.CreateCommand(
+            "SELECT f.relative_path,f.bytes,f.resume_fingerprint,f.file_id,f.status,f.disposition,"
+            + "EXISTS (SELECT 1 FROM laplace.attestations a WHERE a.subject_id=f.resume_fingerprint "
+            + "AND a.object_id=f.resume_fingerprint AND a.source_id=f.resume_fingerprint "
+            + "AND a.type_id=$2 AND a.context_id=$3) "
+            + "FROM laplace.ingest_file_journal f WHERE f.run_id=$1 ORDER BY f.relative_path");
+        query.Parameters.AddWithValue(runId);
+        query.Parameters.AddWithValue(LayerCompletion.RelationTypeId(2).ToBytes());
+        query.Parameters.AddWithValue(OperationalSource.SourceId.ToBytes());
+        await using var row = await query.ExecuteReaderAsync();
+        while (await row.ReadAsync())
+        {
+            string relative = row.GetString(0);
+            Assert.True(seen.Add(relative), "A bundled source artifact must have exactly one receipt in its run.");
+            Assert.True(expected.TryGetValue(relative, out var file));
+            Assert.Equal(file.Bytes.LongLength, row.GetInt64(1));
+            Assert.Equal(file.Fingerprint.ToBytes(), row.GetFieldValue<byte[]>(2));
+            Hash128 fileId = Hash128.FromBytes(row.GetFieldValue<byte[]>(3));
+            Assert.NotEqual(default, fileId);
+            Assert.Equal("ok", row.GetString(4));
+            Assert.Equal("admitted", row.GetString(5));
+            Assert.True(row.GetBoolean(6), "Every selected artifact must finish through its own source-scoped completion marker.");
+            manifest.Add(new { relative_path = relative, bytes = file.Bytes.Length,
+                sha256 = Convert.ToHexString(SHA256.HashData(file.Bytes)).ToLowerInvariant(),
+                resume_fingerprint = Hex(file.Fingerprint), file_id = Hex(fileId), completion_present = true });
+        }
+        Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), seen.Order(StringComparer.Ordinal));
+        string? receiptPath = Environment.GetEnvironmentVariable("LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT");
+        if (!string.IsNullOrWhiteSpace(receiptPath))
+            await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(receiptPath))!, "bundle.json"),
+                JsonSerializer.Serialize(new { schema = "laplace.operational-bundle-proof/v1",
+                    candidate_sha = Environment.GetEnvironmentVariable("LAPLACE_PR_TARGET_SHA"),
+                    run_id = runId, source_id = Hex(OperationalSource.SourceId), files = manifest,
+                    selected = 13, admitted = 13, completions = 13,
+                }, new JsonSerializerOptions { WriteIndented = true }) + "\n");
     }
 
     private async Task AssertPersistedContract(OperationalTaskShapeWitness.Definition shape, Hash128 file)

@@ -329,8 +329,9 @@ public static class ChessGraph
         // Same primitives the position tier composes with — one implementation of "pack an
         // ordered id sequence into a trajectory", not a chess-specific second one.
         double[] traj = Trajectory.Build(ids);
-        // Karcher, not Centroid — intrinsic mean, lands on S3 at norm 1. See
-        // NgramTrajectory for the measurement. Requires a reseed.
+        // Preserve the established chess placement recipe for both Content and
+        // Projection. The generic centroid/Karcher reconciliation is a separate
+        // declared migration; trajectory identity repair does not choose it.
         double[] centroid = Math4d.KarcherMean(coords);
 
         b.AddPhysicality(new PhysicalityRow(

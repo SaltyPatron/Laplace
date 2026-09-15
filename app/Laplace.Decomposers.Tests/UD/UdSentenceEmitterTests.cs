@@ -329,11 +329,25 @@ public sealed class UdSentenceEmitterTests
     {
         var sentence = Sentence(Utf8("cats"),
             Token(1, "cats", "cat", "NOUN", "NNS", ["Number=Plur"], 0, "root"));
+        long implicitStartedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var implicitDefault = EmitAndDecode(sentence);
+        long implicitFinishedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L + 999L;
+        long explicitStartedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         var explicitDefault = EmitAndDecode(sentence,
             witness: new UdWitnessContract(UdSource, SourceTrust.AcademicCurated));
+        long explicitFinishedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L + 999L;
         Assert.Equal(implicitDefault.ParseId, explicitDefault.ParseId);
-        Assert.Equal(implicitDefault.Change.Attestations, explicitDefault.Change.Attestations);
+        // Separate emissions have their own native observation times. Compare every
+        // other record field, and bound microseconds through the final millisecond.
+        Assert.Equal(
+            implicitDefault.Change.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }),
+            explicitDefault.Change.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }));
+        Assert.All(implicitDefault.Change.Attestations, row =>
+            Assert.InRange(row.LastObservedAtUnixUs, implicitStartedAtUs, implicitFinishedAtUs));
+        Assert.All(explicitDefault.Change.Attestations, row =>
+            Assert.InRange(row.LastObservedAtUnixUs, explicitStartedAtUs, explicitFinishedAtUs));
+        Assert.True(implicitDefault.Change.Attestations.Max(row => row.LastObservedAtUnixUs)
+            <= explicitDefault.Change.Attestations.Min(row => row.LastObservedAtUnixUs));
         AttestationRow parseClaim = ParseClaim(implicitDefault.Change);
         Assert.NotNull(parseClaim.ContextId);
         Assert.All(implicitDefault.Change.Attestations, row => AssertWitness(

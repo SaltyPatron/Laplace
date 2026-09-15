@@ -35,6 +35,9 @@
     <Content Include="../../seeds/operational/exemplars/en_define.conllu"
              Link="seeds/operational/seeds/operational/exemplars/%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../seeds/operational/tasks/en_define.json"
+             Link="seeds/operational/seeds/operational/tasks/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

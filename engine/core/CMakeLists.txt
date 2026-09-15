@@ -233,11 +233,28 @@ set(_chess_emit_cmd
             --output ${LAPLACE_CHESS_PERFCACHE_BIN})
 
 if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
+    set(_chess_openings_deps)
     if(LAPLACE_CHESS_OPENINGS AND EXISTS "${LAPLACE_CHESS_OPENINGS}")
         set(_chess_openings_arg "${LAPLACE_CHESS_OPENINGS}")
+        if(IS_DIRECTORY "${LAPLACE_CHESS_OPENINGS}")
+            file(GLOB_RECURSE _chess_openings_deps CONFIGURE_DEPENDS
+                "${LAPLACE_CHESS_OPENINGS}/*.tsv")
+        else()
+            set(_chess_openings_deps "${LAPLACE_CHESS_OPENINGS}")
+        endif()
     else()
         set(_chess_openings_arg "NONE")
     endif()
+    # Corpus contents are native catalog inputs. A manifest also invalidates the
+    # generator when a TSV is removed or replaced with an older file timestamp.
+    set(_chess_openings_manifest "${_chess_openings_arg}\n")
+    foreach(_opening_file IN LISTS _chess_openings_deps)
+        file(SHA256 "${_opening_file}" _opening_hash)
+        string(APPEND _chess_openings_manifest "${_opening_hash} ${_opening_file}\n")
+    endforeach()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_chess_openings_deps})
+    set(_chess_openings_manifest_path "${LAPLACE_PERFCACHE_DIR}/chess_openings_inputs.txt")
+    file(GENERATE OUTPUT "${_chess_openings_manifest_path}" CONTENT "${_chess_openings_manifest}")
     # The managed prep emits board coverage and deterministic transition keys. Binary
     # position identity is independent of the Unicode/codepoint floor.
     add_custom_command(
@@ -248,6 +265,7 @@ if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
                 "${_chess_openings_arg}" "${LAPLACE_CHESS_SURFACES}"
                 "${LAPLACE_CHESS_TRANSITION_BIN}"
         DEPENDS ${LAPLACE_CHESS_SURFACES_MANAGED_SOURCES}
+                ${_chess_openings_deps} "${_chess_openings_manifest_path}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Chess catalog tier-2 surfaces (emit input prep)"
         VERBATIM

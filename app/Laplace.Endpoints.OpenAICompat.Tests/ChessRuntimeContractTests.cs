@@ -38,6 +38,50 @@ public sealed class ChessRuntimeContractTests : IClassFixture<ExploreFactory>
     }
 
     [Fact]
+    public async Task GauntletPreviewPreservesExplicitStockfishResources()
+    {
+        using var client = _factory.CreateClient();
+        using var response = await client.GetAsync("/chess/lab/cutechess/preview?stockfishThreads=4&stockfishHashMb=256"
+            + "&stockfishNumaPolicy=system&stockfishSyzygyPath=%2Fvault%2FTables%20A");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var args = json.RootElement.GetProperty("arguments").EnumerateArray().Select(x => x.GetString()).ToArray();
+        Assert.Contains("option.Threads=4", args);
+        Assert.Contains("option.Hash=256", args);
+        Assert.Contains("option.NumaPolicy=system", args);
+        Assert.Contains("option.SyzygyPath=/vault/Tables A", args);
+        Assert.False(_factory.Services.GetRequiredService<ChessRuntimeService>().InitializationStarted);
+    }
+
+    [Fact]
+    public async Task BlankStockfishResourcesPreserveEngineDefaultsInPreview()
+    {
+        using var client = _factory.CreateClient();
+        using var response = await client.GetAsync("/chess/lab/cutechess/preview?stockfishThreads=&stockfishHashMb="
+            + "&stockfishNumaPolicy=&stockfishSyzygyPath=");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("stockfish").GetProperty("threads").ValueKind);
+    }
+
+    [Theory]
+    [InlineData("stockfishThreads", "0")]
+    [InlineData("stockfishHashMb", "33554433")]
+    [InlineData("stockfishNumaPolicy", "bogus")]
+    public async Task InvalidStockfishResourcesAreRejectedByPreviewAndStart(string name, string value)
+    {
+        using var client = _factory.CreateClient();
+        using var preview = await client.GetAsync($"/chess/lab/cutechess/preview?{name}={value}");
+        Assert.Equal(HttpStatusCode.BadRequest, preview.StatusCode);
+        using var start = await client.PostAsJsonAsync("/chess/lab/start", new
+        {
+            kind = "cutechess", config = new Dictionary<string, string> { [name] = value }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, start.StatusCode);
+        Assert.False(_factory.Services.GetRequiredService<ChessRuntimeService>().InitializationStarted);
+    }
+
+    [Fact]
     public async Task PureAndStatusRoutes_DoNotInitializeWriteRuntime()
     {
         using var client = _factory.CreateClient();

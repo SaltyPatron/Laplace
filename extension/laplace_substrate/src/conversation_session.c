@@ -9,7 +9,8 @@
 
 #include "laplace/core/mantissa.h"
 #include "laplace/core/content_witness_batch.h"
-#include "laplace/core/hash_composer.h"
+#include "laplace/core/hilbert4d.h"
+#include "laplace/core/math4d.h"
 #include "laplace/core/trajectory.h"
 #include "laplace/core/sql_catalog.h"
 #include "spi_common.h"
@@ -23,6 +24,11 @@ static SPIPlanPtr session_manifest_plan = NULL;
 static SPIPlanPtr session_lock_plan = NULL;
 static SPIPlanPtr session_coords_plan = NULL;
 static SPIPlanPtr session_write_plan = NULL;
+
+/* A stable session handle owns a mutable projection of its ordered turns.
+ * Each turn retains its canonical Content physicality through governed apply.
+ * The session handle is not the content hash of the changing turn sequence. */
+enum { SESSION_MANIFEST_TYPE = 3 };
 
 static SPIPlanPtr
 session_plan(SPIPlanPtr *cached, const char *query, int nargs, Oid *types)
@@ -40,9 +46,23 @@ session_plan(SPIPlanPtr *cached, const char *query, int nargs, Oid *types)
 static SPIPlanPtr
 session_manifest(void)
 {
-    Oid types[1] = {BYTEAOID};
+    Oid types[2] = {BYTEAOID, BYTEAOID};
     return session_plan(&session_manifest_plan,
-        laplace_sql_query_text("conversation.manifest"), 1, types);
+        laplace_sql_query_text("conversation.manifest"), 2, types);
+}
+
+static void
+require_projection_manifest(void)
+{
+    for (uint64 i = 0; i < SPI_processed; ++i)
+    {
+        bool isnull;
+        Datum type = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &isnull);
+        if (isnull || DatumGetInt16(type) != SESSION_MANIFEST_TYPE)
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                errmsg("conversation session: legacy Content manifest requires typed recovery"),
+                errhint("Preserve and classify the existing session manifest before migrating it to Projection; append does not rewrite legacy content.")));
+    }
 }
 
 typedef struct SessionTurnOutput
@@ -94,12 +114,14 @@ pg_laplace_session_turn_ids(PG_FUNCTION_ARGS)
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "session_turn_ids: SPI_connect failed");
-    hash128_t session_id, physicality_id;
+    hash128_t session_id, physicality_id, legacy_id;
     memcpy(&session_id, VARDATA_ANY(session), sizeof(session_id));
-    laplace_physicality_id_compute(session_id, 1, &physicality_id);
-    Datum args[1] = {hash128_to_datum(&physicality_id)};
-    if (SPI_execute_plan(session_manifest(), args, NULL, true, 1) != SPI_OK_SELECT)
+    laplace_physicality_id_compute(session_id, SESSION_MANIFEST_TYPE, &physicality_id);
+    laplace_physicality_id_compute(session_id, 1, &legacy_id);
+    Datum args[2] = {hash128_to_datum(&physicality_id), hash128_to_datum(&legacy_id)};
+    if (SPI_execute_plan(session_manifest(), args, NULL, true, 2) != SPI_OK_SELECT)
         elog(ERROR, "session_turn_ids: reading session manifest failed");
+    require_projection_manifest();
 
     if (SPI_processed == 1)
     {
@@ -151,7 +173,7 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
     bool *nulls;
     int added;
     bool spi_top = false;
-    hash128_t session_id, physicality_id;
+    hash128_t session_id, physicality_id, legacy_id;
     size_t previous_count = 0;
     uint32 previous_vertices = 0;
     double *previous = NULL;
@@ -169,7 +191,8 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                            errmsg("session_append_turns: each turn must contain 16 bytes")));
     memcpy(&session_id, VARDATA_ANY(session), sizeof(session_id));
-    laplace_physicality_id_compute(session_id, 1, &physicality_id);
+    laplace_physicality_id_compute(session_id, SESSION_MANIFEST_TYPE, &physicality_id);
+    laplace_physicality_id_compute(session_id, 1, &legacy_id);
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "session_append_turns: SPI_connect failed");
@@ -181,9 +204,10 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         elog(ERROR, "session_append_turns: session entity must be admitted before its turns");
     SPI_freetuptable(SPI_tuptable);
 
-    Datum manifest_args[1] = {hash128_to_datum(&physicality_id)};
-    if (SPI_execute_plan(session_manifest(), manifest_args, NULL, false, 1) != SPI_OK_SELECT)
+    Datum manifest_args[2] = {hash128_to_datum(&physicality_id), hash128_to_datum(&legacy_id)};
+    if (SPI_execute_plan(session_manifest(), manifest_args, NULL, false, 2) != SPI_OK_SELECT)
         elog(ERROR, "session_append_turns: reading session manifest failed");
+    require_projection_manifest();
     if (SPI_processed == 1)
     {
         bool isnull;
@@ -223,17 +247,18 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
     if (SPI_execute_plan(coordinates, coord_args, NULL, false, 0) != SPI_OK_SELECT || SPI_processed != total)
         elog(ERROR, "session_append_turns: each turn requires an admitted content placement");
     double *coords = palloc(total * 4 * sizeof(double));
-    uint8 max_tier = 0;
     for (size_t i = 0; i < total; ++i)
     {
         bool isnull;
         HeapTuple row = SPI_tuptable->vals[i];
         TupleDesc desc = SPI_tuptable->tupdesc;
         int16 tier = DatumGetInt16(SPI_getbinval(row, desc, 2, &isnull));
-        if (isnull || tier < 0 || tier >= UINT8_MAX)
+        if (isnull || tier < 0 || tier > UINT8_MAX)
             elog(ERROR, "session_append_turns: invalid turn floor");
-        max_tier = Max(max_tier, tier);
-        if (i >= previous_count) members.flags[i] = laplace_vertex_flags((uint8) tier, false, 0);
+        /* Batch projections may predate contextual flags. Populate absent flags
+         * from this same set read; retain any existing typed occurrence payload. */
+        if (i >= previous_count || members.flags[i] == 0)
+            members.flags[i] = laplace_vertex_flags((uint8) tier, false, 0);
         for (int axis = 0; axis < 4; ++axis)
         {
             Datum coordinate = SPI_getbinval(row, desc, axis + 3, &isnull);
@@ -242,11 +267,10 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         }
     }
     SPI_freetuptable(SPI_tuptable);
-    hash128_t version;
     hilbert128_t hilbert;
     double centroid[4];
-    hash_composer_compose_node(max_tier + 1, members.ids, coords, total,
-                               &version, centroid, &hilbert);
+    math4d_centroid(coords, total, centroid);
+    hilbert4d_encode(centroid, &hilbert);
     double *packed = palloc(total * 4 * sizeof(double));
     size_t packed_count;
     if (trajectory_build_flagged_rle(members.ids, members.flags, total, packed, &packed_count) != 0)

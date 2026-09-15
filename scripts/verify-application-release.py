@@ -139,7 +139,7 @@ def verify_stockfish() -> None:
     assert spec.loader is not None
     spec.loader.exec_module(installer)
     lock = json.loads((ROOT / "deploy/linux/stockfish-release.json").read_text())
-    installer.probe(prefix / "bin/stockfish", lock["version"])
+    installer.probe(installer.configured_binary(prefix), lock["version"])
 
 
 def wait_for_readiness(base: str, timeout_seconds: float = 60.0,

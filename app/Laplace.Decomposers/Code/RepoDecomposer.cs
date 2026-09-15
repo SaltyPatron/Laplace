@@ -8,9 +8,13 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, FullScope>,
+public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, FullScope>,
     IIngestInventoryProvider, IIngestArtifactGraphProvider
 {
+    private readonly VerifiedGitRepository? verifiedRepository;
+    public RepoDecomposer() { }
+    public RepoDecomposer(VerifiedGitRepository repository) => verifiedRepository = repository;
+
     public static readonly Hash128 Source = RepoSource.SourceId;
     public static readonly Hash128 TrustClass = RepoSource.TrustClass;
 
@@ -29,6 +33,9 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
     private Hash128 _repoId;
+    public VerifiedGitRepository? VerifiedRepository => verifiedRepository;
+    public Hash128? ProvenanceRoot { get; private set; }
+    public Hash128 RepositoryId => _repoId;
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
@@ -38,7 +45,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         var root = context.EcosystemPath;
         if (!Directory.Exists(root)) return;
 
-        ThrowIfNestedRepos(root);
+        if (verifiedRepository is null) ThrowIfNestedRepos(root);
 
         string repoCanonical = $"repo:{Path.GetFullPath(root)}/v1";
         _canonicalNames.TryAdd(repoCanonical, 0);
@@ -47,7 +54,21 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/repo-root", null,
             entityCapacity: 16, physicalityCapacity: 16, attestationCapacity: 0);
         StageRepoRoot(seed, repoCanonical, _repoId);
-        await context.Writer.ApplyAsync(seed.Build(), ct);
+        if (verifiedRepository is null) await context.Writer.ApplyAsync(seed.Build(), ct);
+        else
+        {
+            verifiedRepository.VerifyUnchanged();
+            ProvenanceRoot = ContentEmitter.Emit(seed, Encoding.UTF8.GetString(verifiedRepository.ProvenanceUtf8), Source)
+                ?? throw new InvalidDataException("Git provenance did not produce native content.");
+            seed.AddAttestation(NativeAttestation.CategoricalResolved(
+                _repoId, RepoSource.ReferencesTypeId, ProvenanceRoot.Value, Source, null, SourceTrust));
+            await context.Writer.ApplyWorkingSetAsync([seed.Build()], token =>
+            {
+                token.ThrowIfCancellationRequested();
+                verifiedRepository.VerifyUnchanged();
+                return ValueTask.CompletedTask;
+            }, ct);
+        }
     }
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
@@ -55,6 +76,8 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
     {
         if (_repoId == default && Directory.Exists(ecosystemPath))
             _repoId = Hash128.OfCanonical($"repo:{Path.GetFullPath(ecosystemPath)}/v1");
+        if (verifiedRepository is not null)
+            return verifiedRepository.Graph.Selected.Select(a => (a.Path, a.FileLabel)).ToList();
         return EnumerateRepoFiles(ecosystemPath)
             .Select(x => (
                 x.File,
@@ -66,10 +89,12 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        string? modality = ModalityFor(filePath);
+        string? modality = verifiedRepository is null ? ModalityFor(filePath)
+            : verifiedRepository.Entries.Single(e => Path.Combine(verifiedRepository.Root, e.Path) == filePath).Modality;
         if (modality is null) yield break;
         byte[] bytes;
-        try { bytes = await File.ReadAllBytesAsync(filePath, ct); }
+        try { bytes = verifiedRepository is null ? await File.ReadAllBytesAsync(filePath, ct)
+            : verifiedRepository.ReadVerified(verifiedRepository.Entries.Single(e => Path.Combine(verifiedRepository.Root, e.Path) == filePath)); }
         catch (Exception ex)
         {
             throw new InvalidOperationException(
@@ -79,7 +104,8 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
             throw new InvalidDataException(
                 $"RepoDecomposer: admitted source file '{filePath}' is empty");
 
-        string relPath = fileLabel.StartsWith("repo/", StringComparison.Ordinal)
+        string relPath = verifiedRepository is not null ? Path.GetRelativePath(verifiedRepository.Root, filePath).Replace('\\', '/')
+            : fileLabel.StartsWith("repo/", StringComparison.Ordinal)
             ? fileLabel["repo/".Length..]
             : Path.GetFileName(filePath);
         var filename = Path.GetFileNameWithoutExtension(filePath);
@@ -100,7 +126,9 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
             ConceptCategoryTypeId: FileTypeId,
             ParentContainerId: _repoId,
             FileMetadata: GrammarSourceFileSupport.MetadataFromPath(
-                filePath, relPath, modality));
+                filePath, relPath, modality),
+            RequireSourceAst: verifiedRepository is not null,
+            RawText: verifiedRepository is not null && modality == "text");
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -132,6 +160,7 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
         string ecosystemPath, DecomposerOptions options, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        if (verifiedRepository is not null) return Task.FromResult<IngestArtifactGraph?>(verifiedRepository.Graph);
         return Task.FromResult(GrammarSourceFileSupport.BuildArtifactGraph(
             ecosystemPath, RepoSource.SourceName, "repo", ModalityFor));
     }
@@ -196,6 +225,15 @@ public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSourc
             if (GrammarDecomposer.LookupById(modality) == IntPtr.Zero) continue;
             yield return (file, modality);
         }
+    }
+
+    public static string? VerifiedModalityFor(string file, string? requiredModality = null)
+    {
+        // A declared C++ repository gives .h its C++ translation-unit context.
+        // Loose-file ingestion keeps its existing extension classification.
+        string? modality = requiredModality == "cpp" && Path.GetExtension(file) == ".h"
+            ? "cpp" : ModalityFor(file);
+        return modality is not null && GrammarDecomposer.LookupById(modality) != IntPtr.Zero ? modality : null;
     }
 
     internal static string? ModalityFor(string file)

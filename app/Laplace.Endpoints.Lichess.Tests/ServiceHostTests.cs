@@ -25,13 +25,14 @@ public sealed class ServiceHostTests
         public bool Connected;
         public bool Configured = true;
         public string? Error;
+        public LichessAccountReadiness? Account;
         public bool StartAllowed = true;
         public bool Stopped;
         public bool Disposed;
         public (int Depth, int Maximum, bool Substrate)? Started;
         private readonly TaskCompletionSource _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public LichessConnectivityStatus Status() =>
-            new(Configured, null, Connected, "test", 8, 2, true, 0, [], Error);
+            new(Configured, null, Connected, "test", 8, 2, true, 0, [], Error, Account: Account);
         public IReadOnlyList<LichessChatLine> ChatForGame(string gameId) => [];
         public bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null)
         { Started = (depth, maxConcurrent, substrate); return StartAllowed; }
@@ -79,6 +80,30 @@ public sealed class ServiceHostTests
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
         Assert.Equal(HttpStatusCode.ServiceUnavailable,
             (await client.GetAsync("/health/ready")).StatusCode);
+        await app.StopAsync();
+    }
+
+    [Fact]
+    public async Task StatusExposesAccountPrerequisitesSeparatelyFromProcessReadiness()
+    {
+        var bot = new Connection
+        {
+            Error = "Token lacks bot:play permission.",
+            Account = new(TokenValid: true, BotAccount: true, BotPlayScope: false,
+                Username: "LaplaceBot", Error: "Token lacks bot:play permission.")
+        };
+        await using var app = LichessServiceHost.Build(new(Port: 0), bot);
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+
+        using var status = System.Text.Json.JsonDocument.Parse(await client.GetStringAsync("/status"));
+        Assert.False(status.RootElement.GetProperty("connected").GetBoolean());
+        var account = status.RootElement.GetProperty("account");
+        Assert.True(account.GetProperty("tokenValid").GetBoolean());
+        Assert.True(account.GetProperty("botAccount").GetBoolean());
+        Assert.False(account.GetProperty("botPlayScope").GetBoolean());
+        Assert.False(account.GetProperty("ready").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
         await app.StopAsync();
     }
 

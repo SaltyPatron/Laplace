@@ -21,15 +21,16 @@ public static class SyzygyNative
     public const int Win = 4;
 
     /// <summary>
-    /// Load (or re-load) the tablebase set under <paramref name="path"/>. Returns the
+    /// Load the tablebase directories in <paramref name="path"/> (colon-separated on
+    /// Unix, semicolon-separated on Windows, matching Fathom). Returns the
     /// largest man count the discovered tables cover (0 = directory holds no tables),
     /// or -1 when init failed.
     /// </summary>
     public static int Init(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return -1;
-        string normalized = Path.GetFullPath(path)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string normalized = NormalizeTablePath(path);
+        if (normalized.Length == 0) return -1;
         // IDEMPOTENT, and it has to be here rather than in every caller. The mapping is
         // process-global, but Init is called from a test fixture, from the decomposer's
         // InitializeAsync and again from its prober-resolution path — none of which can
@@ -55,6 +56,12 @@ public static class SyzygyNative
 
     private static readonly object InitGate = new();
     private static string? _mappedPath;
+
+    internal static string NormalizeTablePath(string path)
+        => string.Join(Path.PathSeparator,
+            path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(static p => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p)))
+                .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal));
 
     // Managed-side truth about what is mapped. Largest() cannot serve as the "is it safe to
     // probe" signal: it reads a native global that is not guaranteed zero before a successful

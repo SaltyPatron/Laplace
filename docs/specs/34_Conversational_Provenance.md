@@ -6,6 +6,12 @@ A tenant, user/participant, session, turn, message, tool call, and content artif
 distinct entities. A session is a stable identity whose ordered, versioned trajectory
 contains turns. Each message is itself a tiered content trajectory.
 
+The current session handle stores its growing ordered turn manifest as a Projection
+physicality. Its constituent turn identities resolve to canonical Content
+physicalities admitted through the governed writer. The handle must never acquire a
+Content physicality under an unrelated, mutable manifest. This projection does not
+claim that immutable whole-session snapshots have been admitted as canonical content.
+
 Tenant scope identifies authorization and isolation. It is not semantic source trust.
 Participant, model, tool, corpus, analyzer, and feedback sources retain distinct source
 identities.

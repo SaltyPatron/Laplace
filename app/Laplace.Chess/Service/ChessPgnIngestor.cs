@@ -101,33 +101,42 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     }
 
     public async Task<Result> IngestFileAsync(
-        string pgnPath, Action<string>? log = null, CancellationToken ct = default)
-        => await IngestGamesAsync(PgnGames.StreamGames(pgnPath), Path.GetFileName(pgnPath), log, ct);
+        string pgnPath, Action<string>? log = null, CancellationToken ct = default, string? experimentReceiptJson = null)
+        => await IngestGamesAsync(PgnGames.StreamGames(pgnPath), Path.GetFileName(pgnPath), log, ct, experimentReceiptJson);
 
     public async Task<Result> IngestGamesAsync(
         IEnumerable<string> games, string sourceLabel, Action<string>? log = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? experimentReceiptJson = null)
     {
+        var experiment = experimentReceiptJson is null ? null : ChessExperimentEvidence.Parse(experimentReceiptJson);
         await Gate.WaitAsync(ct);
         try
         {
+            if (experiment is not null)
+            {
+                var names = await ChessVocabulary.BootstrapAsync(_writer,
+                    ChessExperimentEvidence.SourceId, ChessExperimentEvidence.SourceName,
+                    ChessExperimentEvidence.TrustClassId, ct, _reader);
+                await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(_ds, names, ct);
+            }
             int parsed = 0, novel = 0, applied = 0, repaired = 0;
             var chunk = new List<ChessGameRecord>(ChunkSize);
 
             foreach (var gameText in games)
             {
                 ct.ThrowIfCancellationRequested();
+                experiment?.ValidateGame(gameText);
                 if (ChessPgnDecomposer.TryParseGame(gameText) is not { } game) continue;
                 parsed++;
                 chunk.Add(game);
                 if (chunk.Count < ChunkSize) continue;
-                (int n, int a, int r) = await ApplyChunkAsync(chunk, ct);
+                (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment);
                 novel += n; applied += a; repaired += r;
                 chunk.Clear();
             }
             if (chunk.Count > 0)
             {
-                (int n, int a, int r) = await ApplyChunkAsync(chunk, ct);
+                (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment);
                 novel += n; applied += a; repaired += r;
             }
 
@@ -285,7 +294,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         };
 
     private async Task<(int Novel, int Applied, int Repaired)> ApplyChunkAsync(
-        List<ChessGameRecord> chunk, CancellationToken ct)
+        List<ChessGameRecord> chunk, CancellationToken ct, ChessExperimentEvidence? experiment = null)
     {
         // Novel content still takes the fused record+calculated path. Already-present playings
         // take a separate repair lane: rebuild the CURRENT source-record projection in memory,
@@ -326,7 +335,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             ChessPgnDecomposer.RecordGame(game, repair);
         }
 
-        var changes = new List<SubstrateChange>(3);
+        var changes = new List<SubstrateChange>(4);
         if (novel > 0)
         {
             changes.Add(await record.BuildAsync(ct));
@@ -343,6 +352,17 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 changes.Add(repairChange);
                 repairedGames = filtered.Games;
             }
+        }
+
+        // Metadata belongs to every selected playing, including a re-ingest whose PGN
+        // already exists. Exact attestation probes suppress repeated witnessing while
+        // allowing older games to acquire their previously missing experiment receipt.
+        if (experiment is not null)
+        {
+            var evidence = await experiment.BuildChangeAsync(chunk, ct);
+            var present = await ReadPresentAttestationIdsAsync(evidence.Attestations, ct);
+            var missing = evidence.Attestations.Where(row => !present.Contains(row.Id)).ToImmutableArray();
+            if (missing.Length > 0) changes.Add(evidence with { Attestations = missing });
         }
 
         if (changes.Count == 0) return (novel, 0, 0);

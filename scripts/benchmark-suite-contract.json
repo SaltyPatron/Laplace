@@ -3,13 +3,26 @@
   "registry": "scripts/benchmark-profiles.json",
   "runner": "scripts/benchmark_suite.py",
   "workflow": ".github/workflows/benchmark-evidence.yml",
-  "trigger": "workflow_dispatch",
+  "triggers": ["workflow_dispatch", "workflow_call after successful product deployment"],
   "source_core_mutability": "none_except_temporary_outputs",
   "artifact_binding": {
+    "applies_to": "profiles executing the Laplace native core",
     "core": "build/engine/core/liblaplace_core.so",
     "t0": "build/engine/core/perfcache/laplace_t0_perfcache.bin",
     "require_sha256": true,
     "require_build_tree_loader_precedence": true
+  },
+  "chess_environment": {
+    "profile": "chess-environment",
+    "suite": "chess",
+    "requires_laplace_core_artifacts": false,
+    "require_actual_executable_sha256_and_uci_options": true,
+    "require_cpu_affinity_and_cgroup_quota": true,
+    "require_memory_budget_and_process_observations": true,
+    "require_repeated_raw_measurements": true,
+    "require_paired_color_match_records": true,
+    "configuration_changes": "explicit operator selection only",
+    "strength_claim": "environment throughput measurements do not establish playing strength"
   },
   "scaling": {
     "must_measure": true,

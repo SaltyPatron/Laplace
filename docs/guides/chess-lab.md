@@ -87,7 +87,7 @@ is the reason to pass `-debug` at all.
 
 2000 is the default Elo cap, not a fixed level. The live engine's UCI handshake
 is authoritative for its range: the former Ubuntu Stockfish 14.1 advertises
-1350–2850; the verified Stockfish 18 release advertises 1320–3190. These are
+1350–2850; the verified Stockfish 19 release advertises 1320–3190. These are
 engine strength settings, not a guaranteed human rating at arbitrary clocks.
 Disable **Limit Stockfish strength** for full strength: the runner sends
 `UCI_LimitStrength=false` and omits `UCI_Elo`. Existing clients retain the
@@ -95,32 +95,145 @@ limited/default-2000 behavior unless they explicitly set `limitStrength=false`.
 The transcript surfaces unsupported Elo warnings; do not infer the requested
 level was accepted from a match merely starting.
 
-### Persistent Linux engine installation
+### External source checkouts, builds and updates
 
-`setup-host.sh` (through its runner bootstrap) and the existing CI publish phase
-both use `bootstrap-chess-lab.sh`. Stockfish comes from the versioned, SHA-256
-locked official release in `deploy/linux/stockfish-release.json`, **not Ubuntu's
-older package**. The current lock is [Stockfish 18](https://github.com/official-stockfish/Stockfish/releases/tag/sf_18).
-Linux x86-64 AVX2 and baseline artifacts are supported; other architectures fail
-explicitly pending a verified release artifact. cutechess remains built from the
-external source pin; the verified host version 1.5.1 matches
-[upstream v1.5.1](https://github.com/cutechess/cutechess/releases/tag/v1.5.1).
+Stockfish uses the official repository through Laplace's existing external source
+mechanism. Linux uses `$LAPLACE_EXTERNAL/stockfish`, with the established
+`/build/external` default; Windows uses `$LAPLACE_EXTERNAL/stockfish` when set,
+otherwise the repository's `external/stockfish`. `LAPLACE_STOCKFISH_SOURCE` selects
+an existing checkout elsewhere. No particular manually chosen folder is treated
+as a canonical source location.
 
-The Stockfish installer verifies the archive before extraction and a real UCI
-handshake before switching `/opt/laplace/bin/stockfish`. Immutable releases,
-including upstream source/license material, remain under `/opt/laplace/stockfish`.
-Cached CI publishes recheck the installed hash and version. Distro binaries and
-unmanaged replacements are not overwritten. Upgrade the lock through review/CI;
-no floating `latest` download or manual binary-copy step is required. Existing
-provisioned hosts need no new privileged policy installation for this repair.
-API, CLI and ingest discovery prefer the managed installation before build/PATH
-fallbacks; an explicit `LAPLACE_STOCKFISH` override still takes precedence.
+The current source pin in `deploy/linux/stockfish-release.json` is
+[Stockfish 19](https://github.com/official-stockfish/Stockfish/releases/tag/sf_19),
+released September 5, 2026, commit `edb0d9db6731067ec50ce619ff372b463bc4dd5d`.
+`setup-host` and CI invoke the source updater and build:
 
-CI snapshots the prior Stockfish launch pointer and only its API environment key.
-Rollback restores those alongside the previous API/UCI payload, retains releases,
-and preserves unrelated environment changes. Runtime processes are never restarted
-by the dependency installer itself. A tournament is completed only after a zero
-exit and all expected games scored; a `0 - 0 - 0` score is a failure, not success.
+```sh
+python3 scripts/install-stockfish.py
+python3 scripts/install-stockfish.py --check-latest
+python3 scripts/install-stockfish.py --print-path
+```
+
+The updater fetches the selected official stable tag when absent, preserves local
+edits and prior branch tips, and runs upstream `make profile-build ARCH=native`.
+The build downloads and validates its declared NNUE network through upstream's
+`net` target. Its compiler job count follows `--jobs`, then the established
+`CMAKE_BUILD_PARALLEL_LEVEL` / `LAPLACE_BUILD_JOBS` envelope, then available CPUs.
+The checkout's commit is recorded in the existing external `PINS.tsv` alongside
+the other dependencies; an explicit source override does not rewrite that roster.
+
+The runtime uses the built executable directly:
+`$LAPLACE_EXTERNAL/stockfish/src/stockfish` on Linux, or `src/stockfish.exe` on
+Windows. The updater builds an adjacent candidate through upstream's `EXE`
+variable, verifies its exact version, required UCI options, readiness and a legal
+depth-1 search, then replaces the direct executable. A failed compiler, NNUE
+download or search keeps the previous working executable. Repeated runs verify
+the source, compiler, native CPU selection and executable hash before reusing a
+build. A changed source/toolchain/CPU or `--rebuild` rebuilds it.
+
+`--check-latest` compares the official latest stable tag and its source commit
+with the pin and identifies a stale pin explicitly. An upstream update is applied
+by updating that source pin and rebuilding the same checkout. No prebuilt
+Stockfish release archive, managed binary copy or launch-link installation is
+part of this path.
+
+Windows publish first runs `scripts/win/ensure-stockfish-toolchain.cmd`. It reuses
+a complete installed GNU-compatible toolchain; otherwise it provisions the
+missing GNU make/compiler/shell/download/hash tools through MSYS2 UCRT64. The
+[official MSYS2 installer](https://www.msys2.org/docs/installer/) is SHA-256
+verified before execution, and package updates follow its
+[documented update sequence](https://www.msys2.org/docs/ci/). Windows then runs
+the same Python source updater and writes the direct built executable into the
+application environment.
+
+API, CLI and ingest discovery give explicit `LAPLACE_STOCKFISH` precedence,
+then use the source build before legacy managed/build/PATH locations. The API
+configuration snapshot preserves prior environment state for publish rollback;
+the source builder itself protects the previous executable when a rebuild fails.
+A tournament completes only after zero exit and all expected games scored.
+
+### Measuring the actual machine before choosing engine settings
+
+`scripts/benchmark-chess-environment.py` measures the installed source builds on
+the machine where it runs. Its receipt identifies that hostname, CPU model,
+visible affinity, every visible cgroup CPU/memory ancestor, executable SHA-256,
+source commit, compiler/build receipt, UCI options and source NNUE file. An
+80-core CPU model string does not grant 80 CPUs to a container: the effective
+capacity is the minimum of process affinity and CPU quota, followed by the
+declared service reserve.
+
+Inspect admission without launching any benchmark:
+
+```sh
+python3 scripts/benchmark-chess-environment.py \
+  --output-dir /build/laplace/work/chess-calibration-plan \
+  --plan-only --reserve-cpus 2 --memory-mib 2048
+```
+
+Run a measured sweep in a new evidence directory:
+
+```sh
+python3 scripts/benchmark-chess-environment.py \
+  --output-dir /build/laplace/work/chess-calibration-run \
+  --stockfish "$LAPLACE_EXTERNAL/stockfish/src/stockfish" \
+  --cutechess /opt/laplace/bin/cutechess-cli \
+  --reserve-cpus 2 --memory-mib 2048 --repeats 3 \
+  --hash-mib 16,64,256 --max-seconds 180
+```
+
+The default thread sweep includes powers of two, the observed physical-core count
+when it fits the admitted CPU budget, and the observed CPU-budget endpoint.
+`--threads`, `--cpu-budget`, `--concurrency` and `--hash-mib` select
+explicit points; requested points cannot consume the declared CPU reserve or
+exceed memory admission. Fractional CPU quota is retained in the report, and a
+sub-one-CPU grant is reported as insufficient for a full search thread rather
+than silently rounded up. Existing CPU/memory cgroup limits remain in force.
+
+Each Stockfish configuration runs its real built-in `bench` suite repeatedly.
+The first process sample is retained separately from later samples; every bench
+resets its transposition table through upstream `ucinewgame`. The OS filesystem
+cache is neither flushed nor claimed cold. All node counts, engine times and
+NPS values remain visible because different Threads/Hash settings can search
+different amounts of work at the same depth. `--bench-limit-type nodes` changes
+the per-position limit; SMP can still overshoot that limit.
+
+CuteChess runs actual move-limited Stockfish games at each admitted concurrency,
+with the same game count and per-move depth, strength limiting disabled and
+pondering off. Memory planning includes both resident engines per game;
+active search planning uses one search team per game. Completed-game counts,
+UCI best moves, PGN results and ply counts must reconcile. Adjudicated draws from
+`--max-moves` are throughput workload boundaries, not playing-strength evidence.
+
+To include a separate two-game Laplace-versus-Stockfish acceptance, provide
+`--laplace-uci /path/to/laplace-uci`. It preserves Laplace's configured substrate
+mode and records the advertised effective setting. `--laplace-substrate off`
+explicitly requests a substrate-disabled packaging check. Both colors are
+verified; matched depth is recorded without pretending the engines perform equal
+work or inferring Elo from two bounded games.
+
+The output directory contains `report.json`, raw command/transcript logs and
+PGNs. Recommendations distinguish bench completion latency, search-node
+throughput and tournament throughput, report sample variation and overlapping
+ranges, and apply only to measured configurations on that exact environment.
+UCI defaults and compiler capabilities do not establish actual NUMA placement or
+huge-page backing; those are not measured by this command.
+Fewer than three steady samples produce smoke evidence without recommendations.
+The command never changes runtime settings or replaces a corpus-evaluator
+throughput measurement with a self-play estimate.
+
+Wall time is bounded by `--max-seconds` and per-case `--case-timeout`; timeout
+cleanup targets only processes launched by the benchmark. Where the process
+namespace permits it, 50-ms sampling reports process-tree RSS/CPU/I/O and
+cgroup throttling deltas. Sampling is explicitly a lower-bound/interval measure,
+not a kernel-enforced private memory cgroup. Windows Job Object/processor-group
+restrictions and mismatched `/proc` namespaces are reported as unavailable
+capabilities; the runner never attributes unrelated host processes to its work.
+Every failed or incomplete run retains a report with its exact reason.
+
+The named manual benchmark suite is `chess`; it follows the evidence rules in
+[MANUAL_BENCHMARK_EVIDENCE.md](../benchmarks/MANUAL_BENCHMARK_EVIDENCE.md) and does
+not require an unrelated Laplace core/T0 build merely to calibrate external tools.
 
 ## Watching games live
 
@@ -203,10 +316,39 @@ HAS_WHITE/HAS_BLACK. The same panel lives in the web play view ("Explore").
   `cli ingest chess <file>` (records witnessed headers and the typed move trajectory, then the
   analyzer derives positions, MOVE/OUTCOME edges, motifs, openings, clocks).
 - `cli ingest chess-eval [--depth N | --nodes N]` — stockfish eval pass over
-  recorded games (default depth 10, the v1 census budget): HAS_EVAL per position + eval-delta
+  recorded games (default depth 10): HAS_EVAL per position + eval-delta
   MOVE_QUALITY (blunder/mistake/inaccuracy) under the ChessStockfish source.
-  Marker-gated per game/version; `LAPLACE_INGEST_MAX_UNITS=N` bounds a smoke.
+  Completion markers bind each distinct line to its exact version-2 evaluation
+  recipe; `LAPLACE_INGEST_MAX_UNITS=N` bounds a smoke. The recipe records the engine
+  executable SHA-256, reported identity, effective UCI options, NNUE/tablebase
+  identities, depth or node budget, timeout and cold-search policy. Prior caches
+  and markers remain intact; new cache files use a `.recipe-<sha256>` namespace
+  and verify that identity in their headers. Full recipe metadata is retained
+  alongside the calculated testimony rather than relabeling older evaluations.
 - Books: `cli ingest chess-books <dir>` (plaintext only today).
 - Openings: `cli ingest chess-openings <eco.tsv dir>`.
 - Lichess bot: web → Chess panel → lichess start (token in
   `/opt/laplace/secrets/lichess.env`); every ply folds live.
+
+The corpus evaluator accepts `LAPLACE_STOCKFISH_EVAL_THREADS` (default 1),
+`LAPLACE_STOCKFISH_EVAL_HASH_MB` (16), `LAPLACE_STOCKFISH_EVAL_NUMA_POLICY`
+(`auto`), `LAPLACE_STOCKFISH_EVAL_SYZYGY_PATH`, `LAPLACE_STOCKFISH_EVAL_FILE`
+(an explicit compatible NNUE), and `LAPLACE_STOCKFISH_EVAL_TIMEOUT_SECONDS`
+(30). Its process pool accounts for threads per engine against the process CPU
+grant. `LAPLACE_STOCKFISH_EVAL_PROCESSES` explicitly selects pool capacity; the
+recipe records that resource choice and any oversubscription. Measure the corpus
+evaluator's own throughput before applying tournament concurrency to ingestion.
+
+The gauntlet UI, preview and start configuration expose `stockfishThreads`,
+`stockfishHashMb`, `stockfishNumaPolicy`, and `stockfishSyzygyPath`. Empty values
+preserve the actual installed engine defaults. Use the host calibration report
+to choose resources for the intended workload. `auto` and `system` NUMA policies
+respect process affinity; `hardware` deliberately ignores it.
+
+Each gauntlet retains an `experiment.json` containing the requested options,
+actual command, observed UCI configuration, executable/runtime/opening identities,
+timing and results. Automatic and manual PGN ingestion attach this receipt to
+each game occurrence through separate `HasExperimentReceipt` metadata under the
+`ChessGauntlet` source. That provenance survives ordinary local job-artifact
+cleanup and remains separate from literal PGN testimony. The original PGN Event
+continues to identify the experiment.

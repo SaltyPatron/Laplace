@@ -7,6 +7,33 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessSyzygyPackageInventoryTests
 {
     [Fact]
+    public void NestedCopiesOfOneMaterialKeepDistinctPhysicalFileLabels()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "syzygy-packages");
+        string[] paths =
+        [
+            Path.Combine(root, "3-4-5", "KQvK.rtbw"),
+            Path.Combine(root, "other", "KQvK.rtbw"),
+        ];
+        var scheduled = ChessSyzygyDecomposer.SchedulePackages(paths, root);
+        Assert.Equal(2, scheduled.Select(static p => p.Label).Distinct().Count());
+        Assert.Equal(paths.Select(p => Path.GetRelativePath(root, p)),
+            scheduled.Select(static p => p.Label));
+    }
+
+    [Fact]
+    public void IndependentRootsPreserveRepeatedPhysicalPackageLabels()
+    {
+        string first = Path.Combine(Path.GetTempPath(), "syzygy-first");
+        string second = Path.Combine(Path.GetTempPath(), "syzygy-second");
+        string[] paths = [Path.Combine(first, "KQvK.rtbw"), Path.Combine(second, "KQvK.rtbw")];
+        var scheduled = ChessSyzygyDecomposer.SchedulePackages(paths,
+            string.Join(Path.PathSeparator, first, second));
+        Assert.Equal(paths.Order(StringComparer.Ordinal), scheduled.Select(static entry => entry.Path));
+        Assert.Equal(paths.Order(StringComparer.Ordinal), scheduled.Select(static entry => entry.Label));
+    }
+
+    [Fact]
     public void SchedulePackages_KeepsWdlDtzAndLargerMaterials_AsIndependentFiles()
     {
         string[] paths =

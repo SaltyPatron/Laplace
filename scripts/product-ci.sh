@@ -15,6 +15,15 @@ run_policy() {
   bash scripts/ci-policy.sh
 }
 
+resume_held_repair_if_needed() {
+  # Resolve this product's exact held repair before installation/publication can
+  # replace its native or managed generation. With no owned hold this is a no-op.
+  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" --resume-if-needed \
+    --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
+    --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
+    bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
+}
+
 run_deps() {
   bash scripts/ci-deps.sh
 }
@@ -38,24 +47,11 @@ run_install_and_db() (
   bash scripts/pipeline.sh install
   bash deploy/linux/managed-publish.sh preflight
 
-  local api_was_active=0
-  if systemctl is-active --quiet laplace-api; then
-    api_was_active=1
-    sudo -n systemctl stop laplace-api
-  fi
-  restore_api_after_db() {
-    [[ "$api_was_active" -eq 0 ]] || sudo -n systemctl start laplace-api || true
-  }
-  trap restore_api_after_db EXIT
-
-  local args=()
-  [[ "${LAPLACE_FRESH_DB:-}" != 1 ]] || args+=(--fresh-db)
-  bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
-  # Highway is part of the query execution plane. Once the registry is active,
-  # replay any exact pairs retained while it was unavailable and reconcile the
-  # pre-deposit estate exactly once. New ingest deposits masks inline thereafter.
-  bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
-  bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+  # Use the already installed fixed service controls. The command holds their
+  # managed transaction through migration, discards writer processes,
+  # and restores only the services that were running before maintenance.
+  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" -- \
+    bash scripts/maintain-installed-database.sh
 )
 
 ensure_product_foundation() {
@@ -80,12 +76,44 @@ seed_operational_memory() {
   # The versioned operational source ships with this executable generation.
   # Its per-file content completion skips unchanged artifacts; do not use
   # --force/ReObservePresent and turn a deployment into another witness.
+  local proof_root="${LAPLACE_OPERATIONAL_PROOF_DIRECTORY:-/build/laplace/recovery/operational-product}"
+  mkdir -p "$proof_root"
+  operational_proof_directory="$(mktemp -d "$proof_root/invocation-XXXXXXXX")"
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+    printf '%s\n' '{"disposition":"intentionally-unseeded","reason":"fresh database without foundation restoration"}' \
+      > "$operational_proof_directory/disposition.json"
     return 0
   fi
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   LAPLACE_INGEST_MAX_UNITS=0 LAPLACE_INGEST_FORCE=0 \
-    python3 scripts/verify-operational-seed.py --ingest
+    python3 scripts/verify-operational-seed.py --ingest --report "$operational_proof_directory/seed.json"
+}
+
+verify_operational_execution() {
+  if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+    echo "fresh DB intentionally left unseeded — operational execution proof skipped"
+    return 0
+  fi
+  # Consume only this invocation's verified seed receipt. Never select a latest
+  # source run or reuse a receipt from another publication attempt.
+  local seed_run_id
+  seed_run_id="$(python3 - "$operational_proof_directory/seed.json" <<'PY'
+import json
+import sys
+import uuid
+from pathlib import Path
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if report.get("disposition") != "verified":
+    raise SystemExit("operational seed receipt is not a verified invocation")
+run_id = report["run"]["run_id"]
+if str(uuid.UUID(run_id)) != run_id:
+    raise SystemExit("operational seed receipt has an invalid run identity")
+print(run_id)
+PY
+)"
+  python3 scripts/verify-operational-task.py \
+    --shape-file seeds/operational/tasks/en_define.json --seed-run-id "$seed_run_id" \
+    --receipt "$operational_proof_directory/task.json"
 }
 
 reconcile_installed_product() {
@@ -99,6 +127,16 @@ reconcile_installed_product() {
 run_publish() {
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash scripts/publish-applications.sh deploy
+}
+
+run_repair_installed_corpus() {
+  # Publication has activated this source generation. Reclassification must not
+  # restart the previous managed producer after changing its cached identities.
+  LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)" \
+    python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
+      --max-bytes 4294967296 --max-line-bytes 2097152 --max-prior-bytes 34359738368 \
+      --max-current-readback-bytes 8589934592 --timeout-seconds 1800 -- \
+      bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
 }
 
 ensure_api_running() {
@@ -145,6 +183,9 @@ run_perf() {
 }
 
 run_policy
+case "$stage" in
+  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;
+esac
 if [[ "$stage" == reconcile ]]; then
   reconcile_installed_product
   exit 0
@@ -176,17 +217,24 @@ fi
 run_install_and_db
 restore_foundation_if_requested
 seed_operational_memory
-[[ "$stage" == deploy ]] && exit 0
+if [[ "$stage" == deploy ]]; then
+  echo "native/database stage complete; application publication and corpus repair belong to the full lifecycle"
+  exit 0
+fi
 
 if [[ "$stage" == integrate ]]; then
+  echo "integration-only stage verifies the installed database; it does not publish applications or repair retained content"
   run_integration
   exit 0
 fi
 
 trap recover_publish EXIT
 run_publish
+trap - EXIT
+# Repair owns its restoration and unknown transaction outcomes. Publication's
+# API recovery must not restart a writer after unresolved repair quiescence.
+run_repair_installed_corpus
+verify_operational_execution
 run_integration
 run_live_if_expected
 run_perf
-recover_publish
-trap - EXIT

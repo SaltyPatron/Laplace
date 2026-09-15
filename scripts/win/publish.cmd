@@ -125,6 +125,9 @@ for %%D in (core dynamics synthesis) do (
   copy /y "%LAPLACE_ENGINE_BUILD%\%%D\laplace_%%D.dll" "%PUBLISH_OUT%\" >nul
 )
 
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%HERE%publish-zstd.ps1" -Destination "%PUBLISH_OUT%"
+if errorlevel 1 exit /b 1
+
 echo ==== [5/6] inject chess-lab/lichess/stripe/api env into web.config ====
 rem Secrets already ensured by publish-deploy → ensure-billing-runtime; re-sync
 rem here so bare publish.cmd still materializes deploy/secrets from .env.

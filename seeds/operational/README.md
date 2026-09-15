@@ -11,6 +11,7 @@ The selected inputs are declared as literal `Content` items in
 - `docs/INVENTION.md` and `docs/INVENTIONS.md`.
 - Binding specifications 05, 06, 08, 09, 11, 33, 34, 36, and 37.
 - The explicitly authored annotation `seeds/operational/exemplars/en_define.conllu`.
+- Its explicit relation-read declaration `seeds/operational/tasks/en_define.json`.
 
 After the Unicode and language foundation, admit the bundled source with:
 
@@ -77,15 +78,35 @@ grammar admission, shared writer and per-file completion boundary as the other
 operational artifacts. The file identity participates in its annotation
 provenance. No separate source worker or database writer is introduced.
 
-The bundled `define justice` annotation supplies a syntactic exemplar. A parse
-alone does not declare an executable task. The separate task-shape contract
-must name its actual admitted parse identity, predicate and variable token slots.
+The bundled `define justice` annotation supplies a syntactic exemplar. Its
+separate `seeds/operational/tasks/en_define.json` declaration names the actual
+admitted parse identity and the second token reference, recovered from native
+source admission. That declaration calls the governed `HAS_DEFINITION` relation
+and accepts a witnessed `WordNet_Synset` semantic binding for the second token.
+The first token remains invariant. Both artifacts are authored operational
+evidence with `SubstrateMandate` provenance; neither claims upstream UD authorship.
+
+This bundle declares one English, two-token relation-read shape: `define` followed
+by one token whose current witnessed semantic binding has the declared type.
+The shared native runtime uses Unicode-derived identities, exact source
+structure and typed relations. It does not contain an English keyword dispatch
+rule. Other languages, paraphrases, multi-token arguments and other operations
+need their own supported source declarations and evidence. The annotation alone
+does not select a task, and the declaration contains no expected answer.
+
+Source execution acceptance reads these exact bundled bytes and checks the
+declaration against the native admitted parse and token identities. It exercises
+a fresh request operand, witnessed WordNet relation paths, changed source facts
+and competing declarations through the existing forward program. Deployment
+completion still requires the exact file journal and native completion witnesses
+for all thirteen selected artifacts, followed by execution readback.
 
 ## Declared relation-read task shapes
 
 A selected `.json` source can declare a reusable structural binding to the
-native relation-read capability. No language templates are supplied by default.
-The source names exact IDs already admitted by their owning source:
+native relation-read capability. The bundled English declaration above is one
+instance of this generic schema. A source names exact IDs already admitted by
+their owning source:
 
 ```json
 {

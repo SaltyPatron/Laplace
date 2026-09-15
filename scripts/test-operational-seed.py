@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -141,11 +142,61 @@ class OperationalSeedTests(unittest.TestCase):
             project.write_text('<Project><ItemGroup><Content Include="' + ";".join(includes)
                                + '" Link="seeds/operational/docs/%(Filename)%(Extension)" />'
                                + '</ItemGroup></Project>', encoding="utf-8")
-            self.assertEqual(self.selected, SEED.authored_bundle(root, bundle))
+            self.assertEqual({path: root / path for path in self.selected}, SEED.authored_selection(root))
+            with patch.object(SEED, "authored_selection", wraps=SEED.authored_selection) as selection:
+                self.assertEqual(self.selected, SEED.authored_bundle(root, bundle))
+                selection.assert_called_once_with(root)
             path = next(iter(self.selected))
             (bundle / path).write_bytes(b"X" * len(self.selected[path]))
             with self.assertRaisesRegex(RuntimeError, "bytes differ"):
                 SEED.authored_bundle(root, bundle)
+
+    def test_source_path_cli_uses_selection_without_bundle_or_ingestion(self):
+        selected = {"different/bundle/name.md": ROOT / "docs/INVENTION.md"}
+        with patch.object(SEED.sys, "argv", ["verify-operational-seed", "--list-source-paths"]), \
+                patch.object(SEED, "authored_selection", return_value=selected) as selection, \
+                patch.object(SEED, "authored_bundle") as bundle, \
+                patch.object(SEED, "seed_and_verify") as ingest, \
+                patch.object(SEED.sys, "stdout", new_callable=io.StringIO) as output:
+            self.assertEqual(0, SEED.main())
+        self.assertEqual("docs/INVENTION.md\n", output.getvalue())
+        selection.assert_called_once_with(ROOT)
+        bundle.assert_not_called()
+        ingest.assert_not_called()
+
+    def test_source_path_cli_rejects_inventory_failure_without_partial_success(self):
+        with patch.object(SEED.sys, "argv", ["verify-operational-seed", "--list-source-paths"]), \
+                patch.object(SEED, "authored_selection", side_effect=RuntimeError("incomplete selection")), \
+                patch.object(SEED.sys, "stdout", new_callable=io.StringIO) as output, \
+                patch.object(SEED.sys, "stderr", new_callable=io.StringIO) as error:
+            self.assertEqual(1, SEED.main())
+        self.assertEqual("", output.getvalue())
+        self.assertIn("OPERATIONAL_SELECTION_FAIL", error.getvalue())
+
+    def test_repository_bundle_includes_exact_authored_annotation_and_task(self):
+        project = ROOT / "app/Laplace.Decomposers/Laplace.Decomposers.csproj"
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            for item in SEED.ET.parse(project).getroot().iter("Content"):
+                link = item.get("Link", "")
+                if not link.startswith("seeds/operational/"):
+                    continue
+                for include in item.get("Include", "").split(";"):
+                    source = (project.parent / include).resolve()
+                    relative = link.removeprefix("seeds/operational/").replace(
+                        "%(Filename)%(Extension)", source.name)
+                    target = bundle / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(source.read_bytes())
+            selected = SEED.authored_bundle(ROOT, bundle)
+            self.assertEqual(13, len(selected))
+            for relative in ("seeds/operational/exemplars/en_define.conllu",
+                             "seeds/operational/tasks/en_define.json"):
+                self.assertEqual((ROOT / relative).read_bytes(), selected[relative])
+            task = "seeds/operational/tasks/en_define.json"
+            (bundle / task).write_bytes(selected[task].replace(b"token-slots/v1", b"token-slots/v2"))
+            with self.assertRaisesRegex(RuntimeError, "bytes differ"):
+                SEED.authored_bundle(ROOT, bundle)
 
     def test_invocation_owns_new_receipt_and_overrides_inherited_cap_and_force(self):
         observed = []
@@ -179,6 +230,24 @@ class OperationalSeedTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 SEED.seed_and_verify(ROOT)
             readback.assert_not_called()
+
+    def test_report_cli_retains_exact_success_and_replaces_stale_success_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "seed.json"
+            with patch.object(SEED.sys, "argv", ["verify-operational-seed", "--ingest", "--report", str(path)]), \
+                    patch.object(SEED, "seed_and_verify", return_value=self.report), \
+                    patch("builtins.print"):
+                self.assertEqual(0, SEED.main())
+            saved = json.loads(path.read_text())
+            self.assertEqual({**self.report, "disposition": "verified"}, saved)
+            with patch.object(SEED.sys, "argv", ["verify-operational-seed", "--ingest", "--report", str(path)]), \
+                    patch.object(SEED, "seed_and_verify", side_effect=RuntimeError("new run failed")), \
+                    patch("builtins.print"):
+                self.assertEqual(1, SEED.main())
+            failed = json.loads(path.read_text())
+            self.assertEqual("failed", failed["disposition"])
+            self.assertNotIn("run", failed)
+            self.assertNotIn(self.receipt["run_id"], path.read_text())
 
     def test_database_failure_does_not_expose_source_payloads(self):
         result = subprocess.CompletedProcess([], 1, stdout="", stderr="private source payload")

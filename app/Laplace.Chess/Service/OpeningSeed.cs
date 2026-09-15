@@ -6,7 +6,32 @@ namespace Laplace.Chess.Service;
 
 public static class OpeningSeed
 {
-    public static string DefaultDir => Path.Combine(LaplaceInstall.ResolveChessGamesDir(), "openings");
+    public static string DefaultDir
+    {
+        get
+        {
+            var configured = LaplaceInstall.TryReadConfig("LAPLACE_CHESS_OPENINGS", "chess-lab.env");
+            if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
+            var dataRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+            var gamesDir = !string.IsNullOrWhiteSpace(dataRoot)
+                ? Path.Combine(dataRoot.Trim(), "Games", "Chess")
+                : LaplaceInstall.ResolveChessGamesDir();
+            return ResolveDefaultDir(gamesDir);
+        }
+    }
+
+    internal static string ResolveDefaultDir(string gamesDir)
+    {
+        // dataset-estate-refresh acquires the upstream repository as lichess-openings.
+        // Keep existing installations using openings when that is the populated corpus.
+        var refreshed = Path.Combine(gamesDir, "lichess-openings");
+        var legacy = Path.Combine(gamesDir, "openings");
+        foreach (var candidate in new[] { refreshed, legacy })
+            if (Directory.Exists(candidate)
+                && Directory.EnumerateFiles(candidate, "*.tsv", SearchOption.AllDirectories).Any())
+                return candidate;
+        return refreshed;
+    }
 
     public static IReadOnlyList<string> Fens(string? path = null, int plies = 10, int max = 0)
     {
