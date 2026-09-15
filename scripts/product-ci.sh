@@ -15,6 +15,13 @@ run_policy() {
   bash scripts/ci-policy.sh
 }
 
+resume_held_repair_if_needed() {
+  # Resolve this product's exact held repair before installation/publication can
+  # replace its native or managed generation. With no owned hold this is a no-op.
+  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" --resume-if-needed -- \
+    bash scripts/repair-legacy-content-lifecycle.sh "${PGDATABASE:-laplace}"
+}
+
 run_deps() {
   bash scripts/ci-deps.sh
 }
@@ -140,6 +147,9 @@ run_perf() {
 }
 
 run_policy
+case "$stage" in
+  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;
+esac
 if [[ "$stage" == reconcile ]]; then
   reconcile_installed_product
   exit 0

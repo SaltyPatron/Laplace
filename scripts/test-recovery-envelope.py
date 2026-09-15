@@ -47,6 +47,12 @@ class RecoveryEnvelopeTests(unittest.TestCase):
 
     def test_native_input_scope_has_complete_entity_content_join_without_caps(self):
         sql = CLASSIFIER.recovery_envelope_ctes(10)
+        # A retained player target can name a different witnessed alias. Its
+        # native input journal must be measured even when the old Content does
+        # not contain that alias root.
+        carriers = CLASSIFIER.recovery_dependency_ctes().split("recovery_carriers AS MATERIALIZED (", 1)[1].split(
+            "recovery_carrier_members AS MATERIALIZED (", 1)[0]
+        self.assertIn("p.type=1 OR ((owner.is_game OR owner.is_player) AND p.type=3)", carriers)
         input_query = sql.split("recovery_native_snapshot_line_sizes AS MATERIALIZED (", 1)[1].split(
             "recovery_native_snapshot_sizes AS MATERIALIZED (", 1)[0]
         self.assertIn("FROM recovery_needed_ids needed JOIN laplace.entities entity", input_query)

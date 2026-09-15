@@ -333,6 +333,23 @@ class RepairTransactionTests(unittest.TestCase):
         self.assertGreaterEqual(completion["protocol_seconds_through_durable_outcome"],
                                 result["phase_timings"]["protocol_seconds_through_commit_confirmation"])
 
+    def test_server_apply_timeout_is_refreshed_from_budget_remaining_after_durable_plan(self):
+        fsync = REPAIR.os.fsync
+        monotonic = REPAIR.time.monotonic
+        elapsed = [0]
+        def consume_budget(fd):
+            fsync(fd)
+            if os.readlink(f"/proc/self/fd/{fd}") == str(self.directory / "plan.jsonl"):
+                elapsed[0] += 2
+        with patch.object(REPAIR.os,"fsync",side_effect=consume_budget), \
+                patch.object(REPAIR.time,"monotonic",side_effect=lambda:monotonic()+elapsed[0]):
+            result=self.run_repair(timeout=5)
+        self.assertLessEqual(result["apply_statement_timeout_milliseconds"],3000)
+        self.assertGreater(result["initial_database_timeout_milliseconds"],4000)
+        sql=self.transcript.read_text()
+        refresh=f"SET LOCAL statement_timeout='{result['apply_statement_timeout_milliseconds']}ms';"
+        self.assertIn(refresh+"\nAPPLY_RETAINED_PLAN;",sql)
+
     def test_shared_deadline_includes_planning_and_fsync_without_a_fresh_phase_budget(self):
         fsync = REPAIR.os.fsync
         monotonic = REPAIR.time.monotonic

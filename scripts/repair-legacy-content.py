@@ -87,7 +87,8 @@ def verified_plan(directory: Path, *, replay_target=None, deadline: float | None
                 native_inputs += 1
             elif kind == "physicality":
                 if value.get("operation", "rewrite-physicality") not in (
-                        "rewrite-physicality", "retire-redundant-content"):
+                        "rewrite-physicality", "retire-redundant-content",
+                        "retire-content-preserve-witnessed-alias-projection"):
                     raise ValueError("prior repair operation is unknown")
                 rows += 1
             elif kind == "plan":
@@ -232,7 +233,8 @@ CREATE TEMP TABLE repair_reconciliation ON COMMIT DROP AS
 WITH compared AS (
   SELECT r.receipt,r.document,
          pg_temp.repair_snapshot(oldrow)=r.document->'original'
-           AND CASE WHEN r.document->>'operation'='retire-redundant-content'
+           AND CASE WHEN r.document->>'operation' IN (
+                 'retire-redundant-content','retire-content-preserve-witnessed-alias-projection')
                  THEN pg_temp.repair_snapshot(newrow)=r.document->'proposed'
                  ELSE oldrow.id=newrow.id OR newrow.id IS NULL END AS matches_original,
          pg_temp.repair_snapshot(newrow)=r.document->'proposed'
@@ -272,7 +274,11 @@ SET LOCAL max_parallel_workers_per_gather=0;
 -- ingest runs; table locks alone cannot clear a writer's remembered presence IDs.
 LOCK TABLE laplace.entities,laplace.physicalities,laplace.attestations IN SHARE ROW EXCLUSIVE MODE;
 CREATE FUNCTION pg_temp.repair_snapshot(p laplace.physicalities) RETURNS jsonb
-LANGUAGE sql IMMUTABLE STRICT AS $snapshot$ SELECT {snapshot_expression('p')} $snapshot$;
+LANGUAGE sql IMMUTABLE STRICT AS $snapshot$
+-- An absent LATERAL row can be a non-NULL composite containing only NULLs,
+-- while a direct outer join can supply SQL NULL. Neither is a physicality.
+SELECT CASE WHEN p.id IS NULL THEN NULL ELSE {snapshot_expression('p')} END
+$snapshot$;
 {prior_sql(prior_paths, deadline=deadline)}
 
 CREATE TEMP TABLE repair_owner_inventory ON COMMIT DROP AS
@@ -336,7 +342,7 @@ ANALYZE repair_owners;
 CREATE TEMP TABLE repair_carriers ON COMMIT DROP AS
 SELECT p.*,o.repair_kind,o.tier AS parent_tier
 FROM repair_owners o JOIN laplace.physicalities p ON p.entity_id=o.entity_id
-WHERE p.type=1 OR (o.repair_kind='chess-line' AND p.type=3);
+WHERE p.type=1 OR (o.repair_kind IN ('chess-line','player-projection') AND p.type=3);
 ANALYZE repair_carriers;
 CREATE TEMP TABLE repair_packed ON COMMIT DROP AS
 SELECT p.id AS physicality_id,c.ordinal,c.entity_id,c.run_length,c.flags
@@ -381,6 +387,10 @@ ANALYZE repair_manifests;
 CREATE TEMP TABLE repair_candidates ON COMMIT DROP AS
 SELECT o.*,m.child_ids,m.zero_flags,m.resolved,m.descending,m.all_moves,m.all_messages,
        m.child_coords,
+       tm.child_ids AS target_child_ids,tm.child_coords AS target_child_coords,
+       tm.resolved AS target_resolved,tm.zero_flags AS target_zero_flags,
+       target.coord AS target_coord,target.hilbert_index AS target_hilbert,
+       target.trajectory AS target_trajectory,target.n_constituents AS target_count,
        p.id AS projection_id,p.n_constituents AS projection_count,
        pm.child_ids AS position_ids,pm.resolved AS positions_resolved,
        pm.all_positions,pm.child_ids[1] AS start_id,
@@ -391,6 +401,9 @@ SELECT o.*,m.child_ids,m.zero_flags,m.resolved,m.descending,m.all_moves,m.all_me
        (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
          WHERE a.subject_id=o.entity_id AND a.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')
            AND a.object_id=m.child_ids[1]) AS name_witnesses,
+       (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
+         WHERE a.subject_id=o.entity_id AND a.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')
+           AND a.object_id=tm.child_ids[1]) AS target_name_witnesses,
        (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
          WHERE a.subject_id=o.entity_id AND a.type_id=laplace.relation_type_id('HAS_SETUP')) AS setup_witnesses,
        (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
@@ -421,6 +434,7 @@ SELECT o.*,m.child_ids,m.zero_flags,m.resolved,m.descending,m.all_moves,m.all_me
 FROM repair_owners o JOIN laplace.physicalities owner_row ON owner_row.id=o.id
 LEFT JOIN repair_manifests m ON m.id=o.id
 LEFT JOIN laplace.physicalities target ON target.id=public.laplace_hash128_blake3(o.entity_id||decode('0300','hex'))
+LEFT JOIN repair_manifests tm ON tm.id=target.id
 LEFT JOIN LATERAL (
   SELECT candidate.* FROM laplace.physicalities candidate
   WHERE candidate.entity_id=o.entity_id AND candidate.type=3 AND o.repair_kind='chess-line'
@@ -492,8 +506,46 @@ WHERE NOT COALESCE(input.valid_content,false);
 CREATE UNIQUE INDEX repair_invalid_input_owner_identity ON repair_invalid_input_owners(entity_id);
 ANALYZE repair_invalid_input_owners;
 
+-- A stable player may have separately witnessed names. AppendPlayerPhysicality
+-- retains the first Projection and records each HAS_NAME_ALIAS independently.
+-- This is a distinct disposition, not semantic equivalence: both singleton
+-- manifestations must resolve to their own actual native-valid name Content.
+CREATE TEMP TABLE repair_alias_lineage ON COMMIT DROP AS
+SELECT c.id,COALESCE(c.repair_kind='player-projection'
+  AND c.resolved AND c.target_resolved
+  AND cardinality(c.child_ids)=1 AND cardinality(c.target_child_ids)=1
+  AND c.child_ids[1]<>c.target_child_ids[1]
+  AND c.zero_flags AND c.target_zero_flags
+  AND c.radius_origin<=1.0+1e-12
+  AND public.laplace_radius_origin(c.target_coord)<=1.0+1e-12
+  AND ST_AsEWKB(c.coord)=ST_AsEWKB(c.child_coords[1])
+  AND ST_AsEWKB(c.target_coord)=ST_AsEWKB(c.target_child_coords[1])
+  AND c.hilbert_index=public.laplace_hilbert_encode(c.coord)
+  AND c.target_hilbert=public.laplace_hilbert_encode(c.target_coord)
+  AND (c.canonical_projection_evidence-ARRAY[
+       'coord_ewkb','hilbert_index','trajectory_ewkb','radius_origin_bits','observed_at','observed_at_binary'])=
+      ((pg_temp.repair_snapshot(owner_row)||jsonb_build_object(
+         'id',encode(public.laplace_hash128_blake3(c.entity_id||decode('0300','hex')),'hex'),'type',3))
+       -ARRAY['coord_ewkb','hilbert_index','trajectory_ewkb','radius_origin_bits','observed_at','observed_at_binary'])
+  AND EXISTS(SELECT FROM jsonb_array_elements(c.name_witnesses) a
+    WHERE (a->>'outcome')::integer=2 AND (a->>'observation_count')::bigint>0
+      AND (a->>'sum_score_fp1e9')::numeric>(a->>'observation_count')::numeric*500000000)
+  AND NOT EXISTS(SELECT FROM jsonb_array_elements(c.name_witnesses) a
+    WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
+      OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000)
+  AND EXISTS(SELECT FROM jsonb_array_elements(c.target_name_witnesses) a
+    WHERE (a->>'outcome')::integer=2 AND (a->>'observation_count')::bigint>0
+      AND (a->>'sum_score_fp1e9')::numeric>(a->>'observation_count')::numeric*500000000)
+  AND NOT EXISTS(SELECT FROM jsonb_array_elements(c.target_name_witnesses) a
+    WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
+      OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000),false)
+  AS witnessed_alias_projection
+FROM repair_candidates c JOIN laplace.physicalities owner_row ON owner_row.id=c.id;
+CREATE UNIQUE INDEX repair_alias_lineage_identity ON repair_alias_lineage(id);
+ANALYZE repair_alias_lineage;
+
 CREATE TEMP TABLE repair_eligibility ON COMMIT DROP AS
-SELECT c.*,
+SELECT c.*,lineage.witnessed_alias_projection,
   CASE WHEN c.entity_rows<>1 THEN 'duplicate-owner-identity'
        WHEN NOT COALESCE(c.resolved,false) THEN 'unresolved-or-malformed-original-manifest'
        WHEN c.id<>public.laplace_hash128_blake3(c.entity_id||decode('0100','hex')) THEN 'noncanonical-physicality-id'
@@ -513,7 +565,7 @@ SELECT c.*,
                 THEN 'opposing-name-testimony'
               WHEN c.projection_target_exists AND NOT COALESCE(
                 c.projection_rows=1 AND jsonb_array_length(c.occupied_projection_evidence)=1
-                AND c.projection_semantically_equal,false)
+                AND (c.projection_semantically_equal OR lineage.witnessed_alias_projection),false)
                 THEN 'occupied-projection-target' ELSE 'eligible' END
        WHEN c.repair_kind='session-projection' THEN
          CASE WHEN NOT c.all_messages OR c.witnessed_messages<>(SELECT count(DISTINCT id) FROM unnest(c.child_ids) id)
@@ -548,11 +600,14 @@ SELECT c.*,
          OR c.hilbert_index IS DISTINCT FROM public.laplace_hilbert_encode(c.coord)
          THEN 'unexpected-legacy-game-placement'
        ELSE 'eligible' END AS disposition
-FROM repair_candidates c;
+FROM repair_candidates c JOIN repair_alias_lineage lineage ON lineage.id=c.id;
 
 CREATE TEMP TABLE repair_plan ON COMMIT DROP AS
 SELECT c.id AS old_id,c.entity_id,c.repair_kind,c.disposition,
-       CASE WHEN c.repair_kind<>'chess-line' AND c.disposition='eligible' AND c.projection_target_exists
+       CASE WHEN c.repair_kind='player-projection' AND c.disposition='eligible'
+                  AND c.projection_target_exists AND c.witnessed_alias_projection
+         THEN 'retire-content-preserve-witnessed-alias-projection'
+            WHEN c.repair_kind<>'chess-line' AND c.disposition='eligible' AND c.projection_target_exists
          THEN 'retire-redundant-content' ELSE 'rewrite-physicality' END AS operation,
        c.id AS new_id,c.type AS new_type,c.coord AS new_coord,c.hilbert_index AS new_hilbert,
        c.trajectory AS new_trajectory,c.n_constituents AS new_count,
@@ -561,10 +616,13 @@ SELECT c.id AS old_id,c.entity_id,c.repair_kind,c.disposition,
        jsonb_build_object('entity',c.entity_evidence,'position_projection',c.projection_evidence,
            'start_entity',c.start_entity_evidence,'start_content',c.start_physicality_evidence,
            'name_witnesses',c.name_witnesses,'setup_witnesses',c.setup_witnesses,
+           'target_name_witnesses',c.target_name_witnesses,
+           'target_ordered_children',c.target_child_ids,
+           'witnessed_alias_projection',c.witnessed_alias_projection,
            'membership_witnesses',c.membership_witnesses,
            'occupied_projections',c.occupied_projection_evidence,
            'projection_semantically_equal',c.projection_semantically_equal,
-           'projection_preservation_rule','retain canonical target including its observation timestamp; retire only redundant Content',
+           'projection_preservation_rule','retain canonical target exactly; archive retired Content and preserve both alias roots and all applicable testimony',
            'incoming_content',(SELECT jsonb_agg(parent.original ORDER BY parent.id)
               FROM repair_incoming parent WHERE c.entity_id=ANY(parent.members)),
            'ordered_children',c.child_ids,
@@ -578,11 +636,16 @@ UPDATE repair_plan p SET
   new_type=CASE WHEN p.repair_kind='chess-line' THEN 1 ELSE 3 END,
   new_coord=CASE WHEN p.repair_kind='chess-line'
                  THEN public.laplace_karcher_mean_4d(ST_Collect(ARRAY[c.start_coord]||c.child_coords))
+                 WHEN p.operation='retire-content-preserve-witnessed-alias-projection' THEN c.target_coord
                  ELSE c.coord END,
   new_trajectory=CASE WHEN p.repair_kind='chess-line'
                       THEN public.laplace_trajectory_build(ARRAY[c.start_id]||c.child_ids)
+                      WHEN p.operation='retire-content-preserve-witnessed-alias-projection' THEN c.target_trajectory
                       ELSE c.trajectory END,
-  new_count=c.n_constituents+CASE WHEN p.repair_kind='chess-line' THEN 1 ELSE 0 END
+  new_hilbert=CASE WHEN p.operation='retire-content-preserve-witnessed-alias-projection'
+                    THEN c.target_hilbert ELSE c.hilbert_index END,
+  new_count=CASE WHEN p.operation='retire-content-preserve-witnessed-alias-projection' THEN c.target_count
+                 ELSE c.n_constituents+CASE WHEN p.repair_kind='chess-line' THEN 1 ELSE 0 END END
 FROM repair_eligibility c WHERE c.id=p.old_id AND p.disposition='eligible';
 UPDATE repair_plan SET new_hilbert=public.laplace_hilbert_encode(new_coord)
 WHERE repair_kind='chess-line' AND disposition='eligible';
@@ -606,7 +669,8 @@ END $proposed_rows$;
 -- Coexistence is an explicit retirement. Keep the preexisting target exactly,
 -- including its independently observed timestamp; archive the removed Content.
 UPDATE repair_plan p SET proposed=c.canonical_projection_evidence
-FROM repair_eligibility c WHERE c.id=p.old_id AND p.operation='retire-redundant-content';
+FROM repair_eligibility c WHERE c.id=p.old_id AND p.operation IN (
+  'retire-redundant-content','retire-content-preserve-witnessed-alias-projection');
 
 -- Serialize each retained body record exactly once. The measured byte count
 -- includes every native input, original/proposed/evidence row and summary; the
@@ -624,7 +688,9 @@ INSERT INTO repair_output
 SELECT 3,NULL::bytea,jsonb_build_object('kind','plan','count',count(*),
   'native_input_count',(SELECT count(*) FROM repair_native_inputs),
   'rewrites',count(*) FILTER(WHERE operation='rewrite-physicality'),
-  'retirements',count(*) FILTER(WHERE operation='retire-redundant-content'),
+  'retirements',count(*) FILTER(WHERE operation IN (
+    'retire-redundant-content','retire-content-preserve-witnessed-alias-projection')),
+  'witnessed_alias_retirements',count(*) FILTER(WHERE operation='retire-content-preserve-witnessed-alias-projection'),
   'unresolved',count(*) FILTER(WHERE disposition<>'eligible'),
   'classifications',COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM (
     SELECT repair_kind,disposition,count(*) AS rows FROM repair_plan GROUP BY repair_kind,disposition) g),'[]'::jsonb))::text
@@ -684,6 +750,9 @@ BEGIN
         WHERE a.subject_id=c.entity_id AND a.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')
           AND a.object_id=c.child_ids[1]) IS DISTINCT FROM c.name_witnesses
       OR (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
+        WHERE a.subject_id=c.entity_id AND a.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')
+          AND a.object_id=c.target_child_ids[1]) IS DISTINCT FROM c.target_name_witnesses
+      OR (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
         WHERE a.subject_id=c.entity_id AND a.type_id=laplace.relation_type_id('HAS_SETUP'))
            IS DISTINCT FROM c.setup_witnesses
       OR (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
@@ -725,7 +794,8 @@ BEGIN
     FROM repair_plan r WHERE p.id=r.old_id AND r.operation='rewrite-physicality';
     GET DIAGNOSTICS changed=ROW_COUNT;
     DELETE FROM laplace.physicalities p USING repair_plan r
-      WHERE p.id=r.old_id AND r.operation='retire-redundant-content';
+      WHERE p.id=r.old_id AND r.operation IN (
+        'retire-redundant-content','retire-content-preserve-witnessed-alias-projection');
     GET DIAGNOSTICS retired=ROW_COUNT;
     changed:=changed+retired;
     IF changed<>expected THEN
@@ -770,7 +840,9 @@ BEGIN
 END $apply$;
 SELECT jsonb_build_object('kind','applied','count',(SELECT count(*) FROM repair_plan),
   'rewrites',(SELECT count(*) FROM repair_plan WHERE operation='rewrite-physicality'),
-  'retirements',(SELECT count(*) FROM repair_plan WHERE operation='retire-redundant-content'),
+  'retirements',(SELECT count(*) FROM repair_plan WHERE operation IN (
+    'retire-redundant-content','retire-content-preserve-witnessed-alias-projection')),
+  'witnessed_alias_retirements',(SELECT count(*) FROM repair_plan WHERE operation='retire-content-preserve-witnessed-alias-projection'),
   'epoch',(SELECT epoch FROM repair_applied_epoch),'postconditions','exact-row-readback-and-native-content-proof');
 """
 
@@ -800,7 +872,10 @@ def main() -> int:
                 or retained["transaction_identity"] != active_transaction:
             raise ValueError("canonical repair's managed service exclusion is no longer active")
         producer_generation = json.loads((receipt / "prior-services.json").read_text()).get("producer_generation")
-        if not isinstance(producer_generation, dict) or producer_generation != quiescence.published_application_generation():
+        resumed = any(receipt.glob('resume-confirmed-*.json'))
+        if not isinstance(producer_generation, dict) or producer_generation != quiescence.published_application_generation(
+                retained=producer_generation if resumed else None,
+                verification_receipt=receipt / 'producer-application-verification.json'):
             raise ValueError("canonical repair requires the same verified published managed generation")
         for name in ("api", "mcp", "lichess"):
             status = quiescence.service_status(name)
@@ -819,8 +894,12 @@ def main() -> int:
                "-p", os.environ.get("PGPORT", "5432"), "-U", os.environ.get("PGUSER", "laplace_admin"),
                "-d", args.database, "-v", "ON_ERROR_STOP=1"]
     args.receipt_root.mkdir(parents=True, mode=0o770, exist_ok=True)
-    pending = unresolved_submissions(args.receipt_root, deadline=deadline)
     directory = args.receipt_root / (str(time.time_ns()) + "-" + uuid.uuid4().hex)
+    if args.database == 'laplace':
+        quiescence.bind_repair_attempt(receipt, directory, source_sha=source_sha)
+    pending = unresolved_submissions(args.receipt_root, deadline=deadline)
+    statuses = quiescence.database_submission_statuses(pending, command=command, deadline=deadline)
+    quiescence.require_finished_database_submissions(statuses)
     outcome = preserve_and_apply(command, plan_sql(args.max_rows, pending, producer_generation, deadline=deadline), apply_sql(), directory,
         source_sha=source_sha, max_rows=args.max_rows, max_bytes=None, max_native_inputs=None,
         require_resource_inventory=True, max_line_bytes=MAX_LINE_BYTES, timeout=MAINTENANCE_TIMEOUT,

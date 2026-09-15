@@ -218,6 +218,21 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
                 finally:
                     path.write_text(original)
 
+    def test_owned_repair_resume_cannot_be_omitted_swallowed_or_moved_after_build(self):
+        path=self.root / "scripts/product-ci.sh"
+        original=path.read_text()
+        call="  reconcile|deploy|integrate|all|applications) resume_held_repair_if_needed ;;"
+        block='case "$stage" in\n'+call+'\nesac\n'
+        for mutation in (original.replace("--resume-if-needed", "--wrong-resume-mode"),
+                         original.replace(call,call.replace(" ;;"," || true ;;")),
+                         original.replace(block,"").replace("\nrun_build\n","\nrun_build\n"+block)):
+            try:
+                self.assertNotEqual(original,mutation)
+                path.write_text(mutation)
+                self.check_audit(diagnostic="owned repair resume must run unsuppressed")
+            finally:
+                path.write_text(original)
+
     def test_publication_recovery_cannot_restart_api_after_unknown_repair_transaction(self):
         source = PRODUCT.read_text()
         footer = "trap recover_publish EXIT\nrun_publish\n" + source.rsplit(

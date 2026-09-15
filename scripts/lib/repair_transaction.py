@@ -351,7 +351,11 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
             phase = "apply_and_commit_confirmation"
             phase_started = submitted_monotonic
             submitted = True
-            tx.send(apply_sql + f"\nCOMMIT;\n\\echo {commit_marker}\n")
+            # Planning and receipt fsync have consumed the original allowance.
+            # The server must receive only the remaining shared budget for apply.
+            apply_timeout_ms = max(1, math.floor((deadline - time.monotonic()) * 1000))
+            tx.send(f"SET LOCAL statement_timeout='{apply_timeout_ms}ms';\n"
+                    + apply_sql + f"\nCOMMIT;\n\\echo {commit_marker}\n")
             applied = []
             for raw in tx.lines(commit_marker):
                 if applied:
@@ -367,6 +371,7 @@ def preserve_and_apply(command: list[str], plan_sql: str, apply_sql: str,
             phase = "outcome_durability"
             phase_started = confirmed_monotonic
             outcome = {**manifest, "disposition": "commit-confirmed", "applied": applied[0],
+                       "apply_statement_timeout_milliseconds": apply_timeout_ms,
                        "phase_timings": phase_timings,
                        "finished_unix_nanoseconds": time.time_ns()}
             write_new_json(directory / "outcome.json", outcome)

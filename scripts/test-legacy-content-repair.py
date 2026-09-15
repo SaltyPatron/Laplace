@@ -27,6 +27,11 @@ SPEC = importlib.util.spec_from_file_location("legacy_content_repair", ROOT / "s
 assert SPEC and SPEC.loader
 REPAIR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(REPAIR)
+QUIESCENCE_SPEC = importlib.util.spec_from_file_location(
+    "legacy_repair_quiescence", ROOT / "scripts/quiesce-managed-database.py")
+assert QUIESCENCE_SPEC and QUIESCENCE_SPEC.loader
+QUIESCENCE = importlib.util.module_from_spec(QUIESCENCE_SPEC)
+QUIESCENCE_SPEC.loader.exec_module(QUIESCENCE)
 
 
 FIXTURE = r"""
@@ -37,7 +42,7 @@ CREATE SCHEMA repair_test;
 CREATE TABLE repair_test.ids(name text PRIMARY KEY,id bytea UNIQUE NOT NULL);
 INSERT INTO repair_test.ids
 SELECT name,realize.canonical_id('legacy-repair-regression/'||name)
-FROM unnest(ARRAY['source','m1','m2','p0','p1','p2','name','msg1','msg2','player','session']) name;
+FROM unnest(ARRAY['source','m1','m2','p0','p1','p2','name','other-name','msg1','msg2','player','session']) name;
 INSERT INTO repair_test.ids VALUES
  ('game',public.laplace_hash128_merkle(0::smallint,ARRAY[
    (SELECT id FROM repair_test.ids WHERE name='p0'),
@@ -238,6 +243,7 @@ class NativeRepairProof:
                 for key in ("position_projection", "start_content"):
                     assert evidence[key] == before["physicalities"][evidence[key]["id"]]
             else:
+                assert evidence["position_projection"] is None, "absent position Projection became an all-null row"
                 assert old["id"] != new["id"] and new["type"] == 3
                 for key in old.keys() - {"id", "type"}:
                     assert old[key] == new[key], f"projection rewrite changed retained {key}"
@@ -424,6 +430,221 @@ class NativeRepairProof:
           CREATE TRIGGER repair_retirement_corruption BEFORE DELETE ON laplace.physicalities
             FOR EACH ROW EXECUTE FUNCTION pg_temp.keep_redundant_content();
           """, "Repair updated", setup=setup)
+
+    def witnessed_alias_projection_retirement(self) -> None:
+        # These opaque fixture atoms exercise retained-root placement and native
+        # manifest/physicality checks. They do not claim fresh text decomposition.
+        setup = """
+          UPDATE laplace.physicalities SET coord=ST_MakePoint(-0.5,0.1,0.2,0.3),
+            hilbert_index=public.laplace_hilbert_encode(ST_MakePoint(-0.5,0.1,0.2,0.3))
+          WHERE id=repair_test.physicality_id('other-name');
+          UPDATE laplace.entities SET tier=CASE WHEN id=repair_test.id('player') THEN 2 ELSE 3 END
+          WHERE id IN (repair_test.id('player'),repair_test.id('name'),repair_test.id('other-name'));
+          UPDATE laplace.physicalities old SET coord=child.coord,hilbert_index=child.hilbert_index,
+            trajectory=public.laplace_trajectory_build(ARRAY[repair_test.id('name')]),
+            alignment_residual=NULL,source_dim=NULL
+          FROM laplace.physicalities child
+          WHERE old.id=repair_test.physicality_id('player')
+            AND child.id=repair_test.physicality_id('name');
+          UPDATE laplace.attestations SET context_id=NULL
+          WHERE subject_id=repair_test.id('player') AND type_id=laplace.relation_type_id('HAS_NAME_ALIAS');
+          INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
+              n_constituents,alignment_residual,source_dim,observed_at)
+          SELECT repair_test.physicality_id('player',3::smallint),repair_test.id('player'),3,
+            child.coord,child.hilbert_index,public.laplace_trajectory_build(ARRAY[repair_test.id('other-name')]),
+            1,NULL,NULL,old.observed_at+interval '1 day'
+          FROM laplace.physicalities child CROSS JOIN laplace.physicalities old
+          WHERE child.id=repair_test.physicality_id('other-name')
+            AND old.id=repair_test.physicality_id('player');
+          INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,
+              outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+          SELECT realize.canonical_id('legacy-repair-regression/witness/other-alias'),
+            repair_test.id('player'),laplace.relation_type_id('HAS_NAME_ALIAS'),repair_test.id('other-name'),
+            repair_test.id('source'),NULL,2,'2026-09-04 04:05:06.987654+00'::timestamptz,
+            2,2000000000,30000000000;
+          """
+        name = "witnessed-alias-projection-retirement"
+        self.sql("SELECT repair_test.reset();" + setup)
+        before = self.state()
+        roots = json.loads(self.sql("SELECT jsonb_build_object('old',repair_test.id('name'),"
+            "'target',repair_test.id('other-name'));"))
+        result = self.run(name)
+        after = self.state()
+        records = self.records(name)
+        assert result["disposition"] == "commit-confirmed"
+        for summary in (result["applied"], records[-1]):
+            assert summary["count"] == 3 and summary["rewrites"] == 2
+            assert summary["retirements"] == summary["witnessed_alias_retirements"] == 1
+        assert result["native_input_rows"] == records[-1]["native_input_count"] == 9
+        self.native_inputs(records, before,
+            ["m1", "m2", "p0", "p1", "p2", "name", "other-name", "msg1", "msg2"])
+        expected = dict(before["physicalities"])
+        for row in (record for record in records if record["kind"] == "physicality"):
+            old, new = row["original"], row["proposed"]
+            assert expected.pop(old["id"]) == old
+            if row["repair_kind"] != "player-projection":
+                assert row["operation"] == "rewrite-physicality"
+                expected[new["id"]] = new
+                continue
+            assert row["operation"] == "retire-content-preserve-witnessed-alias-projection"
+            assert row["disposition"] == "eligible"
+            evidence = row["evidence"]
+            assert evidence["witnessed_alias_projection"] is True
+            assert evidence["projection_semantically_equal"] is False
+            assert evidence["ordered_children"] == [roots["old"]]
+            assert evidence["target_ordered_children"] == [roots["target"]]
+            assert evidence["occupied_projections"] == [new]
+            assert new == before["physicalities"][new["id"]] == after["physicalities"][new["id"]]
+            assert old["trajectory_ewkb"] != new["trajectory_ewkb"]
+            assert old["coord_ewkb"] != new["coord_ewkb"] and old["hilbert_index"] != new["hilbert_index"]
+            assert old["observed_at_binary"] != new["observed_at_binary"], "target observation was overwritten"
+            for key, root in (("name_witnesses", roots["old"]), ("target_name_witnesses", roots["target"])):
+                witnesses = evidence[key]
+                expected_witnesses = [witness for witness in before["attestations"]
+                    if witness["subject_id"] == "\\x" + old["entity_id"] and witness["object_id"] == root]
+                assert witnesses == expected_witnesses and len(witnesses) == 1
+        assert after["physicalities"] == expected, "alias retirement changed another physicality"
+        assert after["entities"] == before["entities"] and after["attestations"] == before["attestations"]
+        self.readback(name, before, after)
+        self.completed.append("witnessed-alias-retirement-preserves-both-roots-testimony-and-target-time")
+
+        prior = self.receipts / name / "plan.jsonl"
+        prior_bytes = prior.read_bytes()
+        repeat = self.run("witnessed-alias-prior-applied", prior=[prior], max_rows=1)
+        assert repeat["applied"]["count"] == 0 and self.state() == after
+        assert self.records("witnessed-alias-prior-applied")[0]["prior_submission_reconciliation"][0]["disposition"] == "prior-commit-confirmed"
+        self.completed.append("witnessed-alias-prior-applied-exact-target")
+        self.sql("SELECT repair_test.reset();" + setup)
+        assert self.state() == before
+        retry = self.run("witnessed-alias-prior-originals", prior=[prior])
+        assert retry["applied"]["count"] == 3 and self.state() == after
+        assert self.records("witnessed-alias-prior-originals")[0]["prior_submission_reconciliation"][0]["disposition"] == "originals-confirmed"
+        assert prior.read_bytes() == prior_bytes
+        self.completed.append("witnessed-alias-prior-originals-both-coexisting-rows")
+        self.sql("SELECT repair_test.reset();" + setup
+            + "DELETE FROM laplace.physicalities WHERE id=repair_test.physicality_id('player');")
+        self.planning_failure("witnessed-alias-prior-partial", prior=[prior],
+            expected_error="Unknown repair submission diverged")
+        self.sql("SELECT repair_test.reset();" + setup
+            + "UPDATE laplace.physicalities SET observed_at=observed_at+interval '1 microsecond' "
+              "WHERE id=repair_test.physicality_id('player',3::smallint);")
+        self.planning_failure("witnessed-alias-prior-target-diverged", prior=[prior],
+            expected_error="Unknown repair submission diverged")
+
+        cases = [
+            ("missing-old-witness", "DELETE FROM laplace.attestations WHERE subject_id=repair_test.id('player') AND object_id=repair_test.id('name');",
+             "missing-exact-confirmed-name"),
+            ("missing-target-witness", "DELETE FROM laplace.attestations WHERE subject_id=repair_test.id('player') AND object_id=repair_test.id('other-name');",
+             "occupied-projection-target"),
+            ("old-flags", "UPDATE laplace.physicalities SET trajectory=public.laplace_mantissa_pack(repair_test.id('name'),1,1,4::bigint) WHERE id=repair_test.physicality_id('player');",
+             "occupied-projection-target"),
+            ("target-flags", "UPDATE laplace.physicalities SET trajectory=public.laplace_mantissa_pack(repair_test.id('other-name'),1,1,4::bigint) WHERE id=repair_test.physicality_id('player',3::smallint);",
+             "occupied-projection-target"),
+            ("old-coordinate", "UPDATE laplace.physicalities SET coord=ST_MakePoint(0,0,0,1),hilbert_index=public.laplace_hilbert_encode(ST_MakePoint(0,0,0,1)) WHERE id=repair_test.physicality_id('player');",
+             "occupied-projection-target"),
+            ("target-coordinate", "UPDATE laplace.physicalities SET coord=ST_MakePoint(0,0,0,1),hilbert_index=public.laplace_hilbert_encode(ST_MakePoint(0,0,0,1)) WHERE id=repair_test.physicality_id('player',3::smallint);",
+             "occupied-projection-target"),
+            ("old-hilbert", "UPDATE laplace.physicalities SET hilbert_index=decode(repeat('00',16),'hex') WHERE id=repair_test.physicality_id('player');",
+             "occupied-projection-target"),
+            ("target-hilbert", "UPDATE laplace.physicalities SET hilbert_index=decode(repeat('00',16),'hex') WHERE id=repair_test.physicality_id('player',3::smallint);",
+             "occupied-projection-target"),
+            ("target-alignment", "UPDATE laplace.physicalities SET alignment_residual=0.5 WHERE id=repair_test.physicality_id('player',3::smallint);",
+             "occupied-projection-target"),
+            ("target-source-dimension", "UPDATE laplace.physicalities SET source_dim=4 WHERE id=repair_test.physicality_id('player',3::smallint);",
+             "occupied-projection-target"),
+            ("old-count", "UPDATE laplace.physicalities SET n_constituents=2 WHERE id=repair_test.physicality_id('player');",
+             "unresolved-or-malformed-original-manifest"),
+            ("target-count", "UPDATE laplace.physicalities SET n_constituents=2 WHERE id=repair_test.physicality_id('player',3::smallint);",
+             "occupied-projection-target"),
+            ("missing-target-content", "DELETE FROM laplace.physicalities WHERE id=repair_test.physicality_id('other-name');",
+             "occupied-projection-target"),
+            ("missing-target-entity", "DELETE FROM laplace.entities WHERE id=repair_test.id('other-name');",
+             "occupied-projection-target"),
+            ("invalid-target-content", "UPDATE laplace.physicalities SET hilbert_index=decode(repeat('00',16),'hex') WHERE id=repair_test.physicality_id('other-name');",
+             "invalid-native-input-content"),
+            ("noncanonical-target-content", "UPDATE laplace.physicalities SET id=realize.canonical_id('legacy-repair-regression/noncanonical-other-name') WHERE id=repair_test.physicality_id('other-name');",
+             "invalid-native-input-content"),
+            ("extra-projection-alongside-canonical-target", """
+              INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
+                  n_constituents,alignment_residual,source_dim,observed_at)
+              SELECT realize.canonical_id('legacy-repair-regression/extra-alias-projection'),
+                entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at
+              FROM laplace.physicalities WHERE id=repair_test.physicality_id('player',3::smallint);
+              """, "occupied-projection-target"),
+            ("foreign-entity-at-canonical-target", "UPDATE laplace.physicalities SET entity_id=repair_test.id('source') WHERE id=repair_test.physicality_id('player',3::smallint);",
+             "occupied-projection-target"),
+            ("duplicate-target-content", """
+              INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
+                  n_constituents,alignment_residual,source_dim,observed_at)
+              SELECT realize.canonical_id('legacy-repair-regression/duplicate-other-name'),
+                entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at
+              FROM laplace.physicalities WHERE id=repair_test.physicality_id('other-name');
+              """, "invalid-native-input-content"),
+        ]
+        for suffix, mutation, disposition in cases:
+            self.rejected("witnessed-alias-" + suffix, setup + mutation, disposition)
+        for root_name, evidence_key, disposition in (
+            ("name", "name_witnesses", "opposing-name-testimony"),
+            ("other-name", "target_name_witnesses", "occupied-projection-target"),
+        ):
+            records = self.rejected("witnessed-alias-opposed-" + root_name, setup + f"""
+              INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,
+                  outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
+              SELECT realize.canonical_id('legacy-repair-regression/opposed-{root_name}'),
+                subject_id,type_id,object_id,source_id,context_id,0,last_observed_at,1,0,opponent_rd_fp1e9
+              FROM laplace.attestations WHERE subject_id=repair_test.id('player')
+                AND type_id=laplace.relation_type_id('HAS_NAME_ALIAS') AND object_id=repair_test.id('{root_name}');
+              """, disposition)
+            player = next(row for row in records if row.get("repair_kind") == "player-projection")
+            assert {witness["outcome"] for witness in player["evidence"][evidence_key]} == {0, 2}
+
+        self.rollback("witnessed-alias-target-input-changed-after-receipt", """
+          UPDATE laplace.physicalities SET coord=ST_MakePoint(0,0,0,1),
+            hilbert_index=public.laplace_hilbert_encode(ST_MakePoint(0,0,0,1))
+          WHERE id=repair_test.physicality_id('other-name');
+          """, "Native input changed after its durable receipt", setup=setup)
+        self.rollback("witnessed-alias-target-testimony-changed-after-receipt", """
+          UPDATE laplace.attestations SET observation_count=observation_count+1
+          WHERE subject_id=repair_test.id('player') AND object_id=repair_test.id('other-name');
+          """, "Applicable testimony changed after its durable receipt", setup=setup)
+        self.rollback("witnessed-alias-target-changed-after-receipt", """
+          UPDATE laplace.physicalities SET observed_at=observed_at+interval '1 microsecond'
+          WHERE id=repair_test.physicality_id('player',3::smallint);
+          """, "Projection or incoming Content changed after its durable receipt", setup=setup)
+        self.rollback("witnessed-alias-trigger-changes-target-input", """
+          CREATE FUNCTION pg_temp.corrupt_target_alias_input() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            UPDATE laplace.physicalities SET alignment_residual=0.875
+            WHERE id=repair_test.physicality_id('other-name');
+            RETURN OLD;
+          END $$;
+          CREATE TRIGGER repair_target_alias_input AFTER DELETE ON laplace.physicalities
+            FOR EACH ROW EXECUTE FUNCTION pg_temp.corrupt_target_alias_input();
+          """, "Native input changed after its durable receipt", setup=setup)
+        self.rollback("witnessed-alias-trigger-changes-target-testimony", """
+          CREATE FUNCTION pg_temp.corrupt_target_alias_testimony() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            UPDATE laplace.attestations SET observation_count=observation_count+1
+            WHERE subject_id=repair_test.id('player') AND object_id=repair_test.id('other-name');
+            RETURN OLD;
+          END $$;
+          CREATE TRIGGER repair_target_alias_testimony AFTER DELETE ON laplace.physicalities
+            FOR EACH ROW EXECUTE FUNCTION pg_temp.corrupt_target_alias_testimony();
+          """, "Applicable testimony changed after its durable receipt", setup=setup)
+
+        # One batched native xid lookup covers both outcomes. A finished xid
+        # permits exact reconciliation; it does not itself authorize replay.
+        aborted = self.receipts / "witnessed-alias-target-input-changed-after-receipt" / "plan.jsonl"
+        statuses = QUIESCENCE.database_submission_statuses([prior, aborted], command=self.command)
+        assert {row["receipt"]: row["status"] for row in statuses} == {
+            str(prior.resolve()): "committed", str(aborted.resolve()): "aborted"}
+        assert all(row["database_identity_matches"] is True for row in statuses)
+        QUIESCENCE.require_finished_database_submissions(statuses)
+        write_new_json(self.receipts / name / "native-transaction-statuses.json", {
+            "schema": "laplace.legacy-content-native-transaction-status-proof/v1",
+            "source_sha": self.source_sha, "statuses": statuses,
+            "scope": "pg_xact_status on authenticated receipts and exact database identity; row reconciliation remains required"})
+        self.completed.append("native-transaction-status-committed-and-aborted-receipts")
 
     def one_move(self) -> None:
         self.sql("SELECT repair_test.reset();")
@@ -804,6 +1025,7 @@ def main() -> int:
         proof.success()
         proof.one_move()
         proof.compatible_projection_retirement()
+        proof.witnessed_alias_projection_retirement()
         proof.negative_cases()
         proof.hash_correct_missing_child()
         proof.healthy_corpus_over_envelope()
