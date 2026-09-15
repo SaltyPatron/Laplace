@@ -1,5 +1,6 @@
 using global::Npgsql;
 using NpgsqlTypes;
+using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -20,16 +21,7 @@ public static class NpgsqlAttestationReads
     public static Task<IReadOnlyList<WitnessRow>> WitnessesAsync(
         NpgsqlDataSource dataSource, byte[][] subjects, byte[][] types, byte[][] sources,
         byte[][] contexts, byte[][] contextlessSubjects, CancellationToken ct)
-        => NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT a.id, a.subject_id, a.type_id, a.object_id, a.source_id,
-                   a.context_id, a.outcome, a.observation_count
-            FROM laplace.attestations a
-            WHERE a.subject_id = ANY(@subjects::bytea[])
-              AND a.type_id = ANY(@types::bytea[])
-              AND a.source_id = ANY(@sources::bytea[])
-              AND (a.context_id = ANY(@contexts::bytea[])
-                   OR (a.context_id IS NULL AND a.subject_id = ANY(@contextless_subjects::bytea[])))
-            """,
+        => NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("attestations.witnesses_selected"),
             static r => new WitnessRow(
                 (byte[])r[0], (byte[])r[1], (byte[])r[2], r.IsDBNull(3) ? null : (byte[])r[3],
                 (byte[])r[4], r.IsDBNull(5) ? null : (byte[])r[5], r.GetInt16(6), r.GetInt64(7)),

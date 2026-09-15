@@ -6,6 +6,14 @@ SQL_QUERY("browse.names", "bytea[]",
     "consensus.relation_family_ids('HAS_NAME') || consensus.relation_family_ids('HAS_NAME_ALIAS'))")
 SQL_QUERY("entity.facets", "bytea[]",
     "SELECT id, tier, type_id FROM laplace.entities WHERE id = ANY($1)")
+SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[],bytea[]",
+    "SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,a.outcome,a.observation_count "
+    "FROM laplace.attestations a WHERE a.subject_id=ANY($1) AND a.type_id=ANY($2) "
+    "AND a.source_id=ANY($3) AND (a.context_id=ANY($4) "
+    "OR (a.context_id IS NULL AND a.subject_id=ANY($5)))")
+SQL_QUERY("content.carrier_vertices_selected", "bytea[],bytea[]",
+    "SELECT parent_id,n_constituents,ordinal,child_id,run_length,flags "
+    "FROM structural.content_carrier_vertices($1::bytea[],$2::bytea[]) ORDER BY parent_id,ordinal")
 SQL_QUERY("entities.mask_targets", "bytea[]",
     "SELECT id,tier,highway_mask,tableoid,ctid FROM laplace.entities WHERE id=ANY($1)")
 SQL_QUERY("entities.mask_families", "bytea[],bytea",
@@ -240,3 +248,8 @@ SQL_QUERY("ingest.verified_file_carrier", "bytea,bytea",
     "SELECT c.ordinal,c.entity_id,c.run_length,c.flags "
     "FROM public.laplace_trajectory_constituents((SELECT trajectory FROM laplace.physicalities "
     "WHERE id=$1 AND entity_id=$2 AND type=1 AND n_constituents=2)) c ORDER BY c.ordinal")
+
+SQL_QUERY("write.commit_settings", "",
+    "SELECT current_setting('synchronous_commit'), current_setting('fsync')::boolean, "
+    "current_setting('full_page_writes')::boolean")
+SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")

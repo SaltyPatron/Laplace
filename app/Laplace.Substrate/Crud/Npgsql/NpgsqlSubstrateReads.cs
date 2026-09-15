@@ -2632,14 +2632,7 @@ public static partial class NpgsqlSubstrateReads
     /// excludes alternate physicality lanes. Context consumers compare their own recipe.</summary>
     public static Task<IReadOnlyList<ContentCarrierVertex>> CanonicalContentVerticesAsync(
         NpgsqlDataSource ds, byte[][] entityIds, byte[][] physicalityIds, CancellationToken ct)
-        => NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT p.entity_id, p.n_constituents, c.ordinal, c.entity_id, c.run_length, c.flags
-            FROM unnest(@entities::bytea[], @physicalities::bytea[]) AS selected(entity_id, physicality_id)
-            JOIN laplace.physicalities p
-              ON p.id = selected.physicality_id AND p.entity_id = selected.entity_id AND p.type = 1
-            CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c
-            ORDER BY p.entity_id, c.ordinal
-            """, static r => new ContentCarrierVertex((byte[])r[0], Convert.ToInt32(r.GetValue(1)),
+        => NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("content.carrier_vertices_selected"), static r => new ContentCarrierVertex((byte[])r[0], Convert.ToInt32(r.GetValue(1)),
                 Convert.ToInt64(r.GetValue(2)), (byte[])r[3], Convert.ToInt64(r.GetValue(4)), Convert.ToInt64(r.GetValue(5))),
             p =>
             {

@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "scripts/benchmark-profiles.json"
 DEFAULT_CORE = ROOT / "build/engine/core/liblaplace_core.so"
 DEFAULT_T0 = ROOT / "build/engine/core/perfcache/laplace_t0_perfcache.bin"
-VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment"}
+VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment", "postgres-geometry"}
 
 
 def sha256(path: Path) -> str:
@@ -94,6 +94,7 @@ def validate_registry(registry: dict[str, Any]) -> None:
         "core-scale-streams": ROOT / "scripts/bench-compose-stream-scale.py",
         "query-forward": ROOT / "scripts/bench-forward-program.py",
         "chess-environment": ROOT / "scripts/benchmark-chess-environment.py",
+        "postgres-geometry": ROOT / "scripts/benchmark-postgres-geometry.py",
     }
     for name, path in harnesses.items():
         if not path.is_file():
@@ -316,6 +317,7 @@ def run_profile(
     scale_workers: str | None,
     database: str,
     chess_args: list[str] | None = None,
+    geometry_args: list[str] | None = None,
 ) -> dict[str, Any]:
     profile_id = profile["id"]
     kind = profile["kind"]
@@ -350,6 +352,12 @@ def run_profile(
                    "--output-dir", str(output_dir), "--repeats", str(repeats),
                    "--match-depth", "8", "--max-moves", "12",
                    *(chess_args or [])]
+    elif kind == "postgres-geometry":
+        output_dir = receipt_dir / "postgres-geometry"
+        result_json = output_dir / "receipt.json"
+        command = [sys.executable, "scripts/benchmark-postgres-geometry.py",
+                   "--database", database, "--output-dir", str(output_dir),
+                   "--repeats", str(repeats), *(geometry_args or [])]
     else:
         raise ValueError(f"unsupported benchmark kind {kind}")
 
@@ -361,7 +369,7 @@ def run_profile(
 
     if kind == "core-single":
         result = parse_core_single(log_path)
-    elif kind in {"core-scale", "core-scale-streams", "query-forward", "chess-environment"}:
+    elif kind in {"core-scale", "core-scale-streams", "query-forward", "chess-environment", "postgres-geometry"}:
         assert result_json is not None
         result = json.loads(result_json.read_text(encoding="utf-8"))
         if kind == "core-scale":
@@ -396,7 +404,7 @@ def run_suite(args: argparse.Namespace) -> int:
     selected = suites[args.suite]
     source_sha = git_sha()
     artifact_identity: dict[str, Any] = {"repository_sha": source_sha}
-    needs_core = any(profiles[name]["kind"] != "chess-environment"
+    needs_core = any(profiles[name]["kind"] not in {"chess-environment", "postgres-geometry"}
                      for name in selected["profiles"])
     env = dict(os.environ)
     if needs_core:
@@ -419,12 +427,17 @@ def run_suite(args: argparse.Namespace) -> int:
         value = getattr(args, "chess_" + name, None)
         if value is not None:
             chess_args.extend(["--" + name.replace("_", "-"), str(value)])
+    geometry_args = []
+    for name in ("rows", "transaction_rows", "concurrency", "max_bytes", "timeout", "recorded_case_dir"):
+        value = getattr(args, "geometry_" + name, None)
+        if value is not None:
+            geometry_args.extend(["--" + name.replace("_", "-"), str(value)])
     started = time.time_ns()
     for profile_id in selected["profiles"]:
         results.append(run_profile(
             profiles[profile_id], receipt_dir, env, args.repeats,
             Path(args.corpus_dir).resolve(), Path(args.moby_path).resolve(),
-            args.scale_workers, args.database, chess_args,
+            args.scale_workers, args.database, chess_args, geometry_args,
         ))
     finished = time.time_ns()
 
@@ -470,6 +483,12 @@ def main() -> int:
     run.add_argument("--chess-reserve-cpus", type=float, help="CPU capacity reserved for other work before admitting chess benchmark points")
     run.add_argument("--chess-max-seconds", type=float, help="Overall wall-time ceiling for chess calibration")
     run.add_argument("--chess-case-timeout", type=float, help="Wall-time ceiling for each chess measurement process")
+    run.add_argument("--geometry-rows", type=int, help="Existing unique trajectory rows to select, at most 1000000")
+    run.add_argument("--geometry-transaction-rows", type=int, help="Rows per separately committed binary COPY transaction")
+    run.add_argument("--geometry-concurrency", help="Comma-separated actual COPY connection limits, each in 1..16")
+    run.add_argument("--geometry-max-bytes", type=int, help="Combined retained binary input byte envelope")
+    run.add_argument("--geometry-timeout", type=float, help="Total geometry baseline time envelope")
+    run.add_argument("--geometry-recorded-case-dir", help="Optional complete recorded-chess case to validate with its existing owner")
     args = parser.parse_args()
 
     registry = load_registry()

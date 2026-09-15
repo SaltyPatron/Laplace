@@ -56,6 +56,42 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertIn("always()", runtime["if"])
         self.assertEqual("/build/laplace/work/chess-runtime-evidence/${{ github.run_id }}-${{ github.run_attempt }}/",
                          runtime["with"]["path"])
+        geometry = next(step for step in steps if step.get("name") == "Retain PostgreSQL geometry write and readback measurements")
+        self.assertEqual(recorded["if"], geometry["if"])
+        self.assertEqual("/build/laplace/work/postgres-geometry-evidence/${{ github.run_id }}-${{ github.run_attempt }}/",
+                         geometry["with"]["path"])
+
+    def test_recorded_and_geometry_measurements_both_run_and_preserve_each_failure(self):
+        source = PRODUCT.read_text()
+        function = "run_recorded_chess_benchmark() {" + source.split(
+            "run_recorded_chess_benchmark() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        for recorded_status, geometry_status in ((0, 0), (17, 0), (0, 23), (17, 23)):
+            with self.subTest(recorded=recorded_status, geometry=geometry_status), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                calls = root / "calls.jsonl"
+                executable = root / "python3"
+                executable.write_text("#!" + sys.executable + "\n" + """import json, os, sys
+with open(os.environ['MEASUREMENT_CALLS'], 'a') as stream:
+    stream.write(json.dumps(sys.argv[1:]) + '\\n')
+raise SystemExit(int(os.environ['RECORDED_STATUS' if sys.argv[1] == 'scripts/benchmark-recorded-chess.py' else 'GEOMETRY_STATUS']))
+""")
+                executable.chmod(0o755)
+                environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                    "MEASUREMENT_CALLS": str(calls), "RECORDED_STATUS": str(recorded_status),
+                    "GEOMETRY_STATUS": str(geometry_status), "PGDATABASE": "selected_database",
+                    "LAPLACE_PG_PREFIX": str(root / "postgres"),
+                    "LAPLACE_RECORDED_CHESS_DIRECTORY": str(root / "recorded"),
+                    "LAPLACE_POSTGRES_GEOMETRY_DIRECTORY": str(root / "geometry")}
+                result = subprocess.run(["bash"], input="set -euo pipefail\n" + function
+                    + "run_recorded_chess_benchmark\necho subsequent-acceptance\n",
+                    text=True, capture_output=True, env=environment, timeout=10)
+                self.assertEqual(recorded_status or geometry_status, result.returncode, result.stderr)
+                observed = [json.loads(line) for line in calls.read_text().splitlines()]
+                self.assertEqual(["scripts/benchmark-recorded-chess.py", "scripts/benchmark_suite.py"],
+                                 [call[0] for call in observed])
+                self.assertEqual(["run", "--suite", "geometry", "--database", "selected_database", "--repeats", "3",
+                                  "--receipt-dir", str(root / "geometry")], observed[1][1:])
+                self.assertEqual(not (recorded_status or geometry_status), "subsequent-acceptance" in result.stdout)
 
     def run_post_stockfish_proof(self, receipt_values, first_rc=0, second_rc=0, *, fresh="0", restore="0", initial_seed="e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"):
         """Execute the actual lifecycle function and receipt reader under a real host lock."""

@@ -18,7 +18,33 @@ public sealed record ApplyResult(
     /// claimed by a prior committed apply — the whole batch (evidence AND
     /// any dependent fold) already landed; every layer must treat the
     /// replay as a no-op.</summary>
-    bool JournalReplayHit = false);
+    bool JournalReplayHit = false)
+{
+    /// <summary>Actual PostgreSQL transaction settings and acknowledgement for this apply.
+    /// Null means the writer did not establish this PostgreSQL-specific contract.</summary>
+    public PostgresCommitReceipt? PostgresCommit { get; init; }
+    /// <summary>Actual transactions containing COPY, counted once per transaction.
+    /// These are not estimates of physical network round trips.</summary>
+    public int CopyTransactionsStarted { get; init; }
+    public int CopyTransactionsCommitted { get; init; }
+}
+
+/// <summary>Caller-selected acknowledgement policy; neither mode changes the staged rows,
+/// the working-set identity, or the evidence/consensus transaction boundary.</summary>
+public enum PostgresWriteDurability
+{
+    Asynchronous,
+    Synchronous,
+}
+
+public sealed record PostgresCommitReceipt(
+    string SynchronousCommit, bool Fsync, bool FullPageWrites, bool WriteCommitAcknowledged)
+{
+    /// <summary>Local PostgreSQL WAL acknowledgement only; this is not a replication,
+    /// backup, filesystem mount or physical-device power-loss certification.</summary>
+    public bool LocalWalFlushAcknowledged => WriteCommitAcknowledged
+        && SynchronousCommit == "on" && Fsync && FullPageWrites;
+}
 
 public class LegacyReplayRequiresReconciliationException : InvalidOperationException
 {

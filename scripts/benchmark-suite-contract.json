@@ -3,7 +3,10 @@
   "registry": "scripts/benchmark-profiles.json",
   "runner": "scripts/benchmark_suite.py",
   "workflow": ".github/workflows/benchmark-evidence.yml",
-  "triggers": ["workflow_dispatch", "workflow_call after successful product deployment"],
+  "triggers": [
+    "workflow_dispatch",
+    "workflow_call after successful product deployment"
+  ],
   "source_core_mutability": "none_except_temporary_outputs",
   "artifact_binding": {
     "applies_to": "profiles executing the Laplace native core",
@@ -53,5 +56,18 @@
     "psu_nameplate_is_measured_draw": false,
     "rapl_is_whole_system_energy": false,
     "whole_system_requires_admitted_meter": true
+  },
+  "postgres_geometry": {
+    "profile": "postgres-geometry",
+    "suite": "geometry",
+    "requires_laplace_core_artifacts": false,
+    "source": "exact existing unique laplace.physicalities rows with non-null trajectories",
+    "requires_logged_tables": true,
+    "requires_synchronous_commit": true,
+    "requires_exact_committed_binary_readback": true,
+    "requires_payload_rows_vertices_bytes": true,
+    "requires_full_source_and_target_index_constraint_definitions": true,
+    "wal_scope": "cluster-wide LSN deltas include any concurrent unrelated work",
+    "measurement_scope": "COPY plus acknowledged synchronous COMMIT; readback separate; no native admission or gameplay claim"
   }
 }

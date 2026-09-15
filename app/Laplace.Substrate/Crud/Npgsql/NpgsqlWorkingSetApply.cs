@@ -416,7 +416,7 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt,
-        bool journalHit)>
+        bool journalHit, PostgresCommitReceipt commit, CopyTransactionCounts copy)>
         ApplyStagesCoreAsync(
         IReadOnlyList<IntentStage> stages,
         Hash128? workingSetToken,
@@ -429,6 +429,7 @@ public sealed partial class NpgsqlSubstrateWriter
         CancellationToken ct)
     {
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
+        var copyTransactions = new CopyTransactionCounts();
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
         // 14 since fold_replayable (model transient-fold receipts) — must track
@@ -555,24 +556,24 @@ public sealed partial class NpgsqlSubstrateWriter
         // Resolved before the lock: a read-only catalog probe, cached for the
         // writer's lifetime, so only the very first apply pays it.
         bool epochRoute = await SupportsApplyWriteEpochAsync(conn, ct);
-        // Bulk-apply session SEMANTICS only (FK-trigger bypass, relaxed durability for
-        // this bulk tx, no JIT for COPY). Magnitude tuning — work_mem,
+        // Apply session semantics only (FK-trigger bypass, caller-selected commit
+        // acknowledgement, no JIT for COPY). Magnitude tuning — work_mem,
         // maintenance_work_mem, parallel workers — is owned by tune-pg.cmd (derived from
         // Cpu/MemoryTopology) and INHERITED here, never re-set with a hardcoded literal.
         //
         // Presence sets make novelty probes cheap, but they do not coordinate with a
         // second process. The advisory transaction lock remains the cross-process
         // apply mutex and supplies the bounded lock-timeout diagnostics.
-        const string ApplyGucs =
-            "SET LOCAL session_replication_role = replica; "
-            + "SET LOCAL synchronous_commit = off; "
-            + "SET LOCAL jit = off; ";
+        string applyGucs = TransactionGucs(Durability);
         NpgsqlTransaction tx = await AdvisoryTxLock.BeginWithLockAsync(
-            conn, "laplace_apply_batch", ApplyGucs, _log, ct);
+            conn, "laplace_apply_batch", applyGucs, _log, ct);
+        PostgresCommitReceipt commit;
         await using (tx)
         {
         try
         {
+            rtLock++;
+            commit = await ReadCommitSettingsAsync(conn, tx, Durability, ct);
             rtLock++;
 
             // Control-transaction epoch bump — nextval BEFORE any write, per the
@@ -586,7 +587,7 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 await using var epoch = conn.CreateCommand();
                 epoch.Transaction = tx;
-                epoch.CommandText = "SELECT nextval('laplace.apply_write_epoch')";
+                epoch.CommandText = SqlCatalog.Get("write.advance_epoch").Text;
                 long bumped = (long)(await epoch.ExecuteScalarAsync(ct))!;
                 rtEpoch++;
                 if (_epochAfterLastCommit >= 0)
@@ -638,7 +639,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     _log.LogInformation(
                         "WORKING_SET_REPLAY token={Token} already journaled — skipping apply (v2)",
                         token);
-                    return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true);
+                    return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true, commit, copyTransactions);
                 }
 
                 if (reconciliation is not null)
@@ -665,7 +666,8 @@ public sealed partial class NpgsqlSubstrateWriter
                         _log.LogInformation(
                             "WORKING_SET_RECONCILED token={Token} verified legacy bootstrap and recorded v2 receipt",
                             token);
-                        return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true);
+                        return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true,
+                            commit with { WriteCommitAcknowledged = true }, copyTransactions);
                     }
                 }
 
@@ -1056,6 +1058,8 @@ public sealed partial class NpgsqlSubstrateWriter
             if (!parallelCopy)
             {
                 // Small applies stay fully atomic inside the control tx.
+                if (keptEnts.Count > 0 || keptPhys.Count > 0 || keptAtts.Count > 0)
+                    copyTransactions.StartControl();
                 if (keptEnts.Count > 0)
                 {
                     await CopyKeptAsync(conn, "entities", IntentStageTable.Entities,
@@ -1103,12 +1107,12 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     rtCopy += await CopyPayloadsParallelAsync(
                         "entities", IntentStageTable.Entities,
-                        keptEntCount, prebuiltEntGroups, prebuiltEntPayloads, sortMs: 0, ct);
+                        keptEntCount, prebuiltEntGroups, prebuiltEntPayloads, sortMs: 0, copyTransactions, ct);
                 }
                 else
                 {
                     rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
-                        entBlobs, keptEnts, ct);
+                        entBlobs, keptEnts, copyTransactions, ct);
                 }
                 eIns = keptEntCount;
                 // A claimed working-set token is the exactly-once boundary for
@@ -1120,10 +1124,11 @@ public sealed partial class NpgsqlSubstrateWriter
                 if (workingSetToken is not null)
                 {
                     rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
-                        physBlobs, keptPhys, ct);
+                        physBlobs, keptPhys, copyTransactions, ct);
                     pIns = keptPhys.Count;
                     if (keptAtts.Count > 0)
                     {
+                        copyTransactions.StartControl();
                         await CopyKeptAsync(conn, "attestations", IntentStageTable.Attestations,
                             attBlobs, keptAtts, 0, keptAtts.Count, ct);
                         aIns = keptAtts.Count;
@@ -1133,9 +1138,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 else
                 {
                     var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
-                        physBlobs, keptPhys, ct);
+                        physBlobs, keptPhys, copyTransactions, ct);
                     var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
-                        attBlobs, keptAtts, ct);
+                        attBlobs, keptAtts, copyTransactions, ct);
                     await Task.WhenAll(physCopyTask, attCopyTask);
                     rtCopy += physCopyTask.Result + attCopyTask.Result;
                     pIns = keptPhys.Count;
@@ -1153,6 +1158,9 @@ public sealed partial class NpgsqlSubstrateWriter
                     novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(), ct);
 
             await tx.CommitAsync(ct);
+            copyTransactions.CommitControl();
+            commit = commit with { WriteCommitAcknowledged = workingSetToken is not null
+                || eIns > 0 || pIns > 0 || aIns > 0 || aFold > 0 };
 
             // Epoch baseline for the NEXT apply's foreign-delta: last_value read
             // AFTER every bump this apply made (control tx above, COPY sub-txns,
@@ -1249,7 +1257,50 @@ public sealed partial class NpgsqlSubstrateWriter
             "WS_APPLY round-trips: {Total} = {Lock} lock + {Journal} journal + {Epoch} epoch + {Probe} probe + {Copy} copy + {Merge} merge "
             + "({E:N0}e/{P:N0}p/{A:N0}a novel, {Fold:N0} merged)",
             rt, rtLock, rtJournal, rtEpoch, rtProbe, rtCopy, rtMerge, eIns, pIns, aIns, aFold);
-        return (eIns, pIns, aIns, aFold, eSkip, pSkip, rt, false);
+        return (eIns, pIns, aIns, aFold, eSkip, pSkip, rt, false, commit, copyTransactions);
+    }
+
+    private sealed class CopyTransactionCounts
+    {
+        internal int Started;
+        internal int Committed;
+        private bool _controlContainsCopy;
+        internal void StartControl()
+        {
+            if (_controlContainsCopy) return;
+            _controlContainsCopy = true;
+            Interlocked.Increment(ref Started);
+        }
+        internal void CommitControl()
+        {
+            if (_controlContainsCopy) Interlocked.Increment(ref Committed);
+        }
+    }
+
+    internal static string TransactionGucs(PostgresWriteDurability durability) => durability switch
+    {
+        PostgresWriteDurability.Asynchronous => "SET LOCAL session_replication_role = replica; "
+            + "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; ",
+        PostgresWriteDurability.Synchronous => "SET LOCAL session_replication_role = replica; "
+            + "SET LOCAL synchronous_commit = on; SET LOCAL jit = off; ",
+        _ => throw new ArgumentOutOfRangeException(nameof(durability)),
+    };
+
+    internal static async Task<PostgresCommitReceipt> ReadCommitSettingsAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, PostgresWriteDurability durability,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = SqlCatalog.Get("write.commit_settings").Text;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) throw new InvalidOperationException("PostgreSQL commit settings are unavailable.");
+        var receipt = new PostgresCommitReceipt(reader.GetString(0), reader.GetBoolean(1), reader.GetBoolean(2), false);
+        if (receipt.SynchronousCommit != (durability == PostgresWriteDurability.Synchronous ? "on" : "off"))
+            throw new InvalidOperationException("PostgreSQL did not apply the selected commit acknowledgement mode.");
+        if (durability == PostgresWriteDurability.Synchronous && (!receipt.Fsync || !receipt.FullPageWrites))
+            throw new InvalidOperationException("Synchronous recording requires PostgreSQL fsync and full_page_writes enabled.");
+        return receipt;
     }
 
     private static List<(IntPtr Ptr, long Len)> CollectBlobs(
@@ -1886,7 +1937,8 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private async Task<int> CopyPayloadsParallelAsync(
         string tableName, IntentStageTable table,
-        int rowCount, int groups, byte[][] payloads, long sortMs, CancellationToken ct)
+        int rowCount, int groups, byte[][] payloads, long sortMs, CopyTransactionCounts copyTransactions,
+        CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var tasks = new Task[groups];
@@ -1907,6 +1959,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                 await using var conn = await _ds.OpenConnectionAsync(ct);
                 await using var tx = await conn.BeginTransactionAsync(ct);
+                Interlocked.Increment(ref copyTransactions.Started);
                 // The epoch bump rides the GUC batch — same round trip, and this
                 // command has no positional parameters (Npgsql forbids $n in
                 // multi-statement commands). nextval BEFORE the COPY below, per
@@ -1918,10 +1971,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     guc.Transaction = tx;
                     guc.CommandText =
-                        "SET LOCAL session_replication_role = replica; "
-                        + "SET LOCAL synchronous_commit = off; "
-                        + "SET LOCAL jit = off"
-                        + (epochBump ? "; SELECT nextval('laplace.apply_write_epoch')" : "");
+                        TransactionGucs(Durability)
+                        + (epochBump ? SqlCatalog.Get("write.advance_epoch").Text : "");
                     await guc.ExecuteNonQueryAsync(ct);
                 }
                 if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
@@ -1932,6 +1983,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     await CopyTupleParser.WritePackedAsync(stream, payload, ct);
                 }
                 await tx.CommitAsync(ct);
+                Interlocked.Increment(ref copyTransactions.Committed);
                 }
                 finally
                 {
@@ -1953,7 +2005,8 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private async Task<int> CopyPhaseParallelAsync(
         string tableName, IntentStageTable table,
-        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, CancellationToken ct)
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept,
+        CopyTransactionCounts copyTransactions, CancellationToken ct)
     {
         if (kept.Count == 0) return 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -1991,7 +2044,7 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         long sortMs = sw.ElapsedMilliseconds;
         return await CopyPayloadsParallelAsync(
-            tableName, table, kept.Count, groups, payloads, sortMs, ct);
+            tableName, table, kept.Count, groups, payloads, sortMs, copyTransactions, ct);
     }
 
     private static async Task CopyFilteredAsync(

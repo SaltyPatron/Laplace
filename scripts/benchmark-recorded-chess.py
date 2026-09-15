@@ -85,8 +85,13 @@ def validate_recording(recording: dict, experiment: dict, job: dict, request: di
     count = request["config"]["rounds"]
     job_id = job["id"]
     require(job.get("state", "").lower() == "completed", "application job did not complete")
-    require(recording.get("schema") == "laplace.chess-recording/v1"
+    require(recording.get("schema") == "laplace.chess-recording/v2"
             and recording.get("status") == "completed", "committed recording receipt is missing or failed")
+    durability = recording.get("durability", {})
+    require(isinstance(durability, dict) and durability.get("synchronousCommit") == "on"
+            and all(durability.get(field) is True for field in
+                    ("fsync", "fullPageWrites", "writeCommitAcknowledged", "localWalFlushAcknowledged")),
+            "recording lacks an established synchronous local PostgreSQL WAL acknowledgement")
     require(recording.get("experimentId") == experiment.get("experimentId") == job_id
             and recording.get("pgnEvent") == experiment.get("pgnEvent") == "chess-lab/cutechess/" + job_id,
             "job, match and recording provenance differ")
@@ -149,8 +154,14 @@ def validate_recording(recording: dict, experiment: dict, job: dict, request: di
     writer = recording.get("writer", {})
     for field in ("applyCalls", "entitiesAttempted", "entitiesInserted", "physicalitiesAttempted",
                   "physicalitiesInserted", "attestationsAttempted", "attestationsInserted",
-                  "entitiesSkippedAtMerge", "physicalitiesSkippedAtMerge", "roundTrips", "journalReplayHits"):
+                  "entitiesSkippedAtMerge", "physicalitiesSkippedAtMerge", "roundTrips", "journalReplayHits",
+                  "copyTransactionsStarted", "copyTransactionsCommitted"):
         require(type(writer.get(field)) is int and writer[field] >= 0, f"missing writer work counter: {field}")
+    require(writer.get("roundTripsKind") == "logical-writer-accounting/v1",
+            "writer round trips must declare their logical accounting boundary")
+    require(writer["applyCalls"] > 0 and writer["copyTransactionsStarted"] > 0
+            and writer["copyTransactionsCommitted"] == writer["copyTransactionsStarted"],
+            "recording lacks completed COPY transaction counts")
     record_wall = times["recording"] + times["commit"]
     verified_record_wall = record_wall + times["readback"]
     return {"verifiedRecordedGames": count, "verifiedRecordedPlies": plies,
@@ -161,7 +172,8 @@ def validate_recording(recording: dict, experiment: dict, job: dict, request: di
             "gamesPerSecondRecordingAndReadback": count / verified_record_wall if verified_record_wall > 0 else None,
             "gamesPerSecondRecording": count / record_wall if record_wall > 0 else None,
             "rateBoundaries": RATE_BOUNDARIES,
-            "elapsedSeconds": {"collectorEndToEnd": elapsed, **times}, "writer": writer}
+            "elapsedSeconds": {"collectorEndToEnd": elapsed, **times}, "writer": writer,
+            "durability": durability}
 
 
 def summarize_rates(cases: list[dict], concurrencies: list[int], target: float) -> dict:

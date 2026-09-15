@@ -57,7 +57,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     {
         CodepointPerfcache.LoadDefault();
         var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
-        var inner = new NpgsqlSubstrateWriter(ds);
+        var inner = new NpgsqlSubstrateWriter(ds, durability: PostgresWriteDurability.Synchronous);
         var writer = new ConsensusAccumulatingWriter(
             inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);

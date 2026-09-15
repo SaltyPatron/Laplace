@@ -175,9 +175,26 @@ record_chess_completion() {
 
 run_recorded_chess_benchmark() {
   # Use the activated application's ordinary recording path while this lifecycle
-  # still owns the host lock. Retain the runner's failure receipt before exit.
-  python3 scripts/benchmark-recorded-chess.py \
-    --output-dir "${LAPLACE_RECORDED_CHESS_DIRECTORY:-$operational_proof_directory/recorded-chess}"
+  # still owns the host lock. Both requested measurements retain their result;
+  # an unsuccessful match does not prevent measuring the underlying storage.
+  local recorded_status=0 geometry_status=0
+  if python3 scripts/benchmark-recorded-chess.py \
+    --output-dir "${LAPLACE_RECORDED_CHESS_DIRECTORY:-$operational_proof_directory/recorded-chess}"; then
+    :
+  else
+    recorded_status=$?
+  fi
+  if PATH="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}/bin:$PATH" \
+    python3 scripts/benchmark_suite.py run --suite geometry \
+      --database "${PGDATABASE:-laplace}" --repeats 3 \
+      --receipt-dir "${LAPLACE_POSTGRES_GEOMETRY_DIRECTORY:-$operational_proof_directory/postgres-geometry}"; then
+    :
+  else
+    geometry_status=$?
+  fi
+  printf 'CHESS_STORAGE_MEASUREMENT recorded_exit=%s geometry_exit=%s\n' "$recorded_status" "$geometry_status"
+  if [[ "$recorded_status" != 0 ]]; then return "$recorded_status"; fi
+  return "$geometry_status"
 }
 
 observe_chess_runtime() {

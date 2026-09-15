@@ -213,7 +213,8 @@ public sealed class ChessRecordingMeasurementTests
     public void FreshReceiptCannotClaimSuccessfulReadbackFromCountersAlone()
     {
         var measurement = new ChessRecordingMeasurement("test-id", 2);
-        measurement.ObserveCommit(new ApplyResult(10, 8, 11, 9, 12, 12, 3, TimeSpan.FromSeconds(1), false, 2, 2));
+        measurement.ObserveCommit(new ApplyResult(10, 8, 11, 9, 12, 12, 3, TimeSpan.FromSeconds(1), false, 2, 2)
+            { PostgresCommit = new("on", true, true, true) });
         Assert.Equal(8, measurement.Writer.EntitiesInserted);
         Assert.Equal(9, measurement.Writer.PhysicalitiesInserted);
         Assert.Equal(12, measurement.Writer.AttestationsInserted);
@@ -222,6 +223,37 @@ public sealed class ChessRecordingMeasurementTests
         Assert.Throws<InvalidDataException>(() => measurement.Complete("completed"));
         measurement.Complete("failed", "independent readback missing");
         Assert.False(measurement.Verification.CompletedGames);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("asynchronous")]
+    [InlineData("fsync-disabled")]
+    [InlineData("full-page-writes-disabled")]
+    [InlineData("not-acknowledged")]
+    [InlineData("journal-replay")]
+    [InlineData("remote-write-only")]
+    public void RecordingRejectsUnestablishedLocalWalAcknowledgement(string defect)
+    {
+        var receipt = new PostgresCommitReceipt("on", true, true, true);
+        var result = new ApplyResult(1, 1, 0, 0, 1, 1, 1, TimeSpan.FromMilliseconds(1), false)
+        {
+            PostgresCommit = defect switch
+            {
+                "missing" => null,
+                "asynchronous" => receipt with { SynchronousCommit = "off" },
+                "fsync-disabled" => receipt with { Fsync = false },
+                "full-page-writes-disabled" => receipt with { FullPageWrites = false },
+                "not-acknowledged" => receipt with { WriteCommitAcknowledged = false },
+                "remote-write-only" => receipt with { SynchronousCommit = "remote_write" },
+                _ => receipt,
+            },
+            JournalReplayHit = defect == "journal-replay",
+        };
+        var measurement = new ChessRecordingMeasurement("test-id", 1);
+        Assert.Throws<InvalidDataException>(() => measurement.ObserveCommit(result));
+        Assert.Null(measurement.Durability);
+        Assert.Equal(0, measurement.Writer.ApplyCalls);
     }
 
     [Fact]
@@ -252,7 +284,7 @@ public sealed class ChessRecordingMeasurementTests
             var recordingPath = Path.Combine(directory, "recording.json");
             await measurement.WriteAsync(recordingPath);
             using var json = JsonDocument.Parse(await File.ReadAllTextAsync(recordingPath));
-            Assert.Equal("laplace.chess-recording/v1", json.RootElement.GetProperty("schema").GetString());
+            Assert.Equal("laplace.chess-recording/v2", json.RootElement.GetProperty("schema").GetString());
             Assert.False(json.RootElement.GetProperty("verification").GetProperty("exactGameBodies").GetBoolean());
             Assert.Equal(final, await File.ReadAllTextAsync(artifact));
         }

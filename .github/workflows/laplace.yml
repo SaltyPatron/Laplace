@@ -166,6 +166,7 @@ jobs:
           LAPLACE_STOCKFISH_CORPUS_DIRECTORY: /build/laplace/work/stockfish-corpus-evidence/${{ github.run_id }}-${{ github.run_attempt }}
           LAPLACE_RECORDED_CHESS_DIRECTORY: /build/laplace/work/recorded-chess-evidence/${{ github.run_id }}-${{ github.run_attempt }}
           LAPLACE_CHESS_RUNTIME_DIRECTORY: /build/laplace/work/chess-runtime-evidence/${{ github.run_id }}-${{ github.run_attempt }}
+          LAPLACE_POSTGRES_GEOMETRY_DIRECTORY: /build/laplace/work/postgres-geometry-evidence/${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           umask 0002
@@ -245,6 +246,15 @@ jobs:
         with:
           name: laplace-chess-runtime-${{ github.run_id }}-${{ github.run_attempt }}
           path: /build/laplace/work/chess-runtime-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Retain PostgreSQL geometry write and readback measurements
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-postgres-geometry-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/postgres-geometry-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: warn
           retention-days: 30
 

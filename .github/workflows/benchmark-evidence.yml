@@ -67,7 +67,7 @@ on:
         type: choice
         required: true
         default: quick
-        options: [quick, throughput, core, scale, moby, query, chess, all]
+        options: [quick, throughput, core, scale, moby, query, chess, geometry, all]
       repeats:
         description: "repeats per selected benchmark case/scaling point; all runs retained"
         type: string
@@ -149,7 +149,7 @@ jobs:
           printf 'resolved_sha=%s\n' "$resolved" >> "$LAPLACE_BENCH_RECEIPT/request.env"
 
       - uses: ./.github/actions/setup-laplace-env
-        if: inputs.suite != 'chess'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
 
       - name: Validate benchmark registry and dispatch inputs
         shell: bash
@@ -174,7 +174,7 @@ jobs:
           }
 
       - name: Resolve serviceable scaling plan
-        if: inputs.suite != 'chess'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
         shell: bash
         env:
           REQUESTED_SCALE_WORKERS: ${{ inputs.scale_workers }}
@@ -404,7 +404,7 @@ jobs:
           fi
 
       - name: Build exact revision without installing or mutating substrate state
-        if: inputs.suite != 'chess'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
         shell: bash
         env:
           FORCE_REBUILD: ${{ inputs.force_rebuild }}
@@ -419,7 +419,7 @@ jobs:
             | tee "$LAPLACE_BENCH_RECEIPT/build.log"
 
       - name: Bind the benchmark to exact built native artifacts
-        if: inputs.suite != 'chess'
+        if: inputs.suite != 'chess' && inputs.suite != 'geometry'
         shell: bash
         run: |
           set -euo pipefail
@@ -485,6 +485,8 @@ jobs:
               --chess-case-timeout 120
             )
             [[ -z "${LAPLACE_BENCH_CHESS_UCI:-}" ]] || args+=(--chess-laplace-uci "$LAPLACE_BENCH_CHESS_UCI")
+          elif [[ "$SUITE" == geometry ]]; then
+            export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
           else
             args+=(--core "$LAPLACE_CORE" --t0 "$LAPLACE_T0")
             [[ -z "$scale_workers" ]] || args+=(--scale-workers "$scale_workers")
@@ -524,6 +526,9 @@ jobs:
             if [[ '${{ inputs.suite }}' == chess ]]; then
               echo "- Reserved CPU capacity: \`${LAPLACE_BENCH_CHESS_RESERVE_CPUS:-unresolved}\`"
               echo '- CPU affinity, quota, admitted thread points, runtime capabilities and measured results are recorded in the chess report.'
+            elif [[ '${{ inputs.suite }}' == geometry ]]; then
+              echo '- Exact existing GeometryZM payloads: logged COPY plus synchronous commit; complete binary readback measured separately.'
+              echo '- Raw storage rows/vertices are not game-recording or native admission throughput.'
             else
               echo "- Scale workers: \`${LAPLACE_BENCH_SCALE_WORKERS:-unknown}\`"
             fi

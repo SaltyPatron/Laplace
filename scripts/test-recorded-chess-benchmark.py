@@ -23,7 +23,9 @@ class RecordedChessTests(unittest.TestCase):
             "requestedOptions": {"rounds": 2, "depth": 4, "concurrency": 1, "stockfishLimitStrength": False,
                                  "stockfishThreads": 1, "stockfishHashMb": 16},
             "command": {"arguments": ["-each", "tc=inf", "depth=4"]}}
-        recording = {"schema": "laplace.chess-recording/v1", "status": "completed",
+        recording = {"schema": "laplace.chess-recording/v2", "status": "completed",
+            "durability": {"synchronousCommit": "on", "fsync": True, "fullPageWrites": True,
+                           "writeCommitAcknowledged": True, "localWalFlushAcknowledged": True},
             "experimentId": "match-1", "pgnEvent": "chess-lab/cutechess/match-1",
             **{name: 2 for name in ("requestedGames", "parsedGames", "novelGames", "appliedGames", "committedGames", "readbackGames")},
             "readbackPlies": 120, "pgn": {"bytes": len(pgn), "sha256": hashlib.sha256(pgn).hexdigest()},
@@ -34,6 +36,8 @@ class RecordedChessTests(unittest.TestCase):
                        "whitePlayerId": "5" * 32, "blackPlayerId": "6" * 32,
                        "result": "1-0", "moveIds": ["7" * 32] * 60} for i in (1, 2)],
             "writer": {name: 0 for name in ("applyCalls", "entitiesAttempted", "entitiesInserted", "physicalitiesAttempted", "physicalitiesInserted", "attestationsAttempted", "attestationsInserted", "entitiesSkippedAtMerge", "physicalitiesSkippedAtMerge", "roundTrips", "journalReplayHits")}}
+        recording["writer"].update(applyCalls=1, roundTripsKind="logical-writer-accounting/v1",
+                                   copyTransactionsStarted=1, copyTransactionsCommitted=1)
         experiment_bytes = json.dumps(experiment).encode()
         recording["experimentArtifactSha256"] = hashlib.sha256(experiment_bytes).hexdigest()
         return recording, experiment, job, request, pgn, experiment_bytes
@@ -71,6 +75,37 @@ class RecordedChessTests(unittest.TestCase):
         self.assertNotIn("maxPlies", request["config"])
         with self.assertRaises(ValueError):
             bench.game_request(3, 4, 1, 1, 16)
+
+    def test_durability_requires_actual_settings_and_fresh_write_acknowledgement(self):
+        for field in ("fsync", "fullPageWrites", "writeCommitAcknowledged", "localWalFlushAcknowledged"):
+            for invalid in (False, None, 1, "true"):
+                with self.subTest(field=field, invalid=invalid):
+                    data = self.fixture()
+                    data[0]["durability"][field] = invalid
+                    with self.assertRaises(ValueError):
+                        bench.validate_recording(*data, 4)
+        for mode in ("off", "remote_write", None):
+            data = self.fixture()
+            data[0]["durability"]["synchronousCommit"] = mode
+            with self.assertRaises(ValueError):
+                bench.validate_recording(*data, 4)
+        data = self.fixture()
+        data[0]["schema"] = "laplace.chess-recording/v1"
+        with self.assertRaises(ValueError):
+            bench.validate_recording(*data, 4)
+        data = self.fixture()
+        del data[0]["durability"]
+        with self.assertRaises(ValueError):
+            bench.validate_recording(*data, 4)
+
+    def test_copy_counters_cannot_be_missing_or_replace_the_logical_round_trip_label(self):
+        for field, value in (("copyTransactionsStarted", 0), ("copyTransactionsCommitted", 0),
+                             ("copyTransactionsCommitted", 2), ("copyTransactionsStarted", True),
+                             ("roundTripsKind", "physical-network-trips"), ("applyCalls", 0)):
+            data = self.fixture()
+            data[0]["writer"][field] = value
+            with self.assertRaises(ValueError):
+                bench.validate_recording(*data, 4)
 
     def test_successful_play_without_committed_readback_cannot_claim_a_rate(self):
         for field in ("appliedGames", "committedGames", "readbackGames", "novelGames"):

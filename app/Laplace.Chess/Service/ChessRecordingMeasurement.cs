@@ -24,7 +24,7 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
     private bool _normalMatchVerified;
     private bool _matchVerified;
     private bool _verified;
-    public string Schema => "laplace.chess-recording/v1";
+    public string Schema => "laplace.chess-recording/v2";
     public string ExperimentId { get; } = experimentId;
     public string PgnEvent => "chess-lab/cutechess/" + ExperimentId;
     public string Status { get; private set; } = "running";
@@ -46,6 +46,7 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
         _verified, _verified, _verified, _verified, _verified && _normalMatchVerified);
     public List<GameIdentity> Games { get; } = [];
     public WriterCounts Writer { get; } = new();
+    public PostgresCommitReceipt? Durability { get; private set; }
 
     public sealed class PhaseTimes
     {
@@ -75,6 +76,9 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
         public long EntitiesSkippedAtMerge { get; internal set; }
         public long PhysicalitiesSkippedAtMerge { get; internal set; }
         public long RoundTrips { get; internal set; }
+        public string RoundTripsKind => "logical-writer-accounting/v1";
+        public long CopyTransactionsStarted { get; internal set; }
+        public long CopyTransactionsCommitted { get; internal set; }
         public long JournalReplayHits { get; internal set; }
     }
 
@@ -156,6 +160,11 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
 
     internal void ObserveCommit(ApplyResult result)
     {
+        if (result.PostgresCommit is not { LocalWalFlushAcknowledged: true } commit || result.JournalReplayHit)
+            throw new InvalidDataException("recording requires a fresh synchronous PostgreSQL WAL acknowledgement");
+        if (Durability is not null && Durability != commit)
+            throw new InvalidDataException("recording PostgreSQL commit settings changed between applies");
+        Durability = commit;
         Writer.ApplyCalls++;
         Writer.EntitiesAttempted += result.EntitiesAttempted;
         Writer.EntitiesInserted += result.EntitiesInserted;
@@ -166,6 +175,8 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
         Writer.EntitiesSkippedAtMerge += result.EntitiesSkippedAtMerge;
         Writer.PhysicalitiesSkippedAtMerge += result.PhysicalitiesSkippedAtMerge;
         Writer.RoundTrips += result.RoundTrips;
+        Writer.CopyTransactionsStarted += result.CopyTransactionsStarted;
+        Writer.CopyTransactionsCommitted += result.CopyTransactionsCommitted;
         Writer.JournalReplayHits += result.JournalReplayHit ? 1 : 0;
     }
 
@@ -307,7 +318,7 @@ internal sealed class ChessRecordingMeasurement(string experimentId, int request
         if (status == "completed" && (!_matchVerified || _matchGames.Values.Any(n => n != 0)
             || ParsedGames != RequestedGames || ReadbackGames != RequestedGames
             || CommittedGames != RequestedGames || Pgn is null || ExperimentReceiptSha256 is null
-            || ExperimentArtifactSha256 is null))
+            || ExperimentArtifactSha256 is null || Durability is not { LocalWalFlushAcknowledged: true }))
             throw new InvalidDataException("recording cannot complete without every requested committed game and exact readback");
         _verified = status == "completed";
         Status = status;

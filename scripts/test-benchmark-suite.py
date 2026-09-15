@@ -35,7 +35,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.suite.validate_registry(self.registry)
         profiles = {item["id"] for item in self.registry["profiles"]}
         self.assertEqual(
-            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment"},
+            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment", "postgres-geometry"},
             profiles,
         )
         for suite in self.registry["suites"]:
@@ -51,7 +51,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(["query-forward"], suites["query"]["profiles"])
         self.assertNotIn("query-forward", suites["all"]["profiles"])
         self.assertEqual(["chess-environment"], suites["chess"]["profiles"])
-        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "chess", "all"}, set(suites))
+        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "chess", "geometry", "all"}, set(suites))
 
     def test_chess_suite_does_not_require_unrelated_native_artifacts(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -65,11 +65,26 @@ class BenchmarkSuiteTests(unittest.TestCase):
                  mock.patch.object(self.suite, "exact_env", side_effect=AssertionError("core must not be required")), \
                  mock.patch.object(self.suite, "run_profile", return_value={"profile":"chess-environment"}) as run:
                 self.assertEqual(0, self.suite.run_suite(args))
-            forwarded = run.call_args.args[-1]
+            forwarded = run.call_args.args[-2]
             self.assertEqual(["--stockfish", args.chess_stockfish, "--cutechess", args.chess_cutechess,
                               "--cpu-budget", "4", "--memory-mib", "1024", "--reserve-cpus", "1"], forwarded)
             receipt = json.loads((Path(folder) / "suite-receipt.json").read_text())
             self.assertEqual({"repository_sha":"source-revision"}, receipt["artifact_identity"])
+
+    def test_geometry_suite_uses_existing_pg_without_a_core_build(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = Namespace(suite="geometry", repeats=2, receipt_dir=folder,
+                             core="/missing/core", t0="/missing/t0", corpus_dir=folder,
+                             moby_path="/missing/book", scale_workers=None, database="laplace",
+                             geometry_rows=1234, geometry_transaction_rows=500,
+                             geometry_concurrency="1,2", geometry_max_bytes=1000000)
+            with mock.patch.object(self.suite, "git_sha", return_value="source-revision"), \
+                 mock.patch.object(self.suite, "exact_env", side_effect=AssertionError("core must not be required")), \
+                 mock.patch.object(self.suite, "run_profile", return_value={"profile":"postgres-geometry"}) as run:
+                self.assertEqual(0, self.suite.run_suite(args))
+            self.assertEqual(["--rows", "1234", "--transaction-rows", "500",
+                              "--concurrency", "1,2", "--max-bytes", "1000000"], run.call_args.args[-1])
+            self.assertNotIn("postgres-geometry", self.suite.suite_map(self.registry)["all"]["profiles"])
 
     def test_core_suite_still_rejects_missing_native_artifact(self):
         with tempfile.TemporaryDirectory() as folder:

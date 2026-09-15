@@ -54,6 +54,15 @@
       "mutability": "benchmark receipts and PGN only; no substrate writes or configuration changes",
       "resource_shape": "explicit thread/hash/concurrency sweep within effective CPU and memory budgets",
       "receipt_schema": "laplace.benchmark.chess-environment/v1"
+    },
+    {
+      "id": "postgres-geometry",
+      "kind": "postgres-geometry",
+      "description": "Exact existing GeometryZM coordinate/trajectory payloads through logged binary COPY, preserved physicality indexes/checks and independent committed binary readback; storage rows and vertices are not game or admission throughput.",
+      "execution_boundary": "existing PostgreSQL/PostGIS server; no Laplace native core build required",
+      "mutability": "one uniquely owned logged benchmark schema created and removed; canonical source tables are read-only",
+      "resource_shape": "explicit unique-row/byte/time envelopes, transaction row count and measured COPY connection concurrency",
+      "receipt_schema": "laplace.benchmark.postgres-geometry/v1"
     }
   ],
   "suites": [
@@ -106,6 +115,13 @@
       "description": "Stockfish/CuteChess environment calibration and capability report; independent of Laplace native core build artifacts.",
       "profiles": [
         "chess-environment"
+      ]
+    },
+    {
+      "id": "geometry",
+      "description": "Explicit PostgreSQL GeometryZM storage baseline on existing exact physicality payloads; writes only an owned logged benchmark schema.",
+      "profiles": [
+        "postgres-geometry"
       ]
     },
     {
