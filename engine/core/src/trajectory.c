@@ -115,10 +115,8 @@ int trajectory_constituent_count(const double* trajectory_xyzm,
     return 0;
 }
 
-int trajectory_visit_constituents(const double* trajectory_xyzm,
-                                  size_t n_points,
-                                  trajectory_constituent_visitor_t visitor,
-                                  void* context) {
+int trajectory_visit_vertices(const double* trajectory_xyzm, size_t n_points,
+    trajectory_vertex_visitor_t visitor, void* context) {
     if (!visitor || (trajectory_xyzm == NULL && n_points > 0)) return -1;
 
     /* `ordinal` is deliberately a prefix sum.  An RLE vertex describes a
@@ -130,13 +128,33 @@ int trajectory_visit_constituents(const double* trajectory_xyzm,
         mantissa_unpack(&trajectory_xyzm[i * 4], &p);
         const size_t run = p.run_length ? p.run_length : 1;
         if (run - 1 > SIZE_MAX - ordinal) return -1;
-        for (size_t j = 0; j < run; ++j) {
-            if (visitor(context, ordinal + j, &p.entity_id, p.flags) != 0)
-                return -1;
-        }
+        if (visitor(context, ordinal, &p.entity_id, run, p.flags) != 0) return -1;
+        if (i + 1 < n_points && run > SIZE_MAX - ordinal) return -1;
         ordinal += run;
     }
     return 0;
+}
+
+typedef struct {
+    trajectory_constituent_visitor_t visitor;
+    void* context;
+} trajectory_expansion_t;
+
+static int trajectory_expand_vertex(void* context, size_t ordinal,
+    const hash128_t* entity_id, size_t run_length, uint64_t flags) {
+    trajectory_expansion_t* expansion = (trajectory_expansion_t*) context;
+    for (size_t j = 0; j < run_length; ++j)
+        if (expansion->visitor(expansion->context, ordinal + j, entity_id, flags) != 0)
+            return -1;
+    return 0;
+}
+
+int trajectory_visit_constituents(const double* trajectory_xyzm,
+    size_t n_points, trajectory_constituent_visitor_t visitor, void* context) {
+    if (!visitor) return -1;
+    trajectory_expansion_t expansion = {visitor, context};
+    return trajectory_visit_vertices(trajectory_xyzm, n_points,
+        trajectory_expand_vertex, &expansion);
 }
 
 typedef struct {

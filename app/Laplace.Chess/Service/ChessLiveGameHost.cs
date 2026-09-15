@@ -61,7 +61,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         CodepointPerfcache.LoadDefault();
         var conn = connString ?? ChessEngineService.ResolveConnString();
         var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, conn);
-        var inner = new NpgsqlSubstrateWriter(ds);
+        var inner = new NpgsqlSubstrateWriter(ds, durability: PostgresWriteDurability.Synchronous);
         var writer = new ConsensusAccumulatingWriter(
             inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);

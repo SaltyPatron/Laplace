@@ -29,6 +29,43 @@ int collect_occurrence(void* context, size_t ordinal, size_t stride, const hash1
 }
 }
 
+TEST(LaplaceCoreTrajectory, StoredVertexVisitorPreservesRunsFlagsAndLogicalOrdinals) {
+    struct Vertex { size_t ordinal; hash128_t id; size_t run; uint64_t flags; };
+    std::vector<Vertex> rows;
+    auto collect = [](void* opaque, size_t ordinal, const hash128_t* id,
+                      size_t run, uint64_t flags) -> int {
+        static_cast<std::vector<Vertex>*>(opaque)->push_back({ordinal, *id, run, flags});
+        return 0;
+    };
+    const hash128_t a = {1, 2}, b = {3, 4};
+    mantissa_payload_t payloads[] = {
+        {a, 19, 65535, 0x123456789ULL},
+        {b, 0, 2, 7},
+        {a, 1, 0, 11}
+    };
+    double packed[12];
+    for (size_t i = 0; i < 3; ++i) mantissa_pack(packed + i * 4, &payloads[i]);
+    ASSERT_EQ(0, trajectory_visit_vertices(packed, 3, collect, &rows));
+    ASSERT_EQ(3u, rows.size());
+    const size_t ordinals[] = {1, 65536, 65538};
+    const size_t runs[] = {65535, 2, 1};
+    for (size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(ordinals[i], rows[i].ordinal);
+        EXPECT_EQ(runs[i], rows[i].run);
+        EXPECT_EQ(payloads[i].flags, rows[i].flags);
+        EXPECT_EQ(0, memcmp(&payloads[i].entity_id, &rows[i].id, sizeof(hash128_t)));
+    }
+    EXPECT_EQ(0, trajectory_visit_vertices(nullptr, 0, collect, &rows));
+    EXPECT_EQ(-1, trajectory_visit_vertices(nullptr, 1, collect, &rows));
+    EXPECT_EQ(-1, trajectory_visit_vertices(packed, 3, nullptr, &rows));
+    int visits = 0;
+    auto stop = [](void* opaque, size_t, const hash128_t*, size_t, uint64_t) -> int {
+        ++*static_cast<int*>(opaque); return -1;
+    };
+    EXPECT_EQ(-1, trajectory_visit_vertices(packed, 3, stop, &visits));
+    EXPECT_EQ(1, visits);
+}
+
 TEST(LaplaceCoreTrajectory, OrderedOccurrencesMatchIndependentExpandedOracle) {
     const hash128_t alphabet[] = {{1,11},{2,22}};
     for (size_t n=1;n<=7;++n) for (unsigned bits=0;bits<(1u<<n);++bits) {

@@ -2624,6 +2624,22 @@ public static partial class NpgsqlSubstrateReads
     public readonly record struct TypedTrajectoryConstituentRow(
         byte[] ParentId, PhysicalityType Type, byte[] EntityId, int Ordinal);
 
+    public readonly record struct ContentCarrierVertex(
+        byte[] ParentId, int ConstituentCount, long Ordinal, byte[] ChildId, long RunLength, long Flags);
+
+    /// <summary>Exact canonical Content carriers for an admitted entity/physicality set.
+    /// Native code unpacks the complete ordinal/run/flag payload; the id/type predicate
+    /// excludes alternate physicality lanes. Context consumers compare their own recipe.</summary>
+    public static Task<IReadOnlyList<ContentCarrierVertex>> CanonicalContentVerticesAsync(
+        NpgsqlDataSource ds, byte[][] entityIds, byte[][] physicalityIds, CancellationToken ct)
+        => NpgsqlRead.ReadRowsAsync(ds, SqlCatalog.Get("content.carrier_vertices_selected"), static r => new ContentCarrierVertex((byte[])r[0], Convert.ToInt32(r.GetValue(1)),
+                Convert.ToInt64(r.GetValue(2)), (byte[])r[3], Convert.ToInt64(r.GetValue(4)), Convert.ToInt64(r.GetValue(5))),
+            p =>
+            {
+                p.Add("entities", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = entityIds;
+                p.Add("physicalities", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = physicalityIds;
+            }, ct: ct, label: "canonical_content_vertices_batch");
+
     /// <summary>Losslessly unpack ordered typed record trajectories for a batch of entities.</summary>
     public static Task<IReadOnlyList<TrajectoryConstituentRow>> TrajectoryConstituentsAsync(
         NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,

@@ -82,8 +82,9 @@ jobs:
       group: laplace-shared-workspace
       cancel-in-progress: false
     outputs:
-      chess_benchmark_ready: ${{ steps.chess_benchmark_gate.outputs.ready }}
-      activated_ref: ${{ steps.chess_benchmark_gate.outputs.source_sha }}
+      chess_benchmark_ready: ${{ steps.product_chess_completion.outputs.chess_benchmark_ready }}
+      activated_ref: ${{ steps.product_chess_completion.outputs.activated_ref }}
+      chess_acceptance_stage: ${{ steps.product_chess_completion.outputs.chess_acceptance_stage }}
     steps:
       - name: Checkout exact revision without discarding persistent build cache
         env:
@@ -118,7 +119,8 @@ jobs:
                 continue
               fi
               case "$path" in
-                scripts/product-ci.sh|scripts/pr-proof.sh|scripts/pr-db-proof.sh|scripts/ci-session.py|scripts/test-profile-registry.py)
+                .github/workflows/laplace.yml|scripts/product-ci.sh|scripts/pr-proof.sh|scripts/pr-db-proof.sh|scripts/ci-session.py|scripts/test-profile-registry.py|scripts/test-parallel.sh|scripts/ingest-stockfish-corpus.py)
+                  # These files own actual admission and mandatory execution order.
                   fast=0
                   ;;
                 scripts/prove-*|scripts/test-live-recursive-proof-gate.py)
@@ -161,6 +163,11 @@ jobs:
         if: env.LAPLACE_FAST_ONLY != '1'
         env:
           LAPLACE_OPERATIONAL_PROOF_DIRECTORY: /build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}
+          LAPLACE_STOCKFISH_CORPUS_DIRECTORY: /build/laplace/work/stockfish-corpus-evidence/${{ github.run_id }}-${{ github.run_attempt }}
+          LAPLACE_RECORDED_CHESS_DIRECTORY: /build/laplace/work/recorded-chess-evidence/${{ github.run_id }}-${{ github.run_attempt }}
+          LAPLACE_RETAINED_CHESS_DIRECTORY: /build/laplace/work/retained-chess-evidence/${{ github.run_id }}-${{ github.run_attempt }}
+          LAPLACE_CHESS_RUNTIME_DIRECTORY: /build/laplace/work/chess-runtime-evidence/${{ github.run_id }}-${{ github.run_attempt }}
+          LAPLACE_POSTGRES_GEOMETRY_DIRECTORY: /build/laplace/work/postgres-geometry-evidence/${{ github.run_id }}-${{ github.run_attempt }}
           LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product
         run: |
           set -euo pipefail
@@ -260,10 +267,35 @@ jobs:
         if: contains(env.LAPLACE_CI_PHASES, '|publish|')
         run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase publish
 
+      - name: Observe installed chess runtime
+        id: product_chess_runtime
+        if: contains(env.LAPLACE_CI_PHASES, '|chess-runtime|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase chess-runtime
+
       - name: Verify ordinary operational execution
         id: product_operational_execution
         if: contains(env.LAPLACE_CI_PHASES, '|operational-execution|')
         run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase operational-execution
+
+      - name: Admit official Stockfish source and verify native corpus readback
+        id: product_stockfish_corpus
+        if: contains(env.LAPLACE_CI_PHASES, '|stockfish-corpus|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase stockfish-corpus
+
+      - name: Verify ordinary operational execution after Stockfish admission
+        id: product_post_stockfish_execution
+        if: contains(env.LAPLACE_CI_PHASES, '|post-stockfish-execution|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase post-stockfish-execution
+
+      - name: Record completed chess acceptance
+        id: product_chess_completion
+        if: contains(env.LAPLACE_CI_PHASES, '|chess-completion|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase chess-completion
+
+      - name: Measure recorded chess, retained replay and PostgreSQL geometry writes
+        id: product_recorded_chess
+        if: contains(env.LAPLACE_CI_PHASES, '|recorded-chess|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase recorded-chess
 
       - name: Verify database health
         id: product_db_health
@@ -337,23 +369,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Admit official Stockfish source and verify native corpus readback
-        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
-        shell: bash
-        run: |
-          set -euo pipefail
-          umask 0002
-          mkdir -p /build/laplace/work
-          # The common CLI acquires the canonical ingest lane; the shared host
-          # lock also prevents source rebuilds during the two exact observations.
-          flock --exclusive --close /build/laplace/work/host-resource.lock bash -euo pipefail -c '
-            export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
-            dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --nologo -v minimal
-            python3 scripts/ingest-stockfish-corpus.py \
-              --prefix "$LAPLACE_INSTALL_PREFIX" \
-              --output "/build/laplace/work/stockfish-corpus-evidence/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          '
-
       - name: Retain official Stockfish corpus admission evidence
         if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -365,59 +380,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Verify ordinary operational execution after Stockfish admission
-        if: success() && env.LAPLACE_FAST_ONLY != '1' && env.LAPLACE_STAGE == 'all'
-        timeout-minutes: 15
-        shell: bash
-        run: |
-          set -euo pipefail
-          umask 0002
-          if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
-            echo "fresh DB intentionally left unseeded — post-Stockfish operational proof skipped"
-            exit 0
-          fi
-          mkdir -p /build/laplace/work
-          # Reuse this publication's exact seed. Source admission must not
-          # displace either ordinary request; no new seed or execution hints.
-          flock --exclusive --close /build/laplace/work/host-resource.lock bash -euo pipefail <<'BASH'
-          proof_root="/build/laplace/work/operational-proof/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          seed_record="$(python3 - "$proof_root" <<'PY'
-          import itertools
-          import json
-          import sys
-          import uuid
-          from pathlib import Path
-          receipts = list(itertools.islice(Path(sys.argv[1]).glob("invocation-*/seed.json"), 2))
-          if len(receipts) != 1:
-              raise SystemExit("post-Stockfish proof requires exactly one seed receipt for this run and attempt")
-          receipt = receipts[0]
-          if receipt.stat().st_size > 1048576:
-              raise SystemExit("seed receipt exceeds the 1 MiB metadata envelope")
-          report = json.loads(receipt.read_text(encoding="utf-8"))
-          if report.get("disposition") != "verified":
-              raise SystemExit("post-Stockfish seed receipt is not a verified invocation")
-          run_id = report["run"]["run_id"]
-          if not isinstance(run_id, str) or str(uuid.UUID(run_id)) != run_id:
-              raise SystemExit("post-Stockfish seed receipt has an invalid run identity")
-          print(receipt.parent)
-          print(run_id)
-          PY
-          )"
-          mapfile -t seed_fields <<< "$seed_record"
-          proof_directory="${seed_fields[0]}"
-          seed_run_id="${seed_fields[1]}"
-          python3 scripts/verify-operational-task.py \
-            --shape-file seeds/operational/tasks/en_define.json --seed-run-id "$seed_run_id" \
-            --receipt "$proof_directory/post-stockfish-task.json"
-          python3 scripts/verify-operational-task.py \
-            --proof-mode direct-relation --prompt 'The opposite of hot is' --operand hot \
-            --shape-file seeds/operational/tasks/en_antonym.json \
-            --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
-            --receipt "$proof_directory/post-stockfish-antonym-task.json"
-          BASH
-
       - name: Upload operational seed and execution receipts
-        if: always() && steps.product_session.outcome != 'skipped' && env.LAPLACE_STAGE == 'all'
+        if: always() && steps.product_session.outcome != 'skipped' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
         # actions/upload-artifact v4.6.2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -426,14 +390,41 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Record successful activation for installed chess measurement
-        id: chess_benchmark_gate
-        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf 'ready=true\n' >> "$GITHUB_OUTPUT"
-          printf 'source_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Retain installed recorded-game benchmark evidence
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-recorded-chess-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/recorded-chess-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Retain installed chess service and bootstrap observations
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-chess-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/chess-runtime-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Retain installed retained-PGN admission and replay evidence
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-retained-chess-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/retained-chess-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Retain PostgreSQL geometry write and readback measurements
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-postgres-geometry-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/postgres-geometry-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Retain existing live recursive proof receipts
         if: always()
@@ -467,7 +458,9 @@ jobs:
   chess_environment:
     name: Activated host — chess capabilities and performance
     needs: product
-    if: needs.product.result == 'success' && needs.product.outputs.chess_benchmark_ready == 'true'
+    # The current lifecycle emits readiness after corpus and operational proof.
+    # Later independent tests remain mandatory and may leave product failed.
+    if: always() && !cancelled() && needs.product.outputs.chess_benchmark_ready == 'true'
     uses: ./.github/workflows/benchmark-evidence.yml
     with:
       target_ref: ${{ needs.product.outputs.activated_ref }}

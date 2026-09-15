@@ -8,8 +8,27 @@ namespace Laplace.Engine.Core;
 /// </summary>
 public static unsafe class ChessPositionFloor
 {
-    // mmap ROM after load: concurrent readers are safe. Only load/unload take the gate.
-    private static volatile bool _ready;
+    // Native lookup owns a concurrent reader guard through the complete geometry copy.
+    private static long _lookupHits;
+    private static long _lookupMisses;
+
+    public readonly record struct Observation(
+        bool IsLoaded, long RecordCount, long LookupHits, long LookupMisses);
+
+    /// <summary>Actual native map state and completed managed lookup counters. Counters
+    /// cover this process lifetime, including earlier mappings; observation never loads a file.</summary>
+    public static Observation Observe()
+    {
+        lock (LaplaceCoreGate.Native)
+        {
+            ulong count = 0;
+            bool loaded;
+            try { loaded = NativeInterop.ChessPositionTableRecordCount(&count) == 0; }
+            catch (EntryPointNotFoundException) { loaded = false; }
+            return new(loaded, checked((long)count),
+                Interlocked.Read(ref _lookupHits), Interlocked.Read(ref _lookupMisses));
+        }
+    }
 
     public static void Load(string path)
     {
@@ -30,19 +49,18 @@ public static unsafe class ChessPositionFloor
                 throw new InvalidOperationException(
                     $"chess_position_table_load(\"{path}\") failed (rc={rc}): {why}");
             }
-            _ready = true;
         }
     }
 
     public static void LoadDefault()
     {
-        if (_ready) return;
+        if (IsLoadedUnlockedSafe()) return;
         lock (LaplaceCoreGate.Native)
         {
-            if (_ready) return;
+            if (IsLoadedUnlockedSafe()) return;
             try
             {
-                if (IsLoadedUnlocked()) { _ready = true; return; }
+                if (IsLoadedUnlocked()) return;
             }
             catch (EntryPointNotFoundException)
             {
@@ -56,8 +74,7 @@ public static unsafe class ChessPositionFloor
                 return; // optional until catalog emit is configured
             try
             {
-                int rc = NativeInterop.ChessPositionTableLoad(path);
-                if (rc == 0) _ready = true;
+                _ = NativeInterop.ChessPositionTableLoad(path);
             }
             catch (EntryPointNotFoundException)
             {
@@ -71,25 +88,24 @@ public static unsafe class ChessPositionFloor
         lock (LaplaceCoreGate.Native)
         {
             NativeInterop.ChessPositionTableUnload();
-            _ready = false;
         }
     }
 
-    public static bool IsLoaded => _ready || IsLoadedUnlockedSafe();
+    public static bool IsLoaded => IsLoadedUnlockedSafe();
 
     public static long RecordCount
     {
         get
         {
-            if (!_ready && !IsLoadedUnlockedSafe()) return 0;
             ulong n = 0;
-            return NativeInterop.ChessPositionTableRecordCount(&n) == 0 ? (long)n : 0;
+            try { return NativeInterop.ChessPositionTableRecordCount(&n) == 0 ? (long)n : 0; }
+            catch (EntryPointNotFoundException) { return 0; }
         }
     }
 
     /// <summary>
-    /// Lock-free after load. The blob is an immutable mmap; taking
-    /// <see cref="LaplaceCoreGate.Native"/> here serialized every parallel compose worker.
+    /// Concurrent native readers retain the immutable map through the complete copy.
+    /// No global managed gate serializes parallel compose workers or exposes mmap pointers.
     /// </summary>
     public static bool TryLookup(Hash128 id, out double x, out double y, out double z, out double m,
         out Hilbert128 hb, out uint n, out byte tier)
@@ -98,18 +114,23 @@ public static unsafe class ChessPositionFloor
         hb = default;
         n = 0;
         tier = 0;
-        if (!_ready && !IsLoadedUnlockedSafe()) return false;
         double* coord = stackalloc double[4];
-        Hilbert128 hbLocal;
-        uint nLocal;
-        byte tierLocal;
-        if (NativeInterop.ChessPositionTableLookupGeom(
-                &id, coord, &hbLocal, &nLocal, &tierLocal) != 0)
+        Hilbert128 hbLocal = default;
+        uint nLocal = 0;
+        byte tierLocal = 0;
+        int result;
+        try { result = NativeInterop.ChessPositionTableLookupGeom(&id, coord, &hbLocal, &nLocal, &tierLocal); }
+        catch (EntryPointNotFoundException) { result = -1; }
+        if (result != 0)
+        {
+            Interlocked.Increment(ref _lookupMisses);
             return false;
+        }
         x = coord[0]; y = coord[1]; z = coord[2]; m = coord[3];
         hb = hbLocal;
         n = nLocal;
         tier = tierLocal;
+        Interlocked.Increment(ref _lookupHits);
         return true;
     }
 
