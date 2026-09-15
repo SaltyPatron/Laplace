@@ -6,6 +6,10 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.UD;
 
+/// <summary>The source witnessing a CoNLL-U structure, independently of its schema.</summary>
+public readonly record struct UdWitnessContract(
+    Hash128 SourceId, double Trust, Hash128? SourceFileContext = null);
+
 public sealed class UdConlluFileStream : IRecordStream<UdIngestRecord>
 {
     private readonly string _path;
@@ -127,6 +131,7 @@ internal sealed class UdContentForest : IDisposable
 public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>, IIngestBatchScopedHandler
 {
     private readonly Hash128 _sourceId;
+    private readonly UdWitnessContract _witness;
     private readonly string _fileLabel;
     private readonly ConcurrentDictionary<string, byte> _canonicalNames;
     private readonly HashSet<Hash128> _seenEntBatch = new();
@@ -138,8 +143,19 @@ public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>, IIng
         ConcurrentDictionary<string, byte> canonicalNames,
         string fileLabel = "ud/in-memory",
         ConcurrentIdSet? seenSourceDeclarations = null)
+        : this(new UdWitnessContract(sourceId, SourceTrust.AcademicCurated),
+            canonicalNames, fileLabel, seenSourceDeclarations)
     {
-        _sourceId = sourceId;
+    }
+
+    public UdIngestHandler(
+        UdWitnessContract witness,
+        ConcurrentDictionary<string, byte> canonicalNames,
+        string fileLabel = "ud/in-memory",
+        ConcurrentIdSet? seenSourceDeclarations = null)
+    {
+        _witness = witness;
+        _sourceId = witness.SourceId;
         _fileLabel = fileLabel;
         _canonicalNames = canonicalNames;
         _seenSourceDeclarations = seenSourceDeclarations ?? new ConcurrentIdSet();
@@ -153,7 +169,8 @@ public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>, IIng
         if (_emitCtx is null) return;
         UdSentenceEmitContext.EmitWitness(
             builder, record.Sentence, record.LangId, record.LangCode, _fileLabel,
-            _seenEntBatch, _seenSourceDeclarations, _canonicalNames, _emitCtx, _sourceId);
+            _seenEntBatch, _seenSourceDeclarations, _canonicalNames, _emitCtx, _sourceId,
+            _witness.Trust, _witness.SourceFileContext);
         _emitCtx = null;
     }
 

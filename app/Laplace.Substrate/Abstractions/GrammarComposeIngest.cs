@@ -234,7 +234,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             if (file.ContentRootId != _rootId)
                 throw new InvalidOperationException(
                     "whole-source file composition changed its grammar content identity");
-            if (_record.RequireSourceAst) builder.SetFileId(file.FileId);
+            builder.SetFileId(file.FileId);
             return file.FileId;
         }
 

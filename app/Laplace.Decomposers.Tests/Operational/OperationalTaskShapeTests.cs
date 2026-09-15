@@ -20,14 +20,24 @@ public sealed class OperationalTaskShapeTests
     }
 
     [Fact]
-    public async Task NativeSourceAdmissionRetainsExactShapeAndSourceScopedDeclarations()
+    public Task NativeSourceAdmissionRetainsExactShapeAndSourceScopedDeclarations() =>
+        VerifySourceAdmission(Source(Predicate, EntityTypeRegistry.CodeConcept));
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task NativeV2SourceAdmissionRetainsBindingModeAndOnlyDeclaredSourceClaims(bool currentForm) =>
+        VerifySourceAdmission(Source(Predicate, EntityTypeRegistry.Word,
+            currentForm ? OperationalTaskShapeWitness.CurrentFormBindingId
+                : OperationalTaskShapeWitness.WitnessedSemanticBindingId));
+
+    private static async Task VerifySourceAdmission(string json)
     {
         string directory = Path.Combine(Path.GetTempPath(), "task-shape-source-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
         {
             string path = Path.Combine(directory, "shape.json");
-            string json = Source(Predicate, EntityTypeRegistry.CodeConcept);
             await File.WriteAllTextAsync(path, json);
             var record = await OperationalDecomposer.ReadContractAsync(path, "shape.json");
             Assert.Equal(Encoding.UTF8.GetBytes(json), record.Utf8);
@@ -47,6 +57,7 @@ public sealed class OperationalTaskShapeTests
                 var physicality = Assert.Single(change.Physicalities,
                     p => p.EntityId == declared.Id && p.Type == PhysicalityType.ParseStructure);
                 Assert.Equal(declared.Constituents, Trajectory.Constituents(physicality.TrajectoryXyzm!));
+                Assert.Equal(Hash128.Merkle(EntityTier.Document, declared.Constituents), physicality.EntityId);
                 Assert.DoesNotContain(change.Physicalities,
                     p => p.EntityId == declared.Id && p.Type == PhysicalityType.Content);
                 Assert.Contains(change.Attestations, a => a.SubjectId == ParseId
@@ -55,6 +66,27 @@ public sealed class OperationalTaskShapeTests
                 Assert.Contains(change.Attestations, a => a.SubjectId == declared.Id
                     && a.TypeId == OperationalSource.CallsTypeId && a.ObjectId == Predicate
                     && a.SourceId == OperationalSource.SourceId && a.ContextId == file);
+                var declarations = change.Attestations.Where(a => a.SubjectId == declared.Id
+                    || (a.SubjectId == ParseId && a.TypeId == OperationalSource.ExampleOfTypeId)).ToArray();
+                Assert.Equal(3, declarations.Length);
+                Assert.All(declarations, a =>
+                {
+                    Assert.Equal(OperationalSource.SourceId, a.SourceId);
+                    Assert.Equal(file, a.ContextId);
+                    Assert.Equal(NativeAttestation.CategoricalResolved(a.SubjectId, a.TypeId, a.ObjectId,
+                        OperationalSource.SourceId, file, SourceTrust.SubstrateMandate).Id, a.Id);
+                });
+                Assert.DoesNotContain(change.Attestations, a => a.TypeId == RelationTypeRegistry.Resolve("HAS_PARSE").Id
+                    && a.ObjectId == ParseId);
+                if (declared.Schema == OperationalTaskShapeWitness.SchemaV2)
+                {
+                    foreach (Hash128 marker in new[] { OperationalTaskShapeWitness.SchemaV2Id,
+                        OperationalTaskShapeWitness.SlotSchemaV2Id, OperationalTaskShapeWitness.SlotsEndV2Id,
+                        declared.Slots[0].BindingModeId })
+                        Assert.Contains(change.Entities, e => e.Id == marker
+                            && e.TypeId == EntityTypeRegistry.SourceReference
+                            && e.FirstObservedBy == OperationalSource.SourceId);
+                }
                 Assert.Contains(change.Attestations, a => a.SubjectId == declared.Id
                     && a.TypeId == OperationalSource.InputTypeId && a.ObjectId == declared.Slots[0].Id
                     && a.SourceId == OperationalSource.SourceId && a.ContextId == file);
@@ -82,7 +114,7 @@ public sealed class OperationalTaskShapeTests
     public void InvalidOrAmbiguousSourceDeclarationsFailInsteadOfDroppingFields()
     {
         string source = Source(Predicate, EntityTypeRegistry.CodeConcept);
-        Assert.Throws<InvalidDataException>(() => Read(source.Replace("token-slots/v1", "token-slots/v2")));
+        Assert.Throws<InvalidDataException>(() => Read(source.Replace("token-slots/v1", "token-slots/v3")));
         Assert.Throws<InvalidDataException>(() => Read(source.Replace(Hex(ParseId), "not-an-identity")));
         Assert.Throws<InvalidDataException>(() => Read(source.Replace(Hex(ParseId), new string('0', 32))));
         foreach (Hash128 reserved in new[] { OperationalTaskShapeWitness.SchemaId,
@@ -99,15 +131,84 @@ public sealed class OperationalTaskShapeTests
     }
 
     [Fact]
-    public async Task CanonicalPlacementIsIndependentOfSourceFormattingAndPropertyOrder()
+    public void V2MarkerIdsMatchTheNativeProtocol()
+    {
+        // Captured from the production C marker initializer and hash128/BLAKE3
+        // implementation; these are protocol identities, not prompt surfaces.
+        Assert.Equal("f0b9255937dd246a78dc362a992e4f87", Hex(OperationalTaskShapeWitness.SchemaV2Id));
+        Assert.Equal("146ecd333144eaa3594c3d3a2d83f41e", Hex(OperationalTaskShapeWitness.SlotSchemaV2Id));
+        Assert.Equal("261205036ebfaf6cf7726395b98cf4ae", Hex(OperationalTaskShapeWitness.SlotsEndV2Id));
+        Assert.Equal("65f702738f540b1c56c52e67ef9ab8a6", Hex(OperationalTaskShapeWitness.CurrentFormBindingId));
+        Assert.Equal("ca0e4576516bb264240e7d26f6c860b0", Hex(OperationalTaskShapeWitness.WitnessedSemanticBindingId));
+    }
+
+    [Fact]
+    public void BindingModeParticipatesInNativeV2SlotAndShapeIdentityWhileV1StaysUnchanged()
+    {
+        var legacy = Read(Source(Predicate, EntityTypeRegistry.Word));
+        Hash128 legacySlot = Hash128.Merkle(EntityTier.Document,
+            [OperationalTaskShapeWitness.SlotSchemaId, TokenRef, EntityTypeRegistry.Word]);
+        Hash128[] legacyFlat = [OperationalTaskShapeWitness.SchemaId, ParseId, Predicate,
+            legacySlot, TokenRef, EntityTypeRegistry.Word, OperationalTaskShapeWitness.SlotsEndId];
+        Assert.Equal(legacyFlat, legacy.Constituents);
+        Assert.Equal(Hash128.Merkle(EntityTier.Document, legacyFlat), legacy.Id);
+        Assert.Equal(OperationalTaskShapeWitness.WitnessedSemanticBindingId, legacy.Slots[0].BindingModeId);
+        var current = Read(Source(Predicate, EntityTypeRegistry.Word, OperationalTaskShapeWitness.CurrentFormBindingId));
+        var semantic = Read(Source(Predicate, EntityTypeRegistry.Word, OperationalTaskShapeWitness.WitnessedSemanticBindingId));
+        foreach (var shape in new[] { current, semantic })
+        {
+            Hash128 slot = Hash128.Merkle(EntityTier.Document, [OperationalTaskShapeWitness.SlotSchemaV2Id,
+                TokenRef, EntityTypeRegistry.Word, shape.Slots[0].BindingModeId]);
+            Hash128[] flat = [OperationalTaskShapeWitness.SchemaV2Id, ParseId, Predicate,
+                slot, TokenRef, EntityTypeRegistry.Word, shape.Slots[0].BindingModeId,
+                OperationalTaskShapeWitness.SlotsEndV2Id];
+            Assert.Equal(slot, shape.Slots[0].Id);
+            Assert.Equal(flat, shape.Constituents);
+            Assert.Equal(Hash128.Merkle(EntityTier.Document, flat), shape.Id);
+        }
+        Assert.NotEqual(current.Slots[0].Id, semantic.Slots[0].Id);
+        Assert.NotEqual(current.Id, semantic.Id);
+        Assert.NotEqual(legacy.Id, semantic.Id);
+    }
+
+    [Fact]
+    public void V2RequiresOneKnownExactBindingModeAndRejectsEditedIdsOrExtraFields()
+    {
+        string legacy = Source(Predicate, EntityTypeRegistry.Word);
+        string current = Source(Predicate, EntityTypeRegistry.Word, OperationalTaskShapeWitness.CurrentFormBindingId);
+        Assert.Throws<InvalidDataException>(() => Read(legacy.Replace("token-slots/v1", "token-slots/v2")));
+        Assert.Throws<InvalidDataException>(() => Read(current.Replace("token-slots/v2", "token-slots/v1")));
+        byte[] edited = OperationalTaskShapeWitness.CurrentFormBindingId.ToBytes();
+        edited[^1] ^= 1;
+        foreach (Hash128 mode in new[] { Hash128.FromBytes(edited), default, OperationalTaskShapeWitness.SchemaV2Id })
+            Assert.Throws<InvalidDataException>(() => Read(current.Replace(
+                Hex(OperationalTaskShapeWitness.CurrentFormBindingId), Hex(mode))));
+        Assert.Throws<InvalidDataException>(() => Read(current.Replace(
+            "\"binding_mode_id\":", "\"binding_mode_id\": null, \"binding_mode_id\":")));
+        Assert.Throws<InvalidDataException>(() => Read(current.Replace(
+            "\"binding_mode_id\":", "\"slot_id\": \"" + Hex(ParseId) + "\", \"binding_mode_id\":")));
+        foreach (Hash128 reserved in new[] { OperationalTaskShapeWitness.SchemaId, OperationalTaskShapeWitness.SlotSchemaId,
+            OperationalTaskShapeWitness.SlotsEndId, OperationalTaskShapeWitness.SchemaV2Id,
+            OperationalTaskShapeWitness.SlotSchemaV2Id, OperationalTaskShapeWitness.SlotsEndV2Id,
+            OperationalTaskShapeWitness.CurrentFormBindingId, OperationalTaskShapeWitness.WitnessedSemanticBindingId })
+            Assert.Throws<InvalidDataException>(() => Read(current.Replace(Hex(ParseId), Hex(reserved))));
+        Assert.Equal(Read(current).Id, Read(current.Replace("\"binding_mode_id\"", "\"binding_mode_\\u0069d\"")).Id);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CanonicalPlacementIsIndependentOfSourceFormattingAndPropertyOrder(bool version2)
     {
         string directory = Path.Combine(Path.GetTempPath(), "task-shape-placement-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
         {
-            string original = Source(Predicate, EntityTypeRegistry.CodeConcept);
+            Hash128? mode = version2 ? OperationalTaskShapeWitness.CurrentFormBindingId : null;
+            string original = Source(Predicate, EntityTypeRegistry.CodeConcept, mode);
+            string modeField = mode is { } binding ? "\"binding_mode_id\":\"" + Hex(binding).ToUpperInvariant() + "\"," : "";
             string reordered = $$"""
-                {"slots":[{"accepted_entity_type_id":"{{Hex(EntityTypeRegistry.CodeConcept).ToUpperInvariant()}}","exemplar_token_ref_id":"{{Hex(TokenRef)}}"}],"predicate_id":"{{Hex(Predicate)}}","schema":"{{OperationalTaskShapeWitness.Schema}}","exemplar_parse_id":"{{Hex(ParseId)}}"}
+                {"slots":[{ {{modeField}}"accepted_entity_type_id":"{{Hex(EntityTypeRegistry.CodeConcept).ToUpperInvariant()}}","exemplar_token_ref_id":"{{Hex(TokenRef)}}"}],"predicate_id":"{{Hex(Predicate)}}","schema":"{{(version2 ? OperationalTaskShapeWitness.SchemaV2 : OperationalTaskShapeWitness.Schema)}}","exemplar_parse_id":"{{Hex(ParseId)}}"}
                 """;
             var first = await Admit(original, "original.json");
             foreach (var (json, name) in new[]
@@ -157,16 +258,20 @@ public sealed class OperationalTaskShapeTests
         return OperationalTaskShapeWitness.Read(ast, bytes);
     }
 
-    private static string Source(Hash128 predicate, Hash128 acceptedType) => $$"""
+    private static string Source(Hash128 predicate, Hash128 acceptedType, Hash128? bindingMode = null)
+    {
+        string mode = bindingMode is { } id ? ", \"binding_mode_id\": \"" + Hex(id) + "\"" : "";
+        return $$"""
         {
-          "schema": "{{OperationalTaskShapeWitness.Schema}}",
+          "schema": "{{(bindingMode.HasValue ? OperationalTaskShapeWitness.SchemaV2 : OperationalTaskShapeWitness.Schema)}}",
           "exemplar_parse_id": "{{Hex(ParseId)}}",
           "predicate_id": "{{Hex(predicate)}}",
           "slots": [
-            {"exemplar_token_ref_id": "{{Hex(TokenRef)}}", "accepted_entity_type_id": "{{Hex(acceptedType)}}"}
+            {"exemplar_token_ref_id": "{{Hex(TokenRef)}}", "accepted_entity_type_id": "{{Hex(acceptedType)}}"{{mode}}}
           ]
         }
         """;
+    }
 
     private static string Hex(Hash128 id) => Convert.ToHexString(id.ToBytes()).ToLowerInvariant();
 }

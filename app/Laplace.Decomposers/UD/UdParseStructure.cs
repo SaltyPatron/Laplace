@@ -68,7 +68,9 @@ public static class UdParseStructure
         ConcurrentIdSet seenSourceDeclarations,
         ConcurrentDictionary<string, byte> canonicalNames,
         UdSentenceEmitContext content,
-        Hash128 sourceId)
+        Hash128 sourceId,
+        double witnessWeight = SourceTrust.AcademicCurated,
+        Hash128? sourceFileContext = null)
     {
         Hash128 sentenceId = sentence.TextUtf8 is { Length: > 0 }
             ? content.RootFor(sentence.TextUtf8) ?? None
@@ -97,7 +99,7 @@ public static class UdParseStructure
             Hash128 uposId = ResolveUpos(builder, token.Upos, sourceId, canonicalNames);
             Hash128 xposId = ResolveXpos(
                 builder, token.Xpos, languageCode, uposId, sourceId,
-                seenSourceDeclarations, canonicalNames);
+                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
 
             flat.Add(refId);
             flat.Add(formId);
@@ -107,7 +109,7 @@ public static class UdParseStructure
 
             var features = ResolveFeatures(
                 builder, token.Feats, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames);
+                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
             foreach ((Hash128 relationId, Hash128 valueId) in features)
             {
                 flat.Add(relationId);
@@ -125,13 +127,13 @@ public static class UdParseStructure
             };
             Hash128 deprelId = ResolveDeprel(
                 builder, token.Deprel, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames, enhanced: false);
+                seenSourceDeclarations, canonicalNames, enhanced: false, witnessWeight, sourceFileContext);
             flat.Add(headRefId);
             flat.Add(deprelId);
 
             var enhanced = ResolveEnhanced(
                 builder, token.Deps, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames);
+                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
             foreach ((Hash128 enhancedHead, Hash128 enhancedRelation) in enhanced)
             {
                 flat.Add(enhancedHead);
@@ -199,7 +201,8 @@ public static class UdParseStructure
                 0));
 
         Hash128 occurrenceId = OccurrenceId(
-            sourceId, parseId, fileLabel, sentence.SourceOrdinal, sentence.SourceSentenceId);
+            sourceId, parseId, fileLabel, sentence.SourceOrdinal, sentence.SourceSentenceId,
+            sourceFileContext);
         builder.AddEntity(
             occurrenceId, EntityTier.Document, EntityTypeRegistry.UdParseOccurrence, sourceId);
         Hash128 subjectId = sentenceId == None ? occurrenceId : sentenceId;
@@ -209,7 +212,10 @@ public static class UdParseStructure
             parseId,
             sourceId,
             occurrenceId,
-            SourceTrust.AcademicCurated));
+            witnessWeight));
+        if (sourceFileContext is { } fileContext)
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                fileContext, UDSource.ContainsTypeId, occurrenceId, sourceId, fileContext, witnessWeight));
         return parseId;
     }
 
@@ -331,7 +337,9 @@ public static class UdParseStructure
         Hash128 uposId,
         Hash128 sourceId,
         ConcurrentIdSet seenSourceDeclarations,
-        ConcurrentDictionary<string, byte> canonicalNames)
+        ConcurrentDictionary<string, byte> canonicalNames,
+        double witnessWeight,
+        Hash128? sourceFileContext)
     {
         if (string.IsNullOrWhiteSpace(xpos) || xpos == "_") return None;
         NamedAnchor anchor = XposAnchor(languageCode, xpos);
@@ -344,8 +352,8 @@ public static class UdParseStructure
                 UDSource.IsATypeId,
                 uposId,
                 sourceId,
-                null,
-                SourceTrust.AcademicCurated);
+                sourceFileContext,
+                witnessWeight);
             if (seenSourceDeclarations.Add(mapping.Id)) builder.AddAttestation(mapping);
         }
         return anchor.Id;
@@ -357,7 +365,9 @@ public static class UdParseStructure
         Hash128 sourceId,
         HashSet<Hash128> seenEntitiesThisBatch,
         ConcurrentIdSet seenSourceDeclarations,
-        ConcurrentDictionary<string, byte> canonicalNames)
+        ConcurrentDictionary<string, byte> canonicalNames,
+        double witnessWeight,
+        Hash128? sourceFileContext)
     {
         var resolved = new List<(Hash128, Hash128)>(features.Length);
         foreach (string feature in features)
@@ -369,14 +379,14 @@ public static class UdParseStructure
                 $"{name}={value}",
                 EntityTypeRegistry.UdFeature,
                 sourceId,
-                SourceTrust.AcademicCurated,
+                witnessWeight,
                 seenEntitiesThisBatch,
                 readbackNames: canonicalNames);
             RelationTypeRegistry.RelationTypeResolution relation =
                 RelationTypeRegistry.ResolveFeature(name);
             RelationTypeRegistry.SeedDynamic(
                 builder, relation, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames);
+                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
             resolved.Add((relation.Id, valueId));
         }
         SortAndDeduplicate(resolved);
@@ -390,19 +400,21 @@ public static class UdParseStructure
         HashSet<Hash128> seenEntitiesThisBatch,
         ConcurrentIdSet seenSourceDeclarations,
         ConcurrentDictionary<string, byte> canonicalNames,
-        bool enhanced)
+        bool enhanced,
+        double witnessWeight,
+        Hash128? sourceFileContext)
     {
         if (string.IsNullOrWhiteSpace(relation) || relation == "_") return None;
         if (enhanced)
         {
             RelationTypeRegistry.SeedEnhancedDeprel(
                 builder, relation, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames);
+                seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
             return RelationTypeRegistry.ResolveEnhancedDeprel(relation).Id;
         }
         RelationTypeRegistry.SeedDeprel(
             builder, relation, sourceId, seenEntitiesThisBatch,
-            seenSourceDeclarations, canonicalNames);
+            seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
         return RelationTypeRegistry.ResolveDeprel(relation).Id;
     }
 
@@ -412,7 +424,9 @@ public static class UdParseStructure
         Hash128 sourceId,
         HashSet<Hash128> seenEntitiesThisBatch,
         ConcurrentIdSet seenSourceDeclarations,
-        ConcurrentDictionary<string, byte> canonicalNames)
+        ConcurrentDictionary<string, byte> canonicalNames,
+        double witnessWeight,
+        Hash128? sourceFileContext)
     {
         var resolved = new List<(Hash128, Hash128)>();
         if (string.IsNullOrWhiteSpace(deps) || deps == "_") return resolved;
@@ -428,7 +442,7 @@ public static class UdParseStructure
                 : DeclareTokenRef(builder, head, sourceId, canonicalNames);
             Hash128 relationId = ResolveDeprel(
                 builder, relation, sourceId, seenEntitiesThisBatch,
-                seenSourceDeclarations, canonicalNames, enhanced: true);
+                seenSourceDeclarations, canonicalNames, enhanced: true, witnessWeight, sourceFileContext);
             resolved.Add((headId, relationId));
         }
         SortAndDeduplicate(resolved);
@@ -534,13 +548,16 @@ public static class UdParseStructure
         Hash128 parseId,
         string fileLabel,
         long sourceOrdinal,
-        string? sourceSentenceId)
+        string? sourceSentenceId,
+        Hash128? sourceFileContext = null)
     {
-        ReadOnlySpan<byte> domain = "laplace/ud-parse-occurrence/v1\0"u8;
+        ReadOnlySpan<byte> domain = sourceFileContext.HasValue
+            ? "laplace/source-parse-occurrence/v1\0"u8
+            : "laplace/ud-parse-occurrence/v1\0"u8;
         int fileBytes = Encoding.UTF8.GetByteCount(fileLabel);
         int sentenceBytes = Encoding.UTF8.GetByteCount(sourceSentenceId ?? string.Empty);
         int length = domain.Length + 32 + sizeof(int) + fileBytes + sizeof(long)
-            + sizeof(int) + sentenceBytes;
+            + sizeof(int) + sentenceBytes + (sourceFileContext.HasValue ? 16 : 0);
         byte[]? rented = null;
         Span<byte> preimage = length <= 512
             ? stackalloc byte[length]
@@ -553,6 +570,11 @@ public static class UdParseStructure
             cursor += 16;
             parseId.WriteBytes(preimage[cursor..]);
             cursor += 16;
+            if (sourceFileContext is { } fileContext)
+            {
+                fileContext.WriteBytes(preimage[cursor..]);
+                cursor += 16;
+            }
             BinaryPrimitives.WriteInt32LittleEndian(preimage[cursor..], fileBytes);
             cursor += sizeof(int);
             cursor += Encoding.UTF8.GetBytes(fileLabel, preimage[cursor..]);

@@ -103,12 +103,20 @@ jobs:
           set -euo pipefail
           fast=1
           verify_recursive=0
+          # These documents and data files are executable-generation inputs.
+          # Resolve the exact project inventory before the broad docs allowance;
+          # failure must not masquerade as an empty selection and a fast release.
+          operational_paths="$(python3 scripts/verify-operational-seed.py --list-source-paths)"
           if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
             fast=0
           else
             git fetch --no-tags --depth=1 origin "$BEFORE_SHA" || true
             while IFS= read -r path; do
               [[ -z "$path" ]] && continue
+              if [[ $'\n'"$operational_paths"$'\n' == *$'\n'"$path"$'\n'* ]]; then
+                fast=0
+                continue
+              fi
               case "$path" in
                 scripts/prove-*|scripts/test-live-recursive-proof-gate.py)
                   verify_recursive=1
@@ -146,7 +154,10 @@ jobs:
             python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"
 
       - name: Run full product lifecycle
+        id: full_product
         if: env.LAPLACE_FAST_ONLY != '1'
+        env:
+          LAPLACE_OPERATIONAL_PROOF_DIRECTORY: /build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           umask 0002
@@ -200,6 +211,67 @@ jobs:
           path: |
             /build/laplace/work/stockfish-corpus-evidence/${{ github.run_id }}-${{ github.run_attempt }}/
             !/build/laplace/work/stockfish-corpus-evidence/${{ github.run_id }}-${{ github.run_attempt }}/selection.private.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Verify ordinary operational execution after Stockfish admission
+        if: success() && env.LAPLACE_FAST_ONLY != '1' && env.LAPLACE_STAGE == 'all'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+            echo "fresh DB intentionally left unseeded — post-Stockfish operational proof skipped"
+            exit 0
+          fi
+          mkdir -p /build/laplace/work
+          # Reuse this publication's exact seed. Source admission must not
+          # displace either ordinary request; no new seed or execution hints.
+          flock --exclusive --close /build/laplace/work/host-resource.lock bash -euo pipefail <<'BASH'
+          proof_root="/build/laplace/work/operational-proof/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          seed_record="$(python3 - "$proof_root" <<'PY'
+          import itertools
+          import json
+          import sys
+          import uuid
+          from pathlib import Path
+          receipts = list(itertools.islice(Path(sys.argv[1]).glob("invocation-*/seed.json"), 2))
+          if len(receipts) != 1:
+              raise SystemExit("post-Stockfish proof requires exactly one seed receipt for this run and attempt")
+          receipt = receipts[0]
+          if receipt.stat().st_size > 1048576:
+              raise SystemExit("seed receipt exceeds the 1 MiB metadata envelope")
+          report = json.loads(receipt.read_text(encoding="utf-8"))
+          if report.get("disposition") != "verified":
+              raise SystemExit("post-Stockfish seed receipt is not a verified invocation")
+          run_id = report["run"]["run_id"]
+          if not isinstance(run_id, str) or str(uuid.UUID(run_id)) != run_id:
+              raise SystemExit("post-Stockfish seed receipt has an invalid run identity")
+          print(receipt.parent)
+          print(run_id)
+          PY
+          )"
+          mapfile -t seed_fields <<< "$seed_record"
+          proof_directory="${seed_fields[0]}"
+          seed_run_id="${seed_fields[1]}"
+          python3 scripts/verify-operational-task.py \
+            --shape-file seeds/operational/tasks/en_define.json --seed-run-id "$seed_run_id" \
+            --receipt "$proof_directory/post-stockfish-task.json"
+          python3 scripts/verify-operational-task.py \
+            --proof-mode direct-relation --prompt 'The opposite of hot is' --operand hot \
+            --shape-file seeds/operational/tasks/en_antonym.json \
+            --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
+            --receipt "$proof_directory/post-stockfish-antonym-task.json"
+          BASH
+
+      - name: Upload operational seed and execution receipts
+        if: always() && steps.full_product.outcome != 'skipped' && env.LAPLACE_STAGE == 'all'
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-operational-execution-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: warn
           retention-days: 30
 

@@ -1,0 +1,11 @@
+# This is an authored Laplace operational annotation, not an upstream UD corpus observation.
+# This unfinished prompt fragment promotes the overt copula to root; no missing complement is invented.
+# Token 4 is the prospective variable occurrence. This source file declares no task or answer.
+# sent_id = laplace-operational-opposite-empty-fragment-v1
+# text = The opposite of empty is
+1	The	the	DET	_	Definite=Def|PronType=Art	2	det	_	_
+2	opposite	opposite	NOUN	_	Number=Sing	5	nsubj	_	_
+3	of	of	ADP	_	_	4	case	_	_
+4	empty	empty	ADJ	_	Degree=Pos	2	nmod	_	_
+5	is	be	AUX	_	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	0	root	_	_
+

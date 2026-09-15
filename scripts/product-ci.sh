@@ -76,12 +76,49 @@ seed_operational_memory() {
   # The versioned operational source ships with this executable generation.
   # Its per-file content completion skips unchanged artifacts; do not use
   # --force/ReObservePresent and turn a deployment into another witness.
+  local proof_root="${LAPLACE_OPERATIONAL_PROOF_DIRECTORY:-/build/laplace/recovery/operational-product}"
+  mkdir -p "$proof_root"
+  operational_proof_directory="$(mktemp -d "$proof_root/invocation-XXXXXXXX")"
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+    printf '%s\n' '{"disposition":"intentionally-unseeded","reason":"fresh database without foundation restoration"}' \
+      > "$operational_proof_directory/disposition.json"
     return 0
   fi
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   LAPLACE_INGEST_MAX_UNITS=0 LAPLACE_INGEST_FORCE=0 \
-    python3 scripts/verify-operational-seed.py --ingest
+    python3 scripts/verify-operational-seed.py --ingest --report "$operational_proof_directory/seed.json"
+}
+
+verify_operational_execution() {
+  if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
+    echo "fresh DB intentionally left unseeded — operational execution proof skipped"
+    return 0
+  fi
+  # Consume only this invocation's verified seed receipt. Never select a latest
+  # source run or reuse a receipt from another publication attempt.
+  local seed_run_id
+  seed_run_id="$(python3 - "$operational_proof_directory/seed.json" <<'PY'
+import json
+import sys
+import uuid
+from pathlib import Path
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if report.get("disposition") != "verified":
+    raise SystemExit("operational seed receipt is not a verified invocation")
+run_id = report["run"]["run_id"]
+if str(uuid.UUID(run_id)) != run_id:
+    raise SystemExit("operational seed receipt has an invalid run identity")
+print(run_id)
+PY
+)"
+  python3 scripts/verify-operational-task.py \
+    --shape-file seeds/operational/tasks/en_define.json --seed-run-id "$seed_run_id" \
+    --receipt "$operational_proof_directory/task.json"
+  python3 scripts/verify-operational-task.py \
+    --proof-mode direct-relation --prompt 'The opposite of hot is' --operand hot \
+    --shape-file seeds/operational/tasks/en_antonym.json \
+    --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
+    --receipt "$operational_proof_directory/antonym-task.json"
 }
 
 reconcile_installed_product() {
@@ -202,6 +239,7 @@ trap - EXIT
 # Repair owns its restoration and unknown transaction outcomes. Publication's
 # API recovery must not restart a writer after unresolved repair quiescence.
 run_repair_installed_corpus
+verify_operational_execution
 run_integration
 run_live_if_expected
 run_perf

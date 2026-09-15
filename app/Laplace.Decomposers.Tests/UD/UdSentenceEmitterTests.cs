@@ -220,6 +220,165 @@ public sealed class UdSentenceEmitterTests
         Assert.NotEqual(a, b);
     }
 
+    [Fact]
+    public void ExplicitWitnessChangesProvenanceWithoutChangingParseStructure()
+    {
+        var sentence = Sentence(Utf8("cats"),
+            Token(1, "cats", "cat", "NOUN", "NNS", ["Number=Plur"], 0, "root"));
+        Hash128 source = Hash128.OfCanonical("test/authored-ud/source/λ");
+        Hash128 otherSource = Hash128.OfCanonical("test/authored-ud/source/棋");
+        Hash128 file = Hash128.OfCanonical("test/authored-ud/file/one");
+        Hash128 otherFile = Hash128.OfCanonical("test/authored-ud/file/two");
+        var contract = new UdWitnessContract(source, SourceTrust.SubstrateMandate, file);
+        var original = EmitAndDecode(sentence, witness: contract);
+        var changedSource = EmitAndDecode(sentence, witness: contract with { SourceId = otherSource });
+        var changedContext = EmitAndDecode(sentence, witness: contract with { SourceFileContext = otherFile });
+        var changedTrust = EmitAndDecode(sentence, witness: contract with { Trust = 0.37 });
+        var ordinary = EmitAndDecode(sentence);
+
+        PhysicalityRow originalStructure = ParsePhysicality(original.Change, original.ParseId);
+        foreach (var emitted in new[] { changedSource, changedContext, changedTrust, ordinary })
+        {
+            Assert.Equal(original.ParseId, emitted.ParseId);
+            PhysicalityRow structure = ParsePhysicality(emitted.Change, emitted.ParseId);
+            Assert.Equal(originalStructure.Id, structure.Id);
+            Assert.Equal(originalStructure.TrajectoryXyzm, structure.TrajectoryXyzm);
+        }
+
+        AttestationRow originalClaim = ParseClaim(original.Change);
+        Assert.NotEqual(originalClaim.ContextId, ParseClaim(changedSource.Change).ContextId);
+        Assert.NotEqual(originalClaim.ContextId, ParseClaim(changedContext.Change).ContextId);
+        AttestationRow changedTrustClaim = ParseClaim(changedTrust.Change);
+        Assert.Equal(originalClaim.ContextId, changedTrustClaim.ContextId);
+        Assert.Equal(originalClaim.Id, changedTrustClaim.Id);
+        Assert.NotEqual(originalClaim.OpponentRdFp1e9, changedTrustClaim.OpponentRdFp1e9);
+        AssertWitness(changedTrustClaim, source, changedTrustClaim.ContextId, 0.37);
+    }
+
+    [Fact]
+    public void AuthoredWitnessSourceTrustAndContextReachEveryParseDeclaration()
+    {
+        var sentence = Sentence(Utf8("cats"),
+            Token(1, "cats", "cat", "NOUN", "NNS", ["Number=Plur"], 0, "root"));
+        var witness = new UdWitnessContract(
+            Hash128.OfCanonical("test/authored-ud/provenance"), SourceTrust.SubstrateMandate,
+            Hash128.OfCanonical("test/authored-ud/contract-file"));
+        var emitted = EmitAndDecode(sentence, witness: witness);
+        AttestationRow parseClaim = ParseClaim(emitted.Change);
+        Assert.NotNull(parseClaim.ContextId);
+        Assert.Equal(emitted.ParseId, parseClaim.ObjectId);
+        Assert.All(emitted.Change.Entities, entity => Assert.Equal(witness.SourceId, entity.FirstObservedBy));
+        Assert.All(emitted.Change.Attestations, row => AssertWitness(
+            row, witness.SourceId,
+            row.TypeId == parseClaim.TypeId ? parseClaim.ContextId : witness.SourceFileContext,
+            witness.Trust));
+
+        AttestationRow language = Assert.Single(emitted.Change.Attestations.Where(a =>
+            a.TypeId == RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id));
+        Assert.Equal(ContentTierSpine.ResolveRoot(sentence.TextUtf8), language.SubjectId);
+        Assert.Equal(LanguageReference.Resolve("en"), language.ObjectId);
+        UdParseStructure.DecodedToken token = Assert.Single(emitted.Parse.Tokens);
+        Hash128 isA = RelationTypeRegistry.Resolve("IS_A").Id;
+        Assert.Contains(emitted.Change.Attestations, row =>
+            row.SubjectId == token.XposId && row.TypeId == isA && row.ObjectId == token.UposId);
+        var feature = RelationTypeRegistry.ResolveFeature("Number");
+        Assert.NotNull(feature.ParentId);
+        Assert.Contains(emitted.Change.Attestations, row =>
+            row.SubjectId == feature.Id && row.TypeId == isA && row.ObjectId == feature.ParentId);
+    }
+
+    [Fact]
+    public void FileContextsKeepSeparateOccurrencesAndSourceDeclarations()
+    {
+        var sentence = Sentence(Utf8("cats"),
+            Token(1, "cats", "cat", "NOUN", "NNS", ["Number=Plur"], 0, "root"));
+        var first = new UdWitnessContract(
+            Hash128.OfCanonical("test/authored-ud/shared-source"), SourceTrust.SubstrateMandate,
+            Hash128.OfCanonical("test/authored-ud/file/first"));
+        var second = first with { SourceFileContext = Hash128.OfCanonical("test/authored-ud/file/second") };
+        var sharedDeclarations = new ConcurrentIdSet();
+        var a = EmitAndDecode(sentence, witness: first, seenSourceDeclarations: sharedDeclarations);
+        var b = EmitAndDecode(sentence, witness: second, seenSourceDeclarations: sharedDeclarations);
+        var replay = EmitAndDecode(sentence, witness: first);
+        Assert.Equal(a.ParseId, b.ParseId);
+        Assert.NotEqual(ParseClaim(a.Change).ContextId, ParseClaim(b.Change).ContextId);
+        Assert.Equal(ParseClaim(a.Change).ContextId, ParseClaim(replay.Change).ContextId);
+
+        Hash128 contains = RelationTypeRegistry.Resolve("CONTAINS").Id;
+        Hash128 isA = RelationTypeRegistry.Resolve("IS_A").Id;
+        Hash128 feature = RelationTypeRegistry.ResolveFeature("Number").Id;
+        foreach (var (emitted, witness) in new[] { (a, first), (b, second) })
+        {
+            Hash128 occurrence = ParseClaim(emitted.Change).ContextId!.Value;
+            Assert.Contains(emitted.Change.Entities, entity =>
+                entity.Id == occurrence && entity.TypeId == EntityTypeRegistry.UdParseOccurrence);
+            AttestationRow link = Assert.Single(emitted.Change.Attestations.Where(row => row.TypeId == contains));
+            Assert.Equal(witness.SourceFileContext, link.SubjectId);
+            Assert.Equal(occurrence, link.ObjectId);
+            AssertWitness(link, witness.SourceId, witness.SourceFileContext, witness.Trust);
+            Assert.Contains(emitted.Change.Attestations, row => row.SubjectId == feature
+                && row.TypeId == isA && row.ContextId == witness.SourceFileContext);
+            Assert.Contains(emitted.Change.Attestations, row =>
+                row.SubjectId == Assert.Single(emitted.Parse.Tokens).XposId
+                && row.TypeId == isA && row.ContextId == witness.SourceFileContext);
+        }
+    }
+
+    [Fact]
+    public void DefaultWitnessRetainsOrdinaryUdSourceTrustAndOccurrenceContract()
+    {
+        var sentence = Sentence(Utf8("cats"),
+            Token(1, "cats", "cat", "NOUN", "NNS", ["Number=Plur"], 0, "root"));
+        long implicitStartedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var implicitDefault = EmitAndDecode(sentence);
+        long implicitFinishedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L + 999L;
+        long explicitStartedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        var explicitDefault = EmitAndDecode(sentence,
+            witness: new UdWitnessContract(UdSource, SourceTrust.AcademicCurated));
+        long explicitFinishedAtUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L + 999L;
+        Assert.Equal(implicitDefault.ParseId, explicitDefault.ParseId);
+        // Separate emissions have their own native observation times. Compare every
+        // other record field, and bound microseconds through the final millisecond.
+        Assert.Equal(
+            implicitDefault.Change.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }),
+            explicitDefault.Change.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }));
+        Assert.All(implicitDefault.Change.Attestations, row =>
+            Assert.InRange(row.LastObservedAtUnixUs, implicitStartedAtUs, implicitFinishedAtUs));
+        Assert.All(explicitDefault.Change.Attestations, row =>
+            Assert.InRange(row.LastObservedAtUnixUs, explicitStartedAtUs, explicitFinishedAtUs));
+        Assert.True(implicitDefault.Change.Attestations.Max(row => row.LastObservedAtUnixUs)
+            <= explicitDefault.Change.Attestations.Min(row => row.LastObservedAtUnixUs));
+        AttestationRow parseClaim = ParseClaim(implicitDefault.Change);
+        Assert.NotNull(parseClaim.ContextId);
+        Assert.All(implicitDefault.Change.Attestations, row => AssertWitness(
+            row, UdSource, row.TypeId == parseClaim.TypeId ? parseClaim.ContextId : null,
+            SourceTrust.AcademicCurated));
+        Assert.DoesNotContain(implicitDefault.Change.Attestations,
+            row => row.TypeId == RelationTypeRegistry.Resolve("CONTAINS").Id);
+    }
+
+    private static AttestationRow ParseClaim(SubstrateChange change) =>
+        Assert.Single(change.Attestations.Where(a => a.TypeId == RelationTypeRegistry.Resolve("HAS_PARSE").Id));
+
+    private static PhysicalityRow ParsePhysicality(SubstrateChange change, Hash128 parseId) =>
+        Assert.Single(change.Physicalities.Where(p => p.EntityId == parseId
+            && p.Type == PhysicalityType.ParseStructure));
+
+    private static void AssertWitness(AttestationRow actual, Hash128 source, Hash128? context, double trust)
+    {
+        AttestationRow expected = NativeAttestation.CategoricalResolved(
+            actual.SubjectId, actual.TypeId, actual.ObjectId, source, context, trust);
+        Assert.Equal(expected.Id, actual.Id);
+        Assert.Equal(source, actual.SourceId);
+        Assert.Equal(context, actual.ContextId);
+        Assert.Equal(expected.Outcome, actual.Outcome);
+        Assert.Equal(expected.ObservationCount, actual.ObservationCount);
+        Assert.Equal(expected.ScoreFp1e9, actual.ScoreFp1e9);
+        Assert.Equal(expected.SumScoreFp1e9, actual.SumScoreFp1e9);
+        Assert.Equal(expected.OpponentRdFp1e9, actual.OpponentRdFp1e9);
+        Assert.Equal(expected.OpponentRatingFp1e9, actual.OpponentRatingFp1e9);
+    }
+
     private static UdSentence Sentence(byte[] text, params UdToken[] tokens) =>
         new(text, tokens, [], tokens.Where(t => t.Id > 0).Select(t => t.Id).DefaultIfEmpty().Max(),
             "fixture-1", 1);
@@ -254,17 +413,26 @@ public sealed class UdSentenceEmitterTests
             upos, xpos, feats, head, deprel, deps, misc, headSpecified);
 
     private static (SubstrateChange Change, Hash128 ParseId, UdParseStructure.DecodedParse Parse)
-        EmitAndDecode(UdSentence sentence, string langCode = "en")
+        EmitAndDecode(UdSentence sentence, string langCode = "en", UdWitnessContract? witness = null,
+            ConcurrentIdSet? seenSourceDeclarations = null)
     {
         Hash128 langId = LanguageReference.Resolve(langCode);
+        Hash128 source = witness?.SourceId ?? UdSource;
         var builder = new SubstrateChangeBuilder(
-            UdSource, "ud/emitter-test", null,
+            source, "ud/emitter-test", null,
             entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
         UdSentenceEmitContext context = BuildEmitContext(sentence);
-        UdSentenceEmitContext.EmitWitness(
-            builder, sentence, langId, langCode, "ud/test.conllu",
-            new HashSet<Hash128>(), new ConcurrentIdSet(),
-            new ConcurrentDictionary<string, byte>(), context, UdSource);
+        if (witness is { } contract)
+            UdSentenceEmitContext.EmitWitness(
+                builder, sentence, langId, langCode, "ud/test.conllu",
+                new HashSet<Hash128>(), seenSourceDeclarations ?? new ConcurrentIdSet(),
+                new ConcurrentDictionary<string, byte>(), context, contract.SourceId,
+                contract.Trust, contract.SourceFileContext);
+        else
+            UdSentenceEmitContext.EmitWitness(
+                builder, sentence, langId, langCode, "ud/test.conllu",
+                new HashSet<Hash128>(), seenSourceDeclarations ?? new ConcurrentIdSet(),
+                new ConcurrentDictionary<string, byte>(), context, UdSource);
         SubstrateChange change = builder.Build();
 
         Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;

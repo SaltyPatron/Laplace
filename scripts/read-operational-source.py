@@ -111,10 +111,182 @@ def text_sql(value: str) -> str:
     return "convert_from(decode('" + value.encode("utf-8").hex() + "','hex'),'UTF8')"
 
 
+def relation_readback_ctes(relations: list[str], witnesses: int) -> str:
+    """Fixed, bounded diagnostic frontiers; no relation-specific execution rule."""
+    values = ",".join("(" + text_sql(x) + ")" for x in relations)
+    return f"""
+relation_requests(name) AS (VALUES {values}),
+relation_ids AS MATERIALIZED (
+ SELECT DISTINCT laplace.relation_type_id(name) AS id FROM relation_requests
+),
+raw_any_frontier AS MATERIALIZED (
+ SELECT p.id,p.entity_id,p.n_constituents FROM laplace.physicalities p
+ WHERE p.type=8 AND p.trajectory IS NOT NULL
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY(SELECT id FROM cue_ids)
+ LIMIT 11
+),
+raw_all_frontier AS MATERIALIZED (
+ SELECT p.id,p.entity_id,p.n_constituents FROM laplace.physicalities p
+ WHERE p.type=8 AND p.trajectory IS NOT NULL
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY(SELECT id FROM cue_ids)
+ LIMIT 11
+),
+schema_any_frontier AS MATERIALIZED (
+ SELECT p.id,p.entity_id,p.n_constituents FROM laplace.physicalities p
+ WHERE p.type=8 AND p.trajectory IS NOT NULL
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) && ARRAY(SELECT id FROM cue_ids)
+   AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[(SELECT ud_schema FROM roster)]
+ LIMIT 11
+),
+frontier_rows AS MATERIALIZED (
+ SELECT 'raw_any'::text AS route,p.* FROM raw_any_frontier p
+ UNION ALL SELECT 'raw_all',p.* FROM raw_all_frontier p
+ UNION ALL SELECT 'schema_any',p.* FROM schema_any_frontier p
+),
+frontier_diagnostics AS MATERIALIZED (
+ SELECT route,jsonb_build_object('count_lower_bound',count(p.id),
+   'count_exact',count(p.id)<11,'limit',11,'limit_reached',count(p.id)=11,
+   'more_than_8',count(p.id)>8,'more_than_10',count(p.id)>10,
+   'rows',COALESCE(jsonb_agg(jsonb_build_object(
+      'entity_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex'),
+      'n_constituents',p.n_constituents) ORDER BY p.entity_id,p.id)
+      FILTER (WHERE p.id IS NOT NULL),'[]')) AS diagnostic
+ FROM (VALUES ('raw_any'),('raw_all'),('schema_any')) routes(route)
+ LEFT JOIN frontier_rows p USING(route) GROUP BY route
+),
+lookup_senses AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a
+ WHERE a.type_id=(SELECT has_sense FROM roster)
+   AND a.source_id=(SELECT wordnet_source FROM roster)
+   AND a.subject_id=ANY(ARRAY(SELECT id FROM cue_ids UNION SELECT id FROM operand_ids))
+ ORDER BY a.subject_id,a.id LIMIT {witnesses+1}
+),
+lookup_synsets AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a
+ WHERE a.type_id=(SELECT sense_of FROM roster)
+   AND a.source_id=(SELECT wordnet_source FROM roster)
+   AND a.subject_id=ANY(ARRAY(SELECT object_id FROM lookup_senses))
+ ORDER BY a.subject_id,a.id LIMIT {witnesses+1}
+),
+relation_subjects AS MATERIALIZED (
+ SELECT id FROM cue_ids UNION SELECT id FROM operand_ids
+ UNION SELECT object_id FROM lookup_senses UNION SELECT object_id FROM lookup_synsets
+ UNION SELECT entity_id FROM selected UNION SELECT subject_id FROM parse_witnesses
+),
+relation_witnesses AS MATERIALIZED (
+ SELECT a.* FROM relation_ids r CROSS JOIN LATERAL (
+   SELECT a.* FROM laplace.attestations a
+   WHERE a.type_id=r.id AND a.subject_id=ANY(ARRAY(SELECT id FROM relation_subjects))
+   ORDER BY a.subject_id,a.id LIMIT {witnesses+1}
+ ) a
+),
+relation_inverse_witnesses AS MATERIALIZED (
+ SELECT a.* FROM relation_ids r CROSS JOIN LATERAL (
+   SELECT a.* FROM laplace.attestations a
+   WHERE a.type_id=r.id AND a.object_id=ANY(ARRAY(SELECT id FROM relation_subjects))
+   ORDER BY a.object_id,a.subject_id,a.id LIMIT {witnesses+1}
+ ) a
+),
+relation_followup_subjects AS MATERIALIZED (
+ SELECT object_id AS id FROM relation_witnesses
+ UNION SELECT subject_id FROM relation_inverse_witnesses
+ EXCEPT SELECT id FROM relation_subjects
+),
+relation_followup_witnesses AS MATERIALIZED (
+ SELECT a.* FROM relation_ids r CROSS JOIN LATERAL (
+   SELECT a.* FROM laplace.attestations a
+   WHERE a.type_id=r.id AND a.subject_id=ANY(ARRAY(SELECT id FROM relation_followup_subjects))
+   ORDER BY a.subject_id,a.id LIMIT {witnesses+1}
+ ) a
+),
+relation_followup_inverse_witnesses AS MATERIALIZED (
+ SELECT a.* FROM relation_ids r CROSS JOIN LATERAL (
+   SELECT a.* FROM laplace.attestations a
+   WHERE a.type_id=r.id AND a.object_id=ANY(ARRAY(SELECT id FROM relation_followup_subjects))
+   ORDER BY a.object_id,a.subject_id,a.id LIMIT {witnesses+1}
+ ) a
+),
+relation_targets AS MATERIALIZED (
+ SELECT object_id AS id FROM relation_witnesses
+ UNION SELECT object_id FROM relation_followup_witnesses
+ UNION SELECT object_id FROM relation_inverse_witnesses
+ UNION SELECT object_id FROM relation_followup_inverse_witnesses
+),
+target_sense_witnesses AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a
+ WHERE a.type_id=(SELECT sense_of FROM roster)
+   AND a.object_id=ANY(ARRAY(SELECT id FROM relation_targets))
+ ORDER BY a.object_id,a.subject_id,a.id LIMIT {witnesses+1}
+),
+target_lemma_witnesses AS MATERIALIZED (
+ SELECT a.* FROM laplace.attestations a
+ WHERE a.type_id=(SELECT has_sense FROM roster)
+   AND a.object_id=ANY(ARRAY(SELECT subject_id FROM target_sense_witnesses))
+ ORDER BY a.object_id,a.subject_id,a.id LIMIT {witnesses+1}
+),
+relation_limits AS MATERIALIZED (
+ SELECT encode(r.id,'hex') AS relation_id,
+   (SELECT count(*)>{witnesses} FROM relation_witnesses a WHERE a.type_id=r.id) AS witness_overflow,
+   (SELECT count(*)>{witnesses} FROM relation_inverse_witnesses a WHERE a.type_id=r.id) AS inverse_witness_overflow,
+   (SELECT count(*)>{witnesses} FROM relation_followup_witnesses a WHERE a.type_id=r.id) AS followup_witness_overflow,
+   (SELECT count(*)>{witnesses} FROM relation_followup_inverse_witnesses a WHERE a.type_id=r.id) AS followup_inverse_witness_overflow
+ FROM relation_ids r
+),
+"""
+
+
 def readback_sql(cues: list[str], operands: list[str], candidates: int,
-                 constituents: int, witnesses: int, timeout: int) -> str:
+                 constituents: int, witnesses: int, timeout: int,
+                 relations: list[str] | None = None) -> str:
     cue_values = ",".join("(" + text_sql(x) + ")" for x in cues)
     operand_values = ",".join("(" + text_sql(x) + ")" for x in operands)
+    relation_ctes = relation_readback_ctes(relations, witnesses) if relations else ""
+    relation_evidence = """
+ UNION ALL SELECT 'lookup_has_sense',a.* FROM lookup_senses a
+ UNION ALL SELECT 'lookup_is_sense_of',a.* FROM lookup_synsets a
+ UNION ALL SELECT 'requested_relation',a.* FROM relation_witnesses a
+ UNION ALL SELECT 'requested_relation_inverse',a.* FROM relation_inverse_witnesses a
+ UNION ALL SELECT 'requested_relation_followup',a.* FROM relation_followup_witnesses a
+ UNION ALL SELECT 'requested_relation_followup_inverse',a.* FROM relation_followup_inverse_witnesses a
+ UNION ALL SELECT 'target_inverse_is_sense_of',a.* FROM target_sense_witnesses a
+ UNION ALL SELECT 'target_inverse_has_sense',a.* FROM target_lemma_witnesses a
+""" if relations else ""
+    relation_scope = f"""
+   'relation_requests',(SELECT jsonb_agg(jsonb_build_object('name',name,
+      'id',encode(laplace.relation_type_id(name),'hex')) ORDER BY name) FROM relation_requests),
+   'relation_subject_scope','cue/operand roots, observed WordNet senses/synsets, selected parses and their witnessed sentences',
+   'relation_directions','outgoing and incoming; witness subject/object direction retained',
+   'relation_followup_hops',1,'target_label_inverse_hops',2,
+   'relation_witness_limit_per_frontier_per_relation_per_direction',{witnesses},'render_limit_characters',1024,
+   'label_renderer','realize.label_batch; presentation only, raw witnesses retained separately',
+   'text_renderer','realize.batch with default NULL language; actual forward text realization ladder',
+   'relation_witness_order','subject_id,attestation_id; all sources, contexts and outcomes',
+   'relation_inverse_witness_order','object_id,subject_id,attestation_id; all sources, contexts and outcomes',
+   'target_label_witness_order','object_id,subject_id,attestation_id; all sources, contexts and outcomes',
+""" if relations else ""
+    relation_overflows = f"""
+   'lookup_has_sense_witness_overflow',(SELECT count(*)>{witnesses} FROM lookup_senses),
+   'lookup_is_sense_of_witness_overflow',(SELECT count(*)>{witnesses} FROM lookup_synsets),
+   'requested_relations',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.relation_id) FROM relation_limits r),
+   'target_inverse_is_sense_of_witness_overflow',(SELECT count(*)>{witnesses} FROM target_sense_witnesses),
+   'target_inverse_has_sense_witness_overflow',(SELECT count(*)>{witnesses} FROM target_lemma_witnesses),
+""" if relations else ""
+    relation_ids = " UNION SELECT id FROM relation_ids\n" if relations else ""
+    frontier_diagnostics = """
+    'type8_frontiers',(SELECT jsonb_object_agg(route,diagnostic) FROM frontier_diagnostics),
+    'type8_frontier_scope','exact cue IDs; membership count only; SQL LIMIT sample does not reproduce native bitmap visitation order',
+    'type8_frontier_predicates','raw_any: overlap; raw_all: contains all; schema_any: overlap plus UD schema; raw routes have no schema filter',
+""" if relations else ""
+    labels = ",realize.label_batch(ids) AS labels,realize.batch(ids) AS realized_texts" if relations else ""
+    surface = "left(r.surfaces[u.ord],1024)" if relations else "r.surfaces[u.ord]"
+    surface_metadata = """,octet_length(r.surfaces[u.ord]) AS native_surface_bytes,
+        char_length(r.surfaces[u.ord])>1024 AS surface_truncated,
+        left(r.labels[u.ord],1024) AS label,
+        octet_length(r.labels[u.ord]) AS native_label_bytes,
+        char_length(r.labels[u.ord])>1024 AS label_truncated,
+        left(r.realized_texts[u.ord],1024) AS realized_text,
+        octet_length(r.realized_texts[u.ord]) AS native_realized_text_bytes,
+        char_length(r.realized_texts[u.ord])>1024 AS realized_text_truncated""" if relations else ""
     # All bounds are explicit diagnostic envelopes. The extra row reports
     # incomplete enumeration; it is never silently treated as complete evidence.
     return f"""
@@ -224,33 +396,38 @@ definitions AS MATERIALIZED (
    AND a.subject_id=ANY(ARRAY(SELECT object_id FROM synsets))
  ORDER BY a.subject_id,a.id LIMIT {witnesses+1}
 ),
-evidence AS MATERIALIZED (
+{relation_ctes}evidence AS MATERIALIZED (
  SELECT 'has_parse'::text AS route,a.* FROM parse_witnesses a
  UNION ALL SELECT 'has_sense',a.* FROM senses a
  UNION ALL SELECT 'is_sense_of',a.* FROM synsets a
  UNION ALL SELECT 'has_definition',a.* FROM definitions a
+ {relation_evidence}
 ),
 needed_ids AS MATERIALIZED (
  SELECT unnest(ids) AS id FROM expanded
  UNION SELECT id FROM cue_ids UNION SELECT id FROM operand_ids
  UNION SELECT subject_id FROM evidence UNION SELECT object_id FROM evidence
  UNION SELECT source_id FROM evidence UNION SELECT context_id FROM evidence
+ UNION SELECT type_id FROM evidence
+ {relation_ids}
 ),
 render_input AS MATERIALIZED (
  SELECT array_agg(id ORDER BY id) AS ids FROM needed_ids WHERE id IS NOT NULL
 ),
 rendered AS MATERIALIZED (
- SELECT ids,realize.render_text_batch(ids) AS surfaces FROM render_input
+ SELECT ids,realize.render_text_batch(ids) AS surfaces{labels} FROM render_input
 ),
 entity_rows AS MATERIALIZED (
  SELECT e.id,jsonb_agg(jsonb_build_object('tier',e.tier,'type_id',encode(e.type_id,'hex'),
+        'type_canonical_name',n.name,
         'first_observed_by',encode(e.first_observed_by,'hex')) ORDER BY e.tier) AS rows
- FROM laplace.entities e WHERE e.id=ANY(ARRAY(SELECT id FROM needed_ids WHERE id IS NOT NULL))
+ FROM laplace.entities e LEFT JOIN laplace.canonical_names n ON n.id=e.type_id
+ WHERE e.id=ANY(ARRAY(SELECT id FROM needed_ids WHERE id IS NOT NULL))
  GROUP BY e.id
 ),
 dictionary AS MATERIALIZED (
- SELECT encode(u.id,'hex') AS id,r.surfaces[u.ord] AS surface,n.name AS canonical_name,
-        e.rows AS entity_rows
+ SELECT encode(u.id,'hex') AS id,{surface} AS surface,n.name AS canonical_name,
+        e.rows AS entity_rows{surface_metadata}
  FROM rendered r CROSS JOIN LATERAL unnest(r.ids) WITH ORDINALITY u(id,ord)
  LEFT JOIN laplace.canonical_names n ON n.id=u.id
  LEFT JOIN entity_rows e ON e.id=u.id
@@ -271,6 +448,7 @@ SELECT jsonb_build_object(
                WHERE extname IN ('laplace_substrate','laplace_geom')),
  'scope',jsonb_build_object('cues',(SELECT jsonb_agg(surface) FROM cues),
    'operand_probes',(SELECT jsonb_agg(surface) FROM operands),
+   {relation_scope}
    'candidate_order','n_constituents,entity_id,physicality_id',
    'candidate_limit',{candidates},'constituent_limit',{constituents},'witness_limit_per_route',{witnesses}),
  'roster',(SELECT jsonb_build_object('has_parse',encode(has_parse,'hex'),
@@ -278,6 +456,7 @@ SELECT jsonb_build_object(
     'has_definition',encode(definition,'hex'),'ud_source',encode(ud_source,'hex'),
     'wordnet_source',encode(wordnet_source,'hex'),'ud_schema',encode(ud_schema,'hex')) FROM roster),
  'source_diagnostics',jsonb_build_object(
+    {frontier_diagnostics}
     'ud_schema_type8_present',EXISTS(SELECT 1 FROM laplace.physicalities p
       WHERE p.type=8 AND p.trajectory IS NOT NULL
         AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[(SELECT ud_schema FROM roster)]),
@@ -296,6 +475,7 @@ SELECT jsonb_build_object(
       FROM (SELECT * FROM source_sample_witnesses LIMIT 4) a),'[]'),
     'cue_type8_sample_more',(SELECT count(*)>4 FROM cue_sample_nominated)),
  'limits',jsonb_build_object('candidate_overflow',(SELECT count(*)>{candidates} FROM nominated),
+   {relation_overflows}
    'excluded_parse_records',COALESCE((SELECT jsonb_agg(jsonb_build_object(
        'parse_id',encode(p.entity_id,'hex'),'physicality_id',encode(p.id,'hex'),
        'declared_count',p.n_constituents,'packed_vertices',public.st_npoints(p.trajectory),
@@ -371,6 +551,8 @@ def main() -> int:
     parser.add_argument("database")
     parser.add_argument("--cue", action="append", help="exact source lookup surface; repeatable")
     parser.add_argument("--operand", action="append", help="exact WordNet surface probe; repeatable")
+    parser.add_argument("--relation", action="append",
+                        help="exact native relation-name lookup; repeatable, read-only evidence in both directions with one follow-up frontier")
     parser.add_argument("--candidate-limit", type=int, default=16)
     parser.add_argument("--constituent-limit", type=int, default=2048)
     parser.add_argument("--witness-limit", type=int, default=512)
@@ -385,9 +567,12 @@ def main() -> int:
     cues, operands = args.cue or ["define", "Define"], args.operand or ["justice", "glacier", "whale"]
     if len(cues) > 16 or len(operands) > 16 or any(len(x.encode("utf-8")) > 1024 for x in cues + operands):
         parser.error("at most 16 cues/operands of at most 1024 UTF-8 bytes each")
+    relations = args.relation or []
+    if len(relations) > 16 or any(not x or len(x.encode("utf-8")) > 1024 for x in relations):
+        parser.error("at most 16 nonempty relation names of at most 1024 UTF-8 bytes each")
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     sql = readback_sql(cues, operands, args.candidate_limit, args.constituent_limit,
-                       args.witness_limit, args.timeout_seconds)
+                       args.witness_limit, args.timeout_seconds, relations)
     sql_path = args.receipt.with_suffix(".sql")
     sql_path.write_text(sql, encoding="utf-8")
     start = time.monotonic_ns()

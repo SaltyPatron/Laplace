@@ -182,7 +182,9 @@ public static class RelationTypeRegistry
     public static void SeedDynamic(SubstrateChangeBuilder builder, in RelationTypeResolution k, Hash128 sourceId,
                                    ISet<Hash128> seenEntitiesThisBatch,
                                    ConcurrentIdSet seenAttestationsThisRun,
-                                   ConcurrentDictionary<string, byte>? readbackNames = null)
+                                   ConcurrentDictionary<string, byte>? readbackNames = null,
+                                   double witnessWeight = SourceTrust.AcademicCurated,
+                                   Hash128? contextId = null)
     {
 
 
@@ -197,14 +199,17 @@ public static class RelationTypeRegistry
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
 
 
-        if (seenAttestationsThisRun.Add(k.Id))
+        if (k.ParentId is { } parent)
         {
-            builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-            if (k.ParentId is { } parent)
+            AttestationRow declaration = NativeAttestation.Categorical(
+                k.Id, "IS_A", parent, sourceId, contextId, witnessWeight);
+            // A declaration is scoped testimony. Deduplicating only its type
+            // would erase a second source/file's independently witnessed row.
+            if (seenAttestationsThisRun.Add(declaration.Id))
             {
+                builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
                 builder.AddEntity(new EntityRow(parent, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    k.Id, "IS_A", parent, sourceId, null, SourceTrust.AcademicCurated));
+                builder.AddAttestation(declaration);
             }
             // GH #1041: no content DAG for the label — "DEP_NSUBJ" was a
             // measured tier-2 Word entity. The type id is blake3(canonical) =
@@ -217,20 +222,24 @@ public static class RelationTypeRegistry
     public static void SeedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
                                   ISet<Hash128> seenEntitiesThisBatch,
                                   ConcurrentIdSet seenAttestationsThisRun,
-                                  ConcurrentDictionary<string, byte>? readbackNames = null)
+                                  ConcurrentDictionary<string, byte>? readbackNames = null,
+                                  double witnessWeight = SourceTrust.AcademicCurated,
+                                  Hash128? contextId = null)
     {
         int colon = deprel.IndexOf(':');
-        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
-        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
+        if (colon > 0) SeedDynamic(builder, ResolveDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
+        SeedDynamic(builder, ResolveDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
     }
 
     public static void SeedEnhancedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
                                           ISet<Hash128> seenEntitiesThisBatch,
                                           ConcurrentIdSet seenAttestationsThisRun,
-                                          ConcurrentDictionary<string, byte>? readbackNames = null)
+                                          ConcurrentDictionary<string, byte>? readbackNames = null,
+                                          double witnessWeight = SourceTrust.AcademicCurated,
+                                          Hash128? contextId = null)
     {
         int colon = deprel.IndexOf(':');
-        if (colon > 0) SeedDynamic(builder, ResolveEnhancedDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
-        SeedDynamic(builder, ResolveEnhancedDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames);
+        if (colon > 0) SeedDynamic(builder, ResolveEnhancedDeprel(deprel[..colon]), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
+        SeedDynamic(builder, ResolveEnhancedDeprel(deprel), sourceId, seenEntitiesThisBatch, seenAttestationsThisRun, readbackNames, witnessWeight, contextId);
     }
 }

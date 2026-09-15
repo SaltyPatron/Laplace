@@ -262,6 +262,32 @@
       "required": true
     },
     {
+      "id": "policy-operational-source-readback",
+      "profile": "policy",
+      "owner": "substrate",
+      "runner": "script",
+      "command": ["python3", "scripts/test-operational-source-readback.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-operational-task",
+      "profile": "policy",
+      "owner": "substrate",
+      "runner": "script",
+      "command": ["python3", "scripts/test-operational-task.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-managed-host",
       "profile": "policy",
       "owner": "services",

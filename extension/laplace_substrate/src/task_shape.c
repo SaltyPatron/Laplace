@@ -23,7 +23,7 @@ typedef struct ShapeStructure
     hash128_t *flat;
     size_t length;
     laplace_ud_parse_t parse;
-    laplace_task_shape_t shape;
+    laplace_task_shape_view_t shape;
     bool is_parse, is_shape;
     MemoryContextCallback cleanup;
 } ShapeStructure;
@@ -108,7 +108,7 @@ shape_receive_structure(Datum physicality, Datum entity, Datum geometry, void *o
     }
     record->flat = flat;
     record->length = count;
-    int status = laplace_task_shape_decode(flat, count, &record->shape);
+    int status = laplace_task_shape_decode_view(flat, count, &record->shape);
     if (status == -3) elog(ERROR, "task shape: codec allocation failed");
     record->is_shape = status == 0;
     if (!record->is_shape)
@@ -302,7 +302,7 @@ shape_contract(const ShapeRead *read, const ShapeStructure *shape,
         {
             size_t slot;
             for (slot = 0; slot < shape->shape.slot_count; ++slot)
-                if (hash128_eq(&row->object, shape->shape.slots + slot * 3)) break;
+                if (hash128_eq(&row->object, shape->shape.slots + slot * shape->shape.slot_stride)) break;
             if (slot == shape->shape.slot_count || !shape_positive(read, row, rows, count))
                 return false;
             if (!slots[slot]) slots[slot] = row;
@@ -428,8 +428,8 @@ shape_instantiate(ShapeRead *read, const ShapeStructure *shape, const ShapeStruc
         elog(ERROR, "task shape: input slot set exceeds allocation capacity");
     size_t *ordinals = palloc(slots * sizeof(*ordinals));
     int match = current ?
-        laplace_task_shape_match(&shape->shape, &exemplar->parse, &current->decoded, ordinals) :
-        laplace_task_shape_match_forms(&shape->shape, &exemplar->parse,
+        laplace_task_shape_match_view(&shape->shape, &exemplar->parse, &current->decoded, ordinals) :
+        laplace_task_shape_match_forms_view(&shape->shape, &exemplar->parse,
             read->intent->structure->forms, read->intent->structure->form_count, ordinals);
     if (match < 0) elog(ERROR, "task shape: exact structural matching failed");
     if (!match) { pfree(ordinals); return; }
@@ -438,8 +438,11 @@ shape_instantiate(ShapeRead *read, const ShapeStructure *shape, const ShapeStruc
     SlotChoices *choices = palloc0(slots * sizeof(*choices));
     int *selected = palloc0(slots * sizeof(*selected));
     uint64 combinations = 1;
+    laplace_task_shape_markers_extended_t markers;
+    laplace_task_shape_markers_extended_init(&markers);
     for (size_t slot = 0; slot < slots; ++slot)
     {
+        const hash128_t *fields = shape->shape.slots + slot * shape->shape.slot_stride;
         HASH_SEQ_STATUS scan;
         LaplacePromptIntentBinding *binding;
         int count = 0;
@@ -449,15 +452,28 @@ shape_instantiate(ShapeRead *read, const ShapeStructure *shape, const ShapeStruc
         if ((Size) read->fanout > MaxAllocSize / sizeof(hash128_t))
             elog(ERROR, "task shape: input candidate envelope exceeds allocation capacity");
         choices[slot].ids = palloc((Size) Max(read->fanout, 1) * sizeof(hash128_t));
-        hash_seq_init(&scan, read->intent->bindings);
-        while ((binding = hash_seq_search(&scan)) != NULL)
+        if (shape->shape.slot_stride == 4 && hash128_eq(fields + 3, &markers.current_form))
         {
-            if (!bms_is_member(choices[slot].origin, binding->origins)) continue;
-            ShapeEntityType *type = hash_search(read->entity_types, &binding->id, HASH_FIND, NULL);
-            if (!type || !type->known || type->conflicting ||
-                !hash128_eq(&type->type, shape->shape.slots + slot * 3 + 2)) continue;
-            if (count >= read->fanout) { read->failed = true; continue; }
-            choices[slot].ids[count++] = binding->id;
+            /* The source contract selects the representation at this exact
+             * occurrence. Naming alternatives stay in COUPLE; they are not
+             * inputs to a current-form slot and receive no ranking preference. */
+            const hash128_t *form = read->intent->structure->forms + ordinals[slot];
+            ShapeEntityType *type = hash_search(read->entity_types, form, HASH_FIND, NULL);
+            if (type && type->known && !type->conflicting && hash128_eq(&type->type, fields + 2))
+                choices[slot].ids[count++] = *form;
+        }
+        else
+        {
+            hash_seq_init(&scan, read->intent->bindings);
+            while ((binding = hash_seq_search(&scan)) != NULL)
+            {
+                if (!bms_is_member(choices[slot].origin, binding->origins)) continue;
+                ShapeEntityType *type = hash_search(read->entity_types, &binding->id, HASH_FIND, NULL);
+                if (!type || !type->known || type->conflicting ||
+                    !hash128_eq(&type->type, fields + 2)) continue;
+                if (count >= read->fanout) { read->failed = true; continue; }
+                choices[slot].ids[count++] = binding->id;
+            }
         }
         choices[slot].count = count;
         qsort(choices[slot].ids, count, sizeof(hash128_t), shape_identity_compare);
@@ -535,7 +551,14 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
     if (!OidIsValid(geometry)) elog(ERROR, "task shape: geometry type is unavailable");
     read.as_binary = LookupFuncName(list_make2(makeString("public"), makeString("st_asbinary")), 1, &geometry, false);
     members = DatumGetArrayTypeP(makeArrayResult(forms, read.owner));
-    read.failed = !laplace_typed_membership_read(members, false, 8, fanout, shape_receive_structure, &read);
+    laplace_ud_markers_t parse_markers;
+    laplace_ud_markers_init(&parse_markers);
+    ArrayType *required = hash128_array_from_ids(&parse_markers.schema_v1, 1);
+    /* Count only the structural domain this compiler can consume. The schema
+     * requirement is a second indexed AND condition, never another ANY cue. */
+    read.failed = !laplace_typed_membership_read_with_required(members, false,
+        required, 8, fanout, shape_receive_structure, &read);
+    pfree(required);
     pfree(members);
     if (read.failed) goto done;
     parse_ids = shape_structure_ids(&read, true);
@@ -604,7 +627,7 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
         if (shape_contract(&read, shape, example, rows, count, &call, slots))
         {
             size_t *ordinals = palloc(shape->shape.slot_count * sizeof(*ordinals));
-            int projection = laplace_task_shape_match_forms(&shape->shape, &exemplar->parse,
+            int projection = laplace_task_shape_match_forms_view(&shape->shape, &exemplar->parse,
                 structure->forms, structure->form_count, ordinals);
             if (projection < 0) elog(ERROR, "task shape: request projection allocation failed");
             bool conflict = false;
@@ -613,7 +636,7 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
                 if (structure->parses[j]->supported)
                 {
                     ++observed;
-                    int match = laplace_task_shape_match(&shape->shape, &exemplar->parse,
+                    int match = laplace_task_shape_match_view(&shape->shape, &exemplar->parse,
                         &structure->parses[j]->decoded, ordinals);
                     if (match < 0) elog(ERROR, "task shape: observed structure constraint failed");
                     if (!match) conflict = true;

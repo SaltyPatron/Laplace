@@ -15,15 +15,16 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "OperationalDecomposer"
-EXPECTED_ARTIFACTS = 11
+EXPECTED_ARTIFACTS = 15
 # This is the existing file-resume-fingerprint/v1 framing, not a tuning knob.
 # IngestBatchPipeline.TryResolveFileIdentity uses the same 4 MiB byte blocks.
 FINGERPRINT_BLOCK_BYTES = 4 << 20
 
 
-def authored_bundle(root: Path, bundle: Path) -> dict[str, bytes]:
+def authored_selection(root: Path) -> dict[str, Path]:
+    """Resolve the one literal project inventory without a build or native runtime."""
     project = root / "app/Laplace.Decomposers/Laplace.Decomposers.csproj"
-    selected: dict[str, bytes] = {}
+    selected: dict[str, Path] = {}
     for item in ET.parse(project).getroot().iter("Content"):
         link = item.get("Link", "")
         if not link.startswith("seeds/operational/"):
@@ -38,16 +39,28 @@ def authored_bundle(root: Path, bundle: Path) -> dict[str, bytes]:
                 raise RuntimeError("operational artifact is outside the source checkout")
             relative = link.removeprefix("seeds/operational/").replace(
                 "%(Filename)%(Extension)", source.name)
+            if (Path(relative).is_absolute() or ".." in Path(relative).parts
+                    or any(c in relative or c in str(source) for c in ("\n", "\r", "\x00"))):
+                raise RuntimeError("operational artifact paths must be single relative inventory lines")
             if relative in selected:
                 raise RuntimeError(f"duplicate operational bundle path: {relative}")
-            payload = source.read_bytes()
-            if not payload:
+            if not source.is_file() or source.stat().st_size == 0:
                 raise RuntimeError(f"empty authored operational artifact: {relative}")
-            if (bundle / relative).read_bytes() != payload:
-                raise RuntimeError(f"bundled bytes differ from authored artifact: {relative}")
-            selected[relative] = payload
+            selected[relative] = source
     if len(selected) != EXPECTED_ARTIFACTS:
         raise RuntimeError(f"expected {EXPECTED_ARTIFACTS} authored artifacts, found {len(selected)}")
+    return dict(sorted(selected.items()))
+
+
+def authored_bundle(root: Path, bundle: Path) -> dict[str, bytes]:
+    selected: dict[str, bytes] = {}
+    for relative, source in authored_selection(root).items():
+        payload = source.read_bytes()
+        if not payload:
+            raise RuntimeError(f"empty authored operational artifact: {relative}")
+        if (bundle / relative).read_bytes() != payload:
+            raise RuntimeError(f"bundled bytes differ from authored artifact: {relative}")
+        selected[relative] = payload
     actual = {p.relative_to(bundle).as_posix() for p in bundle.rglob("*") if p.is_file()}
     if actual != set(selected):
         raise RuntimeError("bundled artifact paths differ from the declared project selection")
@@ -191,12 +204,46 @@ def seed_and_verify(root: Path = ROOT) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ingest", action="store_true", required=True,
-                        help="run the default product seed and verify that exact invocation")
-    parser.parse_args()
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--ingest", action="store_true",
+                      help="run the default product seed and verify that exact invocation")
+    mode.add_argument("--list-source-paths", action="store_true",
+                      help="list exact project-selected repository source paths without a build or ingestion")
+    parser.add_argument("--report", type=Path,
+                        help="retain the exact validated run/file report for later product proof")
+    args = parser.parse_args()
+    if args.list_source_paths:
+        if args.report is not None:
+            parser.error("--report belongs to --ingest")
+        try:
+            paths = sorted({path.relative_to(ROOT.resolve()).as_posix()
+                            for path in authored_selection(ROOT).values()})
+        except (OSError, ValueError, RuntimeError, ET.ParseError) as error:
+            print(f"OPERATIONAL_SELECTION_FAIL {error}", file=sys.stderr)
+            return 1
+        print("\n".join(paths))
+        return 0
+
+    def retain(value: dict) -> None:
+        if args.report is None:
+            return
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        temporary = args.report.with_name(args.report.name + f".tmp-{os.getpid()}")
+        with temporary.open("w", encoding="utf-8") as output:
+            json.dump(value, output, ensure_ascii=False, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, args.report)
+
     try:
+        # A failed new invocation must never leave an older successful report
+        # available for post-publication proof to mistake as this invocation.
+        retain({"disposition": "running"})
         report = seed_and_verify()
+        retain({**report, "disposition": "verified"})
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        retain({"disposition": "failed", "error": str(error)})
         print(f"OPERATIONAL_SEED_FAIL {error}", file=sys.stderr)
         return 1
     print(f"OPERATIONAL_SEED_OK run={report['run']['run_id']} "
@@ -204,6 +251,8 @@ def main() -> int:
     for file in report["files"]:
         print(f"OPERATIONAL_ARTIFACT path={file['relative_path']} status={file['status']} "
               f"bytes={file['bytes']} fingerprint={file['resume_fingerprint']} completion=present")
+    if args.report is not None:
+        print(f"OPERATIONAL_SEED_REPORT={args.report}")
     return 0
 
 

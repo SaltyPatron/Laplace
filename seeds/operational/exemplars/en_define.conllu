@@ -1,0 +1,6 @@
+# This is an authored Laplace operational annotation, not an upstream UD corpus observation.
+# sent_id = laplace-operational-define-justice-v1
+# text = define justice
+1	define	define	VERB	_	Mood=Imp	0	root	_	_
+2	justice	justice	NOUN	_	Number=Sing	1	obj	_	_
+

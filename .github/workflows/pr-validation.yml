@@ -229,6 +229,10 @@ jobs:
           flock --exclusive --close /build/laplace/work/host-resource.lock \
             python3 scripts/read-operational-source.py "$PGDATABASE" \
               --core "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
+              --cue The --cue opposite --cue of --cue hot --cue is \
+              --operand hot --operand empty --operand cold \
+              --relation IS_ANTONYM_OF --relation HAS_NAME --relation IS_EXAMPLE_OF \
+              --relation CALLS --relation HAS_INPUT --relation IS_LEMMA_OF --relation HAS_NAME_ALIAS \
               --receipt "$evidence/source-readback.json"
 
       - name: Retain operational source evidence
@@ -239,6 +243,15 @@ jobs:
           path: ${{ env.LAPLACE_OPERATIONAL_SOURCE_EVIDENCE }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Retain authored operational exemplar proof
+        if: always() && env.LAPLACE_PR_WORKTREE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: operational-exemplar-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.LAPLACE_PR_WORKTREE }}/build/test-results/operational-exemplar/
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Remove isolated pull-request worktree
         if: always()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import copy
+import json
 import os
 import shutil
 import subprocess
@@ -29,6 +30,149 @@ def commands(job: dict) -> str:
 
 
 class ActionsAuthorityTests(unittest.TestCase):
+    def test_post_stockfish_operational_proof_precedes_upload_and_measurement(self):
+        steps = load(MAIN)["jobs"]["product"]["steps"]
+        names = [step.get("name") for step in steps]
+        source = names.index("Admit official Stockfish source and verify native corpus readback")
+        proof = names.index("Verify ordinary operational execution after Stockfish admission")
+        upload = names.index("Upload operational seed and execution receipts")
+        measurement = names.index("Record successful activation for installed chess measurement")
+        self.assertLess(source, proof)
+        self.assertLess(proof, upload)
+        self.assertLess(upload, measurement)
+        self.assertEqual("success() && env.LAPLACE_FAST_ONLY != '1' && env.LAPLACE_STAGE == 'all'",
+                         steps[proof]["if"])
+        self.assertEqual("15", steps[proof]["timeout-minutes"])
+        self.assertNotIn("continue-on-error", steps[proof])
+        self.assertEqual("always() && steps.full_product.outcome != 'skipped' && env.LAPLACE_STAGE == 'all'",
+                         steps[upload]["if"])
+        self.assertEqual("/build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}/",
+                         steps[upload]["with"]["path"])
+
+    def run_post_stockfish_proof(self, receipt_values, first_rc=0, second_rc=0, *, fresh="0", restore="0"):
+        """Execute the actual workflow shell, receipt reader and file lock."""
+        script = next(step["run"] for step in load(MAIN)["jobs"]["product"]["steps"]
+                      if step.get("name") == "Verify ordinary operational execution after Stockfish admission")
+        with tempfile.TemporaryDirectory(prefix="post-stockfish-", dir=os.environ.get("TMPDIR", "/build/laplace/work")) as directory:
+            root = Path(directory)
+            proof_root = root / "operational-proof"
+            current = proof_root / "34994682033-2"
+            current.mkdir(parents=True)
+            # A previous attempt must never supply this attempt's missing seed.
+            previous = proof_root / "34994682033-1" / "invocation-prior"
+            previous.mkdir(parents=True)
+            previous.joinpath("seed.json").write_text(json.dumps(
+                {"disposition": "verified", "run": {"run_id": "bf972cf5-0ca8-4cab-99e7-0b9b19482c34"}}))
+            baseline = {}
+            for index, value in enumerate(receipt_values):
+                invocation = current / f"invocation-{index}"
+                invocation.mkdir()
+                invocation.joinpath("seed.json").write_text(json.dumps(value))
+                for filename in ("task.json", "antonym-task.json"):
+                    path = invocation / filename
+                    path.write_text("earlier-execution-receipt\n")
+                    baseline[path] = path.read_bytes()
+            lock = root / "host-resource.lock"
+            calls = root / "calls.jsonl"
+            executable = root / "python3"
+            executable.write_text("#!" + sys.executable + "\n" + """import fcntl, json, os, sys
+from pathlib import Path
+if sys.argv[1] == '-':
+    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+if sys.argv[1] != 'scripts/verify-operational-task.py':
+    raise SystemExit('unexpected process instead of the existing verifier')
+with open(os.environ['TEST_HOST_LOCK'], 'a') as lock:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        pass
+    else:
+        raise SystemExit('verifier ran without the shared host lock')
+with Path(os.environ['PROOF_CALLS']).open('a') as stream:
+    stream.write(json.dumps(sys.argv[1:]) + '\\n')
+code = int(os.environ['ANTONYM_RC' if '--proof-mode' in sys.argv else 'DEFINITION_RC'])
+Path(sys.argv[sys.argv.index('--receipt') + 1]).write_text(json.dumps({'exit': code}))
+raise SystemExit(code)
+""")
+            executable.chmod(0o755)
+            environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                           "GITHUB_RUN_ID": "34994682033", "GITHUB_RUN_ATTEMPT": "2",
+                           "PROOF_CALLS": str(calls), "TEST_HOST_LOCK": str(lock),
+                           "DEFINITION_RC": str(first_rc), "ANTONYM_RC": str(second_rc),
+                           "LAPLACE_FRESH_DB": fresh, "LAPLACE_RESTORE_FOUNDATION": restore}
+            # Relocate only fixture filesystem endpoints; the checked-in shell,
+            # real Python receipt validation and real flock all execute unchanged.
+            script = script.replace("/build/laplace/work/operational-proof", str(proof_root)).replace(
+                "/build/laplace/work/host-resource.lock", str(lock))
+            result = subprocess.run(["bash"], input=script + "\necho later-acceptance\n", cwd=ROOT,
+                                    env=environment, text=True, capture_output=True, timeout=20)
+            observed = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+            for path, payload in baseline.items():
+                self.assertEqual(payload, path.read_bytes(), "post proof overwrote an earlier execution receipt")
+            retained = {path.name: json.loads(path.read_text()) for path in current.glob("invocation-*/post-stockfish-*.json")}
+            return result, observed, retained, str(current / "invocation-0")
+
+    def test_post_stockfish_both_forms_reuse_exact_seed_and_retain_separate_receipts(self):
+        run_id = "e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"
+        result, calls, retained, directory = self.run_post_stockfish_proof(
+            [{"disposition": "verified", "run": {"run_id": run_id}}])
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("later-acceptance\n", result.stdout)
+        self.assertEqual([
+            ["scripts/verify-operational-task.py", "--shape-file", "seeds/operational/tasks/en_define.json",
+             "--seed-run-id", run_id, "--receipt", directory + "/post-stockfish-task.json"],
+            ["scripts/verify-operational-task.py", "--proof-mode", "direct-relation", "--prompt", "The opposite of hot is",
+             "--operand", "hot", "--shape-file", "seeds/operational/tasks/en_antonym.json",
+             "--exemplar-file", "seeds/operational/exemplars/en_antonym.conllu", "--seed-run-id", run_id,
+             "--receipt", directory + "/post-stockfish-antonym-task.json"],
+        ], calls)
+        self.assertEqual({"post-stockfish-task.json": {"exit": 0}, "post-stockfish-antonym-task.json": {"exit": 0}}, retained)
+
+    def test_post_stockfish_either_failure_stops_later_acceptance_and_retains_failure(self):
+        seed = {"disposition": "verified", "run": {"run_id": "e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"}}
+        for first, second in ((41, 0), (0, 42)):
+            with self.subTest(first=first, second=second):
+                result, calls, retained, _ = self.run_post_stockfish_proof([seed], first, second)
+                self.assertEqual(first or second, result.returncode, result.stderr)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(1 if first else 2, len(calls))
+                self.assertEqual({"exit": first}, retained["post-stockfish-task.json"])
+                if first:
+                    self.assertNotIn("post-stockfish-antonym-task.json", retained)
+                else:
+                    self.assertEqual({"exit": second}, retained["post-stockfish-antonym-task.json"])
+
+    def test_post_stockfish_rejects_missing_multiple_or_unverified_seed_before_execution(self):
+        seed = {"disposition": "verified", "run": {"run_id": "e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"}}
+        for name, values in (
+            ("missing-current-attempt", []), ("multiple", [seed, seed]),
+            ("unverified", [{**seed, "disposition": "failed"}]),
+            ("invalid-uuid", [{**seed, "run": {"run_id": "not-a-run-uuid"}}]),
+            ("noncanonical-uuid", [{**seed, "run": {"run_id": seed["run"]["run_id"].upper()}}]),
+            ("oversized", [{**seed, "extra": "x" * 1048576}]),
+        ):
+            with self.subTest(name=name):
+                result, calls, retained, _ = self.run_post_stockfish_proof(values)
+                self.assertNotEqual(0, result.returncode, result.stderr)
+                self.assertEqual("", result.stdout)
+                self.assertEqual([], calls)
+                self.assertEqual({}, retained)
+
+    def test_post_stockfish_preserves_only_the_explicit_fresh_unrestored_exception(self):
+        result, calls, retained, _ = self.run_post_stockfish_proof([], fresh="1")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("fresh DB intentionally left unseeded", result.stdout)
+        self.assertEqual([], calls)
+        self.assertEqual({}, retained)
+        # Foundation restoration re-enables the exact seed and both proofs.
+        result, calls, _, _ = self.run_post_stockfish_proof([], fresh="1", restore="1")
+        self.assertNotEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], calls)
+        seed = {"disposition": "verified", "run": {"run_id": "e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"}}
+        result, calls, _, _ = self.run_post_stockfish_proof([seed], fresh="1", restore="1")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(2, len(calls))
+
     def test_main_has_one_product_job_and_one_mutation_authority(self):
         workflow = load(MAIN)
         self.assertEqual("laplace-substrate-lifecycle", workflow["concurrency"]["group"])
@@ -53,8 +197,10 @@ class ActionsAuthorityTests(unittest.TestCase):
             "run_build",
             "run_dev",
             "run_install_and_db",
+            "seed_operational_memory",
             "run_publish",
             "run_repair_installed_corpus",
+            "verify_operational_execution",
             "run_integration",
             "run_live_if_expected",
         ]
@@ -79,6 +225,44 @@ class ActionsAuthorityTests(unittest.TestCase):
         self.assertNotIn("ensure_product_foundation", reconcile)
         self.assertNotIn("ensure-foundation.sh", reconcile)
         self.assertNotIn("pipeline.sh", reconcile)
+
+    def test_actual_classifier_treats_selected_docs_as_product_inputs(self):
+        workflow = load(MAIN)
+        classifier = next(step["run"] for step in workflow["jobs"]["product"]["steps"]
+                          if step.get("name") == "Classify source-only change")
+        # Execute the checked-in classifier with only git's changed-file response
+        # controlled. Selection uses the real CLI/project inventory and no build.
+        git = '''git() {
+  if [[ "$1" == diff ]]; then printf '%s\\n' "$TEST_CHANGED_PATH"; fi
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            envfile = Path(directory) / "github-env"
+            for path, fast in (("docs/INVENTION.md", "0"),
+                               ("docs/specs/37_Substrate_Operation_ISA.md", "0"),
+                               ("docs/INVENTORY.md", "1"),
+                               ("docs/INVENTION.md.notes", "1")):
+                envfile.write_text("")
+                environment = dict(os.environ, BEFORE_SHA="base", TARGET_SHA="head",
+                                   TEST_CHANGED_PATH=path, GITHUB_ENV=str(envfile))
+                result = subprocess.run(["bash"], input=git + classifier, cwd=ROOT,
+                                        env=environment, text=True, capture_output=True, timeout=20)
+                with self.subTest(path=path):
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertIn("LAPLACE_FAST_ONLY=" + fast, envfile.read_text().splitlines())
+
+    def test_classifier_cannot_treat_failed_source_inventory_as_fast_success(self):
+        classifier = next(step["run"] for step in load(MAIN)["jobs"]["product"]["steps"]
+                          if step.get("name") == "Classify source-only change")
+        with tempfile.TemporaryDirectory() as directory:
+            envfile = Path(directory) / "github-env"
+            environment = dict(os.environ, BEFORE_SHA="base", TARGET_SHA="head", GITHUB_ENV=str(envfile))
+            # Assignment must retain the producer's failure before the diff loop;
+            # process substitution would let an empty selection escape as success.
+            result = subprocess.run(["bash"], input="python3() { return 43; }\n" + classifier,
+                                    cwd=ROOT, env=environment, text=True, capture_output=True, timeout=20)
+            self.assertEqual(43, result.returncode, result.stderr)
+            self.assertFalse(envfile.exists())
 
     def test_foundation_restore_is_explicit_in_main_lifecycle(self):
         workflow = load(MAIN)
@@ -107,14 +291,20 @@ class ActionsAuthorityTests(unittest.TestCase):
         prefix = "Laplace.SubstrateCRUD.Tests."
         methods = [
             prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold",
+            prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops",
+            prefix + "OperationalSourceExecutionTests.AuthoredAntonymExemplar_AdmitsCompleteSourceWithNativeParseProvenance",
+            prefix + "OperationalSourceExecutionTests.AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding",
             prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent",
             prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
         ]
         expected_filter = "|".join("FullyQualifiedName=" + method for method in methods)
         self.assertIn("--filter '" + expected_filter + "'", source)
+        self.assertIn('managed_results="$exemplar_results"', source)
+        self.assertIn('"$managed_results/operational-source-execution.trx"',
+                      source.split('rm -f ', 1)[1].split('PATH="$PG_PREFIX/bin:', 1)[0])
         validator = source.split('python3 - "$managed_results/operational-source-execution.trx" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
-        names = [methods[0], methods[1] + "(batchPrefix: False)",
-                 methods[1] + "(batchPrefix: True)", methods[2]]
+        names = [methods[0], methods[1], methods[2], methods[3], methods[4] + "(batchPrefix: False)",
+                 methods[4] + "(batchPrefix: True)", methods[5]]
 
         def receipt():
             root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
@@ -122,7 +312,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             for name in names:
                 ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
             summary = ET.SubElement(root, "ResultSummary")
-            ET.SubElement(summary, "Counters", total="4", executed="4", passed="4",
+            ET.SubElement(summary, "Counters", total="7", executed="7", passed="7",
                           failed="0", notExecuted="0")
             return root
 
@@ -139,20 +329,26 @@ class ActionsAuthorityTests(unittest.TestCase):
         for result in lower.find("Results"):
             result.set("testName", result.get("testName").replace("False", "false").replace("True", "true"))
         check(lower, True)
+        for missing_name in names:
+            with self.subTest(missing_name=missing_name):
+                root = receipt()
+                results = root.find("Results")
+                results.remove(next(result for result in results if result.get("testName") == missing_name))
+                check(root, False)
         for corruption in ("missing", "repeated-theory", "wrong-test", "skipped", "failed", "counter-only"):
             with self.subTest(corruption=corruption):
                 root = receipt()
                 results = root.find("Results")
                 if corruption == "missing":
-                    results.remove(results[3])
+                    results.remove(results[6])
                 elif corruption == "repeated-theory":
-                    results[2].set("testName", names[1])
+                    results[5].set("testName", names[4])
                 elif corruption == "wrong-test":
-                    results[3].set("testName", prefix + "UnrelatedPassingTest")
+                    results[6].set("testName", prefix + "UnrelatedPassingTest")
                 elif corruption in ("skipped", "failed"):
                     results[2].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
                 else:
-                    root.find("ResultSummary/Counters").set("executed", "3")
+                    root.find("ResultSummary/Counters").set("executed", "6")
                 check(root, False)
 
     def test_manual_db_mutation_shares_product_lifecycle_lock(self):
@@ -273,6 +469,88 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
                 finally:
                     path.write_text(original)
 
+    def test_operational_proof_cannot_precede_repair_or_have_failure_suppressed(self):
+        path = self.root / "scripts/product-ci.sh"
+        original = path.read_text()
+        invocation = "\nverify_operational_execution\n"
+        mutations = (
+            original.replace(invocation, ""),
+            original.replace(invocation, "\nverify_operational_execution || true\n"),
+            original.replace(invocation, "").replace("\nrun_publish\n", invocation + "run_publish\n"),
+        )
+        for mutation in mutations:
+            try:
+                self.assertNotEqual(original, mutation)
+                path.write_text(mutation)
+                self.check_audit(diagnostic="product lifecycle order drifted")
+            finally:
+                path.write_text(original)
+
+    def test_failed_operational_proof_stops_later_product_acceptance(self):
+        source = PRODUCT.read_text()
+        footer = "run_repair_installed_corpus\n" + source.rsplit("\nrun_repair_installed_corpus\n", 1)[1]
+        script = """set -euo pipefail
+run_repair_installed_corpus() { echo repair-complete; }
+verify_operational_execution() { echo operational-proof-rejected; return 41; }
+run_integration() { echo unexpected-integration; }
+run_live_if_expected() { echo unexpected-live; }
+run_perf() { echo unexpected-perf; }
+""" + footer
+        result = subprocess.run(["bash"], input=script, text=True, capture_output=True)
+        self.assertEqual(41, result.returncode, result.stderr)
+        self.assertEqual(["repair-complete", "operational-proof-rejected"], result.stdout.splitlines())
+
+    def test_both_operational_forms_require_the_same_seed_and_independent_passing_proofs(self):
+        source = PRODUCT.read_text()
+        function = "verify_operational_execution() {" + source.split(
+            "verify_operational_execution() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        run_id = "e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"
+        shim = "#!" + sys.executable + "\n" + """import json, os, sys
+from pathlib import Path
+if sys.argv[1] == '-':
+    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+with Path(os.environ['PROOF_CALLS']).open('a') as stream:
+    stream.write(json.dumps(sys.argv[1:]) + '\\n')
+mode = 'ANTONYM_RC' if '--proof-mode' in sys.argv else 'DEFINITION_RC'
+raise SystemExit(int(os.environ[mode]))
+"""
+        for first_rc, second_rc in ((0, 0), (41, 0), (0, 42)):
+            with self.subTest(definition=first_rc, antonym=second_rc), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "seed.json").write_text(json.dumps(
+                    {"disposition": "verified", "run": {"run_id": run_id}}))
+                executable = root / "python3"
+                executable.write_text(shim)
+                executable.chmod(0o755)
+                calls_path = root / "calls.jsonl"
+                environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                    "PROOF_CALLS": str(calls_path), "TEST_PROOF_DIR": str(root),
+                    "DEFINITION_RC": str(first_rc), "ANTONYM_RC": str(second_rc),
+                    "LAPLACE_FRESH_DB": "0", "LAPLACE_RESTORE_FOUNDATION": "0"}
+                script = 'set -euo pipefail\noperational_proof_directory="$TEST_PROOF_DIR"\n' \
+                    + function + '\nverify_operational_execution\necho later-acceptance\n'
+                result = subprocess.run(["bash"], input=script, env=environment,
+                                        text=True, capture_output=True)
+                self.assertEqual(first_rc or second_rc, result.returncode, result.stderr)
+                self.assertEqual("later-acceptance\n" if not (first_rc or second_rc) else "", result.stdout)
+                calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+                self.assertEqual(1 if first_rc else 2, len(calls))
+                for call in calls:
+                    self.assertEqual("scripts/verify-operational-task.py", call[0])
+                    self.assertEqual(run_id, call[call.index("--seed-run-id") + 1])
+                self.assertNotIn("--proof-mode", calls[0])
+                self.assertEqual("seeds/operational/tasks/en_define.json",
+                                 calls[0][calls[0].index("--shape-file") + 1])
+                self.assertEqual(str(root / "task.json"), calls[0][calls[0].index("--receipt") + 1])
+                if len(calls) == 2:
+                    direct = calls[1]
+                    for flag, expected in (("--proof-mode", "direct-relation"),
+                        ("--prompt", "The opposite of hot is"), ("--operand", "hot"),
+                        ("--shape-file", "seeds/operational/tasks/en_antonym.json"),
+                        ("--exemplar-file", "seeds/operational/exemplars/en_antonym.conllu"),
+                        ("--receipt", str(root / "antonym-task.json"))):
+                        self.assertEqual(expected, direct[direct.index(flag) + 1])
+
     def test_owned_repair_resume_cannot_be_omitted_swallowed_or_moved_after_build(self):
         path=self.root / "scripts/product-ci.sh"
         original=path.read_text()
@@ -286,7 +564,7 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
                 path.write_text(mutation)
                 self.check_audit(diagnostic="owned repair resume must run unsuppressed")
             finally:
-                path.write_text(original)
+                    path.write_text(original)
 
     def test_publication_recovery_cannot_restart_api_after_unknown_repair_transaction(self):
         source = PRODUCT.read_text()

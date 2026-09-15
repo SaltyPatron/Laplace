@@ -244,7 +244,8 @@ else:
     product = PRODUCT.read_text(encoding="utf-8")
     required_order = [
         "run_policy", "run_deps", "run_build", "run_dev",
-        "run_install_and_db", "run_publish", "run_repair_installed_corpus", "run_integration", "run_live_if_expected",
+        "run_install_and_db", "seed_operational_memory", "run_publish", "run_repair_installed_corpus",
+        "verify_operational_execution", "run_integration", "run_live_if_expected",
     ]
     positions = [product.rfind(f"\n{name}\n") for name in required_order]
     if any(pos < 0 for pos in positions) or positions != sorted(positions):
