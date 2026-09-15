@@ -15,9 +15,9 @@ namespace Laplace.Chess.Service;
 /// plus header facts subjected on the LINE with ctx = the EVENT, so the hydrator navigates
 /// event → line → context-grouped headers. Two stream grains, matching the two marker
 /// grains: per EVENT (analyzer — per-playing testimony) and per LINE (trajectory/stockfish —
-/// pure functions of the line). A line's lossless mainline is its ordered trajectory of typed
-/// move objects; playings carry only occurrence-specific annotation lanes. SAN and board positions
-/// is admitted as stored chess identity.
+/// pure functions of the line). A line's lossless Content manifest is the exact Merkle preimage
+/// [start-position, ordered typed moves]; playings carry only occurrence-specific annotation
+/// lanes. SAN and the subsequent board walk are deterministic realizations of that stored identity.
 /// </summary>
 internal static class ChessWitnessHydrator
 {
@@ -27,10 +27,6 @@ internal static class ChessWitnessHydrator
     private static readonly Hash128 RelHasBlack = RelationTypeRegistry.RelationTypeId("HAS_BLACK");
     private static readonly Hash128 RelHasSetup = RelationTypeRegistry.RelationTypeId("HAS_SETUP");
 
-    // The ONLY relation types the hydrate probe consumes off a line entity. Filtering by
-    // type in SQL lets the composite index attestations_relation_btree (subject_id, type_id,
-    // object_id) drive the probe and stops the wire/CPU cost of pulling every attestation on
-    // a line — a line entity also carries tags and other edges the loop below discards.
     private static readonly byte[][] GameRelationTypes =
     [
         RelHasWhite.ToBytes(), RelHasBlack.ToBytes(), RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
@@ -39,19 +35,12 @@ internal static class ChessWitnessHydrator
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
         reader is NpgsqlSubstrateReader npg ? npg.DataSource : null;
 
-    // Witness sources whose recorded playings the analyzer derives. Live/self-play games
-    // (ChessSelfPlay source) fold their own outcomes at play time and must NOT be re-derived
-    // here — that would double-count them.
     private static byte[][] WitnessSources() =>
     [
         ChessVocabulary.PgnSourceId.ToBytes(),
         ChessVocabulary.BookSourceId.ToBytes(),
     ];
 
-    // Transition replay is testimony-only and safe over historical live/self-play
-    // playings too. Analysis deliberately excludes that source because those games
-    // already calculate analysis inline; applying that restriction to transitions
-    // would leave every pre-transition lab/Lichess game permanently invisible.
     private static byte[][] TransitionWitnessSources() =>
     [
         ChessVocabulary.PgnSourceId.ToBytes(),
@@ -59,11 +48,6 @@ internal static class ChessWitnessHydrator
         ChessVocabulary.SourceId.ToBytes(),
     ];
 
-    /// <summary>Recorded playings under witness sources — the analyzer's unit count.</summary>
-    /// <remarks>
-    /// Name keeps "Events" for call-site stability; the counted type is
-    /// <see cref="ChessVocabulary.PlayingType"/> (Copilot #854 / GH #736).
-    /// </remarks>
     internal static async Task<long?> CountRecordedEventsAsync(NpgsqlDataSource ds, CancellationToken ct)
         => await NpgsqlSubstrateReads.CountChessEventsWithPlaysLineAsync(
             ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(),
@@ -74,13 +58,10 @@ internal static class ChessWitnessHydrator
             ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(),
             TransitionWitnessSources(), ct).ConfigureAwait(false);
 
-    /// <summary>Distinct recorded lines under witness sources — the line-grain unit count.</summary>
     internal static async Task<long?> CountRecordedLinesAsync(NpgsqlDataSource ds, CancellationToken ct)
         => await NpgsqlSubstrateReads.CountChessLinesWithPlaysLineAsync(
             ds, RelPlaysLine.ToBytes(), WitnessSources(), ct).ConfigureAwait(false);
 
-    // markerId selects the per-EVENT skip marker, so each playing-grain lane (ChessAnalyze)
-    // gates its own versioned pass over the same witnessed playings.
     internal static async IAsyncEnumerable<Hash128> StreamUnanalyzedEventIdsAsync(
         NpgsqlDataSource ds,
         ISubstrateReader reader,
@@ -106,8 +87,6 @@ internal static class ChessWitnessHydrator
         }
     }
 
-    // markerId selects the per-LINE skip marker, so each line-grain lane (trajectory,
-    // stockfish) gates its own versioned pass. A line shared by many playings streams ONCE.
     internal static async IAsyncEnumerable<Hash128> StreamUnanalyzedLineIdsAsync(
         NpgsqlDataSource ds,
         ISubstrateReader reader,
@@ -164,7 +143,6 @@ internal static class ChessWitnessHydrator
             yield return g;
     }
 
-    /// <summary>Hydrated per-EVENT stream: one <see cref="ChessWitnessedGame"/> per playing.</summary>
     internal static async IAsyncEnumerable<ChessWitnessedGame> StreamUnanalyzedEventsAsync(
         NpgsqlDataSource ds,
         ISubstrateReader reader,
@@ -191,11 +169,6 @@ internal static class ChessWitnessHydrator
         }
     }
 
-    /// <summary>
-    /// Hydrated per-LINE stream: ONE <see cref="ChessWitnessedGame"/> per distinct line (an
-    /// arbitrary-but-deterministic representative playing supplies headers and result — every
-    /// playing of a line reads the same move trajectory by line identity).
-    /// </summary>
     internal static async IAsyncEnumerable<ChessWitnessedGame> StreamUnanalyzedLinesAsync(
         NpgsqlDataSource ds,
         ISubstrateReader reader,
@@ -220,11 +193,6 @@ internal static class ChessWitnessHydrator
         }
     }
 
-    /// <summary>
-    /// Existing governed players whose game/profile testimony predates the player → name
-    /// physicality. Keyset paging reads each missing identity once; no game testimony is
-    /// replayed and no name attestation is deposited again.
-    /// </summary>
     internal static async IAsyncEnumerable<(Hash128 PlayerId, string Name)>
         StreamPlayersMissingPhysicalityAsync(
             NpgsqlDataSource ds, int chunkSize,
@@ -236,7 +204,7 @@ internal static class ChessWitnessHydrator
         {
             ct.ThrowIfCancellationRequested();
             var page = await NpgsqlSubstrateReads.ChessPlayersMissingPhysicalityPageAsync(
-                    ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Content,
+                    ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Projection,
                     after, chunkSize, ct)
                 .ConfigureAwait(false);
             if (page.Count == 0) yield break;
@@ -270,10 +238,6 @@ internal static class ChessWitnessHydrator
     private static async Task<List<Hash128>> FetchRecordedPlayingIdPageAsync(
         NpgsqlDataSource ds, byte[] afterId, int limit, bool includeLive, CancellationToken ct)
     {
-        // Chess_PLAYING, not Chess_Event. EmitGame makes the PLAYING the subject of
-        // PLAYS_LINE (GH #736: one event holds many playings, so the event cannot carry a
-        // per-game outcome). Substrate page helper is still named ChessEventIdPageAsync
-        // (generic typed-entity page); the type argument is PlayingType.
         var rows = await NpgsqlSubstrateReads.ChessEventIdPageAsync(
             ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(),
             includeLive ? TransitionWitnessSources() : WitnessSources(),
@@ -290,19 +254,11 @@ internal static class ChessWitnessHydrator
         return rows.Select(static b => Hash128.FromBytes(b)).ToList();
     }
 
-    /// <summary>
-    /// Two-hop batched hydrate (GH #736): (1) chunk events → PLAYS_LINE → line ids, (2) one
-    /// probe of the lines' header rows, grouped client-side by (line, context) — every
-    /// requested playing of every line in the chunk hydrates from ONE scan. Rows belonging
-    /// to playings outside the chunk (already-analyzed events sharing a line) are discarded:
-    /// re-deriving them here would double-count their testimony.
-    /// </summary>
     internal static async Task<IReadOnlyList<ChessWitnessedGame>> TryHydrateChunkAsync(
         NpgsqlDataSource ds, IReadOnlyList<Hash128> eventIds, CancellationToken ct)
     {
         if (eventIds.Count == 0) return Array.Empty<ChessWitnessedGame>();
 
-        // Hop 1: event → line.
         var lineByEvent = new Dictionary<Hash128, Hash128>(eventIds.Count);
         {
             var eventBytes = new byte[eventIds.Count][];
@@ -314,7 +270,6 @@ internal static class ChessWitnessHydrator
         }
         if (lineByEvent.Count == 0) return Array.Empty<ChessWitnessedGame>();
 
-        // Hop 2: the lines' header rows, grouped by (line, event-context).
         var lines = lineByEvent.Values.Distinct().ToArray();
         var groups = await FetchHeaderGroupsAsync(ds, lines, ct).ConfigureAwait(false);
 
@@ -328,10 +283,6 @@ internal static class ChessWitnessHydrator
         return await MaterializeAsync(ds, wanted, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Per-LINE hydrate: one representative playing per line (smallest context id, so the
-    /// choice is deterministic across runs).
-    /// </summary>
     internal static async Task<IReadOnlyList<ChessWitnessedGame>> TryHydrateLinesAsync(
         NpgsqlDataSource ds, IReadOnlyList<Hash128> lineIds, CancellationToken ct)
     {
@@ -364,7 +315,7 @@ internal static class ChessWitnessHydrator
             ds, lineBytes, GameRelationTypes, ct).ConfigureAwait(false);
         foreach (var row in rows)
         {
-            if (row.ContextId is null) continue; // header facts are per-playing; ctx names the event
+            if (row.ContextId is null) continue;
             var key = (Hash128.FromBytes(row.SubjectId), Hash128.FromBytes(row.ContextId));
             if (!groups.TryGetValue(key, out var gm)) groups[key] = gm = new GameMeta();
             var type = Hash128.FromBytes(row.TypeId);
@@ -383,14 +334,9 @@ internal static class ChessWitnessHydrator
     {
         if (wanted.Count == 0) return Array.Empty<ChessWitnessedGame>();
 
-        // Result is a scalar surface. SetUp and the game mainline are typed trajectories:
-        // unpack the batch, reconstruct initial boards, then replay ordered move ids.
         var contentIds = new List<Hash128>();
         void Need(Hash128 id) { if (id != default) contentIds.Add(id); }
-        foreach (var (_, _, gm) in wanted)
-        {
-            Need(gm.ResultObj);
-        }
+        foreach (var (_, _, gm) in wanted) Need(gm.ResultObj);
 
         var setupIds = wanted.Select(static w => w.Meta.SetupObj)
             .Where(static id => id != default).Distinct().ToArray();
@@ -434,10 +380,20 @@ internal static class ChessWitnessHydrator
             string? startFen = gm.SetupObj != default
                 && setupBoards.TryGetValue(gm.SetupObj, out var setupBoard)
                 ? setupBoard.ToFen() : null;
-            if (!lanes.TryGetValue((lineId, PhysicalityType.Content), out var moveIds)
-                || moveIds.Count == 0) continue;
+
+            if (!lanes.TryGetValue((lineId, PhysicalityType.Content), out var contentManifest)
+                || contentManifest.Count == 0) continue;
+            Hash128 startPositionId = contentManifest[0];
+            Hash128[] moveIds = contentManifest.Skip(1).ToArray();
+
+            var modality = new ChessModality();
+            if (ChessAnalyze.InitialState(startFen, modality) is not { } initial) continue;
+            Hash128 expectedStart = ChessCompose.PositionId(initial.Initial.Board);
+            if (startPositionId != expectedStart) continue;
+            if (ChessCompose.LineId(startPositionId, moveIds) != lineId) continue;
+
             var replay = ChessReplay.Replay(moveIds, startFen);
-            if (replay.Truncated is not null || replay.Plies.Count != moveIds.Count) continue;
+            if (replay.Truncated is not null || replay.Plies.Count != moveIds.Length) continue;
             var moves = replay.Plies.Select(static p => p.San).ToArray();
             string?[]? comments = RenderLane(
                 lanes, eventId, PhysicalityType.ChessComment, moves.Length, textById);
@@ -494,8 +450,6 @@ internal static class ChessWitnessHydrator
         return list.Count > 0 ? list[0] : null;
     }
 
-    // Per-playing witnessed scaffold: (line, ctx=event) header attestation objects only.
-    // The ordered move record is the line's content physicality trajectory.
     private sealed class GameMeta
     {
         public Hash128 White;
