@@ -1,0 +1,11 @@
+-- Vertices carry realized constituent coordinates, not packed trajectory IDs.
+-- Uses the same native kernel and defaults as managed Math4d.KarcherMean.
+CREATE OR REPLACE FUNCTION @extschema@.laplace_karcher_mean_4d(g geometry)
+    RETURNS geometry
+    AS 'MODULE_PATHNAME', 'pg_laplace_karcher_mean_4d'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+COMMENT ON FUNCTION @extschema@.laplace_karcher_mean_4d(geometry) IS
+    'Native Karcher mean of nonempty finite constituent PointZM coordinates in a '
+    'PointZM, LineStringZM or MultiPointZM; canonical Math4d kernel with tolerance '
+    '1e-12 and 64 iterations. Resolve packed trajectory IDs before calling.';

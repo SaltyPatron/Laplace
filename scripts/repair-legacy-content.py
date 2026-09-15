@@ -311,51 +311,138 @@ SELECT o.*,m.child_ids,m.zero_flags,m.resolved,m.descending,m.all_moves,m.all_me
        pg_temp.repair_snapshot(start_physicality) AS start_physicality_evidence,
        (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
          WHERE a.subject_id=o.entity_id AND a.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')
-           AND a.object_id=m.child_ids[1] AND a.outcome=2 AND a.observation_count>0) AS name_witnesses,
+           AND a.object_id=m.child_ids[1]) AS name_witnesses,
        (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
-         WHERE a.subject_id=o.entity_id AND a.type_id=laplace.relation_type_id('HAS_SETUP')
-           AND a.outcome=2 AND a.observation_count>0) AS setup_witnesses,
+         WHERE a.subject_id=o.entity_id AND a.type_id=laplace.relation_type_id('HAS_SETUP')) AS setup_witnesses,
        (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
          WHERE a.subject_id=ANY(m.child_ids) AND a.object_id=o.entity_id
-           AND a.context_id=o.entity_id AND a.type_id=laplace.relation_type_id('APPEARS_IN')
-           AND a.outcome=2 AND a.observation_count>0) AS membership_witnesses,
+           AND a.context_id=o.entity_id AND a.type_id=laplace.relation_type_id('APPEARS_IN')) AS membership_witnesses,
        (SELECT count(DISTINCT a.subject_id) FROM laplace.attestations a
          WHERE a.subject_id=ANY(m.child_ids) AND a.object_id=o.entity_id
            AND a.context_id=o.entity_id AND a.type_id=laplace.relation_type_id('APPEARS_IN')
-           AND a.outcome=2 AND a.observation_count>0) AS witnessed_messages,
+           AND a.outcome=2 AND a.observation_count>0
+           AND a.sum_score_fp1e9::numeric>a.observation_count::numeric*500000000) AS witnessed_messages,
        EXISTS(SELECT FROM laplace.physicalities occupied
-         WHERE occupied.id=public.laplace_hash128_blake3(o.entity_id||decode('0300','hex')))
-         AS projection_target_exists
+         WHERE (occupied.entity_id=o.entity_id AND occupied.type=3)
+            OR occupied.id=public.laplace_hash128_blake3(o.entity_id||decode('0300','hex')))
+         AS projection_target_exists,
+       (SELECT count(*) FROM laplace.physicalities occupied
+         WHERE occupied.entity_id=o.entity_id AND occupied.type=3) AS projection_rows,
+       (SELECT jsonb_agg(pg_temp.repair_snapshot(occupied) ORDER BY occupied.id)
+        FROM laplace.physicalities occupied
+        WHERE (occupied.entity_id=o.entity_id AND occupied.type=3)
+           OR occupied.id=public.laplace_hash128_blake3(o.entity_id||decode('0300','hex')))
+         AS occupied_projection_evidence
 FROM repair_owners o LEFT JOIN repair_manifests m ON m.id=o.id
-LEFT JOIN laplace.physicalities p ON p.entity_id=o.entity_id AND p.type=3 AND o.repair_kind='chess-line'
+LEFT JOIN LATERAL (
+  SELECT candidate.* FROM laplace.physicalities candidate
+  WHERE candidate.entity_id=o.entity_id AND candidate.type=3 AND o.repair_kind='chess-line'
+  ORDER BY candidate.id LIMIT 1
+) p ON true
 LEFT JOIN repair_manifests pm ON pm.id=p.id
 LEFT JOIN laplace.entities start_entity ON start_entity.id=pm.child_ids[1]
 LEFT JOIN laplace.physicalities start_physicality ON start_physicality.entity_id=pm.child_ids[1]
-  AND start_physicality.type=1
-WHERE NOT COALESCE(m.resolved,false) OR CASE WHEN cardinality(m.child_ids)=1 THEN m.child_ids[1]
-           ELSE public.laplace_hash128_merkle(0::smallint,m.child_ids) END IS DISTINCT FROM o.entity_id;
+  AND start_physicality.type=1;
+
+-- Membership uses the existing indexed native trajectory ID extraction. Keep
+-- complete incoming row images: changing/removing one realization must not
+-- silently invalidate a containing Content realization.
+CREATE TEMP TABLE repair_incoming ON COMMIT DROP AS
+SELECT p.id,p.entity_id,public.laplace_trajectory_constituent_ids(p.trajectory) AS members,
+       pg_temp.repair_snapshot(p) AS original
+FROM laplace.physicalities p WHERE p.type=1
+  AND public.laplace_trajectory_constituent_ids(p.trajectory)
+      && ARRAY(SELECT entity_id FROM repair_owners);
+
+-- One retained set of native coordinate/identity inputs, reused across all
+-- affected parents. Occurrence order and duplicates remain in each manifest.
+CREATE TEMP TABLE repair_native_inputs ON COMMIT DROP AS
+WITH needed AS (
+  SELECT v.entity_id FROM repair_carriers carrier
+    JOIN repair_logical v ON v.physicality_id=carrier.id
+  UNION SELECT start_id FROM repair_candidates WHERE repair_kind='chess-line' AND start_id IS NOT NULL
+)
+SELECT n.entity_id,to_jsonb(e) AS entity,pg_temp.repair_snapshot(p) AS content,
+       p.id AS physicality_id,
+       p.id=public.laplace_hash128_blake3(n.entity_id||decode('0100','hex'))
+         AND p.radius_origin<=1.0+1e-12
+         AND p.hilbert_index=public.laplace_hilbert_encode(p.coord)
+         AND CASE WHEN p.trajectory IS NULL THEN p.n_constituents=0
+              ELSE bounded.valid AND proof.n=p.n_constituents AND proof.ordinals=p.n_constituents
+                AND CASE WHEN proof.n=1 THEN proof.ids[1]
+                         WHEN proof.n>1 THEN public.laplace_hash128_merkle(0::smallint,proof.ids)
+                         ELSE NULL::bytea END=n.entity_id END AS valid_content
+FROM needed n JOIN laplace.entities e ON e.id=n.entity_id
+JOIN laplace.physicalities p ON p.entity_id=n.entity_id AND p.type=1
+CROSS JOIN LATERAL (
+  SELECT COALESCE(p.n_constituents BETWEEN 1 AND {MAX_CONSTITUENTS}
+      AND ST_NPoints(p.trajectory) BETWEEN 1 AND {MAX_CONSTITUENTS}
+      AND count(*)=ST_NPoints(p.trajectory)
+      AND sum(GREATEST(v.run_length,1))=p.n_constituents
+      AND min(v.ordinal)=1
+      AND max(v.ordinal+GREATEST(v.run_length,1)-1)=p.n_constituents,false) AS valid
+  FROM public.laplace_trajectory_constituents(CASE
+    WHEN p.n_constituents BETWEEN 1 AND {MAX_CONSTITUENTS}
+      AND ST_NPoints(p.trajectory) BETWEEN 1 AND {MAX_CONSTITUENTS}
+    THEN p.trajectory ELSE NULL END) v
+) bounded
+CROSS JOIN LATERAL (
+  SELECT count(*) AS n,count(DISTINCT v.ordinal) AS ordinals,
+         array_agg(v.entity_id ORDER BY v.ordinal) AS ids
+  FROM public.laplace_trajectory_expanded_constituents(
+    CASE WHEN bounded.valid THEN p.trajectory ELSE NULL END) v
+) proof;
 
 CREATE TEMP TABLE repair_eligibility ON COMMIT DROP AS
 SELECT c.*,
   CASE WHEN c.entity_rows<>1 THEN 'duplicate-owner-identity'
        WHEN NOT COALESCE(c.resolved,false) THEN 'unresolved-or-malformed-original-manifest'
        WHEN c.id<>public.laplace_hash128_blake3(c.entity_id||decode('0100','hex')) THEN 'noncanonical-physicality-id'
+       WHEN EXISTS(SELECT FROM repair_incoming parent WHERE c.entity_id=ANY(parent.members))
+         THEN 'incoming-content-requires-coupled-recovery'
+       WHEN EXISTS(SELECT FROM repair_native_inputs i
+                    WHERE (i.entity_id=ANY(c.child_ids) OR i.entity_id=ANY(c.position_ids))
+                      AND NOT COALESCE(i.valid_content,false)) THEN 'invalid-native-input-content'
        WHEN c.repair_kind='player-projection' THEN
-         CASE WHEN cardinality(c.child_ids)<>1 OR c.name_witnesses IS NULL THEN 'missing-exact-confirmed-name'
+         CASE WHEN cardinality(c.child_ids)<>1 OR NOT EXISTS(
+                SELECT FROM jsonb_array_elements(c.name_witnesses) a
+                WHERE (a->>'outcome')::integer=2 AND (a->>'observation_count')::bigint>0
+                  AND (a->>'sum_score_fp1e9')::numeric>(a->>'observation_count')::numeric*500000000)
+                THEN 'missing-exact-confirmed-name'
+              WHEN EXISTS(SELECT FROM jsonb_array_elements(c.name_witnesses) a
+                WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
+                   OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000)
+                THEN 'opposing-name-testimony'
               WHEN c.projection_target_exists THEN 'occupied-projection-target' ELSE 'eligible' END
        WHEN c.repair_kind='session-projection' THEN
          CASE WHEN NOT c.all_messages OR c.witnessed_messages<>(SELECT count(DISTINCT id) FROM unnest(c.child_ids) id)
                 THEN 'missing-exact-confirmed-session-membership'
+              WHEN EXISTS(SELECT FROM jsonb_array_elements(c.membership_witnesses) a
+                WHERE (a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
+                   OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000)
+                THEN 'opposing-session-membership'
               WHEN c.projection_target_exists THEN 'occupied-projection-target' ELSE 'eligible' END
        WHEN NOT c.zero_flags THEN 'nonzero-move-occurrence-flags'
        WHEN NOT c.all_moves THEN 'legacy-line-has-non-move-constituents'
+       WHEN c.projection_rows>1 THEN 'ambiguous-position-projections'
        WHEN NOT COALESCE(c.positions_resolved,false) OR NOT COALESCE(c.all_positions,false)
             OR c.projection_count<>c.n_constituents+1 THEN 'missing-exact-position-projection'
        WHEN c.projection_id<>public.laplace_hash128_blake3(c.entity_id||decode('0300','hex')) THEN 'noncanonical-projection-id'
        WHEN NOT c.descending OR c.start_tier>=c.tier THEN 'non-descending-repaired-content'
        WHEN public.laplace_hash128_merkle(0::smallint,ARRAY[c.start_id]||c.child_ids)<>c.entity_id THEN 'retained-start-does-not-recover-line-id'
        WHEN EXISTS(SELECT FROM jsonb_array_elements(c.setup_witnesses) a
-                   WHERE decode(substr(a->>'object_id',3),'hex')<>c.start_id) THEN 'conflicting-confirmed-setup'
+                   WHERE decode(substr(a->>'object_id',3),'hex')<>c.start_id
+                     AND (a->>'outcome')::integer=2 AND (a->>'observation_count')::bigint>0)
+         THEN 'conflicting-confirmed-setup'
+       WHEN EXISTS(SELECT FROM jsonb_array_elements(c.setup_witnesses) a
+                   WHERE decode(substr(a->>'object_id',3),'hex')=c.start_id
+                     AND ((a->>'outcome')::integer<>2 OR (a->>'observation_count')::bigint<=0
+                       OR (a->>'sum_score_fp1e9')::numeric<=(a->>'observation_count')::numeric*500000000))
+         THEN 'opposing-setup-testimony'
+       WHEN ST_AsEWKB(c.coord) IS DISTINCT FROM ST_AsEWKB(
+              public.laplace_karcher_mean_4d(ST_Collect(c.child_coords)))
+         OR c.hilbert_index IS DISTINCT FROM public.laplace_hilbert_encode(c.coord)
+         THEN 'unexpected-legacy-game-placement'
        ELSE 'eligible' END AS disposition
 FROM repair_candidates c;
 
@@ -369,6 +456,10 @@ SELECT c.id AS old_id,c.entity_id,c.repair_kind,c.disposition,
            'start_entity',c.start_entity_evidence,'start_content',c.start_physicality_evidence,
            'name_witnesses',c.name_witnesses,'setup_witnesses',c.setup_witnesses,
            'membership_witnesses',c.membership_witnesses,
+           'occupied_projections',c.occupied_projection_evidence,
+           'incoming_content',(SELECT jsonb_agg(parent.original ORDER BY parent.id)
+              FROM repair_incoming parent WHERE c.entity_id=ANY(parent.members)),
+           'ordered_children',c.child_ids,
            'original_move_occurrence_flags_all_zero',c.zero_flags) AS evidence
 FROM repair_eligibility c JOIN laplace.physicalities p ON p.id=c.id;
 UPDATE repair_plan p SET
@@ -376,7 +467,7 @@ UPDATE repair_plan p SET
               ELSE public.laplace_hash128_blake3(p.entity_id||decode('0300','hex')) END,
   new_type=CASE WHEN p.repair_kind='chess-line' THEN 1 ELSE 3 END,
   new_coord=CASE WHEN p.repair_kind='chess-line'
-                 THEN public.laplace_centroid_4d(ST_Collect(ARRAY[c.start_coord]||c.child_coords))
+                 THEN public.laplace_karcher_mean_4d(ST_Collect(ARRAY[c.start_coord]||c.child_coords))
                  ELSE c.coord END,
   new_trajectory=CASE WHEN p.repair_kind='chess-line'
                       THEN public.laplace_trajectory_build(ARRAY[c.start_id]||c.child_ids)
@@ -392,13 +483,6 @@ UPDATE repair_plan p SET proposed=p.original || jsonb_build_object(
   'trajectory_ewkb',encode(ST_AsEWKB(p.new_trajectory),'hex'),
   'radius_origin_bits',encode(float8send(public.laplace_radius_origin(p.new_coord)),'hex'),
   'n_constituents',p.new_count);
-
-CREATE TEMP TABLE repair_native_inputs ON COMMIT DROP AS
-SELECT DISTINCT v.entity_id,to_jsonb(e) AS entity,pg_temp.repair_snapshot(p) AS content
-FROM repair_plan r JOIN repair_logical v ON v.physicality_id=r.old_id
-JOIN laplace.entities e ON e.id=v.entity_id
-JOIN laplace.physicalities p ON p.entity_id=v.entity_id AND p.type=1
-WHERE r.disposition='eligible' AND r.repair_kind='chess-line';
 
 SELECT jsonb_build_object('kind','context','database',current_database(),
   'producer_generation','{producer_json}'::jsonb,
@@ -438,6 +522,50 @@ BEGIN
   IF EXISTS(SELECT FROM repair_plan r LEFT JOIN laplace.physicalities p ON p.id=r.old_id
             WHERE pg_temp.repair_snapshot(p) IS DISTINCT FROM r.original) THEN
     RAISE EXCEPTION 'Original physicality changed after its durable receipt';
+  END IF;
+  IF EXISTS(SELECT FROM repair_native_inputs i
+            LEFT JOIN laplace.entities e ON e.id=i.entity_id
+            LEFT JOIN laplace.physicalities p ON p.id=i.physicality_id
+            WHERE to_jsonb(e) IS DISTINCT FROM i.entity
+               OR pg_temp.repair_snapshot(p) IS DISTINCT FROM i.content)
+     OR EXISTS(SELECT FROM repair_native_inputs i
+               WHERE (SELECT count(*) FROM laplace.physicalities p
+                       WHERE p.entity_id=i.entity_id AND p.type=1)<>1
+                  OR (SELECT count(*) FROM laplace.entities e WHERE e.id=i.entity_id)<>1) THEN
+    RAISE EXCEPTION 'Native input changed after its durable receipt';
+  END IF;
+  IF EXISTS(SELECT FROM repair_candidates c
+            LEFT JOIN laplace.entities e ON e.id=c.entity_id
+            LEFT JOIN laplace.physicalities p ON p.id=c.projection_id
+            WHERE to_jsonb(e) IS DISTINCT FROM c.entity_evidence
+               OR pg_temp.repair_snapshot(p) IS DISTINCT FROM c.projection_evidence
+               OR (SELECT count(*) FROM laplace.entities other WHERE other.id=c.entity_id)<>1) THEN
+    RAISE EXCEPTION 'Owner or position evidence changed after its durable receipt';
+  END IF;
+  IF EXISTS(SELECT FROM repair_candidates c WHERE
+      (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
+        WHERE a.subject_id=c.entity_id AND a.type_id=laplace.relation_type_id('HAS_NAME_ALIAS')
+          AND a.object_id=c.child_ids[1]) IS DISTINCT FROM c.name_witnesses
+      OR (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
+        WHERE a.subject_id=c.entity_id AND a.type_id=laplace.relation_type_id('HAS_SETUP'))
+           IS DISTINCT FROM c.setup_witnesses
+      OR (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM laplace.attestations a
+        WHERE a.subject_id=ANY(c.child_ids) AND a.object_id=c.entity_id
+          AND a.context_id=c.entity_id AND a.type_id=laplace.relation_type_id('APPEARS_IN'))
+           IS DISTINCT FROM c.membership_witnesses) THEN
+    RAISE EXCEPTION 'Applicable testimony changed after its durable receipt';
+  END IF;
+  IF EXISTS(SELECT FROM repair_candidates c WHERE
+      (SELECT jsonb_agg(pg_temp.repair_snapshot(p) ORDER BY p.id) FROM laplace.physicalities p
+        WHERE (p.entity_id=c.entity_id AND p.type=3)
+           OR p.id=public.laplace_hash128_blake3(c.entity_id||decode('0300','hex')))
+        IS DISTINCT FROM c.occupied_projection_evidence)
+     OR (SELECT jsonb_agg(pg_temp.repair_snapshot(p) ORDER BY p.id)
+         FROM laplace.physicalities p WHERE p.type=1
+           AND public.laplace_trajectory_constituent_ids(p.trajectory)
+               && ARRAY(SELECT entity_id FROM repair_owners))
+        IS DISTINCT FROM (SELECT jsonb_agg(original ORDER BY id) FROM repair_incoming) THEN
+    RAISE EXCEPTION 'Projection or incoming Content changed after its durable receipt';
   END IF;
   IF expected>0 THEN
     INSERT INTO repair_applied_epoch SELECT nextval('laplace.apply_write_epoch');

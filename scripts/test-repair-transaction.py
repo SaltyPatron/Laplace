@@ -36,6 +36,16 @@ for line in sys.stdin:
                      unresolved=1 if mode == 'unresolved' else 0)]
         if mode == 'missing-original': del rows[1]['original']
         if mode == 'non-object': rows[1] = []
+        if mode.startswith('native-'):
+            children = [dict(kind='native-input', entity_id=identity,
+                             entity={'id':'\\x'+identity,'tier':2},
+                             content={'entity_id':identity,'trajectory_ewkb':trajectory})
+                        for identity,trajectory in [('01'*16,'00000080ff'),
+                                                    ('02'*16,'00800000fe')]]
+            if mode.startswith('native-missing-'):
+                del children[1][mode.removeprefix('native-missing-')]
+            rows[1:1] = children
+            rows[-1]['native_input_count'] = 1 if mode == 'native-bad-count' else 2
         if mode == 'plan-disconnect': sys.exit(3)
         for row in rows: print(json.dumps(row), flush=True)
         print(line.split()[1], flush=True)
@@ -106,6 +116,79 @@ class RepairTransactionTests(unittest.TestCase):
         with patch.object(REPAIR.os, "fsync", side_effect=fail_plan_sync), self.assertRaises(OSError):
             self.run_repair()
         self.assert_not_submitted()
+
+    def native_records(self):
+        return [json.loads(line) for line in (self.directory / "plan.jsonl").read_bytes().splitlines()]
+
+    def assert_native_prefix_retained(self, kinds):
+        self.assert_not_submitted()
+        receipt = (self.directory / "plan.jsonl").read_bytes()
+        records = self.native_records()
+        self.assertEqual(kinds, [record["kind"] for record in records])
+        self.assertEqual("01" * 16, records[1]["entity_id"])
+        self.assertEqual("00000080ff", records[1]["content"]["trajectory_ewkb"])
+        failure = json.loads((self.directory / "failure.json").read_text())
+        self.assertEqual(hashlib.sha256(receipt).hexdigest(), failure["plan_sha256"])
+        self.assertFalse((self.directory / "submission.json").exists())
+        self.assertFalse((self.directory / "outcome.json").exists())
+
+    def test_native_input_snapshots_are_durable_before_apply_and_counted_separately(self):
+        sync_events = []
+        fsync, send = REPAIR.os.fsync, REPAIR.PsqlTransaction.send
+        def record_sync(fd):
+            path = os.readlink(f"/proc/self/fd/{fd}")
+            fsync(fd)
+            sync_events.append(path)
+        def record_send(tx, sql):
+            if "APPLY_RETAINED_PLAN;" in sql:
+                for name in ("plan.jsonl", "manifest.json", "submission.json"):
+                    self.assertIn(str(self.directory / name), sync_events)
+                self.assertGreaterEqual(sync_events.count(str(self.directory)), 3)
+                records = self.native_records()
+                self.assertEqual(["context", "native-input", "native-input", "physicality", "plan"],
+                                 [record["kind"] for record in records])
+                self.assertEqual(["01" * 16, "02" * 16],
+                                 [record["entity_id"] for record in records[1:3]])
+                self.assertEqual(["00000080ff", "00800000fe"],
+                                 [record["content"]["trajectory_ewkb"] for record in records[1:3]])
+                for record in records[1:3]:
+                    self.assertEqual("\\x" + record["entity_id"], record["entity"]["id"])
+                    self.assertEqual(record["entity_id"], record["content"]["entity_id"])
+                self.assertEqual(1, records[-1]["count"])
+                self.assertEqual(2, records[-1]["native_input_count"])
+            send(tx, sql)
+        with patch.object(REPAIR.os, "fsync", side_effect=record_sync), \
+                patch.object(REPAIR.PsqlTransaction, "send", new=record_send):
+            result = self.run_repair("native-success", max_rows=1, max_native_inputs=2)
+        self.assertEqual("commit-confirmed", result["disposition"])
+        self.assertEqual(1, result["planned_rows"])
+        self.assertEqual(1, result["applied"]["count"])
+        self.assertEqual(2, result["native_input_rows"])
+        self.assertEqual(2, result["max_native_inputs"])
+        self.assertEqual(hashlib.sha256((self.directory / "plan.jsonl").read_bytes()).hexdigest(),
+                         result["plan_sha256"])
+
+    def test_native_input_requires_identity_entity_and_content_snapshots(self):
+        for missing in ("entity_id", "entity", "content"):
+            with self.subTest(missing=missing):
+                self.directory = self.root / ("missing-" + missing)
+                self.transcript.unlink(missing_ok=True)
+                with self.assertRaisesRegex(REPAIR.RepairProtocolError,
+                                            "native input lacks identity or exact content snapshot"):
+                    self.run_repair("native-missing-" + missing)
+                self.assert_native_prefix_retained(["context", "native-input"])
+
+    def test_native_input_summary_count_must_match_complete_retained_evidence(self):
+        with self.assertRaisesRegex(REPAIR.RepairProtocolError, "count does not match retained rows"):
+            self.run_repair("native-bad-count")
+        self.assert_native_prefix_retained(
+            ["context", "native-input", "native-input", "physicality", "plan"])
+        self.assertEqual("00800000fe", self.native_records()[2]["content"]["trajectory_ewkb"])
+
+    def test_native_input_bound_rejects_excess_children_within_parent_bound(self):
+        with self.assertRaisesRegex(REPAIR.RepairProtocolError, "native input evidence exceeds row bound"):
+            self.run_repair("native-success", max_rows=1, max_native_inputs=1)
+        self.assert_native_prefix_retained(["context", "native-input"])
 
     def test_rejects_incomplete_ambiguous_or_unbounded_plans(self):
         for mode, bounds in (("bad-count", {}), ("unresolved", {}),
