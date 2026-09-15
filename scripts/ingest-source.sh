@@ -13,7 +13,7 @@ USAGE=(tatoeba opensubtitles)
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
     echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
-    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-transitions safetensors" >&2
+    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes chess-tactic-outcomes chess-transitions safetensors" >&2
     exit 2
 fi
 
@@ -213,6 +213,13 @@ case "$source" in
         build_cli
         ingest chess-move-outcomes
         ;;
+    chess-tactic-outcomes)
+        # Historical backfill for the learned fork/pin/skewer provider. New PGN/live
+        # games deposit these bounded pattern OUTCOME cells inline; this route fills
+        # only pre-existing playings and is marker-gated/idempotent.
+        build_cli
+        ingest chess-tactic-outcomes
+        ;;
     chess-eval)
         # Stockfish eval pass over recorded games (calculated layer, GH #573). No path —
         # the substrate is the source. Part of the seed ladder so a db-reset + reseed
@@ -243,7 +250,7 @@ case "$source" in
         echo "Unknown source: $source" >&2
         echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
         echo "         chess openings chess-books chess-analyze chess-transitions chess-trajectory chess-eval chess-syzygy \\" >&2
-    echo "         chess-opening-match \\" >&2
+        echo "         chess-opening-match chess-move-outcomes chess-tactic-outcomes \\" >&2
         echo "         code repo stack tiny-codes tabular recipe agents all safetensors" >&2
         exit 2
         ;;

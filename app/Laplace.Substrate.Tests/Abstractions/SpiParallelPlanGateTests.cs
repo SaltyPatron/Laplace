@@ -58,7 +58,8 @@ public sealed class SpiParallelPlanGateTests
             {
                 // Ignore matches inside a string literal on the same line (elog messages).
                 var lineStart = text.LastIndexOf('\n', m.Index) + 1;
-                var line = text[lineStart..text.IndexOf('\n', m.Index)];
+                var lineEnd = text.IndexOf('\n', m.Index);
+                var line = text[lineStart..(lineEnd >= 0 ? lineEnd : text.Length)];
                 if (line.TrimStart().StartsWith("*") || line.Contains("failed")) continue;
                 var lineNo = text.Take(m.Index).Count(c => c == '\n') + 1;
                 offenders.Add($"{name}:{lineNo}");

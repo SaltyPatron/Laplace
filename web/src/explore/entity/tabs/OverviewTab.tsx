@@ -15,10 +15,10 @@ export function OverviewTab({ entity }: { entity: ExploreEntityResponse }) {
         ) : (
           <>
             {entity.consensus_out.length > 0 ? (
-              <RelationTable title="Outgoing" rows={entity.consensus_out} />
+              <RelationTable title="Outgoing" rows={entity.consensus_out} entityType={entity.type} />
             ) : null}
             {entity.consensus_in.length > 0 ? (
-              <RelationTable title="Incoming" rows={entity.consensus_in} />
+              <RelationTable title="Incoming" rows={entity.consensus_in} entityType={entity.type} />
             ) : null}
           </>
         )}
@@ -28,7 +28,12 @@ export function OverviewTab({ entity }: { entity: ExploreEntityResponse }) {
         <ul className={styles.list}>
           {entity.salient_facts.map((f, i) => (
             <li key={i}>
-              <RelationChip type={f.type} label={f.fact} mu={f.eff_mu} witnesses={f.witnesses} />
+              <RelationChip
+                type={displayRelation(f.type, entity.type, 'out')}
+                label={f.fact}
+                mu={f.eff_mu}
+                witnesses={f.witnesses}
+              />
             </li>
           ))}
         </ul>
@@ -59,7 +64,31 @@ export function OverviewTab({ entity }: { entity: ExploreEntityResponse }) {
   );
 }
 
-function RelationTable({ title, rows }: { title: string; rows: ExploreConsensusRow[] }) {
+function isChessPlayer(type?: string | null) {
+  const normalized = (type ?? '').replaceAll('_', ' ').trim().toLowerCase();
+  return normalized === 'chess player';
+}
+
+function displayRelation(type: string, entityType: string | null | undefined, direction: string) {
+  // Historical chess pairing cells were written as player --PLAYED_BY--> opponent even though
+  // every writer/read interprets the object as the opponent. Until that relation id is migrated,
+  // never turn the legacy storage name into the false English sentence "Spassky played by ...".
+  if (direction === 'out' && isChessPlayer(entityType)
+      && type.replaceAll('_', ' ').trim().toLowerCase() === 'played by') {
+    return 'played against';
+  }
+  return type.replaceAll('_', ' ').toLowerCase();
+}
+
+function RelationTable({
+  title,
+  rows,
+  entityType,
+}: {
+  title: string;
+  rows: ExploreConsensusRow[];
+  entityType?: string | null;
+}) {
   return (
     <>
       <h3 className={styles.sectionTitle}>{title}</h3>
@@ -74,7 +103,7 @@ function RelationTable({ title, rows }: { title: string; rows: ExploreConsensusR
         <tbody>
           {rows.map((row) => (
             <tr key={`${row.direction}:${row.type}:${row.entity_id_hex}`}>
-              <Td>{row.type.replaceAll('_', ' ').toLowerCase()}</Td>
+              <Td>{displayRelation(row.type, entityType, row.direction)}</Td>
               <Td><EntityLink idHex={row.entity_id_hex} label={row.entity_label} /></Td>
               <Td><ConsensusBadge mu={row.eff_mu} witnesses={row.witnesses} tone="explore" /></Td>
             </tr>

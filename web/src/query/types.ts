@@ -99,6 +99,16 @@ export interface TapeRow {
   eff_mu?: number | null;
 }
 
+export interface ChessMatchupSide {
+  peak_source_elo: number | null;
+  games: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  unscored: number;
+  score: number | null;
+}
+
 export interface MatchupSide {
   id: string;
   label: string;
@@ -107,6 +117,7 @@ export interface MatchupSide {
   entity_type?: string | null;
   source_rating_peak?: number | null;
   source_rating_observations?: number;
+  chess?: ChessMatchupSide | null;
 }
 
 export interface Matchup {
