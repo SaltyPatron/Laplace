@@ -1,0 +1,45 @@
+name: Native regression — inspect retained failure
+
+# Read the existing runner output. This is an operator diagnostic, not an
+# acceptance gate: it does not build, test, install, seed or change a database.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-substrate-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Read retained native regression diff
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 5
+    concurrency:
+      group: laplace-shared-workspace
+      cancel-in-progress: false
+    steps:
+      - name: Print existing regression output and its source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close /build/laplace/work/host-resource.lock bash -euo pipefail <<'INSPECT'
+          printf 'checkout_source=%s\n' "$(git rev-parse HEAD)"
+          for extension in laplace_geom laplace_substrate; do
+            directory="build/extension/$extension/tests/regress_output"
+            for name in regression.diffs regression.out; do
+              path="$directory/$name"
+              if [[ -f "$path" ]]; then
+                printf '\n===== %s =====\n' "$path"
+                stat --format='bytes=%s modified=%y' "$path"
+                cat "$path"
+              else
+                printf 'No retained output: %s\n' "$path"
+              fi
+            done
+          done
+          INSPECT
