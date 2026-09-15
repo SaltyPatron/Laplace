@@ -18,6 +18,8 @@ CATALOGS = sorted((ROOT / "engine/core/src").glob("sql_catalog*.def"))
 # Comments must be consumed before strings so examples in comments are not code.
 TOKEN = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"')
 SQL = re.compile(r'\b(?:SELECT\s|INSERT\s+INTO\s|UPDATE\s+[\w.]+\s+SET\s|DELETE\s+FROM\s|WITH\s+[\w]+\s+AS\s*\(|COPY\s+[\w.(]|CREATE\s+(?:TEMP\s+)?(?:TABLE|FUNCTION|INDEX)|ALTER\s+TABLE|DROP\s+(?:TABLE|FUNCTION))', re.I)
+CATALOG_ENTRY = re.compile(
+    r'SQL_QUERY\("([^"]+)",\s*"([^"]*)",([\s\S]*?)\)\s*(?=SQL_QUERY|$)')
 
 
 def statements(source):
@@ -64,6 +66,14 @@ def excess(current, allowed):
     return current - Counter(allowed)
 
 
+def catalog_entries(path: Path):
+    # Parse each shard independently. Concatenating them changes the grammar at a
+    # shard boundary when the preceding file ends after comments/whitespace: the
+    # final SQL_QUERY's lazy literal can otherwise consume the next file's first
+    # entry before the lookahead sees another SQL_QUERY token.
+    return CATALOG_ENTRY.findall(path.read_text())
+
+
 def main():
     allowed = json.loads(BASELINE.read_text())["files"]
     errors, debt = [], 0
@@ -75,10 +85,9 @@ def main():
             errors.append(f"{rel}: {count} new/changed inline SQL statement(s), {digest[:12]}; use the native catalog")
     if not CATALOGS:
         errors.append("native SQL catalog is missing")
-        catalog = ""
-    else:
-        catalog = "\n".join(path.read_text() for path in CATALOGS)
-    entries = re.findall(r'SQL_QUERY\("([^"]+)",\s*"([^"]*)",([\s\S]*?)\)\s*(?=SQL_QUERY|$)', catalog)
+    entries = []
+    for path in CATALOGS:
+        entries.extend(catalog_entries(path))
     keys = set()
     for key, types, literal in entries:
         if key in keys:
