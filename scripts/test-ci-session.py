@@ -214,6 +214,10 @@ echo cleanup >> "$CI_FIXTURE_ROOT/cleaned"
     def test_idle_expiration_releases_host_lock(self):
         self.start("--idle-timeout-seconds", "0.3")
         self.await_condition(lambda: self.state()["status"] == "failed")
+        # Failed records the outcome before the supervisor joins its guardian
+        # and closes the shared lock. Observe actual termination as the other
+        # cancellation tests do before asserting resource release.
+        self.await_condition(lambda: not self.live(self.state()["supervisor"]["pid"]))
         self.assert_lock(False)
         self.assertIn("idle timeout", self.state()["failure"])
 
