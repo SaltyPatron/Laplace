@@ -568,6 +568,9 @@ END $$;
 NOTICE:  ✓ generation_corpus: trajectories are the single source — exact separator ordinals, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
 -- A lossy bitmap contains nonmatching tuples from matching heap pages. Exercise
 -- recheck against an independent SQL oracle, including mixed physicality types.
+-- Keep this stress fixture independent of heap compression and planner tuning.
+-- Its savepoint also removes the load and restores every SET LOCAL below.
+SAVEPOINT membership_bitmap_fixture;
 DO $membership_bitmap$
 DECLARE
     needle bytea := public.laplace_hash128_blake3('test/membership/needle');
@@ -579,13 +582,8 @@ DECLARE
     no_curve geometry;
     plan json;
     actual bytea[];
-    previous_settings jsonb;
-    setting record;
 BEGIN
-    SELECT jsonb_object_agg(name,current_setting(name)) INTO previous_settings
-      FROM unnest(ARRAY['work_mem','enable_seqscan','enable_indexscan',
-                        'enable_indexonlyscan','enable_bitmapscan',
-                        'max_parallel_workers_per_gather']) settings(name);
+    ALTER TABLE laplace.physicalities ALTER COLUMN trajectory SET STORAGE PLAIN;
     SELECT public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(needle,i,1,4) ORDER BY i)),
            public.ST_MakeLine(array_agg(public.laplace_mantissa_pack(noise,i,1,4) ORDER BY i))
       INTO yes_curve,no_curve FROM generate_series(1,40) i;
@@ -600,10 +598,6 @@ BEGIN
     ) inputs
     WHERE pg_catalog.satisfies_hash_partition('laplace.physicalities'::regclass,64,0,id)
     LIMIT 10000;
-    -- This tests bitmap recheck, so require a bitmap access path explicitly.
-    -- Disabling only sequential scans still permits ordinary type/partial
-    -- B-tree scans, especially with the installed host's lower random_page_cost.
-    -- Keep the oracle serial so its page counts cover the complete scan.
     PERFORM set_config('work_mem','64kB',true);
     PERFORM set_config('enable_seqscan','off',true);
     PERFORM set_config('enable_indexscan','off',true);
@@ -616,8 +610,7 @@ BEGIN
         INTO plan USING ARRAY[needle];
     IF NOT EXISTS (SELECT 1 FROM jsonb_path_query(plan::jsonb,'$.**."Lossy Heap Blocks"') v
                    WHERE v::text::bigint > 0) THEN
-        RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap'
-            USING DETAIL = plan::text;
+        RAISE EXCEPTION 'FAIL: membership recheck fixture did not exercise a lossy bitmap: %',plan;
     END IF;
     SELECT array_agg(entity_id) INTO actual
       FROM structural.containers_containing_all(ARRAY[needle,needle]);
@@ -628,11 +621,10 @@ BEGIN
     IF actual IS DISTINCT FROM ARRAY[matched] THEN
         RAISE EXCEPTION 'FAIL: lossy OR membership admitted a wrong entity/type';
     END IF;
-    FOR setting IN SELECT key,value FROM jsonb_each_text(previous_settings) LOOP
-        PERFORM set_config(setting.key,setting.value,true);
-    END LOOP;
 END
 $membership_bitmap$;
+ROLLBACK TO SAVEPOINT membership_bitmap_fixture;
+RELEASE SAVEPOINT membership_bitmap_fixture;
 -- Observation contexts are admissible sequence evidence. An arbitrary relation
 -- object is routing state, even when its physicality contains a matching prefix.
 -- More than one former fetch page also checks streaming and root deduplication.

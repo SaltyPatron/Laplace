@@ -419,9 +419,18 @@ run_private_phase() {
   esac
 }
 
+finish_private_proof() {
+  local proof_rc="$1" cleanup_rc=0
+  if [[ "$action" == all || "$proof_rc" != 0 ]]; then
+    cleanup || cleanup_rc=$?
+  fi
+  if (( proof_rc == 0 )); then proof_rc="$cleanup_rc"; fi
+  exit "$proof_rc"
+}
+
 if [[ "$action" == all ]]; then
   [[ ! -e "$state_file" && ! -L "$state_file" ]] || { echo "private database session already exists" >&2; exit 2; }
-  trap 'rc=$?; cleanup_rc=0; cleanup || cleanup_rc=$?; (( rc != 0 )) || rc=$cleanup_rc; exit "$rc"' EXIT
+  trap 'finish_private_proof "$?"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   for phase in private-db-start native-db operational-db highway-recovery legacy-repair-db private-db-stop; do
@@ -436,7 +445,7 @@ else
   fi
   # A successful step leaves the private cluster for the next named phase.
   # Failure or cancellation cleans it before returning the original exit status.
-  trap 'rc=$?; if (( rc != 0 )); then cleanup || true; fi; exit "$rc"' EXIT
+  trap 'finish_private_proof "$?"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   run_private_phase "$action"
