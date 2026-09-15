@@ -75,6 +75,8 @@ jobs:
           if diagnostic.get('status') != 'in_progress':
               print('Selected diagnostic no longer running; no cancellation.')
               raise SystemExit(0)
-          request(f'/actions/runs/{run_id}/cancel', 'POST')
-          print(f'Cancelled remaining diagnostic in run {run_id}; reconciliation finished and delivery was skipped.')
+          # The ordinary cancellation was accepted at 18:45:57 UTC, but this
+          # always-running diagnostic remained active after more than a minute.
+          request(f'/actions/runs/{run_id}/force-cancel', 'POST')
+          print(f'Force-cancelled remaining diagnostic in run {run_id}; reconciliation finished and delivery was skipped.')
           PY
