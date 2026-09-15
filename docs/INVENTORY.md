@@ -116,7 +116,7 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 56 (`extension/laplace_substrate/src/`)
+## Native extension sources — 57 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `attestation_response.c`
@@ -159,6 +159,7 @@ Chess:
 - `model_factor.c`
 - `observation_read.c`
 - `perfcache.c`
+- `physicality_descriptor_admission.c`
 - `prompt_coherence.c`
 - `prompt_language.c`
 - `prompt_structure.c`
@@ -177,7 +178,7 @@ Chess:
 
 ## Relation manifest (`engine/manifest/relation_types.toml`)
 
-- Governed canonical relations: **225** (+23 aliases — aliases map to a canonical and add no highway bits)
+- Governed canonical relations: **226** (+23 aliases — aliases map to a canonical and add no highway bits)
 - Salience bands: **13** — `mandate`, `definitional`, `taxonomic`, `equivalence`, `partitive`, `causal`, `oppositional`, `associative`, `tensor_calculation`, `lexical_glue`, `scalar_valued`, `standards_structural`, `probationary`
 
 Highway bits are an explicit append-only `bit = N` registry in
