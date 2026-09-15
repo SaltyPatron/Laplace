@@ -17,6 +17,8 @@ import subprocess
 import sys
 import time
 
+from lib.legacy_content_snapshot import snapshot_expression
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -60,6 +62,233 @@ failed AS MATERIALIZED (
 """
 
 
+def recovery_dependency_ctes() -> str:
+    """Complete dependency counts before repair eligibility/resource filters.
+
+    Packed membership supplies distinct dependency IDs; logical occurrences stay
+    in the existing exhaustive identity classification. Counts do not assert
+    that a recipe is eligible. Snapshot byte counts use the canonical repair
+    representation and include one UTF-8 LF per native-input record.
+    """
+    return """
+recovery_types AS MATERIALIZED (
+  SELECT public.laplace_hash128_blake3('Chess_Game'::bytea) AS game,
+         public.laplace_hash128_blake3('Chess_Player'::bytea) AS player,
+         public.laplace_hash128_blake3('Conversation_Session'::bytea) AS session
+),
+recovery_failed_parents AS MATERIALIZED (
+  SELECT f.physicality_id,f.parent_id,
+         bool_or(e.type_id=t.game) AS is_game,
+         bool_or(e.type_id=t.player) AS is_player,
+         bool_or(e.type_id=t.session) AS is_session
+  FROM failed f JOIN laplace.entities e ON e.id=f.parent_id
+  CROSS JOIN recovery_types t WHERE e.type_id IN (t.game,t.player,t.session)
+  GROUP BY f.physicality_id,f.parent_id
+),
+recovery_parent_ids AS MATERIALIZED (
+  SELECT parent_id,bool_or(is_game) AS is_game,bool_or(is_player) AS is_player,
+         bool_or(is_session) AS is_session
+  FROM recovery_failed_parents GROUP BY parent_id
+),
+recovery_carriers AS MATERIALIZED (
+  SELECT p.id,p.entity_id,p.type,p.trajectory
+  FROM recovery_parent_ids owner JOIN laplace.physicalities p ON p.entity_id=owner.parent_id
+  WHERE p.type=1 OR (owner.is_game AND p.type=3)
+),
+recovery_carrier_members AS MATERIALIZED (
+  SELECT p.id AS carrier_id,member.child_id
+  FROM recovery_carriers p CROSS JOIN LATERAL
+    unnest(public.laplace_trajectory_constituent_ids(p.trajectory)) member(child_id)
+),
+recovery_needed_ids AS MATERIALIZED (
+  SELECT DISTINCT child_id FROM recovery_carrier_members
+),
+recovery_needed_entities AS MATERIALIZED (
+  SELECT n.child_id,count(e.id)::bigint AS entity_rows
+  FROM recovery_needed_ids n LEFT JOIN laplace.entities e ON e.id=n.child_id
+  GROUP BY n.child_id
+),
+recovery_needed_content AS MATERIALIZED (
+  SELECT n.child_id,count(p.id)::bigint AS content_rows,
+         count(p.id) FILTER(WHERE p.id<>public.laplace_hash128_blake3(
+           n.child_id||decode('0100','hex')))::bigint AS noncanonical_content_rows
+  FROM recovery_needed_ids n LEFT JOIN laplace.physicalities p ON p.entity_id=n.child_id AND p.type=1
+  GROUP BY n.child_id
+),
+recovery_needed_rows AS MATERIALIZED (
+  SELECT e.child_id,e.entity_rows,p.content_rows,p.noncanonical_content_rows
+  FROM recovery_needed_entities e JOIN recovery_needed_content p USING(child_id)
+),
+recovery_game_projections AS MATERIALIZED (
+  SELECT owner.parent_id,count(p.id)::bigint AS projection_rows,
+    count(p.id) FILTER(WHERE p.id<>public.laplace_hash128_blake3(
+      owner.parent_id||decode('0300','hex')))::bigint AS noncanonical_projection_rows
+  FROM recovery_parent_ids owner LEFT JOIN laplace.physicalities p
+    ON p.entity_id=owner.parent_id AND p.type=3
+  WHERE owner.is_game GROUP BY owner.parent_id
+),
+recovery_projection_destinations AS MATERIALIZED (
+  SELECT owner.parent_id,p.id,p.entity_id,p.type,
+    p.id=public.laplace_hash128_blake3(owner.parent_id||decode('0300','hex')) AS canonical_target
+  FROM recovery_parent_ids owner JOIN laplace.physicalities p
+    ON (p.entity_id=owner.parent_id AND p.type=3)
+       OR p.id=public.laplace_hash128_blake3(owner.parent_id||decode('0300','hex'))
+  WHERE owner.is_player OR owner.is_session
+),
+recovery_incoming_content AS MATERIALIZED (
+  SELECT p.id,p.entity_id,public.laplace_trajectory_constituent_ids(p.trajectory) AS member_ids
+  FROM laplace.physicalities p WHERE p.type=1 AND p.trajectory IS NOT NULL
+    AND public.laplace_trajectory_constituent_ids(p.trajectory)
+        && ARRAY(SELECT parent_id FROM recovery_parent_ids)
+),
+recovery_incoming_matches AS MATERIALIZED (
+  SELECT p.id AS container_id,owner.parent_id
+  FROM recovery_incoming_content p JOIN recovery_parent_ids owner
+    ON owner.parent_id=ANY(p.member_ids)
+)
+"""
+
+
+def recovery_envelope_ctes(sample_limit: int) -> str:
+    """Exact prospective bytes and binary field comparisons; never repair rows."""
+    source_snapshot = snapshot_expression("source")
+    target_snapshot = snapshot_expression("target")
+    input_snapshot = snapshot_expression("content")
+    return f"""
+recovery_native_snapshot_line_sizes AS MATERIALIZED (
+  SELECT octet_length(convert_to(jsonb_build_object(
+      'kind','native-input','entity_id',encode(needed.child_id,'hex'),
+      'entity',to_jsonb(entity),'content',{input_snapshot})::text,'UTF8'))::bigint AS line_bytes
+  FROM recovery_needed_ids needed JOIN laplace.entities entity ON entity.id=needed.child_id
+  JOIN laplace.physicalities content ON content.entity_id=needed.child_id AND content.type=1
+),
+recovery_native_snapshot_sizes AS MATERIALIZED (
+  SELECT count(*) AS records,COALESCE(sum(line_bytes::numeric + 1),0) AS utf8_jsonl_bytes,
+    COALESCE(max(line_bytes),0) AS maximum_record_utf8_bytes,
+    COALESCE(max(line_bytes + 1),0) AS maximum_jsonl_line_utf8_bytes
+  FROM recovery_native_snapshot_line_sizes
+),
+recovery_projection_snapshots AS MATERIALIZED (
+  SELECT parent.parent_id,parent.physicality_id AS content_physicality_id,
+    kind.name AS parent_kind,
+    public.laplace_hash128_blake3(parent.parent_id||decode('0300','hex')) AS target_id,
+    target.id IS NOT NULL AS target_occupied,
+    {source_snapshot} || jsonb_build_object(
+      'id',encode(public.laplace_hash128_blake3(parent.parent_id||decode('0300','hex')),'hex'),
+      'type',3) AS proposed,
+    {target_snapshot} AS existing
+  FROM recovery_failed_parents parent
+  JOIN laplace.physicalities source ON source.id=parent.physicality_id
+  CROSS JOIN LATERAL (VALUES ('player',parent.is_player),('session',parent.is_session)) kind(name,in_scope)
+  LEFT JOIN laplace.physicalities target
+    ON target.id=public.laplace_hash128_blake3(parent.parent_id||decode('0300','hex'))
+  WHERE kind.in_scope
+),
+recovery_projection_comparisons AS MATERIALIZED (
+  SELECT *,target_occupied AND
+      proposed - ARRAY['observed_at','observed_at_binary'] =
+      existing - ARRAY['observed_at','observed_at_binary'] AS semantic_equivalent,
+    target_occupied AND proposed->'observed_at_binary' = existing->'observed_at_binary'
+      AS metadata_equivalent
+  FROM recovery_projection_snapshots
+),
+recovery_projection_difference_examples AS MATERIALIZED (
+  SELECT *,row_number() OVER(PARTITION BY parent_kind ORDER BY parent_id,content_physicality_id)
+      AS example_number
+  FROM recovery_projection_comparisons WHERE target_occupied AND NOT semantic_equivalent
+),
+recovery_projection_equivalence_by_kind AS MATERIALIZED (
+  SELECT kind.name AS parent_kind,count(c.parent_id) AS proposed_physicalities,
+    count(DISTINCT c.parent_id) AS parent_ids,
+    count(c.parent_id) FILTER(WHERE c.target_occupied) AS occupied_target_pairs,
+    count(DISTINCT c.target_id) FILTER(WHERE c.target_occupied) AS occupied_target_ids,
+    count(c.parent_id) FILTER(WHERE NOT c.target_occupied) AS unoccupied_target_pairs,
+    count(c.parent_id) FILTER(WHERE c.semantic_equivalent) AS semantic_equivalent_pairs,
+    count(c.parent_id) FILTER(WHERE c.semantic_equivalent AND c.metadata_equivalent)
+      AS semantic_and_metadata_equivalent_pairs,
+    count(c.parent_id) FILTER(WHERE c.semantic_equivalent AND NOT c.metadata_equivalent)
+      AS semantic_equivalent_metadata_different_pairs,
+    count(c.parent_id) FILTER(WHERE c.target_occupied AND NOT c.semantic_equivalent)
+      AS semantic_difference_pairs,
+    count(c.parent_id) FILTER(WHERE c.target_occupied AND NOT c.metadata_equivalent)
+      AS metadata_difference_pairs
+  FROM (VALUES ('player'),('session')) kind(name)
+  LEFT JOIN recovery_projection_comparisons c ON c.parent_kind=kind.name GROUP BY kind.name
+),
+recovery_projection_equivalence AS MATERIALIZED (
+  SELECT stats.*,COALESCE((SELECT jsonb_agg(jsonb_build_object(
+      'parent_id',encode(example.parent_id,'hex'),
+      'content_physicality_id',encode(example.content_physicality_id,'hex'),
+      'canonical_target_id',encode(example.target_id,'hex'),
+      'target_entity_id',example.existing->'entity_id',
+      'target_type',example.existing->'type',
+      'metadata_equivalent',example.metadata_equivalent,
+      'different_semantic_fields',ARRAY(SELECT field.key
+        FROM jsonb_each(example.proposed - ARRAY['observed_at','observed_at_binary']) field
+        WHERE field.value IS DISTINCT FROM example.existing->field.key ORDER BY field.key))
+        ORDER BY example.example_number)
+    FROM recovery_projection_difference_examples example
+    WHERE example.parent_kind=stats.parent_kind AND example.example_number<={sample_limit}),'[]'::jsonb)
+      AS non_equivalent_examples
+  FROM recovery_projection_equivalence_by_kind stats
+)
+"""
+
+
+def recovery_dependency_json() -> str:
+    return """jsonb_build_object(
+    'schema','laplace.legacy-content-recovery-dependencies/v2',
+    'scope','Complete failed typed parent dependency set before repair eligibility and resource filters; native-input JSONL bytes cover this dependency set only, not other repair receipt records. Counts and equivalence do not establish repair admissibility.',
+    'failed_typed_parent_physicalities',(SELECT count(*) FROM recovery_failed_parents),
+    'failed_typed_parent_ids',(SELECT count(*) FROM recovery_parent_ids),
+    'carriers',jsonb_build_object(
+      'physicality_rows',(SELECT count(*) FROM recovery_carriers),
+      'content_rows',(SELECT count(*) FROM recovery_carriers WHERE type=1),
+      'game_position_projection_rows',(SELECT count(*) FROM recovery_carriers WHERE type=3),
+      'null_trajectory_rows',(SELECT count(*) FROM recovery_carriers WHERE trajectory IS NULL),
+      'empty_trajectory_rows',(SELECT count(*) FROM recovery_carriers WHERE ST_IsEmpty(trajectory)),
+      'distinct_carrier_child_memberships',(SELECT count(*) FROM recovery_carrier_members)),
+    'native_inputs',jsonb_build_object(
+      'distinct_needed_child_ids',(SELECT count(*) FROM recovery_needed_ids),
+      'joined_entity_content_snapshot_rows',(SELECT COALESCE(sum(entity_rows::numeric*content_rows::numeric),0) FROM recovery_needed_rows),
+      'prospective_snapshot_records',(SELECT records FROM recovery_native_snapshot_sizes),
+      'prospective_snapshot_utf8_jsonl_bytes',(SELECT utf8_jsonl_bytes FROM recovery_native_snapshot_sizes),
+      'maximum_snapshot_record_utf8_bytes_excluding_lf',(SELECT maximum_record_utf8_bytes FROM recovery_native_snapshot_sizes),
+      'maximum_snapshot_jsonl_line_utf8_bytes_including_lf',(SELECT maximum_jsonl_line_utf8_bytes FROM recovery_native_snapshot_sizes),
+      'prospective_snapshot_record_format','PostgreSQL jsonb::text {kind:native-input,entity_id:hex,entity:to_jsonb(entity),content:canonical repair snapshot_expression}; UTF8 bytes plus one LF per joined entity/Content row.',
+      'entity_rows',(SELECT COALESCE(sum(entity_rows),0) FROM recovery_needed_rows),
+      'content_rows',(SELECT COALESCE(sum(content_rows),0) FROM recovery_needed_rows),
+      'missing_entity_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE entity_rows=0),
+      'missing_content_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE content_rows=0),
+      'missing_either_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE entity_rows=0 OR content_rows=0),
+      'multiple_entity_row_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE entity_rows>1),
+      'multiple_content_row_id_count',(SELECT count(*) FROM recovery_needed_rows WHERE content_rows>1),
+      'noncanonical_content_rows',(SELECT COALESCE(sum(noncanonical_content_rows),0) FROM recovery_needed_rows)),
+    'game_position_projections',jsonb_build_object(
+      'game_ids',(SELECT count(*) FROM recovery_game_projections),
+      'missing_projection_game_ids',(SELECT count(*) FROM recovery_game_projections WHERE projection_rows=0),
+      'multiple_projection_game_ids',(SELECT count(*) FROM recovery_game_projections WHERE projection_rows>1),
+      'noncanonical_projection_rows',(SELECT COALESCE(sum(noncanonical_projection_rows),0) FROM recovery_game_projections)),
+    'player_session_destinations',jsonb_build_object(
+      'parent_ids',(SELECT count(*) FROM recovery_parent_ids WHERE is_player OR is_session),
+      'occupied_parent_ids',(SELECT count(DISTINCT parent_id) FROM recovery_projection_destinations),
+      'occupied_parent_row_pairs',(SELECT count(*) FROM recovery_projection_destinations),
+      'distinct_occupied_physicalities',(SELECT count(DISTINCT id) FROM recovery_projection_destinations),
+      'canonical_target_rows',(SELECT count(*) FROM recovery_projection_destinations WHERE canonical_target),
+      'noncanonical_projection_rows',(SELECT count(*) FROM recovery_projection_destinations WHERE NOT canonical_target),
+      'canonical_target_identity_or_type_conflicts',(SELECT count(*) FROM recovery_projection_destinations
+        WHERE canonical_target AND (entity_id<>parent_id OR type<>3)),
+      'canonical_target_equivalence_scope','Each failed player/session Content proposal changes only canonical physicality ID and type=3; all semantic physicality fields compare through exact binary snapshots. observed_at is metadata and is counted separately. Parent kinds may overlap only if entity typing is duplicated.',
+      'canonical_target_equivalence_by_kind',(SELECT jsonb_agg(to_jsonb(e) ORDER BY parent_kind)
+        FROM recovery_projection_equivalence e)),
+    'incoming_content',jsonb_build_object(
+      'container_physicalities',(SELECT count(*) FROM recovery_incoming_content),
+      'container_entity_ids',(SELECT count(DISTINCT entity_id) FROM recovery_incoming_content),
+      'affected_failed_parent_ids',(SELECT count(DISTINCT parent_id) FROM recovery_incoming_matches),
+      'container_parent_pairs',(SELECT count(*) FROM recovery_incoming_matches))
+  )"""
+
+
 def classification_sql(sample_limit: int) -> str:
     if not 1 <= sample_limit <= 100:
         raise ValueError("sample_limit must be between 1 and 100")
@@ -71,7 +300,8 @@ entity_metadata AS MATERIALIZED (
          min(e.created_at) AS first_created_at,max(e.created_at) AS last_created_at,
          COALESCE(jsonb_agg(to_jsonb(e) ORDER BY e.tier)
              FILTER (WHERE e.id IS NOT NULL),'[]'::jsonb) AS entity_records
-  FROM failed f LEFT JOIN laplace.entities e ON e.id=f.parent_id
+  FROM (SELECT DISTINCT parent_id FROM failed) f
+  LEFT JOIN laplace.entities e ON e.id=f.parent_id
   GROUP BY f.parent_id
 ),
 classified AS MATERIALIZED (
@@ -114,7 +344,9 @@ strata AS MATERIALIZED (
     min(expanded_count) AS minimum_expanded_count,
     max(expanded_count) AS maximum_expanded_count
   FROM classified GROUP BY type_id,source_id,failure_class
-)
+),
+{recovery_dependency_ctes()},
+{recovery_envelope_ctes(sample_limit)}
 SELECT jsonb_build_object(
   'schema','laplace.legacy-content-classification/v1',
   'database',current_database(),'observed_at',clock_timestamp(),
@@ -126,6 +358,7 @@ SELECT jsonb_build_object(
   'parents_checked',(SELECT count(*) FROM checked),
   'identity_or_expansion_failures',(SELECT count(*) FROM failed),
   'examples_per_stratum',{sample_limit},
+  'recovery_dependency_envelope',{recovery_dependency_json()},
   'strata',COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'entity_type_id',encode(s.type_id,'hex'),'source_id',encode(s.source_id,'hex'),
     'failure_class',s.failure_class,'failures',s.failures,
@@ -155,6 +388,15 @@ def retained_json(path: Path, value: dict) -> None:
         os.fsync(directory)
     finally:
         os.close(directory)
+
+
+def validate_recovery_envelope(envelope: dict) -> None:
+    native_inputs = envelope["native_inputs"]
+    if native_inputs["prospective_snapshot_records"] != native_inputs["joined_entity_content_snapshot_rows"]:
+        raise RuntimeError("native-input snapshot byte scope does not cover all joined dependency rows")
+    for kind in envelope["player_session_destinations"]["canonical_target_equivalence_by_kind"]:
+        if kind["occupied_target_pairs"] != kind["semantic_equivalent_pairs"] + kind["semantic_difference_pairs"]:
+            raise RuntimeError("canonical target equivalence counts do not cover every occupied target pair")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -191,9 +433,11 @@ def main(argv: list[str] | None = None) -> int:
     }
     exit_code = 1
     try:
+        query_started = time.monotonic()
         proc = subprocess.run(proof.psql_argv(args.database) + ["-w"], input=sql,
             cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=args.timeout_seconds + 30)
+        report["psql_elapsed_seconds"] = time.monotonic() - query_started
         report["psql_exit_code"] = proc.returncode
         if proc.returncode:
             raise RuntimeError(proc.stderr.strip() or "classification query failed")
@@ -202,9 +446,11 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError("classification did not attest a read-only transaction")
         if sum(row["failures"] for row in result["strata"]) != result["identity_or_expansion_failures"]:
             raise RuntimeError("classification stratum counts do not cover the exhaustive failure count")
+        validate_recovery_envelope(result["recovery_dependency_envelope"])
         report.update(status="classified", live=result)
         exit_code = 0
     except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError, KeyError) as exc:
+        report["psql_elapsed_seconds"] = time.monotonic() - query_started
         report.update(status="failed", error=str(exc))
     report["finished_unix_nanoseconds"] = time.time_ns()
     retained_json(path, report)
