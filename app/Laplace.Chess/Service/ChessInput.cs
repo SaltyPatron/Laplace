@@ -49,7 +49,7 @@ internal static class ChessInput
                 || !Directory.EnumerateFiles(full, "*.rtbw", SearchOption.AllDirectories).Any())
                 throw new ChessInputException(
                     $"chess-syzygy: selected package root '{full}' contains no .rtbw tables. "
-                    + "Select the installed Syzygy root containing its WDL/DTZ directories.");
+                    + "Use the installed Syzygy root containing its WDL/DTZ directories.");
             return full;
         }
 
