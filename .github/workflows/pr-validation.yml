@@ -95,45 +95,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Classify retained Content when the recovery audit changes
-        if: always() && env.LAPLACE_PR_WORKTREE != ''
-        run: |
-          set -euo pipefail
-          umask 0002
-          cd "$LAPLACE_PR_WORKTREE"
-          if git diff --quiet "$LAPLACE_PR_BASE_SHA" "$LAPLACE_PR_TARGET_SHA" -- scripts/classify-legacy-content.py scripts/repair-legacy-content.py scripts/lib/repair_transaction.py scripts/lib/legacy_content_history.py scripts/repair-legacy-content-lifecycle.sh; then
-            exit 0
-          fi
-          source scripts/lib/storage.sh
-          laplace_storage_init
-          evidence="/build/laplace/work/legacy-content-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -p "$evidence"
-          receipt="$evidence/classification.json"
-          echo "LAPLACE_LEGACY_CONTENT_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          export PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=laplace_admin
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            bash -e -o pipefail -s -- "$PGDATABASE" "$evidence" <<'RECOVERY_DIAGNOSTIC'
-          history_status=0
-          python3 scripts/lib/legacy_content_history.py --receipt "$2/history.json" \
-            --max-bytes 4294967296 --max-prior-bytes 34359738368 \
-            --max-current-readback-bytes 8589934592 || history_status=$?
-          classification_status=0
-          python3 scripts/classify-legacy-content.py "$1" \
-            --examples-per-stratum 10 --timeout-seconds 1800 --receipt "$2/classification.json" || classification_status=$?
-          if (( history_status != 0 || classification_status != 0 )); then
-            exit 1
-          fi
-          RECOVERY_DIAGNOSTIC
-
-      - name: Retain bounded legacy Content classification
-        if: always() && env.LAPLACE_LEGACY_CONTENT_EVIDENCE != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: legacy-content-classification-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.LAPLACE_LEGACY_CONTENT_EVIDENCE }}/
-          if-no-files-found: error
-          retention-days: 14
-
+      # Do not classify the entire installed corpus before proving a branch.
+      # That duplicate read can hold the delivery host lock for 1800 seconds
+      # and fail on baseline data before branch code has even been built.
+      # The private DB proof still exercises repair and source/session behavior;
+      # product-ci owns installed-corpus repair and the subsequent live proof.
       - name: Prove merge candidate without production mutation
         id: proof
         run: |
