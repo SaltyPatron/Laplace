@@ -1,57 +1,87 @@
-export interface ApiErrorBody {
-  error?: { message?: string; type?: string; code?: string };
+export interface QueryShape {
+  shape: string;
+  summary: string;
+  needs_topic2: boolean;
+  needs_type: boolean;
+  accepts_lang: boolean;
 }
 
-export interface HealthResponse {
-  status: string;
-  substrate?: string;
+export interface RelationBand {
+  band: number;
+  name: string;
+  rank: number;
+  relation_types: number;
+  consensus_rows: number;
 }
 
-export interface SalientFact {
-  type: string;
-  fact: string;
+export interface QueryRow {
+  reply: string;
+  eff_mu?: number | null;
+  witnesses?: number | null;
+}
+
+export interface QueryResult {
+  object: string;
+  shape: string;
+  topic_id?: string | null;
+  topic_label?: string | null;
+  topic2_id?: string | null;
+  topic2_label?: string | null;
+  bands?: number[] | null;
+  rows: QueryRow[];
+}
+
+/** Every dial the substrate accepts for a read. */
+export interface QueryDials {
+  depth: number;
+  breadth: number;
+  limit: number;
+  steps: number;
+  spread: number;
+  max_stride: number;
+  seed: string;
+  directed: boolean;
+  use_geometry: boolean;
+}
+
+export const DIAL_DEFAULTS: QueryDials = {
+  depth: 4,
+  breadth: 5,
+  limit: 40,
+  steps: 24,
+  spread: 0.7,
+  max_stride: 5,
+  seed: '',
+  directed: false,
+  use_geometry: false,
+};
+
+/** Which dials each shape actually reads. A control that does nothing is worse
+ *  than no control, so the panel shows only what the chosen shape consumes. */
+export const SHAPE_DIALS: Record<string, (keyof QueryDials)[]> = {
+  band_facts: ['limit'],
+  beam: ['depth', 'breadth', 'limit'],
+  path: ['depth', 'directed', 'use_geometry'],
+  neighbors: ['limit'],
+  generate: ['steps', 'max_stride', 'spread', 'breadth', 'seed'],
+  walk: ['depth'],
+  complete: ['depth', 'breadth'],
+};
+
+export interface LeaderRow {
+  subject_id: string;
+  subject: string;
+  relation: string;
+  object_id: string;
+  object: string;
   eff_mu: number;
   witnesses: number;
 }
 
-export interface SearchEntity {
-  id: string;
-  label: string;
-  type?: string | null;
-  score?: number | null;
-}
-
-export interface SearchResponse {
-  object?: string;
-  data?: SearchEntity[];
-  results?: SearchEntity[];
-}
-
-export interface ExploreConsensusRow {
-  direction: 'out' | 'in' | string;
-  type: string;
-  entity_id_hex: string;
-  entity_label: string;
-  eff_mu: number;
-  witnesses: number;
-}
-
-export interface ExploreSenseRow {
-  sense_id_hex: string;
-  synset_id_hex: string;
-  synset_label: string;
-  eff_mu: number;
-  witnesses: number;
-}
-
-export interface ExploreEntityResponse {
-  id: string;
-  label: string;
-  type?: string | null;
-  consensus_out: ExploreConsensusRow[];
-  consensus_in: ExploreConsensusRow[];
-  salient_facts: SalientFact[];
-  senses: ExploreSenseRow[];
+export interface BandLeaders {
+  band: number;
+  name: string;
+  rows: LeaderRow[];
 }
 
 export interface EntityRecord {
@@ -103,24 +133,4 @@ export interface MatchupVerdict {
   usage?: number | null;
   geodesic?: number | null;
   verdict?: string | null;
-}
-
-export interface BandLeaderRow {
-  subject_id: string;
-  subject: string;
-  relation: string;
-  object_id: string;
-  object: string;
-  eff_mu: number;
-  witnesses: number;
-}
-
-export interface BandLeaders {
-  band: number;
-  name: string;
-  rows: BandLeaderRow[];
-}
-
-export interface LeadersResponse {
-  bands: BandLeaders[];
 }
