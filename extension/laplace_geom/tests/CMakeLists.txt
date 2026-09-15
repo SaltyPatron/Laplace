@@ -18,7 +18,7 @@ if(NOT REGRESS_DB MATCHES "^laplace_[A-Za-z0-9_]+$")
     message(FATAL_ERROR "LAPLACE_REGRESS_DB must produce an isolated laplace_* database name")
 endif()
 
-set(REGRESS_TESTS hash128 st_4d rle_trajectory)
+set(REGRESS_TESTS hash128 st_4d rle_trajectory karcher_mean_4d)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 
