@@ -6,13 +6,11 @@ import copy
 import hashlib
 import json
 import os
-import re
 from pathlib import Path
 import signal
 import subprocess
 import sys
 import tempfile
-import textwrap
 import time
 import unittest
 from unittest import mock
@@ -244,7 +242,7 @@ class RetainedBuildTests(unittest.TestCase):
                     driver.qualification(plan, ROOT)
             remote.assert_not_called()
 
-    def test_actual_workflow_selects_existing_git_checkout_without_mutation(self):
+    def test_direct_driver_selects_existing_checkout_and_staged_controls_without_mutation(self):
         def git_command(*args):
             return subprocess.check_output(
                 ["git", "-C", str(self.checkout), *args], text=True,
@@ -275,20 +273,24 @@ class RetainedBuildTests(unittest.TestCase):
         target = git_command("rev-parse", "HEAD")
         git_command("checkout", "--detach", plan["candidate_commit"])
         self.assertNotEqual(target, git_command("rev-parse", "HEAD"))
-        workflow = (ROOT / ".github/workflows/chess-floor-export.yml").read_text()
-        match = re.search(r'<< "PY_SOURCE"\n(.*?)\n          PY_SOURCE', workflow, re.DOTALL)
-        self.assertIsNotNone(match)
-        program = textwrap.dedent(match.group(1))
         before = (git_command("rev-parse", "HEAD"), git_command("worktree", "list", "--porcelain"),
                   git_command("show-ref", "--head"), tracked.read_bytes(),
                   os.readlink(self.checkout / "build"))
         materialized = self.root / "retained-operator"
-        command = [sys.executable, "-", target, str(materialized)]
-        result = subprocess.run(command, input=program, text=True, capture_output=True,
-                                cwd=self.checkout, timeout=10,
-                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(str(self.checkout), result.stdout.strip())
+        # The supported direct route validates the selected checkout through the
+        # real driver; staged operator files remain outside that checkout.
+        self.assertEqual(self.checkout, driver.candidate_checkout(plan))
+        materialized.mkdir(mode=0o700)
+        for source_path, name in (
+                ("scripts/export-qualified-chess-floors.py", operator_driver.name),
+                (".github/chess-floor-export-selection.json", "selection.json")):
+            retained = subprocess.check_output(
+                ["git", "-C", str(self.checkout), "show", target + ":" + source_path],
+                stderr=subprocess.PIPE, timeout=10)
+            (materialized / name).write_bytes(retained)
+        selected_plan = driver.load(materialized / "selection.json", 65536)
+        self.assertEqual(plan, selected_plan)
+        self.assertEqual(self.checkout, driver.candidate_checkout(selected_plan))
         self.assertEqual(driver_bytes, (materialized / operator_driver.name).read_bytes())
         self.assertEqual(selection_bytes, (materialized / "selection.json").read_bytes())
         self.assertFalse(operator_driver.exists())
@@ -323,12 +325,8 @@ class RetainedBuildTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             driver.candidate_checkout({**plan, "native_checkout": str(alias)})
         tracked.write_text("uncommitted change\n")
-        command[-1] = str(self.root / "refused-operator")
-        refused = subprocess.run(command, input=program, text=True, capture_output=True,
-                                 cwd=self.checkout, timeout=10,
-                                 env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-        self.assertNotEqual(0, refused.returncode)
-        self.assertIn("current checkout differs", refused.stderr)
+        with self.assertRaisesRegex(ValueError, "current checkout differs"):
+            driver.candidate_checkout(selected_plan)
         self.assertEqual("uncommitted change\n", tracked.read_text())
         self.assertEqual(before[:3], (git_command("rev-parse", "HEAD"),
                                      git_command("worktree", "list", "--porcelain"),

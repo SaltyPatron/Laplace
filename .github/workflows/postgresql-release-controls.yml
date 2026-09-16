@@ -1,103 +1,64 @@
-name: Qualify final bootstrap shell syntax and retain passed SQL controls
+name: Qualify current recorded floor export controls
 on:
   push:
     branches: ['verify/postgresql-activation-20260916']
 permissions:
   contents: read
-  actions: read
 jobs:
   qualification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Prepare exact source and permanent SQL evidence
+      - name: Prepare selected source and permanent evidence
         shell: bash
         run: |
           set -euo pipefail
-          work="/build/laplace/work/ingest-liveness-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          evidence="/build/laplace/recovery/ingest-liveness-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence" /build/laplace/work/ilsql
-          mkdir -p "$work/source"
+          work="/build/laplace/work/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          evidence="/build/laplace/recovery/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence"
+          mkdir -p "$work/tmp" "$work/source"
           echo "QUALIFY_WORK=$work" >> "$GITHUB_ENV"
           echo "QUALIFY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          echo "TMPDIR=/build/laplace/work/ilsql" >> "$GITHUB_ENV"
-          echo "TMP=/build/laplace/work/ilsql" >> "$GITHUB_ENV"
-          echo "TEMP=/build/laplace/work/ilsql" >> "$GITHUB_ENV"
-          if [[ ! -x /usr/lib/postgresql/16/bin/postgres ]] || ! command -v shellcheck >/dev/null || ! command -v pg_config >/dev/null; then
-            sudo -n timeout 120s apt-get update
-            sudo -n timeout 180s apt-get install -y --no-install-recommends postgresql-16 libpq-dev shellcheck
-          fi
-          /usr/lib/postgresql/16/bin/postgres --version > "$evidence/postgresql.txt"
-          echo "PG_BINDIR=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+          echo "TMPDIR=$work/tmp" >> "$GITHUB_ENV"
+          echo "TMP=$work/tmp" >> "$GITHUB_ENV"
+          echo "TEMP=$work/tmp" >> "$GITHUB_ENV"
           cd "$work/source"
           git init -q
           git remote add origin https://github.com/SaltyPatron/Laplace.git
-          timeout 120s git fetch --no-tags --depth=1 origin 439b9d2b5572cc4ace02e86db0ca83e77e7e0816
+          timeout 120s git fetch --no-tags --depth=1 origin 2b2d4e78e59bfac2b1fb0b2843e02ba2d5360599
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 439b9d2b5572cc4ace02e86db0ca83e77e7e0816
-          test "$(git rev-parse HEAD^{tree})" = d6d5371cd286f74c9c46e75242fb7043d84706e2
+          test "$(git rev-parse HEAD)" = 2b2d4e78e59bfac2b1fb0b2843e02ba2d5360599
+          test "$(git rev-parse HEAD^{tree})" = 83f9d707c287f0b990e110ae6d05ef31a6071f68
           git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
-      - name: Authenticate prior passed SQL and quiet control logs
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location --max-time 60 \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/SaltyPatron/Laplace/actions/artifacts/10470617512/zip \
-            -o "$QUALIFY_EVIDENCE/prior-sql-controls.zip"
-          python3 -B - <<'PY'
-          import hashlib, os, pathlib, zipfile
-          evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
-          archive=evidence/"prior-sql-controls.zip"
-          assert archive.stat().st_size == 2945
-          assert hashlib.sha256(archive.read_bytes()).hexdigest() == "047788490d022cde92ca5a371ef968397a9cdf93b4e485ce6a6b6f5eaecb191f"
-          with zipfile.ZipFile(archive) as package:
-              for name in ("postgresql-bootstrap.log","quiet-owner.log","postgresql.txt","results.json"):
-                  info=package.getinfo(name)
-                  assert info.file_size < 1024*1024
-                  data=package.read(name)
-                  (evidence/("prior-"+name)).write_bytes(data)
-                  print(name,flush=True)
-                  print(data.decode(),flush=True)
-          PY
-      - name: Execute bounded actual PostgreSQL and caller controls
+      - name: Execute affected export controls
         shell: bash
         run: |
           set -euo pipefail
           cd "$QUALIFY_WORK/source"
           python3 -B - <<'PY'
-          import ast, json, os, pathlib, subprocess, sys
+          import ast, json, os, pathlib, subprocess
           evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
-          for name in ("scripts/bootstrap-ingest-liveness.py", "scripts/test-bootstrap-ingest-liveness.py"):
+          for name in ("scripts/export-qualified-chess-floors.py","scripts/test-qualified-chess-floor-export.py"):
               ast.parse(pathlib.Path(name).read_text(), filename=name)
-          (evidence/"ast.txt").write_text("PASS: helper and PostgreSQL fixture test Python sources\n")
-          commands=[
-              ("bash", ["bash", "-n", "scripts/product-ci.sh", "scripts/test-parallel.sh"]),
-              ("shellcheck", ["shellcheck", "-S", "warning", "scripts/product-ci.sh", "scripts/test-parallel.sh"]),
-          ]
-          results=[]
-          for name, command in commands:
-              with (evidence/(name+".log")).open("w") as stream:
-                  completed=subprocess.run(["timeout","--kill-after=10s","300s",*command],stdout=stream,stderr=subprocess.STDOUT)
-              results.append({"name":name,"command":command,"exit_code":completed.returncode})
-              (evidence/"results.json").write_text(json.dumps(results,indent=2)+"\n")
-              print(name,completed.returncode,flush=True)
-              if completed.returncode:
-                  print((evidence/(name+".log")).read_text(),flush=True)
-                  raise SystemExit(completed.returncode)
+          (evidence/"ast.txt").write_text("PASS: current exporter and changed test Python sources\n")
+          command=["python3","-B","scripts/test-qualified-chess-floor-export.py","-v"]
+          with (evidence/"export-controls.log").open("w") as stream:
+              result=subprocess.run(["timeout","--kill-after=10s","180s",*command],stdout=stream,stderr=subprocess.STDOUT)
+          (evidence/"results.json").write_text(json.dumps({"command":command,"exit_code":result.returncode},indent=2)+"\n")
+          print((evidence/"export-controls.log").read_text(),flush=True)
+          if result.returncode:
+              raise SystemExit(result.returncode)
           dirty=subprocess.check_output(["git","status","--porcelain","--untracked-files=all"],text=True)
           (evidence/"source-clean.txt").write_text(dirty or "PASS: clean source checkout\n")
           if dirty:
               raise SystemExit("qualification modified source checkout")
           PY
-      - name: Retain exact qualification evidence
+      - name: Retain affected control evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ingest-liveness-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          name: current-floor-export-controls-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.QUALIFY_EVIDENCE }}
           if-no-files-found: error
