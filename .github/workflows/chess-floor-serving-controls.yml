@@ -1,70 +1,56 @@
-name: Dispatch the approved complete Original deployment
+name: Observe native dependency ownership after the actual policy refusal
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
 permissions:
   contents: read
-  actions: write
 jobs:
-  operation:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  observe:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 3
     steps:
-      - name: Dispatch the exact merged main through its ordinary complete lifecycle
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Read fixed dependency metadata without checkout or mutation
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json, os, re, urllib.request
-          REPOSITORY = "SaltyPatron/Laplace"
-          EXPECTED_MAIN = "6e15704e990b6a4ab933dcc80d2f4de026b3320f"
-          PROOF_RUN = 35138096800
-          PROOF_HEAD = "9a91eefd4a41bdcc4d22a73c05e710242b547123"
-          EXPECTED_TREE = "c1b18d5ca3319a60e2099187da0493639e2d97e5"
-          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (EXPECTED_MAIN, PROOF_HEAD)):
-              raise ValueError("exact immutable source identities are required")
-          base = "https://api.github.com/repos/" + REPOSITORY
-          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"],
-                     "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10"}
-          def api(path):
-              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
-                  raw = response.read(2 * 1024 * 1024 + 1)
-              if len(raw) > 2 * 1024 * 1024:
-                  raise ValueError("API metadata exceeded the read budget")
-              return json.loads(raw)
-          proof = api("/actions/runs/" + str(PROOF_RUN))
-          if (proof["head_sha"] != PROOF_HEAD or proof["status"] != "completed"
-                  or proof["conclusion"] != "success" or proof["event"] != "pull_request"
-                  or proof["path"] != ".github/workflows/pr-validation.yml"):
-              raise ValueError("the selected current-source PR proof has not passed")
-          commit = api("/git/commits/" + EXPECTED_MAIN)
-          if commit["tree"]["sha"] != EXPECTED_TREE:
-              raise ValueError("the explicitly approved main tree changed")
-          if api("/git/ref/heads/main")["object"]["sha"] != EXPECTED_MAIN:
-              raise ValueError("main changed before the explicit deployment")
-          inputs = {"stage": "all", "full_clean": "false", "force_codegen": "false",
-                    "fresh_db": "false", "restore_foundation": "false", "serial_tests": "false",
-                    "force_all": "false", "generation_benchmark": "false"}
-          payload = {"ref": "main", "inputs": inputs}
-          print("ORIGINAL_DEPLOYMENT_SELECTION " + json.dumps({"source": EXPECTED_MAIN,
-              "historicalSourceProofRun": PROOF_RUN, "historicalSourceProofHead": PROOF_HEAD,
-              "historicalProofAppliesToCurrentMain": False, "currentMainQualification": "pending_this_full_lifecycle",
-              "expectedTree": EXPECTED_TREE, "inputs": inputs}), flush=True)
-          request = urllib.request.Request(base + "/actions/workflows/laplace.yml/dispatches",
-              data=json.dumps(payload).encode(), headers={**headers, "Content-Type": "application/json"}, method="POST")
-          # One request only: an ambiguous transport response is inspected, never retried automatically.
-          with urllib.request.urlopen(request, timeout=30) as response:
-              code = response.status
-              raw = response.read(65537)
-          if code not in (200, 204) or len(raw) > 65536:
-              raise ValueError("unexpected dispatch response")
-          result = json.loads(raw) if raw else {}
-          unchanged = api("/git/ref/heads/main")["object"]["sha"] == EXPECTED_MAIN
-          print("ORIGINAL_DEPLOYMENT_DISPATCH " + json.dumps({"status": "requested",
-              "expectedHead": EXPECTED_MAIN, "mainUnchangedAfterRequest": unchanged,
-              "workflowRunId": result.get("workflow_run_id"), "runUrl": result.get("html_url")}), flush=True)
-          if not unchanged:
-              raise ValueError("main changed during dispatch; authenticate the actual run before using it")
+          timeout --signal=TERM --kill-after=5s 60s python3 - <<'PY'
+          import datetime, json, os, pathlib, stat, subprocess
+          def emit(kind, value):
+              print(json.dumps({"kind":kind, **value}, sort_keys=True), flush=True)
+          emit("identity", {"uid":os.getuid(),"gid":os.getgid(),"groups":os.getgroups(),
+               "utc":datetime.datetime.now(datetime.timezone.utc).isoformat()})
+          paths=["/build/external","/build/external/PINS.tsv","/build/external/postgresql",
+                 "/build/external/postgresql/.git","/opt/laplace","/opt/laplace/pgsql-18",
+                 "/opt/laplace/pgsql-18/bin","/opt/laplace/include","/opt/laplace/lib",
+                 "/opt/laplace/share","/opt/laplace/bin","/usr/local/libexec/laplace-managed-deploy"]
+          for name in paths:
+              try:
+                  p=pathlib.Path(name); info=p.lstat()
+                  emit("path",{"path":name,"uid":info.st_uid,"gid":info.st_gid,
+                      "mode":oct(stat.S_IMODE(info.st_mode)),"symlink":p.is_symlink(),
+                      "readable":os.access(p,os.R_OK),"writable":os.access(p,os.W_OK),
+                      "traversable":os.access(p,os.X_OK),"device":info.st_dev,"inode":info.st_ino})
+              except OSError as exc: emit("path",{"path":name,"errorType":type(exc).__name__,"errno":exc.errno})
+          p=pathlib.Path("/build/external/PINS.tsv")
+          try:
+              if p.stat().st_size > 1048576: raise ValueError("pin metadata read budget exceeded")
+              rows=[line.split("\t") for line in p.read_text().splitlines()
+                    if line.split("\t",1)[0].removeprefix("external/")=="postgresql"]
+              emit("postgresqlPin",{"rows":rows})
+          except (OSError,ValueError) as exc: emit("postgresqlPin",{"errorType":type(exc).__name__})
+          commands=[
+              ("sourceHead",["git","-c","safe.directory=/build/external/postgresql","-C","/build/external/postgresql","rev-parse","HEAD"]),
+              ("postgresVersion",["/opt/laplace/pgsql-18/bin/postgres","--version"]),
+              ("pgConfigVersion",["/opt/laplace/pgsql-18/bin/pg_config","--version"]),
+              ("apiActive",["systemctl","is-active","laplace-api"]),
+              ("runningPostgres",["/opt/laplace/pgsql-18/bin/psql","-X","-h","/var/run/postgresql","-U","laplace_admin","-d","postgres","-Atqc","SHOW server_version_num"])
+          ]
+          for label, argv in commands:
+              try:
+                  result=subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,text=True,timeout=10)
+                  emit(label,{"exitCode":result.returncode,"stdout":result.stdout.strip()[:512],
+                      "stderrBytes":len(result.stderr.encode())})
+              except (OSError,subprocess.TimeoutExpired) as exc:
+                  emit(label,{"errorType":type(exc).__name__})
           PY
