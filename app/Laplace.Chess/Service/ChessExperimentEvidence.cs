@@ -71,7 +71,7 @@ internal sealed record ChessExperimentEvidence(string ExperimentId, string PgnEv
     public async Task<SubstrateChange> BuildChangeAsync(IReadOnlyList<ChessGameRecord> games, CancellationToken ct)
     {
         var source = SourceId;
-        var builder = new SubstrateChangeBuilder(source, PgnEvent + "/receipt")
+        using var builder = new SubstrateChangeBuilder(source, PgnEvent + "/receipt")
             .DeclareSourcePrior(SourceTrust.AppDerived);
         var receiptId = ContentEmitter.Emit(builder, ReceiptJson, source)
             ?? throw new InvalidOperationException("Could not admit chess experiment receipt content.");

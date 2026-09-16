@@ -57,16 +57,40 @@ def place(checkout):
         raise RuntimeError('/build must be mounted')
     checkout = checkout.resolve(strict=True)
     identity = hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
-    target = Path('/build/laplace/build') / ('legacy-' + identity)
+    target = Path('/build/laplace/build') / ('laplace-' + identity)
+    old_target = Path('/build/laplace/build') / ('legacy-' + identity)
     source = checkout / 'build'
     lock_root = Path('/build/laplace/work/build-placement')
     lock_root.mkdir(parents=True, exist_ok=True)
     with (lock_root / (identity + '.lock')).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+
+        # Preserve the existing cache while removing the false product label.
+        if old_target.exists():
+            if target.exists():
+                if inventory(old_target) != inventory(target):
+                    raise RuntimeError(
+                        f'build migration has divergent trees; both retained: {old_target} {target}')
+                shutil.rmtree(old_target)
+            else:
+                old_target.rename(target)
+
         if source.is_symlink():
-            actual = source.resolve()
+            actual = source.resolve(strict=False)
             if actual != target:
-                raise RuntimeError(f'build link does not match this checkout: {source} -> {actual}')
+                # The checkout-local symlink is only a pointer. A persistent runner,
+                # another local clone, or an accidentally tracked symlink may leave it
+                # pointing at another checkout's preserved cache. Keep that cache where
+                # it is and repair this checkout's pointer instead of failing the build.
+                receipt = lock_root / (identity + '-' + str(time.time_ns()) + '-relink.json')
+                receipt.write_text(json.dumps({'source': str(source),
+                                               'previous_target': str(actual),
+                                               'target': str(target)}, sort_keys=True) + '\n')
+                with receipt.open('rb') as stream:
+                    os.fsync(stream.fileno())
+                source.unlink()
+                source.symlink_to(target, target_is_directory=True)
+                actual = target
             actual.mkdir(parents=True, exist_ok=True)
             canonicalize_cmake_cache(actual, lock_root, identity)
             return actual

@@ -22,7 +22,13 @@ class IngestExitTests(unittest.TestCase):
         (scripts / "lib/fp.sh").write_text("fp_compute() { echo fixture; }\nfp_check() { return 1; }\nfp_record() { :; }\n")
         (scripts / "decomposer-gates.json").write_text('{"sources":{"wordnet":{"decomposer":"fixture"}}}')
         (scripts / "verify-ingest-journal.sh").write_text('echo checked >> "$PROOF"\nexit "${PROOF_RC:-0}"\n')
-        (self.root / "app").mkdir()
+        cli = self.root / "app/Laplace.Cli/bin/Release/net10.0"
+        cli.mkdir(parents=True)
+        (cli / "Laplace.Cli.dll").write_bytes(b"fixture-cli")
+        native = self.root / "build/engine/core/liblaplace_core.so"
+        native.parent.mkdir(parents=True)
+        native.write_bytes(b"fixture-native")
+        (cli / "liblaplace_core.so").write_bytes(native.read_bytes())
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         (bin_dir / "dotnet").write_text('''#!/bin/bash
@@ -40,6 +46,8 @@ exit "$CLI_RC"
         self.env = dict(os.environ, PATH=str(bin_dir) + ":" + os.environ["PATH"],
                         GITHUB_ACTIONS="true", GITHUB_OUTPUT=str(self.root / "outputs"),
                         INGEST_LOGDIR=str(self.root / "logs"), PROOF=str(self.root / "proof"),
+                        LAPLACE_BUILD_ROOT="",
+                        LAPLACE_INGEST_RUNTIME_PREPARED="1",
                         CLI_RC="0", CLI_MESSAGE="completed")
 
     def run_ingest(self, **changes):

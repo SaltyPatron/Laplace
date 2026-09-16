@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -222,6 +223,81 @@ public sealed class ChessCorpusSourceTests
         finally { Directory.Delete(directory, true); }
     }
 
+
+    [Theory]
+    [InlineData("failed", 0)]
+    [InlineData("failed", 123)]
+    [InlineData("cancelled", 0)]
+    [InlineData("cancelled", 123)]
+    public void FailedSummaryRetainsPartialWorkButNeverPublishesANumericRate(string status, int sealedGames)
+    {
+        // Reporting-only control: these counters are not database or throughput evidence.
+        // A stale successful candidate may exist before late replay/disposal failure.
+        var result = ChessCorpusBenchmark.CreateResult(status, sealedGames, 45, 3000,
+            qualifiedWindow: true, targetMet: true, receiptPath: "retained/corpus-recording.json");
+        Assert.False(result.Completed);
+        Assert.Equal(sealedGames, result.NewlyRecordedGames);
+        Assert.Equal(45d, result.ElapsedSeconds);
+        Assert.Null(result.GamesPerSecond);
+        Assert.False(result.QualifiedWindow);
+        Assert.False(result.TargetMet);
+        using var summary = JsonDocument.Parse(JsonSerializer.Serialize(result,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(JsonValueKind.Null, summary.RootElement.GetProperty("gamesPerSecond").ValueKind);
+        Assert.Equal(sealedGames, summary.RootElement.GetProperty("newlyRecordedGames").GetInt32());
+        Assert.Equal("retained/corpus-recording.json",
+            summary.RootElement.GetProperty("receiptPath").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CompletedSummaryPreservesSampleRateAndSeparateDurationQualification(bool qualified)
+    {
+        var result = ChessCorpusBenchmark.CreateResult("completed", 120_000,
+            qualified ? 40 : 20, qualified ? 3000 : 6000, qualified, qualified, "retained");
+        Assert.True(result.Completed);
+        Assert.Equal(qualified ? 3000d : 6000d, result.GamesPerSecond);
+        Assert.Equal(qualified, result.QualifiedWindow);
+        Assert.Equal(qualified, result.TargetMet);
+        using var summary = JsonDocument.Parse(JsonSerializer.Serialize(result,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(qualified ? 3000d : 6000d,
+            summary.RootElement.GetProperty("gamesPerSecond").GetDouble());
+    }
+
+    [Fact]
+    public async Task NativeAdmissionFailureRetainsDriverDetailsInTheExistingReceiptError()
+    {
+        // Synthetic server detail exercises the real pinned driver; no database work runs here.
+        const string detail = "grant_bytes=3374058598 retained_bytes=1558360586 remaining_bytes=1815698012 "
+            + "source_forms=1475833 native_phase=8 native_refusal=5 materialization_grant_bytes=1815698012 "
+            + "subowner_grant_bytes=800916049 subowner_retained_bytes=750000000 subowner_peak_bytes=790000000 "
+            + "subowner_requested_bytes=67108864 released_before_serialization_bytes=120000000 "
+            + "serialization_entry_bytes=900000000 plan_allocation=3 plan_refusal=1 "
+            + "plan_requested_bytes=67108864 plan_nodes=50540/65536";
+        var postgres = new global::Npgsql.PostgresException(
+            "physicality descriptor admission native materialization failed (native status -2)",
+            "ERROR", "ERROR", "54000", detail: detail);
+
+        var failure = await ChessCorpusBenchmark.CaptureFailureAsync(
+            () => Task.FromException(postgres));
+
+        Assert.NotNull(failure);
+        Assert.Equal("failed", failure.Status);
+        Assert.Equal(nameof(global::Npgsql.PostgresException), failure.ErrorType);
+        Assert.Equal(postgres.Message, failure.Error);
+        Assert.Contains(detail, failure.Error, StringComparison.Ordinal);
+        // MessageText alone would discard the server detail. The actual driver
+        // Message used by both recording receipts already retains that detail.
+        Assert.DoesNotContain(detail, postgres.MessageText, StringComparison.Ordinal);
+        using var retained = JsonDocument.Parse(JsonSerializer.Serialize(failure,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(postgres.Message, retained.RootElement.GetProperty("error").GetString());
+        Assert.Null(ChessCorpusBenchmark.CreateResult(failure.Status, 0, 117, 0,
+            qualifiedWindow: false, targetMet: false, receiptPath: "retained").GamesPerSecond);
+    }
+
     private sealed class FailingCleanup(Exception failure) : IAsyncDisposable
     {
         public bool Disposed { get; private set; }
@@ -249,6 +325,8 @@ public sealed class ChessCorpusSourceTests
         Assert.Equal("failed", failure.Status);
         Assert.Equal(nameof(IOException), failure.ErrorType);
         Assert.Equal("retained cleanup failed", failure.Error);
+        Assert.Null(ChessCorpusBenchmark.CreateResult(failure.Status, 2000, 45, 2000d / 45,
+            qualifiedWindow: true, targetMet: false, receiptPath: "retained").GamesPerSecond);
     }
 
     [Fact]
@@ -264,6 +342,8 @@ public sealed class ChessCorpusSourceTests
         Assert.NotNull(failure);
         Assert.Equal("cancelled", failure.Status);
         Assert.Equal(nameof(OperationCanceledException), failure.ErrorType);
+        Assert.Null(ChessCorpusBenchmark.CreateResult(failure.Status, 2000, 45, 2000d / 45,
+            qualifiedWindow: true, targetMet: false, receiptPath: "retained").GamesPerSecond);
         Assert.Null(await ChessCorpusBenchmark.CaptureFailureAsync(() => Task.CompletedTask));
     }
 

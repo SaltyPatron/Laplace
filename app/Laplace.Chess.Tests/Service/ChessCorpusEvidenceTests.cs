@@ -117,6 +117,27 @@ public sealed class ChessCorpusEvidenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplayScheduleFollowsSealedFreshBoundariesAndDoesNotAdvanceOnRefusal()
+    {
+        var fresh = await FreshAsync("scheduled-fresh", twoChunks: true);
+        Assert.Null(fresh.NextReplayChunkGames);
+        var replay = new ChessCorpusEvidence(At("scheduled-replay"), fresh);
+        Assert.Equal(2, replay.NextReplayChunkGames);
+        await Assert.ThrowsAsync<InvalidDataException>(() => replay.AppendAsync(
+            [Body(1)], [Scope(Rows(2), Rows(2), true)], 0, new(), Ct));
+        Assert.Equal(2, replay.NextReplayChunkGames);
+        await replay.AppendAsync([Body(1), Body(2)], [Scope(Rows(2), Rows(2), true)], 0, new(), Ct);
+        Assert.Equal(1, replay.NextReplayChunkGames);
+        await replay.AppendAsync([Body(3)], [Scope(Rows(2), Rows(2), true)], 0, new(), Ct);
+        Assert.Equal(0, replay.NextReplayChunkGames);
+        await replay.CompleteAsync(Ct);
+        Assert.True(replay.Completed);
+        var unsealed = new ChessCorpusEvidence(At("unsealed-schedule"));
+        var refused = new ChessCorpusEvidence(At("refused-schedule"), unsealed);
+        Assert.Throws<InvalidDataException>(() => { _ = refused.NextReplayChunkGames; });
+    }
+
+    [Fact]
     public async Task FreshSharedCountGrowthAndZeroWriteReplayProduceIdenticalAggregateState()
     {
         var fresh = await FreshAsync("fresh", twoChunks: true);

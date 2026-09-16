@@ -68,9 +68,9 @@ class RuntimeGuardTests(unittest.TestCase):
     def staged_install(self, _root, _prefix):
         yield self.staged
 
-    def snapshot(self):
+    def snapshot(self, *, purpose="publication"):
         with patch.object(guard, "staged_install", self.staged_install):
-            return guard.snapshot(self.root, self.prefix, self.database, self.fingerprint)
+            return guard.snapshot(self.root, self.prefix, self.database, self.fingerprint, purpose=purpose)
 
     def test_exact_installed_runtime_passes_even_when_build_elf_bytes_differ(self):
         self.assertNotEqual(
@@ -217,6 +217,55 @@ class RuntimeGuardTests(unittest.TestCase):
         self.database["running_ingests"] = 1
         with self.assertRaisesRegex(ValueError, "ingest"):
             self.snapshot()
+
+
+    def test_recording_retains_unresolved_journal_without_treating_it_as_a_lock(self):
+        self.database["running_ingests"] = 3
+        before = self.snapshot(purpose="recording")
+        self.assertEqual(3, before["database"]["running_ingests"])
+        self.database["running_ingests"] = 4
+        after = self.snapshot(purpose="recording")
+        self.assertEqual(4, after["database"]["running_ingests"])
+        self.assertTrue(guard.compatible(before, after, purpose="recording"))
+        self.assertFalse(guard.compatible(before, after))
+        self.assertEqual(3, before["database"]["running_ingests"])
+        with self.assertRaisesRegex(ValueError, "ingest"):
+            self.snapshot()
+
+    def test_recording_comparison_preserves_every_other_runtime_field(self):
+        before = self.snapshot(purpose="recording")
+        paths = [
+            ("native_fingerprint",), ("artifacts", self.execution_artifact),
+            ("database", "database"), ("database", "server_version"),
+            ("database", "postmaster_started"), ("database", "extension_functions"),
+            ("database", "extensions"), ("database", "migrations"),
+            ("database", "roms"),
+        ]
+        for path in paths:
+            with self.subTest(path=path):
+                after = json.loads(json.dumps(before))
+                target = after
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = "changed"
+                self.assertFalse(guard.compatible(before, after, purpose="recording"))
+        with self.assertRaisesRegex(ValueError, "recording snapshots"):
+            guard.compatible(self.snapshot(), before, purpose="recording")
+
+    def test_recording_still_rejects_actual_native_drift_and_invalid_journal_observation(self):
+        self.database["running_ingests"] = 2
+        path = self.prefix / self.execution_artifact
+        original = path.read_bytes()
+        path.write_bytes(b"changed execution module")
+        with self.assertRaisesRegex(ValueError, "tested installed form"):
+            self.snapshot(purpose="recording")
+        path.write_bytes(original)
+        for invalid in (True, -1, None, "2"):
+            self.database["running_ingests"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "journal observation"):
+                self.snapshot(purpose="recording")
+        with self.assertRaisesRegex(ValueError, "purpose"):
+            self.snapshot(purpose="unknown")
 
     def test_unknown_postgres_or_function_contract_fails(self):
         self.database["server_version"] = "170000"

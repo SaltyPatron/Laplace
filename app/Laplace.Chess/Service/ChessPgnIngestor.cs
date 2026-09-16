@@ -29,11 +29,18 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     // API process's own lane. Lab artifacts are small (tens of games) so waiting is fine.
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    // Games per apply. The source profile separates measured serialized game bytes from
-    // resident compose bytes; the shared resolver turns both plus live RAM/topology into
-    // this value. No private chess batch literal or special "fat-record" branch remains.
+    // Nominal parse/novelty-probe window only. Actual admission chunks close on observed
+    // staged bytes after complete games; the historical per-game profile is not a
+    // bound on expanded observation residency.
     private static readonly int ChunkSize =
         IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.ChessPgn, null);
+
+    // Preserve the same producer byte share used by ResolveRecordBatch, replacing its
+    // per-game residency estimate with the bytes actually accumulated by the builders.
+    internal static long ResolvedChunkStagedBytes => Math.Max(1,
+        Math.Min(IngestSizing.ResolveWorkingSetBudgetBytes(),
+            IngestSizing.ResolveWorkingSetFlushEnvelopeBytes())
+        / Math.Max(1, IngestTopology.Current.ComposeWorkers));
 
     private readonly NpgsqlDataSource _ds;
     private readonly ConsensusAccumulatingWriter _writer;
@@ -157,11 +164,14 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 using var sourcePhase = measurement?.MeasurePhase(
                     ChessRecordingMeasurement.WorkPhase.SourceReadParseAndValidation);
                 int parsed = 0, novel = 0, applied = 0, repaired = 0;
-                var chunk = new List<ChessGameRecord>(ChunkSize);
+                int parseWindow = measurement?.NextReplayChunkGames ?? ChunkSize;
+                var chunk = new List<ChessGameRecord>(Math.Max(1, parseWindow));
 
                 foreach (var gameText in games)
                 {
                     ct.ThrowIfCancellationRequested();
+                    if (parseWindow == 0)
+                        throw new InvalidDataException("corpus replay has source games beyond its sealed chunk sequence");
                     experiment?.ValidateGame(gameText);
                     if (measurement is not null) measurement.Work.ParseAttempts++;
                     measurement?.Checkpoint("SourceReadParseAndValidation", "parse-entered", periodic: true,
@@ -179,11 +189,12 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     chunk.Add(game);
                     measurement?.Checkpoint("SourceReadParseAndValidation", "parse-progress", periodic: true,
                         chunkGames: chunk.Count);
-                    if (chunk.Count < ChunkSize) continue;
+                    if (chunk.Count < parseWindow) continue;
                     measurement?.Checkpoint("SourceReadParseAndValidation", "chunk-parsed", chunkGames: chunk.Count);
                     (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement);
                     novel += n; applied += a; repaired += r;
                     chunk.Clear();
+                    parseWindow = measurement?.NextReplayChunkGames ?? ChunkSize;
                 }
                 measurement?.Checkpoint("SourceReadParseAndValidation", "source-enumeration-complete", chunkGames: chunk.Count);
                 if (chunk.Count > 0)
@@ -359,182 +370,166 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         List<ChessGameRecord> chunk, CancellationToken ct, ChessExperimentEvidence? experiment = null,
         ChessRecordingMeasurement? measurement = null)
     {
-        using var compositionPhase = measurement?.MeasurePhase(
-            ChessRecordingMeasurement.WorkPhase.CompositionAndNoveltyProbe);
-        if (measurement is not null) measurement.Work.ChunksStarted++;
-        measurement?.Checkpoint("CompositionAndNoveltyProbe", "chunk-started", chunkGames: chunk.Count);
-        // Novel content still takes the fused record+calculated path. Already-present playings
-        // take a separate repair lane: rebuild the CURRENT source-record projection in memory,
-        // retain only exact playing-grain attestation ids absent from durable evidence, and apply
-        // those rows once. This repairs schema/identity evolution without treating a replay of the
-        // same PGN as a second observation.
-        var record = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/ingest")
-            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
-        var analyze = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "chess/lab/ingest")
-            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
-            .DeclareSourcePrior(ChessTransitions.SourceId, SourceTrust.StructuredCorpus)
-            .DeclareSourcePrior(ChessPositionOutcomes.SourceId, SourceTrust.StructuredCorpus);
-        var repair = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/repair-playing")
-            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
-        int novel = 0;
+        // Keep one set-sized novelty probe per parsed window. Admission is then split
+        // using actual staged observations without parsing or composing a game twice.
         var novelIds = new HashSet<Hash128>();
-        var observedPositions = new HashSet<Hash128>();
-        var observedMoves = new HashSet<Hash128>();
-        await foreach (var game in ChessPgnDecomposer.FilterNovelAsync(chunk, _reader, ct))
+        using (measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.CompositionAndNoveltyProbe))
         {
-            novel++;
-            novelIds.Add(game.PlayingId);
-            measurement?.Checkpoint("CompositionAndNoveltyProbe", "game-composition-entered", periodic: true);
-            ChessPgnDecomposer.RecordGame(game, record);
-            // Share the parsed board/position walk across the same calculated consumers
-            // as generic PGN composition; outcomes must not replay and compose it again.
-            var replay = ChessPgnDecomposer.MaterializeParsedReplay(game);
-            ChessAnalyze.DeriveFromParsed(analyze, game, replay);
-            ChessTransitions.DepositFromParsed(analyze, game);
-            ChessPositionOutcomes.DepositFromParsed(analyze, game, replay);
-            var prober = ChessTablebaseRuntime.Prober;
-            if (measurement is not null) measurement.Work.SyzygyAvailable = prober is not null;
-            if (prober is not null)
+            await foreach (var game in ChessPgnDecomposer.FilterNovelAsync(chunk, _reader, ct))
+                novelIds.Add(game.PlayingId);
+        }
+        int offset = 0, totalNovel = 0, totalApplied = 0, totalRepaired = 0;
+        while (offset < chunk.Count)
+        {
+            using var compositionPhase = measurement?.MeasurePhase(
+                ChessRecordingMeasurement.WorkPhase.CompositionAndNoveltyProbe);
+            using var composed = ChessPgnChunk.ComposeNext(chunk, novelIds, ref offset,
+                ResolvedChunkStagedBytes, measurement?.NextReplayChunkGames, measurement, ct);
+            var result = await ApplyComposedChunkAsync(composed, ct, experiment, measurement);
+            composed.ForgetCommittedNovelty(novelIds);
+            totalNovel += result.Novel;
+            totalApplied += result.Applied;
+            totalRepaired += result.Repaired;
+        }
+        return (totalNovel, totalApplied, totalRepaired);
+    }
+
+    private async Task<(int Novel, int Applied, int Repaired)> ApplyComposedChunkAsync(
+        ChessPgnChunk composed, CancellationToken ct, ChessExperimentEvidence? experiment,
+        ChessRecordingMeasurement? measurement)
+    {
+        var chunk = composed.Games;
+        var record = composed.Record;
+        var analyze = composed.Analyze;
+        var repair = composed.Repair;
+        int novel = composed.NovelGames;
+        var repairPlayings = composed.RepairPlayings;
+        var observedPositions = composed.ObservedPositions;
+        var observedMoves = composed.ObservedMoves;
+        measurement?.Checkpoint("CompositionAndNoveltyProbe", "composition-complete", chunkGames: chunk.Count);
+        var ownedChanges = new List<SubstrateChange>(4);
+        try
+        {
+            var changes = new List<SubstrateChange>(4);
+            var expectedWitnesses = new List<AttestationRow>();
+            var expectedCarriers = new List<PhysicalityRow>();
+            var expectedEntities = new List<EntityRow>();
+            SubstrateChange? experimentChange = null;
+            int repairedGames = 0;
+            using (measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.ChangeMaterializationAndWitnessPreparation))
             {
-                using var syzygyPhase = measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.Syzygy);
-                if (measurement is not null) measurement.Work.SyzygyGameCalls++;
-                ChessSyzygy.DeriveGame(analyze, ChessAnalyze.WitnessedFromParsed(game), prober);
-                if (measurement is not null) measurement.Work.SyzygyGameCallsCompleted++;
+                var selectedPlayings = measurement is null ? null : chunk.Select(g => g.PlayingId).ToHashSet();
+                var selectedLines = measurement is null ? null : chunk.Where(g => g.MoveIds.Length > 0).Select(g => g.LineId).ToHashSet();
+                if (novel > 0)
+                {
+                    var recorded = await record.BuildAsync(ct);
+                    ownedChanges.Add(recorded);
+                    changes.Add(recorded);
+                    if (selectedPlayings is not null)
+                    {
+                        if (measurement?.RetainedPgn == true) expectedEntities.AddRange(recorded.Entities);
+                        expectedWitnesses.AddRange(recorded.Attestations.Where(a => ChessRecordingMeasurement.IsGameWitness(a, selectedPlayings)));
+                        expectedCarriers.AddRange(recorded.Physicalities.Where(p => p.Type == PhysicalityType.Content && selectedLines!.Contains(p.EntityId)));
+                    }
+                    var analyzed = await analyze.BuildAsync(ct);
+                    ownedChanges.Add(analyzed);
+                    changes.Add(analyzed);
+                }
+
+                if (repairPlayings.Count > 0)
+                {
+                    var repairBuilt = await repair.BuildAsync(ct);
+                    ownedChanges.Add(repairBuilt);
+                    if (selectedPlayings is not null)
+                    {
+                        if (measurement?.RetainedPgn == true) expectedEntities.AddRange(repairBuilt.Entities);
+                        expectedWitnesses.AddRange(repairBuilt.Attestations.Where(a => ChessRecordingMeasurement.IsGameWitness(a, selectedPlayings)));
+                        expectedCarriers.AddRange(repairBuilt.Physicalities.Where(p => p.Type == PhysicalityType.Content && selectedLines!.Contains(p.EntityId)));
+                    }
+                    var filtered = await MissingPlayingWitnessesAsync(repairBuilt, repairPlayings, ct);
+                    if (filtered.Change is { } repairChange)
+                    {
+                        changes.Add(repairChange);
+                        repairedGames = filtered.Games;
+                    }
+                }
+
+                // Metadata belongs to every selected playing, including a re-ingest whose PGN
+                // already exists. Exact attestation probes suppress repeated witnessing while
+                // allowing older games to acquire their previously missing experiment receipt.
+                if (experiment is not null)
+                {
+                    var evidence = await experiment.BuildChangeAsync(chunk, ct);
+                    ownedChanges.Add(evidence);
+                    experimentChange = evidence;
+                    var present = await ReadPresentAttestationIdsAsync(evidence.Attestations, ct);
+                    var missing = evidence.Attestations.Where(row => !present.Contains(row.Id)).ToImmutableArray();
+                    if (missing.Length > 0) changes.Add(evidence with { Attestations = missing });
+                }
             }
+            measurement?.ObserveBuiltChanges(changes);
+            measurement?.Checkpoint("ChangeMaterializationAndWitnessPreparation", "changes-built");
+
+            ChessRecordingMeasurement.ScopeRequest? scope = null;
+            if (measurement is { RetainedPgn: true })
+            {
+                using var scopePhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.BeforeScopeProbe);
+                scope = await measurement.ReadScopeBeforeAsync(_ds,
+                    expectedEntities.Concat(experimentChange is null
+                        ? Enumerable.Empty<EntityRow>() : experimentChange.Entities).ToArray(),
+                    expectedWitnesses.Concat(experimentChange is null
+                        ? Enumerable.Empty<AttestationRow>() : experimentChange.Attestations).DistinctBy(a => a.Id).ToArray(),
+                    expectedCarriers, ct);
+            }
+
+            if (changes.Count > 0)
+            {
+                using var writerPhase = measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.WriterApply);
+                if (measurement is not null) measurement.Work.WriterApplyAttempts++;
+                measurement?.Checkpoint("WriterApply", "writer-entered");
+                long commitStarted = Stopwatch.GetTimestamp();
+                try
+                {
+                    var result = await _writer.ApplyManyAsync(changes, ct);
+                    measurement?.ObserveCommit(result);
+                    measurement?.Checkpoint("WriterApply", "writer-acknowledged");
+                }
+                finally
+                {
+                    if (measurement is not null)
+                        measurement.ElapsedSeconds.Commit += Stopwatch.GetElapsedTime(commitStarted).TotalSeconds;
+                }
+            }
+            if (observedPositions.Count > 0 || observedMoves.Count > 0)
+                ChessTransitionObservations.MarkObserved(observedPositions, observedMoves);
             if (measurement is not null)
             {
-                measurement.Work.NovelGamesComposed++;
-                measurement.Work.NovelPliesComposed += game.MoveIds.Length;
-                measurement.Work.PositionOccurrencesComposed += game.PositionIds.Length;
-                measurement.Checkpoint("CompositionAndNoveltyProbe", "game-completed", periodic: true);
+                using var readbackPhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.ExactReadback);
+                await measurement.VerifyChunkAsync(_ds, chunk, expectedWitnesses, expectedCarriers,
+                    experimentChange, experiment, ct);
+                measurement.Checkpoint("ExactReadback", "readback-returned");
             }
-            for (int i = 0; i + 1 < game.PositionIds.Length; i++)
-                observedPositions.Add(game.PositionIds[i]);
-            foreach (var moveId in game.MoveIds)
-                observedMoves.Add(moveId);
-        }
-
-        var repairPlayings = new HashSet<Hash128>();
-        foreach (var game in chunk)
-        {
-            if (novelIds.Contains(game.PlayingId)) continue;
-            repairPlayings.Add(game.PlayingId);
-            // RecordGame is deliberately reused so the repair derives the exact same ids and
-            // fold inputs as a fresh ingest. The filter below admits only playing-scoped rows;
-            // line-grain opening/move testimony is not replayed.
-            ChessPgnDecomposer.RecordGame(game, repair);
-            if (measurement is not null) measurement.Work.RepairGamesComposed++;
-            measurement?.Checkpoint("CompositionAndNoveltyProbe", "repair-game-completed", periodic: true);
-        }
-
-        measurement?.Checkpoint("CompositionAndNoveltyProbe", "composition-complete");
-        var changes = new List<SubstrateChange>(4);
-        var expectedWitnesses = new List<AttestationRow>();
-        var expectedCarriers = new List<PhysicalityRow>();
-        var expectedEntities = new List<EntityRow>();
-        SubstrateChange? experimentChange = null;
-        int repairedGames = 0;
-        using (measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.ChangeMaterializationAndWitnessPreparation))
-        {
-            var selectedPlayings = measurement is null ? null : chunk.Select(g => g.PlayingId).ToHashSet();
-            var selectedLines = measurement is null ? null : chunk.Where(g => g.MoveIds.Length > 0).Select(g => g.LineId).ToHashSet();
-            if (novel > 0)
+            if (scope is not null)
             {
-                var recorded = await record.BuildAsync(ct);
-                changes.Add(recorded);
-                if (selectedPlayings is not null)
-                {
-                    if (measurement?.RetainedPgn == true) expectedEntities.AddRange(recorded.Entities);
-                    expectedWitnesses.AddRange(recorded.Attestations.Where(a => ChessRecordingMeasurement.IsGameWitness(a, selectedPlayings)));
-                    expectedCarriers.AddRange(recorded.Physicalities.Where(p => p.Type == PhysicalityType.Content && selectedLines!.Contains(p.EntityId)));
-                }
-                changes.Add(await analyze.BuildAsync(ct));
+                using var scopePhase = measurement!.MeasurePhase(ChessRecordingMeasurement.WorkPhase.AfterScopeProbe);
+                await measurement.ObserveScopeAfterAsync(_ds, scope, ct);
             }
-
-            if (repairPlayings.Count > 0)
+            if (measurement?.IsCorpus == true)
             {
-                var repairBuilt = await repair.BuildAsync(ct);
-                if (selectedPlayings is not null)
-                {
-                    if (measurement?.RetainedPgn == true) expectedEntities.AddRange(repairBuilt.Entities);
-                    expectedWitnesses.AddRange(repairBuilt.Attestations.Where(a => ChessRecordingMeasurement.IsGameWitness(a, selectedPlayings)));
-                    expectedCarriers.AddRange(repairBuilt.Physicalities.Where(p => p.Type == PhysicalityType.Content && selectedLines!.Contains(p.EntityId)));
-                }
-                var filtered = await MissingPlayingWitnessesAsync(repairBuilt, repairPlayings, ct);
-                if (filtered.Change is { } repairChange)
-                {
-                    changes.Add(repairChange);
-                    repairedGames = filtered.Games;
-                }
+                using var evidencePhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.ChunkEvidenceOutput);
+                await measurement.FlushCorpusChunkAsync(novel, ct);
             }
-
-            // Metadata belongs to every selected playing, including a re-ingest whose PGN
-            // already exists. Exact attestation probes suppress repeated witnessing while
-            // allowing older games to acquire their previously missing experiment receipt.
-            if (experiment is not null)
-            {
-                var evidence = await experiment.BuildChangeAsync(chunk, ct);
-                experimentChange = evidence;
-                var present = await ReadPresentAttestationIdsAsync(evidence.Attestations, ct);
-                var missing = evidence.Attestations.Where(row => !present.Contains(row.Id)).ToImmutableArray();
-                if (missing.Length > 0) changes.Add(evidence with { Attestations = missing });
-            }
+            if (measurement is not null) measurement.Work.ChunksVerified++;
+            measurement?.Checkpoint("ChunkEvidenceOutput", "chunk-sealed");
+            return (novel, novel, repairedGames);
         }
-        measurement?.ObserveBuiltChanges(changes);
-        measurement?.Checkpoint("ChangeMaterializationAndWitnessPreparation", "changes-built");
-
-        ChessRecordingMeasurement.ScopeRequest? scope = null;
-        if (measurement is { RetainedPgn: true })
+        finally
         {
-            using var scopePhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.BeforeScopeProbe);
-            scope = await measurement.ReadScopeBeforeAsync(_ds,
-                expectedEntities.Concat(experimentChange is null
-                    ? Enumerable.Empty<EntityRow>() : experimentChange.Entities).ToArray(),
-                expectedWitnesses.Concat(experimentChange is null
-                    ? Enumerable.Empty<AttestationRow>() : experimentChange.Attestations).DistinctBy(a => a.Id).ToArray(),
-                expectedCarriers, ct);
+            // All writer and readback awaits have returned. Include repair changes
+            // filtered down to no work: their native source stages still had an owner.
+            foreach (var change in ownedChanges)
+                foreach (var stage in change.IntentStages) stage.Dispose();
         }
-
-        if (changes.Count > 0)
-        {
-            using var writerPhase = measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.WriterApply);
-            if (measurement is not null) measurement.Work.WriterApplyAttempts++;
-            measurement?.Checkpoint("WriterApply", "writer-entered");
-            long commitStarted = Stopwatch.GetTimestamp();
-            try
-            {
-                var result = await _writer.ApplyManyAsync(changes, ct);
-                measurement?.ObserveCommit(result);
-                measurement?.Checkpoint("WriterApply", "writer-acknowledged");
-            }
-            finally
-            {
-                if (measurement is not null)
-                    measurement.ElapsedSeconds.Commit += Stopwatch.GetElapsedTime(commitStarted).TotalSeconds;
-            }
-        }
-        if (observedPositions.Count > 0 || observedMoves.Count > 0)
-            ChessTransitionObservations.MarkObserved(observedPositions, observedMoves);
-        if (measurement is not null)
-        {
-            using var readbackPhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.ExactReadback);
-            await measurement.VerifyChunkAsync(_ds, chunk, expectedWitnesses, expectedCarriers,
-                experimentChange, experiment, ct);
-            measurement.Checkpoint("ExactReadback", "readback-returned");
-        }
-        if (scope is not null)
-        {
-            using var scopePhase = measurement!.MeasurePhase(ChessRecordingMeasurement.WorkPhase.AfterScopeProbe);
-            await measurement.ObserveScopeAfterAsync(_ds, scope, ct);
-        }
-        if (measurement?.IsCorpus == true)
-        {
-            using var evidencePhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.ChunkEvidenceOutput);
-            await measurement.FlushCorpusChunkAsync(novel, ct);
-        }
-        if (measurement is not null) measurement.Work.ChunksVerified++;
-        measurement?.Checkpoint("ChunkEvidenceOutput", "chunk-sealed");
-        return (novel, novel, repairedGames);
     }
 
     private async Task<(SubstrateChange? Change, int Games)> MissingPlayingWitnessesAsync(

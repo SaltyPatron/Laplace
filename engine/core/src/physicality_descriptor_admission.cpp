@@ -23,6 +23,14 @@
 namespace {
 
 struct Status { physicality_descriptor_status_t value; };
+struct AllocationRefusal final : std::bad_alloc {
+    uint32_t kind;
+    size_t requested, retained, peak, limit;
+    AllocationRefusal(uint32_t reason, size_t request, size_t current,
+        size_t high_water, size_t ceiling)
+        : kind(reason), requested(request), retained(current),
+          peak(high_water), limit(ceiling) {}
+};
 
 class Memory final : public std::pmr::memory_resource {
 public:
@@ -31,7 +39,9 @@ public:
     size_t peak() const { return peak_; }
     size_t remaining() const { return limit_ - used_; }
     void claim(size_t bytes) {
-        if (bytes > remaining()) throw std::bad_alloc();
+        if (bytes > remaining())
+            throw AllocationRefusal(PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_GRANT,
+                bytes, used_, peak_, limit_);
         used_ += bytes;
         peak_ = std::max(peak_, used_);
     }
@@ -40,7 +50,11 @@ private:
     void* do_allocate(size_t bytes, size_t alignment) override {
         claim(bytes);
         try { return ::operator new(bytes, std::align_val_t(alignment)); }
-        catch (...) { release(bytes); throw; }
+        catch (const std::bad_alloc&) {
+            release(bytes);
+            throw AllocationRefusal(PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_ALLOCATOR,
+                bytes, used_, peak_, limit_);
+        }
     }
     void do_deallocate(void* pointer, size_t bytes, size_t alignment) override {
         ::operator delete(pointer, std::align_val_t(alignment));
@@ -102,6 +116,7 @@ struct Selected {
     Geometry physicality;
     size_t body_index = SIZE_MAX; // SIZE_MAX means an actual native atomic basis.
     bool byte_basis = false;
+    bool terminal_body_verified = false;
 };
 
 struct OutputNode {
@@ -146,7 +161,16 @@ physicality_descriptor_status_t materialize(
     const intent_stage_t* const* admitted_stages, size_t admitted_stage_count,
     const hash128_t* missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* sources, size_t source_count,
-    const hash128_t& generated_source, int64_t generated_at) {
+    const hash128_t& generated_source, int64_t generated_at,
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_materialization_diagnostics_t* diagnostics) {
+    const auto phase = [&](uint32_t value) {
+        if (diagnostics != nullptr) diagnostics->phase = value;
+    };
+    const auto checkpoint = [&] {
+        require(!physicality_descriptor_cancel_requested(cancellation), PHYSICALITY_DESCRIPTOR_CANCELLED);
+    };
+    checkpoint();
     Memory& memory = result.memory;
     size_t original_count = 0;
     const auto* original = physicality_descriptor_capture_inputs(source, &original_count);
@@ -157,11 +181,14 @@ physicality_descriptor_status_t materialize(
         require(result.stage != nullptr, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
         result.stage_bytes = intent_stage_memory_bytes(result.stage);
         memory.claim(result.stage_bytes);
+        phase(PHYSICALITY_MATERIALIZATION_COMPLETE);
         return PHYSICALITY_DESCRIPTOR_OK;
     }
-    for (size_t i = 0; i < source_count; ++i)
+    for (size_t i = 0; i < source_count; ++i) {
+        checkpoint();
         require(std::isfinite(sources[i].source_trust) && sources[i].source_trust >= 0.0 &&
             sources[i].source_trust <= 1.0, PHYSICALITY_DESCRIPTOR_INVALID);
+    }
     /* Fixed native basis verification scratch is admitted before entering the
      * allocation-free owner, and released before ordinary frontier work. */
     constexpr size_t byte_basis_scratch = sizeof(laplace_byte_atoms_t) + LAPLACE_BYTE_ATOM_COUNT * 64u;
@@ -169,11 +196,26 @@ physicality_descriptor_status_t materialize(
     require(laplace_byte_atoms_validate(&vocabulary.byte_basis) == 0, PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
     memory.release(byte_basis_scratch);
 
+    // Only copied, complete serialized output crosses this lifetime boundary.
+    // Provider captures, the authenticated plan and lookup maps have no users
+    // once forms and observations are complete. Their historical peak remains.
+    std::pmr::vector<OutputNode> output(&memory);
+    std::pmr::vector<hash128_t> output_children(&memory);
+    std::pmr::vector<laplace_attestation_staged_t> attestations(&memory);
+    size_t before_retirement = 0;
+    {
+    phase(PHYSICALITY_MATERIALIZATION_CURRENT_CAPTURE);
     External<physicality_descriptor_capture_t, physicality_descriptor_capture_free> current(memory);
     physicality_descriptor_limits_t limits{memory.remaining()};
     if (stage_count != 0) {
-        const auto status = physicality_descriptor_capture_stages(current_stages, stage_count,
-            &vocabulary.basis, &limits, memory.remaining(), &current.value);
+        const auto status = physicality_descriptor_capture_stages_cancelable(current_stages, stage_count,
+            &vocabulary.basis, &limits, memory.remaining(), cancellation, &current.value);
+        if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && diagnostics != nullptr) {
+            diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_CAPTURE;
+            diagnostics->maximum_bytes = memory.remaining();
+            // This legacy capture boundary publishes no failed object.
+            // Its discarded allocation counts are unavailable, not zero work.
+        }
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
         /* Full validation has completed, including bodies excluded from provider
          * selection. Keep decoded rows/trajectories and the original peak, but
@@ -184,11 +226,18 @@ physicality_descriptor_status_t materialize(
     }
     size_t current_count = 0;
     const auto* current_inputs = physicality_descriptor_capture_inputs(current.value, &current_count);
+    phase(PHYSICALITY_MATERIALIZATION_ADMITTED_CAPTURE);
     External<physicality_descriptor_capture_t, physicality_descriptor_capture_free> admitted(memory);
     limits.maximum_plan_bytes = memory.remaining();
     if (admitted_stage_count != 0) {
-        const auto status = physicality_descriptor_capture_stages(admitted_stages, admitted_stage_count,
-            &vocabulary.basis, &limits, memory.remaining(), &admitted.value);
+        const auto status = physicality_descriptor_capture_stages_cancelable(admitted_stages, admitted_stage_count,
+            &vocabulary.basis, &limits, memory.remaining(), cancellation, &admitted.value);
+        if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && diagnostics != nullptr) {
+            diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_CAPTURE;
+            diagnostics->maximum_bytes = memory.remaining();
+            // This legacy capture boundary publishes no failed object.
+            // Its discarded allocation counts are unavailable, not zero work.
+        }
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
         /* Full validation has completed, including bodies excluded from provider
          * selection. Keep decoded rows/trajectories and the original peak, but
@@ -205,6 +254,7 @@ physicality_descriptor_status_t materialize(
     inputs.reserve(original_count + current_count + admitted_count);
     if (original_count != 0) inputs.insert(inputs.end(), original, original + original_count);
     for (size_t i = 0; i < current_count; ++i) {
+        checkpoint();
         require(current_inputs[i].type == 1);
         inputs.push_back(current_inputs[i]);
     }
@@ -214,21 +264,34 @@ physicality_descriptor_status_t materialize(
      * rule before combining these providers with the complete raw source.
      * Alternate bodies remain in original and retain their own D/HAS rows. */
     IdSet admitted_winners(&memory);
-    for (size_t i = 0; i < admitted_count; ++i)
+    for (size_t i = 0; i < admitted_count; ++i) {
+        checkpoint();
         if (admitted_inputs[i].type == 1 && admitted_winners.insert(admitted_inputs[i].entity_id).second)
             inputs.push_back(admitted_inputs[i]);
+    }
 
     External<physicality_descriptor_plan_t, physicality_descriptor_plan_free> plan(memory);
     limits.maximum_plan_bytes = memory.remaining();
-    const auto planned = physicality_descriptor_plan_build(inputs.data(), inputs.size(),
-        &vocabulary.basis, &limits, &plan.value);
+    phase(PHYSICALITY_MATERIALIZATION_COMBINED_PLAN);
+    const auto planned = physicality_descriptor_plan_build_diagnosed_cancelable(inputs.data(), inputs.size(),
+        &vocabulary.basis, &limits, cancellation,
+        diagnostics == nullptr ? nullptr : &diagnostics->plan, &plan.value);
+    if (planned == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && diagnostics != nullptr) {
+        diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_PLAN;
+        diagnostics->maximum_bytes = diagnostics->plan.maximum_bytes;
+        diagnostics->retained_bytes = diagnostics->plan.retained_bytes;
+        diagnostics->peak_bytes = diagnostics->plan.peak_bytes;
+        diagnostics->requested_bytes = diagnostics->plan.requested_bytes;
+    }
     require(planned == PHYSICALITY_DESCRIPTOR_OK, planned);
     plan.account(physicality_descriptor_plan_bytes(plan.value),
         physicality_descriptor_plan_peak_bytes(plan.value));
     const hash128_t* descriptors = physicality_descriptor_plan_roots(plan.value, nullptr);
 
+    phase(PHYSICALITY_MATERIALIZATION_PROVIDER_INDEX);
     IdMap<size_t> current_by_entity(&memory), admitted_by_entity(&memory), body_by_descriptor(&memory);
     for (size_t i = 0; i < inputs.size(); ++i) {
+        checkpoint();
         body_by_descriptor.emplace(descriptors[i], i);
         if (i < original_count) continue;
         auto& index = i < original_count + current_count ? current_by_entity : admitted_by_entity;
@@ -238,6 +301,7 @@ physicality_descriptor_status_t materialize(
     }
     IdSet missing(&memory), pending(&memory), unavailable(&memory);
     for (size_t i = 0; i < missing_count; ++i) {
+        checkpoint();
         require(current_by_entity.find(missing_ids[i]) == current_by_entity.end());
         missing.insert(missing_ids[i]);
     }
@@ -246,6 +310,7 @@ physicality_descriptor_status_t materialize(
     size_t reference_count = 0;
     const auto* references = physicality_descriptor_plan_references(plan.value, &reference_count);
     for (size_t i = 0; i < reference_count; ++i) {
+        checkpoint();
         if (references[i].kind != PHYSICALITY_DESCRIPTOR_CARRIER_ENTITY) continue;
         const hash128_t entity = references[i].entity_id;
         if (selected.find(entity) != selected.end() || pending.find(entity) != pending.end()) continue;
@@ -292,12 +357,15 @@ physicality_descriptor_status_t materialize(
     }
     if (!pending.empty()) {
         result.pending.assign(pending.begin(), pending.end());
-        std::sort(result.pending.begin(), result.pending.end(), [](const hash128_t& a, const hash128_t& b) {
+        std::sort(result.pending.begin(), result.pending.end(), [&](const hash128_t& a, const hash128_t& b) {
+            checkpoint();
             return hash128_compare(&a, &b) < 0;
         });
+        checkpoint();
         return static_cast<physicality_descriptor_status_t>(PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER);
     }
 
+    phase(PHYSICALITY_MATERIALIZATION_GEOMETRY);
     IdMap<Geometry> geometries(&memory);
     for (const auto& tag : vocabulary.tags) geometries.emplace(tag.id, geometry(tag));
     for (const auto& number : vocabulary.numbers) geometries.emplace(number.id, geometry(number));
@@ -306,8 +374,6 @@ physicality_descriptor_status_t materialize(
             &vocabulary.selection_schema, &vocabulary.scope_schema,
             &vocabulary.context_schema, &vocabulary.source_schema, &vocabulary.unit_schema})
         geometries.emplace(tag->id, geometry(*tag));
-    std::pmr::vector<OutputNode> output(&memory);
-    std::pmr::vector<hash128_t> output_children(&memory);
     std::pmr::vector<double> child_coordinates(&memory);
     std::pmr::vector<std::byte> centroid_workspace(&memory);
     std::pmr::vector<hash128_t> fields(&memory);
@@ -321,6 +387,7 @@ physicality_descriptor_status_t materialize(
             PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
         child_coordinates.resize(count * 4u);
         for (size_t child = 0; child < count; ++child) {
+            checkpoint();
             const double* coord;
             if (child == reference_index) coord = reference_coord;
             else {
@@ -363,6 +430,7 @@ physicality_descriptor_status_t materialize(
     };
 
     for (size_t i = 0; i < node_count; ++i) {
+        checkpoint();
         const auto& node = nodes[i];
         const hash128_t* operands = children + node.first_child;
         const double* reference_coord = nullptr;
@@ -397,9 +465,13 @@ physicality_descriptor_status_t materialize(
         for (size_t i = 0; i < 16u; ++i) floor_fields[i + 1u] = vocabulary.basis.byte_numbers[fingerprint[i]];
         byte_floor_receipt = compose(floor_fields.data(), floor_fields.size(), nullptr, SIZE_MAX);
     }
+    phase(PHYSICALITY_MATERIALIZATION_VIEWS);
     IdMap<View> views(&memory);
     IdMap<const physicality_descriptor_node_t*> node_by_id(&memory);
-    for (size_t i = 0; i < node_count; ++i) node_by_id.emplace(nodes[i].id, &nodes[i]);
+    for (size_t i = 0; i < node_count; ++i) {
+        checkpoint();
+        node_by_id.emplace(nodes[i].id, &nodes[i]);
+    }
     std::pmr::vector<size_t> reachable(&memory);
     std::pmr::vector<hash128_t> scope_fields(&memory);
     IdSet reached_descriptors(&memory);
@@ -413,6 +485,7 @@ physicality_descriptor_status_t materialize(
         return found->second;
     };
     for (size_t input_index = 0; input_index < original_count; ++input_index) {
+        checkpoint();
         if (views.find(descriptors[input_index]) != views.end()) continue;
         /* The finite recipe records every selected body reachable from this
          * source form. A grandchild replacement must change the view receipt;
@@ -424,9 +497,12 @@ physicality_descriptor_status_t materialize(
         scope_fields.clear();
         reachable.push_back(input_index);
         for (size_t next = 0; next < reachable.size(); ++next) {
+            checkpoint();
             const size_t body_index = reachable[next];
+            bool terminal_body = true;
             const auto* body_trajectory = trajectory_for_input(body_index);
             for (size_t vertex = 0; vertex < inputs[body_index].trajectory_vertices; ++vertex) {
+                checkpoint();
                 const auto carrier = node_by_id.find(children[body_trajectory->first_child + vertex + 1u]);
                 require(carrier != node_by_id.end());
                 const hash128_t* carrier_fields = children + carrier->second->first_child;
@@ -435,16 +511,32 @@ physicality_descriptor_status_t materialize(
                 if (chosen == selected.end()) {
                     require(unavailable.find(carrier_fields[1]) != unavailable.end());
                     missing_for_view.insert(carrier_fields[1]);
+                    terminal_body = false;
                     continue;
                 }
                 const size_t selected_index = chosen->second.body_index;
-                if (selected_index != SIZE_MAX && reached_descriptors.insert(descriptors[selected_index]).second)
-                    reachable.push_back(selected_index);
+                if (selected_index != SIZE_MAX) {
+                    terminal_body = false;
+                    // Scope membership is positive-length reachability, even
+                    // when this exact selected body has no outgoing body edge.
+                    if (reached_descriptors.insert(descriptors[selected_index]).second &&
+                        !chosen->second.terminal_body_verified)
+                        reachable.push_back(selected_index);
+                }
+            }
+            if (terminal_body) {
+                // An original form can share an entity with a different
+                // selected provider body. Only memoize the exact winner.
+                const auto winner = selected.find(inputs[body_index].entity_id);
+                if (winner != selected.end() && winner->second.body_index != SIZE_MAX &&
+                    hash128_equals(&descriptors[winner->second.body_index], &descriptors[body_index]))
+                    winner->second.terminal_body_verified = true;
             }
         }
         if (!missing_for_view.empty()) {
             sorted_missing.assign(missing_for_view.begin(), missing_for_view.end());
-            std::sort(sorted_missing.begin(), sorted_missing.end(), [](const hash128_t& a, const hash128_t& b) {
+            std::sort(sorted_missing.begin(), sorted_missing.end(), [&](const hash128_t& a, const hash128_t& b) {
+            checkpoint();
                 return hash128_compare(&a, &b) < 0;
             });
             View view;
@@ -456,7 +548,8 @@ physicality_descriptor_status_t materialize(
             continue;
         }
         scope_fields.assign(reached_descriptors.begin(), reached_descriptors.end());
-        std::sort(scope_fields.begin(), scope_fields.end(), [](const hash128_t& a, const hash128_t& b) {
+        std::sort(scope_fields.begin(), scope_fields.end(), [&](const hash128_t& a, const hash128_t& b) {
+            checkpoint();
             return hash128_compare(&a, &b) < 0;
         });
         scope_fields.insert(scope_fields.begin(), vocabulary.scope_schema.id);
@@ -470,6 +563,7 @@ physicality_descriptor_status_t materialize(
         fields.push_back(floor_receipt.id);
         fields.push_back(scope.id);
         for (size_t vertex = 0; vertex < inputs[input_index].trajectory_vertices; ++vertex) {
+            checkpoint();
             const hash128_t carrier_id = children[trajectory->first_child + vertex + 1u];
             const auto carrier = node_by_id.find(carrier_id);
             require(carrier != node_by_id.end());
@@ -491,26 +585,37 @@ physicality_descriptor_status_t materialize(
     }
     result.forms.resize(original_count);
     for (size_t i = 0; i < original_count; ++i) {
+        checkpoint();
         const auto& view = views.at(descriptors[i]);
         result.forms[i] = {descriptors[i], view.id, view.state, view.missing_first, view.missing_count};
     }
 
+    phase(PHYSICALITY_MATERIALIZATION_OBSERVATIONS);
     hash128_t relation;
     require(laplace_relation_resolve("HAS_PHYSICALITY", &relation) == 0);
-    std::pmr::vector<laplace_attestation_staged_t> attestations(&memory);
     IdMap<size_t> observation_index(&memory);
+    hash128_t context_id{};
     for (size_t i = 0; i < original_count; ++i) {
+        checkpoint();
         /* A source-unit receipt is a typed identifier, not automatically an E.
          * Its ordinary context binds the registered source id and exact unit
          * receipt bytes while the attestation retains the real source owner. */
-        const auto source_identifier = identifier(vocabulary.source_schema.id, sources[i].source_id);
-        const auto unit_identifier = identifier(vocabulary.unit_schema.id, sources[i].source_unit_id);
-        const std::array<hash128_t,3> context_fields{vocabulary.context_schema.id,
-            source_identifier.id, unit_identifier.id};
-        const auto context = compose(context_fields.data(), context_fields.size(), nullptr, SIZE_MAX);
+        // The context recipe depends only on these exact identifiers. Reuse
+        // the immediately preceding result while that pair is unchanged;
+        // alternating source/unit rows still take the ordinary compose path.
+        // Trust, timestamp and descriptor remain per-observation inputs below.
+        if (i == 0u ||
+            !hash128_equals(&sources[i].source_id, &sources[i - 1u].source_id) ||
+            !hash128_equals(&sources[i].source_unit_id, &sources[i - 1u].source_unit_id)) {
+            const auto source_identifier = identifier(vocabulary.source_schema.id, sources[i].source_id);
+            const auto unit_identifier = identifier(vocabulary.unit_schema.id, sources[i].source_unit_id);
+            const std::array<hash128_t,3> context_fields{vocabulary.context_schema.id,
+                source_identifier.id, unit_identifier.id};
+            context_id = compose(context_fields.data(), context_fields.size(), nullptr, SIZE_MAX).id;
+        }
         laplace_attestation_staged_t observation{};
         require(laplace_attestation_resolved_build(&inputs[i].entity_id, &relation,
-            &descriptors[i], 0, &sources[i].source_id, &context.id, 0,
+            &descriptors[i], 0, &sources[i].source_id, &context_id, 0,
             sources[i].source_trust, 1, 1, observations[i].observed_at_unix_us, &observation) == 0);
         observation.last_observed_at_unix_us = observations[i].observed_at_unix_us;
         /* The ordinary writer's source-unit journal owns replay exclusion.
@@ -529,33 +634,58 @@ physicality_descriptor_status_t materialize(
         }
     }
 
+    before_retirement = memory.used();
+    } // No borrowed plan/capture/map pointers cross into serialization.
+    if (diagnostics != nullptr) {
+        diagnostics->released_before_serialization_bytes = before_retirement - memory.used();
+        diagnostics->serialization_entry_bytes = memory.used();
+    }
+    phase(PHYSICALITY_MATERIALIZATION_SERIALIZATION);
     size_t widest = 0;
     for (const auto& node : output) widest = std::max(widest, node.child_count);
     std::pmr::vector<double> packed(&memory);
     require(widest <= SIZE_MAX / 4u, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
     packed.resize(widest * 4u);
+    const size_t stage_limit = memory.remaining();
     std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)> stage(
-        intent_stage_new_bounded(0, memory.remaining()), intent_stage_free);
-    require(stage != nullptr, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+        intent_stage_new_bounded(0, stage_limit), intent_stage_free);
+    const auto stage_require = [&](bool accepted) {
+        if (!accepted && diagnostics != nullptr) {
+            diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_STAGE;
+            diagnostics->maximum_bytes = stage_limit;
+            diagnostics->retained_bytes = intent_stage_memory_bytes(stage.get());
+            diagnostics->peak_bytes = intent_stage_memory_peak_bytes(stage.get());
+        }
+        require(accepted, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    };
+    stage_require(stage != nullptr);
     const auto document_type = laplace_content_tier_type_id(4);
     for (const auto& node : output) {
+        checkpoint();
         hash128_t placement;
         laplace_physicality_id_compute(node.geometry.id, node.type, &placement);
         require(trajectory_build(output_children.data() + node.first_child, node.child_count, packed.data()) == 0);
-        require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type, &generated_source) == 0 &&
+        stage_require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type, &generated_source) == 0 &&
             intent_stage_add_physicality(stage.get(), &placement, &node.geometry.id, node.type,
                 node.geometry.coord.data(), &node.geometry.hilbert, packed.data(),
                 static_cast<uint32_t>(node.child_count), static_cast<int32_t>(node.child_count),
-                1, 0.0, 1, 0, generated_at) == 0,
-            PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+                1, 0.0, 1, 0, generated_at) == 0);
     }
-    require(laplace_attestation_staged_batch_add(stage.get(), attestations.data(), attestations.size(), nullptr) == 0,
-        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    // Preserve the scalar append order and complete output. Subspans only
+    // bound cancellation latency inside the existing serialization owner.
+    for (size_t first = 0; first < attestations.size();) {
+        checkpoint();
+        const size_t count = std::min<size_t>(256u, attestations.size() - first);
+        stage_require(laplace_attestation_staged_batch_add(stage.get(), attestations.data() + first, count, nullptr) == 0);
+        first += count;
+    }
     result.stage_bytes = intent_stage_memory_bytes(stage.get());
     const size_t stage_peak = intent_stage_memory_peak_bytes(stage.get());
     memory.claim(stage_peak);
     memory.release(stage_peak - result.stage_bytes);
     result.stage = stage.release();
+    checkpoint();
+    phase(PHYSICALITY_MATERIALIZATION_COMPLETE);
     return PHYSICALITY_DESCRIPTOR_OK;
 }
 
@@ -570,31 +700,100 @@ extern "C" physicality_descriptor_status_t physicality_descriptor_materialize(
     const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
     const hash128_t* source_id, int64_t observed_at_unix_us, size_t maximum_bytes,
     physicality_descriptor_materialization_t** out_materialization) {
-    if (out_materialization == nullptr) return PHYSICALITY_DESCRIPTOR_INVALID;
+    return physicality_descriptor_materialize_cancelable(captured_source, vocabulary,
+        current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
+        explicitly_missing_ids, missing_count, observation_sources, observation_source_count,
+        source_id, observed_at_unix_us, maximum_bytes, nullptr, out_materialization);
+}
+
+extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_cancelable(
+    const physicality_descriptor_capture_t* captured_source,
+    const physicality_descriptor_vocabulary_t* vocabulary,
+    const intent_stage_t* const* current_content_stages, size_t current_stage_count,
+    const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
+    const hash128_t* explicitly_missing_ids, size_t missing_count,
+    const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
+    const hash128_t* source_id, int64_t observed_at_unix_us, size_t maximum_bytes,
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_materialization_t** out_materialization) {
+    return physicality_descriptor_materialize_diagnosed_cancelable(captured_source, vocabulary,
+        current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
+        explicitly_missing_ids, missing_count, observation_sources, observation_source_count,
+        source_id, observed_at_unix_us, maximum_bytes, cancellation, nullptr, out_materialization);
+}
+
+extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_diagnosed_cancelable(
+    const physicality_descriptor_capture_t* captured_source,
+    const physicality_descriptor_vocabulary_t* vocabulary,
+    const intent_stage_t* const* current_content_stages, size_t current_stage_count,
+    const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
+    const hash128_t* explicitly_missing_ids, size_t missing_count,
+    const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
+    const hash128_t* source_id, int64_t observed_at_unix_us, size_t maximum_bytes,
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_materialization_diagnostics_t* diagnostics,
+    physicality_descriptor_materialization_t** out_materialization) {
+    if (diagnostics != nullptr) {
+        *diagnostics = {};
+        diagnostics->materialization_grant_bytes = maximum_bytes;
+    }
+    const auto finish = [&](physicality_descriptor_status_t status) {
+        if (diagnostics != nullptr) {
+            diagnostics->status = status;
+            if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED &&
+                diagnostics->refusal_kind == PHYSICALITY_MATERIALIZATION_REFUSAL_NONE)
+                diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_SIZE_OR_UNREPORTED;
+        }
+        return status;
+    };
+    if (out_materialization == nullptr) return finish(PHYSICALITY_DESCRIPTOR_INVALID);
     *out_materialization = nullptr;
+    if (physicality_descriptor_cancel_requested(cancellation)) return finish(PHYSICALITY_DESCRIPTOR_CANCELLED);
     if (captured_source == nullptr || vocabulary == nullptr || source_id == nullptr ||
         (current_stage_count != 0 && current_content_stages == nullptr) ||
         (admitted_stage_count != 0 && admitted_content_stages == nullptr) ||
         (missing_count != 0 && explicitly_missing_ids == nullptr) ||
         (observation_source_count != 0 && observation_sources == nullptr))
-        return PHYSICALITY_DESCRIPTOR_INVALID;
-    if (maximum_bytes < sizeof(physicality_descriptor_materialization))
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+        return finish(PHYSICALITY_DESCRIPTOR_INVALID);
+    if (maximum_bytes < sizeof(physicality_descriptor_materialization)) {
+        if (diagnostics != nullptr) {
+            diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_GRANT;
+            diagnostics->maximum_bytes = maximum_bytes;
+            diagnostics->requested_bytes = sizeof(physicality_descriptor_materialization);
+        }
+        return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    }
     hash128_t current_floor;
     if (codepoint_table_copy_receipt(&current_floor) != 0)
-        return static_cast<physicality_descriptor_status_t>(PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
-    if (!hash128_equals(&current_floor, &vocabulary->floor_receipt)) return PHYSICALITY_DESCRIPTOR_INVALID;
-    if (!codepoint_table_id_index_ready()) return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+        return finish(PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
+    if (!hash128_equals(&current_floor, &vocabulary->floor_receipt)) return finish(PHYSICALITY_DESCRIPTOR_INVALID);
+    if (!codepoint_table_id_index_ready()) return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
     try {
         auto result = std::make_unique<physicality_descriptor_materialization>(maximum_bytes);
         const auto status = materialize(*result, captured_source, *vocabulary,
             current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
             explicitly_missing_ids, missing_count,
-            observation_sources, observation_source_count, *source_id, observed_at_unix_us);
+            observation_sources, observation_source_count, *source_id, observed_at_unix_us, cancellation, diagnostics);
+        if (diagnostics != nullptr) {
+            // materialize's local vectors and provider owners have unwound.
+            // Match the returned object's retained payload, excluding its header.
+            diagnostics->maximum_bytes = result->memory.used() + result->memory.remaining();
+            diagnostics->retained_bytes = result->memory.used();
+            diagnostics->peak_bytes = result->memory.peak();
+        }
         *out_materialization = result.release();
-        return status;
-    } catch (const Status& status) { return status.value; }
-      catch (const std::bad_alloc&) { return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED; }
+        return finish(status);
+    } catch (const AllocationRefusal& refusal) {
+        if (diagnostics != nullptr) {
+            diagnostics->refusal_kind = refusal.kind;
+            diagnostics->maximum_bytes = refusal.limit;
+            diagnostics->retained_bytes = refusal.retained;
+            diagnostics->peak_bytes = refusal.peak;
+            diagnostics->requested_bytes = refusal.requested;
+        }
+        return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    } catch (const Status& status) { return finish(status.value); }
+      catch (const std::bad_alloc&) { return finish(PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED); }
 }
 
 extern "C" void physicality_descriptor_materialization_free(physicality_descriptor_materialization_t* value) {

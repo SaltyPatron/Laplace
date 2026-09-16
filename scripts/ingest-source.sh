@@ -28,7 +28,12 @@ case "$LOGDIR" in
 esac
 mkdir -p -- "$LOGDIR"
 export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
-DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
+MANAGED_BUILD_ROOT="${LAPLACE_BUILD_ROOT:-$ROOT}"
+if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+    DLL="$MANAGED_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
+else
+    DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
+fi
 
 # Durable progress lives in laplace.ingest_run_journal (+ ops CSV). Actions is not
 # a log warehouse — default CI/console to quiet unless the operator overrides.
@@ -36,23 +41,24 @@ if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; th
     export LAPLACE_INGEST_CONSOLE=ci
 fi
 
-# Content-fingerprint gate for the CLI build (scripts/lib/fp.sh, stamp cli-build):
-# ensure-foundation's 10-rung ladder invokes this script once per rung, which was
-# up to 10 identical `dotnet build`s per foundation run. Skip only when app/
-# content is unchanged since the last SUCCESSFUL build AND the DLL actually
-# exists — stamps attest sources, artifacts must be checked too.
-# shellcheck source=scripts/lib/fp.sh
-source "$ROOT/scripts/lib/fp.sh"
-
 build_cli() {
-    local fp
-    fp=$(fp_compute app docs/INVENTION.md docs/INVENTIONS.md docs/specs)
-    if fp_check cli-build "$fp" && [[ -f "$DLL" ]]; then
-        echo ">>> CLI build skipped — app/ and operational source unchanged since last successful build (fp ${fp:0:12})"
-        return 0
+    if [[ "${LAPLACE_INGEST_RUNTIME_PREPARED:-0}" != 1 ]]; then
+        bash "$ROOT/scripts/pipeline.sh" build
     fi
-    ( cd "$ROOT/app" && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q -clp:NoSummary >/dev/null )
-    fp_record cli-build "$fp"
+    [[ -f "$DLL" ]] || {
+        echo "::error::exact ingest CLI artifact missing after build: $DLL" >&2
+        return 1
+    }
+    local native
+    if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+        native="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace_core.so"
+    else
+        native="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace_core.so"
+    fi
+    [[ -f "$native" ]] && cmp -s "$ROOT/build/engine/core/liblaplace_core.so" "$native" || {
+        echo "::error::ingest CLI native closure is absent or stale: $native" >&2
+        return 1
+    }
 }
 # Every branch below routes through here, so timing is recorded once for all of them.
 # Only the `all` path used to print any timing at all; the single-source path -- the one

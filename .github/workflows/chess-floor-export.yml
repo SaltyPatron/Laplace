@@ -1,0 +1,170 @@
+name: Qualified recorded chess floor export
+
+# A later reviewed operator branch supplies real proof/pilot identities.
+# This workflow never runs for ordinary PRs, main pushes or scheduled work.
+on:
+  push:
+    branches: [verify/chess-floor-export-*]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+env:
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
+  PGHOST: /var/run/postgresql
+  PGPORT: '5432'
+  PGUSER: laplace_admin
+  PGDATABASE: laplace
+  LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  export:
+    name: Rebuild qualified catalog, export and select complete recorded floors
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 180
+    steps:
+      - name: Prepare bounded export evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          mountpoint -q /build
+          mkdir -p /build/laplace/work/chess-floor-export
+          evidence=/build/laplace/work/chess-floor-export/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
+          mkdir "$evidence"
+          printf 'LAPLACE_EXPORT_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf 'LAPLACE_EXPORT_OUTPUT=%s\n' "/build/laplace/corpus-exports/chess/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+
+      - name: Export under ordinary shared host ownership
+        id: export
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 0002
+          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
+          timeout --signal=TERM --kill-after=15s 9300s \
+            flock --exclusive --no-fork --timeout 1800 /build/laplace/work/host-resource.lock bash -c '
+            set -euo pipefail
+            # Preserve tracked operator work instead of replacing it.
+            git diff --quiet
+            git diff --cached --quiet
+            timeout --signal=TERM --kill-after=5s 120s git fetch --no-tags origin "$TARGET_SHA"
+            timeout --signal=TERM --kill-after=5s 60s git checkout --detach "$TARGET_SHA"
+            [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+            selection="$PWD/.github/chess-floor-export-selection.json"
+            test -f "$selection"
+            candidate_sha=$(python3 - "$selection" << "PY_SOURCE"
+          import json, re, sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          if path.stat().st_size > 65536:
+              raise ValueError("export selection exceeds its metadata envelope")
+          plan = json.loads(path.read_bytes())
+          sha = plan.get("candidate_commit") if isinstance(plan, dict) else None
+          if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+              raise ValueError("export candidate must be a complete immutable commit")
+          print(sha)
+          PY_SOURCE
+            )
+            candidate_root=/build/laplace/worktrees/chess-floor-export-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
+            test ! -e "$candidate_root"
+            driver="$PWD/scripts/export-qualified-chess-floors.py"
+            timeout --signal=TERM --kill-after=5s 120s git fetch --no-tags origin "$candidate_sha"
+            git worktree add --detach "$candidate_root" "$candidate_sha"
+            # Retain this exact source worktree beside the export evidence.
+            # exec preserves the lock FD through driver-owned child cleanup.
+            cp "$selection" "$LAPLACE_EXPORT_EVIDENCE/selection.json"
+            export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
+            exec python3 - "$candidate_root" "$driver" "$selection" "$LAPLACE_EXPORT_OUTPUT" << "PY"
+          import json, os, signal, subprocess, sys
+          def interrupted(signum, frame):
+              raise KeyboardInterrupt("export toolchain initialization interrupted")
+          signal.signal(signal.SIGTERM, interrupted)
+          process = subprocess.Popen([
+              "bash", "-c",
+              "source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 && exec \"$1\" -c \"$2\"",
+              "export-toolchain", sys.executable,
+              "import json, os; print(json.dumps(dict(os.environ)))"
+          ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+          try:
+              raw, _ = process.communicate(timeout=120)
+              if process.returncode or len(raw) > 2 * 1024 * 1024:
+                  raise RuntimeError("toolchain environment initialization failed")
+              environment = json.loads(raw)
+              if not isinstance(environment, dict) or any(
+                      not isinstance(k, str) or not isinstance(v, str) for k, v in environment.items()):
+                  raise ValueError("toolchain environment is invalid")
+          finally:
+              for sig in (signal.SIGTERM, signal.SIGKILL):
+                  try:
+                      os.killpg(process.pid, sig)
+                  except ProcessLookupError:
+                      pass
+                  try:
+                      process.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      pass
+              process.stdout.close()
+          candidate, driver, selection, output = sys.argv[1:]
+          # No environment or credential is printed or retained.
+          os.execvpe(sys.executable, [sys.executable,
+              candidate + "/scripts/chess-runtime-env.py", "--prefix",
+              environment["LAPLACE_INSTALL_PREFIX"], "--", sys.executable, driver,
+              "--selection", selection, "--candidate-root", candidate, "--output", output], environment)
+          PY
+          ' 2>&1 | tee "$LAPLACE_EXPORT_EVIDENCE/execution.log"
+
+      - name: Retain explicit export result
+        if: always()
+        shell: bash
+        env:
+          EXPORT_OUTCOME: ${{ steps.export.outcome }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          evidence = Path(os.environ["LAPLACE_EXPORT_EVIDENCE"])
+          output = Path(os.environ["LAPLACE_EXPORT_OUTPUT"])
+          receipt = output / "evidence/receipt.json"
+          value = {"schema": "laplace.qualified-recorded-floor-workflow/v1",
+                   "workflow_source": os.environ["GITHUB_SHA"],
+                   "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                   "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                   "step_outcome": os.environ["EXPORT_OUTCOME"], "durable_output": str(output),
+                   "receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest() if receipt.is_file() else None,
+                   "scope": "Export and future-build selection only; no serving activation or performance claim"}
+          (evidence / "workflow-result.json").write_text(json.dumps(value, sort_keys=True) + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("Recorded floor export: " + value["step_outcome"] + "\n\n")
+              summary.write("Durable source artifacts: " + str(output) + "\n\n")
+              if receipt.is_file():
+                  result = json.loads(receipt.read_bytes())
+                  summary.write("Driver status: " + result["status"] + "\n\n")
+                  summary.write("Selection published: " + str(result["selection_completed"]) + "\n")
+          PY
+
+      - name: Upload bounded qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-recorded-floor-export-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.LAPLACE_EXPORT_EVIDENCE }}/
+            ${{ env.LAPLACE_EXPORT_OUTPUT }}/evidence/
+            ${{ env.LAPLACE_EXPORT_OUTPUT }}/export/export-receipt.json
+            ${{ env.LAPLACE_EXPORT_OUTPUT }}/export/inventory/summary.json
+          if-no-files-found: error
+          retention-days: 90

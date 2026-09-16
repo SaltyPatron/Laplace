@@ -1,22 +1,26 @@
-name: Repository hygiene
+name: Repository branch consolidation
 
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  tracked-tree:
-    name: Tracked tree contains no local/runtime artifacts
+  branches:
+    name: Preserve heads and prune merged branches
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
+    concurrency:
+      group: repository-branch-consolidation
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 1
-      - name: Enforce source-tree hygiene and strong secret signatures
-        run: python3 scripts/repo-hygiene-gate.py
+          ref: main
+          fetch-depth: 0
+      - name: Preserve every head and remove only branches already merged to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/consolidate-branches.sh

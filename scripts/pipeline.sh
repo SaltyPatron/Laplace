@@ -84,6 +84,11 @@ source "$ROOT/scripts/lib/fp.sh"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+# Select one authenticated CMake/CTest/CPack generation before fingerprinted work.
+cmake_bin=$(python3 "$ROOT/scripts/provision-cmake.py" \
+  --root "$LAPLACE_INSTALL_PREFIX/tools/cmake" \
+  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+export PATH="$cmake_bin:$PATH"
 # The substrate runs the PostgreSQL build under LAPLACE_PG_PREFIX.  Never let a
 # distro client or pg_config win merely because /usr/bin appears first in the
 # runner's inherited PATH: build, install, migrate, tune, regress and benchmark
@@ -244,6 +249,25 @@ ensure_extension_library_path() {
   }
   echo "dynamic_library_path: '$current' -> '$desired'"
   return 0
+}
+
+# Same return convention as ensure_extension_library_path: 0 needs activation,
+# 1 is already current, 2 is failed observation. A server-version change is not
+# represented by pg_settings.pending_restart, which only describes GUC changes.
+postgresql_restart_required() {
+  local running rc
+  if ! running=$(psql -d postgres -U laplace_admin -tAc "SHOW server_version_num"); then
+    echo "::error::cannot observe running PostgreSQL release" >&2
+    return 2
+  fi
+  if "$PYTHON" "$ROOT/scripts/postgresql-release.py" restart-needed \
+       --prefix "$LAPLACE_PG_PREFIX" --server-version-num "$running"; then
+    return 1
+  else
+    rc=$?
+    [[ "$rc" -eq 3 ]] && return 0
+    return 2
+  fi
 }
 
 restart_postgres() {
@@ -453,16 +477,20 @@ phase_build() {
     fi
   fi
   echo "===== PHASE — BUILD APP ====="
-  phase_build_app
+  # Managed outputs carry app-local copies of the native closure. Fold the
+  # native fingerprint into their build plan so a native-only ABI change cannot
+  # leave yesterday's liblaplace_core.so beside today's CLI or services.
+  phase_build_app "$native_fp"
 }
 
 phase_build_app() {
+  local native_fp="${1:-}"
   # Affected-only dotnet build: the planner walks the ProjectReference graph
   # with per-project Merkle fingerprints, so building the printed roots builds
   # every affected project. Empty plan = nothing changed. Any planner failure
   # falls back to the full solution — never trade correctness for speed.
   local plan_out plan_rc=0
-  plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns build) || plan_rc=$?
+  plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns build --salt "$native_fp") || plan_rc=$?
   if [[ "$plan_rc" -ne 0 ]]; then
     echo "::warning::affected-app plan failed (rc=$plan_rc) — full solution build"
     ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
@@ -489,7 +517,7 @@ phase_build_app() {
     fi
     echo "app stamps present but $missing lacks bin/Release — full solution build"
     ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
-    "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build
+    "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build --salt "$native_fp"
     return 0
   fi
   local -a roots=()
@@ -504,7 +532,7 @@ phase_build_app() {
       ( cd "$ROOT/app" && dotnet build "$r" -c Release )
     done
   fi
-  "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build
+  "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build --salt "$native_fp"
 }
 
 phase_test() {
@@ -517,7 +545,13 @@ phase_test() {
 phase_install() (
   echo "===== PHASE — INSTALL ====="
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
-  local native_fp installed_fp library_path_changed=0
+  local native_fp installed_fp library_path_changed=0 server_release_changed=0
+  if postgresql_restart_required; then
+    server_release_changed=1
+  else
+    local server_rc=$?
+    [[ "$server_rc" -eq 1 ]] || return "$server_rc"
+  fi
   native_fp=$(fp_native)
   if ensure_extension_library_path; then
     library_path_changed=1
@@ -533,7 +567,7 @@ phase_install() (
     echo "::error::native build artifacts are stale — run 'pipeline.sh build install'" >&2
     exit 1
   fi
-  if [[ "$library_path_changed" -eq 0 ]] \
+  if [[ "$library_path_changed" -eq 0 && "$server_release_changed" -eq 0 ]] \
      && fp_check install-native "$native_fp" \
      && installed_fp=$(installed_artifact_digest) \
      && fp_check install-artifacts "$installed_fp"; then
@@ -578,15 +612,26 @@ phase_install() (
   # core exports even when the preload module itself is byte-identical.
   # Chess floors are also pinned by application/postmaster mappings. Their pair
   # hashes participate even when the native libraries are byte-identical.
+  local postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
     preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
     if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
        || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
-      restart_postgres "install: staged native image, chess floor pair, or resolution path changed"
+      postgres_activation_required=1
     fi
+  fi
+  if [[ "$postgres_activation_required" -eq 1 ]]; then
+    restart_postgres "install: PostgreSQL release, staged native image, chess floor pair, or resolution path changed"
   else
-    echo "install: preloaded native images and chess floors unchanged — no PG bounce needed"
+    echo "install: PostgreSQL release, preloaded native images and chess floors unchanged — no PG bounce needed"
+  fi
+  if postgresql_restart_required; then
+    echo "::error::running PostgreSQL release still differs after native activation" >&2
+    return 2
+  else
+    local activated_server_rc=$?
+    [[ "$activated_server_rc" -eq 1 ]] || return "$activated_server_rc"
   fi
   if [[ "$api_was_active" -eq 1 ]]; then
     sudo -n systemctl start laplace-api
@@ -599,8 +644,29 @@ phase_install() (
 
 phase_migrate() {
   echo "===== PHASE — MIGRATE ($PGDATABASE) ====="
-  local mig="$ROOT/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
-  if [[ ! -f "$mig" || "$FORCE_REBUILD" -eq 1 || "$CLEAN_FIRST" -eq 1 ]]; then
+  local mig
+  if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+    mig="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
+  else
+    mig="$ROOT/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
+  fi
+  if [[ "${LAPLACE_REQUIRE_PREBUILT_MIGRATIONS:-0}" == 1 ]]; then
+    local app_plan native_fp
+    [[ -f "$mig" ]] || {
+      echo "::error::database lifecycle requires the prebuilt migration artifact; deploy/build owns compilation" >&2
+      return 1
+    }
+    native_fp=$(fp_native)
+    app_plan=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns build --salt "$native_fp") || {
+      echo "::error::cannot prove the prebuilt migration artifact belongs to this revision" >&2
+      return 1
+    }
+    [[ -z "$app_plan" ]] || {
+      echo "::error::prebuilt managed artifacts are stale; deploy/build the selected revision before database operations" >&2
+      return 1
+    }
+    echo "migrate: verified prebuilt $mig"
+  elif [[ ! -f "$mig" || "$FORCE_REBUILD" -eq 1 || "$CLEAN_FIRST" -eq 1 ]]; then
     dotnet build "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release
   else
     echo "migrate: using existing $mig"
@@ -995,7 +1061,7 @@ phase_chess_lab() {
   local gui="${LAPLACE_CUTECHESS_GUI:-${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess}"
   local gui_receipt="${LAPLACE_CUTECHESS_GUI_RECEIPT:-${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}/laplace-cutechess-gui-build.json}"
   sf="$(python3 "$ROOT/scripts/install-stockfish.py" --print-path)" || return 1
-  fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json scripts/install-zstd.py scripts/check-zstd-runtime.py deploy/zstd-release.json)
+  fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py scripts/cutechess-user-engines.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json scripts/install-zstd.py scripts/check-zstd-runtime.py deploy/zstd-release.json)
   # A different selected source/installation is a different publish input even
   # when source files are unchanged; refresh the service's actual launch paths.
   fp=$(printf '%s\0' "$fp" "${LAPLACE_EXTERNAL:-/build/external}" "$sf" \
@@ -1007,7 +1073,8 @@ phase_chess_lab() {
     python3 "$ROOT/scripts/install-stockfish.py" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --source-dir "${LAPLACE_EXTERNAL:-/build/external}/cutechess" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$bin}" || return 1
-    python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" || return 1
+    python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" \
+      --install-desktop "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --desktop-stockfish "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-stockfish.py" --check-binary "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-zstd.py" --print-path >/dev/null || return 1
     zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/deploy/zstd-release.json")"

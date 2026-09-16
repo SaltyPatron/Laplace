@@ -22,10 +22,10 @@ StateDirectory=laplace-lichess
 LogsDirectory=laplace-lichess
 Environment=LAPLACE_OPS_LOG_DIR=/var/log/laplace-lichess
 UMask=0002
-Environment=TMPDIR=/build/laplace/work/legacy-lichess
-Environment=TMP=/build/laplace/work/legacy-lichess
-Environment=TEMP=/build/laplace/work/legacy-lichess
-ReadWritePaths=/build/laplace/work/legacy-lichess
+Environment=TMPDIR=/build/laplace/work/lichess
+Environment=TMP=/build/laplace/work/lichess
+Environment=TEMP=/build/laplace/work/lichess
+ReadWritePaths=/build/laplace/work/lichess
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

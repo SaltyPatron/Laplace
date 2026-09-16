@@ -11,6 +11,14 @@ extern "C" {
 #endif
 
 typedef struct intent_stage intent_stage_t;
+/* Conservative complete E/P/A tuple payload, using the ordinary serializer's
+ * actual field widths and raw trajectory vertices. Excludes COPY stream and
+ * array wrappers, buffer capacity, allocator metadata and admission graphs.
+ * 0 succeeds; -1 invalid shape/output; -2 size overflow. Output unchanged on
+ * refusal. No rows are created and no body authenticity is asserted. */
+int intent_stage_tuple_payload_bound(size_t entity_count, size_t physicality_count,
+    size_t stored_vertices, size_t attestation_count, size_t* out_bytes);
+
 
 typedef enum {
     INTENT_STAGE_TABLE_ENTITIES      = 1,
@@ -21,8 +29,9 @@ typedef enum {
 #define INTENT_STAGE_PG_EPOCH_UNIX_US INT64_C(946684800000000)
 
 intent_stage_t* intent_stage_new(size_t row_capacity_hint);
-/* Same serializer with an admitted live-allocation ceiling, including bounded
- * buffer replacement while old/new allocations coexist. */
+/* Same serializer with an admitted requested-payload ceiling. Every bounded
+ * buffer growth reserves old plus requested new storage before realloc, even
+ * when libc can grow in place. Allocator bookkeeping/process RSS are excluded. */
 intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximum_bytes);
 void            intent_stage_free(intent_stage_t* stage);
 /* Exclusive-owner lifetime operation for a stage whose entity/attestation
@@ -34,7 +43,11 @@ void            intent_stage_free(intent_stage_t* stage);
  * validate input: admission callers must finish full tuple import first. */
 size_t intent_stage_retain_physicalities(intent_stage_t* stage);
 size_t intent_stage_memory_bytes(const intent_stage_t* stage);
-/* Bounded stages include simultaneous old/new buffers during growth. */
+/* Conservative high-water reservation of requested payload. Bounded growth
+ * includes old plus requested new buffers even if realloc grows in place;
+ * this is an upper bound, not measured simultaneous allocations or process RSS.
+ * Unbounded buffer growth retains its historical retained-capacity accounting;
+ * witness rehash keeps its existing old-plus-new accounting. */
 size_t intent_stage_memory_peak_bytes(const intent_stage_t* stage);
 int intent_stage_allocation_failed(const intent_stage_t* stage);
 

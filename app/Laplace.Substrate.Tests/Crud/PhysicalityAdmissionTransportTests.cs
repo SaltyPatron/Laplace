@@ -104,7 +104,7 @@ public class PhysicalityAdmissionTransportTests
     [Theory]
     [InlineData(1, 69_632, "OutOfMemoryException")]
     [InlineData(1_024, 69_632, "InvalidOperationException")]
-    [InlineData(200_000, 69_631, "InvalidOperationException")]
+    [InlineData(200_000, 135, "InvalidOperationException")]
     public void SourceCapture_PreservesNativeAndScratchGrants(
         long stageGrant, long scratchGrant, string exceptionType)
     {
@@ -136,6 +136,185 @@ public class PhysicalityAdmissionTransportTests
             NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, Grant));
         Assert.Contains("native physicality batch staging failed", error.Message);
         Assert.Contains("observations=2", error.Message);
+    }
+
+    [Fact]
+    public void SourceCapture_BoundedAndBulkMatchEveryScalarNativeTuple()
+    {
+        PhysicalityRow[] rows = MixedCaptureRows();
+        // 200 bytes admits the widest row and forces storage reuse between
+        // long/empty/short trajectories and non-null/null scalar slots.
+        using var bounded = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, 200);
+        using var bulk = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, Grant);
+        using var scalar = ScalarCapture(rows);
+        Assert.Equal(rows.Length, bounded.PhysicalityCount);
+        Assert.Equal(0, bounded.EntityCount + bounded.AttestationCount);
+        byte[] expected = Tuples(scalar, IntentStageTable.Physicalities);
+        Assert.Equal(expected, Tuples(bulk, IntentStageTable.Physicalities));
+        Assert.Equal(expected, Tuples(bounded, IntentStageTable.Physicalities));
+        Assert.Equal(scalar.EmitCopyBinary(IntentStageTable.Physicalities),
+            bounded.EmitCopyBinary(IntentStageTable.Physicalities));
+        foreach (var row in rows)
+            if (row.TrajectoryXyzm is { } trajectory) Array.Fill(trajectory, double.NaN);
+        Assert.Equal(expected, Tuples(bounded, IntentStageTable.Physicalities));
+    }
+
+    [Fact]
+    public void SourceCapture_ReusesScratchWithinTheSameAggregateGrant()
+    {
+        const long aggregate = 200_000;
+        PhysicalityRow[] rows = CaptureRows(512);
+        long monolithicScratch = rows.Length * 136L;
+        // The actual native old-plus-new reservation cannot grow under the
+        // remainder left by the old whole-change transport allocation.
+        Assert.Throws<InvalidOperationException>(() =>
+            NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(
+                rows, aggregate - monolithicScratch, monolithicScratch));
+        const long boundedScratch = 3 * 136;
+        using var captured = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(
+            rows, aggregate - boundedScratch, boundedScratch);
+        using var scalar = ScalarCapture(rows);
+        Assert.Equal(rows.Length, captured.PhysicalityCount);
+        Assert.True(captured.AllocatedBytes + boundedScratch <= aggregate);
+        Assert.Equal(Tuples(scalar, IntentStageTable.Physicalities),
+            Tuples(captured, IntentStageTable.Physicalities));
+    }
+
+    [Fact]
+    public void SourceCapture_RefusesAnIndivisibleRowOrLaterInvalidIdentity()
+    {
+        PhysicalityRow[] rows = MixedCaptureRows();
+        var tooSmall = Assert.Throws<InvalidOperationException>(() =>
+            NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, 199));
+        Assert.Contains("one physicality transport requires 200 bytes", tooSmall.Message);
+        PhysicalityRow saved = rows[17];
+        rows[17] = saved with { Id = H(999) };
+        using (var partial = IntentStage.NewBounded(0, Grant))
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.StageManagedObservations(
+                    partial, rows, 200, default));
+            Assert.Equal(17, partial.PhysicalityCount);
+        }
+        Assert.Throws<InvalidOperationException>(() =>
+            NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, 200));
+        rows[17] = saved;
+        using var retry = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, 200);
+        using var scalar = ScalarCapture(rows);
+        Assert.Equal(Tuples(scalar, IntentStageTable.Physicalities),
+            Tuples(retry, IntentStageTable.Physicalities));
+    }
+
+    [Fact]
+    public void SourceCapture_CancellationAtNativeBoundaryStopsBeforeNextBatch()
+    {
+        PhysicalityRow[] rows = CaptureRows(30);
+        using var stage = IntentStage.NewBounded(0, Grant);
+        using var cancelled = new CancellationTokenSource();
+        Exception? failure = null;
+        var worker = new Thread(() =>
+        {
+            try
+            {
+                NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.StageManagedObservations(
+                    stage, rows, 3 * 136, cancelled.Token);
+            }
+            catch (Exception error) { failure = error; }
+        }) { IsBackground = true };
+        bool reachedNativeGate;
+        // This existing gate is the worker's only blocking operation. Cancellation
+        // while it waits cannot interrupt native work: the first real batch runs,
+        // then the production post-call checkpoint must prevent the next one.
+        lock (LaplaceCoreGate.Native)
+        {
+            worker.Start();
+            reachedNativeGate = SpinWait.SpinUntil(
+                () => (worker.ThreadState & ThreadState.WaitSleepJoin) != 0,
+                TimeSpan.FromSeconds(10));
+            cancelled.Cancel();
+        }
+        Assert.True(worker.Join(TimeSpan.FromSeconds(10)), "capture worker did not stop");
+        Assert.True(reachedNativeGate, "capture worker did not reach the native gate");
+        Assert.IsType<OperationCanceledException>(failure);
+        Assert.Equal(3, stage.PhysicalityCount);
+        using var prefix = ScalarCapture(rows[..3]);
+        Assert.Equal(Tuples(prefix, IntentStageTable.Physicalities),
+            Tuples(stage, IntentStageTable.Physicalities));
+        Assert.Throws<OperationCanceledException>(() =>
+            NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, 3 * 136, cancelled.Token));
+        using var retry = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, 3 * 136);
+        Assert.Equal(rows.Length, retry.PhysicalityCount);
+    }
+
+    [Fact]
+    public void SourceCapture_PreservesAllObservationSourcesUnitsAndReferenceSupplement()
+    {
+        PhysicalityRow[] rows = CaptureRows(3);
+        var first = new SubstrateChange([], [rows[0], rows[1]], [],
+            new SubstrateChangeMetadata(H(100), H(50), "capture-one", DateTimeOffset.UnixEpoch, null))
+        {
+            // Same exact row observed twice remains two occurrences. A different
+            // but byte-identical object also remains present.
+            PhysicalityObservations = [rows[0], rows[0], rows[0] with { }],
+        }.WithSourcePrior(H(50), .75);
+        var secondRow = rows[2] with { SourceId = H(51) };
+        var second = new SubstrateChange([], [secondRow], [],
+            new SubstrateChangeMetadata(H(101), H(51), "capture-two", DateTimeOffset.UnixEpoch, null))
+            .WithSourcePrior(H(51), .25);
+        using var capture = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
+            [first, second], [], default);
+        Assert.NotNull(capture);
+        Assert.Equal([H(50), H(50), H(50), H(50), H(51)], capture.ObservationSources.ToArray());
+        Assert.Equal([H(100), H(100), H(100), H(100), H(101)], capture.ObservationUnits.ToArray());
+        Assert.Equal([.75, .75, .75, .75, .25], capture.ObservationPriors.ToArray());
+        Assert.Equal(2, capture.RawStages.Count);
+        using var expectedFirst = ScalarCapture([rows[0], rows[0], rows[0], rows[1]]);
+        Assert.Equal(Tuples(expectedFirst, IntentStageTable.Physicalities),
+            Tuples(capture.RawStages[0], IntentStageTable.Physicalities));
+        Assert.Equal(1, capture.RawStages[1].PhysicalityCount);
+        Assert.InRange(capture.OwnedRawBytes + capture.ObservationPayloadBytes, 1, capture.MaximumBytes);
+    }
+
+    [Fact]
+    public void SourceCapture_EmptyInputHasNoRowsAndNoObservationBatch()
+    {
+        using var stage = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage([], Grant, 136);
+        Assert.Equal(0, stage.PhysicalityCount);
+        Assert.Equal(0, stage.TotalTupleBytes);
+        Assert.Null(NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture([], [], default));
+    }
+
+    private static PhysicalityRow[] MixedCaptureRows()
+    {
+        double[] coordinate = [.1, -0.0, .3, -.4];
+        double[] longTrajectory = Trajectory.Build([H(1), H(1), H(2)]);
+        double[] shortTrajectory = Trajectory.Build([H(2)]);
+        var longRow = new PhysicalityRow(PhysicalityId.Compute(
+                Trajectory.ContentIdentity(longTrajectory, out int count), PhysicalityType.Content),
+            Trajectory.ContentIdentity(longTrajectory, out _), H(50), PhysicalityType.Content,
+            coordinate[0], coordinate[1], coordinate[2], coordinate[3], Hilbert128.Encode(coordinate),
+            longTrajectory, count, .375, 7, IntentStage.PgEpochUnixUs - 123);
+        var emptyRow = CaptureRows(1)[0];
+        var shortRow = longRow with
+        {
+            Id = PhysicalityId.Compute(Trajectory.ContentIdentity(shortTrajectory, out _), PhysicalityType.Content),
+            EntityId = Trajectory.ContentIdentity(shortTrajectory, out _),
+            TrajectoryXyzm = shortTrajectory, NConstituents = 1,
+            AlignmentResidual = null, SourceDim = null, ObservedAtUnixUs = IntentStage.PgEpochUnixUs + 456,
+        };
+        return Enumerable.Range(0, 20)
+            .SelectMany(_ => new[] { longRow, emptyRow, shortRow, longRow, longRow with { } }).ToArray();
+    }
+
+    private static IntentStage ScalarCapture(IEnumerable<PhysicalityRow> rows)
+    {
+        var stage = IntentStage.New(0);
+        foreach (var row in rows)
+            stage.AddPhysicality(row.Id, row.EntityId, (short)row.Type,
+                [row.CoordX, row.CoordY, row.CoordZ, row.CoordM], row.HilbertIndex,
+                row.TrajectoryXyzm ?? [], row.NConstituents,
+                row.AlignmentResidual, row.SourceDim, row.ObservedAtUnixUs);
+        return stage;
     }
 
     private static PhysicalityRow[] CaptureRows(int count)

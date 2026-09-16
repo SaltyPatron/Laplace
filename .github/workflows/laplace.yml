@@ -1,4 +1,4 @@
-name: Laplace — product lifecycle
+name: Laplace — development and operator lifecycle
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       stage:
-        description: "product lifecycle stage"
+        description: "explicit operator lifecycle stage"
         type: choice
         required: true
         default: all
@@ -19,16 +19,8 @@ on:
         description: "ignore attestation-law stamp"
         type: boolean
         default: false
-      fresh_db:
-        description: "recreate DB structure/runtime and restore required lexical sources"
-        type: boolean
-        default: false
-      restore_foundation:
-        description: "also restore the broader canonical foundation (can take hours)"
-        type: boolean
-        default: false
       serial_tests:
-        description: "force serial ctest/regress"
+        description: "force serial ctest"
         type: boolean
         default: false
       force_all:
@@ -43,10 +35,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: laplace-substrate-lifecycle
-  cancel-in-progress: false
-
 env:
   LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
@@ -56,36 +44,18 @@ env:
   PGUSER: laplace_admin
   PGDATABASE: laplace
   LAPLACE_DATA_ROOT: /vault/Data
-  LAPLACE_FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.force_all && '1' || '' }}
-  LAPLACE_STAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.stage || 'all' }}
-  LAPLACE_FULL_CLEAN: ${{ github.event_name == 'workflow_dispatch' && inputs.full_clean && '1' || '' }}
-  LAPLACE_FORCE_CODEGEN: ${{ github.event_name == 'workflow_dispatch' && inputs.force_codegen && '1' || '' }}
-  LAPLACE_FRESH_DB: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_db && '1' || '' }}
-  LAPLACE_RESTORE_FOUNDATION: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_foundation && '1' || '' }}
-  LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests && '1' || '' }}
-  LAPLACE_GENERATION_BENCHMARK: ${{ github.event_name == 'workflow_dispatch' && inputs.generation_benchmark && '1' || '' }}
-  LICHESS_API: ${{ secrets.LICHESS_API }}
-  LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
-  LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
-  STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
-  STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-  STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
-  LAPLACE_AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_ID }}
-  LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET }}
-  LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
-  LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
 
 jobs:
-  product:
-    name: Product — prove, activate and verify
+  development:
+    name: Development — build and test
+    if: github.event_name == 'push'
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 420
-    # Independent operator workflows share this workspace; none is a delivery prerequisite.
+    timeout-minutes: 120
     concurrency:
-      group: laplace-shared-workspace
-      cancel-in-progress: false
+      group: laplace-development-${{ github.ref }}
+      cancel-in-progress: true
     steps:
-      - name: Checkout exact revision without discarding persistent build cache
+      - name: Checkout exact revision
         env:
           TARGET_SHA: ${{ github.sha }}
         run: |
@@ -94,341 +64,49 @@ jobs:
 
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Classify source-only change
-        if: github.event_name == 'push'
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          fast=1
-          verify_recursive=0
-          # These documents and data files are executable-generation inputs.
-          # Resolve the exact project inventory before the broad docs allowance;
-          # failure must not masquerade as an empty selection and a fast release.
-          operational_paths="$(python3 scripts/verify-operational-seed.py --list-source-paths)"
-          if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
-            fast=0
-          else
-            git fetch --no-tags --depth=1 origin "$BEFORE_SHA" || true
-            while IFS= read -r path; do
-              [[ -z "$path" ]] && continue
-              if [[ $'\n'"$operational_paths"$'\n' == *$'\n'"$path"$'\n'* ]]; then
-                fast=0
-                continue
-              fi
-              case "$path" in
-                .github/workflows/laplace.yml|scripts/product-ci.sh|scripts/pr-proof.sh|scripts/pr-db-proof.sh|scripts/ci-session.py|scripts/test-profile-registry.py|scripts/test-parallel.sh)
-                  # These files own actual admission and mandatory execution order.
-                  fast=0
-                  ;;
-                scripts/prove-*|scripts/test-live-recursive-proof-gate.py)
-                  verify_recursive=1
-                  ;;
-                scripts/ingest-stockfish-corpus.py|docs/*|.github/*|scripts/test-*|scripts/check-*|scripts/ci-*|scripts/actions-audit.py|scripts/test-profiles.json|scripts/benchmark-profiles.json|scripts/product-ci.sh)
-                  ;;
-                *)
-                  fast=0
-                  ;;
-              esac
-            done < <(git diff --name-only "$BEFORE_SHA" "$TARGET_SHA")
-          fi
-          echo "LAPLACE_FAST_ONLY=$fast" >> "$GITHUB_ENV"
-          echo "LAPLACE_VERIFY_RECURSIVE_PROOF=$verify_recursive" >> "$GITHUB_ENV"
-          echo "change classification: fast_only=$fast verify_recursive=$verify_recursive"
+      - name: Build and test the product
+        run: bash scripts/product-ci.sh test
 
-      - name: Fast source/tooling proof and installed-product reconciliation
-        if: env.LAPLACE_FAST_ONLY == '1'
-        run: |
-          set -euo pipefail
-          umask 0002
-          mkdir -p /build/laplace/work
-          # Both repositories deploy on this host; GitHub concurrency is scoped
-          # to one repository. Do not pass the lock descriptor to service children.
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            bash scripts/product-ci.sh reconcile
-
-      - name: Verify changed recursive proof against the live product
-        if: env.LAPLACE_FAST_ONLY == '1' && env.LAPLACE_VERIFY_RECURSIVE_PROOF == '1'
-        run: |
-          set -euo pipefail
-          umask 0002
-          mkdir -p /build/laplace/work
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"
-
-      - name: Resolve the Stockfish checkout for application publication
-        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
-        env:
-          CONFIGURED_STOCKFISH_SOURCE: ${{ vars.LAPLACE_STOCKFISH_SOURCE }}
-        run: |
-          set -euo pipefail
-          if [[ -n "$CONFIGURED_STOCKFISH_SOURCE" ]]; then
-            export LAPLACE_STOCKFISH_SOURCE="$CONFIGURED_STOCKFISH_SOURCE"
-          fi
-          output="/build/laplace/work/stockfish-source-selection/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -p "$output"
-          python3 scripts/install-stockfish.py --source-receipt \
-            --prefer-source /vault/External/Stockfish/SF_19 > "$output/source-selection.json"
-          python3 - "$output/source-selection.json" <<'PY'
-          import json, os, sys
-          selection = json.load(open(sys.argv[1], encoding="utf-8"))
-          print(json.dumps(selection, sort_keys=True))
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
-              if selection["checkout_status"] != "pending-default-install":
-                  output.write("LAPLACE_STOCKFISH_SOURCE=" + selection["source"] + "\n")
-              output.write("LAPLACE_STOCKFISH=" + selection["executable"] + "\n")
-          PY
-
-
-      - name: Reserve host for product phases
-        id: product_session
-        if: env.LAPLACE_FAST_ONLY != '1'
-        env:
-          LAPLACE_OPERATIONAL_PROOF_DIRECTORY: /build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}
-          LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product
-        run: |
-          set -euo pipefail
-          umask 0002
-          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
-          mkdir -p /build/laplace/work
-          directory="/build/laplace/work/ci-sessions/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product"
-          mkdir -p "$(dirname "$directory")"
-          echo "LAPLACE_PHASE_CHECKOUT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-          echo "LAPLACE_CI_SESSION_DIRECTORY=$directory" >> "$GITHUB_ENV"
-          python3 scripts/ci-session.py start --directory "$directory" \
-            --lock /build/laplace/work/host-resource.lock --checkout "$GITHUB_WORKSPACE" \
-            --kind product --stage "$LAPLACE_STAGE"
-
-      - name: Retain native regression baseline before build
-        continue-on-error: true
-        id: product_native_baseline
-        if: env.LAPLACE_FAST_ONLY != '1'
-        run: |
-          python3 scripts/capture-native-regression.py --repo-root "$GITHUB_WORKSPACE" \
-            --build-root "$(readlink -f build)" \
-            --output-dir "/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product/baseline" \
-            --label retained-baseline --print-diffs
-
-      - name: Upload retained native baseline before build
-        continue-on-error: true
-        if: always() && steps.product_native_baseline.outcome != 'skipped'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-native-baseline-${{ github.run_id }}-${{ github.run_attempt }}-product
-          path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product/baseline/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Check source and policy
-        id: product_policy
-        if: contains(env.LAPLACE_CI_PHASES, '|policy|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase policy
-
-      - name: Resolve build dependencies
-        id: product_dependencies
-        if: contains(env.LAPLACE_CI_PHASES, '|dependencies|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase dependencies
-
-      - name: Build native and managed artifacts
-        id: product_build
-        if: contains(env.LAPLACE_CI_PHASES, '|build|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase build
-
-      - name: Test native engine
-        id: product_native_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|native-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-dev
-
-      - name: Test managed code
-        id: product_managed_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|managed-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase managed-dev
-
-      - name: Test UCI runtime
-        id: product_uci_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|uci-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase uci-dev
-
-      - name: Test browser product
-        id: product_browser_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|browser-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase browser-dev
-
-      - name: Check application release
-        id: product_application_check
-        if: contains(env.LAPLACE_CI_PHASES, '|application-check|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase application-check
-
-      - name: Install native artifacts
-        id: product_native_install
-        if: contains(env.LAPLACE_CI_PHASES, '|native-install|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-install
-
-      - name: Migrate and reconcile installed database
-        id: product_database_maintenance
-        if: contains(env.LAPLACE_CI_PHASES, '|database-maintenance|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase database-maintenance
-
-      - name: Restore requested foundation
-        id: product_foundation
-        if: contains(env.LAPLACE_CI_PHASES, '|foundation|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase foundation
-
-      - name: Admit required lexical foundation
-        id: product_lexical_foundation
-        if: contains(env.LAPLACE_CI_PHASES, '|lexical-foundation|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase lexical-foundation
-
-      - name: Admit operational memory
-        id: product_operational_seed
-        if: contains(env.LAPLACE_CI_PHASES, '|operational-seed|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase operational-seed
-
-      - name: Publish applications
-        id: product_publish
-        if: contains(env.LAPLACE_CI_PHASES, '|publish|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase publish
-
-      - name: Verify the installed direct build uses the selected Stockfish checkout
-        if: contains(env.LAPLACE_CI_PHASES, '|publish|')
-        run: |
-          output="/build/laplace/work/stockfish-source-selection/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          python3 scripts/install-stockfish.py --verify-source-receipt "$output/source-selection.json" \
-            > "$output/source-build.json"
-          cat "$output/source-build.json"
-
-      - name: Verify ordinary operational execution
-        id: product_operational_execution
-        if: contains(env.LAPLACE_CI_PHASES, '|operational-execution|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase operational-execution
-
-      - name: Verify database health
-        id: product_db_health
-        if: contains(env.LAPLACE_CI_PHASES, '|db-health|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase db-health
-
-      - name: Test native PostgreSQL extensions
-        id: product_native_db
-        if: contains(env.LAPLACE_CI_PHASES, '|native-db|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-db
-
-      - name: Test managed database integration
-        id: product_managed_db
-        if: contains(env.LAPLACE_CI_PHASES, '|managed-db|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase managed-db
-
-      - name: Prove live recursive substrate
-        id: product_live_floor
-        if: contains(env.LAPLACE_CI_PHASES, '|live-floor|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase live-floor
-
-      - name: Verify live API endpoints
-        id: product_live_api
-        if: contains(env.LAPLACE_CI_PHASES, '|live-api|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase live-api
-
-      - name: Test live product behavior
-        id: product_managed_live
-        if: contains(env.LAPLACE_CI_PHASES, '|managed-live|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase managed-live
-
-      - name: Evaluate witnessed generation
-        id: product_generation_eval
-        if: contains(env.LAPLACE_CI_PHASES, '|generation-eval|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase generation-eval
-
-      - name: Measure requested generation performance
-        id: product_performance
-        if: contains(env.LAPLACE_CI_PHASES, '|performance|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase performance
-
-      - name: Release product host reservation
-        if: always() && steps.product_session.outcome == 'success'
-        run: python3 scripts/ci-session.py stop --directory "$LAPLACE_CI_SESSION_DIRECTORY"
-
-      - name: Upload lifecycle phase results
-        if: always() && steps.product_session.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-phases-${{ github.run_id }}-${{ github.run_attempt }}-product
-          path: |
-            ${{ env.LAPLACE_CI_SESSION_DIRECTORY }}/session.json
-            ${{ env.LAPLACE_CI_SESSION_DIRECTORY }}/supervisor.log
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Retain native regression results
-        if: always()
-        run: |
-          python3 scripts/capture-native-regression.py --repo-root "$GITHUB_WORKSPACE" \
-            --build-root "$(readlink -f build)" \
-            --output-dir "/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product/current" \
-            --label current --print-diffs
-
-      - name: Upload native regression diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-native-regression-${{ github.run_id }}-${{ github.run_attempt }}-product
-          path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product/
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload operational seed and execution receipts
-        if: always() && steps.product_session.outcome == 'success' && contains(env.LAPLACE_CI_PHASES, '|operational-seed|')
-        # actions/upload-artifact v4.6.2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-operational-execution-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Retain chess playing observation migration evidence
-        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-chess-observation-migration-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/recovery/chess-position-outcomes/${{ github.run_id }}-${{ github.run_attempt }}-*/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Retain existing live recursive proof receipts
-        if: always()
+  operator:
+    name: Operator — ${{ inputs.stage }}
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 420
+    concurrency:
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
+    env:
+      LAPLACE_STAGE: ${{ inputs.stage }}
+      LAPLACE_FORCE_ALL: ${{ inputs.force_all && '1' || '' }}
+      LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
+      LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
+      LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
+      LAPLACE_GENERATION_BENCHMARK: ${{ inputs.generation_benchmark && '1' || '' }}
+      LICHESS_API: ${{ secrets.LICHESS_API }}
+      LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
+      LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
+      STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
+      LAPLACE_AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_ID }}
+      LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET }}
+      LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
+      LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
+    steps:
+      - name: Checkout exact requested revision
         env:
           TARGET_SHA: ${{ github.sha }}
-          PROOF_OUTCOME: ${{ job.status }}
+        run: |
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Run requested lifecycle under one host reservation
         run: |
           set -euo pipefail
-          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-product"
-          args=(
-            --checkout "$GITHUB_WORKSPACE"
-            --output "$evidence"
-            --expected-source "$TARGET_SHA"
-            --proof-outcome "$PROOF_OUTCOME"
-          )
-          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
-            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
-          fi
-          python3 scripts/collect-recursive-proof-evidence.py "${args[@]}"
-
-      - name: Upload retained live recursive proof diagnostics
-        if: always()
-        # actions/upload-artifact v4.6.2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-product
-          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product/
-          if-no-files-found: error
-          retention-days: 30
-
-
-      - name: Retain exact Stockfish source selection
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: stockfish-source-selection-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/work/stockfish-source-selection/${{ github.run_id }}-${{ github.run_attempt }}/
-          if-no-files-found: warn
-          retention-days: 14
+          umask 0002
+          mkdir -p /build/laplace/work
+          exec 9>/build/laplace/work/host-resource.lock
+          flock 9
+          bash scripts/product-ci.sh "$LAPLACE_STAGE"

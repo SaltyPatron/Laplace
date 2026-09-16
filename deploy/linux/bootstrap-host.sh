@@ -13,7 +13,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 mountpoint -q /build || { echo "Required /build volume is not mounted" >&2; exit 1; }
-install -d -m 2770 -o "$RUN_USER" -g "$RUN_GROUP" /build/laplace/work/legacy-api
+install -d -m 2770 -o "$RUN_USER" -g "$RUN_GROUP" /build/laplace/work/api
 
 echo "==> app dir: $APP_DIR (owner $RUN_USER)"
 install -d -m 2775 -o "$RUN_USER" -g "$RUN_GROUP" \

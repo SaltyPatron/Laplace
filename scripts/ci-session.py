@@ -6,6 +6,8 @@ tracking environment. A lock-owning guardian
 uses a Linux pidfd to clean up the active process group if the supervisor dies.
 Phase children never inherit the host lock (a daemonized database must not own it).
 Only the selected canonical script's ordered phase names are accepted.
+A leading source-policy phase runs before acquiring shared-host ownership; the
+same guardian retains the lock continuously from the first mutable phase onward.
 """
 from __future__ import annotations
 
@@ -171,8 +173,9 @@ def guardian(directory, lock_fd, control_fd, parent, environment):
             return
         state = read_state(directory)
         terminate_group(state.get("active"))
-        cleanup_rc = cleanup(state, environment)
-        state.update(status="failed", failure="supervisor exited unexpectedly", active=None, cleanup_exit_code=cleanup_rc)
+        cleanup_rc = cleanup(state, environment) if state.get("host_lock_acquired", True) else 0
+        state.update(status="failed", failure="supervisor exited unexpectedly", active=None,
+                     waiting_for_host=False, cleanup_exit_code=cleanup_rc)
         save(directory, state)
     finally:
         os.close(parent)
@@ -300,20 +303,44 @@ def serve(directory, startup_fd, lock_path, idle_timeout, phase_timeout):
     stopped = False
     locked = False
     state["supervisor"] = {"pid": os.getpid(), "start": process_identity(os.getpid())}
+    state["host_lock_acquired"] = False
+    state["waiting_for_host"] = False
+
+    def acquire_host(client, timeout=None):
+        nonlocal locked
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        # A reservation wait owns no phase process. Expose it separately so
+        # stop can interrupt the supervisor instead of queueing behind the wait.
+        state["waiting_for_host"] = True
+        save(directory, state)
+        try:
+            while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("host reservation timed out")
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+                    state.update(host_lock_acquired=True, waiting_for_host=False)
+                    save(directory, state)
+                    return
+                except BlockingIOError:
+                    if select.select([client], [], [], .2)[0]:
+                        raise ConnectionError("host reservation client disconnected")
+        finally:
+            if state["waiting_for_host"]:
+                state["waiting_for_host"] = False
+                save(directory, state)
+
     def interrupted(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     try:
         save(directory, state)
-        while True:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                locked = True
-                break
-            except BlockingIOError:
-                if select.select([startup], [], [], .2)[0]:
-                    raise ConnectionError("lock acquisition client disconnected")
+        # Source policy has no shared-host lifecycle to reserve. Other plans
+        # keep their original eager reservation; no caller can skip a phase.
+        if state["phases"][0] != "policy":
+            acquire_host(startup)
         os.mkfifo(directory / "request.fifo", 0o600)
         server = os.open(directory / "request.fifo", os.O_RDWR)
         state.update(status="ready", supervisor={"pid": os.getpid(), "start": process_identity(os.getpid())})
@@ -348,7 +375,7 @@ def serve(directory, startup_fd, lock_path, idle_timeout, phase_timeout):
                 if process_identity(request["pid"]) != request["start"]:
                     raise ValueError("CI client identity changed")
                 if request.get("operation") == "stop":
-                    cleanup_rc = cleanup(state, environment)
+                    cleanup_rc = cleanup(state, environment) if locked else 0
                     state.update(status="stopped", cleanup_exit_code=cleanup_rc)
                     save(directory, state)
                     os.write(control_write, b"S")
@@ -370,12 +397,25 @@ def serve(directory, startup_fd, lock_path, idle_timeout, phase_timeout):
                 if source(state["checkout"]) != state["source"]:
                     raise ValueError("CI checkout identity changed")
                 phase_environment = current_step_environment(environment, request.get("command_files"))
-                code, reason = run_phase(directory, state, phase, connection, client_fd, phase_environment, phase_timeout)
+                code, reason = 0, None
+                if not locked and phase != "policy":
+                    emit(connection, {"output": base64.b64encode(
+                        b"Waiting for shared host after completed source checks.\n").decode()})
+                    try:
+                        acquire_host(client_fd, phase_timeout)
+                    except TimeoutError as error:
+                        code, reason = 124, str(error)
+                    except ConnectionError as error:
+                        code, reason = 130, str(error)
+                    if not code and source(state["checkout"]) != state["source"]:
+                        raise ValueError("CI checkout identity changed while waiting for host")
+                if not code:
+                    code, reason = run_phase(directory, state, phase, connection, client_fd, phase_environment, phase_timeout)
                 state["results"].append({"phase": phase, "exit_code": code})
                 state["next"] += 1
                 if code:
                     state.update(status="failed", failure=reason or f"phase {phase} failed")
-                    state["cleanup_exit_code"] = cleanup(state, environment)
+                    state["cleanup_exit_code"] = cleanup(state, environment) if locked else 0
                 save(directory, state)
                 try:
                     emit(connection, {"exit_code": code})
@@ -521,7 +561,7 @@ def main():
     supervisor = state.get("supervisor", {})
     if not supervisor.get("start") or process_identity(supervisor.get("pid", 0)) != supervisor.get("start"):
         raise ValueError("CI session supervisor identity is stale")
-    if args.operation == "stop" and state.get("active"):
+    if args.operation == "stop" and (state.get("active") or state.get("waiting_for_host")):
         descriptor = os.pidfd_open(supervisor["pid"])
         try:
             if process_identity(supervisor["pid"]) != supervisor["start"]:

@@ -24,11 +24,16 @@ registry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(registry)
 
 POLICY_IDS = {
+    "policy-application-publish",
+    "policy-qualified-chess-floor-export",
+    "policy-cutechess-user-engines",
+    "policy-cutechess-gui-game",
+    "policy-cmake-release",
     "policy-chess-floor-serving",
     "policy-chess-floor-artifacts",
     "policy-source-contract", "policy-registry", "policy-sql-catalog", "policy-actions-topology",
     "policy-actions-audit", "policy-shellcheck-gate", "policy-deploy-payload-sync",
-    "policy-pipeline-install", "policy-application-runtime", "policy-native-library-closure", "policy-stockfish-release", "policy-zstd-release",
+    "policy-pipeline-install", "policy-application-runtime", "policy-native-library-closure", "policy-stockfish-release", "policy-zstd-release", "policy-postgresql-release",
     "policy-chess-dependencies", "policy-stockfish-corpus", "policy-cutechess-release", "policy-cutechess-gui-session", "policy-chess-x11-runtime", "policy-chess-acceptance", "policy-chess-environment-benchmark",
     "policy-recorded-chess-benchmark", "policy-retained-chess-ingestion", "policy-retained-chess-capacity", "policy-installed-chess-corpus", "policy-benchmark-registry", "policy-postgres-geometry-benchmark",
     "policy-managed-services", "policy-managed-host", "policy-managed-tls",
@@ -67,7 +72,11 @@ class TestProfileRegistryTests(unittest.TestCase):
             suite = registry.load_validated()["native-dev"]
             receipt = root / "receipt.json"
             log = io.StringIO()
+            # This private CTest file is created by the fixture, not by the
+            # product's pinned CMake. Exercise the available CTest deliberately;
+            # the authenticated selection path has real-process owner controls.
             with patch.object(registry, "ROOT", root), \
+                 patch.object(registry, "ctest_command_prefix", return_value=[shutil.which("ctest")]), \
                  patch.object(registry, "load_validated", return_value={suite["id"]: suite}), \
                  patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
                  contextlib.redirect_stdout(log):

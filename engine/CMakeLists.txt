@@ -219,8 +219,18 @@ endif()
 # Must be the CACHE entry — cmake_minimum_required ignores the directory-scope
 # variable (verified against this CMake version); restored to ON right after.
 set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
+set(_blake3_binary_dir "${CMAKE_BINARY_DIR}/_deps/blake3")
+if(UNIX)
+    # configure_file() reapplies output permissions even when bytes are unchanged.
+    # That fails with EPERM when another laplace-runner group member configured the
+    # shared build tree first. Keep the tiny vendored configure surface per uid;
+    # the product targets and install result remain canonical and shared.
+    execute_process(COMMAND id -u OUTPUT_VARIABLE _laplace_build_uid
+        OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    set(_blake3_binary_dir "${CMAKE_BINARY_DIR}/_deps/blake3-${_laplace_build_uid}")
+endif()
 add_subdirectory("${LAPLACE_EXTERNAL}/blake3/c"
-    "${CMAKE_BINARY_DIR}/_deps/blake3" EXCLUDE_FROM_ALL)
+    "${_blake3_binary_dir}" EXCLUDE_FROM_ALL)
 set(CMAKE_WARN_DEPRECATED ON CACHE BOOL "" FORCE)
 target_compile_options(blake3 PRIVATE -w)
 
