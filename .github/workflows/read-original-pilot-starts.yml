@@ -1,0 +1,113 @@
+name: Read retained corpus pilot starting positions
+
+on:
+  push:
+    branches: ['diag/read-original-corpus-pilot-20260916-*']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify exact artifact and recover retained pilot documents
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, io, json, os, re, urllib.error, urllib.request, zipfile
+          EXPECTED_SHA = "f40078c50e6936fda9e74951ba3905b56e396407"
+          MEASUREMENT_RUN_ID = 35081129857
+          EXPECTED_CONCLUSION = "failure"
+          ARTIFACT_ID = 10440605355
+          EXPECTED_ZIP_BYTES = 186761
+          EXPECTED_ZIP_SHA256 = "04e13972b1fa2fe8dba04b0bf1f8e7be5f386d3eafecd50ceba34081792adeec"
+          REPOSITORY = "SaltyPatron/Laplace"
+          if not re.fullmatch(r"[0-9a-f]{40}", EXPECTED_SHA) or not re.fullmatch(r"[0-9a-f]{64}", EXPECTED_ZIP_SHA256):
+              raise ValueError("exact observed source and artifact identities must be supplied")
+          if min(MEASUREMENT_RUN_ID, ARTIFACT_ID, EXPECTED_ZIP_BYTES) <= 0 or EXPECTED_ZIP_BYTES > 64 * 1024 * 1024:
+              raise ValueError("invalid bounded artifact identity")
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2026-03-10"}
+          base = "https://api.github.com/repos/" + REPOSITORY
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
+                  raw = response.read(2 * 1024 * 1024 + 1)
+              if len(raw) > 2 * 1024 * 1024:
+                  raise ValueError("API metadata exceeded the bounded envelope")
+              return json.loads(raw)
+          run = api("/actions/runs/" + str(MEASUREMENT_RUN_ID))
+          if (run["head_sha"] != EXPECTED_SHA or run["status"] != "completed" or run["conclusion"] != EXPECTED_CONCLUSION
+                  or run["path"] != ".github/workflows/chess-corpus-evidence.yml"):
+              raise ValueError("measurement run does not match the observed terminal source and result")
+          artifact = api("/actions/artifacts/" + str(ARTIFACT_ID))
+          if (artifact.get("expired") or artifact["workflow_run"]["id"] != MEASUREMENT_RUN_ID
+                  or artifact["workflow_run"]["head_sha"] != EXPECTED_SHA
+                  or artifact["name"] != "laplace-chess-corpus-" + str(MEASUREMENT_RUN_ID) + "-" + str(run["run_attempt"])
+                  or artifact["size_in_bytes"] != EXPECTED_ZIP_BYTES
+                  or artifact.get("digest") != "sha256:" + EXPECTED_ZIP_SHA256):
+              raise ValueError("artifact metadata differs from the observed measurement artifact")
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, response_headers, new_url):
+                  return None
+          try:
+              urllib.request.build_opener(NoRedirect).open(
+                  urllib.request.Request(base + "/actions/artifacts/" + str(ARTIFACT_ID) + "/zip", headers=headers), timeout=30)
+              raise ValueError("artifact download did not supply the expected authenticated redirect")
+          except urllib.error.HTTPError as redirect:
+              if redirect.code != 302:
+                  raise
+              location = redirect.headers["Location"]
+          if not location.startswith("https://"):
+              raise ValueError("artifact download redirect is not HTTPS")
+          # The presigned URL is used without the GitHub bearer header.
+          with urllib.request.urlopen(location, timeout=60) as response:
+              raw = response.read(EXPECTED_ZIP_BYTES + 1)
+          if len(raw) != EXPECTED_ZIP_BYTES or hashlib.sha256(raw).hexdigest() != EXPECTED_ZIP_SHA256:
+              raise ValueError("downloaded ZIP bytes differ from the observed artifact")
+          print("VERIFIED_PILOT_ARTIFACT " + json.dumps({"run": MEASUREMENT_RUN_ID, "head": EXPECTED_SHA,
+              "artifact": ARTIFACT_ID, "bytes": len(raw), "sha256": EXPECTED_ZIP_SHA256}), flush=True)
+          with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+              entries = archive.infolist()
+              if len(entries) > 512 or sum(entry.file_size for entry in entries) > 64 * 1024 * 1024:
+                  raise ValueError("pilot archive exceeded its uncompressed envelope")
+              print("PILOT_ARCHIVE_INVENTORY " + json.dumps([{"path": entry.filename, "bytes": entry.file_size}
+                                                          for entry in entries]), flush=True)
+              def exact_entry(suffix):
+                  matched = [entry for entry in entries if entry.filename == suffix or entry.filename.endswith("/" + suffix)]
+                  if len(matched) != 1 or matched[0].file_size > 2 * 1024 * 1024:
+                      raise ValueError("retained entry is ambiguous, missing or oversized: " + suffix)
+                  return archive.read(matched[0])
+              receipt = json.loads(exact_entry("corpus/measurement/corpus-recording.json"))
+              manifest = receipt["source"]["selectionManifest"]
+              selected = exact_entry("corpus/measurement/selection.jsonl")
+              if (len(selected) != 559489 or manifest["bytes"] != len(selected)
+                      or hashlib.sha256(selected).hexdigest() != "8f2699e80af7ef9d5143cfe37325922b29edf2260393acd68ff0fc718fa8460f"
+                      or manifest["sha256"] != hashlib.sha256(selected).hexdigest()):
+                  raise ValueError("retained selection manifest differs from the measured source receipt")
+              records = [json.loads(line) for line in selected.decode("utf-8").splitlines() if line]
+              if len(records) != 2000 or not all(isinstance(record, dict) for record in records):
+                  raise ValueError("selected-game manifest does not contain the expected 2000 object records")
+              keys = sorted({key for record in records for key in record})
+              distributions = {}
+              for key in keys:
+                  counts = {}
+                  for record in records:
+                      value = json.dumps(record.get(key), sort_keys=True, separators=(",", ":"), allow_nan=False)
+                      counts[value] = counts.get(value, 0) + 1
+                  distributions[key] = {"distinct": len(counts), "values": [
+                      {"value": json.loads(value), "count": count} for value, count in sorted(counts.items())
+                  ] if len(counts) <= 8 else None}
+              print("PILOT_SELECTION_START_OBSERVATION " + json.dumps({
+                  "measurement_status": receipt["status"], "source_sha256": receipt["source"]["source"]["sha256"],
+                  "selection_bytes": len(selected), "selection_sha256": hashlib.sha256(selected).hexdigest(),
+                  "records": len(records), "keys": keys, "field_distributions": distributions,
+                  "first_records": records[:3], "last_record": records[-1],
+                  "scope": "Exact retained selection identity observation; no completed game admission or outcome correctness claim."
+              }, sort_keys=True, allow_nan=False), flush=True)
+          PY
