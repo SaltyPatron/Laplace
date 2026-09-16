@@ -75,7 +75,12 @@ template<class T, void (*Destroy)(T*)> struct External {
     Memory* memory;
     size_t bytes = 0;
     explicit External(Memory& owner) : memory(&owner) {}
-    void account(size_t amount) { memory->claim(amount); bytes = amount; }
+    void account(size_t retained, size_t peak) {
+        if (peak < retained) throw std::bad_alloc();
+        memory->claim(peak);
+        memory->release(peak - retained);
+        bytes = retained;
+    }
     ~External() { Destroy(value); memory->release(bytes); }
 };
 
@@ -170,7 +175,8 @@ physicality_descriptor_status_t materialize(
         const auto status = physicality_descriptor_capture_stages(current_stages, stage_count,
             &vocabulary.basis, &limits, memory.remaining(), &current.value);
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
-        current.account(physicality_descriptor_capture_bytes(current.value));
+        current.account(physicality_descriptor_capture_bytes(current.value),
+            physicality_descriptor_capture_peak_bytes(current.value));
     }
     size_t current_count = 0;
     const auto* current_inputs = physicality_descriptor_capture_inputs(current.value, &current_count);
@@ -180,7 +186,8 @@ physicality_descriptor_status_t materialize(
         const auto status = physicality_descriptor_capture_stages(admitted_stages, admitted_stage_count,
             &vocabulary.basis, &limits, memory.remaining(), &admitted.value);
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
-        admitted.account(physicality_descriptor_capture_bytes(admitted.value));
+        admitted.account(physicality_descriptor_capture_bytes(admitted.value),
+            physicality_descriptor_capture_peak_bytes(admitted.value));
     }
     size_t admitted_count = 0;
     const auto* admitted_inputs = physicality_descriptor_capture_inputs(admitted.value, &admitted_count);
@@ -208,7 +215,8 @@ physicality_descriptor_status_t materialize(
     const auto planned = physicality_descriptor_plan_build(inputs.data(), inputs.size(),
         &vocabulary.basis, &limits, &plan.value);
     require(planned == PHYSICALITY_DESCRIPTOR_OK, planned);
-    plan.account(physicality_descriptor_plan_bytes(plan.value));
+    plan.account(physicality_descriptor_plan_bytes(plan.value),
+        physicality_descriptor_plan_peak_bytes(plan.value));
     const hash128_t* descriptors = physicality_descriptor_plan_roots(plan.value, nullptr);
 
     IdMap<size_t> current_by_entity(&memory), admitted_by_entity(&memory), body_by_descriptor(&memory);

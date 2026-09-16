@@ -79,7 +79,8 @@ public static class ChessCorpusBenchmark
         var failure = await CaptureFailureAsync(async () =>
         {
             long setupStart = Stopwatch.GetTimestamp();
-            await using var ingestor = await ChessPgnIngestor.CreateAsync(token);
+            var diagnostics = new ChessRecordingMeasurement.WriterDiagnosticLogger();
+            await using var ingestor = await ChessPgnIngestor.CreateAsync(diagnostics, token);
             setupSeconds = Stopwatch.GetElapsedTime(setupStart).TotalSeconds;
             long preparationStart = Stopwatch.GetTimestamp();
             try { preparation = await ChessCorpusPreparation.PrepareAsync(options, ingestor, token); }
@@ -95,12 +96,16 @@ public static class ChessCorpusBenchmark
                 var measurement = ChessRecordingMeasurement.FromCorpus(preparation, evidence);
                 phases.Add(measurement);
                 if (baseline is null) fresh = measurement;
+                diagnostics.Measurement = measurement;
                 try
                 {
                     await ingestor.IngestCorpusGamesAsync(preparation.ReadSelected(token), measurement, token);
-                    await measurement.VerifyPgnUnchangedAsync(preparation.Source.Path, token);
-                    await ChessCorpusPreparation.RequireUnchangedAsync(preparation.SelectionManifest, token);
-                    await evidence.CompleteAsync(token);
+                    using (measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.FinalSourceVerificationAndEvidenceCompletion))
+                    {
+                        await measurement.VerifyPgnUnchangedAsync(preparation.Source.Path, token);
+                        await ChessCorpusPreparation.RequireUnchangedAsync(preparation.SelectionManifest, token);
+                        await evidence.CompleteAsync(token);
+                    }
                     measurement.Complete("completed");
                     return evidence;
                 }
@@ -114,7 +119,11 @@ public static class ChessCorpusBenchmark
                     measurement.Complete("failed", failure.Message);
                     throw;
                 }
-                finally { await measurement.WriteAsync(Path.Combine(directory, "recording.json")); }
+                finally
+                {
+                    diagnostics.Measurement = null;
+                    await measurement.WriteAsync(Path.Combine(directory, "recording.json"));
+                }
             }
 
             ChessCorpusEvidence freshEvidence;

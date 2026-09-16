@@ -283,13 +283,16 @@ public sealed partial class NpgsqlSubstrateWriter
         Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
         WorkingSetReconciliation? reconciliation, CancellationToken ct)
     {
+        using var connectionDiagnostic = MeasureApplyPhase("connection-and-apply-lock");
         await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
         bool epochRoute = await SupportsApplyWriteEpochAsync(connection, ct).ConfigureAwait(false);
         await using var transaction = await AdvisoryTxLock.BeginWithLockAsync(
             connection, "laplace_apply_batch", TransactionGucs(Durability), _log, ct).ConfigureAwait(false);
+        connectionDiagnostic?.Complete();
         int preparationRoundTrips = 0;
         if (physicalityAdmission is not null)
         {
+            using var admissionDiagnostic = MeasureApplyPhase("physicality-provider-admission");
             // The SQL function performs its complete finite provider read within
             // one active snapshot; the control transaction remains ReadCommitted
             // so later COPY connections' commits are visible to the apply owner.
@@ -319,6 +322,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 legacySingletonToken = null;
                 reconciliation = null;
             }
+            admissionDiagnostic?.Complete();
         }
         var result = await ApplyPreparedStagesCoreAsync(
             connection, transaction, epochRoute, physicalityAdmission,

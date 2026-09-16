@@ -14,6 +14,7 @@ struct physicality_descriptor_capture {
     physicality_descriptor_plan_t* plan;
     size_t count;
     size_t bytes;
+    size_t peak_bytes;
 };
 
 typedef struct {
@@ -238,6 +239,7 @@ physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
     }
     capture->count = count;
     capture->bytes = bytes;
+    capture->peak_bytes = bytes;
     count = 0u;
     vertices = 0u;
     for (size_t stage = 0; stage < stage_count; ++stage) {
@@ -288,6 +290,7 @@ physicality_descriptor_status_t physicality_descriptor_capture_stages(
         physicality_descriptor_capture_free(capture);
         return status;
     }
+    capture->peak_bytes = capture->bytes + physicality_descriptor_plan_peak_bytes(capture->plan);
     capture->bytes += physicality_descriptor_plan_bytes(capture->plan);
     *out_capture = capture;
     return PHYSICALITY_DESCRIPTOR_OK;
@@ -295,6 +298,10 @@ physicality_descriptor_status_t physicality_descriptor_capture_stages(
 
 size_t physicality_descriptor_capture_bytes(const physicality_descriptor_capture_t* capture) {
     return capture == NULL ? 0u : capture->bytes;
+}
+
+size_t physicality_descriptor_capture_peak_bytes(const physicality_descriptor_capture_t* capture) {
+    return capture == NULL ? 0u : capture->peak_bytes;
 }
 
 const physicality_descriptor_plan_t* physicality_descriptor_capture_plan(

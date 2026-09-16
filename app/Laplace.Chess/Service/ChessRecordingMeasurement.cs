@@ -173,6 +173,7 @@ internal sealed partial class ChessRecordingMeasurement(string? experimentId, in
             _matchGames[key] = remaining - 1;
         }
         ParsedGames++;
+        Work.ParsedPlies += game.MoveIds.Length;
     }
 
     internal void ObserveResult(ChessPgnIngestor.Result result)

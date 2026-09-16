@@ -430,6 +430,7 @@ public sealed partial class NpgsqlSubstrateWriter
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct)
     {
+        using var preparationDiagnostic = MeasureApplyPhase("native-tuples-and-merge-preparation");
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var copyTransactions = new CopyTransactionCounts();
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
@@ -534,6 +535,7 @@ public sealed partial class NpgsqlSubstrateWriter
             "WS_APPLY prep: {Ms:N0}ms (blobs {BlobMs:N0} + parse {ParseMs:N0} + ent-dedupe {EntDedupeMs:N0} + rest {RestMs:N0}; {E:N0}e→{EDistinct:N0} distinct/{P:N0}p/{A:N0}a)",
             prepMs, blobMs, parseMs - blobMs, entDedupeMs, prepMs - parseMs - entDedupeMs,
             ents.Ids.Count, distinctStagedEntities, phys.Ids.Count, atts.Ids.Count);
+        preparationDiagnostic?.Complete();
 
         // Entity sort+pack overlaps verification. The outer control transaction
         // already holds the apply lock and the physicality provider observation.
@@ -654,7 +656,7 @@ public sealed partial class NpgsqlSubstrateWriter
                             conn, tx, token, workingSetSource, workingSetSources,
                             receiptKind: "reconciled-existing", ct).ConfigureAwait(false);
                         rtJournal++;
-                        await tx.CommitAsync(ct).ConfigureAwait(false);
+                        await CommitMeasuredAsync(tx, ct).ConfigureAwait(false);
                         if (epochRoute)
                         {
                             await using var last = conn.CreateCommand();
@@ -714,6 +716,7 @@ public sealed partial class NpgsqlSubstrateWriter
             // Probes fan out across pooled connections. Correct under the
             // held advisory lock: every snapshot starts after the lock was
             // acquired, so anything a prior applier committed is visible.
+            using var verificationDiagnostic = MeasureApplyPhase("presence-verification");
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
 
             // Empty-relation probe skip (under the apply advisory lock only).
@@ -924,6 +927,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 physEmptySkip, attEmptySkip, entInvertResolved, attStructuralSkip,
                 presentEntities.Count, presentPhys.Count, presentAtts.Count,
                 epochForeignDelta, _presenceCacheOverflowed);
+            verificationDiagnostic?.Complete();
+
+            using var filteringDiagnostic = MeasureApplyPhase("copy-survivor-selection");
 
             // Entities: first occurrence of each id, minus stored rows.
             // Kept rows carry their id so parallel COPY groups can own
@@ -1049,6 +1055,9 @@ public sealed partial class NpgsqlSubstrateWriter
             _log.LogInformation(
                 "WS_APPLY kept: {E:N0}e/{P:N0}p/{A:N0}a novel after verify in {Ms:N0}ms since verify-start",
                 keptEntCount, keptPhys.Count, keptAtts.Count, phaseSw.ElapsedMilliseconds);
+            filteringDiagnostic?.Complete();
+
+            using var copyDiagnostic = MeasureApplyPhase("copy-and-copy-transaction-commits");
 
             bool parallelCopy = ApplyParallelism > 1
                 && (ResolveCopyGroups(keptEntCount, keptEntBytes) > 1
@@ -1149,16 +1158,22 @@ public sealed partial class NpgsqlSubstrateWriter
 
             }
 
+            copyDiagnostic?.Complete();
+
             // Consensus acceptance is supplied only by the accumulating writer
             // for a freshly claimed V2 working set. It shares this transaction
             // with the evidence and replay token: a failure leaves no accepted
             // journal claim, while a retry that sees the claim cannot refold.
             if (transactionParticipant is not null && workingSetToken is not null)
+            {
+                using var participantDiagnostic = MeasureApplyPhase("consensus-acceptance-participant");
                 await transactionParticipant(conn, tx,
                     new WorkingSetAcceptedEvidence(
                         novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(),
                         physicalityAdmission?.GeneratedAttestations ?? [],
                         physicalityAdmission?.OriginalReplay ?? false), ct);
+                participantDiagnostic?.Complete();
+            }
 
             // Keep the pre-descriptor semantic source receipt in this same commit.
             // It prevents backfilling forms from repeating conversation/participant work.
@@ -1169,7 +1184,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     workingSetSources, "applied", ct).ConfigureAwait(false);
                 rtJournal++;
             }
-            await tx.CommitAsync(ct);
+            await CommitMeasuredAsync(tx, ct);
             copyTransactions.CommitControl();
             commit = commit with { WriteCommitAcknowledged = workingSetToken is not null
                 || eIns > 0 || pIns > 0 || aIns > 0 || aFold > 0 };

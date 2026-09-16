@@ -19,7 +19,7 @@ struct physicality_descriptor_plan {
     size_t child_count, child_capacity;
     size_t reference_count, reference_capacity;
     size_t root_count, slot_count, scratch_capacity;
-    size_t bytes;
+    size_t bytes, peak_bytes, maximum_bytes;
 };
 
 static int checked_add(size_t* value, size_t addition) {
@@ -33,6 +33,48 @@ static int checked_array(size_t* bytes, size_t count, size_t width) {
     return checked_add(bytes, count * width);
 }
 
+/* Grow retained arrays under the same aggregate grant. The old allocation
+ * remains charged until the replacement has been allocated and copied. Only
+ * actual unique descriptor structure asks for node/edge growth; root and
+ * reference occurrence storage is never deduplicated. */
+static int reserve_array(physicality_descriptor_plan_t* plan, void* previous,
+    size_t used, size_t capacity, size_t required, size_t width,
+    void** replacement, size_t* replacement_capacity) {
+    size_t next = capacity == 0u ? 1u : capacity;
+    size_t allocated, previous_bytes;
+    void* memory;
+    if (required <= capacity) {
+        *replacement = previous;
+        *replacement_capacity = capacity;
+        return 1;
+    }
+    if (required > SIZE_MAX / width || capacity > SIZE_MAX / width ||
+        used > capacity || plan->bytes > plan->maximum_bytes)
+        return 0;
+    while (next < required) {
+        if (next > SIZE_MAX / 2u) { next = required; break; }
+        next *= 2u;
+    }
+    /* Geometric spare capacity is optional; a valid exact fit may use only
+     * the required rows, still charging old plus new during replacement. */
+    if (next > SIZE_MAX / width ||
+        next * width > plan->maximum_bytes - plan->bytes)
+        next = required;
+    allocated = next * width;
+    if (allocated > plan->maximum_bytes - plan->bytes) return 0;
+    memory = calloc(next, width);
+    if (memory == NULL) return 0;
+    if (used != 0u) memcpy(memory, previous, used * width);
+    if (plan->bytes + allocated > plan->peak_bytes)
+        plan->peak_bytes = plan->bytes + allocated;
+    previous_bytes = capacity * width;
+    free(previous);
+    plan->bytes += allocated - previous_bytes;
+    *replacement = memory;
+    *replacement_capacity = next;
+    return 1;
+}
+
 static size_t identity_slot(const hash128_t* id, size_t mask) {
     /* Hash-table routing only. Canonical identities come from the ordinary
      * native trajectory/composition owner below. */
@@ -41,6 +83,34 @@ static size_t identity_slot(const hash128_t* id, size_t mask) {
     value *= UINT64_C(0xff51afd7ed558ccd);
     value ^= value >> 33;
     return (size_t)value & mask;
+}
+
+static int reserve_slots(physicality_descriptor_plan_t* plan, size_t nodes) {
+    size_t next = plan->slot_count, bytes, peak;
+    size_t* slots;
+    if (nodes <= next / 2u) return 1;
+    if (nodes > SIZE_MAX / 2u) return 0;
+    while (next < nodes * 2u) {
+        if (next > SIZE_MAX / 2u) return 0;
+        next *= 2u;
+    }
+    if (next > SIZE_MAX / sizeof(*slots)) return 0;
+    bytes = next * sizeof(*slots);
+    if (bytes > plan->maximum_bytes - plan->bytes) return 0;
+    slots = calloc(next, sizeof(*slots));
+    if (slots == NULL) return 0;
+    for (size_t i = 0u; i < plan->node_count; ++i) {
+        size_t slot = identity_slot(&plan->nodes[i].id, next - 1u);
+        while (slots[slot] != 0u) slot = (slot + 1u) & (next - 1u);
+        slots[slot] = i + 1u;
+    }
+    peak = plan->bytes + bytes;
+    if (peak > plan->peak_bytes) plan->peak_bytes = peak;
+    free(plan->slots);
+    plan->bytes += bytes - plan->slot_count * sizeof(*slots);
+    plan->slots = slots;
+    plan->slot_count = next;
+    return 1;
 }
 
 static const hash128_t* basis_value(const physicality_descriptor_basis_t* basis, size_t index) {
@@ -85,9 +155,28 @@ static physicality_descriptor_status_t compose(
         }
         slot = (slot + 1u) & (plan->slot_count - 1u);
     }
-    if (plan->node_count == plan->node_capacity ||
-        count > plan->child_capacity - plan->child_count)
+    /* Exact reuse above needs no spare capacity. Growth cannot invalidate
+     * children/result: callers use stack fields or the fixed scratch/root
+     * arrays, never the growable node/child arrays. */
+    if (plan->node_count == SIZE_MAX || count > SIZE_MAX - plan->child_count)
         return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+    void* replacement;
+    size_t capacity;
+    if (!reserve_array(plan, plan->nodes, plan->node_count, plan->node_capacity,
+            plan->node_count + 1u, sizeof(*plan->nodes), &replacement, &capacity))
+        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+    plan->nodes = replacement;
+    plan->node_capacity = capacity;
+    if (!reserve_array(plan, plan->children, plan->child_count, plan->child_capacity,
+            plan->child_count + count, sizeof(*plan->children), &replacement, &capacity))
+        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+    plan->children = replacement;
+    plan->child_capacity = capacity;
+    if (!reserve_slots(plan, plan->node_count + 1u))
+        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+    slot = identity_slot(result, plan->slot_count - 1u);
+    while (plan->slots[slot] != 0u)
+        slot = (slot + 1u) & (plan->slot_count - 1u);
     physicality_descriptor_node_t* node = &plan->nodes[plan->node_count];
     node->id = *result;
     node->first_child = plan->child_count;
@@ -248,8 +337,8 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
     const physicality_descriptor_basis_t* basis,
     const physicality_descriptor_limits_t* limits,
     physicality_descriptor_plan_t** out_plan) {
-    size_t vertices = 0u, widest = 17u, nodes = 0u, edges = 0u;
-    size_t references = input_count, slots = 1u, bytes = sizeof(physicality_descriptor_plan_t);
+    size_t vertices = 0u, widest = 17u;
+    size_t references = input_count, bytes = sizeof(physicality_descriptor_plan_t);
     physicality_descriptor_plan_t* plan;
     if (out_plan == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     *out_plan = NULL;
@@ -265,46 +354,33 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
             return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
         if (width + 1u > widest) widest = width + 1u;
     }
-    /* Maximum unique nodes/edges before exact subtree reuse. Each carrier
-     * needs at most four binary words plus its typed parent. */
-    if (!checked_array(&nodes, input_count, 16u) || !checked_array(&nodes, vertices, 5u) ||
-        !checked_array(&edges, nodes, 17u) || !checked_add(&edges, vertices) ||
-        !checked_add(&references, vertices) || nodes > SIZE_MAX / 2u)
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    while (slots < nodes * 2u) {
-        if (slots > SIZE_MAX / 2u) return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-        slots *= 2u;
-    }
-    if (!checked_array(&bytes, nodes, sizeof(physicality_descriptor_node_t)) ||
-        !checked_array(&bytes, edges, sizeof(hash128_t)) ||
+    /* Roots and reference occurrences retain their exact input multiplicity.
+     * Descriptor graph arrays grow only as distinct ordered nodes are found. */
+    if (!checked_add(&references, vertices) ||
         !checked_array(&bytes, input_count, sizeof(hash128_t)) ||
         !checked_array(&bytes, references, sizeof(physicality_descriptor_reference_t)) ||
-        !checked_array(&bytes, slots, sizeof(size_t)) ||
+        !checked_array(&bytes, 1u, sizeof(size_t)) ||
         !checked_array(&bytes, widest, 4u * sizeof(double)) ||
         !checked_array(&bytes, widest, sizeof(hash128_t)) || bytes > limits->maximum_plan_bytes)
         return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     plan = calloc(1u, sizeof(*plan));
     if (plan == NULL) return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-    if (nodes != 0u) plan->nodes = calloc(nodes, sizeof(*plan->nodes));
-    if (edges != 0u) plan->children = calloc(edges, sizeof(*plan->children));
     if (input_count != 0u) plan->roots = calloc(input_count, sizeof(*plan->roots));
     if (references != 0u) plan->references = calloc(references, sizeof(*plan->references));
-    plan->slots = calloc(slots, sizeof(*plan->slots));
+    plan->slots = calloc(1u, sizeof(*plan->slots));
     plan->scratch = calloc(widest, 4u * sizeof(double));
     plan->trajectory_children = calloc(widest, sizeof(hash128_t));
-    if ((nodes != 0u && !plan->nodes) || (edges != 0u && !plan->children) ||
-        (input_count != 0u && !plan->roots) || (references != 0u && !plan->references) ||
+    if ((input_count != 0u && !plan->roots) || (references != 0u && !plan->references) ||
         !plan->slots || !plan->scratch || !plan->trajectory_children) {
         physicality_descriptor_plan_free(plan);
         return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     }
-    plan->node_capacity = nodes;
-    plan->child_capacity = edges;
     plan->reference_capacity = references;
     plan->root_count = input_count;
-    plan->slot_count = slots;
+    plan->slot_count = 1u;
     plan->scratch_capacity = widest;
-    plan->bytes = bytes;
+    plan->bytes = plan->peak_bytes = bytes;
+    plan->maximum_bytes = limits->maximum_plan_bytes;
     for (size_t input = 0; input < input_count; ++input) {
         physicality_descriptor_status_t status = describe_one(plan, basis, &inputs[input], input);
         if (status != PHYSICALITY_DESCRIPTOR_OK) {
@@ -318,6 +394,10 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
 
 size_t physicality_descriptor_plan_bytes(const physicality_descriptor_plan_t* plan) {
     return plan == NULL ? 0u : plan->bytes;
+}
+
+size_t physicality_descriptor_plan_peak_bytes(const physicality_descriptor_plan_t* plan) {
+    return plan == NULL ? 0u : plan->peak_bytes;
 }
 
 #define VIEW(name, member, count_member, type) \
