@@ -166,11 +166,13 @@ jobs:
                       return value
                   def verify_jsonl(phase_name, phase, kind):
                       evidence = phase.get("corpusEvidence") or {}
+                      evidence_completed = evidence.get("completed") is True
                       seal = evidence.get("chunkManifest") if kind == "chunks" else evidence.get("exactScopeState")
                       identity = seal if kind == "chunks" else (seal.get("file") if isinstance(seal, dict) else None)
                       member = "corpus/measurement/" + phase_name + ("/chunks.jsonl" if kind == "chunks" else "/scope-fold/state.jsonl")
                       if not isinstance(identity, dict):
-                          return {"path": member, "status": "unavailable_unsealed", "kind": kind}
+                          return {"path": member, "status": "unavailable_unsealed", "kind": kind,
+                                  "evidence_completed": evidence_completed, "phase_status": phase.get("status")}
                       entry = exact_member(member)
                       if entry is None:
                           raise ValueError("sealed retained member is absent: " + member)
@@ -206,7 +208,9 @@ jobs:
                           raise ValueError("sealed retained member identity differs: " + member)
                       result = {"path": member, "status": "stream_verified", "kind": kind, "bytes": total,
                                 "sha256": digest.hexdigest(), "rows": rows,
-                                "complete_body_and_scope_semantic_revalidation": False}
+                                "complete_body_and_scope_semantic_revalidation": False,
+                                "evidence_completed": evidence_completed, "phase_status": phase.get("status"),
+                                "identity_scope": "completed_evidence_seal" if evidence_completed else "partial_phase_identity"}
                       if kind == "chunks":
                           if (rows != count_field(evidence.get("chunks"), "completed chunks")
                                   or games != count_field(evidence.get("readbackGames"), "chunk readback games")
@@ -227,37 +231,79 @@ jobs:
                   if receipt is not None:
                       source = receipt.get("source") or {}
                       manifest = source.get("selectionManifest")
-                      selected_entries = [entry for entry in entries if entry.filename == "corpus/measurement/selection.jsonl"]
+                      selection_member = "corpus/measurement/selection.jsonl"
                       if manifest is not None:
-                          if len(selected_entries) != 1 or selected_entries[0].file_size > 2 * 1024 * 1024:
-                              raise ValueError("declared selection manifest is absent, ambiguous or oversized")
-                          selected = archive.read(selected_entries[0])
-                          if (len(selected) != manifest["bytes"]
-                                  or hashlib.sha256(selected).hexdigest() != manifest["sha256"]):
+                          selected_entry = exact_member(selection_member)
+                          if selected_entry is None:
+                              raise ValueError("declared selection manifest is absent")
+                          expected_selection_bytes = count_field(manifest.get("bytes"), "selection bytes")
+                          expected_selection_hash = manifest.get("sha256")
+                          if not isinstance(expected_selection_hash, str) or re.fullmatch("[0-9a-f]{64}", expected_selection_hash) is None:
+                              raise ValueError("selection manifest has an invalid SHA256")
+                          # Bind all selection bytes without retaining the document in RAM.
+                          # A separate bounded line reader can then report partial diagnostics.
+                          selected_identity, _, _, _ = stream_member(selected_entry)
+                          if (selected_identity["bytes"] != expected_selection_bytes
+                                  or selected_identity["sha256"] != expected_selection_hash):
                               raise ValueError("selection bytes differ from the corpus receipt")
-                          records = [json.loads(line) for line in selected.decode("utf-8").splitlines() if line]
-                          if len(records) != 2000 or receipt["options"]["games"] != 2000:
-                              raise ValueError("completed selection differs from the unchanged 2000-game request")
+                          requested = count_field((receipt.get("options") or {}).get("games"), "requested games")
+                          records = standard_white_records = omitted_start_records = 0
+                          first_ordinal = last_ordinal = None
                           starts = {}
-                          for record in records:
-                              start_id = record["startPositionId"]
-                              if not isinstance(start_id, str) or re.fullmatch("[0-9a-f]{32}", start_id) is None:
-                                  raise ValueError("selection has an invalid canonical start identity")
-                              starts[start_id] = starts.get(start_id, 0) + 1
+                          selection_read_complete = True
+                          with archive.open(selected_entry) as handle:
+                              while True:
+                                  line = handle.readline(1 << 20)
+                                  if not line:
+                                      break
+                                  if len(line) == 1 << 20 and not line.endswith(b"\n"):
+                                      reader_limits.append(selection_member)
+                                      selection_read_complete = False
+                                      break
+                                  if not line.rstrip(b"\r\n"):
+                                      continue
+                                  record = json.loads(line)
+                                  ordinal = count_field(record.get("sourceOrdinal"), "source ordinal")
+                                  if ordinal == 0 or (last_ordinal is not None and ordinal <= last_ordinal):
+                                      raise ValueError("selection source ordinals are not strictly increasing")
+                                  start_id = record.get("startPositionId")
+                                  if not isinstance(start_id, str) or re.fullmatch("[0-9a-f]{32}", start_id) is None:
+                                      raise ValueError("selection has an invalid canonical start identity")
+                                  records += 1
+                                  if first_ordinal is None:
+                                      first_ordinal = ordinal
+                                  last_ordinal = ordinal
+                                  standard_white_records += start_id == "6e209f78d66f64f1405d9184f65065bb"
+                                  if start_id in starts or len(starts) < 256:
+                                      starts[start_id] = starts.get(start_id, 0) + 1
+                                  else:
+                                      omitted_start_records += 1
+                          cohort_complete = selection_read_complete and requested == 2000 and records == 2000
+                          selection_status = ("reader_budget_exceeded" if not selection_read_complete
+                              else "complete_intended_cohort" if cohort_complete
+                              else "partial_selection" if records < requested
+                              else "different_selection_count")
                           print("PILOT_SELECTION_START_OBSERVATION " + json.dumps({
-                              "measurement_status": receipt["status"], "records": len(records),
-                              "selection_bytes": len(selected), "selection_sha256": hashlib.sha256(selected).hexdigest(),
+                              "measurement_status": receipt.get("status"), "selection_status": selection_status,
+                              "reader_status": "read" if selection_read_complete else "reader_budget_exceeded",
+                              "line_budget_bytes": 1 << 20, "selection_read_complete": selection_read_complete,
+                              "records": records, "requested_games": requested,
+                              "intended_2000_game_cohort_certified": cohort_complete,
+                              "selection_bytes": selected_identity["bytes"], "selection_sha256": selected_identity["sha256"],
+                              "selection_identity_verified": True,
                               "start_position_counts": starts,
-                              "all_selected_standard_white": starts == {"6e209f78d66f64f1405d9184f65065bb": 2000},
+                              "start_position_counts_truncated": omitted_start_records > 0,
+                              "start_position_counts_omitted_records": omitted_start_records,
+                              "standard_white_records": standard_white_records,
+                              "all_selected_standard_white": (standard_white_records == records) if cohort_complete else None,
                               "standard_white_identity_evidence": {
                                   "run": 35091710818, "job": 104779326909,
                                   "source_sha256": "9eafc83ed9a97f9dcfc82135448d45653d325a742e497e8d08c3085a6a48b0ea",
                                   "first_frame_sha256": "474bc75575390aa71474bd618e8b26beeffac1f3f78a96bcf9695039b23c24ac",
                                   "retained_manifest_reader_run": 35090617570
                               },
-                              "first_source_ordinal": records[0]["sourceOrdinal"],
-                              "last_source_ordinal": records[-1]["sourceOrdinal"],
-                              "scope": "Exact new selected starting-position identities compared with the independently attributed normal White start. Different IDs remain unclassified; this alone does not prove outcome recording."
+                              "first_source_ordinal": first_ordinal, "last_source_ordinal": last_ordinal,
+                              "scope": "Streamed exact selection identities; bounded displayed start inventory. Only a complete 2000-game selection certifies the intended cohort. Partial selection or reader limits do not change workload status. Different start IDs remain unclassified; this does not prove outcome recording."
                           }, sort_keys=True, allow_nan=False), flush=True)
                       else:
                           print("PILOT_SELECTION_START_OBSERVATION " + json.dumps({
