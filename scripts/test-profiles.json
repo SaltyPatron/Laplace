@@ -6,10 +6,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-chess-floor-serving.py"
-      ],
+      "command": ["python3", "scripts/test-chess-floor-serving.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -22,11 +19,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-chess-floor-artifacts.py",
-        "--source-only"
-      ],
+      "command": ["python3", "scripts/test-chess-floor-artifacts.py", "--source-only"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -87,10 +80,7 @@
       "profile": "policy",
       "owner": "ci",
       "runner": "script",
-      "command": [
-        "bash",
-        "scripts/test-ci-source-contract.sh"
-      ],
+      "command": ["bash", "scripts/test-ci-source-contract.sh"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -103,10 +93,7 @@
       "profile": "policy",
       "owner": "native-query",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-sql-catalog-gate.py"
-      ],
+      "command": ["python3", "scripts/test-sql-catalog-gate.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -119,10 +106,7 @@
       "profile": "policy",
       "owner": "ci",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-test-profile-registry.py"
-      ],
+      "command": ["python3", "scripts/test-test-profile-registry.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -135,10 +119,7 @@
       "profile": "policy",
       "owner": "ci",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-actions-topology.py"
-      ],
+      "command": ["python3", "scripts/test-actions-topology.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -151,10 +132,7 @@
       "profile": "policy",
       "owner": "ci",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/actions-audit.py"
-      ],
+      "command": ["python3", "scripts/actions-audit.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -167,10 +145,7 @@
       "profile": "policy",
       "owner": "deploy",
       "runner": "script",
-      "command": [
-        "bash",
-        "scripts/shellcheck-gate.sh"
-      ],
+      "command": ["bash", "scripts/shellcheck-gate.sh"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -183,10 +158,7 @@
       "profile": "policy",
       "owner": "deploy",
       "runner": "script",
-      "command": [
-        "bash",
-        "scripts/test-deploy-payload-sync.sh"
-      ],
+      "command": ["bash", "scripts/test-deploy-payload-sync.sh"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -199,10 +171,7 @@
       "profile": "policy",
       "owner": "build",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-pipeline-install.py"
-      ],
+      "command": ["python3", "scripts/test-pipeline-install.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -215,10 +184,7 @@
       "profile": "policy",
       "owner": "app",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-application-runtime.py"
-      ],
+      "command": ["python3", "scripts/test-application-runtime.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -231,10 +197,7 @@
       "profile": "policy",
       "owner": "app",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-native-library-closure.py"
-      ],
+      "command": ["python3", "scripts/test-native-library-closure.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -247,10 +210,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-stockfish-release.py"
-      ],
+      "command": ["python3", "scripts/test-stockfish-release.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -263,10 +223,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-zstd-release.py"
-      ],
+      "command": ["python3", "scripts/test-zstd-release.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -279,10 +236,7 @@
       "profile": "policy",
       "owner": "native-query",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-benchmark-suite.py"
-      ],
+      "command": ["python3", "scripts/test-benchmark-suite.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -295,10 +249,7 @@
       "profile": "policy",
       "owner": "native-query",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-postgres-geometry-benchmark.py"
-      ],
+      "command": ["python3", "scripts/test-postgres-geometry-benchmark.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -311,10 +262,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-recorded-chess-benchmark.py"
-      ],
+      "command": ["python3", "scripts/test-recorded-chess-benchmark.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -327,10 +275,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-retained-chess-ingestion.py"
-      ],
+      "command": ["python3", "scripts/test-retained-chess-ingestion.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -343,10 +288,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-chess-environment-benchmark.py"
-      ],
+      "command": ["python3", "scripts/test-chess-environment-benchmark.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -359,10 +301,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-chess-dependencies.py"
-      ],
+      "command": ["python3", "scripts/test-chess-dependencies.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -375,10 +314,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-stockfish-corpus.py"
-      ],
+      "command": ["python3", "scripts/test-stockfish-corpus.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -391,10 +327,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-cutechess-release.py"
-      ],
+      "command": ["python3", "scripts/test-cutechess-release.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -407,10 +340,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-chess-x11-runtime.py"
-      ],
+      "command": ["python3", "scripts/test-chess-x11-runtime.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -423,10 +353,7 @@
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-cutechess-gui-session.py"
-      ],
+      "command": ["python3", "scripts/test-cutechess-gui-session.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -434,15 +361,13 @@
       "timeout_class": "fast",
       "required": true
     },
+
     {
       "id": "policy-cutechess-user-engines",
       "profile": "policy",
       "owner": "chess",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-cutechess-user-engines.py"
-      ],
+      "command": ["python3", "scripts/test-cutechess-user-engines.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -455,10 +380,7 @@
       "profile": "policy",
       "owner": "services",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-managed-services.py"
-      ],
+      "command": ["python3", "scripts/test-managed-services.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -471,10 +393,7 @@
       "profile": "policy",
       "owner": "services",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-managed-database-quiescence.py"
-      ],
+      "command": ["python3", "scripts/test-managed-database-quiescence.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -487,10 +406,7 @@
       "profile": "policy",
       "owner": "substrate",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-repair-transaction.py"
-      ],
+      "command": ["python3", "scripts/test-repair-transaction.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -503,10 +419,7 @@
       "profile": "policy",
       "owner": "substrate",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-legacy-content-history.py"
-      ],
+      "command": ["python3", "scripts/test-legacy-content-history.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -519,10 +432,7 @@
       "profile": "policy",
       "owner": "substrate",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-legacy-repair-evidence.py"
-      ],
+      "command": ["python3", "scripts/test-legacy-repair-evidence.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -535,10 +445,7 @@
       "profile": "policy",
       "owner": "substrate",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-operational-source-readback.py"
-      ],
+      "command": ["python3", "scripts/test-operational-source-readback.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -551,10 +458,7 @@
       "profile": "policy",
       "owner": "substrate",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-operational-task.py"
-      ],
+      "command": ["python3", "scripts/test-operational-task.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -567,10 +471,7 @@
       "profile": "policy",
       "owner": "services",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-managed-host.py"
-      ],
+      "command": ["python3", "scripts/test-managed-host.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -583,10 +484,7 @@
       "profile": "policy",
       "owner": "services",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-managed-tls.py"
-      ],
+      "command": ["python3", "scripts/test-managed-tls.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -599,10 +497,7 @@
       "profile": "policy",
       "owner": "database",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-pg-access.py"
-      ],
+      "command": ["python3", "scripts/test-pg-access.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -615,14 +510,7 @@
       "profile": "policy",
       "owner": "deploy",
       "runner": "script",
-      "command": [
-        "shellcheck",
-        "-S",
-        "warning",
-        "-x",
-        "deploy/linux/deploy.sh",
-        "deploy/linux/managed-publish.sh"
-      ],
+      "command": ["shellcheck", "-S", "warning", "-x", "deploy/linux/deploy.sh", "deploy/linux/managed-publish.sh"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -635,10 +523,7 @@
       "profile": "policy",
       "owner": "build",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/validate-pipeline.py"
-      ],
+      "command": ["python3", "scripts/validate-pipeline.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -651,10 +536,7 @@
       "profile": "policy",
       "owner": "inference",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-eval-op-lane.py"
-      ],
+      "command": ["python3", "scripts/test-eval-op-lane.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -667,10 +549,7 @@
       "profile": "policy",
       "owner": "database",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/test-sql-audit.py"
-      ],
+      "command": ["python3", "scripts/test-sql-audit.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -683,13 +562,7 @@
       "profile": "policy",
       "owner": "database",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/sql-audit.py",
-        "--skip-near-clones",
-        "--fail-on",
-        "high"
-      ],
+      "command": ["python3", "scripts/sql-audit.py", "--skip-near-clones", "--fail-on", "high"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -702,10 +575,7 @@
       "profile": "policy",
       "owner": "extension",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/check-upgrade-drop-order.py"
-      ],
+      "command": ["python3", "scripts/check-upgrade-drop-order.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -718,10 +588,7 @@
       "profile": "policy",
       "owner": "engine",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/isa-gate-check.py"
-      ],
+      "command": ["python3", "scripts/isa-gate-check.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -734,10 +601,7 @@
       "profile": "policy",
       "owner": "foundry",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/model-payload-gate-check.py"
-      ],
+      "command": ["python3", "scripts/model-payload-gate-check.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -750,10 +614,7 @@
       "profile": "policy",
       "owner": "substrate",
       "runner": "script",
-      "command": [
-        "bash",
-        "scripts/test-attestation-law-determinism.sh"
-      ],
+      "command": ["bash", "scripts/test-attestation-law-determinism.sh"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -766,11 +627,7 @@
       "profile": "policy",
       "owner": "docs",
       "runner": "script",
-      "command": [
-        "python3",
-        "scripts/docs-inventory.py",
-        "--check"
-      ],
+      "command": ["python3", "scripts/docs-inventory.py", "--check"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -783,10 +640,7 @@
       "profile": "policy",
       "owner": "substrate",
       "runner": "script",
-      "command": [
-        "bash",
-        "scripts/test-policy-placement.sh"
-      ],
+      "command": ["bash", "scripts/test-policy-placement.sh"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -799,10 +653,7 @@
       "profile": "policy",
       "owner": "architecture",
       "runner": "script",
-      "command": [
-        "bash",
-        "scripts/test-banned-dependency-vocabulary.sh"
-      ],
+      "command": ["bash", "scripts/test-banned-dependency-vocabulary.sh"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",
@@ -815,9 +666,7 @@
       "profile": "dev-native",
       "owner": "engine",
       "runner": "ctest",
-      "selector": {
-        "exclude_label": "regress"
-      },
+      "selector": {"exclude_label": "regress"},
       "environment": "built-tree",
       "mutability": "none",
       "shared_substrate": "forbidden",
@@ -831,9 +680,7 @@
       "owner": "app",
       "runner": "dotnet",
       "project": "app/Laplace.slnx",
-      "selector": {
-        "filter": "Tier!=db&Tier!=live&Tier!=perf"
-      },
+      "selector": {"filter": "Tier!=db&Tier!=live&Tier!=perf"},
       "environment": "built-tree",
       "mutability": "none",
       "shared_substrate": "forbidden",
@@ -847,8 +694,7 @@
       "owner": "chess",
       "runner": "script",
       "command": [
-        "bash",
-        "-lc",
+        "bash", "-lc",
         "runtime=$(mktemp -d); trap 'rm -rf \"$runtime\"' EXIT; dotnet publish app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj -c Release --no-self-contained -o \"$runtime\" && python3 scripts/test-uci-publish.py \"$runtime\" && python3 scripts/install-stockfish.py && stockfish=$(python3 scripts/install-stockfish.py --print-path) && python3 scripts/test-cutechess-runtime.py /opt/laplace/bin/cutechess-cli \"$runtime/laplace-uci\" \"$stockfish\""
       ],
       "environment": "built-tree",
@@ -864,8 +710,7 @@
       "owner": "web",
       "runner": "browser",
       "command": [
-        "bash",
-        "-lc",
+        "bash", "-lc",
         "cd web && npm ci --no-audit --no-fund && npm run typecheck && npx playwright install chromium && npm run test:chess-ui"
       ],
       "environment": "built-tree",
@@ -881,8 +726,7 @@
       "owner": "substrate",
       "runner": "script",
       "command": [
-        "bash",
-        "-lc",
+        "bash", "-lc",
         "bash scripts/check-database-health.sh \"${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}\""
       ],
       "environment": "installed-unseeded-db",
@@ -897,9 +741,7 @@
       "profile": "db",
       "owner": "extension",
       "runner": "ctest",
-      "selector": {
-        "include_label": "regress"
-      },
+      "selector": {"include_label": "regress"},
       "environment": "installed-unseeded-db",
       "mutability": "disposable-db",
       "shared_substrate": "forbidden",
@@ -913,9 +755,7 @@
       "owner": "app",
       "runner": "dotnet",
       "project": "app/Laplace.slnx",
-      "selector": {
-        "filter": "Tier=db"
-      },
+      "selector": {"filter": "Tier=db"},
       "environment": "installed-unseeded-db",
       "mutability": "disposable-db",
       "shared_substrate": "forbidden",
@@ -929,8 +769,7 @@
       "owner": "substrate",
       "runner": "script",
       "command": [
-        "bash",
-        "-lc",
+        "bash", "-lc",
         "bash scripts/check-substrate-floor.sh \"${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}\""
       ],
       "environment": "installed-seeded-runtime",
@@ -946,8 +785,7 @@
       "owner": "api",
       "runner": "script",
       "command": [
-        "bash",
-        "-lc",
+        "bash", "-lc",
         "base=${LAPLACE_API_BASE:-http://127.0.0.1:8080}; capabilities=$(curl -fsS \"$base/v1/capabilities\") && grep -q '\"chat_completions\"' <<<\"$capabilities\" && grep -q '\"op\"' <<<\"$capabilities\" && readiness=$(curl -fsS \"$base/health/ready\") && grep -q '\"ready\":true' <<<\"$readiness\" && grep -q '\"substrate_reachable\":true' <<<\"$readiness\" && inventory=$(curl -fsS -X POST \"$base/v1/op\" -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' --data '{\"name\":\"ops.substrate_counts\",\"max_rows\":20}') && grep -q '\"object\":\"op.result\"' <<<\"$inventory\" && completion=$(curl -fsS -X POST \"$base/v1/chat/completions\" -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' --data '{\"model\":\"laplace-converse-001\",\"messages\":[{\"role\":\"user\",\"content\":\"dog\"}]}') && grep -q '\"object\":\"chat.completion\"' <<<\"$completion\""
       ],
       "environment": "installed-seeded-runtime",
@@ -963,9 +801,7 @@
       "owner": "app",
       "runner": "dotnet",
       "project": "app/Laplace.slnx",
-      "selector": {
-        "filter": "Tier=live"
-      },
+      "selector": {"filter": "Tier=live"},
       "environment": "installed-seeded-runtime",
       "mutability": "shared-read",
       "shared_substrate": "required",
@@ -979,8 +815,7 @@
       "owner": "inference",
       "runner": "script",
       "command": [
-        "bash",
-        "-lc",
+        "bash", "-lc",
         "mkdir -p .eval-proof && python3 scripts/eval-generation.py --api ${LAPLACE_API_BASE:-http://127.0.0.1:8080} --probes scripts/eval-probes.json --baseline scripts/eval-baselines.json --report .eval-proof/generation.json"
       ],
       "environment": "installed-seeded-runtime",
@@ -996,9 +831,7 @@
       "owner": "app",
       "runner": "dotnet",
       "project": "app/Laplace.slnx",
-      "selector": {
-        "filter": "Tier=perf"
-      },
+      "selector": {"filter": "Tier=perf"},
       "environment": "installed-unseeded-db",
       "mutability": "measurement",
       "shared_substrate": "forbidden",
@@ -1012,8 +845,7 @@
       "owner": "inference",
       "runner": "script",
       "command": [
-        "bash",
-        "-lc",
+        "bash", "-lc",
         "mkdir -p .eval-proof && python3 scripts/verify-generation.py --api ${LAPLACE_API_BASE:-http://127.0.0.1:8080} --report .eval-proof/lane-detectors.json --enforce"
       ],
       "environment": "installed-seeded-runtime",
