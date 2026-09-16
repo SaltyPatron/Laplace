@@ -115,6 +115,20 @@ class StockfishSourceTests(unittest.TestCase):
         self.assertEqual("external-default", observed["selection"])
         self.assertFalse(missing.parent.exists())
 
+    def test_unreadable_requested_local_path_does_not_hide_configured_checkout(self):
+        requested = self.base / "unreadable/SF_19"
+        original_exists = Path.exists
+        def observed_exists(path):
+            if path == requested:
+                raise PermissionError("fixture local mount is not accessible")
+            return original_exists(path)
+        with patch.object(Path, "exists", observed_exists):
+            observed = installer.host_source_receipt(requested)
+        self.assertIsNone(observed["requested"]["exists"])
+        self.assertFalse(observed["requested"]["available"])
+        self.assertEqual("requested-local-path-unavailable", observed["requested"]["reason"])
+        self.assertEqual(str(self.source.resolve()), observed["source"])
+
     def test_uninstalled_default_is_receipted_as_pending_without_creating_a_checkout(self):
         self.source.rename(self.base / "preserved-fixture")
         with patch.object(installer.subprocess, "run") as run:

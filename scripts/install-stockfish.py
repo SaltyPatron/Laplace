@@ -269,15 +269,15 @@ def host_source_receipt(preferred=None, source=None):
     configured, selection = source_selection(source)
     configured_source = str(configured)
     requested = {"path": str(preferred) if preferred is not None else None,
-                 "exists": False, "available": False, "reason": "not-requested"}
+                 "exists": None, "available": False, "reason": "not-requested"}
     preferred_observation = None
     if preferred is not None:
-        requested["exists"] = Path(preferred).exists()
         try:
+            requested["exists"] = Path(preferred).exists()
             preferred_observation = existing_source(preferred)
             requested.update(available=True, reason="existing-official-checkout",
                              **preferred_observation)
-        except (OSError, ValueError, subprocess.CalledProcessError):
+        except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError):
             requested["reason"] = ("requested-local-path-not-official-checkout" if requested["exists"]
                                    else "requested-local-path-unavailable")
     if selection not in ("command-line", "environment") and preferred_observation is not None:
