@@ -19,10 +19,10 @@ jobs:
           python3 - <<'PY'
           import json, os, re, urllib.request
           REPOSITORY = "SaltyPatron/Laplace"
-          EXPECTED_MAIN = "0d181eabf2389eafdcde02fcaa75018ffc096b8e"
+          EXPECTED_MAIN = "6e15704e990b6a4ab933dcc80d2f4de026b3320f"
           PROOF_RUN = 35138096800
           PROOF_HEAD = "9a91eefd4a41bdcc4d22a73c05e710242b547123"
-          EXPECTED_TREE = "6861448e083c138055c1bc5930521f65afc59257"
+          EXPECTED_TREE = "c1b18d5ca3319a60e2099187da0493639e2d97e5"
           if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (EXPECTED_MAIN, PROOF_HEAD)):
               raise ValueError("exact immutable source identities are required")
           base = "https://api.github.com/repos/" + REPOSITORY
