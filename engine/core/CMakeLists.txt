@@ -3,6 +3,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/math4d.h
     include/laplace/core/hash128.h
     include/laplace/core/ud_parse.h
+    include/laplace/core/ud_witness.h
     include/laplace/core/task_shape.h
     include/laplace/core/hilbert4d.h
     include/laplace/core/mantissa.h
@@ -54,6 +55,7 @@ set(LAPLACE_CORE_SOURCES
     src/math4d.c
     src/hash128.c
     src/ud_parse.c
+    src/ud_witness.c
     src/task_shape.c
     src/hilbert4d.c
     src/mantissa.c
