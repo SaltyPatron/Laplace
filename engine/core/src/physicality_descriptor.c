@@ -33,10 +33,10 @@ static int checked_array(size_t* bytes, size_t count, size_t width) {
     return checked_add(bytes, count * width);
 }
 
-/* Grow retained arrays under the same aggregate grant. The old allocation
- * remains charged until the replacement has been allocated and copied. Only
- * actual unique descriptor structure asks for node/edge growth; root and
- * reference occurrence storage is never deduplicated. */
+/* Grow retained arrays under the same aggregate grant. Reserve old plus new
+ * requested payload even when realloc grows in place; this conservative peak
+ * is not allocator residency/RSS. Only unique descriptor structure asks for
+ * node/edge growth; root/reference occurrence storage is never deduplicated. */
 static int reserve_array(physicality_descriptor_plan_t* plan, void* previous,
     size_t used, size_t capacity, size_t required, size_t width,
     void** replacement, size_t* replacement_capacity) {
@@ -62,13 +62,13 @@ static int reserve_array(physicality_descriptor_plan_t* plan, void* previous,
         next = required;
     allocated = next * width;
     if (allocated > plan->maximum_bytes - plan->bytes) return 0;
-    memory = calloc(next, width);
+    memory = realloc(previous, allocated);
     if (memory == NULL) return 0;
-    if (used != 0u) memcpy(memory, previous, used * width);
+    /* Preserve calloc's complete zero tail, including unused old capacity. */
+    memset((uint8_t*)memory + used * width, 0, allocated - used * width);
     if (plan->bytes + allocated > plan->peak_bytes)
         plan->peak_bytes = plan->bytes + allocated;
     previous_bytes = capacity * width;
-    free(previous);
     plan->bytes += allocated - previous_bytes;
     *replacement = memory;
     *replacement_capacity = next;
