@@ -120,9 +120,11 @@ the ply count. `summary.json` retains database name/OID/system identifier
 before and after, UTC observation interval, selected/retained/White/Black counts,
 byte allowance and actual retained bytes, input SHA256, page cursors and any
 selected but unclassified ids. It records the failure stage and type on a
-refused read, incomplete replay, deadline or retained-byte limit. The current
-strict hydrator has a 1024-ply replay window; longer unreconstructed lines remain
-unclassified and make the report partial. A cancelled record write is truncated
+refused read, incomplete replay, deadline or retained-byte limit. The strict
+hydrator replays the complete admitted move count after reserving checked expanded
+work under the materialization allowance. It does not impose the separate UI
+replay window on recorded-game admission. Malformed, incomplete, or over-budget
+inputs remain unclassified and make the report partial. A cancelled record write is truncated
 back to the last complete JSONL record.
 
 Exit 0 means enumeration reached its end, every selected playing was retained,

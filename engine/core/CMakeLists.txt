@@ -237,11 +237,52 @@ file(GLOB_RECURSE LAPLACE_CHESS_SURFACES_MANAGED_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Substrate/*.csproj")
 list(FILTER LAPLACE_CHESS_SURFACES_MANAGED_SOURCES EXCLUDE REGEX "/(bin|obj)/")
 
-# Typed atoms and the bounded move alphabet always emit natively. Catalog positions are optional.
-set(_chess_emit_deps $<TARGET_FILE:laplace_chess_position_tables_emit>)
+# Recorded inputs are an explicit completed export, never an implicit database read during a build.
+set(LAPLACE_CHESS_CORPUS_EXPORT "" CACHE FILEPATH "Completed recorded chess floor export receipt")
+set(LAPLACE_CHESS_PERFCACHE_MEMORY_BYTES "67108864" CACHE STRING "Controlled native chess producer memory bytes")
+set(LAPLACE_CHESS_PERFCACHE_SPILL_BYTES "4294967296" CACHE STRING "Maximum owned chess producer spill bytes")
+set(LAPLACE_CHESS_TRANSITION_BUFFER_RECORDS "65536" CACHE STRING "Buffered transition records per sorted run")
+set(LAPLACE_CHESS_TRANSITION_MERGE_FAN_IN "32" CACHE STRING "Maximum transition merge readers")
+set(_chess_artifact_script "${CMAKE_SOURCE_DIR}/scripts/chess-floor-artifacts.py")
+set(_chess_corpus_deps)
+set(_chess_corpus_surfaces)
+set(_chess_corpus_transitions)
+set(_chess_seal_export_args)
+if(LAPLACE_CHESS_CORPUS_EXPORT)
+    if(NOT UNIX)
+        message(FATAL_ERROR "Recorded corpus floor activation currently requires the verified UNIX pair publisher")
+    endif()
+    execute_process(
+        COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${_chess_artifact_script}" validate-export
+                --receipt "${LAPLACE_CHESS_CORPUS_EXPORT}"
+        RESULT_VARIABLE _chess_export_rc OUTPUT_VARIABLE _chess_export_json
+        ERROR_VARIABLE _chess_export_error OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _chess_export_rc EQUAL 0)
+        message(FATAL_ERROR "Recorded chess floor input refused: ${_chess_export_error}")
+    endif()
+    # Receipt acceptance has one owner. CMake consumes its authenticated role paths.
+    string(JSON _chess_corpus_surfaces GET "${_chess_export_json}" roles position-surfaces)
+    string(JSON _chess_corpus_transitions GET "${_chess_export_json}" roles transition-floor)
+    foreach(_role IN ITEMS position-surfaces transition-floor inventory-summary witnessed-inputs)
+        string(JSON _input GET "${_chess_export_json}" roles "${_role}")
+        list(APPEND _chess_corpus_deps "${_input}")
+    endforeach()
+    list(APPEND _chess_corpus_deps "${LAPLACE_CHESS_CORPUS_EXPORT}")
+    list(APPEND _chess_seal_export_args --export-receipt "${LAPLACE_CHESS_CORPUS_EXPORT}")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${_chess_artifact_script}" ${_chess_corpus_deps})
+
+set(_chess_emit_deps $<TARGET_FILE:laplace_chess_position_tables_emit> ${_chess_corpus_deps})
 set(_chess_emit_cmd
     COMMAND $<TARGET_FILE:laplace_chess_position_tables_emit>
-            --output ${LAPLACE_CHESS_PERFCACHE_BIN})
+            --output ${LAPLACE_CHESS_PERFCACHE_BIN}
+            --memory-bytes ${LAPLACE_CHESS_PERFCACHE_MEMORY_BYTES}
+            --scratch-dir "${LAPLACE_PERFCACHE_DIR}/position-sort"
+            --maximum-spill-bytes ${LAPLACE_CHESS_PERFCACHE_SPILL_BYTES})
+if(_chess_corpus_surfaces)
+    list(APPEND _chess_emit_cmd --additional-surfaces "${_chess_corpus_surfaces}")
+endif()
 
 if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
     set(_chess_openings_deps)
@@ -256,8 +297,6 @@ if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
     else()
         set(_chess_openings_arg "NONE")
     endif()
-    # Corpus contents are native catalog inputs. A manifest also invalidates the
-    # generator when a TSV is removed or replaced with an older file timestamp.
     set(_chess_openings_manifest "${_chess_openings_arg}\n")
     foreach(_opening_file IN LISTS _chess_openings_deps)
         file(SHA256 "${_opening_file}" _opening_hash)
@@ -266,23 +305,44 @@ if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_chess_openings_deps})
     set(_chess_openings_manifest_path "${LAPLACE_PERFCACHE_DIR}/chess_openings_inputs.txt")
     file(GENERATE OUTPUT "${_chess_openings_manifest_path}" CONTENT "${_chess_openings_manifest}")
-    # The managed prep emits board coverage and deterministic transition keys. Binary
-    # position identity is independent of the Unicode/codepoint floor.
+    set(_chess_seed_transitions "${LAPLACE_PERFCACHE_DIR}/chess_opening_transitions.bin")
     add_custom_command(
-        OUTPUT ${LAPLACE_CHESS_SURFACES} ${LAPLACE_CHESS_TRANSITION_BIN}
+        OUTPUT ${LAPLACE_CHESS_SURFACES} "${_chess_seed_transitions}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
         COMMAND ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
                 -c Release --no-launch-profile --
                 "${_chess_openings_arg}" "${LAPLACE_CHESS_SURFACES}"
-                "${LAPLACE_CHESS_TRANSITION_BIN}"
-        DEPENDS ${LAPLACE_CHESS_SURFACES_MANAGED_SOURCES}
+                "${_chess_seed_transitions}"
+        DEPENDS laplace_core ${LAPLACE_CHESS_SURFACES_MANAGED_SOURCES}
                 ${_chess_openings_deps} "${_chess_openings_manifest_path}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        COMMENT "Chess catalog tier-2 surfaces (emit input prep)"
+        COMMENT "Chess catalog seed surfaces and transitions"
+        VERBATIM
+    )
+    set(_chess_transition_inputs --input "${_chess_seed_transitions}")
+    if(_chess_corpus_transitions)
+        list(APPEND _chess_transition_inputs --input "${_chess_corpus_transitions}")
+    endif()
+    add_custom_command(
+        OUTPUT ${LAPLACE_CHESS_TRANSITION_BIN}
+        COMMAND ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
+                -c Release --no-launch-profile -- merge-transition-floors
+                --output "${LAPLACE_CHESS_TRANSITION_BIN}"
+                --work-directory "${LAPLACE_PERFCACHE_DIR}/transition-sort"
+                --maximum-buffered-records ${LAPLACE_CHESS_TRANSITION_BUFFER_RECORDS}
+                --merge-fan-in ${LAPLACE_CHESS_TRANSITION_MERGE_FAN_IN}
+                --maximum-spill-bytes ${LAPLACE_CHESS_PERFCACHE_SPILL_BYTES}
+                ${_chess_transition_inputs}
+        DEPENDS "${_chess_seed_transitions}" ${_chess_corpus_deps}
+                ${LAPLACE_CHESS_SURFACES_MANAGED_SOURCES}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Merging bounded seed and recorded-corpus transition floor"
         VERBATIM
     )
     list(APPEND _chess_emit_deps ${LAPLACE_CHESS_SURFACES})
     list(APPEND _chess_emit_cmd --surfaces ${LAPLACE_CHESS_SURFACES})
+elseif(LAPLACE_CHESS_CORPUS_EXPORT)
+    message(FATAL_ERROR "Recorded chess floor inputs require the existing ChessCatalogSurfaces dotnet owner")
 endif()
 
 add_custom_command(
@@ -290,21 +350,60 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
     ${_chess_emit_cmd}
     DEPENDS ${_chess_emit_deps}
-    COMMENT "Emitting chess compose-floor blob (typed atoms + moves + catalog positions)"
+    COMMENT "Emitting bounded chess compose floor from declared seed and recorded inputs"
     VERBATIM
 )
-add_custom_target(laplace_chess_position_perfcache ALL DEPENDS ${LAPLACE_CHESS_PERFCACHE_BIN})
-install(FILES ${LAPLACE_CHESS_PERFCACHE_BIN}
-    DESTINATION share/laplace
-    RENAME "laplace_chess_position_perfcache.bin"
-    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
-)
-if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
-    install(FILES ${LAPLACE_CHESS_TRANSITION_BIN}
-        DESTINATION share/laplace
-        RENAME "laplace_chess_transition_perfcache.bin"
-        PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+if(UNIX AND LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
+    set(LAPLACE_CHESS_PAIR_RECEIPT "${LAPLACE_PERFCACHE_DIR}/chess-floor-pair.json"
+        CACHE FILEPATH "Authenticated complete chess floor pair" FORCE)
+    add_custom_command(
+        OUTPUT "${LAPLACE_CHESS_PAIR_RECEIPT}"
+        COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${_chess_artifact_script}" seal-pair
+                --position "${LAPLACE_CHESS_PERFCACHE_BIN}"
+                --transition "${LAPLACE_CHESS_TRANSITION_BIN}"
+                --native-library $<TARGET_FILE:laplace_core>
+                --position-emitter $<TARGET_FILE:laplace_chess_position_tables_emit>
+                --seed-surfaces "${LAPLACE_CHESS_SURFACES}"
+                --receipt "${LAPLACE_CHESS_PAIR_RECEIPT}"
+                ${_chess_seal_export_args}
+        DEPENDS "${LAPLACE_CHESS_PERFCACHE_BIN}" "${LAPLACE_CHESS_TRANSITION_BIN}"
+                "${LAPLACE_CHESS_SURFACES}" "${_chess_artifact_script}"
+                $<TARGET_FILE:laplace_core> $<TARGET_FILE:laplace_chess_position_tables_emit>
+                ${_chess_corpus_deps}
+        COMMENT "Authenticating the complete chess floor generation"
+        VERBATIM
     )
+    add_custom_target(laplace_chess_position_perfcache ALL DEPENDS "${LAPLACE_CHESS_PAIR_RECEIPT}")
+    install(CODE "
+        execute_process(
+            COMMAND \"${LAPLACE_CODEGEN_PYTHON}\" \"${_chess_artifact_script}\" install-pair
+                    --prefix \"\${CMAKE_INSTALL_PREFIX}\"
+                    --position \"${LAPLACE_CHESS_PERFCACHE_BIN}\"
+                    --transition \"${LAPLACE_CHESS_TRANSITION_BIN}\"
+                    --native-library \"$<TARGET_FILE:laplace_core>\"
+                    --pair-receipt \"${LAPLACE_CHESS_PAIR_RECEIPT}\"
+                    --manifest-only
+            RESULT_VARIABLE _chess_install_rc OUTPUT_VARIABLE _chess_install_paths
+            ERROR_VARIABLE _chess_install_error OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT _chess_install_rc EQUAL 0)
+            message(FATAL_ERROR \"Chess floor pair installation failed: \${_chess_install_error}\")
+        endif()
+        string(REPLACE \"\\n\" \";\" _chess_manifest_files \"\${_chess_install_paths}\")
+        list(APPEND CMAKE_INSTALL_MANIFEST_FILES \${_chess_manifest_files})
+    ")
+else()
+    # Preserve native-only and Windows seed installation until their pair activation
+    # mechanism is explicitly verified; recorded-corpus activation above is UNIX-only.
+    add_custom_target(laplace_chess_position_perfcache ALL DEPENDS ${LAPLACE_CHESS_PERFCACHE_BIN})
+    install(FILES ${LAPLACE_CHESS_PERFCACHE_BIN}
+        DESTINATION share/laplace RENAME "laplace_chess_position_perfcache.bin"
+        PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS})
+    if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
+        add_custom_target(laplace_chess_transition_perfcache ALL DEPENDS ${LAPLACE_CHESS_TRANSITION_BIN})
+        install(FILES ${LAPLACE_CHESS_TRANSITION_BIN}
+            DESTINATION share/laplace RENAME "laplace_chess_transition_perfcache.bin"
+            PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS})
+    endif()
 endif()
 
 # Modality number compose floor (dense 0..255 channel-byte numbers) — spec 33 /
