@@ -1,0 +1,89 @@
+name: Read retained Original UCI timing
+on:
+  push:
+    branches: [diag/read-original-uci-timing-20260916]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  read-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify archive bytes and read bounded UCI timing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, io, json, os, re, urllib.error, urllib.parse, urllib.request, zipfile
+          REPO = "SaltyPatron/Laplace"
+          ARTIFACT = 10423583845
+          EXPECTED_SIZE = 3142172
+          EXPECTED_SHA = "fa6ab6659be0c9ed1be33dc065c774436ef4314570339a71d5c1515ac689a8a0"
+          HEAD = "cf38c9f89b69ebed003168ea7c8bb26e8855dd73"
+          BASE = "https://api.github.com/repos/" + REPO + "/actions/artifacts/" + str(ARTIFACT)
+          HEADERS = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+          with urllib.request.urlopen(urllib.request.Request(BASE, headers=HEADERS), timeout=20) as response:
+              metadata = json.load(response)
+          assert metadata["id"] == ARTIFACT and metadata["name"] == "laplace-benchmark-35035410768-1"
+          assert not metadata["expired"] and metadata["size_in_bytes"] == EXPECTED_SIZE
+          assert metadata["digest"] == "sha256:" + EXPECTED_SHA
+          assert metadata["workflow_run"]["id"] == 35035410768 and metadata["workflow_run"]["head_sha"] == HEAD
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          try:
+              urllib.request.build_opener(NoRedirect()).open(urllib.request.Request(BASE + "/zip", headers=HEADERS), timeout=20)
+              raise RuntimeError("artifact endpoint did not return its expected redirect")
+          except urllib.error.HTTPError as error:
+              assert error.code == 302
+              location = error.headers["Location"]
+              error.close()
+          assert urllib.parse.urlsplit(location).scheme == "https"
+          # The storage download deliberately carries no GitHub Authorization header.
+          with urllib.request.urlopen(urllib.request.Request(location), timeout=20) as response:
+              payload = response.read(EXPECTED_SIZE + 1)
+          assert len(payload) == EXPECTED_SIZE
+          actual_sha = hashlib.sha256(payload).hexdigest()
+          assert actual_sha == EXPECTED_SHA
+          print("ARTIFACT_BYTES_VERIFIED " + json.dumps({"artifact": ARTIFACT, "run": 35035410768, "head": HEAD, "bytes": len(payload), "sha256": actual_sha}, sort_keys=True))
+          archive = zipfile.ZipFile(io.BytesIO(payload))
+          entries = archive.infolist()
+          assert len(entries) <= 1024 and sum(entry.file_size for entry in entries) <= 128 * 1024 * 1024
+          print("ARTIFACT_MEMBERS " + json.dumps([{"name": item.filename, "bytes": item.file_size} for item in entries], sort_keys=True))
+          def emit(label, value):
+              encoded = json.dumps(value, sort_keys=True)
+              assert len(encoded) <= 262144
+              print(label + " " + encoded)
+          report_entries = [entry for entry in entries if entry.filename.endswith("chess-environment/report.json")]
+          assert len(report_entries) == 1
+          entry = report_entries[0]
+          assert entry.file_size <= 16 * 1024 * 1024
+          report = json.loads(archive.read(entry))
+          emit("BENCHMARK", {key: report.get(key) for key in ("schema", "status", "started_utc", "finished_utc", "elapsed_wall_seconds", "parameters", "tournament_scope")})
+          paired = report.get("paired_acceptance")
+          assert isinstance(paired, dict)
+          emit("PAIRED", {key: paired.get(key) for key in ("scope", "substrate_requested", "substrate_effective", "fairness", "normal_completed_games", "legal_moves_validated")})
+          identity = paired.get("identity", {})
+          emit("UCI_IDENTITY", {key: identity.get(key) for key in ("path", "resolved_path", "sha256", "size_bytes", "uci_options", "managed_runtime_files")})
+          process_fields = ("command", "stdin", "pid", "returncode", "wall_seconds", "failure", "log",
+              "process_tree_peak_rss_bytes_sampled", "process_tree_peak_processes_sampled",
+              "process_tree_cpu_seconds_sampled_lower_bound", "observed_processes", "cgroup_counter_deltas", "success")
+          for label, process in (("CAPABILITY_PROCESS", identity.get("capability_process", {})), ("PAIRED_PROCESS", paired.get("process", {}))):
+              emit(label, {key: process.get(key) for key in process_fields})
+          allow = re.compile(r"uciok|readyok|go (?:depth|wtime|btime)|bestmove|info depth [0-9]+|info string substrate provider stack prepared|info string providers|Started game|Finished game|Starting game")
+          logs = [entry for entry in entries if entry.filename.endswith(("laplace-stockfish-paired.log", "laplace-capabilities.log"))]
+          assert len(logs) == 2
+          for entry in logs:
+              assert entry.file_size <= 16 * 1024 * 1024
+              lines = archive.read(entry).decode("utf-8", errors="strict").splitlines()
+              matched = [line for line in lines if allow.search(line)]
+              assert all(len(line) <= 4096 for line in matched)
+              emit("UCI_LOG_SCOPE", {"path": entry.filename, "total_lines": len(lines), "matching_lines": len(matched), "printed_limit": 512})
+              if len(matched) > 512:
+                  matched = matched[:256] + matched[-256:]
+              for line in matched:
+                  print("UCI_LOG " + json.dumps(line))
+          PY
