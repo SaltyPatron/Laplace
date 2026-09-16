@@ -1,4 +1,4 @@
-name: Managed policy and PostgreSQL dependency preparation controls
+name: Verified CMake companion execution controls
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
@@ -10,8 +10,8 @@ jobs:
     timeout-minutes: 12
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: 9f1c4a71838ba86e6be10a1c8f4227ac083b8ef9
-      SOURCE_TREE: 9d6207e1f61ef3c70263a187902edc23e5d0ba0a
+      SOURCE_SHA: d1bd68e72b60cfe7e55b0aefb66ddfc70d9ed55f
+      SOURCE_TREE: b3c526f0f352af36424ad91604f9c0e05f20f016
       TMPDIR: /build/laplace/work/postgresql-release/tmp
       TMP: /build/laplace/work/postgresql-release/tmp
       TEMP: /build/laplace/work/postgresql-release/tmp
@@ -29,12 +29,12 @@ jobs:
           test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
           git worktree add --detach /build/laplace/worktrees/postgresql-release "$SOURCE_SHA"
           printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
-      - name: Execute dependency and existing owner controls
+      - name: Execute CMake selection and existing owner controls
         run: |
           set -euo pipefail
           cd /build/laplace/worktrees/postgresql-release
           status=0
-          for test in test-postgresql-release.py test-test-profile-registry.py test-managed-host.py test-pipeline-install.py; do
+          for test in test-cmake-release.py test-test-profile-registry.py test-managed-host.py; do
             set +e
             timeout --signal=TERM --kill-after=10s 180s python3 "scripts/$test" 2>&1 | tee "$EVIDENCE/$test.log"
             result=$?
@@ -42,8 +42,15 @@ jobs:
             printf '%s\t%s\n' "$test" "$result" >> "$EVIDENCE/exit-codes.tsv"
             if [ "$result" -ne 0 ]; then status=1; fi
           done
-          for script in deploy/linux/managed-publish.sh scripts/ci-deps.sh; do bash -n "$script"; done
-          shellcheck -S warning -x deploy/linux/managed-publish.sh 2>&1 | tee "$EVIDENCE/managed-publish-shellcheck.log"
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
+          import ast
+          from pathlib import Path
+          for name in ("provision-cmake.py", "test-profile-registry.py", "test-cmake-release.py", "test-test-profile-registry.py"):
+              ast.parse((Path("scripts") / name).read_text())
+              print(f"PASS Python AST {name}")
+          PY
+          bash -n scripts/pr-db-proof.sh
+          shellcheck -S warning -x scripts/pr-db-proof.sh 2>&1 | tee "$EVIDENCE/pr-db-proof-shellcheck.log"
           test -z "$(git status --porcelain --untracked-files=all)"
           exit "$status"
       - name: Retain bounded source qualification evidence
