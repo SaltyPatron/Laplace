@@ -1,0 +1,112 @@
+name: Observe requested Stockfish source directory
+
+on:
+  push:
+    branches: ['verify/stockfish-requested-layout-20260916-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 35
+    steps:
+      - name: Create source inspection evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/laplace-requested-stockfish-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir "$output"
+          printf 'LAPLACE_SOURCE_LAYOUT_EVIDENCE=%s\n' "$output" >> "$GITHUB_ENV"
+
+      - name: Invoke the approved source owner under exclusive checkout ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
+          flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock bash -c '
+            set -euo pipefail
+            git fetch --no-tags origin dc5c630a8ddca17466018f6485d444d5679af2c8
+            git checkout --force dc5c630a8ddca17466018f6485d444d5679af2c8
+            timeout --signal=TERM --kill-after=10s 180s python3 -
+          ' <<'PY'
+          import hashlib, importlib.util, json, os, re, subprocess, sys, time
+          from pathlib import Path
+          SOURCE_SHA = "dc5c630a8ddca17466018f6485d444d5679af2c8"
+          requested = Path("/vault/External/Stockfish/SF_19")
+          output = Path(os.environ["LAPLACE_SOURCE_LAYOUT_EVIDENCE"]) / "requested-stockfish-directory.json"
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, timeout=5).strip()
+          if head != SOURCE_SHA:
+              raise ValueError("source owner checkout differs from its reviewed revision")
+          spec = importlib.util.spec_from_file_location("requested_stockfish_source_owner", "scripts/accept-chess-environment.py")
+          owner = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = owner
+          spec.loader.exec_module(owner)
+          started = time.monotonic()
+          proof = {"schema": "laplace.requested-stockfish-source-inspection/v1", "status": "failed",
+                   "ownerSourceSha": head, "repositoryMutated": False, "untrackedFilesEnumerated": False}
+          try:
+              inventory = owner.source_directory_inventory(requested)
+              proof["inventory"] = inventory
+              environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+              environment.update(GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1",
+                                 GIT_NO_REPLACE_OBJECTS="1", GIT_TERMINAL_PROMPT="0")
+              for candidate in inventory["nestedGitCandidates"]:
+                  path = Path(candidate["path"])
+                  path.relative_to(requested)
+                  def git(*arguments):
+                      argv = ["git", "--no-optional-locks", "-c", "safe.directory=" + str(path),
+                              "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+                              "-c", "core.untrackedCache=false", "-C", str(path), *arguments]
+                      result = subprocess.run(argv, env=environment, stdout=subprocess.PIPE,
+                                              stderr=subprocess.DEVNULL, timeout=2, check=True)
+                      if len(result.stdout) > 65536:
+                          raise ValueError("bounded Git response exceeded 65536 bytes")
+                      return result.stdout
+                  observed = {"path": str(path), "genuineWorktree": False, "untrackedFilesEnumerated": False}
+                  candidate["readOnlyGitObservation"] = observed
+                  try:
+                      if git("rev-parse", "--is-inside-work-tree").strip() != b"true":
+                          raise ValueError("Git candidate is not a working tree")
+                      observed["genuineWorktree"] = True
+                      observed["root"] = git("rev-parse", "--show-toplevel").decode("utf-8", errors="strict").strip()
+                      commit = git("rev-parse", "--verify", "HEAD").decode("ascii").strip()
+                      if not re.fullmatch(r"[0-9a-f]{40}", commit):
+                          raise ValueError("invalid observed Git commit")
+                      observed["head"] = commit
+                      origin = git("remote", "get-url", "origin").decode("utf-8", errors="strict").strip().rstrip("/")
+                      observed["officialOrigin"] = origin in (
+                          "https://github.com/official-stockfish/Stockfish", "https://github.com/official-stockfish/Stockfish.git",
+                          "git@github.com:official-stockfish/Stockfish", "git@github.com:official-stockfish/Stockfish.git")
+                      observed["origin"] = "https://github.com/official-stockfish/Stockfish" if observed["officialOrigin"] else "not-the-official-origin"
+                      status = git("status", "--porcelain=v1", "--untracked-files=no")
+                      observed["trackedWorktreeClean"] = not status
+                      observed["trackedPorcelainBytes"] = len(status)
+                      observed["trackedPorcelainSha256"] = hashlib.sha256(status).hexdigest()
+                      lines = status.decode("utf-8", errors="replace").splitlines()
+                      observed["trackedPorcelain"] = lines[:128]
+                      observed["trackedPorcelainTruncated"] = len(lines) > 128
+                  except (OSError, ValueError, UnicodeError, subprocess.SubprocessError) as error:
+                      observed["failureType"] = type(error).__name__
+              proof["status"] = "observed"
+          finally:
+              proof["wallSeconds"] = time.monotonic() - started
+              owner.save(output, proof)
+              print("REQUESTED_STOCKFISH_SOURCE_LAYOUT " + json.dumps(proof, allow_nan=False), flush=True)
+          PY
+
+      - name: Preserve the actual source directory receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: requested-stockfish-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/laplace-requested-stockfish-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
