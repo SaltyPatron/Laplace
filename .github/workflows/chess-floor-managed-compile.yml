@@ -12,8 +12,8 @@ jobs:
       TMPDIR: /build/laplace/work/cutechess-desktop-controls/tmp
       TMP: /build/laplace/work/cutechess-desktop-controls/tmp
       TEMP: /build/laplace/work/cutechess-desktop-controls/tmp
-      CANDIDATE_SHA: bb23f839ab9164aa2feffc42699172908eb8b294
-      CANDIDATE_TREE: ff984a5bb1c1713a7b35050d2898132625f9c700
+      CANDIDATE_SHA: 3dd544ff64a09182f82d5b130dd416395f54b34b
+      CANDIDATE_TREE: 68a318d18eed37e6794b8d3c47da7ec9cca9af77
     steps:
       - name: Prepare permanent work and evidence directories
         run: |
@@ -23,7 +23,7 @@ jobs:
           mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/cutechess-desktop-controls
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: bb23f839ab9164aa2feffc42699172908eb8b294
+          ref: 3dd544ff64a09182f82d5b130dd416395f54b34b
           fetch-depth: 1
           persist-credentials: false
       - name: Bind exact source in permanent worktree
