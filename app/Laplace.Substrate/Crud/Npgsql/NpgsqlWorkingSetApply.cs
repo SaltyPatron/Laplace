@@ -1273,6 +1273,11 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         catch
         {
+            // A competing writer, or a COPY subtransaction that committed before
+            // this apply failed, can add ids absent from the preload snapshot.
+            // Keep durable positive hits, but re-probe every cache miss on retry.
+            _entityPresenceComplete = false;
+            _physPresenceComplete = false;
             try { await tx.RollbackAsync(CancellationToken.None); }
             catch { }
             throw;

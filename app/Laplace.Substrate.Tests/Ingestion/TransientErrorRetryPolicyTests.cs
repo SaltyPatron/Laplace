@@ -62,10 +62,37 @@ public class TransientErrorRetryPolicyTests
     [Theory]
     [InlineData("40P01", true)]
     [InlineData("40001", true)]
-    [InlineData("23505", false)]
+    [InlineData("23505", true)]
+    [InlineData("23503", false)]
+    [InlineData("23514", false)]
     public void ConcurrencyRetry_RetriesOnlyConcurrencySqlStates(string sqlState, bool expected)
     {
         Assert.Equal(expected, TransientErrorRetryPolicy.IsConcurrencySqlState(sqlState));
+    }
+
+    [Theory]
+    [InlineData("23505", true)]
+    [InlineData("40P01", true)]
+    [InlineData("40001", true)]
+    [InlineData("23503", false)]
+    [InlineData("23514", false)]
+    public void RetryPolicies_ClassifyActualAndWrappedPostgresFailures(string sqlState, bool expected)
+    {
+        // COPY can lose a canonical-id landing race. The caller retries the whole
+        // working set; classification does not itself prove a row is equivalent.
+        var failure = new global::Npgsql.PostgresException(
+            "working-set COPY failed", "ERROR", "ERROR", sqlState);
+        foreach (Exception error in new Exception[]
+        {
+            failure,
+            new InvalidOperationException("apply failed",
+                new InvalidOperationException("COPY failed", failure))
+        })
+        {
+            Assert.Equal(expected, TransientErrorRetryPolicy.ConcurrencyRetry.IsTransient(error));
+            Assert.Equal(expected, TransientErrorRetryPolicy.Default.IsTransient(error));
+            Assert.False(TransientErrorRetryPolicy.NoRetry.IsTransient(error));
+        }
     }
 }
 
