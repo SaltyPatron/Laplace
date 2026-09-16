@@ -151,34 +151,6 @@ def verify_source(external: Path, selected: dict) -> dict:
             "tracked_source_clean": True}
 
 
-
-def prepare_source(external: Path, selected: dict) -> dict:
-    """Converge through the existing prefix owner, then verify its actual result."""
-    external = external.resolve()
-    try:
-        result = verify_source(external, selected)
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        print("PostgreSQL source preparation required: " + str(exc),
-              file=sys.stderr, flush=True)
-    else:
-        return {**result, "source_preparation": "already-current"}
-
-    # Prefix owns pin selection and Git acquisition. Keep its own root timeout
-    # around every child; no credential prompt or alternate acquisition path.
-    environment = ["LAPLACE_EXTERNAL=" + str(external)]
-    for name in ("TMPDIR", "TMP", "TEMP", "LAPLACE_OPERATOR"):
-        if name in os.environ:
-            environment.append(name + "=" + os.environ[name])
-    argv = ["timeout", "--signal=TERM", "--kill-after=10s", "600s",
-            "env", *environment, "bash",
-            str(ROOT / "scripts/bootstrap-laplace-runner.sh"), "prefix"]
-    if os.geteuid() != 0:
-        argv = ["sudo", "-n", "--", *argv]
-    subprocess.run(argv, check=True, stdin=subprocess.DEVNULL)
-    result = verify_source(external, selected)
-    return {**result, "source_preparation": "bootstrap-prefix"}
-
-
 def verify_installed(prefix: Path, selected: dict) -> dict:
     versions = {}
     for name, label in (("postgres", "postgres"), ("pg_config", "PostgreSQL")):
@@ -200,7 +172,7 @@ def verify_archive(path: Path, selected: dict) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("select-pin", "source", "prepare-source", "installed", "restart-needed", "archive"))
+    parser.add_argument("mode", choices=("select-pin", "source", "installed", "restart-needed", "archive"))
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--external", type=Path, default=Path(os.environ.get("LAPLACE_EXTERNAL", "/build/external")))
     parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_PG_PREFIX", "/opt/laplace/pgsql-18")))
@@ -213,8 +185,6 @@ def main(argv: list[str] | None = None) -> int:
             result = {"pin_changed": select_pin(args.external / "PINS.tsv", selected)}
         elif args.mode == "source":
             result = verify_source(args.external, selected)
-        elif args.mode == "prepare-source":
-            result = prepare_source(args.external, selected)
         elif args.mode in ("installed", "restart-needed"):
             result = verify_installed(args.prefix, selected)
             if args.mode == "restart-needed":

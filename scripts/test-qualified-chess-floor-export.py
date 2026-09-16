@@ -201,12 +201,9 @@ class MainQualificationTests(unittest.TestCase):
         self.session.parent.mkdir(parents=True, mode=0o700)
         self.session.parent.chmod(0o700)
         self.build_root = self.root / "build"
-        self.build = self.build_root / ("laplace-" + hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16])
+        self.build = self.build_root / ("legacy-" + hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16])
         (self.build / ".stamps").mkdir(parents=True)
-        (self.checkout / "build").symlink_to(self.build, target_is_directory=True)
-        (self.build / "CMakeCache.txt").write_text(
-            "CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.checkout) + "\n"
-            "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build) + "\n")
+        (self.build / "CMakeCache.txt").write_text("CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.checkout) + "\n")
         for name in ("build-native", "install-native"):
             (self.build / ".stamps" / name).write_text("a" * 64 + "\n")
         environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
@@ -306,42 +303,6 @@ class MainQualificationTests(unittest.TestCase):
         for plan in invalid:
             with self.subTest(plan=plan), self.assertRaises(ValueError):
                 driver.selection_identity(plan)
-
-    def test_retained_build_follows_placement_link_despite_obsolete_directory(self):
-        legacy = self.build_root / ("legacy-" + hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16])
-        legacy.mkdir()
-        # A leftover historical directory must not replace the actual placed build.
-        (legacy / "CMakeCache.txt").write_text("obsolete unrelated build\n")
-        link_before = os.readlink(self.checkout / "build")
-        build, receipt = self.qualify()
-        self.assertEqual(self.build, build)
-        self.assertEqual(str(self.build), receipt["native_build"])
-        self.assertEqual(link_before, os.readlink(self.checkout / "build"))
-        self.assertEqual("obsolete unrelated build\n", (legacy / "CMakeCache.txt").read_text())
-
-    def test_retained_build_requires_placement_link_inside_canonical_root(self):
-        link = self.checkout / "build"
-        link.unlink()
-        with self.assertRaisesRegex(ValueError, "build link"):
-            self.qualify()
-        outside = self.root / "unrelated-build"
-        outside.mkdir()
-        link.symlink_to(outside, target_is_directory=True)
-        with self.assertRaisesRegex(ValueError, "canonical build root"):
-            self.qualify()
-
-    def test_retained_cache_directory_must_resolve_to_selected_build(self):
-        cache = self.build / "CMakeCache.txt"
-        original = cache.read_text()
-        other = self.build_root / "other-build"
-        other.mkdir()
-        cache.write_text(original.replace("CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build),
-                                          "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(other)))
-        with self.assertRaisesRegex(ValueError, "another build directory"):
-            self.qualify()
-        cache.write_text(original.replace("CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build),
-                                          "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.checkout / "build")))
-        self.assertEqual(self.build, self.qualify()[0])
 
     def test_retained_build_requires_selected_checkout_and_matching_install_stamp(self):
         self.qualify()

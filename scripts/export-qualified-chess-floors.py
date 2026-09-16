@@ -115,21 +115,13 @@ def qualification(plan, root):
     if (not checkout.is_absolute() or checkout.resolve(strict=True) != checkout
             or str(checkout).startswith(("/tmp/", "/var/tmp/", "/dev/shm/"))):
         raise ValueError("qualified checkout identity was not permanent")
-    # Follow the placement owner's actual link, including any completed migration.
-    # Never reconstruct an obsolete directory name or select the newest build.
-    build_link = checkout / "build"
-    if not build_link.is_symlink():
-        raise ValueError("retained checkout has no placed native build link")
-    build = build_link.resolve(strict=True)
-    if not build.is_dir() or build.parent != BUILD_ROOT.resolve(strict=True):
-        raise ValueError("retained native build is outside the canonical build root")
+    # Existing place-build-directory.py addresses the persistent main checkout.
+    # Never substitute a disposable PR build or whichever build is most recent.
+    build = BUILD_ROOT / ("legacy-" + hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16])
     cache = (build / "CMakeCache.txt").read_text()
     match = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$", cache, re.MULTILINE)
     if not match or Path(match.group(1)) != checkout:
         raise ValueError("retained native build belongs to another checkout")
-    directory = re.search(r"^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$", cache, re.MULTILINE)
-    if not directory or Path(directory.group(1)).resolve(strict=True) != build:
-        raise ValueError("retained CMake cache belongs to another build directory")
     stamps = {name: (build / ".stamps" / name).read_text().strip()
               for name in ("build-native", "install-native")}
     if (any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in stamps.values())

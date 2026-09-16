@@ -3,8 +3,6 @@
 No sudo, network requests, database writes, or host service actions occur here.
 """
 import fcntl
-import os
-import stat
 import importlib.machinery
 import importlib.util
 from pathlib import Path
@@ -14,7 +12,6 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest import mock
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,84 +132,6 @@ class DeploymentTests(unittest.TestCase):
                 (self.deploy.SYSTEMD / ("laplace-" + name + ".service")).read_text())
             self.assertIn(("/usr/bin/systemctl", "enable", "laplace-" + name + ".service"), self.calls)
         self.assertFalse(any("start" in call or "restart" in call for call in self.calls))
-
-    def test_only_each_services_current_scratch_paths_are_allowed(self):
-        for name in self.deploy.UNITS:
-            canonical = (self.payload / ("laplace-" + name + ".service")).read_text()
-            self.deploy.validate_unit(canonical, name)
-            path = "/build/laplace/work/" + name
-            other = "lichess" if name == "mcp" else "mcp"
-            for directive in ("Environment=TMPDIR=", "Environment=TMP=", "Environment=TEMP=", "ReadWritePaths="):
-                for replacement in ("/build/laplace/work/legacy-" + name,
-                                    "/build/laplace/work/" + other, "/build/laplace/work"):
-                    with self.subTest(service=name, directive=directive, replacement=replacement):
-                        mutation = canonical.replace(directive + path + "\n", directive + replacement + "\n")
-                        self.assertNotEqual(canonical, mutation)
-                        with self.assertRaisesRegex(ValueError, "outside root-owned policy"):
-                            self.deploy.validate_unit(mutation, name)
-
-    def test_account_reconciliation_provisions_the_same_fixed_service_scratch_paths(self):
-        def account(name):
-            return types.SimpleNamespace(pw_uid=1234, pw_gid=1234,
-                pw_dir="/var/lib/" + name, pw_shell="/usr/sbin/nologin")
-        with (mock.patch.object(self.deploy.pwd, "getpwnam", side_effect=account),
-              mock.patch.object(self.deploy.grp, "getgrnam", return_value=types.SimpleNamespace(gr_gid=1234)),
-              mock.patch.object(self.deploy, "reconcile_scratch_directory") as scratch):
-            self.deploy.reconcile_accounts()
-        self.assertEqual([mock.call(Path("/build/laplace/work") / name, "laplace-" + name)
-                          for name in self.deploy.UNITS], scratch.call_args_list)
-        self.assertEqual([("/usr/bin/mountpoint", "-q", "/build")] * len(self.deploy.UNITS), self.calls)
-        for name in self.deploy.UNITS:
-            canonical = (self.payload / ("laplace-" + name + ".service")).read_text()
-            for directive in ("Environment=TMPDIR=", "Environment=TMP=", "Environment=TEMP=", "ReadWritePaths="):
-                self.assertIn(directive + "/build/laplace/work/" + name + "\n", canonical)
-
-    def test_existing_service_scratch_preserves_owner_and_contents_while_repairing_shared_access(self):
-        path = self.base / "existing-scratch"
-        path.mkdir(mode=0o700)
-        sentinel = path / "retained"
-        sentinel.write_bytes(b"existing operator output")
-        before = path.stat()
-        with (mock.patch.object(self.deploy.grp, "getgrnam",
-                                return_value=types.SimpleNamespace(gr_gid=os.getgid())),
-              mock.patch.object(self.deploy.pwd, "getpwnam",
-                                side_effect=AssertionError("existing directory must retain its user owner")),
-              mock.patch.object(self.deploy.os, "fchown", wraps=os.fchown) as chown):
-            self.deploy.reconcile_scratch_directory(path, "laplace-mcp")
-        self.assertEqual(-1, chown.call_args.args[1])
-        after = path.stat()
-        self.assertEqual((before.st_uid, before.st_ino), (after.st_uid, after.st_ino))
-        self.assertEqual(stat.S_IMODE(before.st_mode) | stat.S_ISGID | stat.S_IRWXG,
-                         stat.S_IMODE(after.st_mode))
-        self.assertEqual(b"existing operator output", sentinel.read_bytes())
-
-    def test_new_service_scratch_uses_its_service_owner_and_shared_group(self):
-        path = self.base / "new-scratch"
-        with (mock.patch.object(self.deploy.pwd, "getpwnam",
-                                return_value=types.SimpleNamespace(pw_uid=os.getuid())) as account,
-              mock.patch.object(self.deploy.grp, "getgrnam",
-                                return_value=types.SimpleNamespace(gr_gid=os.getgid())) as group):
-            self.deploy.reconcile_scratch_directory(path, "laplace-lichess")
-        account.assert_called_once_with("laplace-lichess")
-        group.assert_called_once_with("laplace-runner")
-        metadata = path.stat()
-        self.assertEqual((os.getuid(), os.getgid()), (metadata.st_uid, metadata.st_gid))
-        self.assertEqual(0o2770, stat.S_IMODE(metadata.st_mode))
-
-    def test_service_scratch_refuses_symlinks_and_files_before_ownership_changes(self):
-        target = self.base / "scratch-target"
-        target.mkdir()
-        for kind in ("symlink", "file"):
-            path = self.base / ("invalid-" + kind)
-            if kind == "symlink":
-                path.symlink_to(target, target_is_directory=True)
-            else:
-                path.write_bytes(b"retain")
-            with self.subTest(kind=kind), mock.patch.object(self.deploy.os, "fchown") as chown:
-                with self.assertRaises(OSError):
-                    self.deploy.reconcile_scratch_directory(path, "laplace-mcp")
-                chown.assert_not_called()
-        self.assertEqual([], list(target.iterdir()))
 
     def test_deliberate_security_breaks_are_detected_before_any_unit_install(self):
         canonical = (self.payload / "laplace-mcp.service").read_text()

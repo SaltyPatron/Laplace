@@ -71,11 +71,7 @@ class TestProfileRegistryTests(unittest.TestCase):
             suite = registry.load_validated()["native-dev"]
             receipt = root / "receipt.json"
             log = io.StringIO()
-            # This private CTest file is created by the fixture, not by the
-            # product's pinned CMake. Exercise the available CTest deliberately;
-            # the authenticated selection path has real-process owner controls.
             with patch.object(registry, "ROOT", root), \
-                 patch.object(registry, "ctest_command_prefix", return_value=[shutil.which("ctest")]), \
                  patch.object(registry, "load_validated", return_value={suite["id"]: suite}), \
                  patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
                  contextlib.redirect_stdout(log):

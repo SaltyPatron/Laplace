@@ -197,22 +197,10 @@ def _env_for_suite(suite: dict[str, Any]) -> dict[str, str]:
     return env
 
 
-def ctest_command_prefix() -> list[str]:
-    if not sys.platform.startswith("linux"):
-        return ["ctest"]
-    prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
-    work = Path(os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work"))
-    # Delegate receipt/content/version checks to the same owner as configure.
-    # Selection is read-only: tests never acquire or repair a tool generation.
-    return [sys.executable, str(ROOT / "scripts/provision-cmake.py"),
-            "--root", str(prefix / "tools/cmake"), "--work", str(work / "cmake"),
-            "--exec-tool", "ctest", "--"]
-
-
 def command_for_suite(suite: dict[str, Any], *, list_only: bool = False) -> list[str]:
     runner = suite["runner"]
     if runner == "ctest":
-        command = [*ctest_command_prefix(), "--test-dir", "build"]
+        command = ["ctest", "--test-dir", "build"]
         if list_only:
             command.append("-N")
         else:

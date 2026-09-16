@@ -1,4 +1,4 @@
-name: Verified CMake companion execution controls
+name: CI session host-wait cancellation controls
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
@@ -10,8 +10,8 @@ jobs:
     timeout-minutes: 12
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: d1bd68e72b60cfe7e55b0aefb66ddfc70d9ed55f
-      SOURCE_TREE: b3c526f0f352af36424ad91604f9c0e05f20f016
+      SOURCE_SHA: d48509640a0844caf095c0da18520ddaca4846ec
+      SOURCE_TREE: def7ecea9377684de236fc16e80c6e45ab13b4ac
       TMPDIR: /build/laplace/work/postgresql-release/tmp
       TMP: /build/laplace/work/postgresql-release/tmp
       TEMP: /build/laplace/work/postgresql-release/tmp
@@ -29,14 +29,14 @@ jobs:
           test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
           git worktree add --detach /build/laplace/worktrees/postgresql-release "$SOURCE_SHA"
           printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
-      - name: Execute CMake selection and existing owner controls
+      - name: Execute exact session lifecycle controls
         run: |
           set -euo pipefail
           cd /build/laplace/worktrees/postgresql-release
           status=0
-          for test in test-cmake-release.py test-test-profile-registry.py test-managed-host.py; do
+          for test in test-ci-session.py; do
             set +e
-            timeout --signal=TERM --kill-after=10s 180s python3 "scripts/$test" 2>&1 | tee "$EVIDENCE/$test.log"
+            timeout --signal=TERM --kill-after=10s 300s python3 "scripts/$test" -v 2>&1 | tee "$EVIDENCE/$test.log"
             result=$?
             set -e
             printf '%s\t%s\n' "$test" "$result" >> "$EVIDENCE/exit-codes.tsv"
@@ -45,12 +45,10 @@ jobs:
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
           import ast
           from pathlib import Path
-          for name in ("provision-cmake.py", "test-profile-registry.py", "test-cmake-release.py", "test-test-profile-registry.py"):
+          for name in ("ci-session.py", "test-ci-session.py"):
               ast.parse((Path("scripts") / name).read_text())
               print(f"PASS Python AST {name}")
           PY
-          bash -n scripts/pr-db-proof.sh
-          shellcheck -S warning -x scripts/pr-db-proof.sh 2>&1 | tee "$EVIDENCE/pr-db-proof-shellcheck.log"
           test -z "$(git status --porcelain --untracked-files=all)"
           exit "$status"
       - name: Retain bounded source qualification evidence

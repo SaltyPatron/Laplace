@@ -182,24 +182,10 @@ def main():
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--ensure", action="store_true", help="acquire a missing pinned generation")
-    parser.add_argument("--exec-tool", choices=TOOLS,
-                        help="execute a verified companion tool with the remaining arguments")
-    parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
-    if args.arguments and not args.exec_tool:
-        parser.error("tool arguments require --exec-tool")
     try:
         lock = json.loads(LOCK.read_text())
-        selected = select(args.root, args.work, lock, args.ensure)
-        if args.exec_tool:
-            arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
-            executable = str(selected / args.exec_tool)
-            # Keep tool stdout exact (CTest discovery emits JSON), and replace
-            # this process so status and signals remain the selected tool's.
-            print(f"CMake execution: {executable} ({lock['version']})",
-                  file=sys.stderr, flush=True)
-            os.execv(executable, [executable, *arguments])
-        print(selected)
+        print(select(args.root, args.work, lock, args.ensure))
         return 0
     except (OSError, ValueError, RuntimeError, tarfile.TarError, subprocess.TimeoutExpired) as error:
         print(f"CMake selection: {error}", file=sys.stderr)
