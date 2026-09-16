@@ -1,0 +1,49 @@
+name: Immutable array assertion reproduction
+on:
+  push:
+    branches: [diag/immutable-array-equality-20260916]
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - name: Prepare isolated real assertion input
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /build/laplace/work/immutable-array-reproduction /build/laplace/build/immutable-array-reproduction /build/laplace/work/tmp /build/laplace/work/nuget
+          sudo chown -R "$(id -u):$(id -g)" /build/laplace
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path("/build/laplace/work/immutable-array-reproduction")
+          (base/"repro.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><LangVersion>latest</LangVersion></PropertyGroup><ItemGroup><PackageReference Include=\"xunit.assert\" Version=\"2.9.2\" /></ItemGroup></Project>\n")
+          (base/"Program.cs").write_text("using System.Collections.Immutable;\nusing System.Text.Json;\nusing Xunit;\n\nvar left = ImmutableArray.Create(new Row(new Id(1,2), 2, new Id(3,4), new Id(5,6)), new Row(new Id(7,8),1,new Id(9,10),null));\nvar right = left.Select(row => row with { }).ToImmutableArray();\nvar namesA = ImmutableArray.Create(\"one\", \"two\");\nvar namesB = ImmutableArray.Create(\"one\", \"two\");\nvar checks = new List<object>();\nbool Observe(string name, Action action) {\n    try { action(); checks.Add(new {name, passed=true, exception=(string?)null, detail=(string?)null}); return true; }\n    catch(Exception ex) { checks.Add(new {name, passed=false, exception=ex.GetType().FullName, detail=ex.Message}); return false; }\n}\nObserve(\"same_values_inferred_immutable_entities\", () => Assert.Equal(left, right));\nbool seq = Observe(\"same_values_explicit_entity_sequence\", () => Assert.Equal<Row>(left, right));\nbool indexed = Observe(\"same_values_indexed_entities\", () => {\n    Assert.Equal(left.Length,right.Length);\n    for(int i=0;i<left.Length;i++) Assert.Equal(left[i],right[i]);\n});\nObserve(\"same_values_inferred_immutable_names\", () => Assert.Equal(namesA,namesB));\nbool names = Observe(\"same_values_explicit_name_sequence\", () => Assert.Equal<string>(namesA,namesB));\nvar changed = right.SetItem(1,right[1] with { Tier=3 });\nbool negative = Observe(\"different_scalar_field_indexed_entities\", () => {\n    Assert.Equal(left.Length,changed.Length);\n    for(int i=0;i<left.Length;i++) Assert.Equal(left[i],changed[i]);\n});\nConsole.WriteLine(JsonSerializer.Serialize(new {\n schema=\"laplace.immutable-array-assertion-reproduction/v1\",\n runtime=System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,\n assertionAssembly=typeof(Assert).Assembly.FullName, checks\n},new JsonSerializerOptions{WriteIndented=true}));\nreturn seq && indexed && names && !negative ? 0:1;\npublic readonly record struct Id(ulong Hi,ulong Lo);\npublic sealed record Row(Id Id,byte Tier,Id TypeId,Id? FirstObservedBy);\n")
+          PY
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Execute exact xUnit assertion comparisons
+        shell: bash
+        env:
+          TMPDIR: /build/laplace/work/tmp
+          TMP: /build/laplace/work/tmp
+          TEMP: /build/laplace/work/tmp
+          DOTNET_CLI_HOME: /build/laplace/work/dotnet
+          NUGET_PACKAGES: /build/laplace/work/nuget
+        run: |
+          set -euo pipefail
+          cd /build/laplace/work/immutable-array-reproduction
+          timeout --signal=TERM --kill-after=10s 180s dotnet run --project repro.csproj -c Release --artifacts-path /build/laplace/build/immutable-array-reproduction 2>&1 | tee result.log
+      - name: Retain actual reproduction
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-array-assertion-${{ github.run_id }}
+          path: /build/laplace/work/immutable-array-reproduction
+          if-no-files-found: error
+          retention-days: 30
