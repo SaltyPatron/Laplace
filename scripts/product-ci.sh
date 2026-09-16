@@ -35,12 +35,10 @@ run_dev_tests() {
 
 run_install() {
   python3 scripts/bootstrap-ingest-liveness.py apply --database "${PGDATABASE:-laplace}"
-  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 180
   bash scripts/pipeline.sh install
 }
 
 run_database_maintenance() {
-  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 60
   bash scripts/maintain-installed-database.sh
 }
 
