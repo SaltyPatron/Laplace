@@ -55,7 +55,13 @@ SERIAL_TESTS=0
 
 nproc_n="$(nproc 2>/dev/null || echo 1)"
 export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$nproc_n}"
-export CTEST_PARALLEL_LEVEL="${CTEST_PARALLEL_LEVEL:-$([[ "${LAPLACE_TEST_SERIAL:-0}" == 1 ]] && echo 1 || echo "$nproc_n")}"
+if [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
+  if [[ "${LAPLACE_TEST_SERIAL:-0}" == 1 ]]; then
+    export CTEST_PARALLEL_LEVEL=1
+  else
+    export CTEST_PARALLEL_LEVEL="$nproc_n"
+  fi
+fi
 
 usage() {
   cat <<'EOF'
@@ -173,13 +179,7 @@ phase_clean() {
 phase_codegen() {
   echo "===== PHASE — CODEGEN ====="
   [[ "$SKIP_CODEGEN" != 1 ]] || { echo "codegen skipped by explicit request"; return 0; }
-  if [[ "$FORCE_CODEGEN" == 1 ]]; then
-    "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py"
-  else
-    # The generator is deterministic and cheap relative to the native build; run
-    # it directly instead of maintaining a second mtime/stamp authority.
-    "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py"
-  fi
+  "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py"
 }
 
 phase_build_app() {
@@ -238,26 +238,31 @@ phase_test() {
   bash "$ROOT/scripts/test-parallel.sh" "${args[@]}"
 }
 
-phase_install() {
+phase_install() (
   echo "===== PHASE — INSTALL ====="
   [[ -f "$LAPLACE_BUILD_DIRECTORY/build.ninja" ]] || {
-    echo "::error::native build tree missing; run pipeline.sh build first" >&2; return 1;
+    echo "::error::native build tree missing; run pipeline.sh build first" >&2; exit 1;
   }
-  # Let Ninja prove the native tree is current instead of trusting a custom skip stamp.
   cmake --build "$LAPLACE_BUILD_DIRECTORY"
 
   local library_path_changed=0 server_release_changed=0 path_rc server_rc
-  if postgresql_restart_required; then server_release_changed=1; else server_rc=$?; [[ "$server_rc" == 1 ]] || return "$server_rc"; fi
-  if ensure_extension_library_path; then library_path_changed=1; else path_rc=$?; [[ "$path_rc" == 1 ]] || return "$path_rc"; fi
+  if postgresql_restart_required; then server_release_changed=1; else server_rc=$?; [[ "$server_rc" == 1 ]] || exit "$server_rc"; fi
+  if ensure_extension_library_path; then library_path_changed=1; else path_rc=$?; [[ "$path_rc" == 1 ]] || exit "$path_rc"; fi
 
-  local api_was_active=0 so_before so_after postgres_activation_required
+  local api_was_active=0 so_before so_after postgres_activation_required rc=0
   systemctl is-active --quiet laplace-api 2>/dev/null && api_was_active=1 || true
+  cleanup_install() {
+    rc=$?
+    trap - EXIT
+    if [[ "$api_was_active" == 1 ]]; then sudo -n systemctl start laplace-api || rc=1; fi
+    exit "$rc"
+  }
+  trap cleanup_install EXIT
   [[ "$api_was_active" != 1 ]] || sudo -n systemctl stop laplace-api
-  trap 'rc=$?; trap - RETURN; [[ "$api_was_active" != 1 ]] || sudo -n systemctl start laplace-api || rc=1; return "$rc"' RETURN
 
   so_before=$(preloaded_so_digest)
   cmake --install "$LAPLACE_BUILD_DIRECTORY"
-  [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]] || { echo "::error::core library not installed" >&2; return 1; }
+  [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]] || { echo "::error::core library not installed" >&2; exit 1; }
   so_after=$(preloaded_so_digest)
   postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" == 1 ]]; then
@@ -269,13 +274,13 @@ phase_install() {
   fi
   [[ "$postgres_activation_required" != 1 ]] || restart_postgres "installed native/PostgreSQL image changed"
   if postgresql_restart_required; then
-    echo "::error::running PostgreSQL release still differs after install" >&2; return 1
+    echo "::error::running PostgreSQL release still differs after install" >&2; exit 1
   else
-    server_rc=$?; [[ "$server_rc" == 1 ]] || return "$server_rc"
+    server_rc=$?; [[ "$server_rc" == 1 ]] || exit "$server_rc"
   fi
-  [[ "$api_was_active" != 1 ]] || { sudo -n systemctl start laplace-api; api_was_active=0; }
-  trap - RETURN
-}
+  if [[ "$api_was_active" == 1 ]]; then sudo -n systemctl start laplace-api; api_was_active=0; fi
+  trap - EXIT
+)
 
 phase_migrate() {
   echo "===== PHASE — MIGRATE ($PGDATABASE) ====="
@@ -298,6 +303,7 @@ phase_migrate() {
 
 alter_extension_update() {
   local ext="$1" avail="$2" rc=0 log
+  mkdir -p "${LAPLACE_WORK_ROOT:-/build/laplace/work}"
   log=$(mktemp "${LAPLACE_WORK_ROOT:-/build/laplace/work}/alter-extension.XXXXXX")
   PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
@@ -317,7 +323,7 @@ sync_one_extension() {
   local ext="$1" avail installed bridge
   avail=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='$ext'" | tr -d '[:space:]')
   installed=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c "SELECT extversion FROM pg_extension WHERE extname='$ext'" | tr -d '[:space:]')
-  [[ -n "$avail" ]] || { echo "::error::$ext is not installed on the server" >&2; return 1; }
+  [[ -n "$avail" ]] || { echo "::error::$ext is not available on the server" >&2; return 1; }
   if [[ -z "$installed" ]]; then
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS $ext CASCADE"
     return
@@ -340,6 +346,7 @@ phase_sync_extension() {
   elif [[ "$installed" != "$avail" ]]; then
     bridge="$LAPLACE_EXT_SHAREDIR/laplace_substrate--${installed}--${avail}.sql"
     install -m 664 "$LAPLACE_EXT_SHAREDIR/laplace_substrate_upgrade.sql" "$bridge"
+    mkdir -p "${LAPLACE_WORK_ROOT:-/build/laplace/work}"
     log=$(mktemp "${LAPLACE_WORK_ROOT:-/build/laplace/work}/substrate-update.XXXXXX")
     PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
       psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
@@ -483,8 +490,12 @@ phase_runtime_secrets() {
 
   local mid="${LAPLACE_AUTH_MICROSOFT_CLIENT_ID:-}" msecret="${LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET:-}"
   local gid="${LAPLACE_AUTH_GOOGLE_CLIENT_ID:-}" gsecret="${LAPLACE_AUTH_GOOGLE_CLIENT_SECRET:-}"
-  [[ -z "$mid" == -z "$msecret" ]] || { echo "::error::Microsoft OAuth client id/secret must be paired" >&2; missing=1; }
-  [[ -z "$gid" == -z "$gsecret" ]] || { echo "::error::Google OAuth client id/secret must be paired" >&2; missing=1; }
+  if { [[ -n "$mid" && -z "$msecret" ]] || [[ -z "$mid" && -n "$msecret" ]]; }; then
+    echo "::error::Microsoft OAuth client id/secret must be paired" >&2; missing=1
+  fi
+  if { [[ -n "$gid" && -z "$gsecret" ]] || [[ -z "$gid" && -n "$gsecret" ]]; }; then
+    echo "::error::Google OAuth client id/secret must be paired" >&2; missing=1
+  fi
   dst="$dir/identity.env"
   {
     [[ -z "$mid" ]] || printf 'LAPLACE_AUTH_MICROSOFT_CLIENT_ID=%s\nLAPLACE_AUTH_MICROSOFT_CLIENT_SECRET=%s\n' "$mid" "$msecret"
@@ -527,7 +538,7 @@ while [[ $# -gt 0 ]]; do
     --clean-first) CLEAN_FIRST=1; shift ;;
     --force-rebuild) FORCE_REBUILD=1; shift ;;
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
-    --force-all) shift ;; # accepted for old operator commands; no skip gates remain
+    --force-all) shift ;;
     -h|--help) usage ;;
     clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
       PHASES+=("$1"); shift ;;
