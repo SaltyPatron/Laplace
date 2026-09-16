@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: build
-        options: [build, install, database, applications, deploy, test-dev, test-db, test-live, reconcile, check]
+        options: [provision, build, install, database, applications, deploy, test-dev, test-db, test-live, reconcile, check]
       full_clean:
         description: "build/deploy: wipe build/ before building"
         type: boolean
@@ -45,7 +45,7 @@ jobs:
       cancel-in-progress: false
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
-      LAPLACE_PROVISION_TOOLS: "1"
+      LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
@@ -69,7 +69,7 @@ jobs:
 
       - uses: ./.github/actions/setup-laplace-env
         with:
-          provision_tools: true
+          provision_tools: ${{ inputs.stage == 'provision' }}
 
       - name: Run requested lifecycle under one host reservation
         run: |
