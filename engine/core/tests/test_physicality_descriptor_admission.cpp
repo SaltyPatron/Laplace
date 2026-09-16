@@ -291,6 +291,112 @@ TEST_F(PhysicalityDescriptorAdmission, MixedWriterStagesSelectFirstContentPlacem
     EXPECT_EQ(intent_stage_attestation_count(generated.get()), 5u);
 }
 
+TEST_F(PhysicalityDescriptorAdmission, ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence) {
+    const auto child = composition({atom('A'), atom('B')});
+    const auto parent = composition({child, atom('C')});
+    auto projection = parent;
+    projection.value.type = 3;
+    auto alternate = child;
+    alternate.value.coord[0] += 0.125;
+    hilbert4d_encode(alternate.value.coord, &alternate.value.hilbert_index);
+    auto original = stage({parent, projection, parent}, {-1234567, 0, 1700000000123456});
+    auto retained = capture(original.get());
+    auto released = capture(original.get());
+    ASSERT_NE(retained, nullptr);
+    ASSERT_NE(released, nullptr);
+    const size_t capture_peak = physicality_descriptor_capture_peak_bytes(released.get());
+    const size_t plan_bytes = physicality_descriptor_plan_bytes(physicality_descriptor_capture_plan(released.get()));
+    ASSERT_GT(plan_bytes, 0u);
+    ASSERT_EQ(physicality_descriptor_capture_release_plan(released.get()), plan_bytes);
+    const size_t capture_bytes = physicality_descriptor_capture_bytes(released.get());
+    EXPECT_EQ(physicality_descriptor_capture_bytes(retained.get()), capture_bytes + plan_bytes);
+    auto current = stage({child});
+    auto admitted = stage({child, projection, alternate});
+    auto sources = witnesses(3);
+    sources[2].source_unit_id = hash128_t{1234, 5678};
+    struct Selection {
+        std::vector<const intent_stage_t*> current;
+        std::vector<const intent_stage_t*> admitted;
+        std::vector<hash128_t> missing;
+        physicality_descriptor_status_t status;
+    };
+    const std::array<Selection, 4> selections{{
+        {{}, {admitted.get()}, {}, PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER},
+        {{current.get()}, {admitted.get()}, {}, PHYSICALITY_DESCRIPTOR_OK},
+        {{}, {admitted.get()}, {child.value.entity_id}, PHYSICALITY_DESCRIPTOR_OK},
+        {{}, {}, {child.value.entity_id}, PHYSICALITY_DESCRIPTOR_OK}
+    }};
+    for (size_t selection = 0; selection < selections.size(); ++selection) {
+        SCOPED_TRACE(selection);
+        const auto& selected = selections[selection];
+        Materialization before(nullptr, physicality_descriptor_materialization_free);
+        Materialization after(nullptr, physicality_descriptor_materialization_free);
+        ASSERT_EQ(run(retained, selected.current, selected.admitted, selected.missing, sources, before),
+            selected.status);
+        ASSERT_NE(before, nullptr);
+        const size_t native_peak = physicality_descriptor_materialization_peak_bytes(before.get());
+        // Each independent execution accounts for source capture and the native
+        // materializer together. The original capture peak is still admitted;
+        // no assertion assumes that old peak-minus-one must fail after growth.
+        ASSERT_LE(native_peak, kBudget - capture_bytes);
+        const size_t grant = std::max(capture_peak, capture_bytes + native_peak);
+        ASSERT_EQ(run(released, selected.current, selected.admitted, selected.missing, sources, after,
+            grant - capture_bytes), selected.status);
+        ASSERT_NE(after, nullptr);
+        EXPECT_LE(capture_bytes + physicality_descriptor_materialization_peak_bytes(after.get()), grant);
+        EXPECT_LE(capture_peak, grant);
+        EXPECT_EQ(physicality_descriptor_capture_peak_bytes(released.get()), capture_peak);
+        EXPECT_NE(physicality_descriptor_capture_plan(retained.get()), nullptr);
+        EXPECT_EQ(physicality_descriptor_capture_plan(released.get()), nullptr);
+        size_t before_count = 0, after_count = 0;
+        const auto* before_pending = physicality_descriptor_materialization_pending(before.get(), &before_count);
+        const auto* after_pending = physicality_descriptor_materialization_pending(after.get(), &after_count);
+        ASSERT_EQ(before_count, after_count);
+        if (selected.status == PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER) ASSERT_GT(before_count, 0u);
+        for (size_t i = 0; i < before_count; ++i)
+            EXPECT_TRUE(hash128_equals(&before_pending[i], &after_pending[i]));
+        const auto* before_missing = physicality_descriptor_materialization_missing(before.get(), &before_count);
+        const auto* after_missing = physicality_descriptor_materialization_missing(after.get(), &after_count);
+        ASSERT_EQ(before_count, after_count);
+        if (selection == 3u) ASSERT_GT(before_count, 0u);
+        for (size_t i = 0; i < before_count; ++i)
+            EXPECT_TRUE(hash128_equals(&before_missing[i], &after_missing[i]));
+        const auto* before_forms = physicality_descriptor_materialization_forms(before.get(), &before_count);
+        const auto* after_forms = physicality_descriptor_materialization_forms(after.get(), &after_count);
+        ASSERT_EQ(before_count, after_count);
+        if (selected.status == PHYSICALITY_DESCRIPTOR_OK) ASSERT_EQ(before_count, 3u);
+        for (size_t i = 0; i < before_count; ++i) {
+            EXPECT_TRUE(hash128_equals(&before_forms[i].descriptor_id, &after_forms[i].descriptor_id));
+            EXPECT_EQ(before_forms[i].view_state, after_forms[i].view_state);
+            if (before_forms[i].view_state == PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE)
+                EXPECT_TRUE(hash128_equals(&before_forms[i].view_id, &after_forms[i].view_id));
+            EXPECT_EQ(before_forms[i].missing_first, after_forms[i].missing_first);
+            EXPECT_EQ(before_forms[i].missing_count, after_forms[i].missing_count);
+        }
+        Stage before_stage(physicality_descriptor_materialization_take_stage(before.get()), intent_stage_free);
+        Stage after_stage(physicality_descriptor_materialization_take_stage(after.get()), intent_stage_free);
+        if (selected.status == PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER) {
+            EXPECT_EQ(before_stage, nullptr);
+            EXPECT_EQ(after_stage, nullptr);
+            continue;
+        }
+        ASSERT_NE(before_stage, nullptr);
+        ASSERT_NE(after_stage, nullptr);
+        EXPECT_EQ(intent_stage_attestation_count(before_stage.get()), 3u);
+        // Compare actual COPY bytes, including all timestamps and occurrences;
+        // the semantic digest alone deliberately excludes observation time.
+        for (const auto table : {INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_PHYSICALITIES,
+                                INTENT_STAGE_TABLE_ATTESTATIONS}) {
+            size_t before_bytes = 0, after_bytes = 0;
+            const auto* before_data = intent_stage_tuple_ptr(before_stage.get(), table, &before_bytes);
+            const auto* after_data = intent_stage_tuple_ptr(after_stage.get(), table, &after_bytes);
+            ASSERT_EQ(before_bytes, after_bytes);
+            ASSERT_GT(before_bytes, 0u);
+            EXPECT_EQ(std::memcmp(before_data, after_data, before_bytes), 0);
+        }
+    }
+}
+
 TEST_F(PhysicalityDescriptorAdmission, ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict) {
     const auto child = composition({atom('A'), atom('B')});
     const auto parent = composition({child, atom('C')});

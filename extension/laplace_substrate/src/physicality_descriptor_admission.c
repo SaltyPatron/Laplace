@@ -655,6 +655,10 @@ static void admission_materialize(admission_state *s,
                           source_count, s->stored_vertices)));
     }
     admission_native_peak(s, physicality_descriptor_capture_peak_bytes(s->capture));
+    /* This owner retains the fully validated source rows for materialization,
+     * not their preliminary plan. Preserve the observed capture peak and all
+     * logical-work charges; only its retained allocation is reduced. */
+    physicality_descriptor_capture_release_plan(s->capture);
     admission_charge(s, physicality_descriptor_capture_bytes(s->capture));
 
     s->snapshot = RegisterSnapshot(GetActiveSnapshot());

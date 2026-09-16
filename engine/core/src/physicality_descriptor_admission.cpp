@@ -175,6 +175,10 @@ physicality_descriptor_status_t materialize(
         const auto status = physicality_descriptor_capture_stages(current_stages, stage_count,
             &vocabulary.basis, &limits, memory.remaining(), &current.value);
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
+        /* Full validation has completed, including bodies excluded from provider
+         * selection. Keep decoded rows/trajectories and the original peak, but
+         * retire this unused plan before the next native allocation. */
+        physicality_descriptor_capture_release_plan(current.value);
         current.account(physicality_descriptor_capture_bytes(current.value),
             physicality_descriptor_capture_peak_bytes(current.value));
     }
@@ -186,6 +190,10 @@ physicality_descriptor_status_t materialize(
         const auto status = physicality_descriptor_capture_stages(admitted_stages, admitted_stage_count,
             &vocabulary.basis, &limits, memory.remaining(), &admitted.value);
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
+        /* Full validation has completed, including bodies excluded from provider
+         * selection. Keep decoded rows/trajectories and the original peak, but
+         * retire this unused plan before the next native allocation. */
+        physicality_descriptor_capture_release_plan(admitted.value);
         admitted.account(physicality_descriptor_capture_bytes(admitted.value),
             physicality_descriptor_capture_peak_bytes(admitted.value));
     }

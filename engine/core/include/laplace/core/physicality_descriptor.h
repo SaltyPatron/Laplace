@@ -161,7 +161,15 @@ physicality_descriptor_status_t physicality_descriptor_capture_stages(
     size_t maximum_capture_bytes,
     physicality_descriptor_capture_t** out_capture);
 void physicality_descriptor_capture_free(physicality_descriptor_capture_t* capture);
-/* Total retained capture + owned plan allocation; maximum_capture_bytes caps
+/* Exclusive-owner lifetime operation after capture_stages has fully validated
+ * every input. Frees only the plan and returns its exact retained payload bytes.
+ * Inputs, decoded trajectories and observations remain valid until capture_free;
+ * all borrowed plan pointers become invalid and capture_plan returns NULL.
+ * Null captures and repeated calls return zero. The retained byte count shrinks;
+ * the historical capture peak is unchanged. This does not refund validation
+ * work or reduce the peak needed to construct the original capture. */
+size_t physicality_descriptor_capture_release_plan(physicality_descriptor_capture_t* capture);
+/* Total retained capture + any still-owned plan allocation; maximum_capture_bytes caps
  * this combined allocation. Borrowed stages and allocator bookkeeping excluded. */
 size_t physicality_descriptor_capture_bytes(const physicality_descriptor_capture_t* capture);
 /* Peak capture plus owned plan payload, including transient plan growth;
