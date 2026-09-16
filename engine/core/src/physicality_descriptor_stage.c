@@ -220,7 +220,7 @@ void physicality_descriptor_capture_free(physicality_descriptor_capture_t* captu
     free(capture);
 }
 
-static physicality_descriptor_status_t capture_stage_rows_cancelable(
+physicality_descriptor_status_t physicality_descriptor_capture_stage_rows_cancelable(
     const intent_stage_t* const* stages, size_t stage_count,
     size_t maximum_capture_bytes, const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_capture_t** out_capture) {
@@ -302,7 +302,7 @@ static physicality_descriptor_status_t capture_stage_rows_cancelable(
 physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
     const intent_stage_t* const* stages, size_t stage_count,
     size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture) {
-    return capture_stage_rows_cancelable(stages, stage_count, maximum_capture_bytes, NULL, out_capture);
+    return physicality_descriptor_capture_stage_rows_cancelable(stages, stage_count, maximum_capture_bytes, NULL, out_capture);
 }
 
 physicality_descriptor_status_t physicality_descriptor_capture_stages(
@@ -327,7 +327,7 @@ physicality_descriptor_status_t physicality_descriptor_capture_stages_cancelable
     *out_capture = NULL;
     if (!physicality_descriptor_basis_is_valid(basis) || plan_limits == NULL)
         return PHYSICALITY_DESCRIPTOR_INVALID;
-    status = capture_stage_rows_cancelable(
+    status = physicality_descriptor_capture_stage_rows_cancelable(
         stages, stage_count, maximum_capture_bytes, cancellation, &capture);
     if (status != PHYSICALITY_DESCRIPTOR_OK) return status;
     remaining_limits = *plan_limits;
