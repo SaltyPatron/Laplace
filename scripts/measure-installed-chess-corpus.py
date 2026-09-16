@@ -233,6 +233,7 @@ def run(args, owner=None):
         proof["sourceFile"] = source
         proof["databaseTarget"] = phase("database-target", database_target)
         command("native-before", [sys.executable, ROOT / "scripts/check-application-runtime.py",
+                                  "--purpose", "recording",
                                   "--snapshot", args.output_dir / "native-before.json"], 240)
         native_bound = True
         command("cli-build", ["dotnet", "build", ROOT / "app/Laplace.Cli/Laplace.Cli.csproj",
@@ -268,6 +269,7 @@ def run(args, owner=None):
         if native_bound:
             try:
                 command("native-after", [sys.executable, ROOT / "scripts/check-application-runtime.py",
+                        "--purpose", "recording",
                         "--compare", args.output_dir / "native-before.json",
                         "--snapshot", args.output_dir / "native-after.json"], 240)
             except BaseException as error:
