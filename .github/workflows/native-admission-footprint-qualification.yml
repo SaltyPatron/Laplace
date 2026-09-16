@@ -29,7 +29,7 @@ jobs:
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
           import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
           from pathlib import Path
-          sha = "16d4f2690f9103af8c65c3c9d0551cd4af93aa04"
+          sha = "75e5e07a49120c0922dce5786fb6d0d8e1eb770e"
           request = urllib.request.Request(
               "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
               headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
@@ -55,6 +55,8 @@ jobs:
           assert not any("physicality_descriptor.c" in pin or "physicality_descriptor_admission.cpp" in pin for pin in pins)
           assert "--exclusive --no-fork" in native_program
           assert native_program.index("flock --exclusive") < native_program.index("git fetch")
+          assert "phase authentic-corpus-recording" not in native_program
+          assert "python3 scripts/measure-installed-chess-corpus.py --mode measure" in native_program
           outer = inner = python = 0
           for job in document["jobs"].values():
               for step in job["steps"]:
