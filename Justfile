@@ -75,17 +75,17 @@ clean-all: clean
 launch-db:
     sudo systemctl start laplace-postgresql.service
 
-db-up: build-migrations
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
+db-up:
+    scripts/db-migrations.sh up
 
-db-status: build-migrations
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- status
+db-status:
+    scripts/db-migrations.sh status
 
-db-reset: build-migrations
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- reset
+db-reset:
+    scripts/db-migrations.sh reset
 
-db-nuke: build-migrations
-    cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
+db-nuke:
+    scripts/db-migrations.sh nuke
 
 migrate-new name:
     #!/usr/bin/env bash
@@ -102,15 +102,15 @@ migrate-new name:
 seed-t0: build
     scripts/ingest-source.sh unicode
 
-db-fresh: build install
+db-fresh:
     set -euo pipefail
-    cd app
-    dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke --yes
-    dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
-    cd ..
+    scripts/db-migrations.sh nuke --yes
+    scripts/db-migrations.sh up
     bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
-    scripts/ingest-source.sh unicode
-    echo "db-fresh: current runtime, fresh database, Unicode admitted"
+    bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+    echo "db-fresh: database recreated from the prepared runtime; no build or ingest was performed"
+
+db-fresh-foundation: db-fresh seed-t0
 
 setup: launch-db db-up seed-t0
     @echo "Laplace ready. Try: just query 'SELECT laplace_version();'"
