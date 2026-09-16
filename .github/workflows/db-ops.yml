@@ -160,12 +160,12 @@ jobs:
 
       - name: Admit required lexical foundation
         if: inputs.operation == 'recreate'
-        timeout-minutes: 450
+        timeout-minutes: 360
         run: bash scripts/ensure-foundation.sh --required-lexical
 
       - name: Restore canonical foundation (explicit opt-in)
         if: inputs.operation == 'recreate' && inputs.restore_foundation
-        timeout-minutes: 450
+        timeout-minutes: 360
         run: |
           bash scripts/ensure-foundation.sh
           bash scripts/check-substrate-floor.sh "${{ inputs.database }}"
