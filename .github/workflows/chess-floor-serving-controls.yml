@@ -1,127 +1,47 @@
-name: Observe and preserve the actual authoritative checkout state
+name: Observe canonical ingest SQL capability and ownership
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
 permissions:
   contents: read
 jobs:
-  inventory:
+  probe:
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 4
+    timeout-minutes: 3
     steps:
-      - name: Inventory exact dirty paths and preserve tracked bytes
+      - name: Observe canonical ingest SQL capability and ownership
         shell: bash
         run: |
           set -euo pipefail
-          export SOURCE_EVIDENCE="/build/laplace/recovery/source-inventory/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -p "$SOURCE_EVIDENCE"
-          chmod 0700 "$SOURCE_EVIDENCE"
-          echo "SOURCE_EVIDENCE=$SOURCE_EVIDENCE" >> "$GITHUB_ENV"
-          timeout --signal=TERM --kill-after=5s 150s python3 -B - <<'PY'
-          import hashlib,json,os,pathlib,shutil,stat,subprocess,time
-          root=pathlib.Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          out=pathlib.Path(os.environ["SOURCE_EVIDENCE"])
-          private=out/"private"
-          private.mkdir(mode=0o700)
-          def git(*args):
-              result=subprocess.run(["git",*args],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
-              if result.returncode:
-                  raise RuntimeError("git command failed: "+args[0]+" rc="+str(result.returncode))
-              if len(result.stdout)>8*1024*1024: raise RuntimeError("git metadata budget exceeded")
-              return result.stdout
-          def tree(revision):
-              rows={}
-              for entry in git("ls-tree","-r","-z",revision).split(b"\0"):
-                  if not entry: continue
-                  meta,path=entry.split(b"\t",1)
-                  mode,kind,sha=meta.decode().split()
-                  rows[os.fsdecode(path)]={"mode":mode,"type":kind,"blob":sha}
-              return rows
-          initial=git("rev-parse","HEAD").decode().strip()
-          git("fetch","--no-tags","origin","main")
-          target=git("rev-parse","--verify","FETCH_HEAD^{commit}").decode().strip()
-          headtree=tree(initial)
-          targettree=tree(target)
-          tracked=set(os.fsdecode(x) for x in git("diff","--name-only","-z","HEAD").split(b"\0") if x)
-          tracked.update(os.fsdecode(x) for x in git("diff","--cached","--name-only","-z","HEAD").split(b"\0") if x)
-          untracked=set(os.fsdecode(x) for x in git("ls-files","--others","--exclude-standard","-z").split(b"\0") if x)
-          selected=sorted(tracked|untracked)
-          proof={"schema":"laplace.checkout-inventory/v1","observedUtc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
-                 "checkout":str(root),"head":initial,"latestMain":target,"latestTree":git("rev-parse",target+"^{tree}").decode().strip(),
-                 "trackedCount":len(tracked),"untrackedCount":len(untracked),"rows":[],"reconciliation":"not_attempted"}
-          if len(selected)>256:
-              proof["truncated"]=True
-              selected=selected[:256]
-          total_backup=0
-          for name in selected:
-              path=root/name
-              if pathlib.PurePosixPath(name).is_absolute() or ".." in pathlib.PurePosixPath(name).parts:
-                  raise RuntimeError("non-relative Git path")
-              row={"path":name,"trackedDirty":name in tracked,"untracked":name in untracked,
-                   "headEntry":headtree.get(name),"latestMainEntry":targettree.get(name)}
-              try:
-                  info=path.lstat()
-              except FileNotFoundError:
-                  row.update(kind="missing",equalsLatestMain=targettree.get(name) is None)
-                  proof["rows"].append(row)
-                  continue
-              row.update(uid=info.st_uid,gid=info.st_gid,mode=oct(stat.S_IMODE(info.st_mode)),bytes=info.st_size)
-              if path.is_symlink():
-                  payload=os.fsencode(os.readlink(path))
-                  row.update(kind="symlink",gitMode="120000")
-              elif stat.S_ISREG(info.st_mode):
-                  row.update(kind="file",gitMode="100755" if info.st_mode&0o111 else "100644")
-                  if info.st_size>16*1024*1024:
-                      row.update(hashUnavailable="file exceeds 16MiB inventory budget",equalsLatestMain=False)
-                      proof["rows"].append(row)
-                      continue
-                  payload=path.read_bytes()
-                  if len(payload)!=info.st_size: raise RuntimeError("file changed while inventorying: "+name)
-              else:
-                  row.update(kind="other",equalsLatestMain=False)
-                  proof["rows"].append(row)
-                  continue
-              row["sha256"]=hashlib.sha256(payload).hexdigest()
-              row["gitBlob"]=hashlib.sha1(b"blob "+str(len(payload)).encode()+b"\0"+payload).hexdigest()
-              expected=targettree.get(name)
-              row["equalsLatestMain"]=bool(expected and expected["blob"]==row["gitBlob"] and expected["mode"]==row["gitMode"])
-              if name in tracked:
-                  total_backup+=len(payload)
-                  if total_backup>64*1024*1024: raise RuntimeError("tracked backup budget exceeded")
-                  backup=private/("tracked-"+str(len(proof["rows"]))+".bytes")
-                  backup.write_bytes(payload)
-                  backup.chmod(0o600)
-                  row["preservedBytes"]=str(backup.relative_to(out))
-              proof["rows"].append(row)
-          proof["sourceStable"]=git("rev-parse","HEAD").decode().strip()==initial
-          (out/"inventory.json").write_text(json.dumps(proof,indent=2)+"\n")
-          print("CHECKOUT_INVENTORY "+json.dumps(proof),flush=True)
-          # Only exact bytes already committed to selected main may be reconciled. A
-          # normal checkout (never force/reset/clean/stash) retains Git's collision checks.
-          if (proof["sourceStable"] and not proof.get("truncated") and not untracked
-                  and all(row.get("equalsLatestMain") for row in proof["rows"])):
-              for row in proof["rows"]:
-                  path=root/row["path"]
-                  if row.get("kind")=="missing":
-                      if path.exists() or path.is_symlink(): raise RuntimeError("missing path changed")
-                  elif row.get("kind")=="symlink":
-                      if hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()!=row["sha256"]: raise RuntimeError("link changed")
-                  elif hashlib.sha256(path.read_bytes()).hexdigest()!=row["sha256"]: raise RuntimeError("source changed")
-              git("checkout","--detach",target)
-              proof["reconciliation"]="normal_checkout_of_byte_identical_committed_main"
-              proof["afterHead"]=git("rev-parse","HEAD").decode().strip()
-              proof["afterStatus"]=git("status","--porcelain","--untracked-files=normal").decode(errors="replace")
-              (out/"inventory.json").write_text(json.dumps(proof,indent=2)+"\n")
-              print("CHECKOUT_RECONCILIATION "+json.dumps({"head":proof["afterHead"],"status":proof["afterStatus"],"method":proof["reconciliation"]}),flush=True)
-          else:
-              print("CHECKOUT_PRESERVED unique or untracked state requires exact owner diagnosis",flush=True)
+          export PROBE_EVIDENCE="/build/laplace/recovery/ingest-capability/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$PROBE_EVIDENCE"
+          chmod 0700 "$PROBE_EVIDENCE"
+          echo "PROBE_EVIDENCE=$PROBE_EVIDENCE" >> "$GITHUB_ENV"
+          timeout --signal=TERM --kill-after=5s 30s python3 -B - <<'PY'
+          import hashlib,json,os,pathlib,subprocess
+          out=pathlib.Path(os.environ["PROBE_EVIDENCE"])
+          sql="SELECT jsonb_build_object(\n'database',current_database(),'current_user',current_user,'server_version_num',current_setting('server_version_num'),\n'extension',(SELECT jsonb_build_object('oid',e.oid,'version',e.extversion,'schema',n.nspname,'owner',r.rolname,'caller_superuser',(SELECT rolsuper FROM pg_roles WHERE rolname=current_user)) FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace JOIN pg_roles r ON r.oid=e.extowner WHERE e.extname='laplace_substrate'),\n'schemas',(SELECT jsonb_agg(jsonb_build_object('name',n.nspname,'owner',pg_get_userbyid(n.nspowner),'extension',e.extname)) FROM pg_namespace n LEFT JOIN pg_depend d ON d.classid='pg_namespace'::regclass AND d.objid=n.oid AND d.refclassid='pg_extension'::regclass AND d.deptype='e' LEFT JOIN pg_extension e ON e.oid=d.refobjid WHERE n.nspname IN ('laplace','ops')),\n'tables',(SELECT jsonb_agg(jsonb_build_object('name',c.oid::regclass::text,'owner',pg_get_userbyid(c.relowner),'kind',c.relkind,'extension',e.extname,'columns',(SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',format_type(a.atttypid,a.atttypmod),'notnull',a.attnotnull)) FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped))) FROM pg_class c LEFT JOIN pg_depend d ON d.classid='pg_class'::regclass AND d.objid=c.oid AND d.refclassid='pg_extension'::regclass AND d.deptype='e' LEFT JOIN pg_extension e ON e.oid=d.refobjid WHERE c.oid IN (to_regclass('laplace.ingest_run_journal'),to_regclass('laplace.ingest_file_journal'))),\n'functions',(SELECT jsonb_agg(jsonb_build_object('name',s.signature,'present',p.oid IS NOT NULL,'owner',pg_get_userbyid(p.proowner),'extension',e.extname,'result',pg_get_function_result(p.oid))) FROM (VALUES ('ops.ingest_run_live(uuid,interval)'),('ops.ingest_run_touch()'),('ops.ingest_file_touch_run()'),('ops.ingest_reconcile_orphans(interval)'),('ops.ingest_runs(integer)'),('laplace.ingest_runs(integer)')) s(signature) LEFT JOIN pg_proc p ON p.oid=to_regprocedure(s.signature) LEFT JOIN pg_depend d ON d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.refclassid='pg_extension'::regclass AND d.deptype='e' LEFT JOIN pg_extension e ON e.oid=d.refobjid),\n'triggers',(SELECT jsonb_agg(jsonb_build_object('table',t.tgrelid::regclass::text,'name',t.tgname,'function',t.tgfoid::regprocedure::text)) FROM pg_trigger t WHERE NOT t.tgisinternal AND t.tgrelid IN (to_regclass('laplace.ingest_run_journal'),to_regclass('laplace.ingest_file_journal'))));\n"
+          data=sql.encode()
+          assert hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()=="ea3b275d013c3cef7d451e5258500f93dd09a031"
+          path=out/"probe.sql"
+          path.write_text("BEGIN READ ONLY;\nSET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='1s';\n"+sql+"\nROLLBACK;\n")
+          result=subprocess.run(["/opt/laplace/pgsql-18/bin/psql","-X","-q","-v","ON_ERROR_STOP=1","-h","/var/run/postgresql","-d","laplace","-U","laplace_admin","-tAX","-f",str(path)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+          (out/"probe.stdout").write_bytes(result.stdout)
+          (out/"probe.stderr").write_bytes(result.stderr)
+          print("PROBE_EXIT",result.returncode,flush=True)
+          if result.returncode:
+           print(result.stderr.decode(errors="replace"),flush=True)
+           raise SystemExit(result.returncode)
+          payload=json.loads(result.stdout)
+          (out/"probe.json").write_text(json.dumps(payload,indent=2)+"\n")
+          print("CANONICAL_INGEST_PROBE "+json.dumps(payload),flush=True)
           
           PY
-      - name: Retain source inventory and preserved bytes
+      - name: Retain exact capability observation
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: original-source-inventory-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.SOURCE_EVIDENCE }}/
+          name: original-ingest-capability-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PROBE_EVIDENCE }}/
           if-no-files-found: error
           retention-days: 30
