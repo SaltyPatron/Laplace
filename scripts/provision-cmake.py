@@ -116,6 +116,35 @@ def extract(archive, destination, lock):
     return destination / top
 
 
+
+def create_package_namespace(root):
+    # Bootstrap may run as root with umask 077. Make only directories created
+    # for this public tool namespace traversable by the later runner; leave
+    # existing shared/private ancestors and their ownership/modes unchanged.
+    missing = []
+    current = root
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for path in reversed(missing):
+        try:
+            path.mkdir()
+        except FileExistsError:
+            if not path.is_dir():
+                raise
+        else:
+            path.chmod((path.stat().st_mode & 0o7777) | 0o555)
+
+
+def make_candidate_directories_readable(candidate):
+    # All these directories belong to our new unpublished package. Archive
+    # files retain their authenticated modes; implicit archive directories
+    # must not inherit a root-only umask.
+    for path in (candidate, *candidate.rglob("*")):
+        if path.is_dir() and not path.is_symlink():
+            path.chmod((path.stat().st_mode & 0o7777) | 0o555)
+
+
 def select(root, work, lock, ensure=False):
     if platform.system() != lock["platform"] or platform.machine().lower() not in ("x86_64", "amd64"):
         raise RuntimeError("this CMake distribution is pinned for Linux x86_64")
@@ -127,7 +156,7 @@ def select(root, work, lock, ensure=False):
         raise RuntimeError(f"pinned CMake is not installed: {generation}; run setup-host")
     work = work.absolute()
     work.mkdir(parents=True, exist_ok=True)
-    root.mkdir(parents=True, exist_ok=True)
+    create_package_namespace(root)
     # Callers already own the shared host reservation; independent private names
     # keep an interrupted acquisition from replacing an existing generation.
     with tempfile.TemporaryDirectory(prefix="cmake-download-", dir=work) as temporary:
@@ -135,10 +164,13 @@ def select(root, work, lock, ensure=False):
         acquire(archive, lock)
         with tempfile.TemporaryDirectory(prefix=".cmake-pending-", dir=root) as stage:
             candidate = extract(archive, Path(stage), lock)
+            make_candidate_directories_readable(candidate)
             versions(candidate, lock)
             receipt = {"schema": "laplace.cmake-install/v1", "release": lock,
                        "files": inventory(candidate)}
-            (candidate / RECEIPT).write_text(json.dumps(receipt, sort_keys=True) + "\n")
+            receipt_path = candidate / RECEIPT
+            receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n")
+            receipt_path.chmod(0o644)
             if generation.exists() or generation.is_symlink():
                 return verify(generation, lock)
             os.rename(candidate, generation)
