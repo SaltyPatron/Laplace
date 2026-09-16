@@ -6,8 +6,10 @@ import importlib.util
 import json
 from pathlib import Path
 import signal
+import threading
 import tempfile
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 
@@ -47,7 +49,7 @@ class RetainedIngestionTests(unittest.TestCase):
     def test_one_deadline_clips_each_request_and_forbids_expired_work(self):
         observed = []
         client = bench.DeadlineClient("http://127.0.0.1:8080", 30, 100)
-        def request(instance, path, data=None, raw=False):
+        def request(instance, path, data=None, raw=False, maximum_bytes=bench.transport.MAX_BYTES):
             observed.append((path, instance.timeout)); return {"ok": True}
         with patch.object(bench.transport.Client, "request", request), patch.object(bench.time, "monotonic", side_effect=[97, 98]):
             client.request("/ingest", {})
@@ -59,6 +61,89 @@ class RetainedIngestionTests(unittest.TestCase):
         with patch.object(bench.transport.Client, "request", request), patch.object(bench.time, "monotonic", return_value=101):
             client.stop_owned("owned")
         self.assertEqual(("/chess/lab/stop/owned", 5), observed[-1])
+
+    def test_real_http_failure_retains_new_service_receipt_without_retry_or_error_body(self):
+        job_id = "a" * 32
+        old, new = "ingest-" + "1" * 32 + ".json", "ingest-" + "2" * 32 + ".json"
+        requests = []
+        body = json.dumps({"schema": "laplace.chess-retained-ingestion/v1", "jobId": job_id,
+                           "recording": {"status": "failed", "error": "exact witness failure"}}).encode()
+        class Handler(BaseHTTPRequestHandler):
+            failed = False
+            def log_message(self, *_): pass
+            def send(self, status, payload):
+                self.send_response(status); self.send_header("Content-Length", str(len(payload)))
+                self.end_headers(); self.wfile.write(payload)
+            def do_POST(self):
+                requests.append(("POST", self.path)); Handler.failed = True
+                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                self.send(500, b"untrusted HTTP error body must not enter evidence")
+            def do_GET(self):
+                requests.append(("GET", self.path))
+                if self.path.endswith("/artifact/" + new): self.send(200, body)
+                else:
+                    artifacts = {old: "/server/old"}
+                    if Handler.failed: artifacts[new] = "/server/new"
+                    self.send(200, json.dumps({"id": job_id, "artifacts": artifacts}).encode())
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            client = bench.DeadlineClient(f"http://127.0.0.1:{server.server_port}", 5, bench.time.monotonic() + 10)
+            with tempfile.TemporaryDirectory() as directory:
+                output, report = Path(directory), {"attempts": []}
+                with self.assertRaisesRegex(ValueError, "HTTP 500"):
+                    bench.request_ingestion(client, output, report, job_id, 0)
+                self.assertEqual(body, (output / new).read_bytes())
+                self.assertFalse((output / old).exists())
+                self.assertEqual([], report["attempts"])
+                self.assertTrue(report["failedIngestion"]["collectionCompleted"])
+                self.assertEqual(hashlib.sha256(body).hexdigest(), report["failedIngestion"]["artifacts"][0]["sha256"])
+                self.assertNotIn("untrusted HTTP error body", json.dumps(report))
+                self.assertEqual(1, sum(method == "POST" for method, _ in requests))
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_failure_evidence_cannot_override_original_error_or_escape_receipt_scope(self):
+        job_id, requests = "a" * 32, []
+        class Client:
+            def request(self, path, data=None, **_):
+                requests.append(path)
+                if path.endswith("/ingest"): raise ValueError("original HTTP 500")
+                if len(requests) == 1: return {"id": job_id, "artifacts": {}}
+                raise ValueError("recovery deadline expired")
+        with tempfile.TemporaryDirectory() as directory:
+            report = {"attempts": []}
+            with self.assertRaisesRegex(ValueError, "original HTTP 500"):
+                bench.request_ingestion(Client(), Path(directory), report, job_id, 1)
+            self.assertFalse(report["failedIngestion"]["collectionCompleted"])
+            self.assertEqual("recovery deadline expired", report["failedIngestion"]["collectionError"])
+            self.assertEqual([], report["attempts"])
+        self.assertEqual(set(), bench.ingestion_artifacts(
+            {"id": job_id, "artifacts": {"../ingest-" + "1" * 32 + ".json": "/irrelevant"}}, job_id))
+        with self.assertRaisesRegex(ValueError, "identity"):
+            bench.ingestion_artifacts({"id": "b" * 32, "artifacts": {}}, job_id)
+
+    def test_failed_receipt_inventory_and_body_are_bounded_and_bound_to_the_job(self):
+        job_id, name = "a" * 32, "ingest-" + "1" * 32 + ".json"
+        with self.assertRaisesRegex(ValueError, "retention bound"):
+            bench.ingestion_artifacts({"id": job_id,
+                "artifacts": {f"ingest-{n:032x}.json": "ignored" for n in range(33)}}, job_id)
+        for wrong_identity in (False, True):
+            calls = []
+            class Client:
+                def request(self, path, data=None, **kwargs):
+                    calls.append((path, kwargs.get("maximum_bytes")))
+                    if path.endswith("/ingest"): raise ValueError("original HTTP 500")
+                    if "/artifact/" in path:
+                        if not wrong_identity: raise ValueError("API artifact exceeds collector byte envelope")
+                        return json.dumps({"schema": "laplace.chess-retained-ingestion/v1", "jobId": "b" * 32}).encode()
+                    return {"id": job_id, "artifacts": {} if len(calls) == 1 else {name: "ignored"}}
+            with tempfile.TemporaryDirectory() as directory:
+                report = {}
+                with self.assertRaisesRegex(ValueError, "original HTTP 500"):
+                    bench.request_ingestion(Client(), Path(directory), report, job_id, 0)
+                self.assertFalse(report["failedIngestion"]["collectionCompleted"])
+                self.assertEqual(bench.MAX_FAILURE_EVIDENCE_BYTES, calls[-1][1])
 
     def test_request_finishing_after_deadline_is_not_accepted(self):
         client = bench.DeadlineClient("http://127.0.0.1:8080", 30, 100)

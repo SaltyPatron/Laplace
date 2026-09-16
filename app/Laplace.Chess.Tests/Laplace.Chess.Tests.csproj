@@ -19,4 +19,8 @@
     <ProjectReference Include="..\Laplace.Chess.Uci\Laplace.Chess.Uci.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures/position-playing-game-*.pgn" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -61,6 +61,23 @@ public sealed class UciEngineTests
     }
 
     [Fact]
+    public void RecordedGauntletTerminalOpening_ReportsMateAndNoMove()
+    {
+        // Retained experiment 7ca360011672441d983ec35e53b6b8e9, games 15/16:
+        // Cute Chess sent this already-checkmated EPD position, then go depth 4.
+        const string fen = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 0 1";
+        var board = Board.FromFen(fen);
+        Assert.True(MoveGen.InCheck(board, board.WhiteToMove));
+        Assert.Empty(MoveGen.Legal(board));
+
+        var outp = Run("debug on", "ucinewgame", "position fen " + fen, "isready", "go depth 4");
+        Assert.Contains("readyok", outp);
+        Assert.Contains("info depth 0 score mate 0 nodes 0", outp);
+        Assert.Equal("0000", BestMove(outp));
+        Assert.DoesNotContain("search failed", outp);
+    }
+
+    [Fact]
     public void BareGo_FromStart_ReturnsLegalOpeningMove()
     {
         var outp = Run("position startpos", "go");

@@ -117,6 +117,54 @@ TEST(PhysicalityDescriptorTransport, LogicalPreflightCountsRunsWithoutExpandingT
     EXPECT_EQ(bodies, 2u); EXPECT_EQ(vertices, 2u); EXPECT_EQ(logical, 131070u);
 }
 
+TEST(PhysicalityDescriptorTransport, SingleStoredRunUsesPointAndRejectsOneVertexLineString) {
+    const hash128_t children[] = {kEntity, kEntity};
+    double packed[8];
+    size_t stored = 0;
+    ASSERT_EQ(trajectory_build_rle(children, 2, packed, &stored), 0);
+    ASSERT_EQ(stored, 1u);
+    hash128_t entity, placement;
+    size_t logical = 0;
+    ASSERT_EQ(trajectory_content_identity(packed, stored, &entity, &logical), 0);
+    ASSERT_EQ(logical, 2u);
+    laplace_physicality_id_compute(entity, 1, &placement);
+    Stage original(intent_stage_new(1), intent_stage_free);
+    const double coordinate[4] = {0.125, 0.25, 0.375, 0.5};
+    hilbert128_t hilbert;
+    hilbert4d_encode(coordinate, &hilbert);
+    ASSERT_EQ(intent_stage_add_physicality(original.get(), &placement, &entity, 1,
+        coordinate, &hilbert, packed, 1, 2, 1, 0.0, 1, 0, 42), 0);
+    const intent_stage_t* stages[] = {original.get()};
+    size_t bodies = 0, vertices = 0;
+    ASSERT_EQ(physicality_descriptor_stages_preflight(stages, 1, 2,
+        &bodies, &vertices, &logical), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(bodies, 1u); EXPECT_EQ(vertices, 1u); EXPECT_EQ(logical, 2u);
+    auto frame = tuples(original.get(), INTENT_STAGE_TABLE_PHYSICALITIES);
+    size_t at = 2, trajectory_length_at = 0, trajectory_at = 0;
+    for (unsigned column = 0; column <= 5; ++column) {
+        const uint32_t length = (uint32_t(frame[at]) << 24u) | (uint32_t(frame[at+1]) << 16u) |
+            (uint32_t(frame[at+2]) << 8u) | frame[at+3];
+        if (column == 5) {
+            trajectory_length_at = at; trajectory_at = at + 4;
+            ASSERT_EQ(length, 37u);
+        }
+        at += 4;
+        if (length != UINT32_MAX) at += length;
+    }
+    const std::array<uint8_t,5> point{{1,1,0,0,0xc0}};
+    ASSERT_EQ(std::memcmp(frame.data()+trajectory_at, point.data(), point.size()), 0);
+    frame[trajectory_length_at+3] = 41;
+    frame[trajectory_at+1] = 2;
+    frame.insert(frame.begin()+static_cast<std::ptrdiff_t>(trajectory_at+5), {1,0,0,0});
+    intent_stage_t* raw = nullptr;
+    ASSERT_EQ(intent_stage_from_tuple_bytes(nullptr, 0, frame.data(), frame.size(),
+        nullptr, 0, kBudget, &raw), 0); // Framing is valid, typed geometry is not.
+    Stage malformed(raw, intent_stage_free);
+    stages[0] = malformed.get();
+    EXPECT_EQ(physicality_descriptor_stages_preflight(stages, 1, 2,
+        nullptr, nullptr, nullptr), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+}
+
 TEST(PhysicalityDescriptorTransport, FactorFloatAndTestimonyGamesAreNotOrdinaryRunLengths) {
     const float arena = 140.0f;
     const float factors[] = {0.25f, -0.75f, 0.5f, 0.125f, 0.875f, -0.625f, 0.0625f};
@@ -221,6 +269,93 @@ TEST(PhysicalityDescriptorTransport, CopyGeometryRequiresEwkbRatherThanIsoWkb) {
             &bodies, &stored, &work), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
         EXPECT_EQ(bodies, 99u); EXPECT_EQ(stored, 99u); EXPECT_EQ(work, 99u);
     }
+}
+
+TEST(PhysicalityDescriptorTransport, PlanFreeExportOwnsExactBodiesAndObservationOrder) {
+    auto first = sample_stage();
+    Stage second(intent_stage_new(0u), intent_stage_free);
+    hash128_t placement;
+    laplace_physicality_id_compute(kEntity, 3, &placement);
+    const hash128_t children[] = {kEntity, {777u, 888u}};
+    double trajectory[8];
+    ASSERT_EQ(trajectory_build(children, 2u, trajectory), 0);
+    const double coord[4] = {0.25, 0.125, 0.5, 0.375};
+    const hilbert128_t hb{};
+    ASSERT_EQ(intent_stage_add_physicality(second.get(), &placement, &kEntity, 3,
+        coord, &hb, trajectory, 2u, 2, 0, 0.125, 0, 4, 43), 0);
+    const intent_stage_t* stages[] = {first.get(), second.get()};
+    physicality_descriptor_capture_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stage_rows(stages, 2u, kBudget, &raw),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const std::unique_ptr<physicality_descriptor_capture_t,
+        decltype(&physicality_descriptor_capture_free)> capture(raw, physicality_descriptor_capture_free);
+    ASSERT_EQ(physicality_descriptor_capture_plan(capture.get()), nullptr);
+    EXPECT_LE(physicality_descriptor_capture_bytes(capture.get()), kBudget);
+    // The capture owns its decoded payload after both native stages are retired.
+    first.reset(); second.reset();
+    size_t count = 0u, observation_count = 0u;
+    const auto* inputs = physicality_descriptor_capture_inputs(capture.get(), &count);
+    const auto* observations = physicality_descriptor_capture_observations(capture.get(), &observation_count);
+    ASSERT_EQ(count, 2u); ASSERT_EQ(observation_count, 2u);
+    EXPECT_TRUE(hash128_equals(&inputs[0].entity_id, &kEntity));
+    EXPECT_TRUE(hash128_equals(&inputs[1].entity_id, &kEntity));
+    EXPECT_TRUE(hash128_equals(&observations[0].placement_id, &observations[1].placement_id));
+    EXPECT_EQ(observations[0].source_stage_index, 0u);
+    EXPECT_EQ(observations[1].source_stage_index, 1u);
+    EXPECT_EQ(observations[0].source_row_index, 0u);
+    EXPECT_EQ(observations[1].source_row_index, 0u);
+    EXPECT_EQ(observations[0].observed_at_unix_us, 42);
+    EXPECT_EQ(observations[1].observed_at_unix_us, 43);
+    EXPECT_DOUBLE_EQ(inputs[0].coord[0], 0.125);
+    EXPECT_EQ(inputs[0].trajectory_vertices, 0u);
+    EXPECT_EQ(inputs[0].trajectory_xyzm, nullptr);
+    EXPECT_EQ(inputs[0].alignment_residual_is_null, 1);
+    EXPECT_EQ(inputs[0].source_dim_is_null, 1);
+    EXPECT_DOUBLE_EQ(inputs[1].coord[0], 0.25);
+    EXPECT_EQ(inputs[1].trajectory_vertices, 2u);
+    EXPECT_EQ(inputs[1].n_constituents, 2);
+    EXPECT_EQ(std::memcmp(inputs[1].trajectory_xyzm, trajectory, sizeof(trajectory)), 0);
+    EXPECT_EQ(inputs[1].alignment_residual_is_null, 0);
+    EXPECT_DOUBLE_EQ(inputs[1].alignment_residual, 0.125);
+    EXPECT_EQ(inputs[1].source_dim_is_null, 0);
+    EXPECT_EQ(inputs[1].source_dim, 4);
+}
+
+TEST(PhysicalityDescriptorTransport, PlanFreeExportRejectsBudgetFramingAndClaimedPlacement) {
+    auto stage = sample_stage();
+    const intent_stage_t* stages[] = {stage.get()};
+    physicality_descriptor_capture_t* output = nullptr;
+    EXPECT_EQ(physicality_descriptor_capture_stage_rows(stages, 1u, 1u, &output),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(output, nullptr);
+    const intent_stage_t* missing[] = {nullptr};
+    EXPECT_EQ(physicality_descriptor_capture_stage_rows(missing, 1u, kBudget, &output),
+        PHYSICALITY_DESCRIPTOR_INVALID);
+    EXPECT_EQ(output, nullptr);
+    size_t length = 0u;
+    auto* bytes = const_cast<uint8_t*>(intent_stage_tuple_ptr(
+        stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &length));
+    ASSERT_GT(length, 22u);
+    bytes[1] = 9; // The declared ten-column native row is now malformed.
+    EXPECT_EQ(physicality_descriptor_capture_stage_rows(stages, 1u, kBudget, &output),
+        PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(output, nullptr);
+    bytes[1] = 10; bytes[6] ^= 1u; // Valid framing, counterfeit placement ID.
+    EXPECT_EQ(physicality_descriptor_capture_stage_rows(stages, 1u, kBudget, &output),
+        PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(output, nullptr);
+}
+
+TEST(PhysicalityDescriptorTransport, PlanFreeExportRepresentsAnEmptyRowSetWithoutAPlan) {
+    physicality_descriptor_capture_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stage_rows(nullptr, 0u, kBudget, &raw),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const std::unique_ptr<physicality_descriptor_capture_t,
+        decltype(&physicality_descriptor_capture_free)> capture(raw, physicality_descriptor_capture_free);
+    size_t count = 99u;
+    EXPECT_EQ(physicality_descriptor_capture_inputs(capture.get(), &count), nullptr);
+    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(physicality_descriptor_capture_plan(capture.get()), nullptr);
 }
 
 }

@@ -273,6 +273,42 @@ TEST(PhysicalityDescriptorVocabulary, GeneratedSourceIsOrdinarySelfWitnessedCont
     EXPECT_EQ(exact_peak, peak);
 }
 
+TEST(PhysicalityDescriptorVocabulary, SessionProjectionHasAnOrdinaryDistinctDerivationSource) {
+    ASSERT_TRUE(codepoint_table_is_loaded());
+    const char* name = physicality_descriptor_session_source_name();
+    ASSERT_STREQ(name, "substrate/source/SessionProjection/v1");
+    hash128_t expected{}, actual{}, generated{};
+    ASSERT_EQ(laplace_content_root_id(reinterpret_cast<const uint8_t*>(name),
+        std::strlen(name), &expected), 0);
+    intent_stage_t *raw = nullptr, *other = nullptr;
+    size_t peak = 0;
+    ASSERT_EQ(physicality_descriptor_session_source_create(kVocabularyBudget,
+        &actual, &raw, &peak), PHYSICALITY_DESCRIPTOR_OK);
+    Stage stage(raw, intent_stage_free);
+    ASSERT_NE(stage, nullptr);
+    EXPECT_TRUE(hash128_equals(&actual, &expected));
+    EXPECT_GT(intent_stage_entity_count(stage.get()), 0u);
+    EXPECT_GT(intent_stage_physicality_count(stage.get()), 0u);
+    EXPECT_LE(peak, kVocabularyBudget);
+    ASSERT_EQ(physicality_descriptor_generated_source_create(kVocabularyBudget,
+        &generated, &other, nullptr), PHYSICALITY_DESCRIPTOR_OK);
+    Stage generated_stage(other, intent_stage_free);
+    EXPECT_FALSE(hash128_equals(&actual, &generated));
+    Stage ordinary(intent_stage_new(0), intent_stage_free);
+    hash128_t emitted{}, actual_digest{}, ordinary_digest{};
+    ASSERT_EQ(content_witness_batch_add(ordinary.get(), reinterpret_cast<const uint8_t*>(name),
+        std::strlen(name), &expected, &emitted), 0);
+    ASSERT_EQ(intent_stage_semantic_digest(stage.get(), &actual_digest), 0);
+    ASSERT_EQ(intent_stage_semantic_digest(ordinary.get(), &ordinary_digest), 0);
+    EXPECT_TRUE(hash128_equals(&actual_digest, &ordinary_digest));
+    raw = nullptr; actual = kSource; peak = 123;
+    EXPECT_EQ(physicality_descriptor_session_source_create(1, &actual, &raw, &peak),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(raw, nullptr);
+    EXPECT_TRUE(hash128_equals(&actual, &kSource));
+    EXPECT_EQ(peak, 0u);
+}
+
 TEST(PhysicalityDescriptorVocabulary, AllNumericAndSchemaRootsMatchTheOrdinaryContentOwner) {
     ASSERT_TRUE(codepoint_table_is_loaded());
     auto provider = vocabulary();

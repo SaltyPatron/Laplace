@@ -417,6 +417,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Retain chess playing observation migration evidence
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-chess-observation-migration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/chess-position-outcomes/${{ github.run_id }}-${{ github.run_attempt }}-*/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Retain PostgreSQL geometry write and readback measurements
         if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

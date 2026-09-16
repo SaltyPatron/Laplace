@@ -19,14 +19,13 @@ const char* physicality_descriptor_generated_source_name(void) {
     return "substrate/source/PhysicalityDescriptorAdmission/v1";
 }
 
-physicality_descriptor_status_t physicality_descriptor_generated_source_create(
-    size_t maximum_bytes, hash128_t* out_source_id, intent_stage_t** out_stage,
+static physicality_descriptor_status_t frozen_source_create(
+    const char* name, size_t maximum_bytes, hash128_t* out_source_id, intent_stage_t** out_stage,
     size_t* out_peak_bytes) {
     tier_tree_t* tree = NULL;
     intent_stage_t* stage = NULL;
     tier_node_view_t source;
     hash128_t emitted;
-    const char* name = physicality_descriptor_generated_source_name();
     if (out_stage == NULL || out_source_id == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     *out_stage = NULL;
     if (out_peak_bytes != NULL) *out_peak_bytes = 0u;
@@ -51,6 +50,24 @@ physicality_descriptor_status_t physicality_descriptor_generated_source_create(
     if (out_peak_bytes != NULL)
         *out_peak_bytes = intent_stage_memory_peak_bytes(stage) + VOCABULARY_CONTENT_SCRATCH_RESERVATION;
     return PHYSICALITY_DESCRIPTOR_OK;
+}
+
+physicality_descriptor_status_t physicality_descriptor_generated_source_create(
+    size_t maximum_bytes, hash128_t* out_source_id, intent_stage_t** out_stage,
+    size_t* out_peak_bytes) {
+    return frozen_source_create(physicality_descriptor_generated_source_name(),
+        maximum_bytes, out_source_id, out_stage, out_peak_bytes);
+}
+
+const char* physicality_descriptor_session_source_name(void) {
+    return "substrate/source/SessionProjection/v1";
+}
+
+physicality_descriptor_status_t physicality_descriptor_session_source_create(
+    size_t maximum_bytes, hash128_t* out_source_id, intent_stage_t** out_stage,
+    size_t* out_peak_bytes) {
+    return frozen_source_create(physicality_descriptor_session_source_name(),
+        maximum_bytes, out_source_id, out_stage, out_peak_bytes);
 }
 
 static const char* const vocabulary_tags[PHYSICALITY_DESCRIPTOR_TAG_COUNT] = {

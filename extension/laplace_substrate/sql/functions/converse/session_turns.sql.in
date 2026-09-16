@@ -35,6 +35,19 @@ CREATE OR REPLACE FUNCTION converse.session_append_turns(
     AS 'EXECUTION_LIBRARY', 'pg_laplace_session_append_turns'
     LANGUAGE C VOLATILE STRICT PARALLEL UNSAFE;
 
+-- The governed writer supplies its actual intent receipt and owned grants.
+-- The three-argument compatibility entry point uses the configured PostgreSQL
+-- maintenance_work_mem for this atomic projection rebuild and derives its unit
+-- receipt from the exact prior/new projection stage through the native owner.
+-- Both paths retain the native SessionProjection source with AppDerived prior.
+CREATE OR REPLACE FUNCTION converse.session_append_turns(
+    p_session bytea, p_turn_ids bytea[], p_observed_at timestamptz,
+    p_source_unit bytea, p_maximum_bytes bigint,
+    p_maximum_database_operations integer, p_maximum_logical_occurrences bigint)
+    RETURNS int
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_session_append_turns'
+    LANGUAGE C VOLATILE STRICT PARALLEL UNSAFE;
+
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN

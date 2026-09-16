@@ -83,7 +83,8 @@ read_leaf(Oid oid, ArrayType *ids, int16 physicality_type,
 static void
 read_trajectories(ArrayType *entities, int16 physicality_type,
     LaplaceContentTrajectoryConsumer consume,
-    LaplaceContentCarrierConsumer carrier, void *context)
+    LaplaceContentCarrierConsumer carrier, void *context,
+    LaplaceContentReadBudget *budget)
 {
     if (physicality_type <= 0)
         elog(ERROR, "trajectory read requires a positive physicality type");
@@ -106,6 +107,19 @@ read_trajectories(ArrayType *entities, int16 physicality_type,
     Datum *values;
     bool *nulls;
     int count;
+    if (budget != NULL)
+    {
+        size_t requested = (size_t) ArrayGetNItems(ARR_NDIM(entities), ARR_DIMS(entities));
+        size_t partitions_bytes = (size_t) Max(partitions->nparts, 1) * sizeof(ArrayBuildState *);
+        /* Array-build growth, routed bytea keys, projected physical tuples and
+         * the dense partition-pointer array coexist until this frontier ends. */
+        size_t per_key = 2 * BLCKSZ + 1024;
+        if (partitions_bytes > SIZE_MAX - 4096 ||
+            requested > (SIZE_MAX - 4096 - partitions_bytes) / per_key ||
+            4096 + partitions_bytes + requested * per_key > budget->maximum_scratch_bytes)
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("content trajectory scratch grant exhausted")));
+    }
     deconstruct_array(entities, BYTEAOID, -1, false, TYPALIGN_INT, &values, &nulls, &count);
     ArrayBuildState **batches = palloc0(sizeof(*batches) * Max(partitions->nparts, 1));
     for (int i = 0; i < count; ++i)
@@ -131,8 +145,17 @@ read_trajectories(ArrayType *entities, int16 physicality_type,
     }
     for (int i = 0; i < partitions->nparts; ++i)
         if (batches[i])
+        {
+            if (budget != NULL)
+            {
+                if (budget->leaf_reads >= budget->maximum_leaf_reads)
+                    ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("content trajectory partition-read grant exhausted")));
+                ++budget->leaf_reads;
+            }
             read_leaf(partitions->oids[i], DatumGetArrayTypeP(makeArrayResult(batches[i],
                 CurrentMemoryContext)), physicality_type, consume, carrier, context);
+        }
     pfree(batches);
     pfree(values);
     pfree(nulls);
@@ -144,14 +167,55 @@ void
 laplace_typed_trajectory_read(ArrayType *entities, int16 physicality_type,
     LaplaceContentTrajectoryConsumer consume, void *context)
 {
-    read_trajectories(entities, physicality_type, consume, NULL, context);
+    read_trajectories(entities, physicality_type, consume, NULL, context, NULL);
 }
 
 void
 laplace_content_carrier_read(ArrayType *entities,
     LaplaceContentCarrierConsumer consume, void *context)
 {
-    read_trajectories(entities, 1, NULL, consume, context);
+    read_trajectories(entities, 1, NULL, consume, context, NULL);
+}
+
+typedef struct BoundedContentCallback {
+    LaplaceContentCarrierConsumer consume;
+    void *context;
+    MemoryContext caller;
+} BoundedContentCallback;
+
+static void
+bounded_content_callback(Datum physicality, Datum entity, int32 count,
+                         Datum geometry, void *opaque)
+{
+    BoundedContentCallback *callback = opaque;
+    MemoryContext previous = MemoryContextSwitchTo(callback->caller);
+    callback->consume(physicality, entity, count, geometry, callback->context);
+    MemoryContextSwitchTo(previous);
+}
+
+void
+laplace_content_carrier_read_bounded(ArrayType *entities,
+    LaplaceContentCarrierConsumer consume, void *context,
+    LaplaceContentReadBudget *budget)
+{
+    if (budget == NULL || budget->maximum_leaf_reads < 0 || budget->leaf_reads < 0 ||
+        budget->maximum_scratch_bytes == 0)
+        elog(ERROR, "content trajectory reader requires a finite read budget");
+    MemoryContext caller = CurrentMemoryContext;
+    MemoryContext scratch = AllocSetContextCreate(caller,
+        "bounded Content frontier", ALLOCSET_DEFAULT_SIZES);
+    BoundedContentCallback callback = {consume, context, caller};
+    PG_TRY();
+    {
+        MemoryContextSwitchTo(scratch);
+        read_trajectories(entities, 1, NULL, bounded_content_callback, &callback, budget);
+    }
+    PG_FINALLY();
+    {
+        MemoryContextSwitchTo(caller);
+        MemoryContextDelete(scratch);
+    }
+    PG_END_TRY();
 }
 
 void

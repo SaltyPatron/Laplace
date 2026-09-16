@@ -192,20 +192,14 @@ void physicality_descriptor_capture_free(physicality_descriptor_capture_t* captu
     free(capture);
 }
 
-physicality_descriptor_status_t physicality_descriptor_capture_stages(
+physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
     const intent_stage_t* const* stages, size_t stage_count,
-    const physicality_descriptor_basis_t* basis,
-    const physicality_descriptor_limits_t* plan_limits,
     size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture) {
     size_t count = 0u, vertices = 0u, bytes = sizeof(physicality_descriptor_capture_t);
     physicality_descriptor_capture_t* capture;
-    physicality_descriptor_status_t status;
-    physicality_descriptor_limits_t remaining_limits;
     if (out_capture == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     *out_capture = NULL;
-    if ((stage_count != 0u && stages == NULL) ||
-        !physicality_descriptor_basis_is_valid(basis) || plan_limits == NULL)
-        return PHYSICALITY_DESCRIPTOR_INVALID;
+    if (stage_count != 0u && stages == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     for (size_t stage = 0; stage < stage_count; ++stage) {
         size_t length, offset = 0u, rows = 0u;
         const uint8_t* data;
@@ -264,9 +258,28 @@ physicality_descriptor_status_t physicality_descriptor_capture_stages(
             ++count;
         }
     }
+    *out_capture = capture;
+    return PHYSICALITY_DESCRIPTOR_OK;
+}
+
+physicality_descriptor_status_t physicality_descriptor_capture_stages(
+    const intent_stage_t* const* stages, size_t stage_count,
+    const physicality_descriptor_basis_t* basis,
+    const physicality_descriptor_limits_t* plan_limits,
+    size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture) {
+    physicality_descriptor_capture_t* capture = NULL;
+    physicality_descriptor_status_t status;
+    physicality_descriptor_limits_t remaining_limits;
+    if (out_capture == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
+    *out_capture = NULL;
+    if (!physicality_descriptor_basis_is_valid(basis) || plan_limits == NULL)
+        return PHYSICALITY_DESCRIPTOR_INVALID;
+    status = physicality_descriptor_capture_stage_rows(
+        stages, stage_count, maximum_capture_bytes, &capture);
+    if (status != PHYSICALITY_DESCRIPTOR_OK) return status;
     remaining_limits = *plan_limits;
-    if (remaining_limits.maximum_plan_bytes > maximum_capture_bytes - bytes)
-        remaining_limits.maximum_plan_bytes = maximum_capture_bytes - bytes;
+    if (remaining_limits.maximum_plan_bytes > maximum_capture_bytes - capture->bytes)
+        remaining_limits.maximum_plan_bytes = maximum_capture_bytes - capture->bytes;
     status = physicality_descriptor_plan_build(capture->inputs, capture->count,
         basis, &remaining_limits, &capture->plan);
     if (status != PHYSICALITY_DESCRIPTOR_OK) {

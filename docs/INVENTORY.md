@@ -116,7 +116,7 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 57 (`extension/laplace_substrate/src/`)
+## Native extension sources — 59 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `attestation_response.c`
@@ -147,6 +147,7 @@ Chess:
 - `fold_route.c`
 - `foundry_crawl.c`
 - `generate_walk.c`
+- `generated_stage_sink.c`
 - `geometry_successors.c`
 - `grammar_source.c`
 - `graph_cascade.c`
@@ -160,6 +161,7 @@ Chess:
 - `observation_read.c`
 - `perfcache.c`
 - `physicality_descriptor_admission.c`
+- `physicality_descriptor_readback.c`
 - `prompt_coherence.c`
 - `prompt_language.c`
 - `prompt_structure.c`

@@ -102,6 +102,7 @@ functions/readback/is_all_whitespace.sql.in
 functions/readback/constituents.sql.in
 functions/readback/constituents_closure.sql.in
 functions/readback/content_carrier_vertices.sql.in
+functions/readback/physicality_descriptors.sql.in
 functions/readback/vertex_atom.sql.in
 functions/readback/vertex_tier.sql.in
 functions/readback/render_text.sql.in

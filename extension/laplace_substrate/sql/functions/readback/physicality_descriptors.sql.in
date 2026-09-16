@@ -1,0 +1,36 @@
+-- Exact immutable D bodies, decoded from ordinary content under one statement snapshot.
+CREATE OR REPLACE FUNCTION structural.physicality_descriptor_read(
+    p_descriptor_ids bytea[], maximum_bytes bigint,
+    maximum_database_operations integer, maximum_logical_work bigint)
+RETURNS TABLE (
+    descriptor_ids bytea[], entity_ids bytea[], physicality_types smallint[],
+    coordinate_bits bytea[], hilbert_indices bytea[], trajectory_bits bytea[],
+    constituent_counts integer[], alignment_residual_bits bytea[], source_dimensions integer[],
+    next_cursor bytea, exhausted boolean, floor_receipt bytea, snapshot_receipt text,
+    candidates bigint, rejected_candidates bigint, hydrated_nodes bigint,
+    charged_logical_work bigint, provider_rounds integer, database_operations integer,
+    reserved_peak_bytes bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_physicality_descriptor_read'
+LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;
+
+-- The page limit bounds candidates in this operation, never the complete form set.
+-- Pass next_cursor until exhausted, even when a page contains only rejected hits.
+CREATE OR REPLACE FUNCTION structural.physicality_forms(
+    p_entity_ids bytea[], after_descriptor_id bytea, maximum_candidates integer,
+    maximum_bytes bigint, maximum_database_operations integer, maximum_logical_work bigint)
+RETURNS TABLE (
+    descriptor_ids bytea[], entity_ids bytea[], physicality_types smallint[],
+    coordinate_bits bytea[], hilbert_indices bytea[], trajectory_bits bytea[],
+    constituent_counts integer[], alignment_residual_bits bytea[], source_dimensions integer[],
+    next_cursor bytea, exhausted boolean, floor_receipt bytea, snapshot_receipt text,
+    candidates bigint, rejected_candidates bigint, hydrated_nodes bigint,
+    charged_logical_work bigint, provider_rounds integer, database_operations integer,
+    reserved_peak_bytes bigint)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_physicality_forms'
+LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;
+
+COMMENT ON FUNCTION structural.physicality_descriptor_read(bytea[],bigint,integer,bigint) IS
+'Exact native typed descriptor readback and ordinary identity replan. Parallel arrays preserve requested D order and duplicates. Coordinates, optional residual and packed trajectory are exact little-endian binary64 bytes; absent fields stay NULL. No timestamp or historical V geometry is inferred. The pinned configured floor authenticates vocabulary. Database operations count actual nonempty partition/PK batches; bytes reserve admitted buffers, not backend RSS. Charged logical work covers hydrated ordered children, catalog identity passes and raw Content-body hash operands; generated-plan allocation has the separate byte grant.';
+
+COMMENT ON FUNCTION structural.physicality_forms(bytea[],bytea,integer,bigint,integer,bigint) IS
+'Indexed schema-plus-entity containment candidates, native root/realized-E filtering, then the same exact D decoder. Start with empty bytea cursor. Cursor orders D bytes and advances across rejected candidates; continue empty pages until exhausted. No total top-K limit. Each call has one statement snapshot; use one repeatable-read transaction for a stable multi-page snapshot. Malformed typed descriptor evidence fails closed. Database operations additionally count preparation and execution of the one GIN-eligible candidate query; this receipt does not claim a planner-selected access path without EXPLAIN evidence.';

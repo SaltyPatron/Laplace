@@ -36,6 +36,7 @@ run_suite() {
 }
 
 run_install() (
+  resume_chess_observation_if_needed
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash deploy/linux/managed-publish.sh preflight
   bash scripts/pipeline.sh install
@@ -43,6 +44,7 @@ run_install() (
 )
 
 run_database_maintenance() (
+  resume_chess_observation_if_needed
   # Use the already installed fixed service controls. The command holds their
   # managed transaction through migration, discards writer processes,
   # and restores only the services that were running before maintenance.
@@ -277,7 +279,16 @@ recover_publish() {
   [[ "$recovery_rc" -eq 0 && "$health_rc" -eq 0 ]]
 }
 
+resume_chess_observation_if_needed() {
+  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
+    --resume-if-needed --timeout-seconds "${LAPLACE_CHESS_OBSERVATION_TIMEOUT_SECONDS:-3600}" -- \
+    bash scripts/repair-chess-position-outcomes.sh
+}
+
 run_publish_with_recovery() {
+  # A prior source transition owns the still-published producer generation and
+  # must finish before publication can acquire or recover its own transaction.
+  resume_chess_observation_if_needed
   trap recover_publish EXIT
   if [[ "$stage" == applications ]]; then
     bash scripts/publish-applications.sh deploy
@@ -286,6 +297,13 @@ run_publish_with_recovery() {
     run_publish
   fi
   trap - EXIT
+  # Published services now use the corrected observation recipe. Drain them through
+  # the existing maintenance owner while retaining, rebuilding and reading back the
+  # old calculated source; restarted services cannot reintroduce the previous recipe.
+  LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)" \
+    python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
+    --timeout-seconds "${LAPLACE_CHESS_OBSERVATION_TIMEOUT_SECONDS:-3600}" -- \
+    bash scripts/repair-chess-position-outcomes.sh
 }
 
 run_live_suite() {
@@ -343,6 +361,7 @@ run_phase() {
     native-dev) run_suite dev-native native-dev ;;
     managed-dev|uci-dev|browser-dev) run_suite dev-managed "$1" ;;
     application-check)
+      resume_chess_observation_if_needed
       [[ "${LAPLACE_FRESH_DB:-}" != 1 && "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || {
         echo "application-only release cannot reset the database or discard install receipts" >&2
         return 1

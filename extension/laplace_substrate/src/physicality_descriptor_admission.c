@@ -542,6 +542,20 @@ static admission_state *admission_state_create(size_t maximum_bytes,
     return s;
 }
 
+static void admission_prepare_provider_plans(admission_state *s,
+    const char *metadata_sql, const char *payload_sql)
+{
+    Oid query_types[1] = {BYTEAARRAYOID};
+    if (s->maximum_operations - s->operations < 2)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("physicality descriptor admission provider plans require two database operations")));
+    ++s->operations;
+    s->metadata_plan = SPI_prepare(metadata_sql, 1, query_types);
+    ++s->operations;
+    s->payload_plan = SPI_prepare(payload_sql, 1, query_types);
+    if (!s->metadata_plan || !s->payload_plan) admission_invalid("could not prepare provider set queries");
+}
+
 static void admission_materialize(admission_state *s,
     const physicality_descriptor_source_observation_t *sources, size_t source_count,
     int64_t generated_at, laplace_physicality_pg_admission_result *result)
@@ -550,7 +564,6 @@ static void admission_materialize(admission_state *s,
     hash128_t generated_source, floor;
     size_t form_count = 0, floor_bytes, source_peak = 0, actual_count = 0;
     Datum snapshot_text;
-    Oid query_types[1] = {BYTEAARRAYOID};
     const char *metadata_sql, *payload_sql;
     s->source_logical = admission_preflight(s, &s->source);
     s->admitted_logical = admission_preflight(s, &s->admitted);
@@ -590,9 +603,7 @@ static void admission_materialize(admission_state *s,
     payload_sql = laplace_sql_query_text("ingest.physicality_descriptor_provider_payload");
     if (metadata_sql == NULL || payload_sql == NULL) admission_invalid("immutable provider SQL is unavailable");
     if (SPI_connect() != SPI_OK_CONNECT) admission_invalid("could not connect to SPI");
-    s->metadata_plan = SPI_prepare(metadata_sql, 1, query_types);
-    s->payload_plan = SPI_prepare(payload_sql, 1, query_types);
-    if (!s->metadata_plan || !s->payload_plan) admission_invalid("could not prepare provider set queries");
+    admission_prepare_provider_plans(s, metadata_sql, payload_sql);
 
     for (;;) {
         physicality_descriptor_status_t status;

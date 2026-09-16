@@ -235,6 +235,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
                 command.Parameters.AddWithValue(NpgsqlDbType.TimestampTz,
                     change.Metadata.BuiltAt.ToUniversalTime());
+                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, change.Metadata.IntentId.ToBytes());
+                long physicalityBudget = IngestSizing.ResolveWorkingSetBudgetBytes();
+                command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget);
+                command.Parameters.AddWithValue(NpgsqlDbType.Integer, 512);
+                command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget / MemoryTopology.Hash128Bytes);
                 await command.ExecuteScalarAsync(token).ConfigureAwait(false);
             });
     }

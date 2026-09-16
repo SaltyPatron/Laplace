@@ -149,7 +149,8 @@ internal static class ChessWitnessHydrator
         int chunkSize,
         Func<Hash128, Hash128> markerId,
         bool includeLive,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        long? strictMaterializationBytes = null)
     {
         chunkSize = Math.Max(1, chunkSize);
         var idChunk = new List<Hash128>(chunkSize);
@@ -158,13 +159,19 @@ internal static class ChessWitnessHydrator
         {
             idChunk.Add(eventId);
             if (idChunk.Count < chunkSize) continue;
-            foreach (var g in await TryHydrateChunkAsync(ds, idChunk, ct).ConfigureAwait(false))
+            var hydrated = strictMaterializationBytes is { } maximumBytes
+                ? await HydratePositionOutcomeInputsAsync(ds, idChunk, maximumBytes, ct).ConfigureAwait(false)
+                : await TryHydrateChunkAsync(ds, idChunk, ct).ConfigureAwait(false);
+            foreach (var g in hydrated)
                 yield return g;
             idChunk.Clear();
         }
         if (idChunk.Count > 0)
         {
-            foreach (var g in await TryHydrateChunkAsync(ds, idChunk, ct).ConfigureAwait(false))
+            var hydrated = strictMaterializationBytes is { } maximumBytes
+                ? await HydratePositionOutcomeInputsAsync(ds, idChunk, maximumBytes, ct).ConfigureAwait(false)
+                : await TryHydrateChunkAsync(ds, idChunk, ct).ConfigureAwait(false);
+            foreach (var g in hydrated)
                 yield return g;
         }
     }
@@ -235,7 +242,7 @@ internal static class ChessWitnessHydrator
         }
     }
 
-    private static async Task<List<Hash128>> FetchRecordedPlayingIdPageAsync(
+    internal static async Task<List<Hash128>> FetchRecordedPlayingIdPageAsync(
         NpgsqlDataSource ds, byte[] afterId, int limit, bool includeLive, CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.ChessEventIdPageAsync(
@@ -281,6 +288,155 @@ internal static class ChessWitnessHydrator
             wanted.Add((lineId, eventId, gm));
         }
         return await MaterializeAsync(ds, wanted, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Strict inputs for the position-outcome version transition: the complete line,
+    /// its start position, and the literal recorded result for every selected playing.
+    /// Annotation, clock and engine-evaluation lanes do not participate in this recipe.
+    /// Unknown/missing/conflicting recorded inputs refuse before source eviction.
+    /// </summary>
+    internal static async Task<IReadOnlyList<ChessWitnessedGame>> HydratePositionOutcomeInputsAsync(
+        NpgsqlDataSource ds, IReadOnlyList<Hash128> playingIds, long maximumMaterializedBytes,
+        CancellationToken ct)
+    {
+        if (playingIds.Count == 0) return [];
+        var budget = new NpgsqlSubstrateReads.ChessWitnessReadBudget(maximumMaterializedBytes);
+        budget.Reserve(checked(65536L + playingIds.Count * 512L));
+        byte[][] selected = playingIds.Select(id => id.ToBytes()).ToArray();
+        var bindings = await NpgsqlSubstrateReads.ChessWitnessInputsAsync(ds, selected,
+            [RelPlaysLine.ToBytes()], TransitionWitnessSources(), null, budget, ct).ConfigureAwait(false);
+        var lineByPlaying = new Dictionary<Hash128, Hash128>();
+        foreach (var row in bindings)
+        {
+            if (row.Object is null || row.Context is not null)
+                throw new InvalidDataException("Recorded playing has an invalid PLAYS_LINE binding.");
+            Hash128 playing = Hash128.FromBytes(row.Subject), line = Hash128.FromBytes(row.Object);
+            if (lineByPlaying.TryGetValue(playing, out var previous) && previous != line)
+                throw new InvalidDataException("Recorded playing has competing PLAYS_LINE bindings.");
+            lineByPlaying[playing] = line;
+        }
+        if (playingIds.Any(id => !lineByPlaying.ContainsKey(id)))
+            throw new InvalidDataException("Selected playing corpus could not be completely reconstructed: missing recorded line binding.");
+
+        var lines = lineByPlaying.Values.Distinct().ToArray();
+        var headers = await NpgsqlSubstrateReads.ChessWitnessInputsAsync(ds,
+            lines.Select(id => id.ToBytes()).ToArray(), GameRelationTypes,
+            TransitionWitnessSources(), selected, budget, ct).ConfigureAwait(false);
+        var values = new Dictionary<(Hash128 Playing, Hash128 Type), Hash128>();
+        foreach (var row in headers)
+        {
+            if (row.Context is null || row.Object is null)
+                throw new InvalidDataException("Recorded playing has an incomplete header binding.");
+            Hash128 playing = Hash128.FromBytes(row.Context), line = Hash128.FromBytes(row.Subject);
+            if (lineByPlaying[playing] != line)
+                throw new InvalidDataException("Recorded playing header names a competing line.");
+            var key = (playing, Hash128.FromBytes(row.Type));
+            var value = Hash128.FromBytes(row.Object);
+            if (values.TryGetValue(key, out var previous) && previous != value)
+                throw new InvalidDataException("Recorded playing has competing header values.");
+            values[key] = value;
+        }
+        var wanted = new List<(Hash128 Line, Hash128 Event, GameMeta Meta)>(playingIds.Count);
+        foreach (var playing in playingIds)
+        {
+            if (!values.TryGetValue((playing, RelHasResult), out var result))
+                throw new InvalidDataException("Selected playing corpus could not be completely reconstructed: missing recorded result.");
+            wanted.Add((lineByPlaying[playing], playing, new GameMeta
+            {
+                ResultObj = result,
+                White = values.GetValueOrDefault((playing, RelHasWhite)),
+                Black = values.GetValueOrDefault((playing, RelHasBlack)),
+                SetupObj = values.GetValueOrDefault((playing, RelHasSetup)),
+            }));
+        }
+
+        var resultIds = wanted.Select(w => w.Meta.ResultObj).Distinct().ToArray();
+        var resultText = await ReadStrictResultsAsync(ds, resultIds, budget, ct).ConfigureAwait(false);
+        // Reserve actual encoded geometry and native-expanded work before the common
+        // hydrator requests expanded constituents or constructs replay/board arrays.
+        var lineShape = await NpgsqlSubstrateReads.ChessContentShapeAsync(ds, lines.Select(id => id.ToBytes()).ToArray(),
+            budget, 4096, ct).ConfigureAwait(false);
+        var lineMultiplicity = wanted.GroupBy(row => row.Line).ToDictionary(group => group.Key, group => group.Count());
+        foreach (var row in lineShape)
+            budget.Reserve(checked((long)row.RunLength * (lineMultiplicity[Hash128.FromBytes(row.Parent)] - 1) * 4096));
+        var setupIds = wanted.Select(w => w.Meta.SetupObj).Where(id => id != default).Distinct().ToArray();
+        var setupShape = await NpgsqlSubstrateReads.ChessContentShapeAsync(ds,
+            setupIds.Select(id => id.ToBytes()).ToArray(), budget, 512, ct).ConfigureAwait(false);
+        var setupAtoms = setupShape.Select(row => Hash128.FromBytes(row.Child)).Distinct().ToArray();
+        var atomShape = await NpgsqlSubstrateReads.ChessContentShapeAsync(ds,
+            setupAtoms.Select(id => id.ToBytes()).ToArray(), budget, 512, ct).ConfigureAwait(false);
+        var atomFields = atomShape.GroupBy(row => Hash128.FromBytes(row.Parent))
+            .ToDictionary(group => group.Key, group => group.Sum(row => (long)row.RunLength));
+        foreach (var row in setupShape)
+            budget.Reserve(checked((long)row.RunLength * atomFields.GetValueOrDefault(Hash128.FromBytes(row.Child)) * 512));
+        var games = await MaterializeAsync(ds, wanted, ct, resultText).ConfigureAwait(false);
+        if (games.Count != playingIds.Count || games.Select(game => game.PlayingId).Distinct().Count() != playingIds.Count)
+            throw new InvalidDataException("Selected playing corpus could not be completely reconstructed from its recorded inputs.");
+        return games;
+    }
+
+    private static async Task<IReadOnlyDictionary<Hash128, string>> ReadStrictResultsAsync(
+        NpgsqlDataSource ds, IReadOnlyList<Hash128> selected,
+        NpgsqlSubstrateReads.ChessWitnessReadBudget budget, CancellationToken ct)
+    {
+        // The finite result vocabulary uses the ordinary native text composer. Its
+        // actual emitted manifests delimit the graph the renderer may visit; this
+        // avoids admitting an arbitrary text closure under a purported result id.
+        var supported = new Dictionary<Hash128, string>();
+        var expected = new Dictionary<Hash128, Hash128[]>();
+        foreach (string token in new[] { "1-0", "0-1", "1/2-1/2" })
+        {
+            using var tree = ContentTierSpine.BuildTree(System.Text.Encoding.UTF8.GetBytes(token))
+                ?? throw new InvalidDataException("Cannot compose the canonical recorded result vocabulary.");
+            var ids = tree.NodeIds();
+            supported[ids[tree.NaturalUnitIndex()]] = token;
+            for (uint index = 0; index < tree.NodeCount; index++)
+            {
+                if (!tree.ShouldEmitCompositional(index)) continue;
+                var node = tree.GetNode(index);
+                var children = new Hash128[node.ChildCount];
+                for (uint child = 0; child < node.ChildCount; child++)
+                    children[child] = ids[node.FirstChildIdx + child];
+                expected[ids[index]] = children;
+            }
+        }
+        if (selected.Any(id => !supported.ContainsKey(id)))
+            throw new InvalidDataException("Recorded result is unsupported or unknown; '*' is not a draw.");
+        var actual = await NpgsqlSubstrateReads.ChessContentShapeAsync(ds,
+            expected.Keys.Select(id => id.ToBytes()).ToArray(), budget, 256, ct).ConfigureAwait(false);
+        var byParent = actual.GroupBy(row => Hash128.FromBytes(row.Parent))
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        // Only required result graphs must be present. The complete finite graph is
+        // checked when present so native rendering cannot follow unbounded extras.
+        foreach (var (parent, rows) in byParent)
+        {
+            var children = expected[parent];
+            int offset = 0;
+            foreach (var row in rows)
+            {
+                if (row.RunLength > children.Length - offset)
+                    throw new InvalidDataException("Recorded result Content disagrees with its canonical native manifest.");
+                for (int repeat = 0; repeat < row.RunLength; repeat++)
+                    if (children[offset++] != Hash128.FromBytes(row.Child))
+                        throw new InvalidDataException("Recorded result Content disagrees with its canonical native manifest.");
+            }
+            if (offset != children.Length)
+                throw new InvalidDataException("Recorded result Content is incomplete.");
+        }
+        budget.Reserve(4096);
+        var rendered = await NpgsqlSubstrateReads.RenderPreflightedChessResultsAsync(ds,
+            selected.Select(id => id.ToBytes()).ToArray(), ContentTierSpine.MaxContentTier + 1, ct).ConfigureAwait(false);
+        if (rendered is null || rendered.Length != selected.Count)
+            throw new InvalidDataException("Recorded result could not be rendered completely.");
+        var result = new Dictionary<Hash128, string>();
+        for (int index = 0; index < selected.Count; index++)
+        {
+            if (rendered[index] != supported[selected[index]])
+                throw new InvalidDataException("Recorded result is missing or could not be rendered exactly.");
+            result[selected[index]] = rendered[index];
+        }
+        return result;
     }
 
     internal static async Task<IReadOnlyList<ChessWitnessedGame>> TryHydrateLinesAsync(
@@ -330,13 +486,14 @@ internal static class ChessWitnessHydrator
 
     private static async Task<IReadOnlyList<ChessWitnessedGame>> MaterializeAsync(
         NpgsqlDataSource ds, IReadOnlyList<(Hash128 Line, Hash128 Event, GameMeta Meta)> wanted,
-        CancellationToken ct)
+        CancellationToken ct, IReadOnlyDictionary<Hash128, string>? positionOutcomeResults = null)
     {
         if (wanted.Count == 0) return Array.Empty<ChessWitnessedGame>();
 
         var contentIds = new List<Hash128>();
         void Need(Hash128 id) { if (id != default) contentIds.Add(id); }
-        foreach (var (_, _, gm) in wanted) Need(gm.ResultObj);
+        if (positionOutcomeResults is null)
+            foreach (var (_, _, gm) in wanted) Need(gm.ResultObj);
 
         var setupIds = wanted.Select(static w => w.Meta.SetupObj)
             .Where(static id => id != default).Distinct().ToArray();
@@ -350,13 +507,15 @@ internal static class ChessWitnessHydrator
                 ds, setupBytes, ct).ConfigureAwait(false);
             setupBoards = ChessPositionTrajectory.Decode(setupRows);
         }
-        var trajectoryOwners = wanted.SelectMany(static w => new[] { w.Line, w.Event })
+        var trajectoryOwners = wanted.SelectMany(w => positionOutcomeResults is null ? new[] { w.Line, w.Event } : new[] { w.Line })
             .Distinct().ToArray();
         var ownerBytes = new byte[trajectoryOwners.Length][];
         for (int i = 0; i < trajectoryOwners.Length; i++) ownerBytes[i] = trajectoryOwners[i].ToBytes();
         var trajectoryRows = await NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
             ds, ownerBytes,
-            [PhysicalityType.Content, PhysicalityType.ChessComment, PhysicalityType.ChessAnnotation],
+            positionOutcomeResults is null
+                ? [PhysicalityType.Content, PhysicalityType.ChessComment, PhysicalityType.ChessAnnotation]
+                : [PhysicalityType.Content],
             ct).ConfigureAwait(false);
         var lanes = new Dictionary<(Hash128 Playing, PhysicalityType Type), List<Hash128>>();
         foreach (var row in trajectoryRows)
@@ -370,7 +529,9 @@ internal static class ChessWitnessHydrator
                 && id != ChessCompose.AnnotationMissing().Id)
                 Need(id);
         }
-        var textById = await RenderTextBatchAsync(ds, contentIds, ct).ConfigureAwait(false);
+        var textById = positionOutcomeResults is null
+            ? await RenderTextBatchAsync(ds, contentIds, ct).ConfigureAwait(false)
+            : positionOutcomeResults;
 
         var outList = new List<ChessWitnessedGame>(wanted.Count);
         foreach (var (lineId, eventId, gm) in wanted)
@@ -380,6 +541,8 @@ internal static class ChessWitnessHydrator
             string? startFen = gm.SetupObj != default
                 && setupBoards.TryGetValue(gm.SetupObj, out var setupBoard)
                 ? setupBoard.ToFen() : null;
+            if (positionOutcomeResults is not null && gm.SetupObj != default && startFen is null)
+                throw new InvalidDataException("Selected playing corpus could not be completely reconstructed: missing recorded start position.");
 
             var modality = new ChessModality();
             if (ChessAnalyze.InitialState(startFen, modality) is not { } initial) continue;

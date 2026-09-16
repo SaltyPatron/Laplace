@@ -168,6 +168,53 @@ observation/derivation scope. Joining every form onto `structural.entity_curve`
 by E alone would multiply occurrences and mix placements, so it is not a valid
 all-form read implementation.
 
+### Bounded PostgreSQL descriptor reads
+
+`physicality_descriptor_readback_prepare` exposes the same decoder's sorted,
+unique missing typed-child frontier. An incomplete result has no executable
+body array. Realized entity references, carrier entity references, schema tags
+and exact numeric vocabulary remain terminal. A typed structural slot cannot
+silently turn a terminal vocabulary value into a fetch request. Before full
+replan, the native owner admits the decoded Content manifests' expanded hash
+operand count under a separate finite work grant.
+
+`structural.physicality_descriptor_read(D[], bytes, operations, logical_work)`
+reads an exact bulk D selection and preserves caller order and duplicates.
+`structural.physicality_forms(E[], cursor, candidates, bytes, operations,
+logical_work)` uses the existing schema/constituent GIN expression to select
+candidates, authenticates their actual schema and realized E natively, then
+uses that same decoder. Incidental containment is rejected. The cursor is the
+last consumed candidate, including rejected candidates; empty pages can have a
+continuation, and there is no total top-K ceiling. Each call pins one active
+MVCC snapshot. A repeatable-read transaction supplies a stable snapshot across
+pages when the caller requires one.
+
+Each missing frontier uses the shared Content reader's partition-routed PK
+batches. Every nonempty leaf scan, candidate-plan preparation and candidate
+execution is counted before work. A transient reader context releases frontier
+scratch while exact decoded nodes remain in the admitted caller context.
+Receipts report the configured floor, active snapshot, hydrated nodes, charged
+logical work, provider rounds, actual database operations and reserved buffer
+peak. They exclude allocator/executor bookkeeping and process RSS. A
+GIN-eligible query does not establish which plan the host actually selected.
+
+The returned arrays preserve exact coordinate, Hilbert, trajectory, optional
+residual and source-dimension fields. Binary64 values are explicit
+little-endian words, including negative zero; absent fields remain NULL.
+This is immutable D-body readback. Historical V geometry still requires its
+explicit selected-body scope and is not inferred from current placements.
+
+The native frontier suite passes 30 tests normally and under ASan/UBSan. The
+production PostgreSQL C helper passes 42 checks through its registered CTest,
+using real PostgreSQL headers and native identity/trajectory/descriptor owners;
+three separately compiled mutations are rejected. Both PG reader C files pass
+strict compilation and GCC's analyzer. These are local native/helper results,
+not PostgreSQL backend execution. Registered server fixtures cover actual
+native stage deposition, replay, post-insert rollback, bit-exact D readback,
+false-positive cursor continuation, missing typed children, finite grants and
+an independent cold backend. Host execution remains an implementation
+obligation; the fixture requires the shared generated-stage sink test adapter.
+
 ## Remaining production work
 
 The accepted work continues through these concrete integration points:
@@ -185,11 +232,14 @@ The accepted work continues through these concrete integration points:
    transaction. Existing E/P COPY transactions retain their established retry
    behavior. A source-only historical receipt suppresses repeated conversation
    append while permitting descriptor backfill; source verification still runs.
-3. Capture server-owned projection changes such as `conversation.write_manifest`
-   through the same native owner before mutable placement overwrite.
-4. Implement the indexed schema-plus-E candidate query, bulk child hydration,
-   native typed validation and direct D read surface. Preserve existing typed
-   placement compatibility and expose actual retained form ids.
+3. Execute the server-owned session projection controls on the host. The native
+   session append captures both the prior and replacement bodies before mutable
+   placement overwrite, derives their ordinary descriptor/view stages through
+   the same materializer, and deposits novel evidence and consensus in the
+   caller transaction. The stable session placement address remains unchanged.
+4. Execute the indexed schema-plus-E candidate and direct D readback fixtures
+   on the host, retaining actual index-plan and cold readback evidence. Expose
+   these same bulk semantics through the ordinary product read surfaces.
 5. Prove normal ingest, replay, alternate forms of an existing E, repeated exact
    bodies, source observations, direct D readback and all-form indexed lookup on
    the actual host. Measure durable output throughput at that same boundary.
@@ -198,10 +248,42 @@ The client admission boundary reserves one aggregate payload grant for raw
 stages, source metadata, SQL input copies, returned tuples/ids, imported native
 stages and decoded evidence. Native import receives the remaining grant for
 each stage. The server reports its snapshot, provider rounds, two set queries
-per round, expanded Content hashing work, stored vertices, retained tuple bytes
+per round plus its two prepared plans, expanded Content hashing work, stored vertices, retained tuple bytes
 and native reservation peak. The receipt also reports actual generated E/P/A
 stage rows before merge. These counts distinguish attempted generated rows,
 source rows, committed insertions and replay; none is a games-per-second claim.
+
+### Managed text and server-owned session integration
+
+`TextEntityBuilder` now uses the shared native content-tree emitter and an owned,
+bounded stage-row export. Its existing-trunk bitmap suppresses entity novelty
+without suppressing the computed physicality observations. An existing floor
+atom keeps its exact body and identity. Export copies remain valid after the
+native stage and capture are released.
+
+Session projection observations use the ordinary native-composed source
+`substrate/source/SessionProjection/v1`, its explicit AppDerived prior, and the
+actual writer source-unit receipt. The native append takes the shared apply lock
+before locking the session row, then refreshes its Read Committed snapshot after
+any wait. A waiting append therefore captures the form committed by its
+predecessor. It rejects a stale isolation level before mutation. Argument,
+trajectory, materializer and sink work share bounded grants; operation receipts
+include actual plan preparation and execution. These payload/native grants do
+not claim PostgreSQL executor memory or total process RSS.
+
+The native generated-stage sink validates and inserts ordinary E/P/A rows in
+sets, folds only actually new evidence, and updates the existing highway masks.
+It commits nothing independently. Session projection overwrite, descriptor
+evidence, fold and the surrounding writer journal either commit together or
+roll back. Normal writer replay does not append a second session turn. The
+legacy three-argument append derives a native source-unit receipt from the
+captured bodies and takes its byte grant from `maintenance_work_mem`.
+
+Local controls cover native export, managed text parity and the PostgreSQL sink
+through actual native owners with controlled PostgreSQL services. Three compiled
+database tests cover existing-turn reuse/replay, rollback/isolation refusal, and
+two real backends contending on the apply lock. Those database tests still need
+execution on the host; compilation is not an acceptance result.
 
 ## Native verification
 

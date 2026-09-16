@@ -329,6 +329,7 @@ run_suite() { step "$2"; }
 run_live_suite() { step "$1"; }
 run_install() { step native-install; }
 run_database_maintenance() { step database-maintenance; }
+resume_chess_observation_if_needed() { :; }
 restore_foundation_if_requested() { step foundation; }
 seed_operational_memory() { step operational-seed; }
 run_publish_with_recovery() { step publish; }
@@ -614,7 +615,7 @@ run_recorded_chess_benchmark() { step recorded-chess; }
             self.assertNotIn(forbidden, command)
         self.assertEqual("true", workflow["concurrency"]["cancel-in-progress"])
 
-    def test_private_database_proof_requires_each_source_and_session_case(self):
+    def test_private_database_proof_requires_each_source_session_physicality_and_chess_case(self):
         source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
         prefix = "Laplace.SubstrateCRUD.Tests."
         methods = [
@@ -624,6 +625,17 @@ run_recorded_chess_benchmark() { step recorded-chess; }
             prefix + "OperationalSourceExecutionTests.AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding",
             prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent",
             prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
+            prefix + "ChessPositionPlayingPersistenceTests.CompleteDistinctPlayingsFoldOnceAndExactReplayPreservesEvidenceAndStanding",
+            prefix + "NativeSqlBatchTests.WitnessScopesExcludeCrossProductsButRetainConflictingObjects",
+            prefix + "PhysicalityObservationWriterTests.OrdinaryWriterRetainsBothRawFormsAndReusesDurableDescriptorViewEvidence",
+            prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness",
+            prefix + "PhysicalityObservationWriterTests.ConsensusFoldsGeneratedEvidenceOncePerDistinctActualSourceUnit",
+            prefix + "PhysicalityObservationWriterTests.SourceOnlyJournalBackfillRequiresFreshVerificationAndAtomicGeneratedEvidence",
+            prefix + "PhysicalityObservationWriterTests.SourceOnlyConversationBackfillDoesNotAppendTheOriginalTurnAgain",
+            prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase",
+            prefix + "SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain",
+            prefix + "SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold",
+            prefix + "SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted",
         ]
         expected_filter = "|".join("FullyQualifiedName=" + method for method in methods)
         self.assertIn("--filter '" + expected_filter + "'", source)
@@ -632,7 +644,21 @@ run_recorded_chess_benchmark() { step recorded-chess; }
                       source.split('rm -f ', 1)[1].split('PATH="$PG_PREFIX/bin:', 1)[0])
         validator = source.split('python3 - "$managed_results/operational-source-execution.trx" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
         names = [methods[0], methods[1], methods[2], methods[3], methods[4] + "(batchPrefix: False)",
-                 methods[4] + "(batchPrefix: True)", methods[5]]
+                 methods[4] + "(batchPrefix: True)", methods[5], methods[6],
+                 prefix + "NativeSqlBatchTests.WitnessScopesExcludeCrossProductsButRetainConflictingObjects",
+                 prefix + "PhysicalityObservationWriterTests.OrdinaryWriterRetainsBothRawFormsAndReusesDurableDescriptorViewEvidence",
+                 prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 0, transportedForms: 1, expectedWitnesses: 1)",
+                 prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 1, transportedForms: 2, expectedWitnesses: 2)",
+                 prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 2, transportedForms: 3, expectedWitnesses: 2)",
+                 prefix + "PhysicalityObservationWriterTests.ConsensusFoldsGeneratedEvidenceOncePerDistinctActualSourceUnit",
+                 prefix + "PhysicalityObservationWriterTests.SourceOnlyJournalBackfillRequiresFreshVerificationAndAtomicGeneratedEvidence",
+                 prefix + "PhysicalityObservationWriterTests.SourceOnlyConversationBackfillDoesNotAppendTheOriginalTurnAgain",
+                 prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase(partialTrajectory: False)",
+                 prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase(partialTrajectory: True)",
+                 prefix + "SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain",
+                 prefix + "SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold",
+                 prefix + "SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted",
+                 ]
 
         def receipt():
             root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
@@ -640,7 +666,7 @@ run_recorded_chess_benchmark() { step recorded-chess; }
             for name in names:
                 ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
             summary = ET.SubElement(root, "ResultSummary")
-            ET.SubElement(summary, "Counters", total="7", executed="7", passed="7",
+            ET.SubElement(summary, "Counters", total="21", executed="21", passed="21",
                           failed="0", notExecuted="0")
             return root
 
@@ -663,7 +689,7 @@ run_recorded_chess_benchmark() { step recorded-chess; }
                 results = root.find("Results")
                 results.remove(next(result for result in results if result.get("testName") == missing_name))
                 check(root, False)
-        for corruption in ("missing", "repeated-theory", "wrong-test", "skipped", "failed", "counter-only"):
+        for corruption in ("missing", "repeated-theory", "repeated-form-variant", "wrong-test", "skipped", "failed", "counter-only"):
             with self.subTest(corruption=corruption):
                 root = receipt()
                 results = root.find("Results")
@@ -671,6 +697,8 @@ run_recorded_chess_benchmark() { step recorded-chess; }
                     results.remove(results[6])
                 elif corruption == "repeated-theory":
                     results[5].set("testName", names[4])
+                elif corruption == "repeated-form-variant":
+                    results[11].set("testName", names[10])
                 elif corruption == "wrong-test":
                     results[6].set("testName", prefix + "UnrelatedPassingTest")
                 elif corruption in ("skipped", "failed"):
@@ -678,6 +706,43 @@ run_recorded_chess_benchmark() { step recorded-chess; }
                 else:
                     root.find("ResultSummary/Counters").set("executed", "6")
                 check(root, False)
+
+    def test_private_native_database_requires_built_physicality_fixtures_in_order(self):
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
+        self.assertIn('ctest --test-dir "$BUILD" --show-only=json-v1 -L regress > "$native_selection"', source)
+        self.assertIn('ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -L regress', source)
+        validator = source.split("<<'PY_NATIVE_SELECTION'\n", 1)[1].split("\nPY_NATIVE_SELECTION\n", 1)[0]
+        required = ["physicality_descriptor_admission", "physicality_readback", "physicality_readback_cold"]
+        selection = {"tests": [{"name": "regress_laplace_substrate", "command": [
+            "/branch/pg_regress", "--use-existing", "bootstrap", *required]}]}
+
+        def check(document, passes):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "selection.json"
+                path.write_text(json.dumps(document), encoding="utf-8")
+                result = subprocess.run([sys.executable, "-", str(path)], input=validator,
+                                        text=True, capture_output=True)
+            self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+
+        check(selection, True)
+        check({"tests": []}, False)
+        check({"tests": selection["tests"] * 2}, False)
+        disabled = copy.deepcopy(selection)
+        disabled["tests"][0]["properties"] = [{"name": "DISABLED", "value": True}]
+        check(disabled, False)
+        for fixture in required:
+            for mutation in ("missing", "repeated"):
+                with self.subTest(fixture=fixture, mutation=mutation):
+                    changed = copy.deepcopy(selection)
+                    command = changed["tests"][0]["command"]
+                    if mutation == "missing":
+                        command.remove(fixture)
+                    else:
+                        command.append(fixture)
+                    check(changed, False)
+        changed = copy.deepcopy(selection)
+        changed["tests"][0]["command"][-2:] = list(reversed(required[-2:]))
+        check(changed, False)
 
     def test_manual_db_mutation_shares_product_lifecycle_lock(self):
         db = load(WORKFLOWS / "db-ops.yml")
@@ -876,13 +941,37 @@ raise SystemExit(int(os.environ[mode]))
 bash() { echo publication-recovery; }
 ensure_api_running() { echo API-START; }
 run_publish() { echo published; }
+python3() {
+  if [[ "$*" == *'--resume-if-needed'* ]]; then return 0; fi
+  [[ "$*" == 'scripts/quiesce-managed-database.py --database laplace --timeout-seconds 3600 -- bash scripts/repair-chess-position-outcomes.sh' ]] || return 90
+  [[ "$LAPLACE_REPAIR_PUBLISHED_SOURCE" == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]] || return 91
+  echo observation-migration
+}
+git() { printf '%s\\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }
+PGDATABASE=laplace
 verify_operational_execution() { echo operational-proof-rejected; return 37; }
 run_phase publish
 run_phase operational-execution
 """
         result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, timeout=10)
         self.assertEqual(37, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(["published", "operational-proof-rejected"], result.stdout.splitlines())
+        self.assertEqual(["published", "observation-migration", "operational-proof-rejected"], result.stdout.splitlines())
+
+    def test_observation_migration_failure_stops_acceptance_after_publication(self):
+        source = PRODUCT.read_text()
+        definitions = source[source.index("run_policy() {"):source.index('case "${2:-}" in')]
+        script = "set -euo pipefail\nstage=all\n" + definitions + """
+recover_publish() { echo unexpected-publication-rollback; }
+run_publish() { echo published; }
+python3() { if [[ "$*" == *'--resume-if-needed'* ]]; then return 0; fi; echo observation-migration-rejected; return 43; }
+git() { printf '%s\\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }
+verify_operational_execution() { echo unexpected-operational-proof; }
+run_phase publish
+run_phase operational-execution
+"""
+        result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, timeout=10)
+        self.assertEqual(43, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(["published", "observation-migration-rejected"], result.stdout.splitlines())
 
     def test_failed_proof_cannot_be_hidden_at_step_or_job(self):
         mutations = [

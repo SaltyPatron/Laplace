@@ -179,7 +179,8 @@ python3 scripts/benchmark-chess-environment.py \
   --stockfish "$LAPLACE_EXTERNAL/stockfish/src/stockfish" \
   --cutechess /opt/laplace/bin/cutechess-cli \
   --reserve-cpus 2 --memory-mib 2048 --repeats 3 \
-  --hash-mib 16,64,256 --max-seconds 180
+  --hash-mib 16,64,256 --match-depth 8 --max-moves 0 \
+  --max-seconds 1800 --case-timeout 600
 ```
 
 The default thread sweep includes powers of two, the observed physical-core count
@@ -198,19 +199,22 @@ NPS values remain visible because different Threads/Hash settings can search
 different amounts of work at the same depth. `--bench-limit-type nodes` changes
 the per-position limit; SMP can still overshoot that limit.
 
-CuteChess runs actual move-limited Stockfish games at each admitted concurrency,
+CuteChess runs complete Stockfish games at each admitted concurrency,
 with the same game count and per-move depth, strength limiting disabled and
 pondering off. Memory planning includes both resident engines per game;
 active search planning uses one search team per game. Completed-game counts,
-UCI best moves, PGN results and ply counts must reconcile. Adjudicated draws from
-`--max-moves` are throughput workload boundaries, not playing-strength evidence.
+UCI best moves, PGN results and ply counts must reconcile. Normal calibration has
+no move-count cutoff and requires normal game termination. A positive
+`--max-moves` explicitly selects a short diagnostic; that mode emits no complete-game
+capacity recommendation. Wall and per-process time budgets still apply, and an
+unfinished game fails the measurement while retaining its available evidence.
 
 To include a separate two-game Laplace-versus-Stockfish acceptance, provide
 `--laplace-uci /path/to/laplace-uci`. It preserves Laplace's configured substrate
 mode and records the advertised effective setting. `--laplace-substrate off`
 explicitly requests a substrate-disabled packaging check. Both colors are
 verified; matched depth is recorded without pretending the engines perform equal
-work or inferring Elo from two bounded games.
+work or inferring Elo from two games.
 
 The output directory contains `report.json`, raw command/transcript logs and
 PGNs. Recommendations distinguish bench completion latency, search-node

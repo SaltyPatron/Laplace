@@ -6,11 +6,12 @@ SQL_QUERY("browse.names", "bytea[]",
     "consensus.relation_family_ids('HAS_NAME') || consensus.relation_family_ids('HAS_NAME_ALIAS'))")
 SQL_QUERY("entity.facets", "bytea[]",
     "SELECT id, tier, type_id FROM laplace.entities WHERE id = ANY($1)")
-SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[],bytea[]",
+SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[]",
     "SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,a.outcome,a.observation_count "
-    "FROM laplace.attestations a WHERE a.subject_id=ANY($1) AND a.type_id=ANY($2) "
-    "AND a.source_id=ANY($3) AND (a.context_id=ANY($4) "
-    "OR (a.context_id IS NULL AND a.subject_id=ANY($5)))")
+    "FROM laplace.attestations a JOIN unnest($1::bytea[],$2::bytea[],$3::bytea[],$4::bytea[]) "
+    "AS s(subject_id,type_id,source_id,context_id) ON a.subject_id=s.subject_id "
+    "AND a.type_id=s.type_id AND a.source_id=s.source_id "
+    "AND a.context_id IS NOT DISTINCT FROM s.context_id WHERE a.type_id=ANY($2)")
 SQL_QUERY("content.carrier_vertices_selected", "bytea[],bytea[]",
     "SELECT parent_id,n_constituents,ordinal,child_id,run_length,flags "
     "FROM structural.content_carrier_vertices($1::bytea[],$2::bytea[]) ORDER BY parent_id,ordinal")
@@ -186,10 +187,18 @@ SQL_QUERY("conversation.forward_trace", "text,int4,int4,float8,int4,int4,int4",
     "t.declared_result,t.event,t.routing_round FROM generation.forward_trace("
     "$1,$2,$3,$4,$5,NULL::bigint,$6,$7,NULL::bytea[],NULL::bytea[]) t "
     "ORDER BY t.step,t.routing_round,CASE t.event WHEN 'route' THEN 0 ELSE 1 END")
-SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz",
-    "SELECT converse.session_append_turns($1,$2,$3)")
+SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz,bytea,int8,int4,int8",
+    "SELECT converse.session_append_turns($1,$2,$3,$4,$5,$6,$7)")
+SQL_QUERY("conversation.register_projection_sources", "bytea[],text[]",
+    "WITH requested AS MATERIALIZED (SELECT * FROM unnest($1::bytea[],$2::text[]) r(id,name)),"
+    "inserted AS (INSERT INTO laplace.canonical_names(id,name) SELECT id,name FROM requested "
+    "ON CONFLICT(id) DO NOTHING RETURNING id,name) "
+    "SELECT count(*) FROM requested r WHERE EXISTS(SELECT FROM inserted i WHERE i.id=r.id AND i.name=r.name) "
+    "OR EXISTS(SELECT FROM laplace.canonical_names c WHERE c.id=r.id AND c.name=r.name)")
 SQL_QUERY("conversation.manifest", "bytea,bytea",
-    "SELECT public.ST_AsBinary(p.trajectory),p.type FROM laplace.physicalities p "
+    "SELECT public.ST_AsBinary(p.trajectory,'NDR'),p.type,public.ST_X(p.coord),public.ST_Y(p.coord),"
+    "public.ST_Z(p.coord),public.ST_M(p.coord),p.hilbert_index,p.n_constituents,"
+    "p.alignment_residual,p.source_dim,p.observed_at FROM laplace.physicalities p "
     "WHERE p.id IN ($1,$2)")
 SQL_QUERY("conversation.lock", "bytea",
     "SELECT id FROM laplace.entities WHERE id=$1 FOR UPDATE")
@@ -205,7 +214,7 @@ SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8
     "VALUES ($1,$2,3,public.ST_GeomFromWKB($3),public.ST_MakePoint($4,$5,$6,$7),$8,$9,$10) "
     "ON CONFLICT(id) DO UPDATE SET trajectory=EXCLUDED.trajectory,coord=EXCLUDED.coord,"
     "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
-    "observed_at=EXCLUDED.observed_at")
+    "alignment_residual=NULL,source_dim=NULL,observed_at=EXCLUDED.observed_at")
 /* Retained for already mapped versioned execution modules during live upgrade. */
 SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT context_id FROM laplace.attestations "
@@ -280,3 +289,109 @@ SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
     "UNION ALL SELECT 2::int2,p.id,0::int8 FROM laplace.physicalities p WHERE p.id=ANY($2) "
     "UNION ALL SELECT 3::int2,a.id,a.observation_count FROM laplace.attestations a "
     "WHERE a.id=ANY($3) AND a.type_id=ANY($4)")
+
+/* Native generated-stage deposit: one caller transaction and fixed set queries. */
+SQL_QUERY("ingest.generated_stage_sink.lock", "",
+    "SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch',0))")
+SQL_QUERY("ingest.generated_stage_sink.epoch", "",
+    "SELECT nextval('laplace.apply_write_epoch')")
+SQL_QUERY("ingest.generated_stage_sink.presence", "bytea[]",
+    "SELECT DISTINCT id FROM laplace.entities WHERE id=ANY($1)")
+SQL_QUERY("ingest.generated_stage_sink.entities", "bytea[],int2[],bytea[],bytea[]",
+    "INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) SELECT r.* FROM unnest($1,$2,$3,$4) r(id,tier,type_id,source) WHERE NOT EXISTS(SELECT 1 FROM laplace.entities e WHERE e.id=r.id) ORDER BY r.id ON CONFLICT(id,tier) DO NOTHING RETURNING id")
+SQL_QUERY("ingest.generated_stage_sink.physicalities", "bytea[],bytea[],int2[],bytea[],bytea[],bytea[],int4[],float8[],int4[],timestamptz[]",
+    "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT r.id,r.entity,r.type,public.ST_GeomFromEWKB(r.coord),r.hilbert,public.ST_GeomFromEWKB(r.trajectory),r.n,r.residual,r.dim,r.observed FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) r(id,entity,type,coord,hilbert,trajectory,n,residual,dim,observed) ORDER BY r.id ON CONFLICT(id) DO NOTHING RETURNING id")
+SQL_QUERY("ingest.generated_stage_sink.attestations", "bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],int2[],timestamptz[],int8[],int8[],int8[],int8[],bool[],bytea[]",
+    "INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,highway_mask) SELECT r.* FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) r(id,subject,type,object,source,context,outcome,observed,games,score,rd,rating,replayable,mask) ORDER BY r.type,r.subject,r.id ON CONFLICT(id,type_id,subject_id) DO NOTHING RETURNING id")
+SQL_QUERY("ingest.generated_stage_sink.fold", "bytea[],bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
+    "SELECT consensus.upsert($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+SQL_QUERY("ingest.generated_stage_sink.masks", "bytea[],bytea[]",
+    "SELECT consensus.highway_mask_deposit($1,$2)")
+/* Direct indexed containment selects candidates, never unverified body rows. */
+SQL_QUERY("readback.physicality_form_candidates", "bytea,bytea[],bytea,int4",
+    "SELECT p.entity_id FROM laplace.physicalities p "
+    "WHERE p.type=1 AND p.trajectory IS NOT NULL "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1] "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $2 "
+    "AND p.entity_id>$3 ORDER BY p.entity_id LIMIT $4")
+SQL_QUERY("readback.physicality_descriptors", "bytea[],int8,int4,int8",
+    "SELECT * FROM structural.physicality_descriptor_read($1,$2,$3,$4)")
+SQL_QUERY("readback.physicality_forms", "bytea[],bytea,int4,int8,int4,int8",
+    "SELECT * FROM structural.physicality_forms($1,$2,$3,$4,$5,$6)")
+
+SQL_QUERY("maintenance.database_identity", "",
+    "SELECT current_database(), "
+    "    (SELECT oid::text FROM pg_database WHERE datname=current_database()), "
+    "    (SELECT system_identifier::text FROM pg_control_system()) ")
+SQL_QUERY("source.observation_contexts", "bytea,bytea,bytea,bytea[]",
+    "SELECT DISTINCT context_id FROM laplace.attestations "
+    "WHERE source_id=$1 AND type_id=$2 AND object_id=$3 AND context_id=ANY($4) ")
+SQL_QUERY("source.observation_inventory", "bytea,bytea,bytea,bytea",
+    "SELECT count(*), "
+    "       count(*) FILTER (WHERE type_id=$2 AND object_id=$3 AND context_id IS NULL), "
+    "       count(*) FILTER (WHERE type_id=$2 AND object_id=$3 AND context_id IS NOT NULL), "
+    "       coalesce(sum(observation_count) FILTER (WHERE type_id=$2 AND object_id=$3),0)::bigint, "
+    "       count(DISTINCT context_id) FILTER (WHERE type_id=$2 AND object_id=$3), "
+    "       (SELECT count(*) FROM laplace.entities WHERE type_id=$4 AND first_observed_by=$1), "
+    "       current_database(), current_setting('server_version') "
+    "FROM laplace.attestations WHERE source_id=$1 ")
+SQL_QUERY("source.migration_retention", "bytea,bytea",
+    "WITH owned_receipts AS MATERIALIZED ( "
+    "    SELECT receipt.* FROM laplace.ingest_flush_journal receipt "
+    "    WHERE receipt.source_id=$1 OR EXISTS ( "
+    "        SELECT FROM laplace.ingest_flush_journal_sources owner "
+    "        WHERE owner.working_set_id=receipt.working_set_id AND owner.source_id=$1) "
+    "), rows AS ( "
+    "    SELECT 'source_evidence' AS section, to_jsonb(a) AS body "
+    "    FROM laplace.attestations a WHERE a.source_id=$1 "
+    "    UNION ALL "
+    "    SELECT 'affected_standing',to_jsonb(c) FROM laplace.consensus c "
+    "    WHERE EXISTS (SELECT FROM laplace.attestations a WHERE a.source_id=$1 "
+    "        AND a.type_id=c.type_id AND a.subject_id=c.subject_id "
+    "        AND a.object_id IS NOT DISTINCT FROM c.object_id) "
+    "    UNION ALL "
+    "    SELECT 'surviving_evidence',to_jsonb(a) FROM laplace.attestations a "
+    "    WHERE a.source_id<>$1 AND EXISTS ( "
+    "        SELECT FROM laplace.attestations old WHERE old.source_id=$1 "
+    "        AND old.type_id=a.type_id AND old.subject_id=a.subject_id "
+    "        AND old.object_id IS NOT DISTINCT FROM a.object_id) "
+    "    UNION ALL "
+    "    SELECT 'source_markers',to_jsonb(e) FROM laplace.entities e "
+    "    WHERE e.first_observed_by=$1 AND e.type_id=$2 "
+    "    UNION ALL "
+    "    SELECT 'marker_physicalities',to_jsonb(p) || jsonb_build_object( "
+    "        'coord_ewkb',encode(ST_AsEWKB(p.coord),'hex'), "
+    "        'trajectory_ewkb',encode(ST_AsEWKB(p.trajectory),'hex')) FROM laplace.physicalities p "
+    "    WHERE EXISTS (SELECT FROM laplace.entities e WHERE e.id=p.entity_id "
+    "        AND e.first_observed_by=$1 AND e.type_id=$2) "
+    "    UNION ALL "
+    "    SELECT 'flush_receipts',to_jsonb(r) FROM owned_receipts r "
+    "    UNION ALL "
+    "    SELECT 'flush_receipt_sources',to_jsonb(s) FROM laplace.ingest_flush_journal_sources s "
+    "    WHERE EXISTS (SELECT FROM owned_receipts r WHERE r.working_set_id=s.working_set_id) "
+    "    UNION ALL "
+    "    SELECT 'file_completion_evidence',to_jsonb(a) FROM laplace.attestations a "
+    "    WHERE EXISTS ( "
+    "        SELECT FROM laplace.ingest_run_journal r "
+    "        JOIN laplace.ingest_file_journal f ON f.run_id=r.run_id "
+    "        WHERE r.source_id=$1 AND f.file_id=a.source_id "
+    "        AND a.type_id=realize.canonical_id('substrate/type/HasLayerCompleted/' || r.layer::text || '/v1') "
+    "        AND (a.context_id=r.source_id OR a.context_id IS NULL)) "
+    ") "
+    "SELECT convert_to(jsonb_build_object('section',section,'row',body)::text || E'\\n','UTF8') FROM rows ")
+SQL_QUERY("chess.witness_inputs", "bytea[],bytea[],bytea[],bytea[],int4",
+    "SELECT subject_id,type_id, "
+    "       CASE WHEN octet_length(object_id)=16 THEN object_id END, "
+    "       CASE WHEN context_id IS NULL OR octet_length(context_id)=16 THEN context_id "
+    "            ELSE decode('00','hex') END "
+    "FROM laplace.attestations "
+    "WHERE subject_id=ANY($1) AND type_id=ANY($2) AND source_id=ANY($3) "
+    "  AND ($4::bytea[] IS NULL OR context_id=ANY($4)) "
+    "LIMIT $5 ")
+SQL_QUERY("chess.content_preflight", "bytea[],int4",
+    "SELECT entity_id,id,ST_MemSize(trajectory)::bigint,ST_NPoints(trajectory)::bigint "
+    "FROM laplace.physicalities "
+    "WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL "
+    "LIMIT $2 ")
+SQL_QUERY("chess.render_preflighted_results", "bytea[],int4",
+    "SELECT realize.render_text_batch($1,$2)")

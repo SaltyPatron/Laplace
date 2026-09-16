@@ -19,6 +19,14 @@ physicality_descriptor_status_t physicality_descriptor_generated_source_create(
     size_t maximum_bytes, hash128_t* out_source_id, intent_stage_t** out_stage,
     size_t* out_peak_bytes);
 
+/* The mutable session projection has its own explicit derivation source.
+ * Its frozen name is ordinary content under the same floor; tenant identity
+ * and the prompt/response priors do not stand in for this native operation. */
+const char* physicality_descriptor_session_source_name(void);
+physicality_descriptor_status_t physicality_descriptor_session_source_create(
+    size_t maximum_bytes, hash128_t* out_source_id, intent_stage_t** out_stage,
+    size_t* out_peak_bytes);
+
 /* Creates the copied vocabulary through the ordinary content owner against
  * the currently loaded floor. No fallback atoms, ids or coordinates. The
  * returned vocabulary owns an ordinary stage until take_stage transfers it. */

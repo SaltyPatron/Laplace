@@ -1,3 +1,12 @@
+add_executable(generated_stage_sink_pg_native_probe generated_stage_sink_native_probe.c)
+target_include_directories(generated_stage_sink_pg_native_probe SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
+target_link_libraries(generated_stage_sink_pg_native_probe PRIVATE laplace_core m)
+target_compile_options(generated_stage_sink_pg_native_probe PRIVATE
+    -ffunction-sections -fdata-sections -Wno-unused-parameter)
+target_link_options(generated_stage_sink_pg_native_probe PRIVATE "LINKER:--gc-sections")
+add_test(NAME generated_stage_sink_pg_native_helpers COMMAND generated_stage_sink_pg_native_probe)
+set_tests_properties(generated_stage_sink_pg_native_helpers PROPERTIES LABELS "native;persistence;physicality")
+
 add_executable(physicality_descriptor_pg_native_probe physicality_descriptor_native_probe.c)
 target_include_directories(physicality_descriptor_pg_native_probe SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
 target_link_libraries(physicality_descriptor_pg_native_probe PRIVATE laplace_core m)
@@ -6,6 +15,15 @@ target_compile_options(physicality_descriptor_pg_native_probe PRIVATE
 target_link_options(physicality_descriptor_pg_native_probe PRIVATE "LINKER:--gc-sections")
 add_test(NAME physicality_descriptor_pg_native_helpers COMMAND physicality_descriptor_pg_native_probe)
 set_tests_properties(physicality_descriptor_pg_native_helpers PROPERTIES LABELS "native;provider;physicality")
+
+add_executable(physicality_readback_pg_native_probe physicality_readback_native_probe.c)
+target_include_directories(physicality_readback_pg_native_probe SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
+target_link_libraries(physicality_readback_pg_native_probe PRIVATE laplace_core m)
+target_compile_options(physicality_readback_pg_native_probe PRIVATE
+    -ffunction-sections -fdata-sections -Wno-unused-parameter)
+target_link_options(physicality_readback_pg_native_probe PRIVATE "LINKER:--gc-sections")
+add_test(NAME physicality_readback_pg_native_helpers COMMAND physicality_readback_pg_native_probe)
+set_tests_properties(physicality_readback_pg_native_helpers PROPERTIES LABELS "native;readback;physicality")
 
 find_program(LAPLACE_PG_REGRESS pg_regress
     PATHS "${LAPLACE_PG_PKGLIBDIR}/pgxs/src/test/regress"
@@ -32,7 +50,7 @@ endif()
 
 set(REGRESS_TESTS bootstrap glicko2_aggregate entities_exist_bitmap physicalities_exist_bitmap consensus_signed consensus_upsert consensus_bulk_write explore_web_neighbors attestation_merge generation_corpus cognition_completion operational_memory task_shapes steer_semantic_precedence converse relation_bands_summary chat_loop word_law identity_law schema_law structural_surface walk_richer_forward_pass chess_read chess_ranked_scope chess_player_identity_scope chess_fold_debt_repair ops_reads ops_control ingest_throughput walk_edge_weight_parity belief_distribution realize_ladder_parity perfcache_read display_label search_path_independence evict_source prompt_election apply_epoch walk_symmetry highway_mask_deposit highway_mask_recovery)
 set(REGRESS_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/regress_output")
-list(APPEND REGRESS_TESTS text_root_placements content_carrier_vertices physicality_descriptor_admission)
+list(APPEND REGRESS_TESTS text_root_placements content_carrier_vertices physicality_descriptor_admission physicality_readback physicality_readback_cold)
 file(MAKE_DIRECTORY "${REGRESS_OUTPUT_DIR}")
 
 add_test(NAME regress_setup_laplace_substrate

@@ -1,0 +1,8 @@
+-- Exact descriptor body readback and indexed form cursor acceptance.
+\set ECHO none
+NOTICE:  physicality readback: actual native stage deposition and replay preserve E/P/A and exact consensus
+NOTICE:  physicality readback: exhausted post-insert sink grant rolls back E/P/A and exact consensus
+NOTICE:  physicality readback: exact native bodies, null/negative-zero bits, root order/duplicates and bounded typed closure
+NOTICE:  physicality readback: complete three-page indexed candidate traversal, native false-positive rejection and empty continuation
+NOTICE:  physicality readback: seven byte/work/operation, missing-root/typed-child, false-descriptor and malformed-cursor refusals
+

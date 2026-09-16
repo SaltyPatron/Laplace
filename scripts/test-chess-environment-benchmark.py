@@ -528,9 +528,27 @@ ActiveEnterTimestampMonotonic=2000000
         args.laplace_substrate = "off"
         self.assertIn("option.Substrate=off", bench.match_command(Path("cc"), Path("sf"), Path("game.pgn"), 1, 2, args, Path("laplace")))
 
+    def test_complete_game_command_has_no_move_cap_and_diagnostics_cannot_recommend_capacity(self):
+        args = self.args()
+        args.match_depth, args.max_moves, args.laplace_substrate = 8, 0, "inherit"
+        command = bench.match_command(Path("cc"), Path("sf"), Path("game.pgn"), 2, 4, args)
+        self.assertNotIn("-maxmoves", command)
+        self.assertNotIn("-draw", command)
+        args.max_moves = 12
+        capped = bench.match_command(Path("cc"), Path("sf"), Path("game.pgn"), 2, 4, args)
+        self.assertEqual("12", capped[capped.index("-maxmoves") + 1])
+        report = {"status":"complete", "stockfish_bench":[],
+            "cutechess_matches":[{"status":"complete", "concurrency":2}],
+            "parameters":{"repeats":3,"max_moves":12}}
+        recommendations = bench.recommendations(report)
+        self.assertIn("tournament_diagnostic_only", recommendations)
+        self.assertNotIn("bounded_tournament_throughput", recommendations)
+
     def test_incomplete_pgn_and_transcript_cannot_be_success(self):
         pgn = '[Event "test"]\n[White "A"]\n[Black "B"]\n[Result "1/2-1/2"]\n[PlyCount "2"]\n[Termination "adjudication"]\n\n1. e4 e5 1/2-1/2\n'
-        games = bench.parse_pgn(pgn, 1)
+        with self.assertRaises(ValueError):
+            bench.parse_pgn(pgn, 1)
+        games = bench.parse_pgn(pgn, 1, allow_adjudication=True)
         bench.verify_tournament("1 <A: bestmove e2e4\n2 <B: bestmove e7e5\nFinished game 1 (A vs B): 1/2-1/2\n", games)
         with self.assertRaises(ValueError):
             bench.parse_pgn(pgn.replace('Result "1/2-1/2"', 'Result "*"'), 1)

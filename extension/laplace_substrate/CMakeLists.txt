@@ -10,7 +10,9 @@ set(EXT_EXECUTION_SOURCES
     src/content_resolve.c
     src/text_root_placements.c
     src/physicality_descriptor_admission.c
+    src/generated_stage_sink.c
     src/content_trajectory_read.c
+    src/physicality_descriptor_readback.c
     src/content_carrier_vertices.c
     src/identity_scan.c
     src/content_membership_read.c
@@ -36,7 +38,7 @@ file(GLOB _execution_headers CONFIGURE_DEPENDS
 set(_execution_inputs CMakeLists.txt ${EXT_EXECUTION_SOURCES} ${_execution_headers}
     ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.def)
 list(SORT _execution_inputs)
-set(_execution_hashes "${LAPLACE_PG_MAJOR};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};${LAPLACE_TARGET_ISA}")
+set(_execution_hashes "testing=${BUILD_TESTING};${LAPLACE_PG_MAJOR};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};${LAPLACE_TARGET_ISA}")
 foreach(_input IN LISTS _execution_inputs)
     if(NOT IS_ABSOLUTE "${_input}")
         set(_input "${CMAKE_CURRENT_SOURCE_DIR}/${_input}")
@@ -184,6 +186,9 @@ else()
 endif()
 
 add_library(laplace_execution MODULE ${EXT_EXECUTION_SOURCES})
+if(BUILD_TESTING)
+    target_compile_definitions(laplace_execution PRIVATE LAPLACE_SUBSTRATE_TESTING=1)
+endif()
 set_target_properties(laplace_execution PROPERTIES PREFIX "" OUTPUT_NAME "${EXT_EXECUTION_MODULE}")
 target_include_directories(laplace_execution SYSTEM PRIVATE ${LAPLACE_PG_INCLUDEDIR_SERVER})
 target_link_libraries(laplace_execution PRIVATE laplace_core laplace_dynamics)

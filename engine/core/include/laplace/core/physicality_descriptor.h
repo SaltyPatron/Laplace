@@ -137,6 +137,15 @@ typedef struct {
     int64_t observed_at_unix_us;
 } physicality_descriptor_observation_t;
 
+/* Plan-free bounded transport of native stage rows. Shares the capture decoder:
+ * exact COPY framing, scalar/EWKB layouts and placement IDs are checked; all
+ * occurrence bodies and timestamps are retained. This does not construct or
+ * validate a descriptor plan, deposit rows, or establish source evidence. The
+ * returned capture_plan is NULL. Use capture_stages for descriptor admission. */
+physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
+    const intent_stage_t* const* stages, size_t stage_count,
+    size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture);
+
 physicality_descriptor_status_t physicality_descriptor_capture_stages(
     const intent_stage_t* const* stages, size_t stage_count,
     const physicality_descriptor_basis_t* basis,
@@ -160,6 +169,33 @@ const physicality_descriptor_observation_t* physicality_descriptor_capture_obser
  * this validation succeeds. Missing child records fail; they are never inferred
  * from current coordinates or replaced by opaque id bytes. */
 typedef struct physicality_descriptor_readback physicality_descriptor_readback_t;
+/* Shape/authenticity filter for indexed containment candidates. A successful
+ * root still requires complete typed readback before it is an admitted body. */
+int physicality_descriptor_readback_root_entity(
+    const physicality_descriptor_node_t* node, const hash128_t* children,
+    size_t child_count, const physicality_descriptor_basis_t* basis,
+    hash128_t* out_entity);
+
+/* The same typed decoder in discovery mode. NEEDS_PROVIDER returns only sorted
+ * unique missing typed-node identities: no body buffer is executable. Realized
+ * E, carrier E, tags and exact numeric vocabulary are leaves. The caller may
+ * hydrate that entire frontier and retry under its cumulative work grant.
+ * OK performs the existing full decoder and planner verification. The content
+ * hash-operand grant is checked against decoded Content manifests before that
+ * replan can expand RLE runs; it is independent of the byte grant. */
+physicality_descriptor_status_t physicality_descriptor_readback_prepare(
+    const physicality_descriptor_node_t* nodes, size_t node_count,
+    const hash128_t* children, size_t child_count,
+    const hash128_t* roots, size_t root_count,
+    const physicality_descriptor_basis_t* basis,
+    const physicality_descriptor_limits_t* plan_limits,
+    size_t maximum_readback_bytes,
+    size_t maximum_content_hash_operands,
+    physicality_descriptor_readback_t** out_readback);
+const hash128_t* physicality_descriptor_readback_missing(
+    const physicality_descriptor_readback_t* readback, size_t* count);
+size_t physicality_descriptor_readback_content_hash_operands(
+    const physicality_descriptor_readback_t* readback);
 physicality_descriptor_status_t physicality_descriptor_readback_build(
     const physicality_descriptor_node_t* nodes, size_t node_count,
     const hash128_t* children, size_t child_count,

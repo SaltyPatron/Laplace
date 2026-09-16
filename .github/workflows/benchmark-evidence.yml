@@ -121,7 +121,7 @@ jobs:
   benchmark:
     name: Measured host — versioned benchmark suite
     runs-on: [self-hosted, laplace]
-    timeout-minutes: ${{ inputs.suite == 'chess' && 30 || 180 }}
+    timeout-minutes: ${{ inputs.suite == 'chess' && 45 || 180 }}
     steps:
       - name: Create immutable evidence directory first
         shell: bash
@@ -481,8 +481,8 @@ jobs:
               --chess-stockfish "$LAPLACE_BENCH_CHESS_STOCKFISH"
               --chess-cutechess "$LAPLACE_BENCH_CHESS_CUTECHESS"
               --chess-reserve-cpus "$LAPLACE_BENCH_CHESS_RESERVE_CPUS"
-              --chess-max-seconds 900
-              --chess-case-timeout 120
+              --chess-max-seconds 1800
+              --chess-case-timeout 600
             )
             [[ -z "${LAPLACE_BENCH_CHESS_UCI:-}" ]] || args+=(--chess-laplace-uci "$LAPLACE_BENCH_CHESS_UCI")
           elif [[ "$SUITE" == geometry ]]; then

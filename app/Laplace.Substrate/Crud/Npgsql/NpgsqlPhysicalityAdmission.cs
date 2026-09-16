@@ -338,8 +338,8 @@ public sealed partial class NpgsqlSubstrateWriter
             (DateTimeOffset.UtcNow.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10);
         command.Parameters.AddWithValue(NpgsqlDbType.Bigint, receiverGrant);
         // A provider round uses both a metadata set and a body set. Content tiers
-        // are byte-valued; do not halve the supported depth by counting one query.
-        const int maximumOperations = 2 * (byte.MaxValue + 1);
+        // are byte-valued. Include the two actual SPI plan preparations as well.
+        const int maximumOperations = 2 + 2 * (byte.MaxValue + 1);
         // Explicit expanded hashing work grant: one 16-byte canonical ID per
         // occurrence. This is a work limit, not a compressed-carrier byte claim.
         long maximumLogicalWork = Math.Max(1, input.MaximumBytes / 16);
@@ -379,7 +379,7 @@ public sealed partial class NpgsqlSubstrateWriter
         if (string.IsNullOrWhiteSpace(input.Receipt.SnapshotReceipt)
             || input.Receipt.CurrentContentBodies < 0 || input.Receipt.MissingContentBodies < 0
             || input.Receipt.ProviderRounds < 0 || input.Receipt.DatabaseOperations < 0
-            || input.Receipt.DatabaseOperations != 2L * input.Receipt.ProviderRounds
+            || input.Receipt.DatabaseOperations != 2L + 2L * input.Receipt.ProviderRounds
             || input.Receipt.DatabaseOperations > maximumOperations
             || input.Receipt.FloorIndexAddedBytes < 0 || input.Receipt.FloorIndexAddedBytes > reportedPeak
             || input.Receipt.LogicalWork < 0 || input.Receipt.LogicalWork > maximumLogicalWork

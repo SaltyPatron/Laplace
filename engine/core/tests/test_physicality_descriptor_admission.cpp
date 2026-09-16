@@ -208,6 +208,46 @@ TEST_F(PhysicalityDescriptorAdmission, FrontierRequiresCheckedAbsenceAndTheExpli
     EXPECT_EQ(result, nullptr);
 }
 
+TEST_F(PhysicalityDescriptorAdmission, RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent) {
+    const auto child = composition({atom('A'), atom('B')});
+    auto parent = composition({child, child});
+    ASSERT_EQ(std::memcmp(parent.value.coord, child.value.coord, sizeof(parent.value.coord)), 0);
+    ASSERT_EQ(std::memcmp(&parent.value.hilbert_index, &child.value.hilbert_index,
+        sizeof(parent.value.hilbert_index)), 0);
+    const hash128_t repeated[] = {child.value.entity_id, child.value.entity_id};
+    size_t stored = 0;
+    ASSERT_EQ(trajectory_build_rle(repeated, 2, parent.trajectory.data(), &stored), 0);
+    ASSERT_EQ(stored, 1u);
+    parent.trajectory.resize(stored * 4u);
+    parent.value.trajectory_vertices = stored;
+    ASSERT_EQ(parent.value.n_constituents, 2);
+    auto raw = stage({parent});
+    auto winner = stage({child});
+    auto captured = capture(raw.get());
+    ASSERT_NE(captured, nullptr);
+    Materialization pending(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {winner.get()}, {}, witnesses(1), pending),
+        PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER);
+    size_t count = 0;
+    const auto* wanted = physicality_descriptor_materialization_pending(pending.get(), &count);
+    ASSERT_EQ(count, 1u);
+    EXPECT_TRUE(hash128_equals(wanted, &child.value.entity_id));
+    EXPECT_EQ(physicality_descriptor_materialization_take_stage(pending.get()), nullptr);
+    Materialization admitted(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {winner.get()}, {child.value.entity_id}, witnesses(1), admitted),
+        PHYSICALITY_DESCRIPTOR_OK);
+    Materialization current(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {winner.get()}, {}, {}, witnesses(1), current),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const auto admitted_form = form(admitted);
+    const auto current_form = form(current);
+    EXPECT_TRUE(hash128_equals(&admitted_form.descriptor_id, &current_form.descriptor_id));
+    EXPECT_TRUE(hash128_equals(&admitted_form.view_id, &current_form.view_id));
+    EXPECT_EQ(run(captured, {}, {}, {child.value.entity_id}, witnesses(1), pending),
+        PHYSICALITY_DESCRIPTOR_MISSING_REFERENCE);
+    EXPECT_EQ(pending, nullptr);
+}
+
 TEST_F(PhysicalityDescriptorAdmission, ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback) {
     const auto content = composition({atom('c'), atom('d')});
     Body self = composition({content});

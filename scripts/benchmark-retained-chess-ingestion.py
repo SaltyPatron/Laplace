@@ -24,6 +24,7 @@ spec = importlib.util.spec_from_file_location("recorded_chess_transport",
 transport = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(transport)
 require, save_json = transport.require, transport.save_json
+MAX_FAILURE_EVIDENCE_BYTES = 16 << 20
 
 
 class DeadlineClient(transport.Client):
@@ -37,11 +38,11 @@ class DeadlineClient(transport.Client):
         require(remaining > 0, "whole-run measurement deadline exceeded")
         return remaining
 
-    def request(self, path, data=None, raw=False):
+    def request(self, path, data=None, raw=False, maximum_bytes=transport.MAX_BYTES):
         previous = self.timeout
         self.timeout = min(previous, self.remaining())
         try:
-            result = super().request(path, data, raw)
+            result = super().request(path, data, raw, maximum_bytes)
             self.remaining()
             return result
         finally:
@@ -67,6 +68,55 @@ def positive(value, name):
 def native_id(value):
     require(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value), "invalid native identity")
     return value
+
+
+def ingestion_artifacts(job, job_id):
+    require(isinstance(job, dict) and job.get("id") == job_id, "ingestion job identity differs")
+    artifacts = job.get("artifacts")
+    require(isinstance(artifacts, dict), "ingestion job artifact inventory is absent")
+    names = {name for name in artifacts if re.fullmatch(r"ingest-[0-9a-f]{32}\.json", name)}
+    require(len(names) <= 32, "ingestion receipt inventory exceeds service retention bound")
+    return names
+
+
+def request_ingestion(client, output, report, job_id, index):
+    # The normal service writes an ingest receipt in finally even when the POST
+    # fails. Collect it by the existing artifact API, not the HTTP error body.
+    before = client.request("/chess/lab/jobs/" + job_id,
+                            maximum_bytes=transport.MAX_JOB_METADATA_BYTES)
+    prior = ingestion_artifacts(before, job_id)
+    save_json(output / f"ingest-{index}-before.json", before)
+    try:
+        return client.request(f"/chess/lab/jobs/{job_id}/ingest", {})
+    except (ValueError, OSError, TimeoutError):
+        failure = {"attemptIndex": index, "artifacts": [],
+                   "scope": "New retained service receipts observed after the failed POST; concurrent invocations are not attributed to this request."}
+        report["failedIngestion"] = failure
+        try:
+            after = client.request("/chess/lab/jobs/" + job_id,
+                                   maximum_bytes=transport.MAX_JOB_METADATA_BYTES)
+            save_json(output / f"ingest-{index}-after-failure.json", after)
+            names = ingestion_artifacts(after, job_id) - prior
+            remaining = MAX_FAILURE_EVIDENCE_BYTES
+            for name in sorted(names):
+                require(remaining > 0, "failed ingestion evidence byte envelope exhausted")
+                payload = client.request(f"/chess/lab/jobs/{job_id}/artifact/{name}",
+                                         raw=True, maximum_bytes=remaining)
+                remaining -= len(payload)
+                (output / name).write_bytes(payload)
+                retained = {"artifact": name, "bytes": len(payload),
+                            "sha256": hashlib.sha256(payload).hexdigest()}
+                failure["artifacts"].append(retained)
+                receipt = json.loads(payload)
+                require(isinstance(receipt, dict)
+                        and receipt.get("schema") == "laplace.chess-retained-ingestion/v1"
+                        and receipt.get("jobId") == job_id, "failed ingestion artifact identity differs")
+                retained["recordingStatus"] = receipt.get("recording", {}).get("status")
+            failure["collectionCompleted"] = True
+        except (ValueError, KeyError, TypeError, AttributeError, OSError, TimeoutError) as recovery:
+            failure["collectionCompleted"] = False
+            failure["collectionError"] = str(recovery) if isinstance(recovery, ValueError) else type(recovery).__name__
+        raise
 
 
 def scope_rows(rows):
@@ -251,7 +301,7 @@ def main(argv=None):
         baseline = None
         for index in range(args.replays + 1):
             started = time.monotonic()
-            response = client.request(f"/chess/lab/jobs/{job_id}/ingest", {})
+            response = request_ingestion(client, args.output_dir, report, job_id, index)
             save_json(args.output_dir / f"ingest-{index}-response.json", response)
             artifact = response.get("measurementArtifact")
             require(isinstance(artifact, str) and re.fullmatch(r"ingest-[0-9a-f]{32}\.json", artifact), "measured ingestion artifact missing")

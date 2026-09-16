@@ -124,6 +124,19 @@ class BenchmarkSuiteTests(unittest.TestCase):
             self.assertNotIn("--max-moves", command)
             self.assertFalse(result["result"]["targetMet"])
 
+    def test_chess_configuration_profile_requests_complete_games(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "chess-environment/report.json"
+            target.parent.mkdir()
+            target.write_text('{"status":"complete"}')
+            with mock.patch.object(self.suite, "capture_rapl", return_value=[]), \
+                 mock.patch.object(self.suite, "run_and_tee", return_value=(0,100)) as run:
+                self.suite.run_profile(self.suite.profile_map(self.registry)["chess-environment"],
+                    Path(folder), {}, 3, Path(folder), Path(folder), None, "unused")
+            command=run.call_args.args[0]
+            self.assertEqual("0",command[command.index("--max-moves")+1])
+            self.assertEqual("8",command[command.index("--match-depth")+1])
+
     def test_raw_harness_scaling_points_still_expose_full_topology_for_explicit_use(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))
         self.assertEqual([1, 2, 3, 4, 8], self.scale.default_worker_counts(8, 8))

@@ -12,6 +12,41 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class NativeSqlBatchTests(LocalPgFixture pg)
 {
     [Fact]
+    public async Task WitnessScopesExcludeCrossProductsButRetainConflictingObjects()
+    {
+        var prefix = "witness-scope/" + Guid.NewGuid().ToString("N");
+        Hash128 Id(string name) => Hash128.OfCanonical(prefix + "/" + name);
+        var source = Id("source"); var otherSource = Id("other-source");
+        var playing = Id("playing"); var line = Id("line"); var context = Id("context");
+        var hasEvent = Id("has-event"); var hasResult = Id("has-result");
+        var eventId = Id("event"); var resultId = Id("result"); var conflicting = Id("conflicting");
+        AttestationRow Row(Hash128 subject, Hash128 type, Hash128 obj, Hash128 src, Hash128? ctx)
+            => NativeAttestation.CategoricalResolved(subject, type, obj, src, ctx, SourceTrust.StructuredCorpus);
+        var selectedEvent = Row(playing, hasEvent, eventId, source, null);
+        var selectedResult = Row(line, hasResult, resultId, source, playing);
+        var conflictingResult = Row(line, hasResult, conflicting, source, playing);
+        var rows = new[] { selectedEvent, selectedResult, conflictingResult,
+            Row(line, hasEvent, eventId, source, playing), // actual PGN header cross-product
+            Row(line, hasResult, resultId, otherSource, playing),
+            Row(line, hasResult, resultId, source, context),
+            Row(line, hasResult, resultId, source, null) };
+        var builder = new SubstrateChangeBuilder(source, prefix).DeclareSourcePrior(SourceTrust.StructuredCorpus);
+        foreach (var id in new[] { source, otherSource, playing, line, context, hasEvent, hasResult, eventId, resultId, conflicting })
+            builder.AddEntity(id, 0, id);
+        foreach (var row in rows) builder.AddAttestation(row);
+        var writer = new NpgsqlSubstrateWriter(pg.DataSource);
+        await writer.ApplyAsync(builder.Build());
+        NpgsqlAttestationReads.WitnessScope[] scopes =
+        [new(playing, hasEvent, source, null), new(line, hasResult, source, playing), new(playing, hasEvent, source, null)];
+        var actual = await NpgsqlAttestationReads.WitnessesAsync(pg.DataSource, scopes, CancellationToken.None);
+        Assert.Equal(3, actual.Count);
+        Assert.Equal<Hash128>(new[] { selectedEvent.Id, selectedResult.Id, conflictingResult.Id }.OrderBy(id => id.Hi).ThenBy(id => id.Lo),
+            actual.Select(a => Hash128.FromBytes(a.Id)).OrderBy(id => id.Hi).ThenBy(id => id.Lo));
+        Assert.Contains(actual, a => a.ContextId is null);
+        Assert.Empty(await NpgsqlAttestationReads.WitnessesAsync(pg.DataSource, [], CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ChessSearchBindsTextArrayAndBooleanThroughTheNativeCatalog()
     {
         var rows = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(

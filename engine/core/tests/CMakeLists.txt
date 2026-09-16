@@ -25,6 +25,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_hash_composer.cpp
     test_physicality_id.cpp
     test_physicality_descriptor.cpp
+    test_physicality_descriptor_frontier.cpp
     test_physicality_descriptor_provider.cpp
     test_centroid_workspace.cpp
     test_physicality_descriptor_transport.cpp

@@ -20,6 +20,7 @@ static bool expecting_error;
 static char error_text[512];
 static int error_code;
 static unsigned spi_calls;
+static unsigned spi_prepare_calls;
 static Snapshot required_snapshot;
 static size_t fake_raw_size;
 static Datum fake_raw_datum;
@@ -116,6 +117,12 @@ static bytea *probe_wkb(const double *xyzm, uint32_t count) {
     }
     return result;
 }
+SPIPlanPtr SPI_prepare(const char *query, int nargs, Oid *types) {
+    ++spi_prepare_calls;
+    CHECK(nargs == 1 && types[0] == BYTEAARRAYOID);
+    CHECK(strcmp(query, "metadata") == 0 || strcmp(query, "payload") == 0);
+    return (SPIPlanPtr)(uintptr_t)(strcmp(query, "metadata") == 0 ? 1 : 2);
+}
 static admission_state *probe_state(Snapshot snapshot) {
     admission_state *s = palloc0(sizeof(*s));
     s->maximum_bytes = 64 * 1024 * 1024;
@@ -160,6 +167,14 @@ int main(void) {
     row.values[9] = TimestampTzGetDatum(123456);
     pending[0] = entity; pending[1] = (hash128_t){100,101}; pending[2] = (hash128_t){200,201};
 
+    s = probe_state(&snapshot);
+    admission_prepare_provider_plans(s, "metadata", "payload");
+    CHECK(s->operations == 2 && spi_prepare_calls == 2);
+    CHECK(s->metadata_plan == (SPIPlanPtr)(uintptr_t)1 && s->payload_plan == (SPIPlanPtr)(uintptr_t)2);
+    s->maximum_operations = 3;
+    REFUSES(admission_prepare_provider_plans(s, "metadata", "payload"), "require two database operations");
+    CHECK(s->operations == 2 && spi_prepare_calls == 2);
+    probe_stages_free(s);
     s = probe_state(&snapshot);
     encoded = admission_snapshot_text(s);
     CHECK(VARSIZE_ANY_EXHDR(encoded) == strlen("active-mvcc-v1;xmin=42;xmax=99;cid=7;recovery=0;suboverflow=0;xip=43,51;subxip=44"));

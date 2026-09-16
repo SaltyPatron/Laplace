@@ -1,0 +1,4 @@
+-- Cold backend reads the exact committed descriptor graph from the prior fixture.
+\set ECHO none
+NOTICE:  physicality readback: independent cold backend exactly reproduces all retained body fields
+

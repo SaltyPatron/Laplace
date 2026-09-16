@@ -206,6 +206,37 @@ internal static class CopyTupleParser
         return result;
     }
 
+    /// <summary>Complete entity transport for APIs that return managed rows.
+    /// Keep the writer's compact verification parser above unchanged.</summary>
+    internal static unsafe List<EntityRow> DecodeEntityRows(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
+    {
+        var result = new List<EntityRow>();
+        foreach (var (pointer, length) in blobs)
+        {
+            byte* bytes = (byte*)pointer;
+            long offset = 0;
+            while (offset < length)
+            {
+                Hash128 id = default, type = default;
+                Hash128? source = null;
+                byte tier = 0;
+                WalkRow(bytes, length, ref offset, EntityFields, "entities", (field, valueOffset, valueLength) =>
+                {
+                    switch (field)
+                    {
+                        case 0: id = ReadHash(bytes, valueOffset, valueLength, "entities.id"); break;
+                        case 1: tier = checked((byte)ReadInt16(bytes, valueOffset, valueLength, "entities.tier")); break;
+                        case 2: type = ReadHash(bytes, valueOffset, valueLength, "entities.type_id"); break;
+                        case 3: source = valueLength == -1 ? null
+                            : ReadHash(bytes, valueOffset, valueLength, "entities.first_observed_by"); break;
+                    }
+                });
+                result.Add(new EntityRow(id, tier, type, source));
+            }
+        }
+        return result;
+    }
+
     public static AttestationRows ParseAttestations(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
         => ParseAttestationsCore(blobs, null, true);
 

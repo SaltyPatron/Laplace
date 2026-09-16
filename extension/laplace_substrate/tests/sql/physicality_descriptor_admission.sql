@@ -34,6 +34,22 @@ FROM descriptor_source s CROSS JOIN (VALUES(0),(1)) v(variant)
 CROSS JOIN LATERAL (SELECT CASE WHEN variant=0 THEN s.coord ELSE
     public.ST_MakePoint(CASE WHEN public.ST_X(s.coord)=0 THEN 0.125 ELSE public.ST_X(s.coord)*0.9 END,
         public.ST_Y(s.coord)*0.9,public.ST_Z(s.coord)*0.9,public.ST_M(s.coord)*0.9) END AS coord) c;
+-- The raw AB forms reference only floor atoms A/B. A separate ordinary
+-- parent [AB,AB] has a real non-atom dependency and one stored RLE carrier.
+-- Its centroid is exactly the repeated child's actual native point. Native
+-- COPY encodes one stored carrier as PointZM, including a repeated logical run.
+CREATE TEMP TABLE descriptor_nested_frame ON COMMIT DROP AS
+SELECT int2send(10::smallint) ||
+    pg_temp.descriptor_field(public.laplace_hash128_blake3(n.entity_id||decode('0100','hex'))) ||
+    pg_temp.descriptor_field(n.entity_id) || pg_temp.descriptor_field(int2send(1::smallint)) ||
+    pg_temp.descriptor_field(public.ST_AsEWKB(s.coord,'NDR')) ||
+    pg_temp.descriptor_field(public.laplace_hilbert_encode(s.coord)) ||
+    pg_temp.descriptor_field(public.ST_AsEWKB(
+        public.laplace_mantissa_pack(s.entity_id,1,2,0),'NDR')) ||
+    pg_temp.descriptor_field(int4send(2)) || pg_temp.descriptor_field(NULL) ||
+    pg_temp.descriptor_field(NULL) || pg_temp.descriptor_field(int8send(1000000::bigint)) AS tuples
+FROM descriptor_source s CROSS JOIN LATERAL
+(SELECT public.laplace_hash128_merkle(0::smallint,ARRAY[s.entity_id,s.entity_id]) AS entity_id) n;
 DELETE FROM laplace.physicalities WHERE id=(SELECT placement_id FROM descriptor_source);
 -- A named temporary result type lets failures and positive reads use the same
 -- actual SQL boundary without repeating or weakening its output contract.
@@ -53,6 +69,18 @@ SELECT * FROM ops.physicality_descriptor_materialize(
     source_ids,unit_ids,priors,
     1700000000000000,byte_grant,operation_grant,logical_grant)
 $$;
+CREATE FUNCTION pg_temp.descriptor_receipt(r pg_temp.descriptor_result) RETURNS jsonb
+LANGUAGE SQL IMMUTABLE AS $$
+SELECT jsonb_build_object('source_forms',(r).source_form_count,'D_count',cardinality((r).descriptor_ids),
+    'V_count',cardinality((r).view_ids),'D_first',encode((r).descriptor_ids[1],'hex'),
+    'D_second',encode((r).descriptor_ids[2],'hex'),'V_first',encode((r).view_ids[1],'hex'),
+    'V_second',encode((r).view_ids[2],'hex'),'source',encode((r).generated_source_id,'hex'),
+    'floor_bytes',octet_length((r).floor_receipt),'snapshot_prefix',left((r).snapshot_receipt,15),
+    'current',(r).current_content_count,'missing',(r).missing_content_count,'rounds',(r).provider_rounds,
+    'operations',(r).database_operations,'peak',(r).reserved_peak_bytes,'logical',(r).raw_logical_work,
+    'tuple_bytes',(r).tuple_bytes,'E_stages',cardinality((r).entities),'P_stages',cardinality((r).physicalities),
+    'A_stages',cardinality((r).attestations),'generated_A_bytes',octet_length((r).attestations[3]))
+$$;
 CREATE TEMP TABLE descriptor_admitted ON COMMIT DROP AS
 SELECT r.* FROM descriptor_source s CROSS JOIN LATERAL pg_temp.descriptor_call(
     (SELECT string_agg(tuples,decode('','hex') ORDER BY variant) FROM descriptor_frames),
@@ -67,12 +95,13 @@ BEGIN
        OR result.descriptor_ids[1]=result.descriptor_ids[2] OR result.view_ids[1]=result.view_ids[2]
        OR result.generated_source_id<>(SELECT root_id FROM converse.text_root_placements(ARRAY['substrate/source/PhysicalityDescriptorAdmission/v1']))
        OR octet_length(result.floor_receipt)<>16 OR result.snapshot_receipt NOT LIKE 'active-mvcc-v1;%'
-       OR result.missing_content_count<1 OR result.provider_rounds<1
-       OR result.database_operations<>2*result.provider_rounds
+       OR result.missing_content_count<>0 OR result.current_content_count<>0 OR result.provider_rounds<>0
+       OR result.database_operations<>2+2*result.provider_rounds
        OR result.reserved_peak_bytes>268435456 OR result.raw_logical_work<=4
        OR result.tuple_bytes<=0 OR cardinality(result.entities)<>3 OR cardinality(result.physicalities)<>3
        OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0 THEN
-        RAISE EXCEPTION 'physicality admission lost source forms, tuple output, source evidence or bounded provider receipts';
+        RAISE EXCEPTION 'physicality admission lost source forms, tuple output, source evidence or bounded provider receipts'
+            USING DETAIL=pg_temp.descriptor_receipt(result)::text;
     END IF;
     SELECT * INTO STRICT single_result FROM pg_temp.descriptor_call(
         (SELECT tuples FROM descriptor_frames WHERE variant=0),(SELECT tuples FROM descriptor_frames WHERE variant=0),
@@ -80,9 +109,26 @@ BEGIN
     IF single_result.descriptor_ids[1]<>result.descriptor_ids[1] OR single_result.view_ids[1]<>result.view_ids[1] THEN
         RAISE EXCEPTION 'batch neighbors changed the original immutable body or source-scoped view';
     END IF;
-    RAISE NOTICE 'physicality admission: two raw forms, exact source mapping, admitted winner, batch/single identity and finite receipts';
+    RAISE NOTICE 'physicality admission: two raw forms, exact source mapping, floor-only zero frontier, batch/single identity and finite receipts';
 END
 $positive$;
+CREATE TEMP TABLE descriptor_nested_admitted ON COMMIT DROP AS
+SELECT r.* FROM descriptor_source s CROSS JOIN LATERAL pg_temp.descriptor_call(
+    (SELECT tuples FROM descriptor_nested_frame),(SELECT tuples FROM descriptor_frames WHERE variant=0),
+    ARRAY[s.source_id],ARRAY[s.unit_id],ARRAY[0.8]) r;
+DO $nested$
+DECLARE result pg_temp.descriptor_result;
+BEGIN
+    SELECT * INTO STRICT result FROM descriptor_nested_admitted;
+    IF result.source_form_count<>1 OR cardinality(result.descriptor_ids)<>1 OR cardinality(result.view_ids)<>1
+       OR result.missing_content_count<>1 OR result.current_content_count<>0 OR result.provider_rounds<>1
+       OR result.database_operations<>2*result.provider_rounds+2 OR result.raw_logical_work<=4 THEN
+        RAISE EXCEPTION 'non-atom carrier did not use explicit absence and its actual admitted winner'
+            USING DETAIL=pg_temp.descriptor_receipt(result)::text;
+    END IF;
+    RAISE NOTICE 'physicality admission: non-atom RLE parent resolves one missing Content carrier from its admitted winner';
+END
+$nested$;
 DO $refusals$
 DECLARE failures integer := 0; s record; raw bytea; winner bytea;
 BEGIN
@@ -105,7 +151,8 @@ BEGIN
       EXCEPTION WHEN program_limit_exceeded THEN failures:=failures+1; END;
     BEGIN PERFORM * FROM pg_temp.descriptor_call(raw,winner,ARRAY[s.source_id,s.source_id],ARRAY[s.unit_id,s.unit_id],ARRAY[0.8,0.8],268435456,32,1);
       EXCEPTION WHEN program_limit_exceeded THEN failures:=failures+1; END;
-    BEGIN PERFORM * FROM pg_temp.descriptor_call(raw,decode('','hex'),ARRAY[s.source_id,s.source_id],ARRAY[s.unit_id,s.unit_id],ARRAY[0.8,0.8]);
+    BEGIN PERFORM * FROM pg_temp.descriptor_call((SELECT tuples FROM descriptor_nested_frame),decode('','hex'),
+        ARRAY[s.source_id],ARRAY[s.unit_id],ARRAY[0.8]);
       EXCEPTION WHEN invalid_parameter_value THEN failures:=failures+1; END;
     IF failures<>9 THEN RAISE EXCEPTION 'physicality admission accepted invalid transport/provider/resource inputs: %',failures; END IF;
     RAISE NOTICE 'physicality admission: nine malformed-source, prior, absent-provider and finite-grant controls refused';
@@ -119,11 +166,14 @@ DECLARE result pg_temp.descriptor_result; s record;
 BEGIN
     SELECT * INTO STRICT s FROM descriptor_source;
     SELECT * INTO STRICT result FROM pg_temp.descriptor_call(
-        (SELECT string_agg(tuples,decode('','hex') ORDER BY variant) FROM descriptor_frames),decode('','hex'),
-        ARRAY[s.source_id,s.source_id],ARRAY[s.unit_id,s.unit_id],ARRAY[0.8,0.8]);
-    IF result.current_content_count<1 OR result.descriptor_ids<>(SELECT descriptor_ids FROM descriptor_admitted)
-       OR result.database_operations<>2*result.provider_rounds THEN
-        RAISE EXCEPTION 'actual current Content provider changed exact original body or lost batched snapshot receipts';
+        (SELECT tuples FROM descriptor_nested_frame),decode('','hex'),
+        ARRAY[s.source_id],ARRAY[s.unit_id],ARRAY[0.8]);
+    IF result.current_content_count<>1 OR result.missing_content_count<>0 OR result.provider_rounds<>1
+       OR result.descriptor_ids<>(SELECT descriptor_ids FROM descriptor_nested_admitted)
+       OR result.view_ids<>(SELECT view_ids FROM descriptor_nested_admitted)
+       OR result.database_operations<>2+2*result.provider_rounds THEN
+        RAISE EXCEPTION 'actual current Content provider changed exact original body or lost batched snapshot receipts'
+            USING DETAIL=pg_temp.descriptor_receipt(result)::text;
     END IF;
     RAISE NOTICE 'physicality admission: actual current Content set resolves without an admitted fallback';
 END
