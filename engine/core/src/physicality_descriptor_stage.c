@@ -220,14 +220,12 @@ void physicality_descriptor_capture_free(physicality_descriptor_capture_t* captu
     free(capture);
 }
 
-physicality_descriptor_status_t physicality_descriptor_capture_stage_rows_cancelable(
+static physicality_descriptor_status_t stages_shape_cancelable(
     const intent_stage_t* const* stages, size_t stage_count,
-    size_t maximum_capture_bytes, const physicality_descriptor_cancel_t* cancellation,
-    physicality_descriptor_capture_t** out_capture) {
-    size_t count = 0u, vertices = 0u, bytes = sizeof(physicality_descriptor_capture_t);
-    physicality_descriptor_capture_t* capture;
-    if (out_capture == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
-    *out_capture = NULL;
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_shape_t* out_shape) {
+    size_t count = 0u, vertices = 0u, maximum = 0u;
+    if (out_shape == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
     if (stage_count != 0u && stages == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     for (size_t stage = 0; stage < stage_count; ++stage) {
@@ -244,15 +242,65 @@ physicality_descriptor_status_t physicality_descriptor_capture_stage_rows_cancel
             if (count == SIZE_MAX || !array_bytes(&vertices, width, 1u))
                 return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
             ++count;
+            if (width > maximum) maximum = width;
             ++rows;
         }
         if (rows != intent_stage_physicality_count(stages[stage]))
             return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
     }
-    if (!array_bytes(&bytes, count, sizeof(physicality_descriptor_input_t)) ||
-        !array_bytes(&bytes, count, sizeof(physicality_descriptor_observation_t)) ||
-        !array_bytes(&bytes, vertices, 4u * sizeof(double)) || bytes > maximum_capture_bytes)
+    const physicality_descriptor_shape_t result = {count, vertices, maximum};
+    *out_shape = result;
+    return PHYSICALITY_DESCRIPTOR_OK;
+}
+
+physicality_descriptor_status_t physicality_descriptor_stages_shape(
+    const intent_stage_t* const* stages, size_t stage_count,
+    physicality_descriptor_shape_t* out_shape) {
+    return stages_shape_cancelable(stages, stage_count, NULL, out_shape);
+}
+
+physicality_descriptor_status_t physicality_descriptor_stage_shape_bound(
+    const intent_stage_t* stage, physicality_descriptor_shape_t* out_shape) {
+    size_t bytes = 0u;
+    if (stage == NULL || out_shape == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
+    const size_t forms = intent_stage_physicality_count(stage);
+    (void)intent_stage_tuple_ptr(stage, INTENT_STAGE_TABLE_PHYSICALITIES, &bytes);
+    if (forms == 0u && bytes != 0u) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
+    const size_t vertices = forms == 0u ? 0u : bytes / (4u * sizeof(double));
+    const physicality_descriptor_shape_t shape = {forms, vertices, vertices};
+    *out_shape = shape;
+    return PHYSICALITY_DESCRIPTOR_OK;
+}
+
+physicality_descriptor_status_t physicality_descriptor_capture_payload_bound(
+    size_t forms, size_t stored_vertices, size_t* out_retained_bytes) {
+    size_t bytes = sizeof(physicality_descriptor_capture_t);
+    if (out_retained_bytes == NULL || (forms == 0u && stored_vertices != 0u))
+        return PHYSICALITY_DESCRIPTOR_INVALID;
+    if (!array_bytes(&bytes, forms, sizeof(physicality_descriptor_input_t)) ||
+        !array_bytes(&bytes, forms, sizeof(physicality_descriptor_observation_t)) ||
+        !array_bytes(&bytes, stored_vertices, 4u * sizeof(double)))
         return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+    *out_retained_bytes = bytes;
+    return PHYSICALITY_DESCRIPTOR_OK;
+}
+
+physicality_descriptor_status_t physicality_descriptor_capture_stage_rows_cancelable(
+    const intent_stage_t* const* stages, size_t stage_count,
+    size_t maximum_capture_bytes, const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_capture_t** out_capture) {
+    size_t count = 0u, vertices = 0u, bytes = sizeof(physicality_descriptor_capture_t);
+    physicality_descriptor_capture_t* capture;
+    if (out_capture == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
+    *out_capture = NULL;
+    physicality_descriptor_shape_t shape;
+    physicality_descriptor_status_t status = stages_shape_cancelable(stages, stage_count, cancellation, &shape);
+    if (status != PHYSICALITY_DESCRIPTOR_OK) return status;
+    count = shape.forms;
+    vertices = shape.stored_vertices;
+    status = physicality_descriptor_capture_payload_bound(count, vertices, &bytes);
+    if (status != PHYSICALITY_DESCRIPTOR_OK) return status;
+    if (bytes > maximum_capture_bytes) return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     capture = calloc(1u, sizeof(*capture));
     if (capture == NULL) return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     if (count != 0u) {

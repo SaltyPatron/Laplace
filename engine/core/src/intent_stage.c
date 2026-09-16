@@ -44,6 +44,30 @@ static const char* const kAttestationColumns =
 #define PHYSICALITY_COL_COUNT 10
 #define ATTESTATION_COL_COUNT 14
 
+/* Complete tuple payload only: 2-byte column count, 4-byte field lengths,
+ * all optional scalars/ids/mask present, and the widest 9-byte trajectory
+ * EWKB header. COPY stream headers and client array wrappers are separate. */
+int intent_stage_tuple_payload_bound(size_t entity_count, size_t physicality_count,
+    size_t stored_vertices, size_t attestation_count, size_t* out_bytes) {
+    const size_t entity_width = 2u + ENTITY_COL_COUNT * 4u + 16u + 2u + 16u + 16u;
+    const size_t physicality_width = 2u + PHYSICALITY_COL_COUNT * 4u +
+        16u + 16u + 2u + (5u + 4u * sizeof(double)) + 16u + 9u +
+        4u + sizeof(double) + 4u + 8u;
+    const size_t attestation_width = 2u + ATTESTATION_COL_COUNT * 4u +
+        6u * 16u + 2u + 5u * 8u + 1u + 32u;
+    const size_t counts[4] = {entity_count, physicality_count, stored_vertices, attestation_count};
+    const size_t widths[4] = {entity_width, physicality_width, 4u * sizeof(double), attestation_width};
+    size_t bytes = 0u;
+    if (out_bytes == NULL || (physicality_count == 0u && stored_vertices != 0u)) return -1;
+    for (size_t i = 0u; i < 4u; ++i) {
+        if (counts[i] > (SIZE_MAX - bytes) / widths[i]) return -2;
+        bytes += counts[i] * widths[i];
+    }
+    *out_bytes = bytes;
+    return 0;
+}
+
+
 typedef struct {
     uint8_t* data;
     size_t   len;

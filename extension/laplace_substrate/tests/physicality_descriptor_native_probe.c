@@ -19,7 +19,7 @@ static unsigned checks;
 static jmp_buf expected_error;
 static bool expecting_error;
 static char error_text[512];
-static char error_detail[512];
+static char error_detail[2048];
 static int error_code;
 static unsigned spi_calls;
 static unsigned spi_prepare_calls;
@@ -483,6 +483,50 @@ int main(void) {
             CHECK(retained[i].observed_at_unix_us == observations[i].observed_at_unix_us);
         }
         CHECK(intent_stage_physicality_count(original) == 2);
+        /* Invoke the actual native refused allocation, then verify SQL reports
+         * its bounded fields without relabeling it as a successful admission. */
+        physicality_descriptor_plan_diagnostics_t diagnostic;
+        physicality_descriptor_plan_t *refused_plan = NULL;
+        const physicality_descriptor_limits_t no_plan_payload = {0};
+        const physicality_descriptor_input_t *decoded_inputs =
+            physicality_descriptor_capture_inputs(phased->capture, NULL);
+        const physicality_descriptor_status_t refused =
+            physicality_descriptor_plan_build_diagnosed_cancelable(decoded_inputs, phased_count,
+                &basis, &no_plan_payload, NULL, &diagnostic, &refused_plan);
+        CHECK(refused == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && refused_plan == NULL);
+        CHECK(diagnostic.allocation == PHYSICALITY_DESCRIPTOR_PLAN_INITIAL);
+        CHECK(diagnostic.refusal == PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED);
+        CHECK(diagnostic.requested_bytes > 0 && diagnostic.retained_bytes == 0);
+        REFUSES(admission_capture_status(phased, refused, "original-form descriptor validation",
+            phased_count, &diagnostic), "original-form capture");
+        CHECK(error_code == ERRCODE_PROGRAM_LIMIT_EXCEEDED);
+        CHECK(strstr(error_detail, "plan_allocation=1 plan_refusal=1 ") != NULL);
+        char expected_request[96];
+        snprintf(expected_request, sizeof(expected_request), "plan_requested_bytes=%zu ", diagnostic.requested_bytes);
+        CHECK(strstr(error_detail, expected_request) != NULL);
+        CHECK(strstr(error_detail, "plan_grant_bytes=0 plan_retained_bytes=0 plan_peak_bytes=0 ") != NULL);
+        CHECK(strstr(error_detail, "plan_input_count=2 plan_completed_inputs=0 ") != NULL);
+        /* Controlled SQL error-format fixture, not a backend execution:
+         * native admission tests own the actual subowner refusal evidence. */
+        physicality_descriptor_materialization_diagnostics_t native_failure = {0};
+        native_failure.status = PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+        native_failure.phase = PHYSICALITY_MATERIALIZATION_COMBINED_PLAN;
+        native_failure.refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_PLAN;
+        native_failure.materialization_grant_bytes = 700;
+        native_failure.maximum_bytes = 500;
+        native_failure.retained_bytes = 300;
+        native_failure.peak_bytes = 400;
+        native_failure.requested_bytes = 250;
+        native_failure.released_before_serialization_bytes = 0;
+        native_failure.serialization_entry_bytes = 0;
+        native_failure.plan = diagnostic;
+        REFUSES(admission_materialization_status(phased, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED,
+            phased_count, &native_failure), "native materialization");
+        CHECK(error_code == ERRCODE_PROGRAM_LIMIT_EXCEEDED);
+        CHECK(strstr(error_detail, "native_phase=3 native_refusal=3 materialization_grant_bytes=700 ") != NULL);
+        CHECK(strstr(error_detail, "subowner_grant_bytes=500 subowner_retained_bytes=300 subowner_peak_bytes=400 ") != NULL);
+        CHECK(strstr(error_detail, "subowner_requested_bytes=250 ") != NULL);
+        CHECK(strstr(error_detail, expected_request) != NULL);
         admission_cleanup(phased);
         CHECK(phased->capture == NULL && phased->source_validation == NULL);
         probe_stages_free(phased);
@@ -507,6 +551,7 @@ int main(void) {
         REFUSES(admission_capture_source(invalid, &basis, 2), "original-form capture");
         CHECK(error_code == ERRCODE_INVALID_PARAMETER_VALUE);
         CHECK(strstr(error_detail, "phase=original-form descriptor validation ") != NULL);
+        CHECK(strstr(error_detail, "plan_allocation=0 plan_refusal=0 ") != NULL);
         CHECK(invalid->source.count == 0 && invalid->source.items == NULL);
         CHECK(invalid->capture != NULL && invalid->source_validation == NULL);
         admission_cleanup(invalid);
