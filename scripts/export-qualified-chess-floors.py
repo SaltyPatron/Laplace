@@ -112,7 +112,7 @@ def lexical_failure_evidence(run_id, attempt, expected, state):
             for step in steps)):
         raise ValueError("failed exact-main lifecycle steps are incomplete")
     installed = (
-        "Resolve the Stockfish checkout for application publication", "Reserve host for product phases",
+        "Resolve the Stockfish checkout for application publication", "Start ordered development phases",
         "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
         "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
         "Install native artifacts", "Migrate and reconcile installed database",
@@ -153,7 +153,8 @@ def qualification(plan, root):
         raise ValueError("an explicit positive proof run and attempt are required")
     remote = run_json(run_id)
     if (remote.get("id") != run_id or remote.get("status") != "completed"
-            or remote.get("conclusion") not in ("success", "failure") or remote.get("event") != "push"
+            or remote.get("conclusion") not in ("success", "failure")
+            or remote.get("event") not in ("push", "workflow_dispatch")
             or remote.get("head_branch") != "main"
             or remote.get("path") != ".github/workflows/laplace.yml"
             or remote.get("run_attempt") != attempt or remote.get("head_sha") != source["commit"]):
@@ -164,10 +165,12 @@ def qualification(plan, root):
             or path.parent.stat().st_mode & 0o077):
         raise ValueError("retained lifecycle session must remain private and owned by this runner")
     state = load(path, 65536)
-    # A normal main push selects the full default product lifecycle. Environment
-    # inherited by this later export must not omit phases from the retained plan.
+    # Resolve the full activation contract independently of the operator event.
+    # Current push/all is development-only; a real dispatch/all still selects all
+    # phases. Authenticate the actual remote event and retained outcomes separately.
     # A lexical-only failure retains the unexecuted suffix explicitly.
-    environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+    environment = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch",
+                       LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
                        LAPLACE_GENERATION_BENCHMARK="")
     expected = subprocess.check_output(
         ["bash", str(root / "scripts/product-ci.sh"), "all", "--list-phases"],
@@ -210,6 +213,7 @@ def qualification(plan, root):
             or len(set(stamps.values())) != 1):
         raise ValueError("qualified native build/install stamps are absent or disagree")
     return build, {"run_id": run_id, "run_attempt": attempt, "source": state["source"],
+                   "lifecycle_event": remote["event"],
                    "lifecycle_conclusion": remote["conclusion"],
                    "full_lifecycle_passed": remote["conclusion"] == "success",
                    "session_status": state["status"], "cleanup_exit_code": state["cleanup_exit_code"],

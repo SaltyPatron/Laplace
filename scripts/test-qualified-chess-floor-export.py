@@ -209,7 +209,8 @@ class MainQualificationTests(unittest.TestCase):
             "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build) + "\n")
         for name in ("build-native", "install-native"):
             (self.build / ".stamps" / name).write_text("a" * 64 + "\n")
-        environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+        environment = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch",
+                           LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
                            LAPLACE_GENERATION_BENCHMARK="")
         self.phases = subprocess.check_output(
             ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
@@ -217,6 +218,24 @@ class MainQualificationTests(unittest.TestCase):
         self.assertIn("native-install", self.phases)
         self.assertIn("publish", self.phases)
         self.assertIn("live-api", self.phases)
+        # Historical lexical-failure protocol, explicitly separate from the
+        # current product owner (which may no longer schedule lexical admission).
+        self.historical_phases = [
+            "policy", "dependencies", "build", "native-dev", "managed-dev",
+            "uci-dev", "browser-dev", "native-install", "database-maintenance",
+            "lexical-foundation", "operational-seed", "publish",
+            "operational-execution", "db-health", "native-db", "managed-db",
+            "live-floor", "live-api", "managed-live", "generation-eval",
+        ]
+        self.historical_root = self.root / "historical-plan-protocol"
+        (self.historical_root / "scripts").mkdir(parents=True)
+        (self.historical_root / "scripts/product-ci.sh").write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            'test "$#" -eq 2\ntest "$1" = all\ntest "$2" = --list-phases\n'
+            'test "$GITHUB_EVENT_NAME" = workflow_dispatch\n'
+            'test -z "$LAPLACE_FRESH_DB$LAPLACE_RESTORE_FOUNDATION$LAPLACE_GENERATION_BENCHMARK"\n'
+            "cat <<'HISTORICAL_PROTOCOL_PLAN'\n"
+            + "\n".join(self.historical_phases) + "\nHISTORICAL_PROTOCOL_PLAN\n")
         self.plan = {"proof_run_id": 123, "proof_run_attempt": 1,
                      "candidate_commit": "1" * 40, "candidate_tree": "2" * 40,
                      "installed_source": "1" * 40}
@@ -246,7 +265,10 @@ class MainQualificationTests(unittest.TestCase):
                 return jobs
             return self.remote if remote is None else remote
         with mock.patch.object(driver, "run_json", side_effect=response):
-            return driver.qualification(self.plan, ROOT)
+            # Only historical failure controls supply remote job fixtures.
+            # Current full-success and build-placement controls use real source.
+            root = self.historical_root if jobs is not None else ROOT
+            return driver.qualification(self.plan, root)
 
     def test_exact_main_requires_real_canonical_all_phase_list_independent_of_export_environment(self):
         with mock.patch.dict(os.environ, {"LAPLACE_FRESH_DB": "1",
@@ -294,15 +316,17 @@ class MainQualificationTests(unittest.TestCase):
                 self.qualify(state={**self.state, **mutation})
 
     def lexical_fixture(self):
-        # Protocol records only; no lexical failure or chess export is executed.
+        # Explicit historical protocol only; no current lexical phase is claimed.
         state = copy.deepcopy(self.state)
-        boundary = self.phases.index("lexical-foundation")
+        state["phases"] = list(self.historical_phases)
+        boundary = self.historical_phases.index("lexical-foundation")
         state.update(status="failed", next=boundary + 1,
-                     results=state["results"][:boundary] + [{"phase": "lexical-foundation", "exit_code": 1}],
+                     results=[{"phase": p, "exit_code": 0} for p in self.historical_phases[:boundary]]
+                             + [{"phase": "lexical-foundation", "exit_code": 1}],
                      failure="phase lexical-foundation failed")
         remote = {**self.remote, "conclusion": "failure"}
         installed = [
-            "Resolve the Stockfish checkout for application publication", "Reserve host for product phases",
+            "Resolve the Stockfish checkout for application publication", "Start ordered development phases",
             "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
             "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
             "Install native artifacts", "Migrate and reconcile installed database",
@@ -338,9 +362,48 @@ class MainQualificationTests(unittest.TestCase):
         self.assertEqual(456, observed["job_id"])
         self.assertEqual("lexical-foundation", observed["failed_phase"])
         self.assertEqual(1, observed["failed_exit_code"])
-        self.assertEqual(self.phases[state["next"]:], observed["not_executed_phases"])
+        self.assertEqual(state["phases"][state["next"]:], observed["not_executed_phases"])
         self.assertEqual(jobs["jobs"][0]["steps"], observed["workflow_steps"])
         self.assertNotIn(state["token"], json.dumps(receipt))
+
+    def test_dispatch_activation_resolves_full_plan_under_operator_push_environment(self):
+        for lexical in (False, True):
+            state, remote, jobs = self.lexical_fixture() if lexical else (
+                self.state, self.remote, None)
+            remote = {**remote, "event": "workflow_dispatch"}
+            with (self.subTest(lexical=lexical),
+                  mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push",
+                      "LAPLACE_FRESH_DB": "1", "LAPLACE_RESTORE_FOUNDATION": "1",
+                      "LAPLACE_GENERATION_BENCHMARK": "1"})):
+                _, receipt = self.qualify(state, remote, jobs)
+            self.assertEqual("workflow_dispatch", receipt["lifecycle_event"])
+            self.assertEqual(state["results"], receipt["phases"])
+            self.assertEqual(not lexical, receipt["full_lifecycle_passed"])
+
+    def test_development_push_receipt_cannot_qualify_as_installed_activation(self):
+        # Actual current product owner maps push/all to only development phases.
+        environment = dict(os.environ, GITHUB_EVENT_NAME="push",
+                           LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+                           LAPLACE_GENERATION_BENCHMARK="")
+        phases = subprocess.check_output(
+            ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
+            cwd=ROOT, env=environment, text=True, timeout=10).splitlines()
+        self.assertTrue(phases)
+        self.assertEqual(len(phases), len(set(phases)))
+        self.assertIn("build", phases)
+        self.assertIn("native-dev", phases)
+        self.assertIn("managed-dev", phases)
+        self.assertEqual(phases, [phase for phase in self.phases if phase in phases])
+        self.assertLess(len(phases), len(self.phases))
+        self.assertTrue({"native-install", "database-maintenance", "publish", "live-api"}.isdisjoint(phases))
+        state = {**self.state, "phases": phases, "next": len(phases),
+                 "results": [{"phase": phase, "exit_code": 0} for phase in phases]}
+        with self.assertRaisesRegex(ValueError, "canonical product phase"):
+            self.qualify(state, {**self.remote, "event": "push"})
+        # Also refuse a full-plan declaration with only the development prefix executed.
+        state["phases"] = self.phases
+        with self.assertRaisesRegex(ValueError, "canonical product phase"):
+            self.qualify(state, {**self.remote, "event": "push"})
 
     def test_lexical_route_rejects_missing_prerequisite_wrong_phase_or_reordered_receipts(self):
         state, remote, jobs = self.lexical_fixture()
@@ -375,7 +438,7 @@ class MainQualificationTests(unittest.TestCase):
             {"active": {"phase": "lexical-foundation"}}, {"kind": "pr"},
             {"source": {"commit": "0" * 40, "tree": self.plan["candidate_tree"]}},
             {"source": {"commit": self.plan["candidate_commit"], "tree": "0" * 40}},
-            {"phases": list(reversed(self.phases))},
+            {"phases": list(reversed(state["phases"]))},
         ]
         for mutation in mutations:
             with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "canonical product phase"):
