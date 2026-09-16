@@ -112,10 +112,11 @@ def snapshot(prefix, state):
     link = prefix / "bin/stockfish"
     config = prefix / "app/laplace-api.env"
     saved = {
+        "config_version": 2,
         "link": os.readlink(link) if link.is_symlink() else None,
         "regular_file": link.exists() and not link.is_symlink(),
         "config": [line for line in config.read_text().splitlines(keepends=True)
-                   if line.startswith("LAPLACE_STOCKFISH=")] if config.exists() else [],
+                   if line.startswith(("LAPLACE_STOCKFISH=", "LAPLACE_STOCKFISH_SOURCE="))] if config.exists() else [],
     }
     with state.open("x") as output:
         json.dump(saved, output)
@@ -124,6 +125,13 @@ def snapshot(prefix, state):
 def restore(prefix, state):
     """Restore the prior launch contract, retaining downloaded immutable releases."""
     saved = json.loads(state.read_text())
+    version = saved.get("config_version", 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("Unsupported Stockfish snapshot configuration version")
+    # Older snapshots only observed the executable setting. Preserve their
+    # original restore scope; absence of an uncaptured source is not evidence
+    # that the previous publication had no source setting.
+    config_keys = ("LAPLACE_STOCKFISH=", "LAPLACE_STOCKFISH_SOURCE=") if version == 2 else ("LAPLACE_STOCKFISH=",)
     link = prefix / "bin/stockfish"
     if saved["link"] is not None:
         # Replace only our managed link, or the exact pre-existing symlink.
@@ -144,7 +152,7 @@ def restore(prefix, state):
     config = prefix / "app/laplace-api.env"
     if config.exists():
         lines = [line for line in config.read_text().splitlines(keepends=True)
-                 if not line.startswith("LAPLACE_STOCKFISH=")]
+                 if not line.startswith(config_keys)]
         if lines and saved["config"] and not lines[-1].endswith("\n"):
             lines[-1] += "\n"
         lines.extend(saved["config"])

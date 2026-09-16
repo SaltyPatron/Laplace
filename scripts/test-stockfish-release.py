@@ -561,6 +561,84 @@ class StockfishSourceTests(unittest.TestCase):
         with patch.dict(os.environ, {"LAPLACE_STOCKFISH": "/explicit/stockfish"}):
             self.assertEqual(Path("/explicit/stockfish"), installer.configured_binary(prefix))
 
+    def test_publish_rollback_restores_exact_prior_binary_and_source_settings(self):
+        prefix = self.base / "install"
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir(parents=True)
+        state = self.base / "stockfish-snapshot.json"
+        cases = (
+            ["LAPLACE_STOCKFISH=/old/binary\n",
+             'LAPLACE_STOCKFISH_SOURCE="/old source/SF_19"\n'],
+            ["LAPLACE_STOCKFISH=/old/binary\n"],
+            ['LAPLACE_STOCKFISH_SOURCE="/old source/SF_19"\n'],
+            [],
+            ["LAPLACE_STOCKFISH=/shadowed/binary\n",
+             "LAPLACE_STOCKFISH_SOURCE=/shadowed/source\n",
+             "LAPLACE_STOCKFISH=/old/binary\n",
+             'LAPLACE_STOCKFISH_SOURCE="/old source/SF_19"\n'],
+        )
+        keys = ("LAPLACE_STOCKFISH=", "LAPLACE_STOCKFISH_SOURCE=")
+        for old_settings in cases:
+            with self.subTest(old_settings=old_settings):
+                original_other = "# installed before publication\nUNCHANGED=original\nLICHESS_API=secret\n"
+                config.write_text(original_other + "".join(old_settings))
+                installer.snapshot(prefix, state)
+                retained = state.read_bytes()
+                saved = json.loads(retained)
+                self.assertEqual(old_settings, saved["config"])
+                self.assertEqual(2, saved["config_version"])
+                self.assertNotIn("LICHESS_API", retained.decode())
+                later_other = "# operator setting preserved during rollback\nUNCHANGED=updated\nLICHESS_API=new-secret\n"
+                config.write_text(later_other + "LAPLACE_STOCKFISH=/new/binary\n"
+                                  + "LAPLACE_STOCKFISH_SOURCE=/new/source\n")
+                with self.assertRaises(FileExistsError):
+                    installer.snapshot(prefix, state)
+                self.assertEqual(retained, state.read_bytes())
+                with patch.dict(os.environ, {"LAPLACE_STOCKFISH": "/process/new/binary",
+                                             "LAPLACE_STOCKFISH_SOURCE": "/process/new/source"}):
+                    installer.restore(prefix, state)
+                restored = config.read_text()
+                self.assertEqual(later_other + "".join(old_settings), restored)
+                self.assertEqual(old_settings, [line for line in restored.splitlines(keepends=True)
+                                               if line.startswith(keys)])
+                installer.restore(prefix, state)
+                self.assertEqual(restored, config.read_text())
+                self.assertEqual(retained, state.read_bytes())
+                state.unlink()
+
+    def test_legacy_snapshot_preserves_source_setting_it_never_captured(self):
+        prefix = self.base / "install"
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir(parents=True)
+        config.write_text("UNCHANGED=value\nLAPLACE_STOCKFISH=/new/binary\n"
+                          "LAPLACE_STOCKFISH_SOURCE=/retained/source\n")
+        state = self.base / "legacy-snapshot.json"
+        state.write_text(json.dumps({"link": None, "regular_file": False,
+                                     "config": ["LAPLACE_STOCKFISH=/old/binary\n"]}))
+        installer.restore(prefix, state)
+        self.assertEqual("UNCHANGED=value\nLAPLACE_STOCKFISH_SOURCE=/retained/source\n"
+                         "LAPLACE_STOCKFISH=/old/binary\n", config.read_text())
+
+    def test_unknown_snapshot_configuration_version_refuses_before_pointer_changes(self):
+        prefix = self.base / "install"
+        (prefix / "bin").mkdir(parents=True)
+        link = prefix / "bin/stockfish"
+        link.symlink_to(prefix / "stockfish/current/binary")
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir()
+        original = "LAPLACE_STOCKFISH=/current/binary\nLAPLACE_STOCKFISH_SOURCE=/current/source\n"
+        config.write_text(original)
+        state = self.base / "unknown-snapshot.json"
+        for version in (0, 3, True, "2"):
+            with self.subTest(version=version):
+                state.write_text(json.dumps({"config_version": version,
+                    "link": None, "regular_file": False, "config": []}))
+                with self.assertRaisesRegex(ValueError, "snapshot configuration version"):
+                    installer.restore(prefix, state)
+                self.assertTrue(link.is_symlink())
+                self.assertEqual(str(prefix / "stockfish/current/binary"), os.readlink(link))
+                self.assertEqual(original, config.read_text())
+
     def test_latest_check_verifies_release_tag_and_source_commit(self):
         with patch.object(installer, "github_json", side_effect=[{"tag_name": "sf_19"}, {"sha": self.commit}]):
             installer.check_latest()
