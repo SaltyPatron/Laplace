@@ -265,3 +265,51 @@ SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
     "UNION ALL SELECT 2::int2,p.id,0::int8 FROM laplace.physicalities p WHERE p.id=ANY($2) "
     "UNION ALL SELECT 3::int2,a.id,a.observation_count FROM laplace.attestations a "
     "WHERE a.id=ANY($3) AND a.type_id=ANY($4)")
+
+SQL_QUERY("identity.create_user", "uuid,text,text,text",
+    "INSERT INTO app.users (user_id, display_name, email, avatar_url) VALUES ($1, $2, $3, $4);")
+SQL_QUERY("identity.create_tenant", "text,text",
+    "INSERT INTO app.tenants (tenant_id, display_name, kind) VALUES ($1, $2, 'personal');")
+SQL_QUERY("identity.create_external", "uuid,uuid,text,text,text,text",
+    "INSERT INTO app.external_identities (identity_id, user_id, provider, issuer, subject, email) VALUES "
+    "($1, $2, $3, $4, $5, $6);")
+SQL_QUERY("identity.create_membership", "text,uuid",
+    "INSERT INTO app.tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner');")
+SQL_QUERY("identity.read_account", "text,text,text",
+    "SELECT u.user_id, m.tenant_id, m.role, i.provider, u.email, u.display_name, u.avatar_url FROM "
+    "app.external_identities i JOIN app.users u ON u.user_id = i.user_id JOIN app.tenant_memberships m ON "
+    "m.user_id = u.user_id WHERE i.provider = $1 AND i.issuer = $2 AND i.subject = $3 ORDER BY CASE m.role "
+    "WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.created_at LIMIT 1;")
+SQL_QUERY("identity.update_user", "text,text,text,uuid",
+    "UPDATE app.users SET display_name = COALESCE($1, display_name), email = COALESCE($2, email), "
+    "avatar_url = COALESCE($3, avatar_url), updated_at = now() WHERE user_id = $4;")
+SQL_QUERY("identity.update_external", "text,text,text,text",
+    "UPDATE app.external_identities SET email = COALESCE($1, email), last_login_at = now() WHERE provider = "
+    "$2 AND issuer = $3 AND subject = $4;")
+SQL_QUERY("identity.upsert_client", "text,text,text",
+    "INSERT INTO app.auth_clients (provider, client_id, authority, enabled, updated_at) VALUES ($1, $2, $3, "
+    "true, now()) ON CONFLICT (provider) DO UPDATE SET client_id = EXCLUDED.client_id, authority = "
+    "EXCLUDED.authority, enabled = true, updated_at = now();")
+SQL_QUERY("identity.put_web_session", "text,uuid,text,bytea,timestamptz,timestamptz,timestamptz",
+    "INSERT INTO app.web_sessions (session_id, user_id, tenant_id, ticket, created_at, last_seen_at, "
+    "expires_at, revoked_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL) ON CONFLICT (session_id) DO UPDATE "
+    "SET ticket = EXCLUDED.ticket, last_seen_at = EXCLUDED.last_seen_at, expires_at = EXCLUDED.expires_at, "
+    "revoked_at = NULL;")
+SQL_QUERY("identity.get_web_session", "text",
+    "SELECT session_id, user_id, tenant_id, ticket, created_at, last_seen_at, expires_at, revoked_at FROM "
+    "app.web_sessions WHERE session_id = $1 AND revoked_at IS NULL AND expires_at > now();")
+SQL_QUERY("identity.revoke_web_session", "text,uuid",
+    "UPDATE app.web_sessions SET revoked_at = now() WHERE session_id = $1 AND user_id = $2 AND revoked_at "
+    "IS NULL;")
+SQL_QUERY("identity.list_web_sessions", "uuid",
+    "SELECT session_id, user_id, tenant_id, ticket, created_at, last_seen_at, expires_at, revoked_at FROM "
+    "app.web_sessions WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now() ORDER BY "
+    "last_seen_at DESC;")
+SQL_QUERY("identity.upsert_conversation", "text,text,uuid,text",
+    "INSERT INTO app.conversation_sessions (tenant_id, session_key, user_id, title, created_at, "
+    "last_turn_at) VALUES ($1, $2, $3, $4, now(), now()) ON CONFLICT (tenant_id, session_key) DO UPDATE SET "
+    "last_turn_at = now(), title = COALESCE(app.conversation_sessions.title, EXCLUDED.title) WHERE "
+    "app.conversation_sessions.user_id = EXCLUDED.user_id;")
+SQL_QUERY("identity.list_conversations", "uuid,text",
+    "SELECT session_key, title, created_at, last_turn_at FROM app.conversation_sessions WHERE user_id = $1 "
+    "AND tenant_id = $2 AND archived_at IS NULL ORDER BY last_turn_at DESC;")

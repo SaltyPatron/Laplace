@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat.Auth;
 
@@ -100,6 +101,24 @@ internal sealed class PostgresIdentityStore : IIdentityStore
 
     public PostgresIdentityStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
+    // Statement text and positional types have one owner: the native catalog.
+    // A batch keeps multi-statement account/profile writes in one transaction and
+    // one round trip without relying on named-placeholder SQL rewriting.
+    internal static NpgsqlBatchCommand Query(string name, params object?[] values)
+    {
+        var query = SqlCatalog.Get(name);
+        if (values.Length != query.ParameterTypes.Length)
+            throw new ArgumentException($"{name}: expected {query.ParameterTypes.Length} parameters, got {values.Length}.");
+        var command = new NpgsqlBatchCommand(query.Text);
+        for (int i = 0; i < values.Length; i++)
+            command.Parameters.Add(new NpgsqlParameter
+            {
+                DataTypeName = query.ParameterTypes[i],
+                Value = values[i] ?? DBNull.Value
+            });
+        return command;
+    }
+
     public async Task<IdentityAccount> UpsertExternalIdentityAsync(
         ExternalIdentityProfile profile, CancellationToken ct)
     {
@@ -127,28 +146,12 @@ internal sealed class PostgresIdentityStore : IIdentityStore
         await using var transaction = await connection.BeginTransactionAsync(ct);
         try
         {
-            await using (var command = new NpgsqlCommand("""
-                INSERT INTO app.users (user_id, display_name, email, avatar_url)
-                VALUES (@user_id, @display_name, @email, @avatar_url);
-                INSERT INTO app.tenants (tenant_id, display_name, kind)
-                VALUES (@tenant_id, @tenant_name, 'personal');
-                INSERT INTO app.external_identities
-                    (identity_id, user_id, provider, issuer, subject, email)
-                VALUES (@identity_id, @user_id, @provider, @issuer, @subject, @email);
-                INSERT INTO app.tenant_memberships (tenant_id, user_id, role)
-                VALUES (@tenant_id, @user_id, 'owner');
-                """, connection, transaction))
+            await using (var command = new NpgsqlBatch(connection, transaction))
             {
-                command.Parameters.AddWithValue("user_id", userId);
-                command.Parameters.AddWithValue("identity_id", identityId);
-                command.Parameters.AddWithValue("tenant_id", tenantId);
-                command.Parameters.AddWithValue("tenant_name", tenantName);
-                command.Parameters.AddWithValue("provider", profile.Provider);
-                command.Parameters.AddWithValue("issuer", profile.Issuer);
-                command.Parameters.AddWithValue("subject", profile.Subject);
-                command.Parameters.AddWithValue("email", (object?)profile.Email ?? DBNull.Value);
-                command.Parameters.AddWithValue("display_name", (object?)profile.DisplayName ?? DBNull.Value);
-                command.Parameters.AddWithValue("avatar_url", (object?)profile.AvatarUrl ?? DBNull.Value);
+                command.BatchCommands.Add(Query("identity.create_user", userId, profile.DisplayName, profile.Email, profile.AvatarUrl));
+                command.BatchCommands.Add(Query("identity.create_tenant", tenantId, tenantName));
+                command.BatchCommands.Add(Query("identity.create_external", identityId, userId, profile.Provider, profile.Issuer, profile.Subject, profile.Email));
+                command.BatchCommands.Add(Query("identity.create_membership", tenantId, userId));
                 await command.ExecuteNonQueryAsync(ct);
             }
             await transaction.CommitAsync(ct);
@@ -175,22 +178,8 @@ internal sealed class PostgresIdentityStore : IIdentityStore
     private static async Task<IdentityAccount?> ReadAccountAsync(
         NpgsqlConnection connection, ExternalIdentityProfile profile, CancellationToken ct)
     {
-        await using var command = new NpgsqlCommand("""
-            SELECT u.user_id, m.tenant_id, m.role, i.provider,
-                   u.email, u.display_name, u.avatar_url
-            FROM app.external_identities i
-            JOIN app.users u ON u.user_id = i.user_id
-            JOIN app.tenant_memberships m ON m.user_id = u.user_id
-            WHERE i.provider = @provider
-              AND i.issuer = @issuer
-              AND i.subject = @subject
-            ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
-                     m.created_at
-            LIMIT 1;
-            """, connection);
-        command.Parameters.AddWithValue("provider", profile.Provider);
-        command.Parameters.AddWithValue("issuer", profile.Issuer);
-        command.Parameters.AddWithValue("subject", profile.Subject);
+        await using var command = new NpgsqlBatch(connection);
+        command.BatchCommands.Add(Query("identity.read_account", profile.Provider, profile.Issuer, profile.Subject));
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
         return new IdentityAccount(
@@ -203,78 +192,30 @@ internal sealed class PostgresIdentityStore : IIdentityStore
     private static async Task UpdateProfileAsync(
         NpgsqlConnection connection, Guid userId, ExternalIdentityProfile profile, CancellationToken ct)
     {
-        await using var command = new NpgsqlCommand("""
-            UPDATE app.users
-            SET display_name = COALESCE(@display_name, display_name),
-                email = COALESCE(@email, email),
-                avatar_url = COALESCE(@avatar_url, avatar_url),
-                updated_at = now()
-            WHERE user_id = @user_id;
-            UPDATE app.external_identities
-            SET email = COALESCE(@email, email), last_login_at = now()
-            WHERE provider = @provider AND issuer = @issuer AND subject = @subject;
-            """, connection);
-        command.Parameters.AddWithValue("user_id", userId);
-        command.Parameters.AddWithValue("provider", profile.Provider);
-        command.Parameters.AddWithValue("issuer", profile.Issuer);
-        command.Parameters.AddWithValue("subject", profile.Subject);
-        command.Parameters.AddWithValue("email", (object?)profile.Email ?? DBNull.Value);
-        command.Parameters.AddWithValue("display_name", (object?)profile.DisplayName ?? DBNull.Value);
-        command.Parameters.AddWithValue("avatar_url", (object?)profile.AvatarUrl ?? DBNull.Value);
+        await using var command = new NpgsqlBatch(connection);
+        command.BatchCommands.Add(Query("identity.update_user", profile.DisplayName, profile.Email, profile.AvatarUrl, userId));
+        command.BatchCommands.Add(Query("identity.update_external", profile.Email, profile.Provider, profile.Issuer, profile.Subject));
         await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task UpsertClientAsync(ExternalOidcProvider provider, CancellationToken ct)
     {
-        await using var command = _dataSource.CreateCommand("""
-            INSERT INTO app.auth_clients (provider, client_id, authority, enabled, updated_at)
-            VALUES (@provider, @client_id, @authority, true, now())
-            ON CONFLICT (provider) DO UPDATE
-            SET client_id = EXCLUDED.client_id,
-                authority = EXCLUDED.authority,
-                enabled = true,
-                updated_at = now();
-            """);
-        command.Parameters.AddWithValue("provider", provider.Scheme);
-        command.Parameters.AddWithValue("client_id", provider.ClientId);
-        command.Parameters.AddWithValue("authority", provider.Authority);
+        await using var command = _dataSource.CreateBatch();
+        command.BatchCommands.Add(Query("identity.upsert_client", provider.Scheme, provider.ClientId, provider.Authority));
         await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task PutWebSessionAsync(StoredWebSession session, CancellationToken ct)
     {
-        await using var command = _dataSource.CreateCommand("""
-            INSERT INTO app.web_sessions
-                (session_id, user_id, tenant_id, ticket, created_at, last_seen_at, expires_at, revoked_at)
-            VALUES
-                (@session_id, @user_id, @tenant_id, @ticket, @created_at, @last_seen_at, @expires_at, NULL)
-            ON CONFLICT (session_id) DO UPDATE
-            SET ticket = EXCLUDED.ticket,
-                last_seen_at = EXCLUDED.last_seen_at,
-                expires_at = EXCLUDED.expires_at,
-                revoked_at = NULL;
-            """);
-        command.Parameters.AddWithValue("session_id", session.SessionId);
-        command.Parameters.AddWithValue("user_id", session.UserId);
-        command.Parameters.AddWithValue("tenant_id", session.TenantId);
-        command.Parameters.AddWithValue("ticket", session.Ticket);
-        command.Parameters.AddWithValue("created_at", session.CreatedAt);
-        command.Parameters.AddWithValue("last_seen_at", session.LastSeenAt);
-        command.Parameters.AddWithValue("expires_at", session.ExpiresAt);
+        await using var command = _dataSource.CreateBatch();
+        command.BatchCommands.Add(Query("identity.put_web_session", session.SessionId, session.UserId, session.TenantId, session.Ticket, session.CreatedAt, session.LastSeenAt, session.ExpiresAt));
         await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<StoredWebSession?> GetWebSessionAsync(string sessionId, CancellationToken ct)
     {
-        await using var command = _dataSource.CreateCommand("""
-            SELECT session_id, user_id, tenant_id, ticket,
-                   created_at, last_seen_at, expires_at, revoked_at
-            FROM app.web_sessions
-            WHERE session_id = @session_id
-              AND revoked_at IS NULL
-              AND expires_at > now();
-            """);
-        command.Parameters.AddWithValue("session_id", sessionId);
+        await using var command = _dataSource.CreateBatch();
+        command.BatchCommands.Add(Query("identity.get_web_session", sessionId));
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
         return ReadSession(reader);
@@ -282,25 +223,15 @@ internal sealed class PostgresIdentityStore : IIdentityStore
 
     public async Task RevokeWebSessionAsync(string sessionId, Guid userId, CancellationToken ct)
     {
-        await using var command = _dataSource.CreateCommand("""
-            UPDATE app.web_sessions SET revoked_at = now()
-            WHERE session_id = @session_id AND user_id = @user_id AND revoked_at IS NULL;
-            """);
-        command.Parameters.AddWithValue("session_id", sessionId);
-        command.Parameters.AddWithValue("user_id", userId);
+        await using var command = _dataSource.CreateBatch();
+        command.BatchCommands.Add(Query("identity.revoke_web_session", sessionId, userId));
         await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<IReadOnlyList<StoredWebSession>> ListWebSessionsAsync(Guid userId, CancellationToken ct)
     {
-        await using var command = _dataSource.CreateCommand("""
-            SELECT session_id, user_id, tenant_id, ticket,
-                   created_at, last_seen_at, expires_at, revoked_at
-            FROM app.web_sessions
-            WHERE user_id = @user_id AND revoked_at IS NULL AND expires_at > now()
-            ORDER BY last_seen_at DESC;
-            """);
-        command.Parameters.AddWithValue("user_id", userId);
+        await using var command = _dataSource.CreateBatch();
+        command.BatchCommands.Add(Query("identity.list_web_sessions", userId));
         await using var reader = await command.ExecuteReaderAsync(ct);
         var sessions = new List<StoredWebSession>();
         while (await reader.ReadAsync(ct)) sessions.Add(ReadSession(reader));
@@ -316,33 +247,16 @@ internal sealed class PostgresIdentityStore : IIdentityStore
     public async Task UpsertConversationAsync(
         string tenantId, Guid userId, string sessionKey, string? title, CancellationToken ct)
     {
-        await using var command = _dataSource.CreateCommand("""
-            INSERT INTO app.conversation_sessions
-                (tenant_id, session_key, user_id, title, created_at, last_turn_at)
-            VALUES (@tenant_id, @session_key, @user_id, @title, now(), now())
-            ON CONFLICT (tenant_id, session_key) DO UPDATE
-            SET last_turn_at = now(),
-                title = COALESCE(app.conversation_sessions.title, EXCLUDED.title)
-            WHERE app.conversation_sessions.user_id = EXCLUDED.user_id;
-            """);
-        command.Parameters.AddWithValue("tenant_id", tenantId);
-        command.Parameters.AddWithValue("session_key", sessionKey);
-        command.Parameters.AddWithValue("user_id", userId);
-        command.Parameters.AddWithValue("title", (object?)title ?? DBNull.Value);
+        await using var command = _dataSource.CreateBatch();
+        command.BatchCommands.Add(Query("identity.upsert_conversation", tenantId, sessionKey, userId, title));
         await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<IReadOnlyList<ConversationSessionView>> ListConversationsAsync(
         Guid userId, string tenantId, CancellationToken ct)
     {
-        await using var command = _dataSource.CreateCommand("""
-            SELECT session_key, title, created_at, last_turn_at
-            FROM app.conversation_sessions
-            WHERE user_id = @user_id AND tenant_id = @tenant_id AND archived_at IS NULL
-            ORDER BY last_turn_at DESC;
-            """);
-        command.Parameters.AddWithValue("user_id", userId);
-        command.Parameters.AddWithValue("tenant_id", tenantId);
+        await using var command = _dataSource.CreateBatch();
+        command.BatchCommands.Add(Query("identity.list_conversations", userId, tenantId));
         await using var reader = await command.ExecuteReaderAsync(ct);
         var conversations = new List<ConversationSessionView>();
         while (await reader.ReadAsync(ct))
