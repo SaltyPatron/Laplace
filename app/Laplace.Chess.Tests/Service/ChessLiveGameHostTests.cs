@@ -132,6 +132,77 @@ public sealed class ChessLiveGameHostTests
         Assert.Equal(1900, LichessBot.ReadPlayerRating(game, "black"));
     }
 
+    [Theory]
+    [InlineData("w", "e2e4", 0, Piece.WPawn)]
+    [InlineData("b", "e7e5", 1, Piece.BPawn)]
+    public void RecordedMoverComesFromResolvedBoardNotPlyParity(
+        string side, string uci, int expectedMover, Piece expectedPiece)
+    {
+        var modality = new ChessModality();
+        var fen = ChessModality.StartFen.Replace(" w ", $" {side} ", StringComparison.Ordinal);
+        var before = modality.FromFen(fen);
+        var move = Assert.Single(MoveGen.Legal(before.Board), candidate => candidate.ToUci() == uci);
+        var after = modality.Apply(before, move);
+        var recorded = ChessLiveGameHost.ResolveRecordedPly(
+            modality.StateKey(before), modality.StateKey(after), uci, null);
+
+        Assert.Equal(expectedMover, recorded.MoverSide);
+        Assert.Equal(expectedPiece, recorded.MovingPiece);
+        Assert.Equal(uci, recorded.MoveToken);
+        Assert.Equal(move, recorded.Move);
+        Assert.Equal(side == "w" ? "e4" : "e5", recorded.San);
+    }
+
+    [Fact]
+    public async Task LiveScopeReleasesPopulatedSessionWithoutWritingCompletedResult()
+    {
+        // These lifecycle calls own only in-memory live state. Null persistence
+        // dependencies make accidental database/completion work fail immediately.
+        var host = new ChessLiveGameHost(null!, null!, null!);
+        var id = ChessLiveGameHost.LichessGameId("scope-abandon-fixture");
+        await host.OpenGameAsync(id, "chess/test/scope");
+        var scope = host.CaptureGameScope(id);
+        Assert.NotNull(scope);
+        var modality = new ChessModality();
+        var before = modality.Initial();
+        var move = Assert.Single(MoveGen.Legal(before.Board), candidate => candidate.ToUci() == "e2e4");
+        var after = modality.Apply(before, move);
+        await Assert.ThrowsAsync<IOException>(async () =>
+        {
+            using (scope)
+            {
+                await host.RecordPlyAsync(id, 1, modality.StateKey(before), modality.StateKey(after), "e2e4", null);
+                await host.RecordPlyClockAsync(id, 1, 1000);
+                await host.RecordPlyAnalysisAsync(id, 1, new ChessLivePlyAnalysis(5, 2, 100));
+                throw new IOException("fixture interrupted stream");
+            }
+        });
+        scope.Dispose();
+        Assert.Null(host.CaptureGameScope(id));
+        Assert.Equal(0, host.GamesCompleted);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            host.RecordPlyAsync(id, 2, modality.StateKey(before), modality.StateKey(after), "e2e4", null));
+    }
+
+    [Fact]
+    public async Task OldScopeCannotAbandonReplacementSessionForSameLichessId()
+    {
+        var host = new ChessLiveGameHost(null!, null!, null!);
+        var id = ChessLiveGameHost.LichessGameId("scope-reconnect-fixture");
+        await host.OpenGameAsync(id, "chess/test/old");
+        var oldScope = host.CaptureGameScope(id);
+        Assert.NotNull(oldScope);
+        await host.OpenGameAsync(id, "chess/test/reconnected");
+        var newScope = host.CaptureGameScope(id);
+        Assert.NotNull(newScope);
+
+        oldScope.Dispose();
+        Assert.NotNull(host.CaptureGameScope(id));
+        newScope.Dispose();
+        Assert.Null(host.CaptureGameScope(id));
+        Assert.Equal(0, host.GamesCompleted);
+    }
+
     [Fact]
     public async Task RecordPly_ReusesPositionEntity_ForRepeatedSurface()
     {

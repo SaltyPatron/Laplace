@@ -161,9 +161,7 @@ public sealed class LichessBot : IAsyncDisposable
     {
         var modality = new ChessModality();
         var substrateGameId = ChessLiveGameHost.LichessGameId(lichessGameId);
-        ChessState trackState = modality.Initial();
-        bool tracking = false;
-        int trackedPlies = 0;
+        LichessGameReplay? replay = null;
         GameOutcome? outcome = null;
         Search? search = null;
 
@@ -175,6 +173,10 @@ public sealed class LichessBot : IAsyncDisposable
                     Site: "lichess.org",
                     ExternalGameId: $"lichess:{lichessGameId}"),
                 ct: ct);
+
+        // The compiler emits a finally for this scope: every unscored, canceled
+        // or failed stream releases only its own live session, without completion.
+        using var gameScope = _record ? _host.CaptureGameScope(substrateGameId) : null;
 
         try
         {
@@ -194,7 +196,6 @@ public sealed class LichessBot : IAsyncDisposable
                 if (type is not ("gameFull" or "gameState")) continue;
 
                 JsonElement stateEl;
-                string moves;
                 int wtime, btime, winc, binc;
                 string initialFen;
 
@@ -209,7 +210,6 @@ public sealed class LichessBot : IAsyncDisposable
                         weAreWhite ? ChessVocabulary.LaplacePlayerId : ChessVocabulary.PlayerId(whiteName), whiteName,
                         weAreWhite ? ChessVocabulary.PlayerId(blackName) : ChessVocabulary.LaplacePlayerId, blackName);
                     stateEl = ev.GetProperty("state");
-                    moves = stateEl.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
                     wtime = stateEl.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
                     btime = stateEl.TryGetProperty("btime", out var bt) ? bt.GetInt32() : 0;
                     winc = stateEl.TryGetProperty("winc", out var wi) ? wi.GetInt32() : 0;
@@ -230,7 +230,6 @@ public sealed class LichessBot : IAsyncDisposable
                 else
                 {
                     stateEl = ev;
-                    moves = ev.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
                     wtime = ev.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
                     btime = ev.TryGetProperty("btime", out var bt) ? bt.GetInt32() : 0;
                     winc = ev.TryGetProperty("winc", out var wi) ? wi.GetInt32() : 0;
@@ -239,77 +238,87 @@ public sealed class LichessBot : IAsyncDisposable
                 }
 
                 var startFen = initialFen is "startpos" or "" ? ChessModality.StartFen : initialFen;
-                if (!tracking)
+                if (replay is null)
                 {
-                    trackState = modality.FromFen(startFen);
-                    tracking = true;
+                    if (type != "gameFull")
+                        throw new InvalidDataException("Lichess game stream did not start with gameFull.");
+                    replay = new LichessGameReplay(startFen);
+                }
+                else if (type == "gameFull" && startFen != replay.InitialFen)
+                    throw new InvalidDataException("Lichess initial position changed during replay.");
+
+                var observed = await replay.ObserveAsync(stateEl,
+                    (ply, token) => _record
+                        ? _host.RecordPlyAsync(substrateGameId, ply.Ply,
+                            modality.StateKey(ply.Before), modality.StateKey(ply.After), ply.Uci,
+                            PlayerIdForSide(modality.SideToMove(ply.Before), weAreWhite), token)
+                        : Task.CompletedTask, ct);
+
+                // These side observations follow a successfully accepted ply. Keep them
+                // outside the append callback so replay cannot retry a recorded move if
+                // analysis or commentary fails.
+                if (_record)
+                {
+                    foreach (var ply in observed)
+                    {
+                        var motifs = ChessMotifs.DetectAtPly(ply.Before.Board, ply.Move, ply.After.Board).ToList();
+                        var analysis = ply.SubmittedAnalysis is { } submitted
+                            ? submitted with { Motifs = motifs }
+                            : new ChessLivePlyAnalysis(Motifs: motifs);
+                        if (ply.SubmittedAnalysis is not null || motifs.Count > 0)
+                            await _host.RecordPlyAnalysisAsync(substrateGameId, ply.Ply, analysis, ct);
+
+                        if (ply.SubmittedAnalysis?.ScoreCpSideToMove is int score)
+                        {
+                            try
+                            {
+                                int whiteCp = ply.Before.Board.WhiteToMove ? score : -score;
+                                string comment = await ChessMoveCommentary.BuildAsync(
+                                    _host.DataSource,
+                                    new ChessMoveCommentary.Inputs(whiteCp, analysis.Depth,
+                                        analysis.Pv ?? Array.Empty<string>(), motifs,
+                                        PositionSurface: modality.StateKey(ply.After)),
+                                    ct);
+                                if (!string.IsNullOrWhiteSpace(comment))
+                                    await PostChatAsync(lichessGameId, "player", comment, ct);
+                            }
+                            catch (Exception ex) when (!ct.IsCancellationRequested)
+                            {
+                                _log.LogDebug(ex, "game {Id}: commentary/chat skipped", lichessGameId);
+                            }
+                        }
+                    }
+
+                    if (replay.AcceptedPlies > 0)
+                    {
+                        // Initial FEN can start with Black; ply parity is not color.
+                        int remaining = replay.State.Board.WhiteToMove ? btime : wtime;
+                        if (remaining >= 0)
+                            await _host.RecordPlyClockAsync(substrateGameId, replay.AcceptedPlies, remaining, ct);
+                    }
                 }
 
-                var uciMoves = moves.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                for (int i = trackedPlies; i < uciMoves.Length; i++)
+                if (replay.Disposition.Stopped)
                 {
-                    var board = trackState.Board;
-                    ChessMove? applied = null;
-                    foreach (var lm in MoveGen.Legal(board))
-                    {
-                        if (lm.ToUci() == uciMoves[i]) { applied = lm; break; }
-                    }
-                    if (applied is null)
-                    {
-                        _log.LogWarning("game {Id}: could not apply move {Uci} at ply {Ply}", lichessGameId, uciMoves[i], i + 1);
-                        break;
-                    }
-
-                    string fromKey = modality.StateKey(trackState);
-                    int mover = modality.SideToMove(trackState);
-                    trackState = modality.Apply(trackState, applied.Value);
-                    string toKey = modality.StateKey(trackState);
-                    int ply = i + 1;
-
                     if (_record)
-                    {
-                        Hash128? moverId = PlayerIdForSide(mover, weAreWhite);
-                        await _host.RecordPlyAsync(
-                            substrateGameId, ply, fromKey, toKey, uciMoves[i], moverId, ct);
-                        var motifs = ChessMotifs.DetectAtPly(board, applied.Value, trackState.Board).ToList();
-                        if (motifs.Count > 0)
-                            await _host.RecordPlyAnalysisAsync(
-                                substrateGameId, ply, new ChessLivePlyAnalysis(Motifs: motifs), ct);
-                    }
-
-                    trackedPlies++;
-                }
-
-                if (_record && uciMoves.Length > 0 && trackedPlies == uciMoves.Length)
-                {
-                    int latestPly = uciMoves.Length;
-                    bool latestWasWhite = (latestPly & 1) == 1;
-                    int remaining = latestWasWhite ? wtime : btime;
-                    if (remaining >= 0)
-                        await _host.RecordPlyClockAsync(substrateGameId, latestPly, remaining, ct);
-                }
-
-                if (TryParseOutcome(stateEl) is { } parsed)
-                {
-                    if (_record)
-                    {
-                        string termination = stateEl.TryGetProperty("status", out var status)
-                            ? status.GetString() ?? "" : "";
                         _host.SetGameMetadata(substrateGameId,
-                            new ChessLiveGameMetadata(Termination: termination));
-                    }
-                    outcome = parsed;
+                            new ChessLiveGameMetadata(Termination: replay.Disposition.Status));
+                    outcome = replay.Disposition.Outcome;
+                    if (outcome is null)
+                        _log.LogInformation("game {Id}: stopped with {Status}; no completed result recorded",
+                            lichessGameId, replay.Disposition.Status);
                     break;
                 }
 
+                var trackState = replay.State;
                 var boardNow = trackState.Board;
-                if (boardNow.WhiteToMove != weAreWhite) continue;
+                if (!replay.Disposition.CanPlay || replay.HasPendingSubmission ||
+                    boardNow.WhiteToMove != weAreWhite) continue;
 
                 int myTime = weAreWhite ? wtime : btime;
                 int myInc = weAreWhite ? winc : binc;
                 int budgetMs = TimeBudget(myTime, myInc);
 
-                var before = trackState;
                 ChessMove mv;
                 int scoreCp;
                 int searchedDepth;
@@ -330,40 +339,13 @@ public sealed class LichessBot : IAsyncDisposable
                     lichessGameId, mv.ToUci(), _substrate ? "substrate-guided search" : "classical control",
                     searchedDepth, scoreCp, budgetMs);
 
-                await PostAsync($"/api/bot/game/{lichessGameId}/move/{mv.ToUci()}", ct);
+                var pending = replay.BeginSubmission(
+                    mv, new ChessLivePlyAnalysis(scoreCp, searchedDepth, searchedNodes, pv));
+                var submission = await PostAsync($"/api/bot/game/{lichessGameId}/move/{mv.ToUci()}", ct);
+                replay.ResolveSubmission(pending, submission);
+                // Even HTTP success is only submission evidence. A later gameState
+                // must confirm the exact ply before it reaches RecordPlyAsync.
 
-                if (_record)
-                {
-                    string fromKey = modality.StateKey(before);
-                    var after = modality.Apply(before, mv);
-                    string toKey = modality.StateKey(after);
-                    int ply = trackedPlies + 1;
-                    await _host.RecordPlyAsync(
-                        substrateGameId, ply, fromKey, toKey, mv.ToUci(),
-                        ChessVocabulary.LaplacePlayerId, ct);
-                    trackState = after;
-                    trackedPlies = ply;
-                    var motifs = ChessMotifs.DetectAtPly(boardNow, mv, after.Board).ToList();
-                    await _host.RecordPlyAnalysisAsync(
-                        substrateGameId, ply,
-                        new ChessLivePlyAnalysis(scoreCp, searchedDepth, searchedNodes, pv, motifs), ct);
-
-                    try
-                    {
-                        int whiteCp = boardNow.WhiteToMove ? scoreCp : -scoreCp;
-                        string comment = await ChessMoveCommentary.BuildAsync(
-                            _host.DataSource,
-                            new ChessMoveCommentary.Inputs(whiteCp, searchedDepth, pv, motifs,
-                                PositionSurface: toKey),
-                            ct);
-                        if (!string.IsNullOrWhiteSpace(comment))
-                            await PostChatAsync(lichessGameId, "player", comment, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        _log.LogDebug(ex, "game {Id}: commentary/chat skipped", lichessGameId);
-                    }
-                }
             }
         }
         catch (OperationCanceledException) { }
@@ -375,7 +357,7 @@ public sealed class LichessBot : IAsyncDisposable
             {
                 await _host.CompleteGameAsync(substrateGameId, gameOutcome, adjudicated: false, ct);
                 _log.LogInformation("game {Id} recorded ({Plies} plies, {Result})",
-                    lichessGameId, trackedPlies, Describe(gameOutcome));
+                    lichessGameId, replay!.AcceptedPlies, Describe(gameOutcome));
             }
             catch (Exception ex)
             {
@@ -493,41 +475,36 @@ public sealed class LichessBot : IAsyncDisposable
     private static string SpeedOf(JsonElement challenge)
         => challenge.TryGetProperty("speed", out var s) ? s.GetString() ?? "" : "";
 
-    private static GameOutcome? TryParseOutcome(JsonElement state)
-    {
-        if (!state.TryGetProperty("status", out var st)) return null;
-        return st.GetString() switch
-        {
-            "started" or "created" => null,
-            "draw" or "stalemate" or "insufficientMaterialClaim" => GameOutcome.Draw,
-            _ => state.TryGetProperty("winner", out var w) ? w.GetString() switch
-            {
-                "white" => GameOutcome.WonBy(0),
-                "black" => GameOutcome.WonBy(1),
-                _ => GameOutcome.Draw,
-            } : GameOutcome.Draw,
-        };
-    }
-
     private static string Describe(GameOutcome o)
         => o.IsDraw ? "draw" : o.Winner == 0 ? "white wins" : "black wins";
 
     private static int TimeBudget(int myTimeMs, int myIncMs)
         => Math.Max(50, Math.Min(myTimeMs - 100, myTimeMs / 20 + (int)(myIncMs * 0.85)));
 
-    private async Task PostAsync(string url, CancellationToken ct)
+    private Task<LichessSubmissionDisposition> PostAsync(string url, CancellationToken ct)
+        => SendPostAsync(_http, url, ct, _log);
+
+    internal static async Task<LichessSubmissionDisposition> SendPostAsync(
+        HttpClient http, string url, CancellationToken ct, ILogger? log = null)
     {
         try
         {
             using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             reqCts.CancelAfter(TimeSpan.FromSeconds(15));
-            using var resp = await _http.PostAsync(url, content: null, reqCts.Token).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
-                _log.LogWarning("POST {Url} → {Status}", url, (int)resp.StatusCode);
+            using var resp = await http.PostAsync(url, content: null, reqCts.Token).ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode) return LichessSubmissionDisposition.Accepted;
+            log?.LogWarning("POST {Url} → {Status}", url, (int)resp.StatusCode);
+            // A timeout or server failure can follow a committed move. Keep that
+            // attempt pending until the stream resolves it instead of resubmitting.
+            int status = (int)resp.StatusCode;
+            return status >= 400 && status < 500 && status != 408
+                ? LichessSubmissionDisposition.Rejected
+                : LichessSubmissionDisposition.Unknown;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            _log.LogWarning(ex, "POST {Url} failed", url);
+            log?.LogWarning(ex, "POST {Url} unresolved", url);
+            return LichessSubmissionDisposition.Unknown;
         }
     }
 
