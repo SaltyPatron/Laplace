@@ -1,0 +1,29 @@
+@layer components {
+  .workspace { display: flex; flex-direction: column; gap: var(--space-3, .75rem); min-width: 0; max-width: 100%; }
+  .workspace p, .workspace h4 { margin: 0; }
+  .boundary { font-size: var(--text-sm, .875rem); }
+  .meta { color: var(--color-text-muted); font-size: var(--text-xs, .75rem); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2, .5rem); font-size: var(--text-sm, .875rem); }
+  .toolbar select { color: var(--color-text-primary); background: var(--color-bg-panel); border: 1px solid var(--color-border-default); border-radius: var(--radius-sm, 4px); padding: .3rem; }
+  .columns { border: 1px solid var(--color-border-default); border-radius: var(--radius-sm, 4px); padding: .3rem .5rem; }
+  .columns summary { cursor: pointer; }
+  .columns label { display: flex; gap: .4rem; align-items: center; padding: .25rem; }
+  .scroll { max-width: 100%; max-height: 60vh; overflow: auto; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm, 4px); }
+  .table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--text-sm, .875rem); }
+  .table caption { text-align: left; padding: .5rem; color: var(--color-text-muted); }
+  .table th, .table td { text-align: left; vertical-align: top; padding: .5rem .65rem; border-bottom: 1px solid var(--color-border-default); min-width: 4rem; max-width: 40ch; overflow-wrap: anywhere; }
+  .table thead th { position: sticky; top: 0; background: var(--color-bg-panel); z-index: 1; }
+  .table th:first-child, .table td:first-child { min-width: auto; }
+  .table small { display: block; font-weight: normal; color: var(--color-text-muted); }
+  .table tr[data-selected] { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+  .cellValue, .fullValue { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .fullValue { margin: .5rem 0; max-height: 18rem; overflow: auto; }
+  .inspector { border-top: 1px solid var(--color-border-default); padding-top: var(--space-3, .75rem); }
+  .values { display: grid; gap: .5rem; margin: .75rem 0; }
+  .values > div { display: grid; grid-template-columns: minmax(7rem, 1fr) minmax(0, 3fr); gap: .75rem; border-bottom: 1px solid var(--color-border-default); padding-bottom: .5rem; }
+  .values dt { font-weight: 600; overflow-wrap: anywhere; }
+  .values dd { margin: 0; min-width: 0; }
+  .values pre { margin: 0; max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .error { color: var(--color-error); }
+  @media (max-width: 600px) { .values > div { grid-template-columns: minmax(0, 1fr); gap: .25rem; } }
+}

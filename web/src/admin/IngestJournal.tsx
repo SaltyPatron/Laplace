@@ -1,355 +1,112 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Button, ErrorText, LoadingText, Muted, Panel, Toggle } from '@ui';
+import { useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Button, ErrorText, Modal, Muted, Panel, ReadStatus, Toggle, useReadResource } from '@ui';
+import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
+import { captureRows } from '../ui/lib/resultRows';
 import { useAppStore } from '../store';
-import {
-  closeIngestRun,
-  ingestFiles,
-  ingestRuns,
-  type IngestFile,
-  type IngestRun,
-} from './api';
+import { closeIngestRun, ingestFiles, ingestRuns, type IngestFile, type IngestRun } from './api';
+import { countText, ingestDuration, ingestStatusTone, OPEN_INGEST_STATES } from './ingestPresentation';
 import styles from './Admin.module.css';
 
 const REFRESH_MS = 5000;
-
-/** Runs that a pipeline waiting on this journal would still be blocked by. */
-const OPEN_STATES = new Set(['running', 'composed', 'started', 'pending', 'in_progress']);
-
-function duration(item: Pick<IngestRun, 'started_at' | 'ended_at'>): string {
-  if (!item.started_at) return '—';
-  const start = Date.parse(item.started_at);
-  const end = item.ended_at ? Date.parse(item.ended_at) : Date.now();
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return '—';
-  const s = Math.max(0, Math.round((end - start) / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+function Status({ value }: { value: string | null }) {
+  return value ? <span className={`${styles.badge} ${styles[ingestStatusTone(value)]}`}>{value}</span> : <span>Not recorded</span>;
 }
-
-function bytes(value: number | null): string {
-  if (value == null || value <= 0) return '—';
-  const units = ['B', 'KiB', 'MiB', 'GiB'];
-  let amount = value;
-  let unit = 0;
-  while (amount >= 1024 && unit < units.length - 1) {
-    amount /= 1024;
-    unit += 1;
-  }
-  return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
-}
-
-function pct(done: number | null, total: number | null): string {
-  if (!total || total <= 0 || done == null) return '—';
-  return `${Math.round((done / total) * 100)}%`;
-}
-
-function isComplete(status: string): boolean {
-  const value = status.toLowerCase();
-  return value === 'ok' || value === 'complete' || value === 'completed';
-}
-
-function counterMismatch(status: string, done: number | null, total: number | null): boolean {
-  return isComplete(status) && total != null && total > 0 && done !== total;
-}
-
-function statusClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === 'ok' || s === 'complete' || s === 'completed') return styles.ok;
-  if (OPEN_STATES.has(s)) return styles.running;
-  if (s === 'cancelled' || s === 'canceled') return styles.cancelled;
-  return styles.failed;
-}
-
-/**
- * The ingest journal — the gate CI/CD waits on.
- *
- * This is a read of `ops.ingest_runs`, which is the same row a pipeline polls.
- * Forcing a run closed is `ops.ingest_run_close` — the one write op on
- * POST /v1/op's allow-list (InstalledOpInvoker.WritableOps), so unlike every
- * other catalog write it is callable from here, behind a two-step confirm.
- * The equivalent SQL is still offered for copy so an operator can run the
- * close out-of-band instead.
- */
 export function IngestJournal() {
-  const { tenant } = useAppStore();
-  const [runs, setRuns] = useState<IngestRun[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { tenant, authUser } = useAppStore();
+  return <RunWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
+}
+function RunWorkspace({ tenant }: { tenant: string }) {
+  const [params, setParams] = useSearchParams();
   const [live, setLive] = useState(true);
   const [limit, setLimit] = useState(25);
-  const [copied, setCopied] = useState<string | null>(null);
-  const [closing, setClosing] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const [closeErr, setCloseErr] = useState<string | null>(null);
-  const [expandedRun, setExpandedRun] = useState<string | null>(null);
-  const [files, setFiles] = useState<IngestFile[] | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    ingestRuns(limit, { tenant })
-      .then((r) => { setRuns(r.rows ?? []); setError(null); })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [limit, tenant]);
-
-  const loadFiles = useCallback((runId: string) => {
-    ingestFiles(runId, 250, { tenant })
-      .then((r) => { setFiles(r.rows ?? []); setFileError(null); })
-      .catch((e) => setFileError(e instanceof Error ? e.message : String(e)));
-  }, [tenant]);
-
-  useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    if (!live) return;
-    const t = setInterval(load, REFRESH_MS);
-    return () => clearInterval(t);
-  }, [live, load]);
-
-  useEffect(() => {
-    if (expandedRun == null) {
-      setFiles(null);
-      setFileError(null);
-      return;
-    }
-    setFiles(null);
-    loadFiles(expandedRun);
-  }, [expandedRun, loadFiles]);
-
-  useEffect(() => {
-    if (!live || expandedRun == null) return;
-    const t = setInterval(() => loadFiles(expandedRun), REFRESH_MS);
-    return () => clearInterval(t);
-  }, [expandedRun, live, loadFiles]);
-
-  const open = runs?.filter((r) => OPEN_STATES.has(r.status.toLowerCase())) ?? [];
-
-  /**
-   * Force the run closed. Two clicks, because this releases a CI/CD gate and
-   * there is no undo — the second click is the confirmation.
-   */
-  async function forceClose(run: IngestRun) {
-    if (confirming !== run.run_id) {
-      setConfirming(run.run_id);
-      setCloseErr(null);
-      setTimeout(() => setConfirming((c) => (c === run.run_id ? null : c)), 5000);
-      return;
-    }
-    setConfirming(null);
-    setClosing(run.run_id);
-    setCloseErr(null);
+  const [confirming, setConfirming] = useState<IngestRun | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const closingRef = useRef(false);
+  const expandedRun = params.get('run');
+  const filter = params.get('source') ?? '';
+  const runsRead = useReadResource({
+    key: JSON.stringify(['ingest-runs', tenant, limit]), refreshMs: live ? REFRESH_MS : 0,
+    read: async (signal) => {
+      const result = await ingestRuns(limit, { tenant, signal });
+      return captureRows(result.rows, `Up to ${limit} requested run receipts${result.truncated_at != null ? `; transport truncated at ${result.truncated_at}` : ''}. Older runs may exist.`, { operation: 'ops.ingest_runs', requested_limit: limit });
+    },
+  });
+  function setParam(name: string, value: string | null, replace = false) {
+    const next = new URLSearchParams(params);
+    if (value) next.set(name, value); else next.delete(name);
+    setParams(next, { replace });
+  }
+  async function closeReceipt(run: IngestRun) {
+    if (closingRef.current) return;
+    closingRef.current = true; setClosing(true); setActionError(null);
     try {
       await closeIngestRun(run.run_id, 'cancelled', { tenant });
-      load();
-    } catch (e) {
-      setCloseErr(`${run.source_name}: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setClosing(null);
-    }
+      setConfirming(null); await runsRead.refresh();
+    } catch (failure) {
+      setActionError(`${run.source_name}: ${failure instanceof Error ? failure.message : String(failure)}. The outcome may be unknown after a transport failure; refresh the receipt before trying again.`);
+    } finally { closingRef.current = false; setClosing(false); }
   }
-
-  async function copyClose(run: IngestRun) {
-    const cmd = `SELECT * FROM ops.ingest_run_close('${run.run_id}'::uuid, 'cancelled');`;
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopied(run.run_id);
-      setTimeout(() => setCopied(null), 2000);
-    } catch { /* clipboard unavailable; the command is on screen anyway */ }
-  }
-
-  return (
-    <Panel title="LapSight / Ingest — the CI/CD gate">
+  const columns: ResultColumn<IngestRun>[] = [
+    { key: 'status', label: 'Run status', render: (run) => <><Status value={run.status} />{run.phase && <div>{run.phase}</div>}{run.error && <details><summary>Run error</summary><pre className={styles.sig}>{run.error}</pre></details>}</> },
+    { key: 'source_name', label: 'Source', render: (run) => <Link to={`/explore/source/${encodeURIComponent(run.source_name)}`}>{run.source_name}</Link> },
+    { key: 'run_id', label: 'Files and run', render: (run) => <><code>{run.run_id}</code><Button variant="ghost" aria-expanded={expandedRun === run.run_id} onClick={() => setParam('run', expandedRun === run.run_id ? null : run.run_id)}>{expandedRun === run.run_id ? 'Hide file receipts' : 'Open file receipts'}</Button></> },
+    { key: 'layer', label: 'Layer' },
+    { key: 'input_units_done', label: 'Input processed / total', render: (run) => <><span>{countText(run.input_units_done)} / {countText(run.input_units_total)}</span><div className={styles.progressPct}>Processed input can exclude already-complete files.</div></> },
+    { key: 'files_done', label: 'Files complete / total', render: (run) => <span>{countText(run.files_done)} / {countText(run.files_total)}</span> },
+    { key: 'entities', label: 'Staged entities / physicalities / attestations', render: (run) => <><span>{countText(run.entities)} / {countText(run.physicalities)} / {countText(run.attestations)}</span>{run.entities === 0 && run.physicalities === 0 && run.attestations === 0 && <div className={styles.progressPct}>No staged writes reported; inspect file dispositions.</div>}</> },
+    { key: 'throughput_status', label: 'Throughput measurement', render: (run) => <><Status value={run.throughput_status} /><div className={styles.progressPct}>{run.throughput_rows_per_s == null ? 'No rate recorded' : `${countText(run.throughput_rows_per_s)} rows/s`}{run.throughput_compared ? ' · compared with baseline' : ' · no baseline comparison'}</div></> },
+    { key: 'started_at', label: 'Started / elapsed', render: (run) => <><time dateTime={run.started_at ?? undefined}>{run.started_at ? new Date(run.started_at).toLocaleString() : 'Not recorded'}</time><div>{ingestDuration(run.started_at, run.ended_at)}</div></> },
+    { key: 'ended_at', label: 'Receipt control', render: (run) => <Button variant="ghost" disabled={closing || !OPEN_INGEST_STATES.has(run.status.toLowerCase())} onClick={() => { setConfirming(run); setActionError(null); }}>Close run receipt…</Button> },
+  ];
+  const open = runsRead.data?.rows.filter((run) => OPEN_INGEST_STATES.has(run.status.toLowerCase())).length;
+  return <>
+    <Panel title="Ingestion runs" expandable>
       <div className={styles.toolbar}>
-        <label className={styles.liveLabel}>
-          <Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />
-          live ({REFRESH_MS / 1000}s)
-        </label>
-        <label className={styles.limitLabel}>
-          rows
-          <select
-            className={styles.limitSelect}
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-          >
-            {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
-        <Button variant="ghost" onClick={load}>Refresh</Button>
-        <Muted className={styles.gateNote}>
-          {runs == null ? '' : open.length === 0
-            ? 'No open runs — a pipeline gating on this journal would proceed.'
-            : `${open.length} open run${open.length === 1 ? '' : 's'} — a pipeline gating on this journal is still blocked.`}
-        </Muted>
+        <label className={styles.liveLabel}><Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />Refresh after each completed read ({REFRESH_MS / 1000}s)</label>
+        <label className={styles.limitLabel}>Requested run window<select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[10, 25, 50, 100, 500].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+        <Button variant="ghost" onClick={() => void runsRead.refresh()}>Refresh runs</Button>
       </div>
-
-      {error ? <ErrorText>{error}</ErrorText>
-        : runs == null ? <LoadingText>Reading the journal…</LoadingText>
-        : runs.length === 0 ? <Muted>No ingest runs recorded.</Muted>
-        : (
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Status</th>
-                  <th scope="col">Source</th>
-                  <th scope="col" className={styles.num}>Layer</th>
-                  <th scope="col" className={styles.num}>Units</th>
-                  <th scope="col" className={styles.num}>Input</th>
-                  <th scope="col" className={styles.num}>Files</th>
-                  <th scope="col" className={styles.num}>Staged E/P/A</th>
-                  <th scope="col">Throughput</th>
-                  <th scope="col" className={styles.num}>Took</th>
-                  <th scope="col">Force close</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <Fragment key={r.run_id}>
-                    <tr className={OPEN_STATES.has(r.status.toLowerCase()) ? styles.openRow : undefined}>
-                      <td>
-                        <span className={`${styles.badge} ${statusClass(r.status)}`}>{r.status}</span>
-                        {OPEN_STATES.has(r.status.toLowerCase()) && r.phase && (
-                          <div className={styles.progressPct}>{r.phase}</div>
-                        )}
-                        {r.error && <div className={styles.runErr} title={r.error}>{r.error.slice(0, 90)}</div>}
-                      </td>
-                      <td>
-                        <div className={styles.source}>{r.source_name}</div>
-                        <code className={styles.runId}>{r.run_id.slice(0, 8)}</code>
-                        {(r.files_total ?? 0) > 0 && (
-                          <button
-                            type="button"
-                            className={styles.fileToggle}
-                            aria-expanded={expandedRun === r.run_id}
-                            onClick={() => setExpandedRun((current) => current === r.run_id ? null : r.run_id)}
-                          >
-                            {expandedRun === r.run_id ? 'hide files' : 'show files'}
-                          </button>
-                        )}
-                      </td>
-                      <td className={styles.num}>{r.layer ?? '—'}</td>
-                      <td className={styles.num}>
-                        {r.units_applied ?? 0}/{r.units_attempted ?? 0}
-                        {(r.units_failed ?? 0) > 0 && <span className={styles.failedUnits}> ({r.units_failed} failed)</span>}
-                      </td>
-                      <td className={`${styles.num} ${counterMismatch(r.status, r.input_units_done, r.input_units_total) ? styles.counterMismatch : ''}`}>
-                        <div>{(r.input_units_done ?? 0).toLocaleString()}/{(r.input_units_total ?? 0).toLocaleString()}</div>
-                        <span className={styles.progressPct}>{pct(r.input_units_done, r.input_units_total)}</span>
-                      </td>
-                      <td className={styles.num}>
-                        <div className={counterMismatch(r.status, r.files_done, r.files_total) ? styles.counterMismatch : undefined}>
-                          {r.files_done ?? 0}/{r.files_total ?? 0}
-                        </div>
-                        <span className={styles.progressPct}>{pct(r.files_done, r.files_total)}</span>
-                      </td>
-                      <td className={styles.num}>
-                        {(r.entities ?? 0).toLocaleString()}/
-                        {(r.physicalities ?? 0).toLocaleString()}/
-                        {(r.attestations ?? 0).toLocaleString()}
-                      </td>
-                      <td>
-                        {r.throughput_status ? (
-                          <>
-                            <span className={`${styles.badge} ${statusClass(r.throughput_status)}`}>
-                              {r.throughput_status}
-                            </span>
-                            <div className={styles.progressPct}>
-                              {r.throughput_rows_per_s == null
-                                ? 'not measured'
-                                : `${Math.round(r.throughput_rows_per_s).toLocaleString()} rows/s`}
-                              {r.throughput_slowdown_ratio == null
-                                ? ''
-                                : ` · ${r.throughput_slowdown_ratio.toFixed(2)}× baseline`}
-                              {r.throughput_compared ? '' : ' · not compared'}
-                            </div>
-                          </>
-                        ) : '—'}
-                      </td>
-                      <td className={styles.num}>
-                        <div>{duration(r)}</div>
-                        {isComplete(r.status) && ((r.fold_drain_ms ?? 0) > 0 || (r.writer_maintenance_ms ?? 0) > 0) && (
-                          <span className={styles.progressPct}>
-                            drain {Math.round((r.fold_drain_ms ?? 0) / 1000)}s · maintenance {Math.round((r.writer_maintenance_ms ?? 0) / 1000)}s
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <Button
-                          variant="ghost"
-                          loading={closing === r.run_id}
-                          disabled={closing != null}
-                          onClick={() => void forceClose(r)}
-                          title={`Force ops.ingest_run_close on ${r.run_id}`}
-                        >
-                          {confirming === r.run_id ? 'Confirm?' : 'Close'}
-                        </Button>
-                        <button type="button" className={styles.copyCmd} onClick={() => void copyClose(r)}>
-                          {copied === r.run_id ? 'copied' : 'copy SQL'}
-                        </button>
-                      </td>
-                    </tr>
-                    {expandedRun === r.run_id && (
-                      <tr className={styles.fileDetailRow}>
-                        <td colSpan={9}>
-                          <div className={styles.fileDetailHead}>
-                            Independent file jobs; active and failed files are listed first (up to 250).
-                          </div>
-                          {fileError ? <ErrorText>{fileError}</ErrorText>
-                            : files == null ? <LoadingText>Reading file jobs…</LoadingText>
-                            : files.length === 0 ? <Muted>No per-file journal rows recorded for this run.</Muted>
-                            : (
-                              <div className={styles.fileTableWrap}>
-                                <table className={`${styles.table} ${styles.fileTable}`}>
-                                  <thead>
-                                    <tr>
-                                      <th scope="col">Status</th>
-                                      <th scope="col">File job</th>
-                                      <th scope="col" className={styles.num}>Records</th>
-                                      <th scope="col" className={styles.num}>Staged E/P/A</th>
-                                      <th scope="col" className={styles.num}>Bytes</th>
-                                      <th scope="col" className={styles.num}>Took</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {files.map((file) => (
-                                      <tr key={file.file_label}>
-                                        <td>
-                                          <span className={`${styles.badge} ${statusClass(file.status)}`}>{file.status}</span>
-                                          {file.error && <div className={styles.runErr} title={file.error}>{file.error.slice(0, 120)}</div>}
-                                        </td>
-                                        <td><code className={styles.fileLabel}>{file.file_label}</code></td>
-                                        <td className={styles.num}>{(file.records ?? 0).toLocaleString()}</td>
-                                        <td className={styles.num}>
-                                          {(file.entities ?? 0).toLocaleString()}/
-                                          {(file.physicalities ?? 0).toLocaleString()}/
-                                          {(file.attestations ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className={styles.num}>{bytes(file.bytes)}</td>
-                                        <td className={styles.num}>{duration(file)}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-      {closeErr && <ErrorText className={styles.foot}>{closeErr}</ErrorText>}
-
-      <Muted className={styles.foot}>
-        Runs read via <code>ops.ingest_runs</code> and expanded file jobs via{' '}
-        <code>ops.ingest_files</code>; force close calls{' '}
-        <code>ops.ingest_run_close(p_run_id uuid, p_status text)</code>, which is on the endpoint&rsquo;s
-        write allow-list (<code>InstalledOpInvoker.WritableOps</code>) and so resolves onto a
-        writable connection. Requires an endpoint built after that change — against an older
-        build the call fails read-only, and <em>copy SQL</em> gives the equivalent statement.
-      </Muted>
+      <ReadStatus label="Ingestion runs" resource={runsRead} />
+      {open != null && <Muted>{open} open runs in the received window. This is not a global readiness verdict.</Muted>}
+      {runsRead.data && <ResultWorkspace scopeKey={JSON.stringify(['ingest-runs', tenant])} label="Ingestion run receipts" snapshot={runsRead.data} columns={columns}
+        rowLabel={(run) => `${run.source_name} run ${run.run_id}`} filterText={filter} onFilterTextChange={(value) => setParam('source', value, true)} />}
+      <Muted>The journal shows executions, not distinct content entities. A completed file may have been processed or skipped because its completion was already recorded.</Muted>
     </Panel>
-  );
+    {expandedRun && <RunFiles key={JSON.stringify([tenant, expandedRun])} runId={expandedRun} tenant={tenant} live={live} onClose={() => setParam('run', null)} />}
+    <Modal open={confirming != null} onClose={() => { if (!closingRef.current) setConfirming(null); }} title="Close this run receipt?"
+      actions={<><Button variant="ghost" disabled={closing} onClick={() => setConfirming(null)}>Go back</Button><Button loading={closing} onClick={() => confirming && void closeReceipt(confirming)}>Mark receipt cancelled</Button></>}>
+      <p>Source: {confirming?.source_name}. Run: <code>{confirming?.run_id}</code>.</p>
+      <p>This changes the shared journal status. It is not confirmation that the ingest process or its database backends stopped. Stop active work first; use Activity to inspect running backends.</p>
+      <Link to="/operator?section=activity">Open Activity</Link>
+      <details><summary>Equivalent journal-only SQL</summary><pre className={styles.sig}>{confirming ? `SELECT * FROM ops.ingest_run_close('${confirming.run_id}'::uuid, 'cancelled');` : ''}</pre></details>
+      {actionError && <ErrorText role="alert">{actionError}</ErrorText>}
+    </Modal>
+  </>;
+}
+function RunFiles({ runId, tenant, live, onClose }: { runId: string; tenant: string; live: boolean; onClose: () => void }) {
+  const [limit, setLimit] = useState(250);
+  const valid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId);
+  const filesRead = useReadResource({
+    key: JSON.stringify(['ingest-files', tenant, runId, limit]), enabled: valid, refreshMs: live ? REFRESH_MS : 0,
+    read: async (signal) => {
+      const result = await ingestFiles(runId, limit, { tenant, signal });
+      return captureRows(result.rows, `Requested up to ${limit} file receipts for run ${runId}; active and failed files are returned first${result.truncated_at != null ? `; transport truncated at ${result.truncated_at}` : ''}.`, { operation: 'ops.ingest_files', run_id: runId, requested_limit: limit });
+    },
+  });
+  const columns: ResultColumn<IngestFile>[] = [
+    { key: 'status', label: 'Disposition', render: (file) => <Status value={file.status} /> },
+    { key: 'file_label', label: 'File' }, { key: 'records', label: 'Records' },
+    { key: 'entities', label: 'Staged entities' }, { key: 'physicalities', label: 'Staged physicalities' },
+    { key: 'attestations', label: 'Staged attestations' }, { key: 'bytes', label: 'Bytes' },
+    { key: 'error', label: 'Error' },
+  ];
+  return <Panel title="File receipts" expandable actions={<Button variant="ghost" onClick={onClose}>Close file receipts</Button>}>
+    <code>{runId}</code>
+    <div className={styles.toolbar}><label>Requested file window<select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[250, 500, 1000, 5000].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <Button variant="ghost" disabled={!valid} onClick={() => void filesRead.refresh()}>Refresh file receipts</Button></div>
+    {!valid ? <ErrorText>The run address is not a UUID. Choose a run from the journal.</ErrorText> : <ReadStatus label="File receipts" resource={filesRead} />}
+    {filesRead.data && <ResultWorkspace scopeKey={JSON.stringify(['ingest-files', tenant, runId])} label="Ingested file receipts" snapshot={filesRead.data} columns={columns} rowLabel={(file) => file.file_label} />}
+  </Panel>;
 }

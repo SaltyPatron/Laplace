@@ -63,4 +63,4 @@ Exact scope follows the existing recording owner: explicit source EntityRows, se
 
 The managed solution owns CLI argument, source-byte/completeness and disk-evidence controls. Native source tests preserve the existing recorded fixture; synthetic parser/transport controls are explicitly test fixtures and never benchmark corpus input. The disk controls include more than 32 merge inputs, shared-row count evolution, every writer counter, altered game order/body, incomplete replay and retained-evidence corruption.
 
-Passing these controls does not establish a throughput result. The installed CLI must run against an observed real corpus and the deployed PostgreSQL writer/readback path, and its exact retained receipt must be inspected.
+Passing these controls does not establish a throughput result. The source-built CLI must run against an observed real corpus and the deployed PostgreSQL/native writer/readback path, and its exact retained receipt must be inspected.
