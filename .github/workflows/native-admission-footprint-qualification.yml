@@ -1,4 +1,4 @@
-name: Direct pipeline and recorded export correction controls
+name: Quiet substrate bootstrap controls
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -7,102 +7,45 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: 01d528e2906e8a4434b20ebe4508eca0e10dce90
-      SOURCE_TREE: 0c0ae0d8a794cf8cacb66a6e4ef4c6196dd6d0eb
-      TMPDIR: /build/laplace/work/current-direct-owners/tmp
-      TMP: /build/laplace/work/current-direct-owners/tmp
-      TEMP: /build/laplace/work/current-direct-owners/tmp
-      EVIDENCE: /build/laplace/recovery/current-direct-owners
+      TMPDIR: /build/laplace/work/quiet-bootstrap-controls/tmp
+      TMP: /build/laplace/work/quiet-bootstrap-controls/tmp
+      TEMP: /build/laplace/work/quiet-bootstrap-controls/tmp
+      EVIDENCE: /build/laplace/recovery/quiet-bootstrap-controls
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 01d528e2906e8a4434b20ebe4508eca0e10dce90
+          ref: c94ec4da2c255dfb3a2c7e5e0e66133f0414a6a4
           fetch-depth: 1
-      - name: Prepare permanent scratch for the selected source
+      - name: Prepare permanent source control evidence
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$TMPDIR" "$EVIDENCE"
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
-          printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
-          command -v rsync
-          rsync --version > "$EVIDENCE/rsync.txt"
-      - name: Execute corrected pipeline and snapshot controls
+          test "$(git rev-parse HEAD)" = c94ec4da2c255dfb3a2c7e5e0e66133f0414a6a4
+          test "$(git rev-parse HEAD^{tree})" = 396b6c98f8c46c4f8c98eaa143f6622201001986
+          git rev-parse HEAD HEAD^{tree} > "$EVIDENCE/source.txt"
+      - name: Execute existing quiet-owner bootstrap controls
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=10s 120s python3 scripts/test-pipeline-install.py -v 2>&1 | tee "$EVIDENCE/pipeline-controls.log"
-          timeout --signal=TERM --kill-after=10s 120s python3 scripts/test-qualified-chess-floor-export.py -v 2>&1 | tee "$EVIDENCE/export-controls.log"
+          timeout --signal=TERM --kill-after=10s 120s python3 scripts/test-wait-for-quiet-substrate.py -v 2>&1 | tee "$EVIDENCE/controls.log"
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/syntax.log"
           import ast
           from pathlib import Path
-          for name in ("export-qualified-chess-floors.py", "test-qualified-chess-floor-export.py",
-                       "test-pipeline-install.py"):
-              ast.parse((Path("scripts") / name).read_text())
-              print("PASS AST " + name)
+          ast.parse(Path("scripts/test-wait-for-quiet-substrate.py").read_text())
+          print("PASS test Python AST")
           PY
-          bash -n scripts/pipeline.sh
+          bash -n scripts/wait-for-quiet-substrate.sh
+          shellcheck --severity=warning scripts/wait-for-quiet-substrate.sh 2>&1 | tee "$EVIDENCE/shellcheck.log"
           test -z "$(git status --porcelain --untracked-files=all)"
-      - name: Authenticate and parse the coordinated native operator
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
-          import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
-          from pathlib import Path
-          sha = "c692dc8f376e15c725a7cc069e986b852c8e6c7d"
-          request = urllib.request.Request(
-              "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
-              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
-                       "Accept": "application/vnd.github+json"})
-          with urllib.request.urlopen(request, timeout=30) as response:
-              encoded = response.read(2 * 1024 * 1024 + 1)
-          if len(encoded) > 2 * 1024 * 1024:
-              raise ValueError("operator metadata exceeded bound")
-          item = json.loads(encoded)
-          assert item["sha"] == sha and item["encoding"] == "base64"
-          raw = base64.b64decode(item["content"])
-          assert len(raw) == item["size"] and len(raw) < 1024 * 1024
-          assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == sha
-          (Path(os.environ["EVIDENCE"]) / "native-operator.yml").write_bytes(raw)
-          document = yaml.safe_load(raw)
-          outer = inner = python = 0
-          for job in document["jobs"].values():
-              for step in job["steps"]:
-                  program = step.get("run")
-                  if program is None:
-                      continue
-                  subprocess.run(["bash", "-n"], input=program, text=True, check=True)
-                  outer += 1
-                  lines = program.splitlines()
-                  for index, line in enumerate(lines):
-                      match = re.search(r"<<'([A-Z_]+)'", line)
-                      if not match:
-                          continue
-                      delimiter = match.group(1)
-                      end = next(i for i in range(index + 1, len(lines)) if lines[i].strip() == delimiter)
-                      body = textwrap.dedent("\n".join(lines[index + 1:end])) + "\n"
-                      if delimiter == "PY":
-                          ast.parse(body)
-                          python += 1
-                      elif delimiter in ("NATIVE", "MANAGED_READINESS"):
-                          subprocess.run(["bash", "-n"], input=body, text=True, check=True)
-                          inner += 1
-          assert (outer, inner, python) == (4, 2, 8), (outer, inner, python)
-          print(json.dumps({"operatorBlob": sha, "bytes": len(raw),
-                            "outerBash": outer, "innerBash": inner, "python": python,
-                            "scope": "authenticated source syntax only; no native or host execution"}))
-          PY
-      - name: Retain bounded source qualification evidence
+      - name: Retain bounded quiet-owner evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: current-main-port-source-controls
-          path: /build/laplace/recovery/current-direct-owners/
+          name: quiet-bootstrap-controls
+          path: /build/laplace/recovery/quiet-bootstrap-controls/
           if-no-files-found: error
           retention-days: 30

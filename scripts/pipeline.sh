@@ -141,9 +141,8 @@ postgresql_restart_required() {
   if "$PYTHON" "$ROOT/scripts/postgresql-release.py" restart-needed \
        --prefix "$LAPLACE_PG_PREFIX" --server-version-num "$running"; then
     return 1
-  else
-    rc=$?
   fi
+  rc=$?
   [[ "$rc" -eq 3 ]] && return 0
   return 2
 }
@@ -199,7 +198,6 @@ phase_build_app() {
 }
 
 phase_build() {
-  "$PYTHON" "$ROOT/scripts/postgresql-release.py" build-inputs --prefix "$LAPLACE_PG_PREFIX" || return $?
   [[ "$FORCE_REBUILD" != 1 ]] || phase_clean
   [[ "$FORCE_CODEGEN" != 1 ]] || phase_codegen
   echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
