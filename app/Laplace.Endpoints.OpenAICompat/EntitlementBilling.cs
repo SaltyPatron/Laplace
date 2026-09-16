@@ -40,13 +40,12 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
     private readonly Dictionary<string, long> _versions = new(StringComparer.Ordinal);
     private readonly object _gate = new();
 
-    // These explicit-period adapters retain the existing non-provider store API.
-    // Stripe events use ApplySubscriptionAsync with provider-owned boundaries.
+    // Existing non-provider callers explicitly choose these monthly boundaries.
+    // Provider callbacks use ApplySubscriptionAsync with Stripe's actual period.
     public Task<BillingEntitlement> ActivatePlanAsync(string tenant, BillingPlan plan,
         string? stripeCustomerId, string? stripeSubscriptionId, DateTimeOffset activatedAt, CancellationToken ct) =>
         ApplySubscriptionAsync(plan, new(tenant, stripeSubscriptionId ?? "", stripeCustomerId,
             "active", activatedAt, activatedAt.AddMonths(1), activatedAt.ToUnixTimeSeconds(), false), ct);
-
     public Task<BillingEntitlement> RenewPlanAsync(string tenant, BillingPlan plan,
         string? stripeCustomerId, string? stripeSubscriptionId, DateTimeOffset renewedAt, CancellationToken ct) =>
         ActivatePlanAsync(tenant, plan, stripeCustomerId, stripeSubscriptionId, renewedAt, ct);
@@ -62,9 +61,9 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
             if (current is not null && (_versions.GetValueOrDefault(Key(current.Tenant, current.PlanId)) > state.EventCreated
                 || (current.StripeSubscriptionId == state.SubscriptionId && current.Status == "canceled" && state.Status != "canceled")))
                 return Task.FromResult(current);
-
-            var samePeriod = related.FirstOrDefault(e => e.StripeSubscriptionId == state.SubscriptionId && e.PeriodStart == state.PeriodStart);
-            foreach (var old in related.Where(e => e.PlanId != plan.PlanId && e.StripeSubscriptionId == state.SubscriptionId))
+            var subscriptionId = string.IsNullOrEmpty(state.SubscriptionId) ? current?.StripeSubscriptionId : state.SubscriptionId;
+            var samePeriod = related.FirstOrDefault(e => e.StripeSubscriptionId == subscriptionId && e.PeriodStart == state.PeriodStart);
+            foreach (var old in related.Where(e => e.PlanId != plan.PlanId && e.StripeSubscriptionId == subscriptionId))
             {
                 _entitlements[Key(old.Tenant, old.PlanId)] = old with { Status = "replaced", UpdatedAt = DateTimeOffset.UtcNow };
                 _versions[Key(old.Tenant, old.PlanId)] = state.EventCreated;
@@ -73,8 +72,7 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
                 state.PeriodStart, state.PeriodEnd,
                 new Dictionary<string, int>(plan.MonthlyCredits, StringComparer.OrdinalIgnoreCase),
                 samePeriod?.UsedCredits ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
-                state.CustomerId ?? current?.StripeCustomerId,
-                string.IsNullOrEmpty(state.SubscriptionId) ? current?.StripeSubscriptionId : state.SubscriptionId,
+                state.CustomerId ?? current?.StripeCustomerId, subscriptionId,
                 DateTimeOffset.UtcNow, state.CancelAtPeriodEnd);
             _entitlements[Key(state.Tenant, plan.PlanId)] = entitlement;
             _versions[Key(state.Tenant, plan.PlanId)] = state.EventCreated;
@@ -86,7 +84,7 @@ internal sealed class InMemoryBillingEntitlementStore : IBillingEntitlementStore
     {
         lock (_gate)
         {
-            var current = _entitlements.Values.FirstOrDefault(e => e.StripeSubscriptionId == stripeSubscriptionId);
+            var current = _entitlements.Values.FirstOrDefault(e => e.StripeSubscriptionId == stripeSubscriptionId && e.Status != "replaced");
             if (current is null) return Task.FromResult<BillingEntitlement?>(null);
             var updated = current with { Status = status, UpdatedAt = DateTimeOffset.UtcNow };
             _entitlements[Key(updated.Tenant, updated.PlanId)] = updated;
@@ -171,7 +169,6 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
     private readonly IBillingOrchestrator _billing;
     private readonly IBillingEntitlementStore _entitlements;
     private readonly IBillingWebhookEventStore _events;
-
     public BillingWebhookHandler(IOptions<StripeBillingOptions> options, IWebhookSecretProvider webhookSecret,
         IBillingCatalog catalog, IBillingOrchestrator billing, IBillingEntitlementStore entitlements, IBillingWebhookEventStore eventStore)
     {
@@ -219,8 +216,8 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
             }
             catch (Exception)
             {
-                // A started record is not a completed event. Stripe can retry this
-                // event after transient API/DB failure, including a process restart.
+                // Started is not completed. Retrying a partial attempt must be safe
+                // after either a provider/database error or a process restart.
                 await _events.CompleteAsync(id, "retryable", CancellationToken.None);
                 throw;
             }
@@ -239,7 +236,6 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
             or "customer.subscription.created" or "customer.subscription.updated" or "customer.subscription.deleted"
             or "customer.subscription.paused" or "customer.subscription.resumed";
         if (!relevant) return new(true, verified, false, id, type, "ignored", tenant, serviceId, quoteId, null);
-
         if (checkout)
         {
             var paymentStatus = Text(obj, "payment_status");
@@ -253,7 +249,6 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
                 await _billing.TryApproveQuoteAsync(quoteId, ct);
             }
         }
-
         var subscriptionId = type.StartsWith("customer.subscription.", StringComparison.Ordinal)
             ? Text(obj, "id") : ObjectId(Child(obj, "subscription"));
         subscriptionId ??= ObjectId(Child(Child(Child(obj, "parent"), "subscription_details"), "subscription"));
@@ -262,20 +257,31 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
             throw new InvalidOperationException("Stripe subscription synchronization requires its configured API credential.");
 
-        // Fetch the current provider object rather than reactivating an account
-        // from an old invoice or an out-of-order subscription event snapshot.
         var subscriptions = new SubscriptionService(new StripeClient(_options.ApiKey));
         var subscription = await subscriptions.GetAsync(subscriptionId, cancellationToken: ct);
         string? Meta(string key) => subscription.Metadata is not null && subscription.Metadata.TryGetValue(key, out var value) ? value : null;
-        tenant = Meta("tenant"); serviceId = Meta("service_id");
-        var plan = _catalog.ListPlans().FirstOrDefault(p => p.ServiceId == serviceId);
-        if (string.IsNullOrWhiteSpace(tenant) || plan is null)
-            return new(true, verified, false, id, type, "unmanaged_subscription", tenant, serviceId, quoteId, null);
+        tenant = Meta("tenant");
+        if (string.IsNullOrWhiteSpace(tenant))
+            return new(true, verified, false, id, type, "unmanaged_subscription", null, null, quoteId, null);
         var items = subscription.Items?.Data;
         var item = items is { Count: 1 } ? items[0] : null;
-        if (item is null || item.CurrentPeriodEnd <= item.CurrentPeriodStart
-            || item.CurrentPeriodStart <= DateTime.UnixEpoch)
+        if (item is null || item.CurrentPeriodEnd <= item.CurrentPeriodStart || item.CurrentPeriodStart <= DateTime.UnixEpoch)
             throw new InvalidOperationException("The Laplace subscription has no unambiguous provider billing period.");
+
+        // Portal changes replace the price, not the original checkout metadata.
+        // Resolve the current managed price first; metadata on an older price also
+        // survives a lookup-key transfer when a catalog price is replaced.
+        var lookupKey = item.Price?.LookupKey;
+        var priceService = item.Price?.Metadata is { } priceMetadata
+            && priceMetadata.TryGetValue("laplace_service_id", out var currentService) ? currentService : null;
+        var plan = _catalog.ListPlans().FirstOrDefault(p => _catalog.TryGet(p.ServiceId, out var price)
+            && !string.IsNullOrWhiteSpace(lookupKey) && price.LookupKey == lookupKey)
+            ?? _catalog.ListPlans().FirstOrDefault(p => p.ServiceId == priceService);
+        if (plan is null)
+        {
+            var previous = await _entitlements.DeactivateSubscriptionAsync(subscription.Id, "unrecognized_price", ct);
+            return new(true, verified, false, id, type, "unrecognized_price", tenant, null, quoteId, previous?.PlanId);
+        }
         var start = new DateTimeOffset(DateTime.SpecifyKind(item.CurrentPeriodStart, DateTimeKind.Utc));
         var end = new DateTimeOffset(DateTime.SpecifyKind(item.CurrentPeriodEnd, DateTimeKind.Utc));
         var entitlement = await _entitlements.ApplySubscriptionAsync(plan, new BillingSubscriptionState(
@@ -292,8 +298,7 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         var child = Child(value, name);
         return child.ValueKind == JsonValueKind.String ? child.GetString() : null;
     }
-    private static string? ObjectId(JsonElement value) =>
-        value.ValueKind == JsonValueKind.String ? value.GetString() : Text(value, "id");
+    private static string? ObjectId(JsonElement value) => value.ValueKind == JsonValueKind.String ? value.GetString() : Text(value, "id");
 }
 
 internal static class BillingJsonNumbers
