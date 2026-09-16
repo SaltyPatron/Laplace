@@ -192,11 +192,18 @@ def run(args, owner=None):
              "targetGamesPerSecond": 2500, "targetMet": False}
     def checkpoint():
         owner.save(args.output_dir / "receipt.json", proof)
+    def progress(row):
+        # Phase-only records keep live logs useful without printing arguments,
+        # database settings, source payloads, or the full retained receipt.
+        event = {"observedUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                 **row}
+        print("CORPUS_PHASE " + json.dumps(event, allow_nan=False), flush=True)
     def phase(name, action):
         row = {"name": name, "status": "running"}
         proof["phases"].append(row)
         checkpoint()
         started = time.monotonic()
+        progress(row)
         try:
             value = action()
             row["status"] = "passed"
@@ -207,6 +214,7 @@ def run(args, owner=None):
         finally:
             row["wallSeconds"] = time.monotonic() - started
             checkpoint()
+            progress(row)
     def command(name, argv, timeout):
         return phase(name, lambda: owner.command(argv, args.output_dir / (name + ".log"), timeout))
     native_bound = False
