@@ -1,0 +1,172 @@
+name: Observe installed WordNet source and admission
+on:
+  push:
+    branches: ['verify/wordnet-source-diagnostic-20260916-*']
+permissions:
+  contents: read
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+jobs:
+  observe:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 35
+    env:
+      PGHOST: /var/run/postgresql
+      PGPORT: '5432'
+      PGUSER: laplace_admin
+      PGDATABASE: laplace
+    steps:
+      - name: Create exact source observation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/laplace-wordnet-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir "$output"
+          printf 'LAPLACE_WORDNET_DIAGNOSTIC=%s\n' "$output" >> "$GITHUB_ENV"
+      - name: Observe files and installed lexical admission under exclusive checkout ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock bash -c '
+            set -euo pipefail
+            git fetch --no-tags origin f40078c50e6936fda9e74951ba3905b56e396407
+            git checkout --force f40078c50e6936fda9e74951ba3905b56e396407
+            timeout --signal=TERM --kill-after=10s 120s python3 -
+          ' <<'PY'
+          import hashlib, importlib.util, json, os, signal, stat, subprocess, sys, time
+          from pathlib import Path
+          SOURCE_SHA = "f40078c50e6936fda9e74951ba3905b56e396407"
+          SQL = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\nSET LOCAL client_encoding='UTF8';\nSET LOCAL bytea_output='hex';\nSET LOCAL statement_timeout='15s';\nSET LOCAL lock_timeout='2s';\nSET LOCAL idle_in_transaction_session_timeout='30s';\nWITH roster AS MATERIALIZED (\n SELECT laplace.word_id('glacier') AS word_operand,\n        laplace.content_id(convert_to('glacier','UTF8')) AS content_operand,\n        laplace.source_id('WordNetDecomposer') AS wordnet,\n        laplace.relation_type_id('HAS_SENSE') AS has_sense,\n        laplace.relation_type_id('IS_SENSE_OF') AS sense_of,\n        laplace.relation_type_id('HAS_DEFINITION') AS definition,\n        laplace.entity_type_id('WordNet_Synset') AS synset_type\n), all_senses AS MATERIALIZED (\n SELECT a.* FROM laplace.attestations a\n WHERE a.type_id=(SELECT has_sense FROM roster)\n AND a.subject_id=ANY(ARRAY[(SELECT word_operand FROM roster),(SELECT content_operand FROM roster)])\n ORDER BY a.id LIMIT 65\n), synsets AS MATERIALIZED (\n SELECT a.* FROM laplace.attestations a\n WHERE a.type_id=(SELECT sense_of FROM roster)\n AND a.subject_id=ANY(ARRAY(SELECT object_id FROM all_senses WHERE object_id IS NOT NULL))\n ORDER BY a.id LIMIT 65\n), definitions AS MATERIALIZED (\n SELECT a.* FROM laplace.attestations a\n WHERE a.type_id=(SELECT definition FROM roster)\n AND a.subject_id=ANY(ARRAY(SELECT object_id FROM synsets WHERE object_id IS NOT NULL))\n ORDER BY a.id LIMIT 65\n), recent_runs AS MATERIALIZED (\n SELECT run_id,source_name,source_id,layer,status,phase,started_at,ended_at,units_attempted,\n        units_applied,units_failed,entities,physicalities,attestations,files_done,files_total,\n        input_units_done,input_units_total,evidence_persisted,(error IS NOT NULL) AS has_error\n FROM laplace.ingest_run_journal WHERE source_name IN ('WordNetDecomposer','CILIDecomposer')\n ORDER BY started_at DESC,run_id LIMIT 16\n), recent_files AS MATERIALIZED (\n SELECT f.run_id,f.file_label,f.source_name,f.file_id,f.resume_fingerprint,f.status,\n        f.started_at,f.ended_at,f.bytes,f.records,f.entities,f.physicalities,f.attestations,\n        f.relative_path,f.disposition,(f.error IS NOT NULL) AS has_error\n FROM laplace.ingest_file_journal f\n WHERE f.run_id=ANY(ARRAY(SELECT run_id FROM recent_runs))\n ORDER BY f.started_at DESC,f.run_id,f.file_label LIMIT 65\n), operand_entities AS MATERIALIZED (\n SELECT e.id,e.type_id FROM laplace.entities e\n WHERE e.id=ANY(ARRAY[(SELECT word_operand FROM roster),(SELECT content_operand FROM roster)])\n ORDER BY e.id,e.type_id LIMIT 65\n)\nSELECT jsonb_build_object(\n 'schema','laplace.wordnet-source-diagnostic/v1',\n 'observed_at',clock_timestamp(),'database',current_database(),\n 'transaction_read_only',current_setting('transaction_read_only'),\n 'snapshot',pg_current_snapshot()::text,'roster',(SELECT to_jsonb(r) FROM roster r),\n 'route_limit',65,\n 'all_source_senses',COALESCE((SELECT jsonb_agg(to_jsonb(a)) FROM all_senses a),'[]'),\n 'all_source_synsets',COALESCE((SELECT jsonb_agg(to_jsonb(a)) FROM synsets a),'[]'),\n 'all_source_definitions',COALESCE((SELECT jsonb_agg(to_jsonb(a)) FROM definitions a),'[]'),\n 'operand_entities',COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM operand_entities e),'[]'),\n 'recent_source_runs',COALESCE((SELECT jsonb_agg(to_jsonb(r)) FROM recent_runs r),'[]'),\n 'recent_source_files',COALESCE((SELECT jsonb_agg(to_jsonb(f)) FROM recent_files f),'[]'));\nROLLBACK;\n"
+          out = Path(os.environ["LAPLACE_WORDNET_DIAGNOSTIC"])
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, timeout=5).strip()
+          if head != SOURCE_SHA:
+              raise ValueError("read-only diagnostic source revision changed")
+          started = time.monotonic()
+          proof = {"schema": "laplace.wordnet-host-diagnostic/v1", "status": "failed", "sourceSha": head,
+                   "databaseModified": False, "sourceFilesModified": False, "untrackedFilesEnumerated": False,
+                   "scope": "Read-only source metadata/hashes and bounded installed database lexical/journal snapshot"}
+          def save():
+              (out / "wordnet-host.json").write_text(json.dumps(proof, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+          def deadline(signum, frame):
+              raise TimeoutError("WordNet host diagnostic exceeded 100 seconds")
+          signal.signal(signal.SIGALRM, deadline)
+          signal.alarm(100)
+          try:
+              spec = importlib.util.spec_from_file_location("wordnet_readonly_owner", "scripts/read-operational-source.py")
+              owner = importlib.util.module_from_spec(spec)
+              sys.modules[spec.name] = owner
+              spec.loader.exec_module(owner)
+              sql_path = out / "wordnet-source.sql"
+              sql_path.write_text(SQL, encoding="utf-8")
+              proof["sqlSha256"] = hashlib.sha256(SQL.encode("utf-8")).hexdigest()
+              try:
+                  raw = owner.bounded_query("laplace", sql_path, 30, 2 << 20)
+                  document = json.loads(raw)
+                  if document.get("transaction_read_only") != "on" or document.get("database") != "laplace":
+                      raise ValueError("database observation did not retain read-only target proof")
+                  proof["database"] = document
+                  (out / "wordnet-source.json").write_bytes(raw)
+              except Exception as error:
+                  proof["databaseError"] = {"type": type(error).__name__, "message": str(error)[:4096]}
+              roots = [Path("/Data/Ingest"), (Path.cwd() / ".." / ".." / "Data" / "Ingest").resolve(), Path("/vault/Data")]
+              roots = list(dict.fromkeys(roots))
+              proof["rootCandidates"] = [{"path": str(root), "exists": root.is_dir()} for root in roots]
+              proof["firstExistingCandidate"] = next((str(root) for root in roots if root.is_dir()), None)
+              proof["rootScope"] = "Observed candidates in source resolver order; managed resolver invocation not asserted"
+              names = ["frames.vrb", "data.noun", "data.verb", "data.adj", "data.adv", "index.sense", "index.noun",
+                       "noun.exc", "verb.exc", "adj.exc", "adv.exc", "sents.vrb", "sentidx.vrb"]
+              paths = []
+              directories = []
+              truncated = False
+              for root in roots:
+                  paths.extend(root / "Wordnet" / "WordNet-3.0" / "dict" / name for name in names)
+                  cili = root / "CILI"
+                  paths.extend(cili / name for name in ("ili.ttl", "ili-map-pwn30.tab", "ili-map-wn30.ttl"))
+                  if not cili.is_dir():
+                      continue
+                  pending = [(cili, 0)]
+                  while pending:
+                      directory, depth = pending.pop()
+                      if len(directories) >= 256:
+                          truncated = True
+                          break
+                      directories.append(str(directory))
+                      with os.scandir(directory) as iterator:
+                          entries = []
+                          for entry in iterator:
+                              if len(entries) >= 512:
+                                  truncated = True
+                                  break
+                              entries.append(entry)
+                      for entry in sorted(entries, key=lambda x: x.name):
+                          path = Path(entry.path)
+                          if entry.is_dir(follow_symlinks=False):
+                              if depth < 5:
+                                  pending.append((path, depth + 1))
+                              else:
+                                  truncated = True
+                          elif entry.is_file(follow_symlinks=False) and (
+                              (entry.name.startswith("ili-map-") and path.suffix in (".tab", ".ttl"))
+                              or (entry.name.startswith("changes-in-") and path.suffix == ".csv")):
+                              if len(paths) < 384:
+                                  paths.append(path)
+                              else:
+                                  truncated = True
+              files, total_bytes = [], 0
+              for path in dict.fromkeys(paths):
+                  item = {"path": str(path)}
+                  files.append(item)
+                  try:
+                      before = path.stat()
+                      item["resolvedPath"] = str(path.resolve())
+                      item["symlink"] = path.is_symlink()
+                      if not stat.S_ISREG(before.st_mode):
+                          item["status"] = "not-regular-file"
+                          continue
+                      item["bytes"] = before.st_size
+                      if before.st_size > (256 << 20) or total_bytes + before.st_size > (512 << 20):
+                          item["status"] = "hash-byte-bound-exceeded"
+                          truncated = True
+                          continue
+                      digest = hashlib.sha256()
+                      observed = 0
+                      with path.open("rb") as stream:
+                          for block in iter(lambda: stream.read(1 << 20), b""):
+                              observed += len(block)
+                              if observed > before.st_size:
+                                  raise ValueError("source grew during hash")
+                              digest.update(block)
+                      after = path.stat()
+                      if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                              after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) or observed != before.st_size:
+                          raise ValueError("source changed during hash")
+                      total_bytes += observed
+                      item.update(status="hashed-unchanged", sha256=digest.hexdigest())
+                  except FileNotFoundError:
+                      item["status"] = "missing"
+                  except (OSError, ValueError) as error:
+                      item.update(status="error", errorType=type(error).__name__, error=str(error)[:512])
+              proof["files"] = files
+              proof["inventory"] = {"directoriesScanned": len(directories), "filesObserved": len(files),
+                                    "hashedBytes": total_bytes, "truncated": truncated}
+              proof["status"] = "observed" if "database" in proof and not truncated else "partial"
+          finally:
+              signal.alarm(0)
+              proof["wallSeconds"] = time.monotonic() - started
+              save()
+              print("WORDNET_HOST_DIAGNOSTIC " + json.dumps(proof, allow_nan=False), flush=True)
+          if proof["status"] != "observed":
+              raise SystemExit(1)
+          
+          PY
+      - name: Preserve exact read-only WordNet observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-wordnet-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/laplace-wordnet-source-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90
