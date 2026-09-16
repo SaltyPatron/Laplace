@@ -40,7 +40,13 @@ public sealed class ChessRecordingDiagnosticsTests
         measurement.Complete("failed", "expected native identity rejection");
         string expectedPhase = failDuringCapture ? "physicality-capture" : "managed-staging";
         var failed = Assert.Single(measurement.WriterLog.Entries.Where(entry =>
-            entry.Fields.TryGetValue("Phase", out var phase) && Equals(phase, expectedPhase)));
+            entry.Fields.TryGetValue("Phase", out var phase) && Equals(phase, expectedPhase)
+            && Equals(entry.Fields.GetValueOrDefault("Boundary"), "exited")));
+        var entered = Assert.Single(measurement.WriterLog.Entries.Where(entry =>
+            Equals(entry.Fields.GetValueOrDefault("Phase"), expectedPhase)
+            && Equals(entry.Fields.GetValueOrDefault("Boundary"), "entered")));
+        Assert.True(entered.AdmissionElapsedSeconds <= failed.AdmissionElapsedSeconds);
+        Assert.False(entered.Fields.ContainsKey("Returned"));
         Assert.Equal(false, failed.Fields["Returned"]);
         Assert.True(Convert.ToDouble(failed.Fields["ElapsedMs"]) >= 0);
         if (failDuringCapture)
