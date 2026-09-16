@@ -450,12 +450,16 @@ public sealed partial class NpgsqlSubstrateWriter
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
             input.ObservationUnits.Select(id => id.ToBytes()).ToArray());
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, input.ObservationPriors.ToArray());
-        // SQL now owns independent parameter copies; the extra raw native stages
-        // can be released before receiving the generated stages.
+        // SQL now owns independent parameter copies in the PostgreSQL backend;
+        // the extra client-side raw native stages can be released before
+        // receiving the generated stages.  The backend is a distinct allocation
+        // owner and must receive the operation's full declared grant.  Subtracting
+        // the client transport here caused large, valid Unicode/UCA batches to
+        // arrive with only the unused tail of the client grant, even though the
+        // native materializer accounts its parameter copies, decoded stages and
+        // result serialization against its own process-local grant.
         input.ReleaseRawStages();
-        long receiverGrant = checked(input.MaximumBytes - input.ObservationPayloadBytes - transportBytes);
-        if (receiverGrant <= 0)
-            throw new InvalidOperationException("physicality SQL output has no remaining allocation grant");
+        long receiverGrant = input.MaximumBytes;
         command.Parameters.AddWithValue(NpgsqlDbType.Bigint,
             (DateTimeOffset.UtcNow.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10);
         command.Parameters.AddWithValue(NpgsqlDbType.Bigint, receiverGrant);

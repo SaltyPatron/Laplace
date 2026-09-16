@@ -90,7 +90,10 @@ static void admission_charge(admission_state *s, size_t bytes)
 {
     if (bytes > s->maximum_bytes - s->bytes)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                       errmsg("physicality descriptor admission byte grant exhausted")));
+                       errmsg("physicality descriptor admission byte grant exhausted"),
+                       errdetail("grant_bytes=%zu retained_bytes=%zu requested_bytes=%zu remaining_bytes=%zu",
+                                 s->maximum_bytes, s->bytes, bytes,
+                                 s->maximum_bytes - s->bytes)));
     s->bytes += bytes;
     if (s->bytes > s->peak_bytes) s->peak_bytes = s->bytes;
 }
