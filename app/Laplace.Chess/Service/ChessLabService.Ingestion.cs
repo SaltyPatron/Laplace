@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Laplace.Chess.Service;
@@ -25,6 +27,11 @@ public sealed partial class ChessLabService
         bool gateEntered = false;
         ChessRecordingMeasurement? measurement = null;
         string? artifact = null;
+        string? pgnPath = null;
+        string? receiptPath = null;
+        string? experimentTextSha256 = null;
+        string status = "failed";
+        string? failure = null;
         string disposition = "failed";
         try
         {
@@ -32,13 +39,20 @@ public sealed partial class ChessLabService
             gateEntered = true;
             var job = Snapshot(slot);
             if (!job.Artifacts.TryGetValue("games.pgn", out var path) || !File.Exists(path)) return null;
-            string? receiptPath = job.Artifacts.GetValueOrDefault("experiment.json");
-            string? experimentJson = receiptPath is not null && File.Exists(receiptPath)
-                ? await File.ReadAllTextAsync(receiptPath, ct) : null;
-            if (job.Kind == ChessLabJobKind.Cutechess && job.State == ChessLabJobState.Completed && experimentJson is not null)
-            {
-                measurement = ChessRecordingMeasurement.FromRetainedMatch(job.Id, experimentJson);
+            pgnPath = path;
+            receiptPath = job.Artifacts.GetValueOrDefault("experiment.json");
+            bool hasExperiment = receiptPath is not null && File.Exists(receiptPath);
+            // The invocation owns its failure receipt before reading or validating
+            // the retained experiment. Recording may remain absent on rejection.
+            if (job.Kind == ChessLabJobKind.Cutechess && job.State == ChessLabJobState.Completed
+                && hasExperiment)
                 artifact = "ingest-" + Guid.NewGuid().ToString("N") + ".json";
+            string? experimentJson = hasExperiment ? await File.ReadAllTextAsync(receiptPath!, ct) : null;
+            if (artifact is not null && experimentJson is not null)
+            {
+                experimentTextSha256 = Convert.ToHexStringLower(
+                    SHA256.HashData(Encoding.UTF8.GetBytes(experimentJson)));
+                measurement = ChessRecordingMeasurement.FromRetainedMatch(job.Id, experimentJson);
                 await measurement.IdentifyPgnAsync(path, experimentJson, ct);
             }
             var host = await GetLiveHostAsync(ct);
@@ -46,10 +60,6 @@ public sealed partial class ChessLabService
             var result = measurement is null
                 ? await ingestor.IngestFileAsync(path, null, ct, experimentJson)
                 : await ingestor.IngestRecordedFileAsync(path, measurement, null, ct, experimentJson!);
-            disposition = result.Novel == result.Parsed ? "fresh"
-                : result.Novel > 0 ? "mixed"
-                : measurement?.IsVerifiedNoOpReplay == true ? "replay"
-                : measurement is not null ? "repaired" : "existing-or-repaired";
             if (measurement is not null)
             {
                 await measurement.VerifyPgnUnchangedAsync(path, ct);
@@ -60,15 +70,23 @@ public sealed partial class ChessLabService
                     throw new InvalidDataException("retained experiment changed during ingestion/readback");
                 measurement.Complete("completed");
             }
+            disposition = result.Novel == result.Parsed ? "fresh"
+                : result.Novel > 0 ? "mixed"
+                : measurement?.IsVerifiedNoOpReplay == true ? "replay"
+                : measurement is not null ? "repaired" : "existing-or-repaired";
+            status = "completed";
             return new(path, result.Parsed, result.Applied, result.Parsed - result.Novel, artifact, disposition);
         }
         catch (OperationCanceledException)
         {
+            status = "cancelled";
+            failure = "cancelled";
             measurement?.Complete("cancelled", "cancelled");
             throw;
         }
         catch (Exception error)
         {
+            failure = error.Message;
             measurement?.Complete("failed", error.Message);
             throw;
         }
@@ -76,19 +94,20 @@ public sealed partial class ChessLabService
         {
             try
             {
-                if (measurement is not null && artifact is not null)
+                if (artifact is not null)
                 {
                     string target = Path.Combine(_labDir, jobId, artifact);
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     var receipt = new
                     {
                         schema = "laplace.chess-retained-ingestion/v1",
-                        jobId, disposition,
+                        jobId, disposition, status, error = failure,
+                        inputs = new { pgnPath, experimentPath = receiptPath, experimentTextSha256 },
                         serviceElapsedSeconds = Stopwatch.GetElapsedTime(serviceStarted).TotalSeconds,
                         serviceElapsedScope = "HTTP service operation through attach/bootstrap/wait, parse, shared apply and exact readback; excludes receipt file serialization and HTTP response transport",
-                        newlyRecordedGames = measurement.Status == "completed" ? (int?)measurement.NovelGames : null,
-                        alreadyPresentGames = measurement.Status == "completed" ? (int?)(measurement.ParsedGames - measurement.NovelGames) : null,
-                        noOpReplayVerified = measurement.IsVerifiedNoOpReplay && measurement.Status == "completed",
+                        newlyRecordedGames = measurement?.Status == "completed" ? (int?)measurement.NovelGames : null,
+                        alreadyPresentGames = measurement?.Status == "completed" ? (int?)(measurement.ParsedGames - measurement.NovelGames) : null,
+                        noOpReplayVerified = measurement?.IsVerifiedNoOpReplay == true && measurement.Status == "completed",
                         recording = measurement,
                     };
                     await File.WriteAllTextAsync(target + ".pending", JsonSerializer.Serialize(receipt,

@@ -191,6 +191,54 @@ static void session_release(SessionAdmission *state, void *pointer, size_t bytes
     if (pointer != NULL) { pfree(pointer); state->bytes -= bytes; }
 }
 
+/* Statement disposition, not a commit claim. Append observes at most its
+ * previous and replacement body; every missing identifier remains explicit. */
+static char *session_view_receipt(SessionAdmission *state,
+    const laplace_physicality_pg_admission_result *result, size_t *out_bytes)
+{
+    size_t unavailable = 0;
+    *out_bytes = 0;
+    for (size_t i = 0; i < result->form_count; ++i)
+        if (result->forms[i].view_state == PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE) ++unavailable;
+    if (!unavailable) return NULL;
+    if (result->form_count > 2 || result->view_missing_count > (SIZE_MAX - 512) / 35)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("session view receipt exceeds its finite extent")));
+    size_t capacity = 512 + result->view_missing_count * 35;
+    char *buffer = session_alloc(state, capacity);
+    size_t used = 0;
+#define SESSION_RECEIPT_APPEND(...) do { \
+    int written = snprintf(buffer + used, capacity - used, __VA_ARGS__); \
+    if (written < 0 || (size_t) written >= capacity - used) \
+        elog(ERROR, "session view receipt reservation is insufficient"); \
+    used += (size_t) written; \
+} while (0)
+    SESSION_RECEIPT_APPEND("{\"schema\":\"laplace.session-descriptor-views/v1\",\"transaction_pending\":true,\"forms\":[");
+    size_t emitted = 0;
+    for (size_t i = 0; i < result->form_count; ++i)
+    {
+        const physicality_descriptor_admitted_form_t *form = &result->forms[i];
+        if (form->view_state != PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE) continue;
+        char id[33];
+        hex_encode((const char *) &form->descriptor_id, 16, id);
+        id[32] = 0;
+        SESSION_RECEIPT_APPEND("%s{\"descriptor_id\":\"%s\",\"view_state\":1,\"missing_first\":%zu,\"missing_count\":%zu}",
+            emitted++ ? "," : "", id, form->missing_first, form->missing_count);
+    }
+    SESSION_RECEIPT_APPEND("],\"missing_ids\":[");
+    for (size_t i = 0; i < result->view_missing_count; ++i)
+    {
+        char id[33];
+        hex_encode((const char *) &result->view_missing_ids[i], 16, id);
+        id[32] = 0;
+        SESSION_RECEIPT_APPEND("%s\"%s\"", i ? "," : "", id);
+    }
+    SESSION_RECEIPT_APPEND("]}");
+#undef SESSION_RECEIPT_APPEND
+    *out_bytes = capacity;
+    return buffer;
+}
+
 static void session_cleanup(void *arg)
 {
     SessionAdmission *state = arg;
@@ -578,6 +626,8 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         elog(ERROR, "session_append_turns: projection source display name conflicts with its actual content ID");
     SPI_freetuptable(SPI_tuptable);
     SPI_freeplan(registration);
+    size_t view_receipt_bytes = 0;
+    char *view_receipt = session_view_receipt(admission, materialized, &view_receipt_bytes);
     laplace_physicality_pg_admission_release(materialized);
     Oid write_types[10] = {BYTEAOID, BYTEAOID, BYTEAOID, FLOAT8OID, FLOAT8OID,
                            FLOAT8OID, FLOAT8OID, BYTEAOID, INT4OID, TIMESTAMPTZOID};
@@ -593,6 +643,11 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         elog(ERROR, "session_append_turns: persisting session trajectory failed");
     PopActiveSnapshot();
     laplace_spi_finish(spi_top);
+    if (view_receipt != NULL)
+    {
+        ereport(NOTICE, (errmsg("session descriptor view unavailable; transaction pending: %s", view_receipt)));
+        session_release(admission, view_receipt, view_receipt_bytes);
+    }
     session_cleanup(admission);
     PG_RETURN_INT32((int32) total);
 }

@@ -478,15 +478,19 @@ static void sink_presence(SinkState *s,const physicality_descriptor_input_t *bod
         memcpy(&source,row->fields[3].data,16);
         sink_reference(&refs,&row->id);
         sink_reference(&refs,&source);
-        /* Every claimed generated E has an actual native-authenticated Content
-         * body. Tier/type metadata alone cannot deposit a naked opaque hash. */
+        /* Every generated E has an authenticated ordinary Content body or an
+         * exact descriptor-retention manifest. Metadata is not a naked E. */
         hash128_t placement;
         laplace_physicality_id_compute(row->id,1,&placement);
-        if (sink_find(&s->tables[1],&placement) == NULL)
-            sink_invalid("generated entity has no supplied Content body");
+        if (sink_find(&s->tables[1],&placement) == NULL) {
+            laplace_physicality_id_compute(row->id,PHYSICALITY_DESCRIPTOR_RETENTION_TYPE,&placement);
+            if (sink_find(&s->tables[1],&placement) == NULL)
+                sink_invalid("generated entity has no supplied Content or retention body");
+        }
     }
     for (size_t i=0;i<count;++i) {
-        if (bodies[i].type != 1) sink_invalid("generated stage contains non-Content physicality");
+        if (bodies[i].type != 1 && bodies[i].type != PHYSICALITY_DESCRIPTOR_RETENTION_TYPE)
+            sink_invalid("generated stage contains unsupported physicality");
         sink_reference(&refs,&bodies[i].entity_id);
         if (trajectory_visit_vertices(bodies[i].trajectory_xyzm,bodies[i].trajectory_vertices,
                                       sink_reference_vertex,&refs) != 0)
@@ -692,17 +696,17 @@ static void sink_validate_bodies(SinkState *s,const intent_stage_t *const *stage
     const physicality_descriptor_input_t *bodies=physicality_descriptor_capture_inputs(s->capture,&count);
     for (size_t i=0;i<count;++i) {
         const physicality_descriptor_input_t *body=&bodies[i];
-        if (body->type != 1 || (!body->alignment_residual_is_null &&
+        if ((body->type != 1 && body->type != PHYSICALITY_DESCRIPTOR_RETENTION_TYPE) || (!body->alignment_residual_is_null &&
             (!isfinite(body->alignment_residual) || body->alignment_residual < 0)) ||
             (!body->source_dim_is_null && body->source_dim <= 0))
-            sink_invalid("invalid generated Content metadata");
+            sink_invalid("invalid generated Content or retention metadata");
         for (unsigned axis=0;axis<4;++axis)
             if (!isfinite(body->coord[axis])) sink_invalid("nonfinite generated coordinate");
-        /* One bounded Content identity pass, charged by preflight before any
+        /* One bounded canonical identity pass, charged by preflight before any
          * expanded-RLE hash work. Other scans visit stored vertices only. */
         if (laplace_physicality_manifest_validate(&body->entity_id,body->type,
             body->trajectory_xyzm,body->trajectory_vertices,body->n_constituents) != 0)
-            sink_invalid("generated Content identity disagrees with its exact manifest");
+            sink_invalid("generated Content identity or retention identity disagrees with its exact manifest");
         if (body->trajectory_vertices == 0) {
             uint32_t atom;
             hash128_t id;

@@ -7,6 +7,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/hilbert4d.h
     include/laplace/core/mantissa.h
     include/laplace/core/super_fibonacci.h
+    include/laplace/core/byte_atoms.h
     include/laplace/core/glicko2.h
     include/laplace/core/score.h
     include/laplace/core/codepoint_table.h
@@ -60,6 +61,7 @@ set(LAPLACE_CORE_SOURCES
     src/hilbert4d.c
     src/mantissa.c
     src/super_fibonacci.c
+    src/byte_atoms.c
     src/modality_decimal.c
     src/modality_witness.c
     src/image_decomposer.c

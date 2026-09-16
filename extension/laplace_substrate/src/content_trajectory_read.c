@@ -34,6 +34,7 @@ typedef struct ContentReadContext
     void *context;
     AttrNumber entity, type, trajectory, n_constituents;
     int16 physicality_type;
+    bool strict;
 } ContentReadContext;
 
 static void
@@ -42,9 +43,15 @@ consume_content(TupleTableSlot *slot, AttrNumber id, void *opaque)
     ContentReadContext *read = opaque;
     bool isnull;
     Datum kind = slot_getattr(slot, read->type, &isnull);
+    if (read->strict && (isnull || DatumGetInt16(kind) != read->physicality_type))
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("typed trajectory read found an unexpected physicality kind")));
     if (!isnull && DatumGetInt16(kind) == read->physicality_type)
     {
         Datum geometry = slot_getattr(slot, read->trajectory, &isnull);
+        if (read->strict && isnull)
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("typed trajectory read found a NULL required manifest")));
         if (!isnull)
         {
             bool physicality_null, entity_null;
@@ -68,11 +75,11 @@ consume_content(TupleTableSlot *slot, AttrNumber id, void *opaque)
 static void
 read_leaf(Oid oid, ArrayType *ids, int16 physicality_type,
           LaplaceContentTrajectoryConsumer consume,
-          LaplaceContentCarrierConsumer carrier, void *context)
+          LaplaceContentCarrierConsumer carrier, void *context, bool strict)
 {
     ContentReadContext read = {consume, carrier, context, get_attnum(oid, "entity_id"),
         get_attnum(oid, "type"), get_attnum(oid, "trajectory"),
-        carrier ? get_attnum(oid, "n_constituents") : 0, physicality_type};
+        carrier ? get_attnum(oid, "n_constituents") : 0, physicality_type, strict};
     if (read.entity <= 0 || read.type <= 0 || read.trajectory <= 0 ||
         (carrier && (read.n_constituents <= 0 ||
                      get_atttype(oid, read.n_constituents) != INT4OID)) ||
@@ -154,7 +161,7 @@ read_trajectories(ArrayType *entities, int16 physicality_type,
                 ++budget->leaf_reads;
             }
             read_leaf(partitions->oids[i], DatumGetArrayTypeP(makeArrayResult(batches[i],
-                CurrentMemoryContext)), physicality_type, consume, carrier, context);
+                CurrentMemoryContext)), physicality_type, consume, carrier, context, budget != NULL);
         }
     pfree(batches);
     pfree(values);
@@ -194,7 +201,7 @@ bounded_content_callback(Datum physicality, Datum entity, int32 count,
 }
 
 void
-laplace_content_carrier_read_bounded(ArrayType *entities,
+laplace_typed_carrier_read_bounded(ArrayType *entities, int16 physicality_type,
     LaplaceContentCarrierConsumer consume, void *context,
     LaplaceContentReadBudget *budget)
 {
@@ -203,12 +210,12 @@ laplace_content_carrier_read_bounded(ArrayType *entities,
         elog(ERROR, "content trajectory reader requires a finite read budget");
     MemoryContext caller = CurrentMemoryContext;
     MemoryContext scratch = AllocSetContextCreate(caller,
-        "bounded Content frontier", ALLOCSET_DEFAULT_SIZES);
+        "bounded typed manifest frontier", ALLOCSET_DEFAULT_SIZES);
     BoundedContentCallback callback = {consume, context, caller};
     PG_TRY();
     {
         MemoryContextSwitchTo(scratch);
-        read_trajectories(entities, 1, NULL, bounded_content_callback, &callback, budget);
+        read_trajectories(entities, physicality_type, NULL, bounded_content_callback, &callback, budget);
     }
     PG_FINALLY();
     {
@@ -216,6 +223,13 @@ laplace_content_carrier_read_bounded(ArrayType *entities,
         MemoryContextDelete(scratch);
     }
     PG_END_TRY();
+}
+
+void
+laplace_content_carrier_read_bounded(ArrayType *entities,
+    LaplaceContentCarrierConsumer consume, void *context, LaplaceContentReadBudget *budget)
+{
+    laplace_typed_carrier_read_bounded(entities, 1, consume, context, budget);
 }
 
 void

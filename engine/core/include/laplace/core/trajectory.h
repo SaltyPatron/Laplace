@@ -41,10 +41,11 @@ int trajectory_manifest_scan(const double* trajectory_xyzm, size_t n_points,
     size_t* out_ordinary_count, int* out_typed_payload);
 
 /* Shared physicality manifest law for native and managed admission. Content
- * (type1) requires an ordinary manifest and unchanged canonical entity ID.
- * Ordinary non-Content validates its count; typed factor/testimony payloads
+ * (type1) and descriptor retention (type9) require an ordinary manifest and
+ * unchanged canonical entity ID. Retention requires at least two operands.
+ * Other ordinary types validate their count; typed factor/testimony payloads
  * retain their type-owned count without interpreting numeric bits as RLE.
- * Returns0, -1 invalid arguments, -3 malformed/count, -4 Content ID mismatch. */
+ * Returns0, -1 invalid arguments, -3 malformed/count, -4 canonical ID mismatch. */
 int laplace_physicality_manifest_validate(const hash128_t* entity_id, int16_t type,
     const double* trajectory_xyzm, size_t n_points, int32_t n_constituents);
 

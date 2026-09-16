@@ -95,13 +95,22 @@ Geometry geometry(const tier_node_view_t& node) {
 
 struct Selected {
     Geometry physicality;
-    size_t body_index = SIZE_MAX; // SIZE_MAX means actual mapped codepoint floor.
+    size_t body_index = SIZE_MAX; // SIZE_MAX means an actual native atomic basis.
+    bool byte_basis = false;
 };
 
 struct OutputNode {
     Geometry geometry;
     size_t first_child;
     size_t child_count;
+    int16_t type;
+};
+
+struct View {
+    hash128_t id{};
+    uint32_t state = PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE;
+    size_t missing_first = 0;
+    size_t missing_count = 0;
 };
 
 void require(bool condition, physicality_descriptor_status_t status = PHYSICALITY_DESCRIPTOR_INVALID_BODY) {
@@ -113,11 +122,12 @@ void require(bool condition, physicality_descriptor_status_t status = PHYSICALIT
 struct physicality_descriptor_materialization {
     Memory memory;
     std::pmr::vector<hash128_t> pending;
+    std::pmr::vector<hash128_t> missing;
     std::pmr::vector<physicality_descriptor_admitted_form_t> forms;
     intent_stage_t* stage = nullptr;
     size_t stage_bytes = 0;
     explicit physicality_descriptor_materialization(size_t ceiling)
-        : memory(ceiling - sizeof(*this)), pending(&memory), forms(&memory) {}
+        : memory(ceiling - sizeof(*this)), pending(&memory), missing(&memory), forms(&memory) {}
     ~physicality_descriptor_materialization() { intent_stage_free(stage); }
 };
 
@@ -147,6 +157,12 @@ physicality_descriptor_status_t materialize(
     for (size_t i = 0; i < source_count; ++i)
         require(std::isfinite(sources[i].source_trust) && sources[i].source_trust >= 0.0 &&
             sources[i].source_trust <= 1.0, PHYSICALITY_DESCRIPTOR_INVALID);
+    /* Fixed native basis verification scratch is admitted before entering the
+     * allocation-free owner, and released before ordinary frontier work. */
+    constexpr size_t byte_basis_scratch = sizeof(laplace_byte_atoms_t) + LAPLACE_BYTE_ATOM_COUNT * 64u;
+    memory.claim(byte_basis_scratch);
+    require(laplace_byte_atoms_validate(&vocabulary.byte_basis) == 0, PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
+    memory.release(byte_basis_scratch);
 
     External<physicality_descriptor_capture_t, physicality_descriptor_capture_free> current(memory);
     physicality_descriptor_limits_t limits{memory.remaining()};
@@ -204,12 +220,13 @@ physicality_descriptor_status_t materialize(
         if (found == index.end()) index.emplace(inputs[i].entity_id, i);
         else require(hash128_equals(&descriptors[i], &descriptors[found->second]));
     }
-    IdSet missing(&memory), pending(&memory);
+    IdSet missing(&memory), pending(&memory), unavailable(&memory);
     for (size_t i = 0; i < missing_count; ++i) {
         require(current_by_entity.find(missing_ids[i]) == current_by_entity.end());
         missing.insert(missing_ids[i]);
     }
     IdMap<Selected> selected(&memory);
+    bool selected_byte_basis = false;
     size_t reference_count = 0;
     const auto* references = physicality_descriptor_plan_references(plan.value, &reference_count);
     for (size_t i = 0; i < reference_count; ++i) {
@@ -228,13 +245,27 @@ physicality_descriptor_status_t materialize(
                 selected.emplace(entity, selection);
                 continue;
             }
+            const laplace_byte_atom_t* byte_atom = nullptr;
+            const int byte_status = laplace_byte_atoms_lookup(&vocabulary.byte_basis, &entity, &byte_atom);
+            require(byte_status >= 0, PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
+            if (byte_status == 1) {
+                selection.physicality.id = byte_atom->id;
+                std::copy_n(byte_atom->coord, 4, selection.physicality.coord.data());
+                selection.physicality.hilbert = byte_atom->hilbert;
+                selection.byte_basis = true;
+                selected_byte_basis = true;
+                selected.emplace(entity, selection);
+                continue;
+            }
             if (missing.find(entity) == missing.end()) {
                 pending.insert(entity);
                 continue;
             }
             found = admitted_by_entity.find(entity);
-            require(found != admitted_by_entity.end(),
-                static_cast<physicality_descriptor_status_t>(PHYSICALITY_DESCRIPTOR_MISSING_REFERENCE));
+            if (found == admitted_by_entity.end()) {
+                unavailable.insert(entity);
+                continue;
+            }
             selection.body_index = found->second;
         }
         const auto& body = inputs[selection.body_index];
@@ -255,7 +286,8 @@ physicality_descriptor_status_t materialize(
     for (const auto& tag : vocabulary.tags) geometries.emplace(tag.id, geometry(tag));
     for (const auto& number : vocabulary.numbers) geometries.emplace(number.id, geometry(number));
     for (const auto* tag : {&vocabulary.view_schema, &vocabulary.view_recipe,
-            &vocabulary.floor_schema, &vocabulary.selection_schema, &vocabulary.scope_schema,
+            &vocabulary.floor_schema, &vocabulary.byte_floor_schema, &vocabulary.retention_reference_schema,
+            &vocabulary.selection_schema, &vocabulary.scope_schema,
             &vocabulary.context_schema, &vocabulary.source_schema, &vocabulary.unit_schema})
         geometries.emplace(tag->id, geometry(*tag));
     std::pmr::vector<OutputNode> output(&memory);
@@ -268,7 +300,7 @@ physicality_descriptor_status_t materialize(
     const auto* children = physicality_descriptor_plan_children(plan.value, nullptr);
 
     auto compose = [&](const hash128_t* operands, size_t count, const double* reference_coord,
-                       size_t reference_index) -> Geometry {
+                       size_t reference_index, int16_t type = 1) -> Geometry {
         require(count >= 2 && count <= INT32_MAX && count <= UINT32_MAX && count <= SIZE_MAX / 4u,
             PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
         child_coordinates.resize(count * 4u);
@@ -300,9 +332,18 @@ physicality_descriptor_status_t materialize(
         }
         const size_t start = output_children.size();
         output_children.insert(output_children.end(), operands, operands + count);
-        output.push_back(OutputNode{value, start, count});
+        output.push_back(OutputNode{value, start, count, type});
         geometries.emplace(value.id, value);
         return value;
+    };
+
+    auto identifier = [&](const hash128_t& schema, const hash128_t& exact_value) {
+        std::array<hash128_t,17> operands;
+        operands[0] = schema;
+        const auto* octets = reinterpret_cast<const uint8_t*>(&exact_value);
+        for (size_t byte = 0u; byte < 16u; ++byte)
+            operands[byte + 1u] = vocabulary.basis.byte_numbers[octets[byte]];
+        return compose(operands.data(), operands.size(), nullptr, SIZE_MAX);
     };
 
     for (size_t i = 0; i < node_count; ++i) {
@@ -310,20 +351,21 @@ physicality_descriptor_status_t materialize(
         const hash128_t* operands = children + node.first_child;
         const double* reference_coord = nullptr;
         size_t reference_index = SIZE_MAX;
+        Geometry literal_reference;
         if (node.child_count == 9u && hash128_equals(&operands[0],
                 &vocabulary.basis.tags[PHYSICALITY_DESCRIPTOR_SCHEMA])) {
-            const auto found = body_by_descriptor.find(node.id);
-            require(found != body_by_descriptor.end());
-            reference_coord = inputs[found->second].coord;
+            require(body_by_descriptor.find(node.id) != body_by_descriptor.end());
+            literal_reference = identifier(vocabulary.retention_reference_schema.id, operands[1]);
+            reference_coord = literal_reference.coord.data();
             reference_index = 1u;
         } else if (node.child_count == 5u && hash128_equals(&operands[0],
                 &vocabulary.basis.tags[PHYSICALITY_DESCRIPTOR_CARRIER])) {
-            const auto found = selected.find(operands[1]);
-            require(found != selected.end());
-            reference_coord = found->second.physicality.coord.data();
+            literal_reference = identifier(vocabulary.retention_reference_schema.id, operands[1]);
+            reference_coord = literal_reference.coord.data();
             reference_index = 1u;
         }
-        const auto produced = compose(operands, node.child_count, reference_coord, reference_index);
+        const auto produced = compose(operands, node.child_count, reference_coord, reference_index,
+            PHYSICALITY_DESCRIPTOR_RETENTION_TYPE);
         require(hash128_equals(&produced.id, &node.id));
     }
 
@@ -332,12 +374,21 @@ physicality_descriptor_status_t materialize(
     const auto* fingerprint = reinterpret_cast<const uint8_t*>(&vocabulary.floor_receipt);
     for (size_t i = 0; i < 16u; ++i) floor_fields[i + 1u] = vocabulary.basis.byte_numbers[fingerprint[i]];
     const auto floor_receipt = compose(floor_fields.data(), floor_fields.size(), nullptr, SIZE_MAX);
-    IdMap<hash128_t> views(&memory);
+    Geometry byte_floor_receipt;
+    if (selected_byte_basis) {
+        floor_fields[0] = vocabulary.byte_floor_schema.id;
+        fingerprint = reinterpret_cast<const uint8_t*>(&vocabulary.byte_basis.receipt);
+        for (size_t i = 0; i < 16u; ++i) floor_fields[i + 1u] = vocabulary.basis.byte_numbers[fingerprint[i]];
+        byte_floor_receipt = compose(floor_fields.data(), floor_fields.size(), nullptr, SIZE_MAX);
+    }
+    IdMap<View> views(&memory);
     IdMap<const physicality_descriptor_node_t*> node_by_id(&memory);
     for (size_t i = 0; i < node_count; ++i) node_by_id.emplace(nodes[i].id, &nodes[i]);
     std::pmr::vector<size_t> reachable(&memory);
     std::pmr::vector<hash128_t> scope_fields(&memory);
     IdSet reached_descriptors(&memory);
+    IdSet missing_for_view(&memory);
+    std::pmr::vector<hash128_t> sorted_missing(&memory);
     auto trajectory_for_input = [&](size_t input_index) {
         const auto root = node_by_id.find(descriptors[input_index]);
         require(root != node_by_id.end());
@@ -345,7 +396,7 @@ physicality_descriptor_status_t materialize(
         require(found != node_by_id.end());
         return found->second;
     };
-    for (size_t input_index = 0; input_index < inputs.size(); ++input_index) {
+    for (size_t input_index = 0; input_index < original_count; ++input_index) {
         if (views.find(descriptors[input_index]) != views.end()) continue;
         /* The finite recipe records every selected body reachable from this
          * source form. A grandchild replacement must change the view receipt;
@@ -353,6 +404,7 @@ physicality_descriptor_status_t materialize(
          * body identity, never by an arbitrary recursion depth. */
         reachable.clear();
         reached_descriptors.clear();
+        missing_for_view.clear();
         scope_fields.clear();
         reachable.push_back(input_index);
         for (size_t next = 0; next < reachable.size(); ++next) {
@@ -364,11 +416,28 @@ physicality_descriptor_status_t materialize(
                 const hash128_t* carrier_fields = children + carrier->second->first_child;
                 if (hash128_equals(&carrier_fields[0], &vocabulary.basis.tags[PHYSICALITY_DESCRIPTOR_FACTOR])) continue;
                 const auto chosen = selected.find(carrier_fields[1]);
-                require(chosen != selected.end());
+                if (chosen == selected.end()) {
+                    require(unavailable.find(carrier_fields[1]) != unavailable.end());
+                    missing_for_view.insert(carrier_fields[1]);
+                    continue;
+                }
                 const size_t selected_index = chosen->second.body_index;
                 if (selected_index != SIZE_MAX && reached_descriptors.insert(descriptors[selected_index]).second)
                     reachable.push_back(selected_index);
             }
+        }
+        if (!missing_for_view.empty()) {
+            sorted_missing.assign(missing_for_view.begin(), missing_for_view.end());
+            std::sort(sorted_missing.begin(), sorted_missing.end(), [](const hash128_t& a, const hash128_t& b) {
+                return hash128_compare(&a, &b) < 0;
+            });
+            View view;
+            view.state = PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE;
+            view.missing_first = result.missing.size();
+            view.missing_count = sorted_missing.size();
+            result.missing.insert(result.missing.end(), sorted_missing.begin(), sorted_missing.end());
+            views.emplace(descriptors[input_index], view);
+            continue;
         }
         scope_fields.assign(reached_descriptors.begin(), reached_descriptors.end());
         std::sort(scope_fields.begin(), scope_fields.end(), [](const hash128_t& a, const hash128_t& b) {
@@ -394,32 +463,26 @@ physicality_descriptor_status_t materialize(
             const auto found = selected.find(carrier_fields[1]);
             require(found != selected.end());
             const auto& selection = found->second;
-            const hash128_t selected_form = selection.body_index == SIZE_MAX ? floor_receipt.id :
-                descriptors[selection.body_index];
+            const hash128_t selected_form = selection.body_index == SIZE_MAX ?
+                (selection.byte_basis ? byte_floor_receipt.id : floor_receipt.id) : descriptors[selection.body_index];
             const std::array<hash128_t,5> binding{vocabulary.selection_schema.id,
                 carrier_id, carrier_fields[1], selected_form, scope.id};
             const auto receipt = compose(binding.data(), binding.size(), selection.physicality.coord.data(), 2u);
             fields.push_back(receipt.id);
         }
         const auto view = compose(fields.data(), fields.size(), nullptr, SIZE_MAX);
-        views.emplace(descriptors[input_index], view.id);
+        views.emplace(descriptors[input_index], View{view.id, PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE, 0u, 0u});
     }
     result.forms.resize(original_count);
-    for (size_t i = 0; i < original_count; ++i)
-        result.forms[i] = {descriptors[i], views.at(descriptors[i])};
+    for (size_t i = 0; i < original_count; ++i) {
+        const auto& view = views.at(descriptors[i]);
+        result.forms[i] = {descriptors[i], view.id, view.state, view.missing_first, view.missing_count};
+    }
 
     hash128_t relation;
     require(laplace_relation_resolve("HAS_PHYSICALITY", &relation) == 0);
     std::pmr::vector<laplace_attestation_staged_t> attestations(&memory);
     IdMap<size_t> observation_index(&memory);
-    auto identifier = [&](const hash128_t& schema, const hash128_t& exact_value) {
-        std::array<hash128_t,17> operands;
-        operands[0] = schema;
-        const auto* octets = reinterpret_cast<const uint8_t*>(&exact_value);
-        for (size_t byte = 0u; byte < 16u; ++byte)
-            operands[byte + 1u] = vocabulary.basis.byte_numbers[octets[byte]];
-        return compose(operands.data(), operands.size(), nullptr, SIZE_MAX);
-    };
     for (size_t i = 0; i < original_count; ++i) {
         /* A source-unit receipt is a typed identifier, not automatically an E.
          * Its ordinary context binds the registered source id and exact unit
@@ -461,10 +524,10 @@ physicality_descriptor_status_t materialize(
     const auto document_type = laplace_content_tier_type_id(4);
     for (const auto& node : output) {
         hash128_t placement;
-        laplace_physicality_id_compute(node.geometry.id, 1, &placement);
+        laplace_physicality_id_compute(node.geometry.id, node.type, &placement);
         require(trajectory_build(output_children.data() + node.first_child, node.child_count, packed.data()) == 0);
         require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type, &generated_source) == 0 &&
-            intent_stage_add_physicality(stage.get(), &placement, &node.geometry.id, 1,
+            intent_stage_add_physicality(stage.get(), &placement, &node.geometry.id, node.type,
                 node.geometry.coord.data(), &node.geometry.hilbert, packed.data(),
                 static_cast<uint32_t>(node.child_count), static_cast<int32_t>(node.child_count),
                 1, 0.0, 1, 0, generated_at) == 0,
@@ -532,6 +595,12 @@ extern "C" const physicality_descriptor_admitted_form_t* physicality_descriptor_
     const physicality_descriptor_materialization_t* value, size_t* count) {
     if (count != nullptr) *count = value == nullptr ? 0u : value->forms.size();
     return value == nullptr ? nullptr : value->forms.data();
+}
+
+extern "C" const hash128_t* physicality_descriptor_materialization_missing(
+    const physicality_descriptor_materialization_t* value, size_t* count) {
+    if (count != nullptr) *count = value == nullptr ? 0u : value->missing.size();
+    return value == nullptr ? nullptr : value->missing.data();
 }
 
 extern "C" intent_stage_t* physicality_descriptor_materialization_take_stage(

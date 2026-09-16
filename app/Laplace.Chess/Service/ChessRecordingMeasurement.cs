@@ -27,6 +27,7 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
     public string Schema => "laplace.chess-recording/v2";
     public string Purpose => retainedPgn ? "retained-pgn-ingestion" : "fresh-match-recording";
     internal bool RetainedPgn => retainedPgn;
+    internal bool RequiresNormalCompletion => _normalMatchVerified;
     public string ExperimentId { get; } = experimentId;
     public string PgnEvent => "chess-lab/cutechess/" + ExperimentId;
     public string Status { get; private set; } = "running";
@@ -148,6 +149,14 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
         if (game.PositionIds.Length != game.MoveIds.Length + 1
             || game.MoveIds.Length != game.Moves.Count)
             throw new InvalidDataException("recording input does not contain a complete legal move trajectory");
+        if (_normalMatchVerified && !game.NormalCompletionVerified)
+            throw new InvalidDataException("normal recorded game lacks serialized terminal-outcome verification");
+        string plyCount = PgnGames.TagStr(game.GameText, "PlyCount");
+        if (_normalMatchVerified && !string.IsNullOrEmpty(plyCount)
+            && (!int.TryParse(plyCount, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out int declaredPlies)
+                || declaredPlies != game.MoveIds.Length))
+            throw new InvalidDataException("normal recorded game PlyCount differs from its serialized legal moves");
         var result = PgnGames.TagStr(game.GameText, "Result");
         if (result != game.Result.ResultToken)
             throw new InvalidDataException("recording PGN header and parsed movetext result disagree");

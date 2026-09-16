@@ -309,11 +309,16 @@ SQL_QUERY("ingest.generated_stage_sink.masks", "bytea[],bytea[]",
     "SELECT consensus.highway_mask_deposit($1,$2)")
 /* Direct indexed containment selects candidates, never unverified body rows. */
 SQL_QUERY("readback.physicality_form_candidates", "bytea,bytea[],bytea,int4",
+    "SELECT candidate.entity_id FROM ("
     "SELECT p.entity_id FROM laplace.physicalities p "
+    "WHERE p.type=9 AND p.trajectory IS NOT NULL "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1] "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $2 AND p.entity_id>$3 "
+    "UNION SELECT p.entity_id FROM laplace.physicalities p "
     "WHERE p.type=1 AND p.trajectory IS NOT NULL "
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1] "
-    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $2 "
-    "AND p.entity_id>$3 ORDER BY p.entity_id LIMIT $4")
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $2 AND p.entity_id>$3"
+    ") candidate ORDER BY candidate.entity_id LIMIT $4")
 SQL_QUERY("readback.physicality_descriptors", "bytea[],int8,int4,int8",
     "SELECT * FROM structural.physicality_descriptor_read($1,$2,$3,$4)")
 SQL_QUERY("readback.physicality_forms", "bytea[],bytea,int4,int8,int4,int8",
@@ -443,3 +448,73 @@ SQL_QUERY("identity.conversation_upsert", "text,text,uuid,text",
 SQL_QUERY("identity.conversations_list", "uuid,text",
     "SELECT session_key, title, created_at, last_turn_at FROM app.conversation_sessions WHERE user_id = $1 "
     "AND tenant_id = $2 AND archived_at IS NULL ORDER BY last_turn_at DESC;")
+
+/* Account and billing commands retain their existing transaction boundaries. */
+SQL_QUERY("account.member_sessions_revoke", "text,uuid",
+    "UPDATE app.web_sessions SET revoked_at = now() WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS "
+    "NULL;")
+SQL_QUERY("account.member_remove", "text,uuid,uuid",
+    "DELETE FROM app.tenant_memberships target WHERE target.tenant_id = $1 AND target.user_id = $2 AND EXISTS "
+    "(SELECT 1 FROM app.tenant_memberships actor WHERE actor.tenant_id = $1 AND actor.user_id = $3 AND "
+    "(actor.role = 'owner' OR (actor.role = 'admin' AND target.role = 'member'))) AND (target.role <> 'owner' "
+    "OR (SELECT count(*) FROM app.tenant_memberships WHERE tenant_id = $1 AND role = 'owner') > 1);")
+SQL_QUERY("account.workspace_lock", "text",
+    "SELECT tenant_id FROM app.tenants WHERE tenant_id = $1 FOR UPDATE")
+SQL_QUERY("account.invitation_lock", "bytea",
+    "SELECT i.invitation_id, i.tenant_id, i.role FROM app.workspace_invitations i JOIN app.tenant_memberships "
+    "m ON m.tenant_id = i.tenant_id AND m.user_id = i.created_by WHERE i.token_hash = $1 AND i.expires_at > "
+    "now() AND i.revoked_at IS NULL AND i.accepted_at IS NULL AND (m.role = 'owner' OR (m.role = 'admin' AND "
+    "i.role = 'member')) FOR UPDATE OF i;")
+SQL_QUERY("account.invitation_revoke", "uuid,text",
+    "UPDATE app.workspace_invitations SET revoked_at = now() WHERE invitation_id = $1 AND tenant_id = $2 AND "
+    "accepted_at IS NULL AND revoked_at IS NULL;")
+SQL_QUERY("account.invitations_list", "text",
+    "SELECT invitation_id, role, created_at, expires_at FROM app.workspace_invitations WHERE tenant_id = $1 "
+    "AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now() ORDER BY created_at DESC;")
+SQL_QUERY("account.invitation_insert", "uuid,text,bytea,text,uuid,timestamptz",
+    "INSERT INTO app.workspace_invitations (invitation_id, tenant_id, token_hash, role, created_by, "
+    "expires_at) SELECT $1, $2, $3, $4, $5, $6 WHERE EXISTS (SELECT 1 FROM app.tenant_memberships WHERE "
+    "tenant_id = $2 AND user_id = $5 AND (role = 'owner' OR (role = 'admin' AND $4 = 'member')));")
+SQL_QUERY("account.members_list", "text",
+    "SELECT u.user_id, u.display_name, u.email, m.role FROM app.tenant_memberships m JOIN app.users u USING "
+    "(user_id) WHERE m.tenant_id = $1 ORDER BY m.created_at, u.user_id;")
+SQL_QUERY("account.workspace_rename", "text,uuid,text",
+    "UPDATE app.tenants SET display_name = $3, updated_at = now() WHERE tenant_id = $1 AND EXISTS ( SELECT 1 "
+    "FROM app.tenant_memberships WHERE tenant_id = $1 AND user_id = $2 AND role IN ('owner', 'admin'));")
+SQL_QUERY("account.membership_role", "text,uuid",
+    "SELECT role FROM app.tenant_memberships WHERE tenant_id = $1 AND user_id = $2;")
+SQL_QUERY("account.workspaces_list", "uuid",
+    "SELECT t.tenant_id, t.display_name, t.kind, m.role FROM app.tenant_memberships m JOIN app.tenants t USING "
+    "(tenant_id) WHERE m.user_id = $1 ORDER BY t.display_name, t.tenant_id;")
+SQL_QUERY("billing.credit_consume", "text,text,int4",
+    "SELECT plan_id, remaining, period_end FROM app.consume_credit($1, $2, $3);")
+SQL_QUERY("billing.entitlements_list", "text",
+    "SELECT tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits, "
+    "stripe_customer_id, stripe_subscription_id, updated_at, cancel_at_period_end FROM "
+    "app.billing_entitlements WHERE tenant = $1 ORDER BY plan_id;")
+SQL_QUERY("billing.subscription_deactivate", "text,text",
+    "UPDATE app.billing_entitlements SET status = $1, updated_at = now() WHERE stripe_subscription_id = $2 "
+    "RETURNING tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits, "
+    "stripe_customer_id, stripe_subscription_id, updated_at, cancel_at_period_end;")
+SQL_QUERY("billing.subscription_apply", "text,text,text,timestamptz,timestamptz,jsonb,text,text,int8,bool",
+    "SELECT tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits, "
+    "stripe_customer_id, stripe_subscription_id, updated_at, cancel_at_period_end FROM "
+    "app.apply_subscription($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);")
+SQL_QUERY("billing.webhook_status", "text",
+    "SELECT status FROM app.billing_webhook_events WHERE event_id = $1;")
+SQL_QUERY("billing.webhook_complete", "text,text",
+    "UPDATE app.billing_webhook_events SET status = $2, updated_at = now() WHERE event_id = $1;")
+SQL_QUERY("billing.webhook_begin", "text,text",
+    "INSERT INTO app.billing_webhook_events (event_id, status, updated_at) VALUES ($1, $2, now()) ON CONFLICT "
+    "(event_id) DO UPDATE SET status = EXCLUDED.status, updated_at = now() WHERE "
+    "app.billing_webhook_events.status = 'retryable' OR (app.billing_webhook_events.status LIKE 'processing:%' "
+    "AND app.billing_webhook_events.updated_at < now() - interval '5 minutes');")
+SQL_QUERY("account.workspace_insert", "text,text",
+    "INSERT INTO app.tenants (tenant_id, display_name, kind) VALUES ($1, $2, 'organization');")
+SQL_QUERY("account.workspace_owner_insert", "text,uuid",
+    "INSERT INTO app.tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner');")
+SQL_QUERY("account.invitation_membership_insert", "text,uuid,text",
+    "INSERT INTO app.tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, "
+    "user_id) DO NOTHING;")
+SQL_QUERY("account.invitation_accept", "uuid,uuid",
+    "UPDATE app.workspace_invitations SET accepted_at = now(), accepted_by = $1 WHERE invitation_id = $2;")

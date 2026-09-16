@@ -13,6 +13,7 @@
 #include "laplace/core/hash_composer.h"
 #include "laplace/core/physicality_descriptor_admission.h"
 #include "laplace/core/trajectory.h"
+#include "../src/physicality_descriptor_provider.h"
 
 namespace {
 
@@ -128,6 +129,42 @@ protected:
     }
 };
 
+TEST_F(PhysicalityDescriptorAdmission, ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence) {
+    const auto& byte_basis = vocabulary->byte_basis;
+    std::vector<Body> bytes(2);
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        bytes[i].value.type = 1;
+        bytes[i].value.alignment_residual_is_null = bytes[i].value.source_dim_is_null = 1;
+        bytes[i].value.entity_id = byte_basis.atoms[i].id;
+        std::copy_n(byte_basis.atoms[i].coord, 4, bytes[i].value.coord);
+        bytes[i].value.hilbert_index = byte_basis.atoms[i].hilbert;
+    }
+    const auto parent = composition(bytes);
+    auto original = stage({parent});
+    auto captured = capture(original.get());
+    Materialization basis(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {}, {bytes[0].value.entity_id, bytes[1].value.entity_id}, witnesses(1), basis),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const auto basis_form = form(basis);
+    auto changed = bytes[0];
+    changed.value.coord[0] += 0.125;
+    hilbert4d_encode(changed.value.coord, &changed.value.hilbert_index);
+    auto stored = stage({changed});
+    Materialization current(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {stored.get()}, {}, {}, witnesses(1), current), PHYSICALITY_DESCRIPTOR_OK);
+    const auto current_form = form(current);
+    EXPECT_TRUE(hash128_equals(&basis_form.descriptor_id, &current_form.descriptor_id));
+    EXPECT_FALSE(hash128_equals(&basis_form.view_id, &current_form.view_id));
+    const auto saved = vocabulary->byte_basis;
+    vocabulary->byte_basis.atoms[0].coord[0] += 0.125;
+    EXPECT_EQ(run(captured, {}, {}, {}, witnesses(1), current), PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
+    EXPECT_EQ(current, nullptr);
+    vocabulary->byte_basis = {};
+    EXPECT_EQ(run(captured, {}, {}, {}, witnesses(1), current), PHYSICALITY_DESCRIPTOR_MISSING_FLOOR);
+    EXPECT_EQ(current, nullptr);
+    vocabulary->byte_basis = saved;
+}
+
 TEST_F(PhysicalityDescriptorAdmission, TransitiveProviderChangeKeepsExactDescriptorAndChangesRootView) {
     const auto c = composition({atom('a'), atom('b')});
     const auto b = composition({c, atom('x')});
@@ -202,8 +239,10 @@ TEST_F(PhysicalityDescriptorAdmission, FrontierRequiresCheckedAbsenceAndTheExpli
     ASSERT_EQ(run(captured, {}, {admitted_stage.get()}, missing, witnesses(1), result), PHYSICALITY_DESCRIPTOR_OK);
     auto extra_raw = stage({a, b, c});
     auto raw_capture = capture(extra_raw.get());
-    EXPECT_EQ(run(raw_capture, {}, {}, missing, witnesses(3), result), PHYSICALITY_DESCRIPTOR_MISSING_REFERENCE);
-    EXPECT_EQ(result, nullptr);
+    ASSERT_EQ(run(raw_capture, {}, {}, missing, witnesses(3), result), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(form(result, 0).view_state, PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE);
+    EXPECT_EQ(form(result, 1).view_state, PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE);
+    EXPECT_EQ(form(result, 2).view_state, PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE);
     EXPECT_EQ(run(captured, {admitted_stage.get()}, {}, missing, witnesses(1), result), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
     EXPECT_EQ(result, nullptr);
 }
@@ -312,9 +351,11 @@ TEST_F(PhysicalityDescriptorAdmission, RepeatedCompositeCarrierRequiresProviderA
     const auto current_form = form(current);
     EXPECT_TRUE(hash128_equals(&admitted_form.descriptor_id, &current_form.descriptor_id));
     EXPECT_TRUE(hash128_equals(&admitted_form.view_id, &current_form.view_id));
-    EXPECT_EQ(run(captured, {}, {}, {child.value.entity_id}, witnesses(1), pending),
-        PHYSICALITY_DESCRIPTOR_MISSING_REFERENCE);
-    EXPECT_EQ(pending, nullptr);
+    ASSERT_EQ(run(captured, {}, {}, {child.value.entity_id}, witnesses(1), pending),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const auto unavailable_form = form(pending);
+    EXPECT_EQ(unavailable_form.view_state, PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE);
+    EXPECT_TRUE(hash128_equals(&unavailable_form.descriptor_id, &admitted_form.descriptor_id));
 }
 
 TEST_F(PhysicalityDescriptorAdmission, ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback) {
@@ -541,7 +582,7 @@ TEST_F(PhysicalityDescriptorAdmission, ExactBodyReadsBackFromActualGeneratedComp
     std::vector<physicality_descriptor_node_t> nodes;
     std::vector<hash128_t> children;
     for (size_t i = 0; i < emitted_count; ++i) {
-        ASSERT_EQ(rows[i].type, 1);
+        ASSERT_TRUE(rows[i].type == 1 || rows[i].type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE);
         ASSERT_GE(rows[i].n_constituents, 2);
         const size_t first = children.size();
         const size_t count = static_cast<size_t>(rows[i].n_constituents);

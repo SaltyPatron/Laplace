@@ -94,6 +94,22 @@ public sealed class SessionPhysicalityObservationTests(LocalPgFixture pg)
         Assert.Equal(2, second.Evidence.Count(e => e.Split(':')[1] == oldDescriptor));
         Assert.Equal(2, second.Evidence.Select(e => e.Split(':')[1]).Distinct().Count());
         Assert.All(second.Evidence, e => Assert.Equal("1", e.Split(':')[3]));
+        string newDescriptor = Assert.Single(second.Evidence.Select(e => e.Split(':')[1])
+            .Distinct(), id => id != oldDescriptor);
+        // The mutable session placement is still Projection. Both historical
+        // immutable descriptors have their own retention bodies; typed readback
+        // must recover the original projection type and exact turn counts.
+        await PhysicalityWriterTestSupport.AssertDescriptorShapesAsync(pg.DataSource,
+        [
+            (Hash128.FromBytes(Convert.FromHexString(oldDescriptor)), f.Session, PhysicalityType.Projection, 1),
+            (Hash128.FromBytes(Convert.FromHexString(newDescriptor)), f.Session, PhysicalityType.Projection, 2),
+        ]);
+        await using (var canonical = pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.physicalities WHERE entity_id=$1 AND type=1"))
+        {
+            canonical.Parameters.AddWithValue(f.Session.ToBytes());
+            Assert.Equal(0L, (long)(await canonical.ExecuteScalarAsync())!);
+        }
         Assert.True((await writer.ApplyConversationTurnAsync(f.Second, f.Session, [f.Turn])).JournalReplayHit);
         EqualSnapshot(second, await ReadAsync(f.Session));
     }

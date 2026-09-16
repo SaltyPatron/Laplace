@@ -35,6 +35,11 @@ public enum PhysicalityType : short
     // 1475 outranking New -> Zealand at 1336.
     ParseStructure = 8,
 
+    // Exact canonical descriptor manifest with the native literal-identifier
+    // retention projection. This does not assert selected Content geometry for
+    // referenced entities; a selected view has its own recipe and receipt.
+    DescriptorRetention = 9,
+
     // Sparse, ordinal-aligned chess source annotations. These are parallel sequences on
     // the PLAYING, not per-ply testimony rows and not part of move/position identity.
     ChessComment = 6,

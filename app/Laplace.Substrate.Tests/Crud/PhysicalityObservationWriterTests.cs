@@ -102,32 +102,31 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         return result.ToArray();
     }
 
-    private async Task AssertBodiesExistAsync(IEnumerable<string> ids)
+    private async Task AssertBodiesExistAsync(IEnumerable<string> descriptors, IEnumerable<string> views)
     {
-        byte[][] selected = ids.Distinct().Select(Convert.FromHexString).ToArray();
-        await using var command = pg.DataSource.CreateCommand("""
-            SELECT count(DISTINCT e.id),count(DISTINCT p.id)
-            FROM laplace.entities e JOIN laplace.physicalities p ON p.entity_id=e.id AND p.type=1
-            WHERE e.id=ANY($1::bytea[])
-            """);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, selected);
-        await using var reader = await command.ExecuteReaderAsync();
-        Assert.True(await reader.ReadAsync());
-        Assert.Equal(selected.LongLength, reader.GetInt64(0));
-        Assert.Equal(selected.LongLength, reader.GetInt64(1));
+        Hash128[] retained = descriptors.Select(id => Hash128.FromBytes(Convert.FromHexString(id))).Distinct().ToArray();
+        Hash128[] available = views.Select(id => Hash128.FromBytes(Convert.FromHexString(id))).Distinct().ToArray();
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(pg.DataSource,
+            retained.Concat(available),
+            retained.Select(id => PhysicalityId.Compute(id, PhysicalityType.DescriptorRetention))
+                .Concat(available.Select(id => PhysicalityId.Compute(id, PhysicalityType.Content))), []);
     }
 
-    private async Task<(string Descriptor, long Witnesses)[]> ConsensusAsync(Input input)
+    private sealed record Standing(string Descriptor, long Witnesses, long Rating, long Rd,
+        long Volatility, DateTime ObservedAt);
+    private async Task<Standing[]> ConsensusAsync(Input input)
     {
         await using var command = pg.DataSource.CreateCommand("""
-            SELECT encode(object_id,'hex'),witness_count FROM laplace.consensus
+            SELECT encode(object_id,'hex'),witness_count,rating,rd,volatility,last_observed_at FROM laplace.consensus
             WHERE subject_id=$1 AND type_id=$2 ORDER BY object_id
             """);
         command.Parameters.AddWithValue(input.Entity.Id.ToBytes());
         command.Parameters.AddWithValue(HasPhysicality.ToBytes());
-        var rows = new List<(string, long)>();
+        var rows = new List<Standing>();
         await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync()) rows.Add((reader.GetString(0), reader.GetInt64(1)));
+        while (await reader.ReadAsync())
+            rows.Add(new(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
+                reader.GetInt64(4), reader.GetDateTime(5)));
         return rows.ToArray();
     }
 
@@ -143,6 +142,14 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         var first = await writer.ApplyWorkingSetAsync(change);
         var receipt = Assert.IsType<PhysicalityAdmissionReceipt>(first.PhysicalityAdmission);
         Assert.Equal(2, receipt.SourceForms);
+        Assert.Equal(2, receipt.Forms.Length);
+        Assert.All(receipt.Forms, form =>
+        {
+            Assert.Equal(PhysicalityViewState.Available, form.ViewState);
+            Assert.NotNull(form.ViewId);
+            Assert.Equal(0, form.MissingCount);
+        });
+        Assert.Empty(receipt.MissingViewReferences);
         Assert.True(Assert.IsType<PostgresCommitReceipt>(first.PostgresCommit).LocalWalFlushAcknowledged);
         var evidence = await EvidenceAsync(input);
         Assert.Equal(2, evidence.Length);
@@ -151,13 +158,91 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         Assert.Equal(2, descriptors.Length);
         string[] views = await ViewIdsAsync(descriptors, receipt.GeneratedSourceId);
         Assert.Equal(2, views.Length);
-        await AssertBodiesExistAsync(descriptors.Concat(views));
+        Assert.Equal(views, receipt.Forms.Select(form => Convert.ToHexStringLower(form.ViewId!.Value.ToBytes()))
+            .Distinct().Order().ToArray());
+        await AssertBodiesExistAsync(descriptors, views);
         var replay = await writer.ApplyWorkingSetAsync(input.Change("first-unit"));
         Assert.True(replay.JournalReplayHit);
         Assert.Equal(0, replay.AttestationsInserted);
         Assert.Equal(evidence, await EvidenceAsync(input));
         Assert.Equal(views, await ViewIdsAsync(descriptors, receipt.GeneratedSourceId));
-        await AssertBodiesExistAsync(descriptors.Concat(views));
+        await AssertBodiesExistAsync(descriptors, views);
+    }
+
+    [Fact]
+    public async Task MissingCarrierRetainsDescriptorAndLaterContentCompletesOnlyItsView()
+    {
+        var child = ComposeInput();
+        await DeclareSourceAsync(child);
+        var component = new OrderedCompositionComponent(child.Entity.Id, child.Entity.Tier,
+            child.Winner.CoordX, child.Winner.CoordY, child.Winner.CoordZ, child.Winner.CoordM, 0, false);
+        var parent = Assert.Single(OrderedComposition.ComposeBatch([
+            new OrderedCompositionRequest([component, component], child.Entity.TypeId, child.Source,
+                child.Winner.ObservedAtUnixUs)]));
+        var entity = new EntityRow(parent.Id, parent.Tier, child.Entity.TypeId, child.Source);
+        var projection = new PhysicalityRow(PhysicalityId.Compute(parent.Id, PhysicalityType.Projection),
+            parent.Id, child.Source, PhysicalityType.Projection,
+            parent.CoordX, parent.CoordY, parent.CoordZ, parent.CoordM, parent.Hilbert,
+            Trajectory.Build([child.Entity.Id, child.Entity.Id]), 2, null, null, child.Winner.ObservedAtUnixUs);
+        var input = new Input(child.Source, entity, projection, projection);
+        SubstrateChange Observation() => new SubstrateChangeBuilder(child.Source, "missing-carrier-unit")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus).AddEntity(child.Entity).AddEntity(entity)
+            .AddPhysicality(projection).Build();
+        await using var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(pg.DataSource, durability: PostgresWriteDurability.Synchronous), pg.DataSource);
+        int callbacks = 0;
+        ValueTask Verify(CancellationToken _) { callbacks++; return ValueTask.CompletedTask; }
+        var first = await writer.ApplyWorkingSetAsync([Observation()], Verify);
+        var missing = Assert.IsType<PhysicalityAdmissionReceipt>(first.PhysicalityAdmission);
+        var form = Assert.Single(missing.Forms);
+        Assert.Equal(PhysicalityViewState.MissingReference, form.ViewState);
+        Assert.Null(form.ViewId);
+        Assert.Equal(0, form.MissingFirst);
+        Assert.Equal(1, form.MissingCount);
+        Assert.Equal([child.Entity.Id], missing.MissingViewReferences.ToArray());
+        string descriptor = Convert.ToHexStringLower(form.DescriptorId.ToBytes());
+        await AssertBodiesExistAsync([descriptor], []);
+        await PhysicalityWriterTestSupport.AssertDescriptorReadbackAsync(pg.DataSource,
+            form.DescriptorId, projection);
+        Assert.Empty(await ViewIdsAsync([descriptor], missing.GeneratedSourceId));
+        var evidence = await EvidenceAsync(input);
+        Assert.Equal(descriptor, Assert.Single(evidence).Descriptor);
+        Assert.Equal(1, evidence[0].Observations);
+        var standing = await ConsensusAsync(input);
+        Assert.Equal(1, Assert.Single(standing).Witnesses);
+        Assert.Equal(1, callbacks);
+        Assert.True((await writer.ApplyWorkingSetAsync([Observation()], Verify)).JournalReplayHit);
+        Assert.Equal(evidence, await EvidenceAsync(input));
+        Assert.Equal(standing, await ConsensusAsync(input));
+        Assert.Equal(1, callbacks);
+
+        // This is the actual canonical child body, admitted through the same
+        // normal writer. Its E was already present; no placeholder coordinate
+        // or opaque-ID geometry is used to manufacture a view.
+        await writer.ApplyWorkingSetAsync(new SubstrateChangeBuilder(child.Source, "missing-carrier-content")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus).AddEntity(child.Entity)
+            .AddPhysicality(child.Winner).Build());
+        var completed = await writer.ApplyWorkingSetAsync([Observation()], Verify);
+        Assert.False(completed.JournalReplayHit);
+        var available = Assert.IsType<PhysicalityAdmissionReceipt>(completed.PhysicalityAdmission);
+        var resolved = Assert.Single(available.Forms);
+        Assert.Equal(form.DescriptorId, resolved.DescriptorId);
+        Assert.Equal(PhysicalityViewState.Available, resolved.ViewState);
+        Assert.NotNull(resolved.ViewId);
+        Assert.Equal(0, resolved.MissingCount);
+        Assert.Empty(available.MissingViewReferences);
+        Assert.Equal(evidence, await EvidenceAsync(input));
+        Assert.Equal(standing, await ConsensusAsync(input));
+        Assert.Equal(1, callbacks);
+        string view = Convert.ToHexStringLower(resolved.ViewId.Value.ToBytes());
+        Assert.Equal([view], await ViewIdsAsync([descriptor], available.GeneratedSourceId));
+        await AssertBodiesExistAsync([descriptor], [view]);
+        await PhysicalityWriterTestSupport.AssertDescriptorReadbackAsync(pg.DataSource,
+            form.DescriptorId, projection);
+        Assert.True((await writer.ApplyWorkingSetAsync([Observation()], Verify)).JournalReplayHit);
+        Assert.Equal(evidence, await EvidenceAsync(input));
+        Assert.Equal(standing, await ConsensusAsync(input));
+        Assert.Equal(1, callbacks);
     }
 
     [Theory]

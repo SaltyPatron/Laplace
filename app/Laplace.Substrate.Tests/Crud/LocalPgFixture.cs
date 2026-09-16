@@ -2,6 +2,7 @@ using System.Diagnostics;
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Unicode;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
@@ -58,6 +59,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
         ";
                     await cmd.ExecuteNonQueryAsync();
                     await DeclareNativeFixtureFloorAsync(conn);
+                    await DeclareNativeByteBasisAsync(candidate, conn);
                     _sharedDataSource = candidate;
                 }
                 catch
@@ -113,6 +115,66 @@ public sealed class LocalPgFixture : IAsyncLifetime
         if (await verify.ExecuteScalarAsync() is not long count || count != symbols.Length)
             throw new InvalidOperationException(
                 "Fixture basis did not retain every declared actual native floor entity");
+    }
+
+    private static SubstrateChange NativeByteBasis()
+    {
+        // These are raw bytes 0x80..0xff, not their UTF-8 text encodings.
+        // Use the same native basis and exact atomic Content body as UnicodeDecomposer.
+        var source = UnicodeDecomposer.Source;
+        var builder = new SubstrateChangeBuilder(source, "test-foundation/native-byte-basis/v1")
+            .DeclareSourcePrior(SourceTrust.StandardsDerived)
+            .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, source);
+        for (int index = 0; index < ByteAtoms.Count; index++)
+        {
+            byte value = checked((byte)(ByteAtoms.First + index));
+            Hash128 id = ByteAtoms.Id(value);
+            ReadOnlySpan<double> coordinate = ByteAtoms.Coord(value);
+            builder.AddEntity(id, 0, ByteAtoms.TypeId, source);
+            builder.AddPhysicality(new PhysicalityRow(
+                PhysicalityId.Compute(id, PhysicalityType.Content), id, source, PhysicalityType.Content,
+                coordinate[0], coordinate[1], coordinate[2], coordinate[3], ByteAtoms.Hilbert(value),
+                null, 0, null, null, 0));
+        }
+        return builder.Build();
+    }
+
+    private static async Task DeclareNativeByteBasisAsync(
+        NpgsqlDataSource dataSource, NpgsqlConnection connection)
+    {
+        SubstrateChange basis = NativeByteBasis();
+        // The normal native stage/admission/COPY owner retains these actual forms.
+        // Setup remains incomplete until the exact persisted bodies are read back.
+        await new NpgsqlSubstrateWriter(dataSource).ApplyAsync(basis);
+        await using var verify = connection.CreateCommand();
+        verify.CommandText = """
+            SELECT count(*)
+            FROM unnest($1::bytea[],$2::bytea[],$3::double precision[],
+                        $4::double precision[],$5::double precision[],
+                        $6::double precision[],$7::bytea[]) AS expected(e,p,x,y,z,m,h)
+            JOIN laplace.entities e ON e.id=expected.e
+            JOIN laplace.physicalities p ON p.id=expected.p
+            WHERE e.tier=0 AND e.type_id=$8 AND e.first_observed_by=$9
+              AND p.entity_id=expected.e AND p.type=1
+              AND float8send(public.ST_X(p.coord))=float8send(expected.x)
+              AND float8send(public.ST_Y(p.coord))=float8send(expected.y)
+              AND float8send(public.ST_Z(p.coord))=float8send(expected.z)
+              AND float8send(public.ST_M(p.coord))=float8send(expected.m)
+              AND p.hilbert_index=expected.h AND p.trajectory IS NULL
+              AND p.n_constituents=0 AND p.alignment_residual IS NULL AND p.source_dim IS NULL
+            """;
+        var rows = basis.Physicalities;
+        verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, rows.Select(p => p.EntityId.ToBytes()).ToArray());
+        verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, rows.Select(p => p.Id.ToBytes()).ToArray());
+        verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, rows.Select(p => p.CoordX).ToArray());
+        verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, rows.Select(p => p.CoordY).ToArray());
+        verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, rows.Select(p => p.CoordZ).ToArray());
+        verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, rows.Select(p => p.CoordM).ToArray());
+        verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, rows.Select(p => p.HilbertIndex.ToByteArray()).ToArray());
+        verify.Parameters.AddWithValue(ByteAtoms.TypeId.ToBytes());
+        verify.Parameters.AddWithValue(UnicodeDecomposer.Source.ToBytes());
+        if (await verify.ExecuteScalarAsync() is not long count || count != ByteAtoms.Count)
+            throw new InvalidOperationException("Fixture byte basis did not retain every exact native entity and Content body");
     }
 
     public async Task DisposeAsync()

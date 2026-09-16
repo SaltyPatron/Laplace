@@ -34,11 +34,15 @@ RETURNS TABLE (
     floor_index_added_bytes bigint,
     raw_logical_work bigint,
     stored_vertices bigint,
-    generated_source_id bytea)
+    generated_source_id bytea,
+    view_states smallint[],
+    view_missing_first bigint[],
+    view_missing_count bigint[],
+    view_missing_ids bytea[])
 AS 'EXECUTION_LIBRARY', 'pg_laplace_physicality_descriptor_materialize'
 LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;
 
 COMMENT ON FUNCTION ops.physicality_descriptor_materialize(
     bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],
     bigint,bigint,integer,bigint) IS
-'Trusted native ingest boundary: exact raw observations plus explicit producer source priors; one active SQL snapshot for current Content closure. Output stage arrays contain the native source declaration, vocabulary, then generated descriptors/views/structural observations. The returned generated source id is the actual ordinary source-label content root. Receipts describe this operation, not a historical child-geometry witness. Raw logical work counts expanded Content carrier validation; native generated plan allocation has the separate byte ceiling. Reserved bytes are admitted buffers, not backend RSS.';
+'Trusted native ingest boundary: exact raw observations plus explicit producer source priors; one active SQL snapshot for current Content closure. Output stage arrays contain the native source declaration, vocabulary, then generated descriptors/views/structural observations. The returned generated source id is the actual ordinary source-label content root. Descriptors retain exact typed manifests independently of selected child geometry. View state 0 has a non-NULL view id; state 1 has NULL and an exact missing-id slice addressed by zero-based first/count arrays. Receipts describe this operation, not a historical child-geometry witness. Raw logical work counts expanded Content carrier validation; native generated plan allocation has the separate byte ceiling. Reserved bytes are admitted buffers, not backend RSS.';

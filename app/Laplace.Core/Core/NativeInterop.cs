@@ -98,6 +98,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "super_fibonacci")]
     internal static partial void SuperFibonacci(nuint n, double* outQuats);
 
+    [LibraryImport(Library, EntryPoint = "laplace_byte_atoms_copy")]
+    internal static partial int ByteAtomsCopy(Hash128* ids, double* coordinates,
+        Hilbert128* hilberts, nuint capacity);
+
     [LibraryImport(Library, EntryPoint = "math4d_centroid")]
     internal static partial void Math4dCentroid(double* points, nuint nPoints, double* out4);
 

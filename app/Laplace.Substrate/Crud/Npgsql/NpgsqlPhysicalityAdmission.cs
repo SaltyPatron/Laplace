@@ -357,14 +357,18 @@ public sealed partial class NpgsqlSubstrateWriter
         var physicalities = reader.GetFieldValue<byte[][]>(1);
         var attestations = reader.GetFieldValue<byte[][]>(2);
         var descriptors = reader.GetFieldValue<byte[][]>(3);
-        var views = reader.GetFieldValue<byte[][]>(4);
+        var views = reader.GetFieldValue<byte[]?[]>(4);
         var floor = reader.GetFieldValue<byte[]>(5);
         long forms = reader.GetInt64(7);
         byte[] generatedSource = reader.GetFieldValue<byte[]>(17);
+        var viewStates = reader.GetFieldValue<short[]>(18);
+        var viewMissingFirst = reader.GetFieldValue<long[]>(19);
+        var viewMissingCount = reader.GetFieldValue<long[]>(20);
+        var viewMissingIds = reader.GetFieldValue<byte[][]>(21);
         if (entities.Length != 3 || physicalities.Length != 3 || attestations.Length != 3
             || forms != input.ObservationSources.Count || descriptors.LongLength != forms
             || views.LongLength != forms || floor.Length != 16 || generatedSource.Length != 16
-            || descriptors.Any(id => id.Length != 16) || views.Any(id => id.Length != 16))
+            || descriptors.Any(id => id is not { Length: 16 }))
             throw new InvalidOperationException("physicality materializer receipt and native source forms do not align");
         input.Receipt = new PhysicalityAdmissionReceipt(
             Hash128.FromBytes(floor), Hash128.FromBytes(generatedSource), reader.GetString(6), forms,
@@ -391,10 +395,22 @@ public sealed partial class NpgsqlSubstrateWriter
                 + physicalities[i].LongLength + attestations[i].LongLength);
         if (returnedTupleBytes != reportedTupleBytes)
             throw new InvalidOperationException("physicality tuple transport differs from its retained receipt");
-        // The two ID arrays, table arrays, floor/source IDs and snapshot are also
-        // live while imported native stages are created. Account their payloads.
-        long returnedBytes = checked(returnedTupleBytes + forms * (32L + 2 * IntPtr.Size)
+        // Raw ID arrays, view-state/slice arrays, table arrays, floor/source IDs
+        // and snapshot coexist with retained receipts and imported native stages.
+        // Reserve both raw transport and decoded immutable receipt payloads.
+        long returnedBytes = checked(returnedTupleBytes + forms * (32L + 2 * IntPtr.Size + 2 + 2 * sizeof(long))
+            + viewMissingIds.LongLength * (16L + IntPtr.Size)
             + 9L * IntPtr.Size + 32 + input.Receipt.SnapshotReceipt.Length * sizeof(char));
+        var decodedViews = PhysicalityViewReceipts.Decode(descriptors, views, viewStates,
+            viewMissingFirst, viewMissingCount, viewMissingIds,
+            checked(receiverGrant - returnedBytes), maximumLogicalWork);
+        returnedBytes = checked(returnedBytes
+            + PhysicalityViewReceipts.RetainedPayloadBytes(forms, viewMissingIds.LongLength));
+        input.Receipt = input.Receipt with
+        {
+            Forms = decodedViews.Forms,
+            MissingViewReferences = decodedViews.Missing,
+        };
         long generatedBytes = 0;
         for (int i = 0; i < entities.Length; ++i)
         {
@@ -425,8 +441,10 @@ public sealed partial class NpgsqlSubstrateWriter
         CopyTupleParser.DecodeAttestations(
             CollectBlobs(input.GeneratedStages, IntentStageTable.Attestations, 14, "attestations"),
             input.GeneratedAttestations);
-        _log.LogInformation("PHYSICALITY_ADMISSION forms={Forms} provider_rounds={Rounds} database_operations={Operations} peak_bytes={PeakBytes} tuple_bytes={TupleBytes}",
-            forms, input.Receipt.ProviderRounds, input.Receipt.DatabaseOperations,
+        _log.LogInformation("PHYSICALITY_ADMISSION forms={Forms} available_views={AvailableViews} missing_views={MissingViews} missing_reference_entries={MissingReferences} provider_rounds={Rounds} database_operations={Operations} peak_bytes={PeakBytes} tuple_bytes={TupleBytes}",
+            forms, input.Receipt.Forms.LongCount(form => form.ViewState == PhysicalityViewState.Available),
+            input.Receipt.Forms.LongCount(form => form.ViewState == PhysicalityViewState.MissingReference),
+            input.Receipt.MissingViewReferences.Length, input.Receipt.ProviderRounds, input.Receipt.DatabaseOperations,
             input.Receipt.ReservedPeakBytes, input.Receipt.TupleBytes);
     }
 }

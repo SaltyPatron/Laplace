@@ -58,7 +58,8 @@ CREATE TYPE pg_temp.descriptor_result AS (
     floor_receipt bytea,snapshot_receipt text,source_form_count bigint,current_content_count bigint,
     missing_content_count bigint,provider_rounds integer,database_operations integer,
     reserved_peak_bytes bigint,tuple_bytes bigint,floor_index_added_bytes bigint,
-    raw_logical_work bigint,stored_vertices bigint,generated_source_id bytea);
+    raw_logical_work bigint,stored_vertices bigint,generated_source_id bytea,
+    view_states smallint[],view_missing_first bigint[],view_missing_count bigint[],view_missing_ids bytea[]);
 CREATE FUNCTION pg_temp.descriptor_call(raw_frames bytea,winner_frames bytea,
     source_ids bytea[],unit_ids bytea[],priors float8[],byte_grant bigint DEFAULT 268435456,
     operation_grant integer DEFAULT 32,logical_grant bigint DEFAULT 1000000)
@@ -93,6 +94,10 @@ BEGIN
     SELECT * INTO STRICT s FROM descriptor_source;
     IF result.source_form_count<>2 OR cardinality(result.descriptor_ids)<>2 OR cardinality(result.view_ids)<>2
        OR result.descriptor_ids[1]=result.descriptor_ids[2] OR result.view_ids[1]=result.view_ids[2]
+       OR result.view_states IS DISTINCT FROM ARRAY[0,0]::smallint[]
+       OR result.view_missing_count IS DISTINCT FROM ARRAY[0,0]::bigint[]
+       OR result.view_missing_ids IS DISTINCT FROM ARRAY[]::bytea[]
+       OR array_position(result.view_ids,NULL) IS NOT NULL
        OR result.generated_source_id<>(SELECT root_id FROM converse.text_root_placements(ARRAY['substrate/source/PhysicalityDescriptorAdmission/v1']))
        OR octet_length(result.floor_receipt)<>16 OR result.snapshot_receipt NOT LIKE 'active-mvcc-v1;%'
        OR result.missing_content_count<>0 OR result.current_content_count<>0 OR result.provider_rounds<>0
@@ -106,7 +111,11 @@ BEGIN
     SELECT * INTO STRICT single_result FROM pg_temp.descriptor_call(
         (SELECT tuples FROM descriptor_frames WHERE variant=0),(SELECT tuples FROM descriptor_frames WHERE variant=0),
         ARRAY[s.source_id],ARRAY[s.unit_id],ARRAY[0.8]);
-    IF single_result.descriptor_ids[1]<>result.descriptor_ids[1] OR single_result.view_ids[1]<>result.view_ids[1] THEN
+    IF single_result.descriptor_ids IS DISTINCT FROM ARRAY[result.descriptor_ids[1]]
+       OR single_result.view_ids IS DISTINCT FROM ARRAY[result.view_ids[1]]
+       OR single_result.view_states IS DISTINCT FROM ARRAY[0]::smallint[]
+       OR single_result.view_missing_count IS DISTINCT FROM ARRAY[0]::bigint[]
+       OR single_result.view_missing_ids IS DISTINCT FROM ARRAY[]::bytea[] THEN
         RAISE EXCEPTION 'batch neighbors changed the original immutable body or source-scoped view';
     END IF;
     RAISE NOTICE 'physicality admission: two raw forms, exact source mapping, floor-only zero frontier, batch/single identity and finite receipts';
@@ -122,6 +131,9 @@ BEGIN
     SELECT * INTO STRICT result FROM descriptor_nested_admitted;
     IF result.source_form_count<>1 OR cardinality(result.descriptor_ids)<>1 OR cardinality(result.view_ids)<>1
        OR result.missing_content_count<>1 OR result.current_content_count<>0 OR result.provider_rounds<>1
+       OR result.view_states IS DISTINCT FROM ARRAY[0]::smallint[]
+       OR result.view_missing_count IS DISTINCT FROM ARRAY[0]::bigint[]
+       OR result.view_missing_ids IS DISTINCT FROM ARRAY[]::bytea[] OR result.view_ids[1] IS NULL
        OR result.database_operations<>2*result.provider_rounds+2 OR result.raw_logical_work<=4 THEN
         RAISE EXCEPTION 'non-atom carrier did not use explicit absence and its actual admitted winner'
             USING DETAIL=pg_temp.descriptor_receipt(result)::text;
@@ -129,6 +141,28 @@ BEGIN
     RAISE NOTICE 'physicality admission: non-atom RLE parent resolves one missing Content carrier from its admitted winner';
 END
 $nested$;
+DO $unavailable$
+DECLARE result pg_temp.descriptor_result; available pg_temp.descriptor_result; s record;
+BEGIN
+    SELECT * INTO STRICT s FROM descriptor_source;
+    SELECT * INTO STRICT available FROM descriptor_nested_admitted;
+    SELECT * INTO STRICT result FROM pg_temp.descriptor_call(
+        (SELECT tuples FROM descriptor_nested_frame),decode('','hex'),
+        ARRAY[s.source_id],ARRAY[s.unit_id],ARRAY[0.8]);
+    IF result.source_form_count<>1 OR result.descriptor_ids IS DISTINCT FROM available.descriptor_ids
+       OR result.view_ids IS DISTINCT FROM ARRAY[NULL::bytea]
+       OR result.view_states IS DISTINCT FROM ARRAY[1]::smallint[]
+       OR result.view_missing_first IS DISTINCT FROM ARRAY[0]::bigint[]
+       OR result.view_missing_count IS DISTINCT FROM ARRAY[1]::bigint[]
+       OR result.view_missing_ids IS DISTINCT FROM ARRAY[s.entity_id]
+       OR cardinality(result.physicalities)<>3 OR octet_length(result.physicalities[3])=0
+       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0 THEN
+        RAISE EXCEPTION 'missing geometry did not retain exact D, native stages and explicit unavailable V'
+            USING DETAIL=pg_temp.descriptor_receipt(result)::text;
+    END IF;
+    RAISE NOTICE 'physicality admission: absent selected Content preserves exact descriptor and reports null view with exact AB frontier';
+END
+$unavailable$;
 DO $refusals$
 DECLARE failures integer := 0; s record; raw bytea; winner bytea;
 BEGIN
@@ -151,11 +185,8 @@ BEGIN
       EXCEPTION WHEN program_limit_exceeded THEN failures:=failures+1; END;
     BEGIN PERFORM * FROM pg_temp.descriptor_call(raw,winner,ARRAY[s.source_id,s.source_id],ARRAY[s.unit_id,s.unit_id],ARRAY[0.8,0.8],268435456,32,1);
       EXCEPTION WHEN program_limit_exceeded THEN failures:=failures+1; END;
-    BEGIN PERFORM * FROM pg_temp.descriptor_call((SELECT tuples FROM descriptor_nested_frame),decode('','hex'),
-        ARRAY[s.source_id],ARRAY[s.unit_id],ARRAY[0.8]);
-      EXCEPTION WHEN invalid_parameter_value THEN failures:=failures+1; END;
-    IF failures<>9 THEN RAISE EXCEPTION 'physicality admission accepted invalid transport/provider/resource inputs: %',failures; END IF;
-    RAISE NOTICE 'physicality admission: nine malformed-source, prior, absent-provider and finite-grant controls refused';
+    IF failures<>8 THEN RAISE EXCEPTION 'physicality admission accepted invalid transport/provider/resource inputs: %',failures; END IF;
+    RAISE NOTICE 'physicality admission: eight malformed-source, prior and finite-grant controls refused';
 END
 $refusals$;
 INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
@@ -169,8 +200,11 @@ BEGIN
         (SELECT tuples FROM descriptor_nested_frame),decode('','hex'),
         ARRAY[s.source_id],ARRAY[s.unit_id],ARRAY[0.8]);
     IF result.current_content_count<>1 OR result.missing_content_count<>0 OR result.provider_rounds<>1
-       OR result.descriptor_ids<>(SELECT descriptor_ids FROM descriptor_nested_admitted)
-       OR result.view_ids<>(SELECT view_ids FROM descriptor_nested_admitted)
+       OR result.descriptor_ids IS DISTINCT FROM (SELECT descriptor_ids FROM descriptor_nested_admitted)
+       OR result.view_ids IS DISTINCT FROM (SELECT view_ids FROM descriptor_nested_admitted)
+       OR result.view_states IS DISTINCT FROM ARRAY[0]::smallint[]
+       OR result.view_missing_count IS DISTINCT FROM ARRAY[0]::bigint[]
+       OR result.view_missing_ids IS DISTINCT FROM ARRAY[]::bytea[] OR result.view_ids[1] IS NULL
        OR result.database_operations<>2+2*result.provider_rounds THEN
         RAISE EXCEPTION 'actual current Content provider changed exact original body or lost batched snapshot receipts'
             USING DETAIL=pg_temp.descriptor_receipt(result)::text;

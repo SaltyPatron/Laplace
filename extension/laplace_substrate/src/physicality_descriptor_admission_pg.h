@@ -13,6 +13,8 @@ typedef struct laplace_physicality_pg_admission_result {
     intent_stage_t *stages[3];
     const physicality_descriptor_admitted_form_t *forms;
     size_t form_count;
+    const hash128_t *view_missing_ids;
+    size_t view_missing_count;
     hash128_t floor_receipt;
     hash128_t generated_source_id;
     Datum snapshot_receipt;

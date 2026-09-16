@@ -111,7 +111,11 @@ def request_ingestion(client, output, report, job_id, index):
                 require(isinstance(receipt, dict)
                         and receipt.get("schema") == "laplace.chess-retained-ingestion/v1"
                         and receipt.get("jobId") == job_id, "failed ingestion artifact identity differs")
-                retained["recordingStatus"] = receipt.get("recording", {}).get("status")
+                recording = receipt.get("recording")
+                require(recording is None or isinstance(recording, dict), "failed recording receipt has invalid shape")
+                retained["serviceStatus"] = receipt.get("status")
+                retained["serviceError"] = receipt.get("error")
+                retained["recordingStatus"] = recording.get("status") if recording is not None else None
             failure["collectionCompleted"] = True
         except (ValueError, KeyError, TypeError, AttributeError, OSError, TimeoutError) as recovery:
             failure["collectionCompleted"] = False
@@ -135,8 +139,9 @@ def scope_rows(rows):
 def validate(receipt, experiment, experiment_bytes, pgn, job_id, games, elapsed, replay, previous=None):
     require(receipt.get("schema") == "laplace.chess-retained-ingestion/v1"
             and receipt.get("jobId") == job_id, "retained ingestion receipt identity differs")
-    recording = receipt.get("recording", {})
-    require(recording.get("schema") == "laplace.chess-recording/v2"
+    recording = receipt.get("recording")
+    require(isinstance(recording, dict)
+            and recording.get("schema") == "laplace.chess-recording/v2"
             and recording.get("purpose") == "retained-pgn-ingestion"
             and recording.get("status") == "completed", "retained native readback did not complete")
     require(recording.get("experimentId") == experiment.get("experimentId") == job_id

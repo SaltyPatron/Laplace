@@ -47,6 +47,7 @@ typedef struct ReadState {
     bool has_cursor, exhausted;
     size_t candidates, rejected, hydrated_nodes;
     bool candidate_hydration;
+    int16 hydration_type;
 } ReadState;
 
 static pg_noreturn void read_invalid(const char *message) {
@@ -169,12 +170,12 @@ static int append_child(void *opaque,size_t ordinal,const hash128_t *id,uint64 f
 }
 static void receive_node(Datum placement_value,Datum entity_value,int32 n_constituents,Datum geometry,void *opaque) {
     ReadState *s=opaque;hash128_t entity=read_id(entity_value),placement=read_id(placement_value),expected;
-    laplace_physicality_id_compute(entity,1,&expected);
+    laplace_physicality_id_compute(entity,s->hydration_type,&expected);
     hash128_t *selected=bsearch(&entity,s->frontier,s->frontier_count,sizeof(entity),compare_id);
     if(memcmp(&placement,&expected,sizeof(expected)) || !selected)
-        read_invalid("indexed row is outside requested Content identity scope");
+        read_invalid("indexed row is outside requested descriptor physicality scope");
     size_t selected_index=(size_t)(selected-s->frontier);
-    if(s->frontier_seen[selected_index])read_invalid("duplicate indexed Content row");
+    if(s->frontier_seen[selected_index])read_invalid("duplicate indexed descriptor row");
     s->frontier_seen[selected_index]=true;
     if(n_constituents<(s->candidate_hydration?1:2)) read_invalid("typed descriptor node must have at least two ordinary children");
     work(s,(size_t)n_constituents);
@@ -209,10 +210,21 @@ static void hydrate(ReadState *s,const hash128_t *ids,size_t count) {
     size_t reservation=plus(8192,times(unique,2*BLCKSZ+2048));read_charge(s,reservation);
     s->reads.maximum_scratch_bytes=reservation;
     s->callback_first=s->node_count;size_t start=s->node_count;
-    s->reads.maximum_leaf_reads=s->maximum_operations-s->operations;
-    s->reads.leaf_reads=0;
-    laplace_content_carrier_read_bounded(array,receive_node,s,&s->reads);
-    s->operations+=s->reads.leaf_reads;++s->rounds;
+    /* New retention manifests are independent of selected child geometry.
+     * Hydrate legacy Content only for identities with no retention row. */
+    for (int pass=0;pass<2;++pass) {
+        s->hydration_type=pass==0?PHYSICALITY_DESCRIPTOR_RETENTION_TYPE:1;
+        s->reads.maximum_leaf_reads=s->maximum_operations-s->operations;
+        s->reads.leaf_reads=0;
+        laplace_typed_carrier_read_bounded(array,s->hydration_type,receive_node,s,&s->reads);
+        s->operations+=s->reads.leaf_reads;
+        if(pass!=0 || s->node_count-start==unique)break;
+        hash128_t *absent=allocate(s,times(unique,sizeof(hash128_t)));size_t absent_count=0;
+        for(size_t i=0;i<unique;++i)if(!s->frontier_seen[i])absent[absent_count++]=s->frontier[i];
+        release(s,array,VARSIZE(array));array=id_array(s,absent,absent_count);
+        release(s,absent,times(unique,sizeof(hash128_t)));
+    }
+    ++s->rounds;
     if(s->node_count-start!=unique) read_invalid("required typed descriptor node is absent");
     s->bytes-=reservation;
     release(s,array,VARSIZE(array));release(s,s->frontier,bytes);

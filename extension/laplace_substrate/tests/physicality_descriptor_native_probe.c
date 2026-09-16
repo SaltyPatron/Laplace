@@ -5,6 +5,7 @@
 #define LAPLACE_DESCRIPTOR_PG_SOURCE "../src/physicality_descriptor_admission.c"
 #endif
 #include LAPLACE_DESCRIPTOR_PG_SOURCE
+#include "../src/conversation_session.c"
 #include <setjmp.h>
 #include <stdarg.h>
 
@@ -33,6 +34,7 @@ static SPITupleTable tuple_table;
 static HeapTuple row_pointers[3];
 
 MemoryContext CurrentMemoryContext;
+static MemoryContext allocation_context;
 volatile sig_atomic_t InterruptPending;
 uint64 SPI_processed;
 SPITupleTable *SPI_tuptable;
@@ -51,6 +53,9 @@ int errcode(int code) { error_code = code; return 0; }
 int errmsg(const char *format, ...) {
     va_list args; va_start(args, format); vsnprintf(error_text, sizeof(error_text), format, args); va_end(args); return 0;
 }
+int errmsg_internal(const char *format, ...) {
+    va_list args; va_start(args,format);vsnprintf(error_text,sizeof(error_text),format,args);va_end(args);return 0;
+}
 void errfinish(const char *file, int line, const char *function) {
     (void)file; (void)line; (void)function;
     if (expecting_error) longjmp(expected_error, 1);
@@ -64,7 +69,7 @@ void pg_qsort(void *base, size_t count, size_t size, int (*compare)(const void *
 }
 void *palloc(Size bytes) { void *p = malloc(bytes ? bytes : 1); CHECK(p != NULL); return p; }
 void *palloc0(Size bytes) { void *p = calloc(1, bytes ? bytes : 1); CHECK(p != NULL); return p; }
-void *MemoryContextAllocZero(MemoryContext context, Size bytes) { (void)context; return palloc0(bytes); }
+void *MemoryContextAllocZero(MemoryContext context, Size bytes) { allocation_context=context; return palloc0(bytes); }
 void pfree(void *pointer) { free(pointer); }
 struct varlena *pg_detoast_datum_packed(struct varlena *datum) { return datum; }
 struct varlena *pg_detoast_datum(struct varlena *datum) { return datum; }
@@ -140,7 +145,66 @@ static void probe_stages_free(admission_state *s) {
     pfree(s->missing); pfree(s);
 }
 
+uint64 hex_encode(const char *src,size_t len,char *dst) {
+    static const char digits[]="0123456789abcdef";
+    for(size_t i=0;i<len;++i){unsigned char c=(unsigned char)src[i];dst[i*2]=digits[c>>4];dst[i*2+1]=digits[c&15];}
+    return len*2;
+}
+static void probe_session_view_receipt(void) {
+    SessionAdmission state={0};state.maximum_bytes=4096;
+    state.context=(MemoryContext)(uintptr_t)1;CurrentMemoryContext=(MemoryContext)(uintptr_t)2;
+    physicality_descriptor_admitted_form_t forms[2]={0};
+    hash128_t missing[2]={{2,0},{3,0}};
+    laplace_physicality_pg_admission_result result={0};result.forms=forms;result.form_count=2;
+    size_t bytes=99;CHECK(session_view_receipt(&state,&result,&bytes)==NULL && bytes==0 && state.bytes==0);
+    forms[1].descriptor_id=(hash128_t){1,0};forms[1].view_state=PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE;
+    forms[1].missing_count=2;result.view_missing_ids=missing;result.view_missing_count=2;
+    char *receipt=session_view_receipt(&state,&result,&bytes);
+    const char *expected="{\"schema\":\"laplace.session-descriptor-views/v1\",\"transaction_pending\":true,\"forms\":[{\"descriptor_id\":\"01000000000000000000000000000000\",\"view_state\":1,\"missing_first\":0,\"missing_count\":2}],\"missing_ids\":[\"02000000000000000000000000000000\",\"03000000000000000000000000000000\"]}";
+    CHECK(strcmp(receipt,expected)==0 && state.bytes==bytes && state.peak_bytes==bytes);
+    CHECK(allocation_context==state.context && allocation_context!=CurrentMemoryContext);
+    session_release(&state,receipt,bytes);CHECK(state.bytes==0);
+    state.maximum_bytes=512;REFUSES((void)session_view_receipt(&state,&result,&bytes),"byte grant");
+    CHECK(state.bytes==0);result.view_missing_count=SIZE_MAX;
+    REFUSES((void)session_view_receipt(&state,&result,&bytes),"finite extent");
+    CurrentMemoryContext=NULL;
+}
+
+static void probe_view_arrays(void) {
+    SnapshotData snapshot={0};admission_state *s=probe_state(&snapshot);
+    s->context=(MemoryContext)(uintptr_t)3;CurrentMemoryContext=(MemoryContext)(uintptr_t)4;
+    physicality_descriptor_admitted_form_t forms[3]={0};
+    forms[0].view_id=(hash128_t){11,12};forms[2].view_id=(hash128_t){21,22};
+    forms[1].view_state=PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE;
+    forms[1].missing_first=1;forms[1].missing_count=2;
+    ArrayType *views=admission_views(s,forms,3,3);
+    CHECK(allocation_context==s->context && allocation_context!=CurrentMemoryContext);
+    CHECK(ARR_NDIM(views)==1 && ARR_DIMS(views)[0]==3 && ARR_LBOUND(views)[0]==1);
+    CHECK(ARR_HASNULL(views) && ARR_NULLBITMAP(views)[0]==5);
+    char *data=ARR_DATA_PTR(views);
+    CHECK(VARSIZE(data)==20 && !memcmp(VARDATA(data),&forms[0].view_id,16));
+    CHECK(VARSIZE(data+20)==20 && !memcmp(VARDATA(data+20),&forms[2].view_id,16));
+    CHECK(VARSIZE(views)==ARR_OVERHEAD_WITHNULLS(1,3)+40);
+    for(int field=0;field<3;++field) {
+        ArrayType *values=admission_view_field(s,forms,3,field);
+        CHECK(!ARR_HASNULL(values) && ARR_DIMS(values)[0]==3);
+        if(field==0){int16 values_copy[3];memcpy(values_copy,ARR_DATA_PTR(values),sizeof(values_copy));
+            CHECK(values_copy[0]==0 && values_copy[1]==1 && values_copy[2]==0);}
+        else{int64 values_copy[3];memcpy(values_copy,ARR_DATA_PTR(values),sizeof(values_copy));
+            CHECK(values_copy[0]==0 && values_copy[1]==(field==1?1:2) && values_copy[2]==0);}
+        pfree(values);
+    }
+    ArrayType *empty=admission_views(s,NULL,0,0);CHECK(ARR_NDIM(empty)==0 && !ARR_HASNULL(empty));pfree(empty);
+    forms[1].missing_first=2;REFUSES((void)admission_views(s,forms,3,3),"missing slice");forms[1].missing_first=1;
+    forms[1].missing_count=0;REFUSES((void)admission_views(s,forms,3,3),"missing slice");forms[1].missing_count=2;
+    forms[1].view_state=7;REFUSES((void)admission_views(s,forms,3,3),"view state");
+    forms[1].view_state=0;REFUSES((void)admission_views(s,forms,3,3),"missing slice");
+    pfree(views);probe_stages_free(s);CurrentMemoryContext=NULL;
+}
+
 int main(void) {
+    probe_view_arrays();
+    probe_session_view_receipt();
     SnapshotData snapshot = {0};
     TransactionId transactions[2] = {43,51}, children[1] = {44};
     hash128_t child_ids[2] = {{10,11},{20,21}}, entity, placement, pending[3];

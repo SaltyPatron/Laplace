@@ -268,6 +268,51 @@ static ArrayType *admission_ids(admission_state *s, const hash128_t *ids, size_t
     return array;
 }
 
+/* The view state and exact missing slice are distinct from immutable D.
+ * Array NULL bits express unavailable V; an all-zero id is never published. */
+static ArrayType *admission_views(admission_state *s,
+    const physicality_descriptor_admitted_form_t *forms,size_t count,size_t missing_count)
+{
+    size_t present=0;
+    if(count>INT_MAX)admission_invalid("view count exceeds PostgreSQL array capacity");
+    for(size_t i=0;i<count;++i) {
+        if(forms[i].view_state!=PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE &&
+           forms[i].view_state!=PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE)
+            admission_invalid("native view state is invalid");
+        if(forms[i].missing_first>missing_count || forms[i].missing_count>missing_count-forms[i].missing_first ||
+           forms[i].missing_first>PG_INT64_MAX || forms[i].missing_count>PG_INT64_MAX ||
+           ((forms[i].view_state==PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE)!=(forms[i].missing_count==0)))
+            admission_invalid("native view missing slice is invalid");
+        if(forms[i].view_state==PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE)++present;
+    }
+    size_t overhead=count?ARR_OVERHEAD_WITHNULLS(1,count):ARR_OVERHEAD_NONULLS(0);
+    size_t bytes=admission_add(overhead,admission_multiply(present,INTALIGN(VARHDRSZ+sizeof(hash128_t))));
+    ArrayType *array=admission_alloc(s,bytes);SET_VARSIZE(array,bytes);
+    ARR_NDIM(array)=count?1:0;ARR_ELEMTYPE(array)=BYTEAOID;
+    if(count){ARR_DIMS(array)[0]=(int)count;ARR_LBOUND(array)[0]=1;array->dataoffset=(int32)overhead;}
+    char *cursor=(char*)array+overhead;bits8 *bitmap=ARR_NULLBITMAP(array);
+    for(size_t i=0;i<count;++i)if(forms[i].view_state==PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE) {
+        bitmap[i/8]|=(bits8)(1u<<(i%8));SET_VARSIZE(cursor,VARHDRSZ+sizeof(hash128_t));
+        memcpy(cursor+VARHDRSZ,&forms[i].view_id,sizeof(hash128_t));cursor+=INTALIGN(VARHDRSZ+sizeof(hash128_t));
+    }
+    return array;
+}
+static ArrayType *admission_view_field(admission_state *s,
+    const physicality_descriptor_admitted_form_t *forms,size_t count,int field)
+{
+    size_t width=field==0?sizeof(int16):sizeof(int64),overhead=ARR_OVERHEAD_NONULLS(count?1:0);
+    size_t bytes=admission_add(overhead,admission_multiply(count,width));
+    ArrayType *array=admission_alloc(s,bytes);SET_VARSIZE(array,bytes);ARR_NDIM(array)=count?1:0;
+    ARR_ELEMTYPE(array)=field==0?INT2OID:INT8OID;
+    if(count){ARR_DIMS(array)[0]=(int)count;ARR_LBOUND(array)[0]=1;}
+    char *data=(char*)array+overhead;
+    for(size_t i=0;i<count;++i) {
+        if(field==0){int16 value=(int16)forms[i].view_state;memcpy(data+i*width,&value,width);}
+        else{int64 value=(int64)(field==1?forms[i].missing_first:forms[i].missing_count);memcpy(data+i*width,&value,width);}
+    }
+    return array;
+}
+
 static int admission_key_compare(const void *left, const void *right)
 {
     return memcmp(&((const provider_key *)left)->placement,
@@ -642,6 +687,7 @@ static void admission_materialize(admission_state *s,
     for (size_t i = 0; i < 3; ++i) result->stages[i] = s->output[i];
     result->owner = s->context;
     result->form_count = form_count;
+    result->view_missing_ids = physicality_descriptor_materialization_missing(s->materialization, &result->view_missing_count);
     result->floor_receipt = floor;
     result->generated_source_id = generated_source;
     result->snapshot_receipt = snapshot_text;
@@ -723,8 +769,8 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     int64_t maximum_bytes = PG_GETARG_INT64(10), maximum_logical = PG_GETARG_INT64(12);
     int32_t maximum_operations = PG_GETARG_INT32(11);
     int64_t generated_at = PG_GETARG_INT64(9);
-    Datum snapshot_text, values[18] = {0};
-    bool nulls[18] = {false};
+    Datum snapshot_text, values[22] = {0};
+    bool nulls[22] = {false};
     ReturnSetInfo *result;
 
     if (maximum_bytes <= 0 || maximum_logical <= 0 || maximum_operations <= 0 ||
@@ -748,8 +794,10 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     form_ids = admission_alloc(s, admission_multiply(form_count, sizeof(*form_ids)));
     for (size_t i = 0; i < form_count; ++i) form_ids[i] = forms[i].descriptor_id;
     values[3] = PointerGetDatum(admission_ids(s, form_ids, form_count));
-    for (size_t i = 0; i < form_count; ++i) form_ids[i] = forms[i].view_id;
-    values[4] = PointerGetDatum(admission_ids(s, form_ids, form_count));
+    values[4] = PointerGetDatum(admission_views(s, forms, form_count, materialized.view_missing_count));
+    for(int i=0;i<3;++i)
+        values[18+i]=PointerGetDatum(admission_view_field(s,forms,form_count,i));
+    values[21]=PointerGetDatum(admission_ids(s,materialized.view_missing_ids,materialized.view_missing_count));
     for (int i = 0; i < 3; ++i)
         values[i] = PointerGetDatum(admission_output(s, (intent_stage_table_t)(i + 1), &tuple_bytes));
     {
@@ -775,6 +823,8 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
         size_t result_bytes = 256 + VARHDRSZ + sizeof(generated_source);
         for (int i = 0; i < 7; ++i)
             result_bytes = admission_add(result_bytes, toast_raw_datum_size(values[i]));
+        for (int i = 18; i < 22; ++i)
+            result_bytes = admission_add(result_bytes, toast_raw_datum_size(values[i]));
         admission_charge(s, result_bytes);
     }
     values[12] = Int64GetDatum((int64_t)s->peak_bytes);
@@ -784,7 +834,7 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     values[16] = Int64GetDatum((int64_t)s->stored_vertices);
     InitMaterializedSRF(fcinfo, 0);
     result = (ReturnSetInfo *)fcinfo->resultinfo;
-    if (result->setDesc->natts != 18) admission_invalid("SQL result contract does not match native provider");
+    if (result->setDesc->natts != 22) admission_invalid("SQL result contract does not match native provider");
     tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
     admission_cleanup(s);
     PG_RETURN_NULL();

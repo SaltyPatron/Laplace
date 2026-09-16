@@ -103,19 +103,43 @@ body. Native controls prove that missing-body frontier and its resolution.
 ## Geometry and finite derivation
 
 The identity plan contains ordered structure and a list of every reference
-occurrence. It does not manufacture coordinates for missing references. The
-realized-E field can use its supplied physicality body. A descriptor view's
-carrier references require actual selected child physicalities and an explicit
-recipe/epoch receipt. Using verified current Content placements does not prove
-the historical child curve of an old observation.
+occurrence. Exact retention does not require a selected geometric view of every
+referenced E. Canonical vocabulary anchors intentionally admitted as E plus
+names can therefore remain exact descriptor operands without acquiring invented
+Content physicalities. A selected view still requires actual child physicalities
+and an explicit recipe/epoch receipt. Verified current Content placements do not
+prove the historical child curve of an old observation.
+
+`DescriptorRetention` is registered physicality type 9. Its version-1 storage
+recipe composes the existing descriptor manifest in the native document tier.
+Every original entity operand and every descriptor entity ID remains unchanged.
+For a realized-E or carrier-E operand, the storage projection uses the coordinate
+of an ordinary literal identifier entity:
+`[PhysicalityRetentionReferenceIdentifierV1, byte-number-0, ..., byte-number-15]`.
+The sixteen numeric children encode the exact existing identifier bytes through
+the same canonical numeric vocabulary as other descriptor fields. That literal
+entity and its real Content body are emitted explicitly. Its coordinate describes
+the identifier representation; it never claims to be the referenced E's selected
+position. Other descriptor children use their actual typed-field projection.
+The original E remains in the type-9 ordered trajectory, so containment and
+reference resolution retain their ordinary indexed path. The native manifest
+validator authenticates the same canonical ordered identity, requires at least
+two logical operands, rejects factor/testimony payloads in this manifest, and
+charges expanded hash work before execution.
 
 `physicality_descriptor_materialize` accepts the original capture, actual
 current Content provider stages, original writer stages in transport order, checked
 absence ids and one actual source/source-unit/prior tuple per source body.
-It publishes a sorted unique pending frontier with no generated stage until
-the finite original-body closure is available. The provider order is declared
-by `PhysicalityCurrentFloorAdmittedWinnerRecipeV1`: current database Content,
-mapped codepoint floor, then the actual placement winner this writer will
+It publishes a sorted unique pending frontier with no generated stage while
+references remain unqueried. Once absence is checked, it retains exact D and
+source-unit HAS evidence even when no selected body exists. Such a form has
+`view_state=1`, a NULL SQL view ID, and a sorted unique slice of its exact
+transitive missing E frontier. Available forms have `view_state=0` and empty
+missing slices. Every flattened missing entry belongs to an original form;
+duplicate forms may share a slice. No zero hash is published as an entity.
+The provider order is declared by
+`PhysicalityRetainedDescriptorSelectedGeometryRecipeV2`: current database Content,
+mapped codepoint floor or authenticated native raw-byte basis, then the actual placement winner this writer will
 install after a checked database absence. Alternate raw source bodies never
 choose the provider by incidental order or by a different minimum-id rule.
 All typed rows in the original writer stages are authenticated. Only Content
@@ -123,6 +147,16 @@ rows enter the fallback provider set, and its first placement per entity follows
 the writer's actual first-occurrence rule across those stages. Projection,
 parse and alternate Content observations remain in the original capture and
 receive their own exact descriptors and source-unit evidence.
+
+Raw bytes 128–255 use the same native basis as `ByteAtoms`: Blake3 of the
+single byte, the existing 128-point SuperFibonacci placement and its Hilbert
+index. The vocabulary retains a copied indexed basis and authenticates it
+before use. A selected byte atom binds `PhysicalityByteBasisReceiptV1` to a
+fingerprint of every exact basis ID, binary64 coordinate and Hilbert field;
+the Unicode floor receipt itself remains unchanged. Stored Content
+still takes precedence. This makes atoms resolvable without claiming their E
+rows are already persisted: the generated-stage sink retains its SQL presence
+checks. Existing Unicode decomposition owns byte E/P declaration.
 
 Every view contains a canonical sorted receipt of the selected bodies reachable
 from that root. A change to C in A→B→C changes A's view receipt even when A and
@@ -132,6 +166,10 @@ rows are never fed back into provider closure. Each ordinary reference selection
 retains the real E operand, selected exact D (or pinned floor receipt), carrier
 identity and reachable scope. The descriptor D remains immutable content while
 the view V identifies this explicit geometry recipe and selection.
+The version-2 view recipe deliberately changes V identity because descriptor
+storage projection now uses the explicit retention recipe. Existing E and exact
+D identities do not change. Prior type-1 descriptor storage remains readable;
+it is not relabeled as a type-9 projection.
 
 The registered `HAS_PHYSICALITY` relation associates E with D using the actual
 source and source-unit context. A raw source-unit receipt is not assumed to be
@@ -164,11 +202,11 @@ identity, field width, schema and numeric representation, reconstructs the
 exact body, and rechecks each root through the same native planner. Missing or
 malformed child records fail before output.
 
-The existing GIN expression on Content trajectory constituent ids can select
+The GIN expressions on retention and legacy Content trajectory constituent ids can select
 candidates containing both E and the canonical schema constituent. That hit
 requires native typed validation; containment alone does not establish a form.
-The resulting descriptor D is an ordinary entity whose Content trajectory can
-use the existing typed trajectory reader. Product results must expose D and its
+The resulting descriptor D is an ordinary entity whose authenticated typed
+trajectory is hydrated through the existing bounded reader. Product results must expose D and its
 observation/derivation scope. Joining every form onto `structural.entity_curve`
 by E alone would multiply occurrences and mix placements, so it is not a valid
 all-form read implementation.
@@ -180,7 +218,7 @@ unique missing typed-child frontier. An incomplete result has no executable
 body array. Realized entity references, carrier entity references, schema tags
 and exact numeric vocabulary remain terminal. A typed structural slot cannot
 silently turn a terminal vocabulary value into a fetch request. Before full
-replan, the native owner admits the decoded Content manifests' expanded hash
+replan, the native owner admits decoded Content and retention manifests' expanded hash
 operand count under a separate finite work grant.
 
 `structural.physicality_descriptor_read(D[], bytes, operations, logical_work)`

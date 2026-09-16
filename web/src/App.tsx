@@ -15,18 +15,11 @@ import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { AccountControls } from './auth/AccountControls';
-import { apiGet } from './api/client';
+import { SettingsView, BillingReturnView } from './auth/SettingsView';
+import { apiGet, setApiWorkspace } from './api/client';
 import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
-/**
- * One shell, one nav, for every surface. Previously the app ran two shells — a
- * tab-state MainShell and a separate ExploreShell whose header showed only two
- * destinations, so entering Explore hid Home/Query/Play/Lab/Billing and stranded
- * you there. Everything is a route now: the header is identical everywhere,
- * every surface has a URL (deep-link, refresh, back button), and no page can
- * hide another.
- */
 const TABS: { id: string; label: string; path: string }[] = [
   { id: 'home', label: 'Home', path: '/' },
   { id: 'chat', label: 'Chat', path: '/chat' },
@@ -36,28 +29,27 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'play', label: 'Play', path: '/play' },
   { id: 'lab', label: 'Lab', path: '/lab' },
   { id: 'billing', label: 'Billing', path: '/billing' },
+  { id: 'settings', label: 'Settings', path: '/settings' },
   { id: 'operator', label: 'Operator', path: '/operator' },
 ];
 
 function isActive(pathname: string, tabPath: string): boolean {
-  if (tabPath === '/') return pathname === '/';
-  return pathname === tabPath || pathname.startsWith(`${tabPath}/`);
+  return tabPath === '/' ? pathname === '/' : pathname === tabPath || pathname.startsWith(`${tabPath}/`);
 }
 
 function Shell() {
   const { tenant, setTenant, authReady, authUser, authProviders, setAuth } = useAppStore();
   const nav = useNavigate();
-  const { pathname } = useLocation();
-
+  const { pathname, search, hash } = useLocation();
   useEffect(() => {
     let live = true;
     void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[] }>('/v1/auth/me')
       .then((result) => {
-        if (live) setAuth(result.authenticated ? result.user : null, result.providers ?? []);
+        if (!live) return;
+        setApiWorkspace(result.authenticated ? result.user?.tenantId ?? null : null);
+        setAuth(result.authenticated ? result.user : null, result.providers ?? []);
       })
-      .catch(() => {
-        if (live) setAuth(null, []);
-      });
+      .catch(() => { if (live) setAuth(null, []); });
     return () => { live = false; };
   }, [setAuth]);
 
@@ -66,26 +58,17 @@ function Shell() {
       <AppHeader
         title={<RouterLink to="/" className={styles.title}>Laplace</RouterLink>}
         tagline="witnessed consensus, not weights"
-        nav={
-          <NavTabs
-            tabs={TABS.map((t) => ({
-              id: t.id,
-              label: t.label,
-              active: isActive(pathname, t.path),
-              onClick: () => nav(t.path),
-            }))}
-          />
-        }
-        tenant={
-          authReady && (authUser || authProviders.length > 0)
-            ? <AccountControls user={authUser} providers={authProviders} returnUrl={pathname} />
-            : <TenantField value={tenant} onChange={setTenant} />
-        }
+        nav={<NavTabs tabs={TABS.map((tab) => ({
+          id: tab.id, label: tab.label, active: isActive(pathname, tab.path), onClick: () => nav(tab.path),
+        }))} />}
+        tenant={authReady && (authUser || authProviders.length > 0)
+          ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${pathname}${search}${hash}`} />
+          : <TenantField value={tenant} onChange={setTenant} />}
       />
       <SubstrateStatusBanner />
       <main className={styles.main}>
         <Routes>
-          <Route path="/" element={<HomeView onGoto={(t) => nav(`/${t}`)} />} />
+          <Route path="/" element={<HomeView onGoto={(tab) => nav(`/${tab}`)} />} />
           <Route path="/chat" element={<ChatView />} />
           <Route path="/query" element={<QueryConsole />} />
           <Route path="/topic" element={<TopicView />} />
@@ -95,6 +78,9 @@ function Shell() {
           <Route path="/play" element={<ChessView />} />
           <Route path="/lab/*" element={<LabView />} />
           <Route path="/billing" element={<BillingView />} />
+          <Route path="/billing/success" element={<BillingReturnView />} />
+          <Route path="/billing/cancel" element={<BillingReturnView />} />
+          <Route path="/settings" element={<SettingsView />} />
           <Route path="/operator" element={<AdminView />} />
         </Routes>
       </main>
@@ -103,10 +89,4 @@ function Shell() {
   );
 }
 
-export function App() {
-  return (
-    <BrowserRouter>
-      <Shell />
-    </BrowserRouter>
-  );
-}
+export function App() { return <BrowserRouter><Shell /></BrowserRouter>; }

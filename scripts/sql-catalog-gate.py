@@ -22,7 +22,12 @@ TOKEN = re.compile(
     r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|@"(?:""|[^"])*"'
     r"|(?P<char>(?<![\w])(?:u8|[uUL])?'(?:\\.|[^'\\\r\n])+')"
     r'|"(?:\\.|[^"\\])*"')
-SQL = re.compile(r'\b(?:SELECT\s|INSERT\s+INTO\s|UPDATE\s+[\w.]+\s+SET\s|DELETE\s+FROM\s|WITH\s+[\w]+\s+AS\s*\(|COPY\s+[\w.(]|CREATE\s+(?:TEMP\s+)?(?:TABLE|FUNCTION|INDEX)|ALTER\s+TABLE|DROP\s+(?:TABLE|FUNCTION))', re.I)
+# Workspace instructions are prose: after expression `your`/`a` and optional
+# alias `workspace`, neither `before` nor a sentence-ending period can continue
+# a SELECT statement. Exclude only those invalid unquoted prefixes, not SELECT
+# identifiers/aliases or the entire literal; later SQL must remain visible.
+# Check before consuming whitespace so extra spaces cannot bypass the exclusion.
+SQL = re.compile(r'\b(?:SELECT(?!\s+your\s+workspace\s+before\b|\s+a\s+workspace\.(?=\s|$))\s|INSERT\s+INTO\s|UPDATE\s+[\w.]+\s+SET\s|DELETE\s+FROM\s|WITH\s+[\w]+\s+AS\s*\(|COPY\s+[\w.(]|CREATE\s+(?:TEMP\s+)?(?:TABLE|FUNCTION|INDEX)|ALTER\s+TABLE|DROP\s+(?:TABLE|FUNCTION))', re.I)
 
 
 def statements(source):

@@ -240,7 +240,19 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget);
                 command.Parameters.AddWithValue(NpgsqlDbType.Integer, 512);
                 command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget / MemoryTopology.Hash128Bytes);
-                await command.ExecuteScalarAsync(token).ConfigureAwait(false);
+                void OnSessionNotice(object sender, NpgsqlNoticeEventArgs notice)
+                {
+                    const string prefix = "session descriptor view unavailable; transaction pending: ";
+                    if (notice.Notice.MessageText.StartsWith(prefix, StringComparison.Ordinal))
+                        _log.LogInformation("SESSION_PHYSICALITY_VIEW transaction_pending=true receipt={Receipt}",
+                            notice.Notice.MessageText[prefix.Length..]);
+                }
+                // The native appender keeps its scalar turn-count ABI. Expose its
+                // bounded missing-view receipt for this operation and detach on
+                // failure as well as success before the connection is reused.
+                connection.Notice += OnSessionNotice;
+                try { await command.ExecuteScalarAsync(token).ConfigureAwait(false); }
+                finally { connection.Notice -= OnSessionNotice; }
             });
     }
 

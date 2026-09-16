@@ -22,6 +22,49 @@ class SqlOwnership(unittest.TestCase):
     def test_csharp_raw_and_verbatim_literals_are_captured(self):
         self.assertEqual(len(list(gate.statements('q = """SELECT id\nFROM entities"""; r = @"SELECT name FROM entities";'))), 2)
 
+    def test_workspace_selection_instruction_is_not_sql(self):
+        messages = (
+            "The request belongs to a different workspace. Select your workspace before starting checkout.",
+            "Select your workspace before starting checkout.",
+            "SELECT   your   workspace   before starting checkout.",
+            "select\nyour\tworkspace before starting checkout.",
+            "Sign in to select a workspace.",
+            "SELECT   a   workspace.",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertEqual(list(gate.statements('Reject("""' + message + '""");')), [])
+
+    def test_workspace_words_remain_valid_sql_identifiers_and_aliases(self):
+        queries = (
+            "SELECT your workspace FROM accounts",
+            "SELECT your workspace",
+            "SELECT a workspace",
+            "SELECT a workspace FROM accounts",
+            "SELECT a.workspace FROM accounts a",
+            "SELECT your, workspace, before FROM accounts",
+            "SELECT your.workspace AS before FROM accounts your",
+            "SELECT 1",
+            "SELECT 'Select your workspace before starting checkout.' AS message",
+            'SELECT "your workspace before" FROM accounts',
+            'SELECT "a workspace." FROM accounts',
+        )
+        for query in queries:
+            with self.subTest(query=query):
+                self.assertEqual(list(gate.statements('q = """' + query + '""";')), [query])
+
+    def test_workspace_prose_cannot_hide_sql_elsewhere_in_the_literal(self):
+        prose = "Select your workspace before starting checkout. "
+        queries = ("SELECT 1", "SELECT id FROM accounts", "INSERT INTO accounts VALUES ($1)",
+                   "UPDATE accounts SET active=true", "DELETE FROM accounts",
+                   "WITH chosen AS (SELECT 1) SELECT * FROM chosen", "COPY accounts FROM STDIN")
+        for query in queries:
+            for text in (prose + query, prose + "; " + query, query + "; " + prose,
+                         "Sign in to select a workspace. " + query):
+                with self.subTest(text=text):
+                    self.assertEqual(list(gate.statements('q = "' + text + '";')), [text.strip()])
+                    self.assertTrue(gate.excess(gate.fingerprints('q = "' + text + '";'), {}))
+
     def test_quote_character_literals_do_not_turn_comments_into_sql(self):
         source = r'''switch (c) {
             case '"': cp = '"'; break;

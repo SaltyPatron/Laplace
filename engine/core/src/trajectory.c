@@ -1,5 +1,6 @@
 #include "laplace/core/trajectory.h"
 #include "laplace/core/mantissa.h"
+#include "laplace/core/physicality_descriptor.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -153,11 +154,12 @@ int laplace_physicality_manifest_validate(const hash128_t* entity_id, int16_t ty
     int typed;
     if (entity_id == NULL || type <= 0 || n_constituents < 0 ||
         (n_points != 0u && trajectory_xyzm == NULL)) return -1;
+    if (type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE && n_constituents < 2) return -3;
     if (n_points == 0u) return n_constituents == 0 ? 0 : -3;
     if (trajectory_manifest_scan(trajectory_xyzm, n_points, &count, &typed) != 0) return -3;
-    if (typed) return type == 1 ? -3 : 0;
+    if (typed) return type == 1 || type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE ? -3 : 0;
     if (count != (size_t)n_constituents) return -3;
-    if (type == 1) {
+    if (type == 1 || type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE) {
         hash128_t manifest;
         if (trajectory_content_identity(trajectory_xyzm, n_points, &manifest, &count) != 0) return -3;
         if (!hash128_equals(entity_id, &manifest)) return -4;

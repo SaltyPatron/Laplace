@@ -119,6 +119,7 @@ physicality_descriptor_status_t physicality_descriptor_stages_preflight(
                 !geometry(fields.bytes[5], fields.lengths[5], 1, &vertices, &coordinates))
                 return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
             const int16_t type = (int16_t)read_word(fields.bytes[2], 2u, 0);
+            const int canonical_manifest = type == 1 || type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE;
             if (type <= 0) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
             for (size_t vertex = 0u; vertex < vertices; ++vertex) {
                 double packed[4];
@@ -129,16 +130,17 @@ physicality_descriptor_status_t physicality_descriptor_stages_preflight(
                 if (trajectory_manifest_scan(packed, 1u, &run, &typed_vertex) != 0 ||
                     !array_bytes(&row_logical, run, 1u)) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
                 typed_payload |= typed_vertex;
-                if (type == 1 && typed_payload) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-                if (type == 1 && row_logical > maximum_logical_occurrences - logical)
+                if (canonical_manifest && typed_payload) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
+                if (canonical_manifest && row_logical > maximum_logical_occurrences - logical)
                     return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
             }
             const int32_t declared = (int32_t)read_word(fields.bytes[6], 4u, 0);
-            if (declared < 0 || (!typed_payload && row_logical != (size_t)declared))
+            if (declared < 0 || (type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE && declared < 2) ||
+                (!typed_payload && row_logical != (size_t)declared))
                 return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
             if (bodies == SIZE_MAX || !array_bytes(&stored, vertices, 1u))
                 return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
-            if (type == 1) logical += row_logical;
+            if (canonical_manifest) logical += row_logical;
             ++bodies; ++rows;
         }
         if (rows != intent_stage_physicality_count(stages[stage])) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;

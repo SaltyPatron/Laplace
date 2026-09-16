@@ -26,6 +26,22 @@ public class ByteAtomsTests
     }
 
     [Fact]
+    public void SharedNativeBasis_PreservesEveryExistingByteIdentityAndPhysicality()
+    {
+        var expected = SuperFibonacci.Generate(ByteAtoms.Count);
+        for (int i = 0; i < ByteAtoms.Count; ++i)
+        {
+            byte value = checked((byte)(ByteAtoms.First + i));
+            Assert.Equal(Hash128.Blake3(new[] { value }), ByteAtoms.Id(value));
+            var coordinate = expected.AsSpan(i * 4, 4);
+            for (int axis = 0; axis < 4; ++axis)
+                Assert.Equal(BitConverter.DoubleToInt64Bits(coordinate[axis]),
+                    BitConverter.DoubleToInt64Bits(ByteAtoms.Coord(value)[axis]));
+            Assert.Equal(Hilbert128.Encode(coordinate), ByteAtoms.Hilbert(value));
+        }
+    }
+
+    [Fact]
     public void Utf8Roles_FollowRfc3629()
     {
         Assert.Equal("continuation", ByteAtoms.Utf8Role(0x80));

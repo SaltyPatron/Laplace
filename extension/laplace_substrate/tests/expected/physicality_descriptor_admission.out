@@ -2,5 +2,6 @@
 \set ECHO none
 NOTICE:  physicality admission: two raw forms, exact source mapping, floor-only zero frontier, batch/single identity and finite receipts
 NOTICE:  physicality admission: non-atom RLE parent resolves one missing Content carrier from its admitted winner
-NOTICE:  physicality admission: nine malformed-source, prior, absent-provider and finite-grant controls refused
+NOTICE:  physicality admission: absent selected Content preserves exact descriptor and reports null view with exact AB frontier
+NOTICE:  physicality admission: eight malformed-source, prior and finite-grant controls refused
 NOTICE:  physicality admission: actual current Content set resolves without an admitted fallback

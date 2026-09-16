@@ -141,7 +141,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 {
                     ct.ThrowIfCancellationRequested();
                     experiment?.ValidateGame(gameText);
-                    if (ChessPgnDecomposer.TryParseGame(gameText) is not { } game) continue;
+                    if (ChessPgnDecomposer.TryParseGame(gameText,
+                        requireNormalCompletion: measurement?.RequiresNormalCompletion == true) is not { } game) continue;
                     measurement?.ObserveParsed(game);
                     parsed++;
                     chunk.Add(game);

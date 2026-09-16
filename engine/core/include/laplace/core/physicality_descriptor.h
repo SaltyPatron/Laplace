@@ -94,6 +94,11 @@ typedef struct {
 
 typedef struct physicality_descriptor_plan physicality_descriptor_plan_t;
 
+/* Exact descriptor manifests retain their ordinary entity identities while
+ * their storage coordinates use the declared literal-identifier projection.
+ * They are not the referenced entities' selected Content geometry. */
+enum { PHYSICALITY_DESCRIPTOR_RETENTION_TYPE = 9 };
+
 typedef enum {
     PHYSICALITY_DESCRIPTOR_OK = 0,
     PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER = 1,

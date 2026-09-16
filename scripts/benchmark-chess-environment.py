@@ -32,6 +32,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from lib import chess_pgn
+
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
 SCHEMA = "laplace.benchmark.chess-environment/v1"
@@ -851,29 +853,10 @@ def parse_benches(text):
             for ms, nodes, nps in summaries]
 
 
-def parse_pgn(text, expected, *, allow_adjudication=False):
-    records = [part for part in re.split(r'(?=^\[Event ")', text, flags=re.M) if part.strip()]
-    if len(records) != expected:
-        raise ValueError(f"expected {expected} PGN games, found {len(records)}")
-    games = []
-    for record in records:
-        tags = dict(re.findall(r'^\[(\w+) "(.*)"\]$', record, re.M))
-        result = tags.get("Result")
-        if result not in ("1-0", "0-1", "1/2-1/2"):
-            raise ValueError("PGN includes an unscored or incomplete game")
-        allowed_terminations = ("normal", "adjudication") if allow_adjudication else ("normal",)
-        # CuteChess PgnGame::setResult removes Termination for a normal result;
-        # exceptional/adjudicated results carry an explicit tag.
-        termination = tags.get("Termination", "normal").lower()
-        if termination not in allowed_terminations:
-            raise ValueError("PGN records a failed engine/game termination")
-        if not tags.get("PlyCount", "").isdigit() or int(tags["PlyCount"]) == 0:
-            raise ValueError("PGN lacks a numeric PlyCount")
-        if not record.rstrip().endswith(result):
-            raise ValueError("PGN movetext is truncated or disagrees with its Result tag")
-        games.append({"white": tags.get("White"), "black": tags.get("Black"), "result": result,
-                      "plies": int(tags["PlyCount"]), "termination": termination})
-    return games
+def parse_pgn(text, expected, *, allow_adjudication=False, max_moves=0, provider=None):
+    if allow_adjudication != (max_moves > 0):
+        raise ValueError("PGN adjudication requires the explicit diagnostic move cap")
+    return chess_pgn.validate_games(text, expected, provider=provider, max_moves=max_moves)
 
 
 def verify_tournament(transcript, games):
@@ -979,6 +962,10 @@ def main():
     parser.add_argument("--api-base", type=api_base,
                         default=os.environ.get("LAPLACE_API_BASE", "http://127.0.0.1:" + os.environ.get("LAPLACE_API_PORT", "5187")))
     parser.add_argument("--plan-only", action="store_true", help="Inspect capability/resource admission without launching benchmark tools")
+    parser.add_argument("--pgn-validator-cache", type=Path, default=chess_pgn.default_cache(),
+                        help="Cache for the exact pinned external rules provider; no global Python installation")
+    parser.add_argument("--pgn-validator-offline", action="store_true",
+                        help="Require the verified PGN provider archive to be present in its cache")
     parser.add_argument("--runtime-only", action="store_true", help="Observe services, chess readiness before/after one depth-one Laplace evaluation, GPU, NNUE files and Stockfish UCI bootstrap; skip Stockfish search calibration and tournaments")
     args = parser.parse_args()
     if args.plan_only and args.runtime_only:
@@ -1050,6 +1037,9 @@ def main():
             report["status"] = "complete"
             print(f"CHESS_ENVIRONMENT_BENCHMARK status=complete scope=runtime_only report={report_path}")
             return 0
+        provider = chess_pgn.load_provider(args.pgn_validator_cache, offline=args.pgn_validator_offline)
+        report["pgn_validation_provider"] = provider[2]
+        save()
         for name, values in (("Threads", budget["threads"] + [args.match_threads]), ("Hash", budget["hash_mib"] + [args.match_hash_mb])):
             option = options.get(name)
             if not option or any(not int(option["min"]) <= value <= int(option["max"]) for value in values):
@@ -1090,9 +1080,12 @@ def main():
                 case["samples"].append(sample)
                 if not result["success"]:
                     raise ValueError(f"CuteChess tournament failed at concurrency {concurrency}")
-                games = parse_pgn(pgn.read_text(), budget["games_per_match_sample"], allow_adjudication=args.max_moves > 0)
+                games = parse_pgn(pgn.read_text(), budget["games_per_match_sample"], allow_adjudication=args.max_moves > 0,
+                                  max_moves=args.max_moves, provider=provider)
                 verify_tournament(Path(result["log"]).read_text(), games)
-                sample.update({"games": games, "pgn_sha256": sha256(pgn), "total_plies": sum(game["plies"] for game in games),
+                sample.update({"games": games, "pgn_sha256": sha256(pgn),
+                               "normal_completed_games": sum(game["normal_completion"] for game in games),
+                               "legal_moves_validated": True, "total_plies": sum(game["plies"] for game in games),
                                "games_per_second": len(games) / result["wall_seconds"],
                                "plies_per_second": sum(game["plies"] for game in games) / result["wall_seconds"]})
                 save()
@@ -1121,11 +1114,14 @@ def main():
             paired["process"] = result
             if not result["success"]:
                 raise ValueError("Laplace/Stockfish paired acceptance failed")
-            games = parse_pgn(pgn.read_text(), 2, allow_adjudication=args.max_moves > 0)
+            games = parse_pgn(pgn.read_text(), 2, allow_adjudication=args.max_moves > 0,
+                                  max_moves=args.max_moves, provider=provider)
             verify_tournament(Path(result["log"]).read_text(), games)
             if sorted(game["white"] for game in games) != ["Laplace", "Stockfish-B"]:
                 raise ValueError("paired acceptance did not exercise Laplace with both colors")
-            paired.update({"games": games, "pgn": str(pgn), "pgn_sha256": sha256(pgn)})
+            paired.update({"games": games, "pgn": str(pgn), "pgn_sha256": sha256(pgn),
+                           "normal_completed_games": sum(game["normal_completion"] for game in games),
+                           "legal_moves_validated": True})
         for key, binary in (("stockfish_identity", sf), ("cutechess_identity", cc)):
             if report[key]["sha256"] != sha256(binary):
                 report["evidence_invalid"] = True

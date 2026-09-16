@@ -8,6 +8,10 @@ import importlib.util
 import io
 import json
 import os
+import re
+import shutil
+import tarfile
+import types
 from pathlib import Path
 import sys
 import tempfile
@@ -20,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("chess_benchmark", ROOT / "scripts/benchmark-chess-environment.py")
 bench = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bench)
+PGN = bench.chess_pgn
 
 
 class ChessEnvironmentTests(unittest.TestCase):
@@ -545,10 +550,10 @@ ActiveEnterTimestampMonotonic=2000000
         self.assertNotIn("bounded_tournament_throughput", recommendations)
 
     def test_incomplete_pgn_and_transcript_cannot_be_success(self):
-        pgn = '[Event "test"]\n[White "A"]\n[Black "B"]\n[Result "1/2-1/2"]\n[PlyCount "2"]\n[Termination "adjudication"]\n\n1. e4 e5 1/2-1/2\n'
+        pgn = '[Event "test"]\n[White "A"]\n[Black "B"]\n[Result "1/2-1/2"]\n[PlyCount "2"]\n[Termination "adjudication"]\n\n1. e4 e5 {Draw by adjudication: maximal game length} 1/2-1/2\n'
         with self.assertRaises(ValueError):
             bench.parse_pgn(pgn, 1)
-        games = bench.parse_pgn(pgn, 1, allow_adjudication=True)
+        games = bench.parse_pgn(pgn, 1, allow_adjudication=True, max_moves=1)
         bench.verify_tournament("1 <A: bestmove e2e4\n2 <B: bestmove e7e5\nFinished game 1 (A vs B): 1/2-1/2\n", games)
         with self.assertRaises(ValueError):
             bench.parse_pgn(pgn.replace('Result "1/2-1/2"', 'Result "*"'), 1)
@@ -569,6 +574,338 @@ ActiveEnterTimestampMonotonic=2000000
             self.assertIn("launched", log.read_text())
             with self.assertRaises(ProcessLookupError):
                 os.kill(result["pid"], 0)
+
+
+class ChessPgnProvider(unittest.TestCase):
+    """Real pinned rules execution, with independent archive/import refusals."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.artifact = PGN.artifact_lock()
+        cache = Path(os.environ.get("LAPLACE_CHESS_PGN_TEST_CACHE", str(PGN.default_cache())))
+        cache.mkdir(parents=True, exist_ok=True)
+        cls.archive = PGN.acquire(cls.artifact, cache, os.environ.get("LAPLACE_CHESS_PGN_OFFLINE") == "1")
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.directory = Path(self.temporary.name)
+        self.cache = self.directory / "provider"
+        self.cache.mkdir()
+        shutil.copyfile(self.archive, self.cache / self.artifact["filename"])
+        self.previous_loaded = PGN._loaded.copy()
+        self.previous = {key: value for key, value in sys.modules.items()
+                         if key == "chess" or key.startswith("chess.")}
+        for key in self.previous:
+            del sys.modules[key]
+
+    def tearDown(self) -> None:
+        for key in list(sys.modules):
+            if key == "chess" or key.startswith("chess."):
+                del sys.modules[key]
+        sys.modules.update(self.previous)
+        PGN._loaded.clear()
+        PGN._loaded.update(self.previous_loaded)
+        self.temporary.cleanup()
+
+    def load(self):
+        return PGN.load_provider(self.cache, offline=True)
+
+    def test_real_rules_parse_legal_checkmate_and_refuse_illegal_san(self) -> None:
+        chess, pgn, receipt = self.load()
+        game = pgn.read_game(io.StringIO('[Result "0-1"]\n\n1. f3 e5 2. g4 Qh4# 0-1\n'))
+        self.assertEqual(game.errors, [])
+        board = game.end().board()
+        self.assertEqual(board.outcome().termination, chess.Termination.CHECKMATE)
+        self.assertEqual(board.result(), "0-1")
+        self.assertEqual(game.end().ply(), 4)
+        with self.assertLogs("chess.pgn", level="ERROR"):
+            illegal = pgn.read_game(io.StringIO('[Result "0-1"]\n\n1. e5 0-1\n'))
+        self.assertTrue(illegal.errors)
+        self.assertIsNone(illegal.end().board().outcome())
+        self.assertEqual(receipt["archive"]["sha256"], self.artifact["sha256"])
+        self.assertEqual(receipt["version"], "1.11.2")
+        self.assertEqual(len(receipt["files"]), 10)
+        self.assertEqual(len(receipt["modules"]), 8)
+        self.assertTrue(Path(receipt["license"]["path"]).read_text().startswith("                    GNU GENERAL PUBLIC LICENSE"))
+        self.assertFalse(list(self.cache.rglob("*.pyc")))
+
+    def test_exact_cache_and_modules_reuse_without_download(self) -> None:
+        chess, pgn, receipt = self.load()
+        with patch.object(PGN.urllib.request, "urlopen", side_effect=AssertionError("offline reuse tried a download")):
+            repeated = self.load()
+        self.assertIs(repeated[0], chess)
+        self.assertIs(repeated[1], pgn)
+        self.assertEqual(repeated[2], receipt)
+
+    def test_download_publishes_only_exact_pinned_bytes(self) -> None:
+        target = self.cache / self.artifact["filename"]
+        original = target.read_bytes()
+        target.unlink()
+        for payload, message in [(original[:-1], "truncated"), (original + b"x", "pinned size")]:
+            with self.subTest(message=message), patch.object(PGN.urllib.request, "urlopen", return_value=io.BytesIO(payload)):
+                with self.assertRaisesRegex(ValueError, message):
+                    PGN.acquire(self.artifact, self.cache, offline=False)
+            self.assertFalse(target.exists())
+            self.assertEqual(list(self.cache.iterdir()), [])
+        with patch.object(PGN.urllib.request, "urlopen", return_value=io.BytesIO(original)):
+            published = PGN.acquire(self.artifact, self.cache, offline=False)
+        self.assertEqual(published.read_bytes(), original)
+        self.assertEqual(list(self.cache.iterdir()), [target])
+
+    def test_corrupt_or_missing_archive_is_refused_before_import(self) -> None:
+        archive = self.cache / self.artifact["filename"]
+        data = archive.read_bytes()
+        archive.write_bytes(bytes([data[0] ^ 1]) + data[1:])
+        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+            self.load()
+        self.assertNotIn("chess", sys.modules)
+        archive.write_bytes(data[:-1])
+        with self.assertRaisesRegex(ValueError, "size or regular-file mismatch"):
+            self.load()
+        archive.unlink()
+        with self.assertRaisesRegex(ValueError, "offline PGN provider artifact missing"):
+            self.load()
+
+    def test_every_runtime_file_and_license_is_reverified_on_reuse(self) -> None:
+        _, _, receipt = self.load()
+        root = Path(receipt["runtime_root"])
+        for item in receipt["files"]:
+            with self.subTest(path=item["path"]):
+                path = root / item["path"]
+                original = path.read_bytes()
+                path.write_bytes(original + b"\n# deliberate runtime mutation\n")
+                with self.assertRaisesRegex(ValueError, "runtime bytes differ"):
+                    self.load()
+                path.write_bytes(original)
+        (root / "chess/pgn.py").unlink()
+        with self.assertRaisesRegex(ValueError, "inventory is incomplete"):
+            self.load()
+
+    def test_extra_importable_files_and_bytecode_directories_are_refused(self) -> None:
+        self.load()
+        root = self.cache / "runtime/chess"
+        for name in ("extra.py", "extra.pyc", "extra.so"):
+            with self.subTest(name=name):
+                path = root / name
+                path.write_bytes(b"untrusted extra")
+                with self.assertRaisesRegex(ValueError, "extra or nonregular"):
+                    self.load()
+                path.unlink()
+        (root / "__pycache__").mkdir()
+        with self.assertRaisesRegex(ValueError, "extra.*directory"):
+            self.load()
+
+    def test_runtime_and_archive_links_are_refused_even_for_identical_bytes(self) -> None:
+        self.load()
+        for relative in ("runtime/chess/pgn.py", self.artifact["filename"]):
+            with self.subTest(path=relative):
+                path = self.cache / relative
+                original = path.read_bytes()
+                outside = self.directory / "outside"
+                outside.write_bytes(original)
+                path.unlink()
+                path.symlink_to(outside)
+                with self.assertRaisesRegex(ValueError, "link|physical regular"):
+                    self.load()
+                path.unlink()
+                os.link(outside, path)
+                with self.assertRaisesRegex(ValueError, "nonregular|physical regular"):
+                    self.load()
+                path.unlink()
+                outside.unlink()
+                path.write_bytes(original)
+
+    def test_ambient_module_is_not_replaced_or_used(self) -> None:
+        substitute = types.ModuleType("chess")
+        substitute.__version__ = "1.11.2"
+        sys.modules["chess"] = substitute
+        with self.assertRaisesRegex(ValueError, "module inventory differs"):
+            self.load()
+        self.assertIs(sys.modules["chess"], substitute)
+
+    def test_cache_and_runtime_directory_symlinks_are_refused(self) -> None:
+        self.load()
+        alias = self.directory / "alias"
+        alias.symlink_to(self.cache, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "cache must not be a symlink"):
+            PGN.load_provider(alias, offline=True)
+        runtime = self.cache / "runtime"
+        outside = self.directory / "original-runtime"
+        runtime.rename(outside)
+        runtime.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "runtime must be a physical directory"):
+            self.load()
+
+    def test_loaded_module_version_origin_and_identity_substitutions_are_refused(self) -> None:
+        chess, pgn, _ = self.load()
+        for owner, attribute, value, message in (
+                (chess, "__version__", "substituted", "version differs"),
+                (pgn, "__file__", "/ambient/chess/pgn.py", "origin differs"),
+                (pgn.__spec__, "origin", "/ambient/chess/pgn.py", "origin differs"),
+                (chess, "__path__", ["/ambient/chess"], "search path differs"),
+                (pgn, "chess", types.ModuleType("chess"), "absolute import substitution"),
+                (chess, "pgn", types.ModuleType("chess.pgn"), "package module substitution")):
+            with self.subTest(attribute=attribute):
+                previous = getattr(owner, attribute)
+                setattr(owner, attribute, value)
+                with self.assertRaisesRegex(ValueError, message):
+                    self.load()
+                setattr(owner, attribute, previous)
+        sys.modules["chess.pgn"] = types.ModuleType("chess.pgn")
+        with self.assertRaisesRegex(ValueError, "module substitution"):
+            self.load()
+
+    def test_unsafe_tar_paths_links_and_duplicate_names_are_refused(self) -> None:
+        # These archives test extraction rejection only; game validation always
+        # uses the exact official artifact acquired in setUpClass.
+        cases = [("../escape.py", tarfile.REGTYPE), ("/escape.py", tarfile.REGTYPE),
+                 ("chess-1.11.2/chess/../escape.py", tarfile.REGTYPE),
+                 ("chess-1.11.2/chess\\escape.py", tarfile.REGTYPE),
+                 ("chess-1.11.2/chess/pgn.py", tarfile.SYMTYPE),
+                 ("chess-1.11.2/chess/pgn.py", tarfile.LNKTYPE)]
+        for index, (name, kind) in enumerate(cases):
+            with self.subTest(name=name, kind=kind):
+                path = self.directory / f"unsafe-{index}.tar.gz"
+                with tarfile.open(path, "w:gz") as archive:
+                    member = tarfile.TarInfo(name)
+                    member.type = kind
+                    member.linkname = "/outside"
+                    archive.addfile(member, io.BytesIO(b""))
+                with self.assertRaisesRegex(ValueError, "unsafe|links or special"):
+                    PGN._runtime_files(path, "1.11.2")
+        path = self.directory / "duplicate.tar.gz"
+        with tarfile.open(path, "w:gz") as archive:
+            for _ in range(2):
+                archive.addfile(tarfile.TarInfo("chess-1.11.2/chess/pgn.py"), io.BytesIO(b""))
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            PGN._runtime_files(path, "1.11.2")
+
+
+class PgnLegalityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.provider = PGN.load_provider(PGN.default_cache(), offline=os.environ.get("LAPLACE_CHESS_PGN_OFFLINE") == "1")
+        with tarfile.open(cls.provider[2]["archive"]["path"], "r:gz") as archive:
+            fixture = archive.extractfile("chess-1.11.2/data/pgn/molinari-bordais-1979.pgn")
+            assert fixture is not None
+            cls.checkmate = fixture.read().decode("utf-8")
+        cls.retained_game = (ROOT / "app/Laplace.Chess.Tests/Fixtures/position-playing-game-1.pgn").read_text(encoding="utf-8")
+
+    def validate(self, text, expected=1, max_moves=0):
+        return bench.parse_pgn(text, expected, provider=self.provider,
+                               allow_adjudication=max_moves > 0, max_moves=max_moves)
+
+    def diagnostic(self):
+        # The first four actual moves of the pinned upstream game, deliberately
+        # capped and identified as diagnostic rather than a complete game.
+        tags = self.checkmate.split("\n\n", 1)[0].replace('[Result "0-1"]', '[Result "1/2-1/2"]')
+        tags = tags.replace('[PlyCount "10"]', '[PlyCount "4"]')
+        return tags + '\n[Termination "adjudication"]\n\n1. e4 c5 2. c4 Nc6 {Draw by adjudication: maximal game length} 1/2-1/2\n'
+
+    def test_real_upstream_checkmate_has_replayed_outcome_and_exact_move_receipt(self):
+        game, = self.validate(self.checkmate)
+        self.assertEqual((game["plies"], game["board_outcome"], game["normal_completion"]), (10, "CHECKMATE", True))
+        self.assertTrue(game["legal_moves_validated"])
+        self.assertEqual(game, self.validate(self.checkmate.replace('[Result "0-1"]', '[Result "0-1"]\n[Termination "normal"]'))[0])
+        self.assertEqual(len(game["moves_sha256"]), 64)
+        self.assertIn(" w ", game["final_fen"])
+
+    def test_old_header_only_counterexamples_are_refused(self):
+        for moves, plies in [("1. e5", 1), ("1. e4 e5", 2)]:
+            text = f'[Event "Negative control"]\n[Result "1-0"]\n[PlyCount "{plies}"]\n\n{moves} 1-0\n'
+            with self.subTest(moves=moves), self.assertRaises(ValueError):
+                self.validate(text)
+
+    def test_actual_terminal_result_cannot_be_replaced_or_retained_on_a_prefix(self):
+        for text in [self.checkmate.replace('0-1', '1-0'),
+                     self.checkmate.replace('5. g3 Nd3# ', '').replace('[PlyCount "10"]', '[PlyCount "8"]')]:
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "terminal outcome"):
+                self.validate(text)
+
+    def test_illegal_null_unknown_and_postterminal_moves_are_refused(self):
+        for old, new in [('1. e4', '1. e5'), ('1. e4', '1. --'),
+                         ('1. e4', '1. e4garbage'), ('1. e4', '1. e4 garbage'),
+                         ('Nd3# 0-1', 'Nd3# 6. Kg2 0-1')]:
+            with self.subTest(new=new), self.assertRaises(ValueError):
+                self.validate(self.checkmate.replace(old, new))
+
+    def test_each_header_move_and_result_token_is_accounted(self):
+        for changed in [self.checkmate.replace('Nd3# 0-1', 'Nd3# 1-0'),
+                        self.checkmate.replace('Nd3# 0-1', 'Nd3#'),
+                        self.checkmate.replace('[PlyCount "10"]', '[PlyCount "9"]'),
+                        self.checkmate.replace('[Result "0-1"]', '[Result "0-1"]\n[Result "0-1"]'),
+                        self.checkmate.replace('[Result "0-1"]', '[Result "*"]'),
+                        self.checkmate + '{Engine disconnected}',
+                        'unaccounted prefix\n' + self.checkmate]:
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                self.validate(changed)
+        with self.assertRaisesRegex(ValueError, "expected 2"):
+            self.validate(self.checkmate, expected=2)
+
+    def test_history_supports_legal_draw_claim_and_refuses_shorter_prefix(self):
+        text = '[Event "Rules control"]\n[Result "1/2-1/2"]\n[PlyCount "8"]\n\n1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 1/2-1/2\n'
+        game, = self.validate(text)
+        self.assertEqual(game["board_outcome"], "THREEFOLD_REPETITION")
+        self.assertTrue(game["normal_completion"])
+        with self.assertRaisesRegex(ValueError, "terminal outcome"):
+            self.validate(text.replace('3. Nf3 Nf6 4. Ng1 Ng8 ', '').replace('[PlyCount "8"]', '[PlyCount "4"]'))
+
+    def test_declared_standard_start_cannot_be_replaced_by_terminal_fen(self):
+        altered = self.checkmate.replace('[Event "cr"]', '[Event "cr"]\n[SetUp "1"]\n[FEN "8/8/8/8/8/5k2/6q1/7K w - - 0 1"]')
+        with self.assertRaises(ValueError):
+            self.validate(altered)
+        with self.assertRaises(ValueError):
+            self.validate(self.checkmate.replace('[Event "cr"]', '[Event "cr"]\n[Variant "Atomic"]'))
+
+    def test_retained_setup_without_fen_cannot_use_the_upstream_default_board(self):
+        changed = self.retained_game.replace('\n', '\n[SetUp "1"]\n', 1)
+        upstream = self.provider[1].read_game(io.StringIO(changed))
+        self.assertEqual([], upstream.errors)
+        self.assertEqual("1", upstream.headers["SetUp"])
+        self.assertNotIn("FEN", upstream.headers)
+        self.assertEqual(self.provider[0].STARTING_FEN, upstream.board().fen())
+        with self.assertRaisesRegex(ValueError, "SetUp=1 requires a nonempty FEN"):
+            self.validate(changed)
+
+    def test_retained_setup_and_fen_headers_must_be_coherent(self):
+        standard_fen = self.provider[0].STARTING_FEN
+        for headers, message in [
+                ('[SetUp "1"]\n[FEN ""]', "SetUp=1 requires a nonempty FEN"),
+                ('[SetUp "1"]\n[FEN "   "]', "SetUp=1 requires a nonempty FEN"),
+                (f'[FEN "{standard_fen}"]', "FEN requires SetUp=1"),
+                (f'[SetUp "0"]\n[FEN "{standard_fen}"]', "FEN requires SetUp=1"),
+                ('[FEN ""]', "FEN requires SetUp=1")]:
+            changed = self.retained_game.replace('\n', '\n' + headers + '\n', 1)
+            with self.subTest(headers=headers), self.assertRaisesRegex(ValueError, message):
+                self.validate(changed)
+
+    def test_coherent_standard_setup_preserves_the_complete_retained_game(self):
+        expected, = self.validate(self.retained_game)
+        self.assertEqual((154, "CHECKMATE", True),
+                         (expected["plies"], expected["board_outcome"], expected["normal_completion"]))
+        for headers in ['[SetUp "0"]', f'[SetUp "1"]\n[FEN "{self.provider[0].STARTING_FEN}"]']:
+            changed = self.retained_game.replace('\n', '\n' + headers + '\n', 1)
+            with self.subTest(headers=headers):
+                self.assertEqual([expected], self.validate(changed))
+
+    def test_capped_diagnostic_requires_exact_moves_reason_and_declared_cap(self):
+        with self.assertRaisesRegex(ValueError, "non-normal"):
+            self.validate(self.diagnostic())
+        game, = self.validate(self.diagnostic(), max_moves=2)
+        self.assertFalse(game["normal_completion"])
+        self.assertIsNone(game["board_outcome"])
+        for changed, cap in [(self.diagnostic(), 3), (self.diagnostic(), 1),
+                             (self.diagnostic().replace('maximal game length', 'evaluation'), 2)]:
+            with self.subTest(cap=cap), self.assertRaises(ValueError):
+                self.validate(changed, max_moves=cap)
+        with self.assertRaisesRegex(ValueError, "explicit diagnostic"):
+            bench.parse_pgn(self.diagnostic(), 1, allow_adjudication=True, provider=self.provider)
+
+    def test_comments_do_not_hide_duplicate_results_or_san_tokens(self):
+        self.assertEqual(self.validate(self.checkmate), self.validate(self.checkmate.replace('1. e4', '1. e4 {0.12/6 0.002s}')))
+        for suffix in [' 0-1', ' garbage', ' (1. d4)']:
+            with self.subTest(suffix=suffix), self.assertRaises(ValueError):
+                self.validate(self.checkmate.rstrip() + suffix)
 
 
 if __name__ == "__main__":

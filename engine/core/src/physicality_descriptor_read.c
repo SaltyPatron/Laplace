@@ -396,7 +396,7 @@ physicality_descriptor_status_t physicality_descriptor_readback_prepare(
     for (size_t i = 0; i < root_count; ++i) {
         physicality_descriptor_input_t scratch = {0};
         (void)decode_one(&catalog, &roots[i], &scratch, NULL);
-        if (scratch.type == 1 && scratch.n_constituents > 0) {
+        if ((scratch.type == 1 || scratch.type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE) && scratch.n_constituents > 0) {
             if ((size_t)scratch.n_constituents > maximum_content_hash_operands - content_hash_operands) {
                 status = PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED; goto done;
             }

@@ -215,10 +215,23 @@ with the same game count and per-move depth, strength limiting disabled and
 pondering off. Memory planning includes both resident engines per game;
 active search planning uses one search team per game. Completed-game counts,
 UCI best moves, PGN results and ply counts must reconcile. Normal calibration has
-no move-count cutoff and requires normal game termination. A positive
+no move-count cutoff. Each PGN mainline is legally replayed from the standard
+initial position, and its result must match checkmate or a rules-supported draw
+with complete history. A result tag alone cannot establish completion. A positive
 `--max-moves` explicitly selects a short diagnostic; that mode emits no complete-game
-capacity recommendation. Wall and per-process time budgets still apply, and an
+capacity recommendation and accepts a length adjudication only at that exact cap.
+Wall and per-process time budgets still apply, and an
 unfinished game fails the measurement while retaining its available evidence.
+
+This external-game audit uses the `chess` 1.11.2 source artifact pinned by size
+and SHA-256 in `deploy/chess-pgn-validator.json`. The archive, exact runtime files,
+module origins, version and upstream GPL-3.0-or-later license are verified and
+retained in the benchmark's `pgn_validation_provider` receipt. The provider is
+loaded from `${LAPLACE_WORK_ROOT:-/build/laplace/work}/chess-pgn-validation`;
+`--pgn-validator-cache` or `LAPLACE_CHESS_PGN_CACHE` selects another cache, and
+`--pgn-validator-offline` requires the pinned archive to be present. It does not
+install a global Python package or change Laplace's chess rules implementation.
+Planning and runtime-only capability checks do not require this provider.
 
 To include a separate two-game Laplace-versus-Stockfish acceptance, provide
 `--laplace-uci /path/to/laplace-uci`. It preserves Laplace's configured substrate

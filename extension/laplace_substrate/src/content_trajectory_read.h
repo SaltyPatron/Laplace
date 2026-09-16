@@ -27,6 +27,10 @@ typedef struct LaplaceContentReadBudget {
     int leaf_reads;
     size_t maximum_scratch_bytes;
 } LaplaceContentReadBudget;
+/* Required structural manifests: reject an existing wrong-kind or NULL body. */
+void laplace_typed_carrier_read_bounded(ArrayType *entities, int16 physicality_type,
+    LaplaceContentCarrierConsumer consume, void *context,
+    LaplaceContentReadBudget *budget);
 void laplace_content_carrier_read_bounded(ArrayType *entities,
     LaplaceContentCarrierConsumer consume, void *context,
     LaplaceContentReadBudget *budget);

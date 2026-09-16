@@ -6,6 +6,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_hilbert4d.cpp
     test_mantissa.cpp
     test_super_fibonacci.cpp
+    test_byte_atoms.cpp
     test_image_decomposer.cpp
     test_audio_decomposer.cpp
     test_media_decode.cpp
@@ -30,6 +31,7 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_centroid_workspace.cpp
     test_physicality_descriptor_transport.cpp
     test_physicality_descriptor_admission.cpp
+    test_physicality_descriptor_retention.cpp
     test_grapheme_break.cpp
     test_word_break.cpp
     test_sentence_break.cpp

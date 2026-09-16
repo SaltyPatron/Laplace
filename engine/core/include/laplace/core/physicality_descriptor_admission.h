@@ -61,7 +61,8 @@ physicality_descriptor_status_t physicality_descriptor_stage_add_batch(
     const int64_t* observed_at_unix_us, size_t count);
 
 /* Scans exact tuple framing and stored carriers without expanding runs or
- * hashing their logical content. The logical grant/receipt counts Content RLE
+ * hashing their logical content. The logical grant/receipt counts Content and
+ * descriptor-retention RLE
  * hash operands; all typed/ordinary stored vertices are reported separately.
  * Rejects invalid ordinary counts and excess work before hashing. Typed factor
  * and testimony count fields retain their physicality owner's meaning.
@@ -73,9 +74,19 @@ physicality_descriptor_status_t physicality_descriptor_stages_preflight(
 
 /* NEEDS_PROVIDER publishes only a pending frontier, with no generated stage. */
 
+enum {
+    PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE = 0,
+    PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE = 1
+};
+
 typedef struct {
     hash128_t descriptor_id;
+    /* Valid only for AVAILABLE. Unavailable SQL views are NULL, never this
+     * unused C field interpreted as an ordinary entity. */
     hash128_t view_id;
+    uint32_t view_state;
+    size_t missing_first;
+    size_t missing_count;
 } physicality_descriptor_admitted_form_t;
 
 typedef struct {
@@ -94,7 +105,11 @@ typedef struct {
  * typed body is authenticated; the first Content placement per entity is the
  * provider winner, matching the writer's first-placement deduplication. Alternate
  * raw forms in captured_source do not choose a provider. Otherwise the frontier requests the next
- * bulk provider read. The finite closure contains original physicalities only;
+ * bulk provider read. After checked absence without a winner, exact descriptor
+ * retention and HAS evidence succeed while the view reports its exact missing
+ * frontier. Descriptor type-9 storage uses explicit identifier-literal geometry;
+ * only an available selected view claims actual referenced Content geometry.
+ * The finite closure contains original physicalities only;
  * generated descriptor/view rows are never fed back into that closure. */
 physicality_descriptor_status_t physicality_descriptor_materialize(
     const physicality_descriptor_capture_t* captured_source,
@@ -112,6 +127,10 @@ void physicality_descriptor_materialization_free(
 const hash128_t* physicality_descriptor_materialization_pending(
     const physicality_descriptor_materialization_t* materialization, size_t* count);
 const physicality_descriptor_admitted_form_t* physicality_descriptor_materialization_forms(
+    const physicality_descriptor_materialization_t* materialization, size_t* count);
+/* Each unavailable form addresses a sorted unique range in this array. Exact
+ * duplicate forms may share that range; unrelated roots have separate ranges. */
+const hash128_t* physicality_descriptor_materialization_missing(
     const physicality_descriptor_materialization_t* materialization, size_t* count);
 intent_stage_t* physicality_descriptor_materialization_take_stage(
     physicality_descriptor_materialization_t* materialization);

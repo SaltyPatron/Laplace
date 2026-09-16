@@ -636,6 +636,7 @@ run_recorded_chess_benchmark() { step recorded-chess; }
             prefix + "SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain",
             prefix + "SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold",
             prefix + "SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted",
+            prefix + "PhysicalityObservationWriterTests.MissingCarrierRetainsDescriptorAndLaterContentCompletesOnlyItsView",
         ]
         expected_filter = "|".join("FullyQualifiedName=" + method for method in methods)
         self.assertIn("--filter '" + expected_filter + "'", source)
@@ -658,6 +659,7 @@ run_recorded_chess_benchmark() { step recorded-chess; }
                  prefix + "SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain",
                  prefix + "SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold",
                  prefix + "SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted",
+                 prefix + "PhysicalityObservationWriterTests.MissingCarrierRetainsDescriptorAndLaterContentCompletesOnlyItsView",
                  ]
 
         def receipt():
@@ -666,7 +668,7 @@ run_recorded_chess_benchmark() { step recorded-chess; }
             for name in names:
                 ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
             summary = ET.SubElement(root, "ResultSummary")
-            ET.SubElement(summary, "Counters", total="21", executed="21", passed="21",
+            ET.SubElement(summary, "Counters", total=str(len(names)), executed=str(len(names)), passed=str(len(names)),
                           failed="0", notExecuted="0")
             return root
 

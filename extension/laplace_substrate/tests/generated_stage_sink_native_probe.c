@@ -380,6 +380,42 @@ int main(void)
     reset_spi();s=probe_state(forged_stages,1);sink_parse(s,forged_stages,1);
     REFUSES(sink_validate_bodies(s,forged_stages,1),"Content identity");
     CHECK(query_calls[SQ_PRESENCE]==0);sink_cleanup(s);intent_stage_free(forged);
+
+    /* Descriptor retention keeps the same canonical E and exact operands in a
+     * distinct typed body. The public sink admits that real body while still
+     * charging its canonical hash work and requiring every persisted referent. */
+    intent_stage_t *retention=intent_stage_new(2);
+    hash128_t retention_placement;
+    laplace_physicality_id_compute(novel_entity,PHYSICALITY_DESCRIPTOR_RETENTION_TYPE,&retention_placement);
+    CHECK(intent_stage_add_entity(retention,&novel_entity,1,&tier1,&source)==0);
+    CHECK(intent_stage_add_physicality(retention,&retention_placement,&novel_entity,
+        PHYSICALITY_DESCRIPTOR_RETENTION_TYPE,coord,&hilbert,trajectory,2,2,1,0,1,0,
+        INTENT_STAGE_PG_EPOCH_UNIX_US)==0);
+    const intent_stage_t *retention_stages[1]={retention};
+    reset_spi();limits.maximum_rows=1000;limits.maximum_operations=100;
+    laplace_generated_stage_sink(retention_stages,1,&limits,&receipt);
+    CHECK(receipt.inserted_rows[0]==1 && receipt.inserted_rows[1]==1 && receipt.inserted_rows[2]==0);
+    CHECK(receipt.logical_work==2 && receipt.stored_vertices==2);
+    reset_spi();s=probe_state(retention_stages,1);sink_parse(s,retention_stages,1);
+    s->limits.maximum_logical_occurrences=1;
+    REFUSES(sink_validate_bodies(s,retention_stages,1),"logical work grant");
+    CHECK(query_calls[SQ_PRESENCE]==0);sink_cleanup(s);
+    reset_spi();omit_reference=true;missing_entity=children[1];
+    s=probe_state(retention_stages,1);sink_parse(s,retention_stages,1);
+    REFUSES(sink_validate_bodies(s,retention_stages,1),"referenced entity");sink_cleanup(s);
+    tuple=intent_stage_tuple_ptr(retention,INTENT_STAGE_TABLE_PHYSICALITIES,&tuple_bytes);
+    corrupt=palloc(tuple_bytes);memcpy(corrupt,tuple,tuple_bytes);offset=0;
+    sink_read_row(corrupt,tuple_bytes,&offset,10,&parsed);
+    laplace_physicality_id_compute(false_entity,PHYSICALITY_DESCRIPTOR_RETENTION_TYPE,&false_placement);
+    memcpy((uint8 *)parsed.fields[0].data,&false_placement,16);
+    memcpy((uint8 *)parsed.fields[1].data,&false_entity,16);
+    forged=NULL;
+    CHECK(intent_stage_from_tuple_bytes(NULL,0,corrupt,tuple_bytes,NULL,0,1024*1024,&forged)==0);
+    pfree(corrupt);forged_stages[0]=forged;
+    reset_spi();s=probe_state(forged_stages,1);sink_parse(s,forged_stages,1);
+    REFUSES(sink_validate_bodies(s,forged_stages,1),"retention identity");
+    CHECK(query_calls[SQ_PRESENCE]==0);sink_cleanup(s);intent_stage_free(forged);
+    intent_stage_free(retention);
     forged=intent_stage_new(1);
     hash128_t relation,wrong_id={111,222};CHECK(laplace_relation_resolve("HAS_PHYSICALITY",&relation)==0);
     CHECK(intent_stage_add_attestation(forged,&wrong_id,&children[0],&relation,&novel_entity,&source,

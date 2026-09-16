@@ -63,11 +63,19 @@ class RetainedIngestionTests(unittest.TestCase):
         self.assertEqual(("/chess/lab/stop/owned", 5), observed[-1])
 
     def test_real_http_failure_retains_new_service_receipt_without_retry_or_error_body(self):
+        self.assert_http_failure_receipt({"status": "failed", "error": "exact witness failure"})
+
+    def test_real_http_early_validation_failure_collects_receipt_without_recording(self):
+        self.assert_http_failure_receipt(None)
+
+    def assert_http_failure_receipt(self, recording):
         job_id = "a" * 32
         old, new = "ingest-" + "1" * 32 + ".json", "ingest-" + "2" * 32 + ".json"
         requests = []
         body = json.dumps({"schema": "laplace.chess-retained-ingestion/v1", "jobId": job_id,
-                           "recording": {"status": "failed", "error": "exact witness failure"}}).encode()
+                           "status": "failed", "disposition": "failed", "error": "service validation failed",
+                           "newlyRecordedGames": None, "alreadyPresentGames": None,
+                           "recording": recording}).encode()
         class Handler(BaseHTTPRequestHandler):
             failed = False
             def log_message(self, *_): pass
@@ -97,7 +105,11 @@ class RetainedIngestionTests(unittest.TestCase):
                 self.assertFalse((output / old).exists())
                 self.assertEqual([], report["attempts"])
                 self.assertTrue(report["failedIngestion"]["collectionCompleted"])
-                self.assertEqual(hashlib.sha256(body).hexdigest(), report["failedIngestion"]["artifacts"][0]["sha256"])
+                artifact = report["failedIngestion"]["artifacts"][0]
+                self.assertEqual(hashlib.sha256(body).hexdigest(), artifact["sha256"])
+                self.assertEqual("failed", artifact["serviceStatus"])
+                self.assertEqual("service validation failed", artifact["serviceError"])
+                self.assertEqual(recording["status"] if recording is not None else None, artifact["recordingStatus"])
                 self.assertNotIn("untrusted HTTP error body", json.dumps(report))
                 self.assertEqual(1, sum(method == "POST" for method, _ in requests))
         finally:
@@ -168,6 +180,12 @@ class RetainedIngestionTests(unittest.TestCase):
             "serviceElapsedSeconds": 2, "newlyRecordedGames": 2, "alreadyPresentGames": 0,
             "noOpReplayVerified": False, "disposition": "fresh", "recording": recording}
         return receipt, experiment, raw_experiment, pgn, job["id"], 2, 3
+
+    def test_absent_recording_cannot_be_accepted_as_zero_recorded_games(self):
+        args = self.fixture()
+        args[0]["recording"] = None
+        with self.assertRaisesRegex(ValueError, "retained native readback did not complete"):
+            bench.validate(*args, replay=False)
 
     def replay(self):
         args = self.fixture()

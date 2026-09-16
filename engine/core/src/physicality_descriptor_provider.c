@@ -133,6 +133,10 @@ physicality_descriptor_status_t physicality_descriptor_vocabulary_create(
         physicality_descriptor_vocabulary_free(vocabulary);
         return (physicality_descriptor_status_t)PHYSICALITY_DESCRIPTOR_MISSING_FLOOR;
     }
+    if (laplace_byte_atoms_build(&vocabulary->byte_basis) != 0) {
+        physicality_descriptor_vocabulary_free(vocabulary);
+        return (physicality_descriptor_status_t)PHYSICALITY_DESCRIPTOR_MISSING_FLOOR;
+    }
     for (size_t i = 0; i < PHYSICALITY_DESCRIPTOR_TAG_COUNT; ++i) {
         status = emit_vocabulary_content(vocabulary, source_id,
             vocabulary_tags[i], strlen(vocabulary_tags[i]), &vocabulary->tags[i]);
@@ -149,7 +153,7 @@ physicality_descriptor_status_t physicality_descriptor_vocabulary_create(
         vocabulary->basis.byte_numbers[i] = vocabulary->numbers[i].id;
     }
     {
-        const char* names[] = {"PhysicalityViewV1", "PhysicalityCurrentFloorAdmittedWinnerRecipeV1",
+        const char* names[] = {"PhysicalityViewV1", "PhysicalityRetainedDescriptorSelectedGeometryRecipeV2",
             "PhysicalityFloorReceiptV1", "PhysicalityReferenceSelectionV1", "PhysicalitySelectionScopeV1",
             "PhysicalitySourceUnitContextV1", "PhysicalitySourceIdentifierV1", "PhysicalitySourceUnitReceiptV1"};
         tier_node_view_t* nodes[] = {&vocabulary->view_schema, &vocabulary->view_recipe,
@@ -159,6 +163,12 @@ physicality_descriptor_status_t physicality_descriptor_vocabulary_create(
             status = emit_vocabulary_content(vocabulary, source_id, names[i], strlen(names[i]), nodes[i]);
             if (status != PHYSICALITY_DESCRIPTOR_OK) goto failed;
         }
+        status = emit_vocabulary_content(vocabulary, source_id, "PhysicalityByteBasisReceiptV1",
+            sizeof("PhysicalityByteBasisReceiptV1") - 1u, &vocabulary->byte_floor_schema);
+        if (status != PHYSICALITY_DESCRIPTOR_OK) goto failed;
+        status = emit_vocabulary_content(vocabulary, source_id, "PhysicalityRetentionReferenceIdentifierV1",
+            sizeof("PhysicalityRetentionReferenceIdentifierV1") - 1u, &vocabulary->retention_reference_schema);
+        if (status != PHYSICALITY_DESCRIPTOR_OK) goto failed;
     }
     if (!physicality_descriptor_basis_is_valid(&vocabulary->basis)) {
         status = PHYSICALITY_DESCRIPTOR_INVALID;
