@@ -1,0 +1,29 @@
+name: Qualify chess floor publication controls
+on:
+  push:
+    branches: [qualify/chess-floor-publisher-20260916]
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 63aace62a73b9c8d0e92ebdea3c120ad7ec9fe18
+          persist-credentials: false
+      - name: Verify immutable candidate and execute actual controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 63aace62a73b9c8d0e92ebdea3c120ad7ec9fe18
+          test "$(git write-tree)" = de77a1c0a392de4a36b1fafe8d5dea701acd16ba
+          mkdir -p "$RUNNER_TEMP/chess-floor-qualifier"
+          export TMPDIR="$RUNNER_TEMP/chess-floor-qualifier"
+          python3 -m py_compile scripts/chess-floor-artifacts.py scripts/test-chess-floor-artifacts.py scripts/check-application-runtime.py scripts/test-application-runtime.py scripts/test-pipeline-install.py scripts/test-app-fingerprints.py
+          bash -n scripts/lib/fp.sh scripts/pipeline.sh
+          python3 scripts/test-chess-floor-artifacts.py
+          python3 scripts/test-pipeline-install.py
+          python3 scripts/test-application-runtime.py
+          python3 scripts/test-app-fingerprints.py
