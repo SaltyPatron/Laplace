@@ -414,8 +414,8 @@ per scalar `converse.label_or_hex` call. The `_batch` variants exist for exactly
 | `ops.placement_health_by_tier(sample, unreliable)` | per-tier split, sampled |
 | `ops.placement_unreliable(thresh, limit)` | the offending rows, one batched label call |
 | `ops.metric_ladder(a, b)` / `_words(a, b)` | all five rungs over **realized curves** |
-| `ops.ingest_integrity_gate(since)` | runs that wrote more physicalities than entities; reads the journal, no scan |
-| `ops.orphan_physicality_count()` | direct anti-join, for rows predating the journal |
+| `ops.ingest_integrity_gate(since)` | corrected 2026-09-16: actual missing-reference physicality IDs, entity IDs and observation times; since scopes the physicality observation |
+| `ops.orphan_physicality_count()` | count of that same exact missing-reference set; journal count differences never establish orphans |
 | `physicalities_ducet_rank_btree` | makes a collation range an index scan (**written and registered; NOT yet applied**) |
 
 ---

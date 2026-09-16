@@ -205,3 +205,15 @@ window 2, generate_series 2, LATERAL 1, size up to 2):
 
 `converse.chat` is the tier-8 entry point and 27 KB of plpgsql — the furthest thing from a thin
 versioned surface in the tree.
+
+## Integrity diagnostic contract (2026-09-16)
+
+`ops.ingest_integrity_gate(since)` returns actual missing-reference rows as
+`(physicality_id bytea, entity_id bytea, observed_at timestamptz)`. Its optional
+`since` argument filters the physicality's observation time. It does not assign
+rows to ingest runs. `ops.orphan_physicality_count()` counts that same exact set.
+New forms around retained entities are valid even when a run records zero new
+entities and one or more physicalities; journal totals cannot establish orphans.
+The existing function-shape migration retires the former run/count result shape.
+The installed `ops_reads` regression covers valid extra forms, missing entities,
+observation-time scope, and resolution when the referenced entity is retained.
