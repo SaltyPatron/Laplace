@@ -190,8 +190,8 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
             .AddPhysicality(projection).Build();
         await using var writer = new ConsensusAccumulatingWriter(
             new NpgsqlSubstrateWriter(pg.DataSource, durability: PostgresWriteDurability.Synchronous), pg.DataSource);
-        int callbacks = 0;
-        ValueTask Verify(CancellationToken _) { callbacks++; return ValueTask.CompletedTask; }
+        int precommitVerifications = 0;
+        ValueTask Verify(CancellationToken _) { precommitVerifications++; return ValueTask.CompletedTask; }
         var first = await writer.ApplyWorkingSetAsync([Observation()], Verify);
         var missing = Assert.IsType<PhysicalityAdmissionReceipt>(first.PhysicalityAdmission);
         var form = Assert.Single(missing.Forms);
@@ -210,11 +210,11 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         Assert.Equal(1, evidence[0].Observations);
         var standing = await ConsensusAsync(input);
         Assert.Equal(1, Assert.Single(standing).Witnesses);
-        Assert.Equal(1, callbacks);
+        Assert.Equal(1, precommitVerifications);
         Assert.True((await writer.ApplyWorkingSetAsync([Observation()], Verify)).JournalReplayHit);
         Assert.Equal(evidence, await EvidenceAsync(input));
         Assert.Equal(standing, await ConsensusAsync(input));
-        Assert.Equal(1, callbacks);
+        Assert.Equal(1, precommitVerifications);
 
         // This is the actual canonical child body, admitted through the same
         // normal writer. Its E was already present; no placeholder coordinate
@@ -233,7 +233,9 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         Assert.Empty(available.MissingViewReferences);
         Assert.Equal(evidence, await EvidenceAsync(input));
         Assert.Equal(standing, await ConsensusAsync(input));
-        Assert.Equal(1, callbacks);
+        // Completing V is a new augmented working-set commit, so its input-integrity
+        // verifier runs again. Original testimony and standing remain unchanged above.
+        Assert.Equal(2, precommitVerifications);
         string view = Convert.ToHexStringLower(resolved.ViewId.Value.ToBytes());
         Assert.Equal([view], await ViewIdsAsync([descriptor], available.GeneratedSourceId));
         await AssertBodiesExistAsync([descriptor], [view]);
@@ -242,7 +244,7 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         Assert.True((await writer.ApplyWorkingSetAsync([Observation()], Verify)).JournalReplayHit);
         Assert.Equal(evidence, await EvidenceAsync(input));
         Assert.Equal(standing, await ConsensusAsync(input));
-        Assert.Equal(1, callbacks);
+        Assert.Equal(2, precommitVerifications);
     }
 
     [Theory]

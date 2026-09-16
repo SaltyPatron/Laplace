@@ -75,8 +75,18 @@ public sealed class SubstrateRootBiasTests
             cpPerPoint: 8d, capCp: 150, shrinkK0: 0d,
             version: (_, _) => version);
 
+        var before = bias.ObserveWork();
         _ = bias.Bonus(fixture.Board, fixture.Moves);
+        var cold = bias.ObserveWork();
         _ = bias.Bonus(fixture.Board, fixture.Moves);
+        var hit = bias.ObserveWork();
+        Assert.Equal(0, before.BackendReads);
+        Assert.Equal(1, cold.BackendReads);
+        Assert.True(cold.FrontierTicks > 0);
+        Assert.True(cold.EvidenceReadTicks > 0);
+        Assert.Equal(cold.FrontierTicks, hit.FrontierTicks);
+        Assert.Equal(cold.EvidenceReadTicks, hit.EvidenceReadTicks);
+        Assert.Equal(1, hit.EvidenceCacheHits);
         Assert.Equal(1, reads);
         Assert.Equal(1, bias.BackendReads);
         Assert.Equal(1, bias.FrontierBuilds);
@@ -90,6 +100,9 @@ public sealed class SubstrateRootBiasTests
         Assert.Equal(2, bias.BackendReads);
         Assert.Equal(1, bias.FrontierBuilds);
         Assert.Equal(lookups, bias.TransitionPerfcacheHits + bias.TransitionNovelHits + bias.TransitionCompositions);
+        var refreshed = bias.ObserveWork();
+        Assert.Equal(cold.FrontierTicks, refreshed.FrontierTicks);
+        Assert.True(refreshed.EvidenceReadTicks > cold.EvidenceReadTicks);
     }
 
     [Fact]

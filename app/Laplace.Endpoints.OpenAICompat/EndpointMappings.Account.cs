@@ -4,8 +4,8 @@ using System.Text;
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Options;
-using Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -20,9 +20,8 @@ internal static class AccountEndpoints
         {
             if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to manage your account.");
             var workspaces = new List<WorkspaceView>();
-            await using (var command = substrate.DataSource.CreateCommand(SqlCatalog.Get("account.workspaces_list").Text))
+            await using (var command = NpgsqlCatalog.Command(substrate.DataSource, "account.workspaces", account.User))
             {
-                command.Parameters.Add(new NpgsqlParameter { Value = account.User });
                 await using var reader = await command.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                     workspaces.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
@@ -44,8 +43,8 @@ internal static class AccountEndpoints
                     publicBaseUrl = stripe.Value.PublicBaseUrl,
                     persistentSessionKeys = !string.IsNullOrWhiteSpace(LaplaceInstall.TryReadConfig("LAPLACE_DATA_PROTECTION_KEYS", "identity.env")),
                     providers = identity.Providers.Select(p => new { id = p.Scheme, name = p.DisplayName, callbackPath = p.CallbackPath }),
-                    // This reports the actual legacy data-reader contract, not a
-                    // privacy promise inferred from authentication being configured.
+                    // Account authentication does not isolate the legacy global
+                    // substrate readers. Do not infer a privacy promise from login.
                     substrateScope = "shared", privateDataIsolation = false
                 }
             });
@@ -58,33 +57,21 @@ internal static class AccountEndpoints
             if (!ValidName(request.Name)) return Error(400, "invalid_name", "Use a workspace name between 1 and 160 characters without control characters.");
             var tenant = $"t-{Guid.NewGuid():N}";
             var name = request.Name!.Trim();
-            await using var connection = await substrate.DataSource.OpenConnectionAsync(ct);
-            await using var transaction = await connection.BeginTransactionAsync(ct);
-            await using var batch = new NpgsqlBatch(connection, transaction);
-            var workspace = new NpgsqlBatchCommand(SqlCatalog.Get("account.workspace_insert").Text);
-            workspace.Parameters.Add(new NpgsqlParameter { Value = tenant });
-            workspace.Parameters.Add(new NpgsqlParameter { Value = name });
-            batch.BatchCommands.Add(workspace);
-            var membership = new NpgsqlBatchCommand(SqlCatalog.Get("account.workspace_owner_insert").Text);
-            membership.Parameters.Add(new NpgsqlParameter { Value = tenant });
-            membership.Parameters.Add(new NpgsqlParameter { Value = account.User });
-            batch.BatchCommands.Add(membership);
-            await batch.ExecuteNonQueryAsync(ct);
-            await transaction.CommitAsync(ct);
+            // Workspace and owner are admitted atomically by one catalog operation.
+            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                "account.create_workspace", tenant, name, account.User);
+            await command.ExecuteNonQueryAsync(ct);
             return Results.Ok(new WorkspaceView(tenant, name, "organization", "owner"));
         }).WithTags("account");
 
         app.MapPost("/v1/account/workspaces/{tenantId}/select", async (string tenantId, HttpContext http,
             SubstrateClient substrate, CancellationToken ct) =>
         {
-            if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to select a workspace.");
-            await using var command = substrate.DataSource.CreateCommand(SqlCatalog.Get("account.membership_role").Text);
-            command.Parameters.Add(new NpgsqlParameter { Value = tenantId });
-            command.Parameters.Add(new NpgsqlParameter { Value = account.User });
+            if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to choose a workspace.");
+            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                "account.membership_role", tenantId, account.User);
             if (await command.ExecuteScalarAsync(ct) is not string role)
                 return Error(403, "workspace_membership_required", "This account does not belong to that workspace.");
-            // An opaque login session and a workspace selection have different
-            // lifetimes. The resolver revalidates membership on every request.
             var cookie = ApiKeyTenantResolver.WorkspaceCookieOptions();
             cookie.Expires = DateTimeOffset.UtcNow.AddDays(14);
             http.Response.Cookies.Append(ApiKeyTenantResolver.WorkspaceCookie, tenantId, cookie);
@@ -96,10 +83,8 @@ internal static class AccountEndpoints
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "A workspace owner or administrator must change its settings.");
             if (!ValidName(request.Name)) return Error(400, "invalid_name", "Use a workspace name between 1 and 160 characters without control characters.");
-            await using var command = substrate.DataSource.CreateCommand(SqlCatalog.Get("account.workspace_rename").Text);
-            command.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
-            command.Parameters.Add(new NpgsqlParameter { Value = account.User });
-            command.Parameters.Add(new NpgsqlParameter { Value = request.Name!.Trim() });
+            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                "account.rename_workspace", account.Tenant, account.User, request.Name!.Trim());
             return await command.ExecuteNonQueryAsync(ct) == 1 ? Results.NoContent()
                 : Error(403, "workspace_admin_required", "Your workspace permissions have changed.");
         }).WithTags("account");
@@ -107,8 +92,7 @@ internal static class AccountEndpoints
         app.MapGet("/v1/account/members", async (HttpContext http, SubstrateClient substrate, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can view the membership roster.");
-            await using var command = substrate.DataSource.CreateCommand(SqlCatalog.Get("account.members_list").Text);
-            command.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
+            await using var command = NpgsqlCatalog.Command(substrate.DataSource, "account.members", account.Tenant);
             await using var reader = await command.ExecuteReaderAsync(ct);
             var members = new List<object>();
             while (await reader.ReadAsync(ct)) members.Add(new
@@ -129,13 +113,8 @@ internal static class AccountEndpoints
             var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
             var id = Guid.NewGuid();
             var expires = DateTimeOffset.UtcNow.AddDays(7);
-            await using var command = substrate.DataSource.CreateCommand(SqlCatalog.Get("account.invitation_insert").Text);
-            command.Parameters.Add(new NpgsqlParameter { Value = id });
-            command.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
-            command.Parameters.Add(new NpgsqlParameter { Value = SHA256.HashData(Encoding.UTF8.GetBytes(token)) });
-            command.Parameters.Add(new NpgsqlParameter { Value = role });
-            command.Parameters.Add(new NpgsqlParameter { Value = account.User });
-            command.Parameters.Add(new NpgsqlParameter { Value = expires });
+            await using var command = NpgsqlCatalog.Command(substrate.DataSource, "account.create_invitation",
+                id, account.Tenant, SHA256.HashData(Encoding.UTF8.GetBytes(token)), role, account.User, expires);
             if (await command.ExecuteNonQueryAsync(ct) != 1) return Error(403, "workspace_admin_required", "Your workspace permissions have changed.");
             return Results.Ok(new { invitationId = id, role, expiresAt = expires, invitationPath = $"/settings#join={token}" });
         }).WithTags("account");
@@ -143,8 +122,7 @@ internal static class AccountEndpoints
         app.MapGet("/v1/account/invitations", async (HttpContext http, SubstrateClient substrate, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can view invitations.");
-            await using var command = substrate.DataSource.CreateCommand(SqlCatalog.Get("account.invitations_list").Text);
-            command.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
+            await using var command = NpgsqlCatalog.Command(substrate.DataSource, "account.invitations", account.Tenant);
             await using var reader = await command.ExecuteReaderAsync(ct);
             var invitations = new List<object>();
             while (await reader.ReadAsync(ct)) invitations.Add(new
@@ -159,9 +137,8 @@ internal static class AccountEndpoints
             SubstrateClient substrate, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can revoke invitations.");
-            await using var command = substrate.DataSource.CreateCommand(SqlCatalog.Get("account.invitation_revoke").Text);
-            command.Parameters.Add(new NpgsqlParameter { Value = invitationId });
-            command.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
+            await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                "account.revoke_invitation", invitationId, account.Tenant, account.User);
             return await command.ExecuteNonQueryAsync(ct) == 1 ? Results.NoContent() : Results.NotFound();
         }).WithTags("account");
 
@@ -176,26 +153,16 @@ internal static class AccountEndpoints
             string tenant;
             string role;
             Guid id;
-            await using (var command = new NpgsqlCommand(SqlCatalog.Get("account.invitation_lock").Text, connection, transaction))
+            await using (var command = NpgsqlCatalog.Command(connection, transaction,
+                "account.lock_invitation", SHA256.HashData(Encoding.UTF8.GetBytes(request.Token))))
             {
-                command.Parameters.Add(new NpgsqlParameter { Value = SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)) });
                 await using var reader = await command.ExecuteReaderAsync(ct);
                 if (!await reader.ReadAsync(ct)) return Error(404, "invalid_invitation", "This invitation is invalid, expired, or already used.");
                 id = reader.GetGuid(0); tenant = reader.GetString(1); role = reader.GetString(2);
             }
-            await using (var batch = new NpgsqlBatch(connection, transaction))
-            {
-                var membership = new NpgsqlBatchCommand(SqlCatalog.Get("account.invitation_membership_insert").Text);
-                membership.Parameters.Add(new NpgsqlParameter { Value = tenant });
-                membership.Parameters.Add(new NpgsqlParameter { Value = account.User });
-                membership.Parameters.Add(new NpgsqlParameter { Value = role });
-                batch.BatchCommands.Add(membership);
-                var invitation = new NpgsqlBatchCommand(SqlCatalog.Get("account.invitation_accept").Text);
-                invitation.Parameters.Add(new NpgsqlParameter { Value = account.User });
-                invitation.Parameters.Add(new NpgsqlParameter { Value = id });
-                batch.BatchCommands.Add(invitation);
-                await batch.ExecuteNonQueryAsync(ct);
-            }
+            await using (var command = NpgsqlCatalog.Command(connection, transaction,
+                "account.accept_invitation", tenant, account.User, role, id))
+                await command.ExecuteNonQueryAsync(ct);
             await transaction.CommitAsync(ct);
             return Results.Ok(new { tenantId = tenant });
         }).WithTags("account");
@@ -206,21 +173,17 @@ internal static class AccountEndpoints
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Only workspace administrators can remove members.");
             await using var connection = await substrate.DataSource.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
-            await using (var command = new NpgsqlCommand(SqlCatalog.Get("account.workspace_lock").Text, connection, transaction))
-            {
-                command.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
+            await using (var command = NpgsqlCatalog.Command(connection, transaction, "account.lock_workspace", account.Tenant))
                 await command.ExecuteScalarAsync(ct);
+            await using (var remove = NpgsqlCatalog.Command(connection, transaction,
+                "account.remove_member", account.Tenant, userId, account.User))
+            {
+                if (await remove.ExecuteNonQueryAsync(ct) != 1)
+                    return Error(409, "member_not_removable", "The member is absent, your role cannot remove them, or they are the last owner.");
             }
-            await using var remove = new NpgsqlCommand(SqlCatalog.Get("account.member_remove").Text, connection, transaction);
-            remove.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
-            remove.Parameters.Add(new NpgsqlParameter { Value = userId });
-            remove.Parameters.Add(new NpgsqlParameter { Value = account.User });
-            if (await remove.ExecuteNonQueryAsync(ct) != 1)
-                return Error(409, "member_not_removable", "The member is absent, your role cannot remove them, or they are the last owner.");
-            await using var revoke = new NpgsqlCommand(SqlCatalog.Get("account.member_sessions_revoke").Text, connection, transaction);
-            revoke.Parameters.Add(new NpgsqlParameter { Value = account.Tenant });
-            revoke.Parameters.Add(new NpgsqlParameter { Value = userId });
-            await revoke.ExecuteNonQueryAsync(ct);
+            await using (var revoke = NpgsqlCatalog.Command(connection, transaction,
+                "identity.revoke_workspace_sessions", account.Tenant, userId))
+                await revoke.ExecuteNonQueryAsync(ct);
             await transaction.CommitAsync(ct);
             return Results.NoContent();
         }).WithTags("account");
@@ -231,7 +194,8 @@ internal static class AccountEndpoints
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Sign in as a workspace owner or administrator to create API keys.");
             if (request.Label?.Length > 160) return Error(400, "invalid_label", "Key labels may contain at most 160 characters.");
             var plans = await entitlements.GetByTenantAsync(account.Tenant, ct);
-            if (!plans.Any(p => p.Status == "active" && p.PeriodStart <= DateTimeOffset.UtcNow && p.PeriodEnd > DateTimeOffset.UtcNow))
+            var now = DateTimeOffset.UtcNow;
+            if (!plans.Any(p => p.Status == "active" && p.PeriodStart <= now && p.PeriodEnd > now))
                 return Error(402, "active_subscription_required", "An active workspace subscription is required to create an API key.");
             var issued = await keys.IssueAsync(account.Tenant, request.Label?.Trim(), ct);
             return Results.Ok(new { key = issued.Key, keyPrefix = issued.Record.KeyPrefix,
@@ -247,8 +211,9 @@ internal static class AccountEndpoints
             var session = await gateway.TryGetSessionAsync(request.SessionId, ct);
             if (!session.Found || !string.Equals(session.Tenant, account.Tenant, StringComparison.Ordinal)) return Results.NotFound();
             var subscriptions = await entitlements.GetByTenantAsync(account.Tenant, ct);
+            var now = DateTimeOffset.UtcNow;
             var active = subscriptions.Any(e => e.StripeSubscriptionId == session.SubscriptionId
-                && e.Status == "active" && e.PeriodStart <= DateTimeOffset.UtcNow && e.PeriodEnd > DateTimeOffset.UtcNow);
+                && e.Status == "active" && e.PeriodStart <= now && e.PeriodEnd > now);
             return Results.Ok(new { paid = session.Paid, active, tenantId = account.Tenant,
                 status = active ? "active" : session.Paid ? "awaiting_subscription_confirmation" : "awaiting_payment" });
         }).WithTags("billing");

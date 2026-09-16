@@ -120,6 +120,67 @@ def game_request(games: int, depth: int, concurrency: int, threads: int, hash_mb
         "ingest": True, "persistPgn": True, "persistTranscript": True}}
 
 
+def _content_inventory(line_counts: list[dict], ordered_count: int, method: str) -> dict:
+    games = sum(line["games"] for line in line_counts)
+    starts = {line["startPositionId"] for line in line_counts}
+    lines = len(line_counts)
+    return {"schema": "laplace.chess-content-inventory/v1",
+            "scope": "Content diversity of verified readback playings; counts do not establish newly inserted canonical entities or representative chess coverage.",
+            "playings": games, "distinctStartPositions": len(starts),
+            "distinctLines": lines, "distinctOrderedLines": ordered_count,
+            "repeatedLinePlayings": games - lines,
+            "repeatedOrderedLinePlayings": games - ordered_count,
+            "maximumPlayingsSharingLine": max((line["games"] for line in line_counts), default=0),
+            "multipleStartPositionsAndLines": len(starts) > 1 and lines > 1,
+            "classification": ("multiple-starts-and-lines" if len(starts) > 1 and lines > 1
+                               else "single-start-multiple-lines" if lines > 1
+                               else "single-line" if lines else "empty"),
+            "orderedLineCountMethod": method, "lineCounts": line_counts}
+
+
+def content_inventory(games: list[dict]) -> dict:
+    """Group existing native readback identities without minting new chess IDs.
+
+    Event, Round, players and playing IDs are observation dimensions. The exact
+    start-position ID and ordered move-ID tuple identify the line's content.
+    """
+    lines, ordered_lines = {}, {}
+    for game in games:
+        line_id, start = game["lineId"].lower(), game["startPositionId"].lower()
+        ordered = (start, tuple(move.lower() for move in game["moveIds"]))
+        previous = lines.get(line_id)
+        require(previous is None or previous[0] == ordered,
+                "one native line identity has conflicting ordered readback bodies")
+        require(ordered not in ordered_lines or ordered_lines[ordered] == line_id,
+                "one exact ordered readback body has conflicting native line identities")
+        lines[line_id] = (ordered, 1 if previous is None else previous[1] + 1)
+        ordered_lines[ordered] = line_id
+    groups = [{"lineId": line, "startPositionId": body[0][0], "games": body[1]}
+              for line, body in sorted(lines.items())]
+    return _content_inventory(groups, len(ordered_lines),
+                              "exact-start-position-and-ordered-move-ID-tuples")
+
+
+def aggregate_content_inventory(cases: list[dict]) -> dict:
+    """Reuse native canonical line IDs across already validated complete cases."""
+    lines = {}
+    for case in cases:
+        inventory = case["contentInventory"]
+        require(inventory["playings"] == case["verifiedRecordedGames"],
+                "content inventory differs from accepted playing count")
+        for line in inventory["lineCounts"]:
+            identity = line["lineId"]
+            previous = lines.get(identity)
+            require(previous is None or previous["startPositionId"] == line["startPositionId"],
+                    "one native line identity has conflicting start positions across cases")
+            if previous is None:
+                lines[identity] = dict(line)
+            else:
+                previous["games"] += line["games"]
+    return _content_inventory([lines[key] for key in sorted(lines)], len(lines),
+                              "native-canonical-line-IDs-after-exact-per-case-ordered-body-check")
+
+
 def validate_recording(recording: dict, experiment: dict, job: dict, request: dict,
                        pgn: bytes, experiment_bytes: bytes, elapsed: float) -> dict:
     count = request["config"]["rounds"]
@@ -205,6 +266,7 @@ def validate_recording(recording: dict, experiment: dict, job: dict, request: di
     record_wall = times["recording"] + times["commit"]
     verified_record_wall = record_wall + times["readback"]
     return {"verifiedRecordedGames": count, "verifiedRecordedPlies": plies,
+            "newlyRecordedPlayings": count, "contentInventory": content_inventory(bodies),
             "verifiedPlayingIds": sorted(playing_ids),
             "gamesPerSecondServerWorkflow": count / times["total"],
             "pliesPerSecondServerWorkflow": plies / times["total"],
@@ -236,6 +298,8 @@ def summarize_rates(cases: list[dict], concurrencies: list[int], target: float) 
             medians[metric][str(concurrency)] = (
                 statistics.median(values) if all(value is not None for value in values) else None)
     return {"medianRatesByConcurrency": medians,
+            "correctnessSweepNewlyRecordedPlayings": sum(case["verifiedRecordedGames"] for case in cases),
+            "correctnessSweepContentInventory": aggregate_content_inventory(cases),
             "targetMetric": TARGET_METRIC,
             "sampleTargetRateReached": max(medians[TARGET_METRIC].values()) >= target,
             "collectorSampleTargetRateReached": max(medians["gamesPerSecondEndToEnd"].values()) >= target,
@@ -374,15 +438,26 @@ def run_sustained(client, directory, request, duration, deadline, case_timeout, 
         result["status"] = "failed"
         result["error"] = str(error) if isinstance(error, (ValueError, TimeoutError)) else type(error).__name__
     finally:
-        elapsed = time.monotonic() - started
         # A partial failed run retains successful work but never establishes capacity.
         valid = [case for case in result["cases"] if case.get("aggregateAccepted") is True]
         games = sum(case["verifiedRecordedGames"] for case in valid)
         plies = sum(case["verifiedRecordedPlies"] for case in valid)
+        inventory = None
+        try:
+            inventory = aggregate_content_inventory(valid)
+        except (ValueError, KeyError, TypeError) as error:
+            result["status"] = "failed"
+            result["contentInventoryError"] = str(error) if isinstance(error, ValueError) else type(error).__name__
+            result.setdefault("error", result["contentInventoryError"])
+        finished = time.monotonic()
+        if finished >= deadline and result["status"] == "passed":
+            result.update(status="failed", error="collector total execution deadline expired during final inventory bookkeeping")
+        elapsed = finished - started
         qualified = result["status"] == "passed" and elapsed >= duration >= MIN_DURATION_SECONDS and len(valid) >= 2
         rate = games / elapsed if elapsed > 0 else 0
         result.update(elapsedSeconds=elapsed, finishedAt=datetime.now(timezone.utc).isoformat(), completedCases=len(valid),
                       verifiedRecordedGames=games, verifiedRecordedPlies=plies,
+                      newlyRecordedPlayings=games, contentInventory=inventory,
                       gamesPerSecondSustainedEndToEnd=rate,
                       pliesPerSecondSustainedEndToEnd=plies / elapsed if elapsed > 0 else 0,
                       gamesPerDayExtrapolated=rate * 86400,

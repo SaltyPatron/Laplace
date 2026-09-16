@@ -72,7 +72,7 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
                     if (!string.IsNullOrWhiteSpace(supplied.GetString())
                         && !string.Equals(supplied.GetString()!.Trim(), tenant.TenantId, StringComparison.Ordinal))
                     {
-                        await Reject(http, 403, "tenant_mismatch", "The request belongs to a different workspace. Select your workspace before starting checkout."); return;
+                        await Reject(http, 403, "tenant_mismatch", "The request belongs to a different workspace. Choose your workspace before starting checkout."); return;
                     }
                 }
                 if (path.Equals(new PathString("/v1/billing/keys/redeem")))

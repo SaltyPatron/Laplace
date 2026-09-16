@@ -1,8 +1,6 @@
-using Laplace.Engine.Core;
 using System.Text.Json;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
-using NpgsqlTypes;
 
 namespace Laplace.Endpoints.OpenAICompat.BillingPostgres;
 
@@ -24,57 +22,41 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
 
     public async Task<BillingEntitlement> ApplySubscriptionAsync(BillingPlan plan, BillingSubscriptionState state, CancellationToken ct)
     {
-        var sql = SqlCatalog.Get("billing.subscription_apply").Text;
-        var result = await NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql, ReadEntitlement, p =>
-        {
-            p.Add(new NpgsqlParameter { Value = state.Tenant });
-            p.Add(new NpgsqlParameter { Value = plan.PlanId });
-            p.Add(new NpgsqlParameter { Value = state.Status });
-            p.Add(new NpgsqlParameter { Value = state.PeriodStart });
-            p.Add(new NpgsqlParameter { Value = state.PeriodEnd });
-            p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Jsonb, Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
-            p.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)state.CustomerId ?? DBNull.Value });
-            p.Add(new NpgsqlParameter { Value = state.SubscriptionId });
-            p.Add(new NpgsqlParameter { Value = state.EventCreated });
-            p.Add(new NpgsqlParameter { Value = state.CancelAtPeriodEnd });
-        }, ct: ct);
-        return result ?? throw new InvalidOperationException("The subscription operation returned no account state.");
+        await using var command = NpgsqlCatalog.Command(_dataSource, "billing.apply_subscription",
+            state.Tenant, plan.PlanId, state.Status, state.PeriodStart, state.PeriodEnd,
+            JsonSerializer.Serialize(plan.MonthlyCredits), state.CustomerId, state.SubscriptionId,
+            state.EventCreated, state.CancelAtPeriodEnd);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadEntitlement(reader)
+            : throw new InvalidOperationException("The subscription operation returned no account state.");
     }
 
-    public Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct)
+    public async Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct)
     {
-        var sql = SqlCatalog.Get("billing.subscription_deactivate").Text;
-        return NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql, ReadEntitlement, p =>
-        {
-            p.Add(new NpgsqlParameter { Value = status });
-            p.Add(new NpgsqlParameter { Value = stripeSubscriptionId });
-        }, ct: ct);
+        await using var command = NpgsqlCatalog.Command(_dataSource, "billing.deactivate_subscription", status, stripeSubscriptionId);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadEntitlement(reader) : null;
     }
 
-    public Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct)
+    public async Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct)
     {
-        var sql = SqlCatalog.Get("billing.entitlements_list").Text;
-        return NpgsqlRead.ReadRowsAsync(_dataSource, sql, ReadEntitlement,
-            p => p.Add(new NpgsqlParameter { Value = tenant }), ct: ct);
+        await using var command = NpgsqlCatalog.Command(_dataSource, "billing.entitlements", tenant);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        var result = new List<BillingEntitlement>();
+        while (await reader.ReadAsync(ct)) result.Add(ReadEntitlement(reader));
+        return result;
     }
 
     public async Task<(bool Consumed, BillingCreditDebit Debit)> TryConsumeCreditAsync(
         string tenant, string serviceId, int units, CancellationToken ct)
     {
         if (units <= 0) return (false, new BillingCreditDebit(tenant, "", serviceId, units, 0, DateTimeOffset.MinValue, "invalid_units"));
-        var sql = SqlCatalog.Get("billing.credit_consume").Text;
-        var debit = await NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql,
-            r => new BillingCreditDebit(tenant, r.GetString(0), serviceId, units, r.GetInt32(1),
-                r.GetFieldValue<DateTimeOffset>(2), "consumed"),
-            p =>
-            {
-                p.Add(new NpgsqlParameter { Value = tenant });
-                p.Add(new NpgsqlParameter { Value = serviceId });
-                p.Add(new NpgsqlParameter { Value = units });
-            }, ct: ct);
-        return debit is null
-            ? (false, new BillingCreditDebit(tenant, "", serviceId, units, 0, DateTimeOffset.MinValue, "insufficient_credits"))
-            : (true, debit);
+        await using var command = NpgsqlCatalog.Command(_dataSource, "billing.consume_credit", tenant, serviceId, units);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return (false, new BillingCreditDebit(tenant, "", serviceId, units, 0, DateTimeOffset.MinValue, "insufficient_credits"));
+        return (true, new BillingCreditDebit(tenant, reader.GetString(0), serviceId, units,
+            reader.GetInt32(1), reader.GetFieldValue<DateTimeOffset>(2), "consumed"));
     }
 
     private static BillingEntitlement ReadEntitlement(NpgsqlDataReader r) => new(

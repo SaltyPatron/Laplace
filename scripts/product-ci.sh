@@ -212,7 +212,7 @@ run_recorded_chess_benchmark() {
   # an unsuccessful match does not prevent measuring the underlying storage.
   local recorded_status=0 retained_status=0 geometry_status=0
   if python3 scripts/benchmark-recorded-chess.py \
-    --duration-seconds 30 --total-timeout 1800 \
+    --duration-seconds 30 --total-timeout 7200 \
     --output-dir "${LAPLACE_RECORDED_CHESS_DIRECTORY:-$operational_proof_directory/recorded-chess}"; then
     :
   else

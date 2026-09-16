@@ -209,6 +209,23 @@ class RetainedIngestionTests(unittest.TestCase):
         self.assertEqual(0, actual["metrics"]["newlyRecordedGamesPerSecondService"])
         self.assertEqual(1, actual["metrics"]["processedGamesPerSecondService"])
 
+    def test_same_line_first_admission_and_exact_replay_keep_distinct_denominators(self):
+        args, baseline = self.replay()
+        replay = bench.validate(*args, replay=True, previous=baseline)
+        first_metrics, replay_metrics = baseline["metrics"], replay["metrics"]
+        self.assertEqual(2, first_metrics["newlyRecordedPlayings"])
+        self.assertEqual(0, replay_metrics["newlyRecordedPlayings"])
+        self.assertEqual(first_metrics["contentInventory"], replay_metrics["contentInventory"])
+        inventory = replay_metrics["contentInventory"]
+        self.assertEqual(2, inventory["playings"])
+        self.assertEqual(1, inventory["distinctStartPositions"])
+        self.assertEqual(1, inventory["distinctLines"])
+        self.assertEqual(1, inventory["distinctOrderedLines"])
+        self.assertFalse(inventory["multipleStartPositionsAndLines"])
+        self.assertEqual(1, first_metrics["newlyRecordedGamesPerSecondService"])
+        self.assertEqual(0, replay_metrics["newlyRecordedGamesPerSecondService"])
+        self.assertEqual(1, replay_metrics["processedGamesPerSecondService"])
+
     def test_replay_count_growth_cannot_hide_behind_same_witness_id(self):
         args, baseline = self.replay()
         args[0]["recording"]["replayScopes"][0]["after"][2]["observationCount"] += 1

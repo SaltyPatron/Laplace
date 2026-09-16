@@ -151,7 +151,7 @@ raise SystemExit(int(os.environ[statuses[sys.argv[1]]]))
                 observed = [json.loads(line) for line in calls.read_text().splitlines()]
                 self.assertEqual(["scripts/benchmark-recorded-chess.py", "scripts/benchmark-retained-chess-ingestion.py", "scripts/benchmark_suite.py"],
                                  [call[0] for call in observed])
-                self.assertEqual(["--duration-seconds", "30", "--total-timeout", "1800",
+                self.assertEqual(["--duration-seconds", "30", "--total-timeout", "7200",
                                   "--output-dir", str(root / "recorded")], observed[0][1:])
                 self.assertEqual(["run", "--suite", "geometry", "--database", "selected_database", "--repeats", "3",
                                   "--receipt-dir", str(root / "geometry")], observed[2][1:])

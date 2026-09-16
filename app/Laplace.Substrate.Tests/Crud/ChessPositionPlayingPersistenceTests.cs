@@ -109,19 +109,25 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
         var priorDirectories = Directory.GetDirectories(evidenceRoot).ToHashSet(StringComparer.Ordinal);
         await using (var connection = await pg.DataSource.OpenConnectionAsync())
         {
-            await using var remove = new global::Npgsql.NpgsqlCommand("""
+            await using var remove = new global::Npgsql.NpgsqlBatch(connection);
+            var backup = new global::Npgsql.NpgsqlBatchCommand("""
                 CREATE TEMP TABLE chess_result_evidence_backup AS
                 SELECT a.* FROM laplace.attestations a
-                WHERE a.context_id=$1 AND a.type_id=$2 AND a.source_id=ANY($3);
-                DELETE FROM laplace.attestations a USING chess_result_evidence_backup saved
-                WHERE a.id=saved.id AND a.type_id=saved.type_id AND a.subject_id=saved.subject_id
-                """, connection);
-            remove.Parameters.AddWithValue(Convert.FromHexString(firstPlaying));
-            remove.Parameters.AddWithValue(RelationTypeRegistry.RelationTypeId("HAS_RESULT").ToBytes());
-            remove.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, new[]
+                WHERE a.context_id=$1 AND a.type_id=$2 AND a.source_id=ANY($3)
+                """);
+            backup.Parameters.AddWithValue(Convert.FromHexString(firstPlaying));
+            backup.Parameters.AddWithValue(RelationTypeRegistry.RelationTypeId("HAS_RESULT").ToBytes());
+            backup.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, new[]
             {
                 ChessVocabulary.PgnSourceId.ToBytes(), ChessVocabulary.BookSourceId.ToBytes(), ChessVocabulary.SourceId.ToBytes(),
             });
+            remove.BatchCommands.Add(backup);
+            remove.BatchCommands.Add(new global::Npgsql.NpgsqlBatchCommand("""
+                DELETE FROM laplace.attestations a USING chess_result_evidence_backup saved
+                WHERE a.id=saved.id AND a.type_id=saved.type_id AND a.subject_id=saved.subject_id
+                """));
+            // Keep both statements in one implicit transaction, completed before
+            // migration reads through its own connections.
             Assert.True(await remove.ExecuteNonQueryAsync() > 0);
             try
             {
@@ -200,16 +206,22 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
         // both playings and their result/header witnesses still exist.
         await using (var connection = await pg.DataSource.OpenConnectionAsync())
         {
-            await using var remove = new global::Npgsql.NpgsqlCommand("""
+            await using var remove = new global::Npgsql.NpgsqlBatch(connection);
+            var backup = new global::Npgsql.NpgsqlBatchCommand("""
                 CREATE TEMP TABLE chess_position_content_backup AS
                 SELECT p.* FROM laplace.physicalities p
                 WHERE p.type=$1 AND p.entity_id IN (
-                    SELECT object_id FROM laplace.attestations WHERE subject_id=$2 AND type_id=$3);
+                    SELECT object_id FROM laplace.attestations WHERE subject_id=$2 AND type_id=$3)
+                """);
+            backup.Parameters.AddWithValue((short)PhysicalityType.Content);
+            backup.Parameters.AddWithValue(Convert.FromHexString(firstPlaying));
+            backup.Parameters.AddWithValue(RelationTypeRegistry.RelationTypeId("PLAYS_LINE").ToBytes());
+            remove.BatchCommands.Add(backup);
+            remove.BatchCommands.Add(new global::Npgsql.NpgsqlBatchCommand("""
                 DELETE FROM laplace.physicalities p USING chess_position_content_backup saved WHERE p.id=saved.id
-                """, connection);
-            remove.Parameters.AddWithValue((short)PhysicalityType.Content);
-            remove.Parameters.AddWithValue(Convert.FromHexString(firstPlaying));
-            remove.Parameters.AddWithValue(RelationTypeRegistry.RelationTypeId("PLAYS_LINE").ToBytes());
+                """));
+            // Keep both statements in one implicit transaction, completed before
+            // migration reads through its own connections.
             Assert.True(await remove.ExecuteNonQueryAsync() > 0);
             try
             {

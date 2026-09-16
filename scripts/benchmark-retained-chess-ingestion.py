@@ -235,6 +235,8 @@ def validate(receipt, experiment, experiment_bytes, pgn, job_id, games, elapsed,
                 and all(durability.get(k) is True for k in ("fsync", "fullPageWrites", "writeCommitAcknowledged", "localWalFlushAcknowledged")),
                 "fresh admission lacks synchronous PostgreSQL acknowledgement")
     return {"metrics": {"parsedGames": games, "newlyRecordedGames": expected_new,
+            "newlyRecordedPlayings": expected_new,
+            "contentInventory": transport.content_inventory(bodies),
             "pliesReadback": plies, "serviceElapsedSeconds": service, "collectorElapsedSeconds": elapsed,
             "newlyRecordedGamesPerSecondService": expected_new / service,
             "processedGamesPerSecondService": games / service,
