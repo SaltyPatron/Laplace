@@ -101,6 +101,20 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names, ct);
     }
 
+    internal static int ResolvedGamesPerChunk => ChunkSize;
+
+    internal IAsyncEnumerable<ChessGameRecord> SelectNovelAsync(
+        List<ChessGameRecord> games, CancellationToken ct)
+        => ChessPgnDecomposer.FilterNovelAsync(games, _reader, ct);
+
+    internal Task<Result> IngestCorpusGamesAsync(
+        IEnumerable<string> games, ChessRecordingMeasurement measurement, CancellationToken ct)
+    {
+        if (!measurement.IsCorpus)
+            throw new ArgumentException("corpus ingestion requires bound corpus provenance", nameof(measurement));
+        return IngestGamesCoreAsync(games, "bound original corpus selection", null, ct, null, measurement);
+    }
+
     public async Task<Result> IngestFileAsync(
         string pgnPath, Action<string>? log = null, CancellationToken ct = default, string? experimentReceiptJson = null)
         => await IngestGamesAsync(PgnGames.StreamGames(pgnPath), Path.GetFileName(pgnPath), log, ct, experimentReceiptJson);
@@ -142,7 +156,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     ct.ThrowIfCancellationRequested();
                     experiment?.ValidateGame(gameText);
                     if (ChessPgnDecomposer.TryParseGame(gameText,
-                        requireNormalCompletion: measurement?.RequiresNormalCompletion == true) is not { } game) continue;
+                        requireNormalCompletion: measurement?.RequiresNormalCompletion == true,
+                        requireCompleteSource: measurement?.IsCorpus == true) is not { } game) continue;
                     measurement?.ObserveParsed(game);
                     parsed++;
                     chunk.Add(game);
@@ -424,8 +439,10 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         ChessRecordingMeasurement.ScopeRequest? scope = null;
         if (measurement is { RetainedPgn: true })
             scope = await measurement.ReadScopeBeforeAsync(_ds,
-                expectedEntities.Concat(experimentChange!.Entities).ToArray(),
-                expectedWitnesses.Concat(experimentChange!.Attestations).DistinctBy(a => a.Id).ToArray(),
+                expectedEntities.Concat(experimentChange is null
+                    ? Enumerable.Empty<EntityRow>() : experimentChange.Entities).ToArray(),
+                expectedWitnesses.Concat(experimentChange is null
+                    ? Enumerable.Empty<AttestationRow>() : experimentChange.Attestations).DistinctBy(a => a.Id).ToArray(),
                 expectedCarriers, ct);
 
         if (changes.Count > 0)
@@ -446,10 +463,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             ChessTransitionObservations.MarkObserved(observedPositions, observedMoves);
         if (measurement is not null)
             await measurement.VerifyChunkAsync(_ds, chunk, expectedWitnesses, expectedCarriers,
-                experimentChange ?? throw new InvalidOperationException("recording requires experiment provenance"),
-                experiment!, ct);
+                experimentChange, experiment, ct);
         if (scope is not null)
             await measurement!.ObserveScopeAfterAsync(_ds, scope, ct);
+        if (measurement?.IsCorpus == true)
+            await measurement.FlushCorpusChunkAsync(novel, ct);
         return (novel, novel, repairedGames);
     }
 

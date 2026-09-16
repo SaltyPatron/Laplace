@@ -354,15 +354,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
     }
 
-    internal static ChessGameRecord? TryParseGame(string gameText, bool requireNormalCompletion = false)
+    internal static ChessGameRecord? TryParseGame(string gameText, bool requireNormalCompletion = false,
+        bool requireCompleteSource = false)
     {
+        bool strict = requireNormalCompletion || requireCompleteSource;
         var gameBytes = Encoding.UTF8.GetBytes(gameText);
         PgnMovetext.PgnWalkResult walk;
         using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
         {
-            if (requireNormalCompletion && !ast.Diagnostics.SyntaxComplete)
+            if (strict && !ast.Diagnostics.SyntaxComplete)
                 throw new InvalidDataException("normal recorded PGN requires a complete native syntax parse");
-            if (requireNormalCompletion)
+            if (strict)
             {
                 int games = 0;
                 for (int i = 0; i < ast.NodeCount; i++)
@@ -374,7 +376,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
         if (walk.Result is null)
         {
-            if (requireNormalCompletion)
+            if (strict)
                 throw new InvalidDataException("normal recorded PGN requires a finished serialized result");
             ChessDropLedger.Drop(ChessDropLedger.NoResultOrMoves, Headline(gameText));
             return null;
@@ -382,21 +384,32 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
         var moves = walk.Mainline.Select(p => p.San).ToList();
         var result = walk.Result.Value;
+        if (strict && PgnGames.TagStr(gameText, "Result") != result.ResultToken)
+            throw new InvalidDataException("complete recorded PGN header and movetext result disagree");
+        if (requireCompleteSource && PgnGames.TagStr(gameText, "Termination").ToLowerInvariant()
+            is "unterminated" or "abandoned")
+            throw new InvalidDataException("corpus source declares an unfinished game");
 
+        string declaredPlies = PgnGames.TagStr(gameText, "PlyCount");
+        if (strict && declaredPlies.Length > 0 && (!int.TryParse(declaredPlies,
+                System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture,
+                out int plyCount) || plyCount != moves.Count))
+            throw new InvalidDataException("complete recorded PGN PlyCount differs from its main line");
         var (whiteName, blackName) = ParseNames(gameText);
         string date = PgnGames.TagStr(gameText, "Date");
 
         string? startFen = PgnGames.TagStr(gameText, "SetUp") == "1"
             ? PgnGames.TagStr(gameText, "FEN") : null;
-        if (requireNormalCompletion && startFen is not null && string.IsNullOrWhiteSpace(startFen))
+        if (strict && startFen is not null && string.IsNullOrWhiteSpace(startFen))
             throw new InvalidDataException("normal recorded PGN declares SetUp=1 without its FEN");
-        if (requireNormalCompletion && startFen is null && !string.IsNullOrEmpty(PgnGames.TagStr(gameText, "FEN")))
+        if (strict && startFen is null && !string.IsNullOrEmpty(PgnGames.TagStr(gameText, "FEN")))
             throw new InvalidDataException("normal recorded PGN has a FEN without SetUp=1");
         var replay = TryReplayLineDetailed(moves, startFen,
-            expectedNormalOutcome: requireNormalCompletion ? result : null);
+            expectedNormalOutcome: requireNormalCompletion ? result : null,
+            expectedSourceOutcome: requireCompleteSource ? result : null);
         if (replay is null)
         {
-            if (requireNormalCompletion)
+            if (strict)
                 throw new InvalidDataException("normal recorded PGN does not contain a legal complete move trajectory");
             ChessDropLedger.Drop(
                 DropReason(gameText, startFen),
@@ -425,6 +438,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             MovingPieces = replay.MovingPieces,
             MoveIds = replay.MoveIds,
             NormalCompletionVerified = requireNormalCompletion,
+            CompleteSourceVerified = strict,
         };
     }
 
@@ -449,7 +463,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         => TryReplayLineDetailed(sans, startFen)?.PositionIds;
 
     internal static ChessLineReplay? TryReplayLineDetailed(
-        IReadOnlyList<string> sans, string? startFen, GameOutcome? expectedNormalOutcome = null)
+        IReadOnlyList<string> sans, string? startFen, GameOutcome? expectedNormalOutcome = null,
+        GameOutcome? expectedSourceOutcome = null)
     {
         var m = new ChessModality();
         if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
@@ -457,7 +472,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         // The ordinary move owner supports kingless puzzle positions. They must
         // never certify a normal completed game, nor may the nonmoving king
         // already be in check when the supplied game starts.
-        if (expectedNormalOutcome is not null
+        if ((expectedNormalOutcome is not null || expectedSourceOutcome is not null)
             && (System.Numerics.BitOperations.PopCount(board.PieceBB(Piece.WKing)) != 1
                 || System.Numerics.BitOperations.PopCount(board.PieceBB(Piece.BKing)) != 1
                 || MoveGen.InCheck(board, !board.WhiteToMove)))
@@ -501,6 +516,12 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
         if (history is not null && m.Terminal(new ChessState(board, history)) != expectedNormalOutcome)
             throw new InvalidDataException("normal recorded game's serialized terminal outcome differs from its result");
+        // Human source games may end by resignation or agreement while legal moves
+        // remain. A forced mate/stalemate still cannot contradict the declared result.
+        // Do not turn claimable repetition/fifty-move positions into automatic endings.
+        if (expectedSourceOutcome is { } sourceOutcome && MoveGen.Legal(board).Count == 0
+            && m.Terminal(new ChessState(board, ImmutableList.Create(ids[^1]))) != sourceOutcome)
+            throw new InvalidDataException("complete source game's forced terminal outcome differs from its result");
         return new ChessLineReplay(ids, moves, movingPieces, moveIds);
     }
 
@@ -884,6 +905,7 @@ public sealed record ChessGameRecord(
     internal Piece[] MovingPieces { get; init; } = [];
     internal Hash128[] MoveIds { get; init; } = [];
     internal bool NormalCompletionVerified { get; init; }
+    internal bool CompleteSourceVerified { get; init; }
 
     public Hash128 TrunkRootId => PlayingId;
 }
