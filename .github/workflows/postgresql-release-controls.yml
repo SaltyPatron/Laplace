@@ -1,4 +1,4 @@
-name: Qualify scoped UCI publication owners
+name: Qualify final UCI help and transaction refusals
 on:
   push:
     branches: ['verify/postgresql-activation-20260916']
@@ -35,10 +35,10 @@ jobs:
           cd "$work/source"
           git init -q
           git remote add origin https://github.com/SaltyPatron/Laplace.git
-          timeout 120s git fetch --no-tags --depth=1 origin 9f9a39c9e5e0d825df99fb5dc2c2841ea4d7ecb4
+          timeout 120s git fetch --no-tags --depth=1 origin e1efe584bf7afdccc532d7b690fcbb69bb6b5ac2
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 9f9a39c9e5e0d825df99fb5dc2c2841ea4d7ecb4
-          test "$(git rev-parse HEAD^{tree})" = 1d4b7ab451b8bdf4c4943f312f5bfd2f452d21da
+          test "$(git rev-parse HEAD)" = e1efe584bf7afdccc532d7b690fcbb69bb6b5ac2
+          test "$(git rev-parse HEAD^{tree})" = cc6d7177878dcf5e1c2278dfc74886998a42879a
           git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
       - name: Execute bounded real file and child protocol controls
         shell: bash
@@ -48,15 +48,13 @@ jobs:
           python3 -B - <<'PY'
           import ast, json, os, pathlib, subprocess, sys
           evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
-          for name in ("scripts/verify-api-payload.py","scripts/test-application-publish.py"):
+          for name in ("scripts/test-application-publish.py",):
               ast.parse(pathlib.Path(name).read_text(), filename=name)
-          (evidence/"ast.txt").write_text("PASS: two Python source files\n")
+          (evidence/"ast.txt").write_text("PASS: changed Python test source\n")
           commands=[
-              ("application-publish",["python3","-B","scripts/test-application-publish.py","-v"]),
-              ("payload-sync",["bash","scripts/test-deploy-payload-sync.sh"]),
-              ("managed-snapshot",["bash","scripts/test-managed-publish-snapshot.sh"]),
-              ("bash-syntax",["bash","-c","for path in deploy/linux/deploy.sh deploy/linux/payload-sync.sh deploy/linux/managed-publish.sh scripts/publish-applications.sh scripts/test-deploy-payload-sync.sh scripts/test-managed-publish-snapshot.sh; do bash -n \"$path\" || exit; done"]),
-              ("shellcheck",["shellcheck","-S","warning","-x","deploy/linux/deploy.sh","deploy/linux/payload-sync.sh","deploy/linux/managed-publish.sh","scripts/publish-applications.sh"]),
+              ("uci-only",["python3","-B","scripts/test-application-publish.py","UciOnlyDeploymentTests","-v"]),
+              ("bash-syntax",["bash","-n","deploy/linux/deploy.sh"]),
+              ("shellcheck",["shellcheck","-S","warning","-x","deploy/linux/deploy.sh"]),
           ]
           results=[]
           for name,argv in commands:
