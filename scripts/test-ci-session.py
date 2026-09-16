@@ -177,6 +177,38 @@ echo cleanup >> "$CI_FIXTURE_ROOT/cleaned"
         self.assert_lock(False)
         self.assertEqual("cleanup\n", (self.root / "cleaned").read_text())
 
+    def test_stop_cancels_deferred_host_wait_without_touching_foreign_owner(self):
+        self.policy_plan()
+        with self.lock.open("a") as owner:
+            fcntl.flock(owner, fcntl.LOCK_EX)
+            self.start()
+            self.assertEqual(0, self.invoke("run", "--phase", "policy").returncode)
+            client = subprocess.Popen([sys.executable, str(HELPER), "run", "--directory",
+                str(self.directory), "--phase", "second"], env=self.env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.addCleanup(lambda: client.poll() is None and client.kill())
+            self.await_condition(lambda: self.state().get("waiting_for_host") is True)
+            self.assertIsNone(self.state()["active"])
+            self.assertFalse(self.state()["host_lock_acquired"])
+            stopped = self.invoke("stop", timeout=5)
+            self.assertEqual(0, stopped.returncode, stopped.stderr)
+            output, error = client.communicate(timeout=5)
+            self.assertNotEqual(0, client.returncode, error)
+            self.assertIn("Waiting for shared host", output)
+            final = self.state()
+            self.assertEqual("failed", final["status"])
+            self.assertFalse(final["waiting_for_host"])
+            self.assertFalse(final["host_lock_acquired"])
+            self.assertIsNone(final["active"])
+            self.assertEqual([{"phase": "policy", "exit_code": 0}], final["results"])
+            self.assertEqual(1, final["next"])
+            self.assertEqual(0, final["cleanup_exit_code"])
+            self.assertFalse(self.live(final["supervisor"]["pid"]))
+            self.assertNotIn("second:", (self.root / "executed").read_text())
+            self.assertFalse((self.root / "cleaned").exists())
+            self.assert_lock(True)
+        self.assert_lock(False)
+
     def test_source_policy_supervisor_loss_kills_children_without_host_cleanup(self):
         self.policy_plan(wait=True)
         self.start()
