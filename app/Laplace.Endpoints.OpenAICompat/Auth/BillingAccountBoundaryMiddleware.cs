@@ -13,11 +13,19 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
         IOptions<StripeBillingOptions> options, IOptions<LaplaceAuthOptions> auth, BillingStoreMode store)
     {
         var path = http.Request.Path;
-        if (!path.StartsWithSegments("/v1")) { await next(http); return; }
+        if (!path.StartsWithSegments("/v1") && !path.StartsWithSegments("/chess")) { await next(http); return; }
         var tenant = await resolver.ResolveAsync(http, http.RequestAborted);
         if (tenant.AuthKind is "browser" or "api_key"
             || path.StartsWithSegments("/v1/auth") || path.StartsWithSegments("/v1/account"))
             http.Response.Headers.CacheControl = "private, no-store";
+        var expectedWorkspace = http.Request.Headers["X-Laplace-Workspace"].ToString();
+        if (tenant.AuthKind == "browser" && !string.IsNullOrWhiteSpace(expectedWorkspace)
+            && !string.Equals(expectedWorkspace, tenant.TenantId, StringComparison.Ordinal)
+            && !path.StartsWithSegments("/v1/auth") && !path.StartsWithSegments("/v1/admin")
+            && !path.StartsWithSegments("/v1/billing/operator"))
+        {
+            await Reject(http, 409, "workspace_changed", "The selected workspace changed in another tab or session. Reload this page before continuing; this request was not executed."); return;
+        }
         if (!path.StartsWithSegments("/v1/billing") || path.StartsWithSegments("/v1/billing/webhooks")
             || path.StartsWithSegments("/v1/billing/operator") || tenant.AuthKind is not ("browser" or "api_key"))
         {

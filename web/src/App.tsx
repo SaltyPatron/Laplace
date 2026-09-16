@@ -16,11 +16,10 @@ import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { AccountControls } from './auth/AccountControls';
 import { SettingsView, BillingReturnView } from './auth/SettingsView';
-import { apiGet } from './api/client';
+import { apiGet, setApiWorkspace } from './api/client';
 import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
-/** One shell and stable route navigation for every product surface. */
 const TABS: { id: string; label: string; path: string }[] = [
   { id: 'home', label: 'Home', path: '/' },
   { id: 'chat', label: 'Chat', path: '/chat' },
@@ -35,24 +34,22 @@ const TABS: { id: string; label: string; path: string }[] = [
 ];
 
 function isActive(pathname: string, tabPath: string): boolean {
-  if (tabPath === '/') return pathname === '/';
-  return pathname === tabPath || pathname.startsWith(`${tabPath}/`);
+  return tabPath === '/' ? pathname === '/' : pathname === tabPath || pathname.startsWith(`${tabPath}/`);
 }
 
 function Shell() {
   const { tenant, setTenant, authReady, authUser, authProviders, setAuth } = useAppStore();
   const nav = useNavigate();
   const { pathname, search, hash } = useLocation();
-
   useEffect(() => {
     let live = true;
     void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[] }>('/v1/auth/me')
       .then((result) => {
-        if (live) setAuth(result.authenticated ? result.user : null, result.providers ?? []);
+        if (!live) return;
+        setApiWorkspace(result.authenticated ? result.user?.tenantId ?? null : null);
+        setAuth(result.authenticated ? result.user : null, result.providers ?? []);
       })
-      .catch(() => {
-        if (live) setAuth(null, []);
-      });
+      .catch(() => { if (live) setAuth(null, []); });
     return () => { live = false; };
   }, [setAuth]);
 
@@ -61,26 +58,17 @@ function Shell() {
       <AppHeader
         title={<RouterLink to="/" className={styles.title}>Laplace</RouterLink>}
         tagline="witnessed consensus, not weights"
-        nav={
-          <NavTabs
-            tabs={TABS.map((t) => ({
-              id: t.id,
-              label: t.label,
-              active: isActive(pathname, t.path),
-              onClick: () => nav(t.path),
-            }))}
-          />
-        }
-        tenant={
-          authReady && (authUser || authProviders.length > 0)
-            ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${pathname}${search}${hash}`} />
-            : <TenantField value={tenant} onChange={setTenant} />
-        }
+        nav={<NavTabs tabs={TABS.map((tab) => ({
+          id: tab.id, label: tab.label, active: isActive(pathname, tab.path), onClick: () => nav(tab.path),
+        }))} />}
+        tenant={authReady && (authUser || authProviders.length > 0)
+          ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${pathname}${search}${hash}`} />
+          : <TenantField value={tenant} onChange={setTenant} />}
       />
       <SubstrateStatusBanner />
       <main className={styles.main}>
         <Routes>
-          <Route path="/" element={<HomeView onGoto={(t) => nav(`/${t}`)} />} />
+          <Route path="/" element={<HomeView onGoto={(tab) => nav(`/${tab}`)} />} />
           <Route path="/chat" element={<ChatView />} />
           <Route path="/query" element={<QueryConsole />} />
           <Route path="/topic" element={<TopicView />} />
@@ -101,10 +89,4 @@ function Shell() {
   );
 }
 
-export function App() {
-  return (
-    <BrowserRouter>
-      <Shell />
-    </BrowserRouter>
-  );
-}
+export function App() { return <BrowserRouter><Shell /></BrowserRouter>; }
