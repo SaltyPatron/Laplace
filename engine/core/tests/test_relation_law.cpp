@@ -274,6 +274,74 @@ TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
 
 
 
+TEST(LaplaceAttestationEngine, AggregatedBatch_PreservesEveryEvidenceFieldOnReuse) {
+    const hash128_t types[] = {
+        relation_type_id("PRECEDES"), relation_type_id("IS_SYNONYM_OF")
+    };
+    const hash128_t src = hash_path("batch-parity/source");
+    const hash128_t context = hash_path("batch-parity/playing");
+    const hash128_t subject = hash_path("batch-parity/subject");
+    const hash128_t object = hash_path("batch-parity/object");
+    const int64_t now = 123456789;
+    laplace_attestation_aggregated_cell_t cells[3] = {};
+    for (int i = 0; i < 3; ++i) {
+        cells[i].subject = subject;
+        cells[i].object = object;
+        cells[i].object_is_null = (i == 2);
+        cells[i].games = 2;
+        cells[i].sum_score_fp1e9 = i * LAPLACE_GLICKO2_FP_SCALE;
+    }
+
+    for (const auto& type : types) {
+        for (uint8_t context_is_null : { uint8_t{0}, uint8_t{1} }) {
+            for (int initial_byte : { 0, 0xa5 }) {
+                SCOPED_TRACE(initial_byte);
+                SCOPED_TRACE(context_is_null);
+                laplace_attestation_staged_t batch[3];
+                // Fresh managed arrays start at zero; reused native buffers may
+                // carry any old flag. Both must produce the same replay law.
+                std::memset(batch, initial_byte, sizeof(batch));
+                ASSERT_EQ(0, laplace_attestation_aggregated_batch_build(
+                    cells, 3, &type, &src,
+                    context_is_null ? nullptr : &context, context_is_null,
+                    0.7, now, batch));
+                for (int i = 0; i < 3; ++i) {
+                    SCOPED_TRACE(i);
+                    laplace_attestation_staged_t one = {};
+                    ASSERT_EQ(0, laplace_attestation_aggregated_build(
+                        &cells[i].subject, &type,
+                        cells[i].object_is_null ? nullptr : &cells[i].object,
+                        cells[i].object_is_null, &src,
+                        context_is_null ? nullptr : &context, context_is_null,
+                        0.7, cells[i].games, cells[i].sum_score_fp1e9, now, &one));
+                    EXPECT_TRUE(hash128_equals(&one.id, &batch[i].id));
+                    EXPECT_TRUE(hash128_equals(&one.subject_id, &batch[i].subject_id));
+                    EXPECT_TRUE(hash128_equals(&one.type_id, &batch[i].type_id));
+                    EXPECT_TRUE(hash128_equals(&one.source_id, &batch[i].source_id));
+                    EXPECT_EQ(one.object_is_null, batch[i].object_is_null);
+                    EXPECT_EQ(one.context_is_null, batch[i].context_is_null);
+                    // A null payload has no semantic value; its null flag and
+                    // receipt id, rather than indeterminate padding, are exact.
+                    if (!one.object_is_null)
+                        EXPECT_TRUE(hash128_equals(&one.object_id, &batch[i].object_id));
+                    if (!one.context_is_null)
+                        EXPECT_TRUE(hash128_equals(&one.context_id, &batch[i].context_id));
+                    EXPECT_EQ(one.outcome, batch[i].outcome);
+                    EXPECT_EQ(one.last_observed_at_unix_us, batch[i].last_observed_at_unix_us);
+                    EXPECT_EQ(one.observation_count, batch[i].observation_count);
+                    EXPECT_EQ(one.score_fp1e9, batch[i].score_fp1e9);
+                    EXPECT_EQ(one.opponent_rd_fp1e9, batch[i].opponent_rd_fp1e9);
+                    EXPECT_EQ(one.opponent_rating_fp1e9, batch[i].opponent_rating_fp1e9);
+                    EXPECT_EQ(one.sum_score_fp1e9, batch[i].sum_score_fp1e9);
+                    EXPECT_EQ(one.is_aggregated, batch[i].is_aggregated);
+                    EXPECT_EQ(1, one.fold_replayable);
+                    EXPECT_EQ(one.fold_replayable, batch[i].fold_replayable);
+                }
+            }
+        }
+    }
+}
+
 TEST(LaplaceRelationLaw, ReverseLookupFindsEveryEntry) {
     
     size_t n = laplace_relation_manifest_count();
