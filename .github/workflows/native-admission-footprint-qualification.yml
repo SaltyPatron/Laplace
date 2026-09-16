@@ -1,4 +1,4 @@
-name: Qualify current lifecycle runtime and native operator
+name: Qualify final GUI corpus cache and foundation operator
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -7,146 +7,176 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      EVIDENCE: /build/laplace/work/final-operator-syntax/evidence
-      TMPDIR: /build/laplace/work/final-operator-syntax/tmp
-      TMP: /build/laplace/work/final-operator-syntax/tmp
-      TEMP: /build/laplace/work/final-operator-syntax/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
+      EVIDENCE: /build/laplace/work/final-gui-cache/evidence
+      TMPDIR: /build/laplace/work/final-gui-cache/tmp
+      TMP: /build/laplace/work/final-gui-cache/tmp
+      TEMP: /build/laplace/work/final-gui-cache/tmp
     steps:
-      - name: Prepare permanent syntax workspace
+      - name: Prepare permanent qualification directory
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$EVIDENCE" "$TMPDIR"
-      - name: Authenticate and parse the coordinated native operator
+      - name: Authenticate final sources and exercise actual nested cancellation
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
-          import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
+          import ast,base64,fcntl,hashlib,json,os,re,signal,subprocess,sys,textwrap,time,urllib.request,yaml
           from pathlib import Path
-          sha = "76a9fd627495a9de2032d5b3a74ad1467e568f8d"
-          request = urllib.request.Request(
-              "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
-              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
-                       "Accept": "application/vnd.github+json"})
-          with urllib.request.urlopen(request, timeout=30) as response:
-              encoded = response.read(2 * 1024 * 1024 + 1)
-          if len(encoded) > 2 * 1024 * 1024:
-              raise ValueError("operator metadata exceeded bound")
-          item = json.loads(encoded)
-          assert item["sha"] == sha and item["encoding"] == "base64"
-          raw = base64.b64decode(item["content"])
-          assert len(raw) == item["size"] and len(raw) < 1024 * 1024
-          assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == sha
-          (Path(os.environ["EVIDENCE"]) / "native-operator.yml").write_bytes(raw)
-          document = yaml.safe_load(raw)
-          environment = document["jobs"]["native"]["env"]
-          assert environment["TARGET_SHA"] == environment["TARGET_TREE"] == ""
-          assert environment["REQUIRED_ANCESTOR"] == "c490651eee906f44f944ae2c2b0d0783516f9e0c"
-          native_program = document["jobs"]["native"]["steps"][1]["run"]
-          pins = re.search(r"done <<'SOURCE_OWNERS'\n(.*?)\nSOURCE_OWNERS", native_program, re.S).group(1).splitlines()
-          assert len(pins) == 14, pins
-          assert all(re.fullmatch(r"100(?:644|755) [0-9a-f]{40} .+", pin) for pin in pins)
-          assert not any("physicality_descriptor.c" in pin or "physicality_descriptor_admission.cpp" in pin for pin in pins)
-          assert "--exclusive --no-fork" in native_program
-          assert native_program.index("flock --exclusive") < native_program.index("git fetch")
-          assert "phase authentic-corpus-recording" not in native_program
-          assert "python3 scripts/measure-installed-chess-corpus.py --mode measure" in native_program
-          outer = inner = python = 0
+          evidence=Path(os.environ["EVIDENCE"])
+          selections={"workflow":"31c73a38f48564d545fe93a7d391ae851865ebf2","gui":"ed1cd32b7432d99be96e770800a55f7ae6ddb423","bootstrap":"1aafd564ecec11a9f7a9ce450dc00e8563d1b63b","cache":"9859fe785ba9208282d92a6135115ed161378323","follow":"c163897dec428abada49343f0817c799b6a7d62a","managed":"ddf5d4c219cc386d52a44274394a8b0dff8251d6","accept":"b7846e06e1f9dc67c9ca0c06df93340f9dd7d697","stockfish":"50cadf5154a84005145023b1f9336cc0d0c1813e"}
+          sources={}
+          for name,sha in selections.items():
+              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
+                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
+              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
+              assert len(encoded)<=2<<20
+              item=json.loads(encoded)
+              assert item["sha"]==sha and item["encoding"]=="base64"
+              raw=base64.b64decode(item["content"])
+              assert len(raw)==item["size"] and len(raw)<1<<20
+              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
+              sources[name]=raw.decode()
+              (evidence/(name+(".yml" if name=="workflow" else ".sh" if name=="pipeline" else ".py"))).write_bytes(raw)
+              if name not in ("workflow","pipeline"):ast.parse(raw,filename=name+".py")
+          document=yaml.safe_load(sources["workflow"])
+          counts={"outerBash":0,"innerBash":0,"pythonHeredocs":0}
           for job in document["jobs"].values():
               for step in job["steps"]:
-                  program = step.get("run")
-                  if program is None:
-                      continue
-                  subprocess.run(["bash", "-n"], input=program, text=True, check=True)
-                  outer += 1
-                  lines = program.splitlines()
-                  for index, line in enumerate(lines):
-                      match = re.search(r"<<'([A-Z_]+)'", line)
-                      if not match:
-                          continue
-                      delimiter = match.group(1)
-                      end = next(i for i in range(index + 1, len(lines)) if lines[i].strip() == delimiter)
-                      body = textwrap.dedent("\n".join(lines[index + 1:end])) + "\n"
-                      if delimiter == "PY":
+                  program=step.get("run")
+                  if program is None:continue
+                  subprocess.run(["bash","-n"],input=program,text=True,check=True)
+                  counts["outerBash"]+=1
+                  lines=program.splitlines()
+                  for i,line in enumerate(lines):
+                      match=re.search(r"<<'([A-Z_]+)'",line)
+                      if not match:continue
+                      delimiter=match.group(1)
+                      end=next(j for j in range(i+1,len(lines)) if lines[j].strip()==delimiter)
+                      body=textwrap.dedent("\n".join(lines[i+1:end]))+"\n"
+                      if delimiter=="PY":
                           ast.parse(body)
-                          python += 1
-                      elif delimiter in ("NATIVE", "MANAGED_READINESS"):
-                          subprocess.run(["bash", "-n"], input=body, text=True, check=True)
-                          inner += 1
-          assert (outer, inner, python) == (4, 2, 10), (outer, inner, python)
-          print(json.dumps({"operatorBlob": sha, "bytes": len(raw),
-                            "outerBash": outer, "innerBash": inner, "python": python,
-                            "scope": "authenticated source syntax only; no native or host execution"}))
+                          counts["pythonHeredocs"]+=1
+                      elif delimiter=="FOLLOW":
+                          subprocess.run(["bash","-n"],input=body,text=True,check=True)
+                          counts["innerBash"]+=1
+          assert counts=={"outerBash":6,"innerBash":1,"pythonHeredocs":6},counts
+          assert document["jobs"]["foundation"]["if"]=="always()"
+          assert "env" not in document["jobs"]["foundation"]
+          assert len(document["jobs"]["chess"]["env"])==10
+          def functions(source,names):
+              nodes=[node for node in ast.parse(source).body if isinstance(node,ast.FunctionDef) and node.name in names]
+              assert {node.name for node in nodes}==set(names)
+              return ast.unparse(ast.Module(body=nodes,type_ignores=[]))
+          parent_functions=functions(sources["follow"],("run_child","interrupted"))
+          command_functions=functions(sources["accept"],("command","stop_group"))
+          worker=evidence/"nested-owned-worker.py"
+          worker.write_text("import signal,sys,time\nfrom pathlib import Path\n"
+              "root=Path(sys.argv[1])\n"
+              "def stop(signum,frame):\n"
+              " (root/'cleanup-started').write_text('yes')\n"
+              " time.sleep(0.6)\n"
+              " (root/'cleanup-completed').write_text('yes')\n"
+              " raise SystemExit(0)\n"
+              "signal.signal(signal.SIGTERM,stop)\n"
+              "(root/'worker-ready').write_text('yes')\n"
+              "while True:time.sleep(0.05)\n")
+          driver=evidence/"actual-parent.py"
+          driver.write_text("import fcntl,os,signal,subprocess,sys\nfrom pathlib import Path\n"+parent_functions+"\n"
+              "root=Path(sys.argv[1])\n"
+              "fd=os.open(root/'host.lock',os.O_CREAT|os.O_RDWR,0o600)\n"
+              "fcntl.flock(fd,fcntl.LOCK_EX)\n"
+              "os.environ['FOLLOW_LOCK_FD']=str(fd)\n"
+              "signal.signal(signal.SIGTERM,interrupted)\n"
+              "signal.signal(signal.SIGINT,interrupted)\n"
+              "try:run_child([sys.executable,sys.argv[2],str(root),sys.argv[3]])\n"
+              "except KeyboardInterrupt:raise SystemExit(143)\n"
+              "finally:os.close(fd)\n")
+          def wait_file(path,process):
+              end=time.monotonic()+10
+              while not path.exists():
+                  assert process.poll() is None,"actual owner exited early"
+                  if time.monotonic()>end:raise TimeoutError(str(path))
+                  time.sleep(0.02)
+          results=[]
+          for name,handler in (("gui","interrupt"),("cache","interrupted"),("managed","interrupted")):
+              child=evidence/("actual-child-"+name+".py")
+              child.write_text("import os,signal,subprocess,sys\nfrom pathlib import Path\n"+
+                  command_functions+"\n"+functions(sources[name],(handler,))+"\n"
+                  "ROOT=Path(sys.argv[1])\n"
+                  "signal.signal(signal.SIGTERM,"+handler+")\n"
+                  "signal.signal(signal.SIGINT,"+handler+")\n"
+                  "command([sys.executable,sys.argv[2],str(ROOT)],ROOT/'worker.log',30)\n")
+              for first,second in ((signal.SIGTERM,signal.SIGTERM),(signal.SIGINT,signal.SIGTERM)):
+                  case=evidence/(name+"-"+str(first)+"-"+str(second));case.mkdir()
+                  process=subprocess.Popen([sys.executable,driver,case,child,worker],start_new_session=True)
+                  try:
+                      wait_file(case/"worker-ready",process)
+                      os.killpg(process.pid,first)
+                      wait_file(case/"cleanup-started",process)
+                      os.killpg(process.pid,second)
+                      with (case/"host.lock").open("r+") as contender:
+                          try:fcntl.flock(contender,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                          except BlockingIOError:pass
+                          else:raise AssertionError("host lock released during actual nested command cleanup")
+                      assert process.wait(timeout=10)==143
+                      assert (case/"cleanup-completed").read_text()=="yes"
+                      with (case/"host.lock").open("r+") as contender:
+                          fcntl.flock(contender,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                      results.append({"childOwner":name,"firstGroupSignal":first,"secondGroupSignal":second,
+                                      "actualNestedOwner":"accept-chess-environment.command/stop_group",
+                                      "cleanupCompleted":True,"lockHeldUntilCleanup":True,"lockReleasedAfterward":True})
+                  finally:
+                      try:os.killpg(process.pid,signal.SIGKILL)
+                      except ProcessLookupError:pass
+                      process.wait(timeout=5)
+          receipt={"status":"passed","selections":selections,"syntax":counts,
+                   "actualNestedCancellationControls":results,
+                   "scope":"Authenticated final operational syntax and actual nested cancellation; no GUI/cache/database execution"}
+          (evidence/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt))
+          
           PY
-      - name: Retain authenticated operator syntax
+      - name: Retain final operational controls
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: final-native-operator-syntax
-          path: /build/laplace/work/final-operator-syntax/evidence/
+          name: final-gui-corpus-cache-foundation-controls
+          path: /build/laplace/work/final-gui-cache/evidence/
           if-no-files-found: error
           retention-days: 30
-
-  runtime_export:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
+  native-progress-observation:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    continue-on-error: true
     steps:
-      - name: Prepare selected source and permanent evidence
-        shell: bash
+      - name: Observe bounded provisional native progress without waiting for its owner
         run: |
-          set -euo pipefail
-          work="/build/laplace/work/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          evidence="/build/laplace/recovery/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence"
-          mkdir -p "$work/tmp" "$work/source"
-          echo "QUALIFY_WORK=$work" >> "$GITHUB_ENV"
-          echo "QUALIFY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          echo "TMPDIR=$work/tmp" >> "$GITHUB_ENV"
-          echo "TMP=$work/tmp" >> "$GITHUB_ENV"
-          echo "TEMP=$work/tmp" >> "$GITHUB_ENV"
-          cd "$work/source"
-          git init -q
-          git remote add origin https://github.com/SaltyPatron/Laplace.git
-          timeout 120s git fetch --no-tags --depth=1 origin 777549b20e91e1f087929a7875fe8edc444904c3
-          git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 777549b20e91e1f087929a7875fe8edc444904c3
-          test "$(git rev-parse HEAD^{tree})" = ca0d1c090441c47b4daf64710c4ae827ad175738
-          git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
-      - name: Execute affected export controls
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$QUALIFY_WORK/source"
-          python3 -B - <<'PY'
-          import ast, json, os, pathlib, subprocess
-          evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
-          for name in ("scripts/export-qualified-chess-floors.py","scripts/test-qualified-chess-floor-export.py"):
-              ast.parse(pathlib.Path(name).read_text(), filename=name)
-          (evidence/"ast.txt").write_text("PASS: current exporter and changed test Python sources\n")
-          command=["python3","-B","scripts/test-qualified-chess-floor-export.py","-v"]
-          with (evidence/"export-controls.log").open("w") as stream:
-              result=subprocess.run(["timeout","--kill-after=10s","180s",*command],stdout=stream,stderr=subprocess.STDOUT)
-          (evidence/"results.json").write_text(json.dumps({"command":command,"exit_code":result.returncode},indent=2)+"\n")
-          print((evidence/"export-controls.log").read_text(),flush=True)
-          if result.returncode:
-              raise SystemExit(result.returncode)
-          dirty=subprocess.check_output(["git","status","--porcelain","--untracked-files=all"],text=True)
-          (evidence/"source-clean.txt").write_text(dirty or "PASS: clean source checkout\n")
-          if dirty:
-              raise SystemExit("qualification modified source checkout")
+          python3 - <<'PY'
+          import json,os,pathlib
+          source=pathlib.Path("/build/laplace/recovery/native-install/35161276382-1")
+          result={"runId":35161276382,"scope":"Provisional read-only progress; final native receipt remains authoritative"}
+          try:
+              path=source/"execution.log"
+              with path.open("rb") as stream:
+                  first=stream.read(65536)
+                  size=stream.seek(0,2)
+                  stream.seek(max(0,size-196608))
+                  tail=stream.read(196608)
+              selected=[line for line in (first+b"\n"+tail).decode(errors="replace").splitlines()
+                        if line.startswith(("NATIVE_SOURCE_FREEZE ","NATIVE_PHASE ","CORPUS_CAPACITY_RESULT "))]
+              result["phaseObservations"]=list(dict.fromkeys(selected))
+              result["executionLogBytes"]=size
+              journal=source/"completed-phases.txt"
+              result["completedPhases"]=journal.read_text()[:8192].splitlines() if journal.is_file() else []
+              result["observation"]="available"
+          except (OSError,ValueError) as error:
+              result.update(observation="unavailable",errorType=type(error).__name__)
+          print(json.dumps(result,sort_keys=True))
           PY
-      - name: Retain affected control evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: current-floor-export-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.QUALIFY_EVIDENCE }}
-          if-no-files-found: error
