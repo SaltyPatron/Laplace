@@ -21,8 +21,8 @@ jobs:
       DOTNET_NOLOGO: '1'
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       MSBUILDDISABLENODEREUSE: '1'
-      CANDIDATE_SHA: 8f905dced5573aab48baf544852eb106286a60ab
-      CANDIDATE_TREE: 8c88c1f61f7b60eb2f9c47af1c90451d15be9379
+      CANDIDATE_SHA: 19289bfc9584c02d1c3a5cd0758a9f351fab5bf1
+      CANDIDATE_TREE: fd3037c7bc2e5568b8f43a00a5c657530080c2ff
     steps:
       - name: Prepare permanent build and evidence directories
         run: |
@@ -32,7 +32,7 @@ jobs:
           mkdir -p "$LAPLACE_BUILD_ROOT" "$TMPDIR" "$DOTNET_CLI_HOME" "$DOTNET_INSTALL_DIR" "$NUGET_PACKAGES" /build/laplace/worktrees /build/laplace/recovery/floor-managed-compile
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 8f905dced5573aab48baf544852eb106286a60ab
+          ref: 19289bfc9584c02d1c3a5cd0758a9f351fab5bf1
           fetch-depth: 1
           persist-credentials: false
       - name: Bind the exact candidate in the permanent worktree
@@ -48,7 +48,7 @@ jobs:
               "candidate_commit":os.environ["CANDIDATE_SHA"],
               "candidate_tree":os.environ["CANDIDATE_TREE"],
               "workflow_commit":os.environ["GITHUB_SHA"],
-              "claim":"managed-compilation-only",
+              "claim":"managed-compilation-and-native-syntax-only",
               "native_runtime_executed":False
           },indent=2)+"\n")
           PY
@@ -130,6 +130,8 @@ jobs:
             printf '%s\t%s\n' "$unit" "$status" >> "$evidence/native-syntax-summary.tsv"
             if [[ "$status" != 0 ]]; then failed=1; fi
           done
+          cat "$evidence/build-summary.tsv"
+          cat "$evidence/native-syntax-summary.tsv"
           test -z "$(git status --porcelain --untracked-files=all)"
           exit "$failed"
       - name: Retain exact compilation evidence
