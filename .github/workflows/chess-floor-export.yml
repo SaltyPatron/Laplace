@@ -57,33 +57,36 @@ jobs:
           timeout --signal=TERM --kill-after=15s 9300s \
             flock --exclusive --no-fork --timeout 1800 /build/laplace/work/host-resource.lock bash -c '
             set -euo pipefail
-            # Preserve tracked operator work instead of replacing it.
+            # Fetch only the operator object; preserve the authoritative checkout.
             git diff --quiet
             git diff --cached --quiet
             timeout --signal=TERM --kill-after=5s 120s git fetch --no-tags origin "$TARGET_SHA"
-            timeout --signal=TERM --kill-after=5s 60s git checkout --detach "$TARGET_SHA"
-            [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
-            selection="$PWD/.github/chess-floor-export-selection.json"
-            test -f "$selection"
-            candidate_sha=$(python3 - "$selection" << "PY_SOURCE"
-          import json, re, sys
+            operator_directory="$LAPLACE_EXPORT_EVIDENCE/operator"
+            candidate_root=$(python3 - "$TARGET_SHA" "$operator_directory" << "PY_SOURCE"
+          import importlib.util, subprocess, sys
           from pathlib import Path
-          path = Path(sys.argv[1])
-          if path.stat().st_size > 65536:
-              raise ValueError("export selection exceeds its metadata envelope")
-          plan = json.loads(path.read_bytes())
-          sha = plan.get("candidate_commit") if isinstance(plan, dict) else None
-          if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
-              raise ValueError("export candidate must be a complete immutable commit")
-          print(sha)
+          target, output = sys.argv[1:]
+          directory = Path(output)
+          directory.mkdir()
+          for path, name, limit in (
+                  ("scripts/export-qualified-chess-floors.py", "export-qualified-chess-floors.py", 1048576),
+                  (".github/chess-floor-export-selection.json", "selection.json", 65536)):
+              raw = subprocess.check_output(["git", "show", target + ":" + path], timeout=30)
+              if len(raw) > limit:
+                  raise ValueError("selected operator input exceeds its fixed envelope")
+              (directory / name).write_bytes(raw)
+          source = directory / "export-qualified-chess-floors.py"
+          spec = importlib.util.spec_from_file_location("selected_export_driver", source)
+          owner = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = owner
+          spec.loader.exec_module(owner)
+          plan = owner.load(directory / "selection.json", 65536)
+          print(owner.candidate_checkout(plan))
           PY_SOURCE
             )
-            candidate_root=/build/laplace/worktrees/chess-floor-export-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
-            test ! -e "$candidate_root"
-            driver="$PWD/scripts/export-qualified-chess-floors.py"
-            timeout --signal=TERM --kill-after=5s 120s git fetch --no-tags origin "$candidate_sha"
-            git worktree add --detach "$candidate_root" "$candidate_sha"
-            # Retain this exact source worktree beside the export evidence.
+            selection="$operator_directory/selection.json"
+            driver="$operator_directory/export-qualified-chess-floors.py"
+            # Reuse the exact existing candidate; source selection never changes it.
             # exec preserves the lock FD through driver-owned child cleanup.
             cp "$selection" "$LAPLACE_EXPORT_EVIDENCE/selection.json"
             export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"

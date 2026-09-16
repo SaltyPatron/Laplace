@@ -29,36 +29,64 @@ while :; do
   fi
 
   if [ "$probe_rc" -eq 0 ] && [ "$probe" = "present" ]; then
-    state_rc=0
-    state=$("${PSQL[@]}" -tAc \
-      "SELECT count(*) FROM ops.ingest_reconcile_orphans(make_interval(secs => ${CORPSE_GRACE}));
-       SELECT count(*) FROM laplace.ingest_run_journal j
-        WHERE j.status = 'running'
-          AND ops.ingest_run_live(j.run_id, make_interval(secs => ${CORPSE_GRACE}));" \
-      2>&1) || state_rc=$?
-
-    if [ "$state_rc" -eq 0 ]; then
-      # psql emits one scalar per SELECT; the final non-empty line is the live count.
-      live=$(printf '%s\n' "$state" | awk 'NF {value=$0} END {gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); print value}')
-      if [[ "$live" =~ ^[0-9]+$ ]]; then
-        if [ "$live" -eq 0 ]; then
-          echo "substrate quiet — no live ingest in flight"
-          exit 0
-        fi
-        echo "::notice::waiting on ${live} live ingest(s) before touching PostgreSQL"
-        "${PSQL[@]}" -P pager=off -c \
-          "SELECT source_name, phase, files_done, files_total,
-                  input_units_done, input_units_total, heartbeat_at,
-                  now() - started_at AS elapsed
-             FROM laplace.ingest_run_journal j
-            WHERE j.status = 'running'
-              AND ops.ingest_run_live(j.run_id, make_interval(secs => ${CORPSE_GRACE}))
-            ORDER BY started_at;" || true
+    # Before this release's SQL is installed, zero registered running rows is
+    # sufficient to prove idle. A nonzero count is never reconciled locally:
+    # wait for the existing ingest owner, without calling missing functions.
+    capability_rc=0
+    capability=$("${PSQL[@]}" -tAc \
+      "SELECT (count(*) FILTER (WHERE status = 'running'))::text || ' ' ||
+              CASE WHEN to_regprocedure('ops.ingest_run_live(uuid,interval)') IS NOT NULL
+                     AND to_regprocedure('ops.ingest_reconcile_orphans(interval)') IS NOT NULL
+                   THEN 'present' ELSE 'missing' END
+         FROM laplace.ingest_run_journal;" 2>&1) || capability_rc=$?
+    canonical_ready=0
+    if [ "$capability_rc" -eq 0 ] && [[ "$capability" =~ ^([0-9]+)\ (present|missing)$ ]]; then
+      running="${BASH_REMATCH[1]}"
+      functions="${BASH_REMATCH[2]}"
+      if [ "$functions" = "present" ]; then
+        canonical_ready=1
+      elif [ "$running" -eq 0 ]; then
+        echo "substrate quiet — zero running journal rows before canonical liveness SQL installation"
+        exit 0
       else
-        echo "::warning::canonical ingest-liveness query returned an unexpected response: ${state//$'\n'/ }"
+        echo "::notice::waiting on ${running} running journal row(s); canonical liveness SQL is not installed, so no reconciliation is attempted"
       fi
     else
-      echo "::warning::canonical ingest-liveness query failed: ${state//$'\n'/ }"
+      echo "::warning::ingest-liveness capability/count probe failed or returned an unexpected response: ${capability//$'\n'/ }"
+    fi
+
+    if [ "$canonical_ready" -eq 1 ]; then
+      state_rc=0
+      state=$("${PSQL[@]}" -tAc \
+        "SELECT count(*) FROM ops.ingest_reconcile_orphans(make_interval(secs => ${CORPSE_GRACE}));
+         SELECT count(*) FROM laplace.ingest_run_journal j
+          WHERE j.status = 'running'
+            AND ops.ingest_run_live(j.run_id, make_interval(secs => ${CORPSE_GRACE}));" \
+        2>&1) || state_rc=$?
+
+      if [ "$state_rc" -eq 0 ]; then
+        # psql emits one scalar per SELECT; the final non-empty line is the live count.
+        live=$(printf '%s\n' "$state" | awk 'NF {value=$0} END {gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); print value}')
+        if [[ "$live" =~ ^[0-9]+$ ]]; then
+          if [ "$live" -eq 0 ]; then
+            echo "substrate quiet — no live ingest in flight"
+            exit 0
+          fi
+          echo "::notice::waiting on ${live} live ingest(s) before touching PostgreSQL"
+          "${PSQL[@]}" -P pager=off -c \
+            "SELECT source_name, phase, files_done, files_total,
+                    input_units_done, input_units_total, heartbeat_at,
+                    now() - started_at AS elapsed
+               FROM laplace.ingest_run_journal j
+              WHERE j.status = 'running'
+                AND ops.ingest_run_live(j.run_id, make_interval(secs => ${CORPSE_GRACE}))
+              ORDER BY started_at;" || true
+        else
+          echo "::warning::canonical ingest-liveness query returned an unexpected response: ${state//$'\n'/ }"
+        fi
+      else
+        echo "::warning::canonical ingest-liveness query failed: ${state//$'\n'/ }"
+      fi
     fi
   elif [[ "$probe" == *"3D000"* || "$probe" == *"database \"$DB\" does not exist"* || "$probe" == *"database $DB does not exist"* ]]; then
     echo "substrate quiet — database \"$DB\" does not exist"

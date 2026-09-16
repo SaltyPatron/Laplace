@@ -4,6 +4,9 @@
 # Options:
 #   --force-npm    always run npm ci (ignore lockfile stamp)
 #   --serial       publish API, UCI, MCP, Lichess serially (default: parallel)
+#   --api-only     publish API + SPA in the existing API-only transaction
+#   --uci-only     publish only the verified immutable UCI runtime
+#   --uci-recover  restore a retained failed UCI-only publication
 
 set -euo pipefail
 
@@ -11,21 +14,181 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"
 source "$REPO_ROOT/deploy/linux/app-dir-contract.sh"
 source "$REPO_ROOT/deploy/linux/payload-sync.sh"
-STAGE="$(mktemp -d)"
+STAGE=""
 FORCE_NPM=0
 SERIAL=0
+API_ONLY=0
+UCI_ONLY=0
+UCI_RECOVER=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force-npm) FORCE_NPM=1; shift ;;
     --serial)    SERIAL=1; shift ;;
+    --api-only)  API_ONLY=1; shift ;;
+    --uci-only)  UCI_ONLY=1; shift ;;
+    --uci-recover) UCI_ONLY=1; UCI_RECOVER=1; shift ;;
     -h|--help)
-      sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 
+
+# UCI-only publication uses this existing owner without service-policy setup,
+# secret reads, API replacement, or MCP/Lichess selection.
+uci_no_other_transaction() {
+  local pending
+  for pending in .managed-publish-backup .api-publish-backup .application-publish-owner .application-restore-pending; do
+    [[ ! -e "$REPO_ROOT/build/$pending" ]] || {
+      echo "::error::another application transaction is unresolved" >&2; return 1;
+    }
+  done
+  [[ ! -e /var/lib/laplace-managed/transaction.json ]] || {
+    echo "::error::managed transaction is unresolved" >&2; return 1;
+  }
+}
+
+uci_verify() {
+  python3 "$REPO_ROOT/scripts/verify-api-payload.py" --verify-uci "$1" \
+    --manifest "$2" --receipt "$3"
+}
+
+uci_recover() {
+  uci_no_other_transaction || return 1
+  local marker="$REPO_ROOT/build/.uci-publish-pending" state old next current="" build
+  [[ -f "$marker" && ! -L "$marker" ]] || {
+    [[ ! -e "$marker" && ! -L "$marker" ]] && return 0
+    echo "::error::invalid UCI publication marker" >&2; return 1;
+  }
+  state="$(<"$marker")"
+  build="$(realpath -e "$REPO_ROOT/build")" || return 1
+  [[ "$state" == "$build"/.uci-publish.* && -d "$state" && ! -L "$state" &&
+     "$(dirname "$state")" == "$build" && -f "$state/previous-target" &&
+     ! -L "$state/previous-target" ]] || {
+    echo "::error::invalid UCI recovery state; no link changed" >&2; return 1;
+  }
+  old="$(<"$state/previous-target")"
+  next=""
+  [[ ! -f "$state/next-target" ]] || next="$(<"$state/next-target")"
+  for current in "$old" "$next"; do
+    [[ -z "$current" || "$current" =~ ^releases/runtime\.[a-zA-Z0-9_.-]+/uci/laplace-uci$ ]] || {
+      echo "::error::invalid retained UCI target; no link changed" >&2; return 1;
+    }
+  done
+  current=""
+  if [[ -L "$APP_DIR/laplace-uci" ]]; then
+    current="$(readlink "$APP_DIR/laplace-uci")"
+  elif [[ -e "$APP_DIR/laplace-uci" ]]; then
+    echo "::error::UCI selection is no longer a managed link" >&2; return 1
+  fi
+  [[ "$current" == "$old" || ( -n "$next" && "$current" == "$next" ) ]] || {
+    echo "::error::UCI selection changed outside this transaction" >&2; return 1;
+  }
+  if [[ "$current" != "$old" ]]; then
+    if [[ -n "$old" ]]; then
+      laplace_select_uci_runtime "$APP_DIR" "$old" || return 1
+    else
+      rm "$APP_DIR/laplace-uci" || return 1
+    fi
+  fi
+  if [[ -n "$old" ]]; then
+    uci_verify "$APP_DIR/laplace-uci" "$state/previous.json" "$state/restored.json" || return 1
+    cp "$state/restored.json" "$REPO_ROOT/build/.uci-publish-restored.json" || return 1
+  fi
+  rm "$marker" || return 1
+  rm -rf -- "$state"
+}
+
+publish_uci_only() (
+  set -euo pipefail
+  uci_no_other_transaction
+  local marker="$REPO_ROOT/build/.uci-publish-pending" state old="" reference=""
+  local release="" next="" committed=0 marked=0 rc=0 previous_lease
+  [[ ! -e "$marker" && ! -L "$marker" ]] || {
+    echo "::error::UCI recovery is pending; run deploy.sh --uci-recover" >&2; exit 1;
+  }
+  if [[ -L "$APP_DIR/laplace-uci" ]]; then
+    old="$(readlink "$APP_DIR/laplace-uci")"
+    [[ "$old" =~ ^releases/runtime\.[a-zA-Z0-9_.-]+/uci/laplace-uci$ ]] || {
+      echo "::error::existing UCI link is outside immutable runtime ownership" >&2; exit 1;
+    }
+    reference="$(laplace_current_runtime_dir "$APP_DIR" uci "$APP_DIR/laplace-uci")"
+    [[ -f "$reference/../.runtime-lease" && ! -L "$reference/../.runtime-lease" ]] || {
+      echo "::error::previous UCI runtime has no lease" >&2; exit 1;
+    }
+    exec {previous_lease}<"$reference/../.runtime-lease"
+    flock -s "$previous_lease"
+  elif [[ -e "$APP_DIR/laplace-uci" ]]; then
+    echo "::error::refusing to replace a non-managed UCI executable" >&2; exit 1
+  fi
+  mkdir -p "$REPO_ROOT/build"
+  state="$(mktemp -d "$(realpath -e "$REPO_ROOT/build")/.uci-publish.XXXXXX")"
+  trap 'rc=$?; trap - EXIT
+    if [[ "$marked" == 1 && "$committed" == 0 ]]; then
+      uci_recover || { echo "::error::UCI recovery retained at $state" >&2; rc=1; }
+    elif [[ "$marked" == 0 ]]; then
+      rm -rf -- "$state"
+    fi
+    exit "$rc"' EXIT
+  trap 'exit 143' TERM HUP
+  trap 'exit 130' INT
+  printf '%s\n' "$old" > "$state/previous-target"
+  if [[ -n "$old" ]]; then
+    python3 "$REPO_ROOT/scripts/verify-api-payload.py" --seal-uci "$reference" \
+      --wrapped-uci --manifest "$state/previous.json"
+  fi
+  (set -o noclobber; printf '%s\n' "$state" > "$marker")
+  marked=1
+  mkdir "$state/stage"
+  dotnet publish "$REPO_ROOT/app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" \
+    -c Release --no-self-contained --no-build -o "$state/stage"
+  python3 "$REPO_ROOT/scripts/verify-api-payload.py" --seal-uci "$state/stage" \
+    --native-build "${LAPLACE_ENGINE_BUILD:-$REPO_ROOT/build/engine}" --manifest "$state/next.json"
+  release="$(laplace_stage_uci_runtime "$APP_DIR" "$state/stage")"
+  next="releases/$(basename "$release")/uci/laplace-uci"
+  printf '%s\n' "$next" > "$state/next-target"
+  uci_verify "$release/uci/laplace-uci" "$state/next.json" "$state/staged.json"
+  # Refuse interference before the single atomic pointer replacement.
+  if [[ -n "$old" ]]; then
+    [[ -L "$APP_DIR/laplace-uci" && "$(readlink "$APP_DIR/laplace-uci")" == "$old" ]]
+  else
+    [[ ! -e "$APP_DIR/laplace-uci" && ! -L "$APP_DIR/laplace-uci" ]]
+  fi
+  laplace_select_uci_runtime "$APP_DIR" "$next"
+  uci_verify "$APP_DIR/laplace-uci" "$state/next.json" "$state/verified.json"
+  cp "$state/next.json" "$REPO_ROOT/build/.uci-publish-payload.json"
+  cp "$state/verified.json" "$REPO_ROOT/build/.uci-publish-verified.json"
+  rm "$marker"
+  committed=1
+  rm -rf -- "$state"
+  echo "PASS: immutable UCI payload and public launcher verified; API/MCP/Lichess selections unchanged"
+)
+
+if [[ "$API_ONLY" == 1 && "$UCI_ONLY" == 1 ]]; then
+  echo "::error::choose API-only or UCI-only publication" >&2
+  exit 2
+fi
+if [[ "$UCI_ONLY" == 1 ]]; then
+  if [[ "$UCI_RECOVER" == 1 ]]; then
+    uci_recover
+  else
+    laplace_reconcile_app_dir_contract "$APP_DIR"
+    publish_uci_only
+  fi
+  exit 0
+fi
+[[ ! -e "$REPO_ROOT/build/.uci-publish-pending" ]] || {
+  echo "::error::UCI publication recovery is pending" >&2; exit 1;
+}
+
+if [[ "$API_ONLY" -eq 1 && "${LAPLACE_API_TRANSACTION:-}" != "1" ]]; then
+  echo "::error::use scripts/publish-applications.sh api-deploy for API-only publication" >&2
+  exit 2
+fi
+
+STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 laplace_reconcile_app_dir_contract "$APP_DIR"
@@ -53,16 +216,32 @@ npm run gen:api
 npm run build
 popd >/dev/null
 
-UCI_STAGE="$(mktemp -d)"
-MCP_STAGE="$(mktemp -d)"
-LICHESS_STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"' EXIT
-
 publish_api() {
   echo "==> publish API -> staging ($STAGE)"
   dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" \
     -c Release --no-build --no-self-contained -o "$STAGE"
 }
+
+if [[ "$API_ONLY" -eq 1 ]]; then
+  publish_api
+  rm -rf "$STAGE/wwwroot"
+  mkdir -p "$STAGE/wwwroot"
+  cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+  python3 "$REPO_ROOT/scripts/verify-api-payload.py" \
+    --seal-payload "$STAGE" --native-build "$LAPLACE_ENGINE_BUILD" \
+    --manifest "$LAPLACE_API_PAYLOAD_MANIFEST"
+  # All build/closure checks complete before the serving API is stopped.
+  sudo -n systemctl stop laplace-api
+  laplace_sync_api_payload "$STAGE" "$APP_DIR"
+  laplace_require_app_dir_contract "$APP_DIR"
+  echo "published API + SPA; transaction owner must verify or restore"
+  exit 0
+fi
+
+UCI_STAGE="$(mktemp -d)"
+MCP_STAGE="$(mktemp -d)"
+LICHESS_STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"' EXIT
 
 publish_uci() {
   echo "==> publish laplace-uci -> $UCI_STAGE"
