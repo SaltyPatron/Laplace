@@ -126,6 +126,7 @@ app.MapFoundryEndpoints();
 app.MapBillingEndpoints();
 app.MapBillingIdentityEndpoints();
 app.MapIdentityEndpoints();
+app.MapAccountEndpoints();
 app.MapChessEndpoints();
 app.MapChessPlayerModelEndpoints();
 app.MapChessReadEndpoints();
