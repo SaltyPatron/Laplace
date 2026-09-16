@@ -10,6 +10,10 @@ inputs:
     description: "allow this explicit operator job to install the pinned CMake tool"
     required: false
     default: "false"
+  require_built_revision:
+    description: "require the persistent runtime to have been built from this exact checkout revision"
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -37,6 +41,19 @@ runs:
           else
             echo "CTEST_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"
           fi
+        fi
+
+    - name: Bind prepared runtime to this revision
+      if: inputs.require_built_revision == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        expected=$(git rev-parse HEAD)
+        actual=$(cat build/.laplace-source-revision 2>/dev/null || true)
+        if [[ "$actual" != "$expected" ]]; then
+          echo "::error::prepared runtime belongs to '${actual:-none}', current checkout is '$expected'"
+          echo "::error::run the build lifecycle for this revision before database or ingest operations"
+          exit 1
         fi
 
     - name: Select build tool
