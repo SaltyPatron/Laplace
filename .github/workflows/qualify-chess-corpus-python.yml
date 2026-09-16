@@ -9,17 +9,24 @@ permissions:
 
 jobs:
   controls:
-    name: Pure corpus wrapper controls
+    name: Actual corpus workflow and registry controls
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: b175bd0bb0c15b7d2380c3825cbeae86a1b6f8d9
           fetch-depth: 1
           persist-credentials: false
-      - name: Execute actual standard-library controls
+      - name: Execute exact intended production workflow controls
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$(git write-tree)" == "dcc9d3ef0d4c81ee5a2b6c63cb8dfd3abee0d8df" ]]
           python3 --version
-          python3 scripts/test-installed-chess-corpus.py -v
+          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+          python3 scripts/test-actions-topology.py -v
+          python3 scripts/test-test-profile-registry.py -v
+          python3 scripts/actions-audit.py
