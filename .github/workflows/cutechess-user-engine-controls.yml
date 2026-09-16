@@ -1,0 +1,84 @@
+name: Hosted CuteChess configured-engine protocol controls
+on:
+  push:
+    branches: [verify/cutechess-user-engine-controls-20260916]
+permissions:
+  contents: read
+jobs:
+  protocol-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TMPDIR: /build/laplace/work/cutechess-user-engine-controls/tmp
+      TMP: /build/laplace/work/cutechess-user-engine-controls/tmp
+      TEMP: /build/laplace/work/cutechess-user-engine-controls/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
+      CANDIDATE_SHA: 0d7257b5dba979fde295bad6c32ec5b1e6995675
+      CANDIDATE_TREE: 4d4ac74de05cc72b6be2bdfba4aac785572ebd3c
+    steps:
+      - name: Prepare permanent work and evidence directories
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/cutechess-user-engine-controls
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 0d7257b5dba979fde295bad6c32ec5b1e6995675
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind exact source in the permanent worktree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          git worktree add --detach /build/laplace/worktrees/cutechess-user-engine-controls "$CANDIDATE_SHA"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          Path("/build/laplace/recovery/cutechess-user-engine-controls/source.json").write_text(json.dumps({
+              "candidate_commit":os.environ["CANDIDATE_SHA"],
+              "candidate_tree":os.environ["CANDIDATE_TREE"],
+              "workflow_commit":os.environ["GITHUB_SHA"],
+              "scope":"real local subprocess protocol and cleanup controls; fixture engines",
+              "installed_acceptance_executed":False,
+              "gui_game_executed":False,
+              "database_access_executed":False
+          },indent=2)+"\n")
+          PY
+      - name: Execute protocol and registry controls
+        working-directory: /build/laplace/worktrees/cutechess-user-engine-controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ("check-cutechess-user-engines.py","test-cutechess-user-engines.py"):
+              ast.parse((Path("scripts")/name).read_text(),filename=name)
+              print("Python AST PASS",name)
+          PY
+          set +e
+          timeout --signal=TERM --kill-after=10s 60s python3 scripts/test-cutechess-user-engines.py -v 2>&1 | tee /build/laplace/recovery/cutechess-user-engine-controls/protocol.log
+          protocol_status=${PIPESTATUS[0]}
+          timeout --signal=TERM --kill-after=10s 60s python3 scripts/test-test-profile-registry.py -v 2>&1 | tee /build/laplace/recovery/cutechess-user-engine-controls/registry.log
+          registry_status=${PIPESTATUS[0]}
+          set -e
+          python3 - "$protocol_status" "$registry_status" <<'PY'
+          import json,sys
+          from pathlib import Path
+          Path("/build/laplace/recovery/cutechess-user-engine-controls/results.json").write_text(json.dumps({
+              "protocol_exit":int(sys.argv[1]),"registry_exit":int(sys.argv[2])
+          },indent=2)+"\n")
+          PY
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$protocol_status" -eq 0
+          test "$registry_status" -eq 0
+      - name: Retain bounded qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cutechess-user-engine-controls
+          path: /build/laplace/recovery/cutechess-user-engine-controls
+          retention-days: 14
+          if-no-files-found: error
