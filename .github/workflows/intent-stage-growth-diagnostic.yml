@@ -56,6 +56,7 @@ jobs:
           static size_t live_bytes, live_peak, allocation_calls;
           static uint64_t copy_calls, copy_bytes, growth_calls, growth_bytes;
           static uint64_t small_copy_sizes[17];
+          static uint64_t plain_calls, fortified_calls;
           
           static void track(void *pointer, size_t size) {
               check(pointer != NULL, "libc allocation failed");
@@ -121,6 +122,7 @@ jobs:
           }
           
           void *__wrap_memcpy(void *destination, const void *source, size_t size) {
+              if (track_copies) ++plain_calls;
               observe_copy(size);
               return __real_memcpy(destination, source, size);
           }
@@ -129,6 +131,7 @@ jobs:
            * __memcpy_chk. Preserve libc's destination-bound enforcement unchanged. */
           void *__wrap___memcpy_chk(void *destination, const void *source,
                                    size_t size, size_t destination_size) {
+              if (track_copies) ++fortified_calls;
               observe_copy(size);
               return __real___memcpy_chk(destination, source, size, destination_size);
           }
@@ -162,6 +165,7 @@ jobs:
           
               live_bytes = live_peak = allocation_calls = 0;
               copy_calls = copy_bytes = growth_calls = growth_bytes = 0;
+              plain_calls = fortified_calls = 0;
               for (size_t i = 0; i < 17; ++i) small_copy_sizes[i] = 0;
               track_allocations = 1;
               intent_stage_t *bounded = intent_stage_new_bounded(0, grant);
@@ -187,6 +191,9 @@ jobs:
               for (size_t i = 0; i < 17; ++i)
                   printf("%s%" PRIu64, i ? "," : "", small_copy_sizes[i]);
               puts("]}");
+              printf("{\"copy_entry_points\":{\"memcpy\":%" PRIu64
+                     ",\"__memcpy_chk\":%" PRIu64 "}}\n", plain_calls, fortified_calls);
+              check(plain_calls + fortified_calls == measured_copy_calls, "copy entry point accounting differs");
               check(measured_copy_calls - measured_growth_calls == 8 * rows, "field-copy call accounting differs");
               check(measured_copy_bytes - measured_growth_bytes == 52 * rows, "field-copy byte accounting differs");
           
