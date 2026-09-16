@@ -129,6 +129,133 @@ protected:
     }
 };
 
+
+struct DescriptorCancellationProbe {
+    size_t calls = 0;
+    size_t stop = std::numeric_limits<size_t>::max();
+    static int requested(void* opaque) {
+        auto& probe = *static_cast<DescriptorCancellationProbe*>(opaque);
+        return ++probe.calls >= probe.stop;
+    }
+};
+
+TEST_F(PhysicalityDescriptorAdmission, CancelledCapturePublishesNothingAndPreservesBorrowedRows) {
+    std::vector<Body> bodies;
+    for (size_t i = 0; i < 64; ++i)
+        bodies.push_back(composition({atom('a' + static_cast<uint32_t>(i % 26)),
+                                      atom('A' + static_cast<uint32_t>(i / 26))}));
+    auto original = stage(bodies);
+    ASSERT_NE(original, nullptr);
+    const intent_stage_t* source = original.get();
+    const physicality_descriptor_limits_t limits{kBudget};
+    DescriptorCancellationProbe count;
+    physicality_descriptor_cancel_t cancellation{DescriptorCancellationProbe::requested, &count};
+    physicality_descriptor_capture_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stages_cancelable(&source, 1,
+        physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits, kBudget,
+        &cancellation, &raw), PHYSICALITY_DESCRIPTOR_OK);
+    Capture completed(raw, physicality_descriptor_capture_free);
+    ASSERT_GT(count.calls, 100u);
+    const size_t full_calls = count.calls;
+    for (size_t stop : {size_t{1}, size_t{2}, bodies.size() + 4u, full_calls / 2, full_calls}) {
+        SCOPED_TRACE(stop);
+        DescriptorCancellationProbe probe{0, stop};
+        cancellation.context = &probe;
+        raw = nullptr;
+        EXPECT_EQ(physicality_descriptor_capture_stages_cancelable(&source, 1,
+            physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits, kBudget,
+            &cancellation, &raw), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(probe.calls, stop);
+    }
+    for (size_t stop : {size_t{3}, size_t{8}}) {
+        DescriptorCancellationProbe preflight{0, stop};
+        cancellation.context = &preflight;
+        size_t rows = 91, vertices = 92, logical = 93;
+        EXPECT_EQ(physicality_descriptor_stages_preflight_cancelable(&source, 1, kBudget,
+            &cancellation, &rows, &vertices, &logical), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(preflight.calls, stop);
+        EXPECT_EQ(rows, 91u);
+        EXPECT_EQ(vertices, 92u);
+        EXPECT_EQ(logical, 93u);
+    }
+    auto retry = capture(source); // ordinary API still owns the same complete rows
+    ASSERT_NE(retry, nullptr);
+    size_t expected_count = 0, actual_count = 0;
+    const auto* expected = physicality_descriptor_capture_inputs(completed.get(), &expected_count);
+    const auto* actual = physicality_descriptor_capture_inputs(retry.get(), &actual_count);
+    ASSERT_EQ(actual_count, bodies.size());
+    ASSERT_EQ(actual_count, expected_count);
+    const auto* observations = physicality_descriptor_capture_observations(retry.get(), nullptr);
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&actual[i].entity_id, &expected[i].entity_id));
+        EXPECT_EQ(actual[i].trajectory_vertices, expected[i].trajectory_vertices);
+        EXPECT_EQ(std::memcmp(actual[i].trajectory_xyzm, expected[i].trajectory_xyzm,
+            actual[i].trajectory_vertices * 4 * sizeof(double)), 0);
+        EXPECT_EQ(observations[i].observed_at_unix_us, 100 + static_cast<int64_t>(i));
+    }
+}
+
+TEST_F(PhysicalityDescriptorAdmission, CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy) {
+    std::vector<Body> bodies;
+    for (size_t i = 0; i < 64; ++i)
+        bodies.push_back(composition({atom('a' + static_cast<uint32_t>(i % 26)),
+                                      atom('A' + static_cast<uint32_t>(i / 26))}));
+    auto original = stage(bodies);
+    auto captured = capture(original.get());
+    ASSERT_NE(captured, nullptr);
+    const intent_stage_t* provider = original.get();
+    const auto sources = witnesses(bodies.size());
+    DescriptorCancellationProbe count;
+    physicality_descriptor_cancel_t cancellation{DescriptorCancellationProbe::requested, &count};
+    physicality_descriptor_materialization_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_materialize_cancelable(captured.get(), vocabulary.get(),
+        &provider, 1, &provider, 1, nullptr, 0, sources.data(), sources.size(),
+        &kSource, 200, kBudget, &cancellation, &raw), PHYSICALITY_DESCRIPTOR_OK);
+    Materialization completed(raw, physicality_descriptor_materialization_free);
+    const size_t full_calls = count.calls;
+    ASSERT_GT(full_calls, 100u);
+    // The last checkpoint is after the generated stage is attached to its
+    // result owner. CANCELLED must destroy that stage as well as transient RAII.
+    for (size_t stop : {size_t{1}, size_t{100}, full_calls / 2, full_calls}) {
+        SCOPED_TRACE(stop);
+        DescriptorCancellationProbe probe{0, stop};
+        cancellation.context = &probe;
+        raw = nullptr;
+        EXPECT_EQ(physicality_descriptor_materialize_cancelable(captured.get(), vocabulary.get(),
+            &provider, 1, &provider, 1, nullptr, 0, sources.data(), sources.size(),
+            &kSource, 200, kBudget, &cancellation, &raw), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(probe.calls, stop);
+    }
+    Materialization retry(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {provider}, {provider}, {}, sources, retry), PHYSICALITY_DESCRIPTOR_OK);
+    size_t expected_count = 0, actual_count = 0;
+    const auto* expected = physicality_descriptor_materialization_forms(completed.get(), &expected_count);
+    const auto* actual = physicality_descriptor_materialization_forms(retry.get(), &actual_count);
+    ASSERT_EQ(actual_count, expected_count);
+    ASSERT_EQ(actual_count, bodies.size());
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&actual[i].descriptor_id, &expected[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&actual[i].view_id, &expected[i].view_id));
+        EXPECT_EQ(actual[i].view_state, expected[i].view_state);
+        EXPECT_EQ(actual[i].missing_first, expected[i].missing_first);
+        EXPECT_EQ(actual[i].missing_count, expected[i].missing_count);
+    }
+    Stage expected_stage(physicality_descriptor_materialization_take_stage(completed.get()), intent_stage_free);
+    Stage actual_stage(physicality_descriptor_materialization_take_stage(retry.get()), intent_stage_free);
+    ASSERT_NE(expected_stage, nullptr);
+    ASSERT_NE(actual_stage, nullptr);
+    for (const auto table : {INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_PHYSICALITIES,
+                             INTENT_STAGE_TABLE_ATTESTATIONS}) {
+        size_t expected_bytes = 0, actual_bytes = 0;
+        const auto* want = intent_stage_tuple_ptr(expected_stage.get(), table, &expected_bytes);
+        const auto* got = intent_stage_tuple_ptr(actual_stage.get(), table, &actual_bytes);
+        ASSERT_EQ(actual_bytes, expected_bytes);
+        if (actual_bytes != 0) EXPECT_EQ(std::memcmp(got, want, actual_bytes), 0);
+    }
+}
+
 TEST_F(PhysicalityDescriptorAdmission, ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence) {
     const auto& byte_basis = vocabulary->byte_basis;
     std::vector<Body> bytes(2);

@@ -37,6 +37,12 @@ static HeapTuple row_pointers[3];
 MemoryContext CurrentMemoryContext;
 static MemoryContext allocation_context;
 volatile sig_atomic_t InterruptPending;
+volatile sig_atomic_t QueryCancelPending;
+volatile sig_atomic_t ProcDiePending;
+volatile uint32 InterruptHoldoffCount;
+volatile uint32 QueryCancelHoldoffCount;
+volatile uint32 CritSectionCount;
+ErrorContextCallback *error_context_stack;
 uint64 SPI_processed;
 SPITupleTable *SPI_tuptable;
 
@@ -54,6 +60,8 @@ int errcode(int code) { error_code = code; return 0; }
 int errmsg(const char *format, ...) {
     va_list args; va_start(args, format); vsnprintf(error_text, sizeof(error_text), format, args); va_end(args); return 0;
 }
+int set_errcontext_domain(const char *domain) { (void)domain; return 0; }
+int errcontext_msg(const char *format, ...) { (void)format; return 0; }
 int errmsg_internal(const char *format, ...) {
     va_list args; va_start(args,format);vsnprintf(error_text,sizeof(error_text),format,args);va_end(args);return 0;
 }
@@ -208,7 +216,33 @@ static void probe_view_arrays(void) {
     pfree(views);probe_stages_free(s);CurrentMemoryContext=NULL;
 }
 
+static void probe_cancel_holdoffs(void)
+{
+    CHECK(admission_cancel_requested(NULL) == 0);
+    QueryCancelPending = 1;
+    CHECK(admission_cancel_requested(NULL) == 1);
+    QueryCancelHoldoffCount = 1;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    ProcDiePending = 1;
+    CHECK(admission_cancel_requested(NULL) == 1);
+    InterruptHoldoffCount = 1;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    InterruptHoldoffCount = 0;
+    CritSectionCount = 1;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    CritSectionCount = 0;
+    QueryCancelHoldoffCount = 0;
+    QueryCancelPending = ProcDiePending = 0;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    /* A returned cancellation cannot become partial success even when no
+     * PostgreSQL interrupt is pending. This test double does not run PG. */
+    REFUSES(admission_status(PHYSICALITY_DESCRIPTOR_CANCELLED, "probe"), "cancelled");
+    CHECK(error_code == ERRCODE_QUERY_CANCELED);
+    CHECK(error_context_stack == NULL);
+}
+
 int main(void) {
+    probe_cancel_holdoffs();
     probe_view_arrays();
     probe_session_view_receipt();
     SnapshotData snapshot = {0};

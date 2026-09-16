@@ -105,13 +105,24 @@ physicality_descriptor_status_t physicality_descriptor_stages_preflight(
     const intent_stage_t* const* stages, size_t stage_count,
     size_t maximum_logical_occurrences, size_t* out_body_count,
     size_t* out_stored_vertices, size_t* out_logical_occurrences) {
+    return physicality_descriptor_stages_preflight_cancelable(stages, stage_count,
+        maximum_logical_occurrences, NULL, out_body_count, out_stored_vertices, out_logical_occurrences);
+}
+
+physicality_descriptor_status_t physicality_descriptor_stages_preflight_cancelable(
+    const intent_stage_t* const* stages, size_t stage_count,
+    size_t maximum_logical_occurrences,
+    const physicality_descriptor_cancel_t* cancellation, size_t* out_body_count,
+    size_t* out_stored_vertices, size_t* out_logical_occurrences) {
     size_t bodies = 0u, stored = 0u, logical = 0u;
+    if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
     if (stage_count != 0u && stages == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     for (size_t stage = 0u; stage < stage_count; ++stage) {
         size_t length, offset = 0u, rows = 0u;
         if (stages[stage] == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
         const uint8_t* data = intent_stage_tuple_ptr(stages[stage], INTENT_STAGE_TABLE_PHYSICALITIES, &length);
         while (offset < length) {
+            if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
             fields_t fields;
             size_t vertices, row_logical = 0u;
             int typed_payload = 0;
@@ -123,6 +134,7 @@ physicality_descriptor_status_t physicality_descriptor_stages_preflight(
             const int canonical_manifest = type == 1 || type == PHYSICALITY_DESCRIPTOR_RETENTION_TYPE;
             if (type <= 0) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
             for (size_t vertex = 0u; vertex < vertices; ++vertex) {
+                if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
                 double packed[4];
                 size_t run;
                 int typed_vertex;
@@ -153,7 +165,8 @@ physicality_descriptor_status_t physicality_descriptor_stages_preflight(
 }
 
 static int decode_fields(const fields_t* fields, physicality_descriptor_input_t* input,
-    physicality_descriptor_observation_t* observation, double* trajectory) {
+    physicality_descriptor_observation_t* observation, double* trajectory,
+    const physicality_descriptor_cancel_t* cancellation) {
     size_t vertices;
     const uint8_t* coordinates;
     hash128_t expected;
@@ -167,8 +180,10 @@ static int decode_fields(const fields_t* fields, physicality_descriptor_input_t*
         input->coord[axis] = read_double(coordinates + axis * 8u, 1);
     memcpy(&input->hilbert_index, fields->bytes[4], 16u);
     if (!geometry(fields->bytes[5], fields->lengths[5], 1, &vertices, &coordinates)) return 0;
-    for (size_t component = 0; component < vertices * 4u; ++component)
+    for (size_t component = 0; component < vertices * 4u; ++component) {
+        if (physicality_descriptor_cancel_requested(cancellation)) return -1;
         trajectory[component] = read_double(coordinates + component * 8u, 1);
+    }
     input->trajectory_xyzm = vertices == 0u ? NULL : trajectory;
     input->trajectory_vertices = vertices;
     input->n_constituents = (int32_t)read_word(fields->bytes[6], 4u, 0);
@@ -205,13 +220,15 @@ void physicality_descriptor_capture_free(physicality_descriptor_capture_t* captu
     free(capture);
 }
 
-physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
+static physicality_descriptor_status_t capture_stage_rows_cancelable(
     const intent_stage_t* const* stages, size_t stage_count,
-    size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture) {
+    size_t maximum_capture_bytes, const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_capture_t** out_capture) {
     size_t count = 0u, vertices = 0u, bytes = sizeof(physicality_descriptor_capture_t);
     physicality_descriptor_capture_t* capture;
     if (out_capture == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     *out_capture = NULL;
+    if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
     if (stage_count != 0u && stages == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     for (size_t stage = 0; stage < stage_count; ++stage) {
         size_t length, offset = 0u, rows = 0u;
@@ -219,6 +236,7 @@ physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
         if (stages[stage] == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
         data = intent_stage_tuple_ptr(stages[stage], INTENT_STAGE_TABLE_PHYSICALITIES, &length);
         while (offset < length) {
+            if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
             fields_t fields;
             size_t width;
             if (!read_fields(data, length, &offset, &fields) || !validate_fields(&fields, &width))
@@ -257,16 +275,21 @@ physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
         const uint8_t* data = intent_stage_tuple_ptr(
             stages[stage], INTENT_STAGE_TABLE_PHYSICALITIES, &length);
         while (offset < length) {
+            if (physicality_descriptor_cancel_requested(cancellation)) {
+                physicality_descriptor_capture_free(capture);
+                return PHYSICALITY_DESCRIPTOR_CANCELLED;
+            }
             fields_t fields;
             physicality_descriptor_input_t* input = &capture->inputs[count];
             physicality_descriptor_observation_t* observation = &capture->observations[count];
             observation->source_stage_index = stage;
             observation->source_row_index = row++;
-            if (!read_fields(data, length, &offset, &fields) ||
-                !decode_fields(&fields, input, observation, capture->trajectories == NULL ? NULL :
-                    capture->trajectories + vertices * 4u)) {
+            int decoded = read_fields(data, length, &offset, &fields) ?
+                decode_fields(&fields, input, observation, capture->trajectories == NULL ? NULL :
+                    capture->trajectories + vertices * 4u, cancellation) : 0;
+            if (decoded <= 0) {
                 physicality_descriptor_capture_free(capture);
-                return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
+                return decoded < 0 ? PHYSICALITY_DESCRIPTOR_CANCELLED : PHYSICALITY_DESCRIPTOR_INVALID_BODY;
             }
             vertices += input->trajectory_vertices;
             ++count;
@@ -276,11 +299,27 @@ physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
     return PHYSICALITY_DESCRIPTOR_OK;
 }
 
+physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
+    const intent_stage_t* const* stages, size_t stage_count,
+    size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture) {
+    return capture_stage_rows_cancelable(stages, stage_count, maximum_capture_bytes, NULL, out_capture);
+}
+
 physicality_descriptor_status_t physicality_descriptor_capture_stages(
     const intent_stage_t* const* stages, size_t stage_count,
     const physicality_descriptor_basis_t* basis,
     const physicality_descriptor_limits_t* plan_limits,
     size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture) {
+    return physicality_descriptor_capture_stages_cancelable(stages, stage_count, basis,
+        plan_limits, maximum_capture_bytes, NULL, out_capture);
+}
+
+physicality_descriptor_status_t physicality_descriptor_capture_stages_cancelable(
+    const intent_stage_t* const* stages, size_t stage_count,
+    const physicality_descriptor_basis_t* basis,
+    const physicality_descriptor_limits_t* plan_limits,
+    size_t maximum_capture_bytes, const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_capture_t** out_capture) {
     physicality_descriptor_capture_t* capture = NULL;
     physicality_descriptor_status_t status;
     physicality_descriptor_limits_t remaining_limits;
@@ -288,14 +327,14 @@ physicality_descriptor_status_t physicality_descriptor_capture_stages(
     *out_capture = NULL;
     if (!physicality_descriptor_basis_is_valid(basis) || plan_limits == NULL)
         return PHYSICALITY_DESCRIPTOR_INVALID;
-    status = physicality_descriptor_capture_stage_rows(
-        stages, stage_count, maximum_capture_bytes, &capture);
+    status = capture_stage_rows_cancelable(
+        stages, stage_count, maximum_capture_bytes, cancellation, &capture);
     if (status != PHYSICALITY_DESCRIPTOR_OK) return status;
     remaining_limits = *plan_limits;
     if (remaining_limits.maximum_plan_bytes > maximum_capture_bytes - capture->bytes)
         remaining_limits.maximum_plan_bytes = maximum_capture_bytes - capture->bytes;
-    status = physicality_descriptor_plan_build(capture->inputs, capture->count,
-        basis, &remaining_limits, &capture->plan);
+    status = physicality_descriptor_plan_build_cancelable(capture->inputs, capture->count,
+        basis, &remaining_limits, cancellation, &capture->plan);
     if (status != PHYSICALITY_DESCRIPTOR_OK) {
         physicality_descriptor_capture_free(capture);
         return status;

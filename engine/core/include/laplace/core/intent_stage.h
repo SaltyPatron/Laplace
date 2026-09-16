@@ -21,8 +21,9 @@ typedef enum {
 #define INTENT_STAGE_PG_EPOCH_UNIX_US INT64_C(946684800000000)
 
 intent_stage_t* intent_stage_new(size_t row_capacity_hint);
-/* Same serializer with an admitted live-allocation ceiling, including bounded
- * buffer replacement while old/new allocations coexist. */
+/* Same serializer with an admitted requested-payload ceiling. Every bounded
+ * buffer growth reserves old plus requested new storage before realloc, even
+ * when libc can grow in place. Allocator bookkeeping/process RSS are excluded. */
 intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximum_bytes);
 void            intent_stage_free(intent_stage_t* stage);
 /* Exclusive-owner lifetime operation for a stage whose entity/attestation
@@ -34,7 +35,11 @@ void            intent_stage_free(intent_stage_t* stage);
  * validate input: admission callers must finish full tuple import first. */
 size_t intent_stage_retain_physicalities(intent_stage_t* stage);
 size_t intent_stage_memory_bytes(const intent_stage_t* stage);
-/* Bounded stages include simultaneous old/new buffers during growth. */
+/* Conservative high-water reservation of requested payload. Bounded growth
+ * includes old plus requested new buffers even if realloc grows in place;
+ * this is an upper bound, not measured simultaneous allocations or process RSS.
+ * Unbounded buffer growth retains its historical retained-capacity accounting;
+ * witness rehash keeps its existing old-plus-new accounting. */
 size_t intent_stage_memory_peak_bytes(const intent_stage_t* stage);
 int intent_stage_allocation_failed(const intent_stage_t* stage);
 

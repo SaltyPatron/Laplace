@@ -155,9 +155,44 @@ static intent_stage_t **admission_stage_slot(admission_state *s, stage_list *lis
     return &list->items[list->count++];
 }
 
+/* Poll signal flags on the backend thread only. Never CHECK/ereport here:
+ * core may own C++ temporaries that PostgreSQL's longjmp cannot unwind.
+ * Respect PostgreSQL holdoffs and leave every flag for ProcessInterrupts. */
+static int admission_cancel_requested(void *context)
+{
+    (void)context;
+    if (InterruptHoldoffCount != 0 || CritSectionCount != 0) return 0;
+    return ProcDiePending || (QueryCancelPending && QueryCancelHoldoffCount == 0);
+}
+static const physicality_descriptor_cancel_t admission_cancellation = {
+    admission_cancel_requested, NULL
+};
+
+/* This context is installed only after the portable call has unwound. It
+ * distinguishes a native cancellation checkpoint from an unrelated SQL error. */
+static void admission_cancel_context(void *arg)
+{
+    errcontext("physicality descriptor native %s returned cancelled", (const char *)arg);
+}
+
 static void admission_status(physicality_descriptor_status_t status, const char *phase)
 {
     if (status == PHYSICALITY_DESCRIPTOR_OK) return;
+    if (status == PHYSICALITY_DESCRIPTOR_CANCELLED) {
+        /* Every portable owner has returned and released unpublished output.
+         * Preserve PostgreSQL's cancellation/timeout/shutdown SQLSTATE. */
+        ErrorContextCallback context;
+        context.callback = admission_cancel_context;
+        context.arg = (void *)phase;
+        context.previous = error_context_stack;
+        error_context_stack = &context;
+        CHECK_FOR_INTERRUPTS();
+        error_context_stack = context.previous;
+        /* A cancellation status is never a successful partial admission, even
+         * if a future caller changes interrupt holdoffs before reaching here. */
+        ereport(ERROR, (errcode(ERRCODE_QUERY_CANCELED),
+                       errmsg("physicality descriptor admission cancelled")));
+    }
     ereport(ERROR, (errcode(status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED ?
                            ERRCODE_PROGRAM_LIMIT_EXCEEDED : ERRCODE_INVALID_PARAMETER_VALUE),
                    errmsg("physicality descriptor admission %s failed (native status %d)",
@@ -228,9 +263,9 @@ static void admission_import(admission_state *s, transport_array *a, stage_list 
 static size_t admission_preflight(admission_state *s, stage_list *list)
 {
     size_t bodies = 0, stored = 0, logical = 0;
-    admission_status(physicality_descriptor_stages_preflight(
+    admission_status(physicality_descriptor_stages_preflight_cancelable(
         (const intent_stage_t *const *)list->items, list->count, s->maximum_logical,
-        &bodies, &stored, &logical), "stored-carrier preflight");
+        &admission_cancellation, &bodies, &stored, &logical), "stored-carrier preflight");
     s->stored_vertices = admission_add(s->stored_vertices, stored);
     return logical;
 }
@@ -644,10 +679,11 @@ static void admission_materialize(admission_state *s,
     admission_logical(s, s->source_logical);
     limits.maximum_plan_bytes = s->maximum_bytes - s->bytes;
     {
-        physicality_descriptor_status_t status = physicality_descriptor_capture_stages(
+        physicality_descriptor_status_t status = physicality_descriptor_capture_stages_cancelable(
             (const intent_stage_t *const *)s->source.items, s->source.count,
             physicality_descriptor_vocabulary_basis(s->vocabulary), &limits,
-            s->maximum_bytes - s->bytes, &s->capture);
+            s->maximum_bytes - s->bytes, &admission_cancellation, &s->capture);
+        if (status == PHYSICALITY_DESCRIPTOR_CANCELLED) admission_status(status, "original-form capture");
         if (status != PHYSICALITY_DESCRIPTOR_OK)
             ereport(ERROR, (errcode(status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED ?
                                    ERRCODE_PROGRAM_LIMIT_EXCEEDED : ERRCODE_INVALID_PARAMETER_VALUE),
@@ -683,11 +719,11 @@ static void admission_materialize(admission_state *s,
          * expanded carrier work, separate from finite generated plan work. */
         admission_logical(s, admission_add(s->source_logical,
             admission_multiply(2, admission_add(s->current_logical, s->admitted_logical))));
-        status = physicality_descriptor_materialize(s->capture, s->vocabulary,
+        status = physicality_descriptor_materialize_cancelable(s->capture, s->vocabulary,
             (const intent_stage_t *const *)s->current.items, s->current.count,
             (const intent_stage_t *const *)s->admitted.items, s->admitted.count,
             s->missing, s->missing_count, sources, source_count, &generated_source,
-            generated_at, s->maximum_bytes - s->bytes, &s->materialization);
+            generated_at, s->maximum_bytes - s->bytes, &admission_cancellation, &s->materialization);
         if (status != PHYSICALITY_DESCRIPTOR_OK && status != PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER)
             admission_status(status, "native materialization");
         admission_native_peak(s, physicality_descriptor_materialization_peak_bytes(s->materialization));
