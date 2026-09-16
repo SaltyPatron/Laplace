@@ -20,8 +20,8 @@ export interface ApiOptions {
   quoteId?: string;
   session?: string;
   operatorToken?: string;
+  signal?: AbortSignal;
 }
-
 
 export class PaymentRequiredError extends Error {
   constructor(public readonly body: PaymentRequiredResponse) {
@@ -36,7 +36,10 @@ export class ApiError extends Error {
 }
 
 export function laplaceHeaders(opts: ApiOptions): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Laplace-Request': '1',
+  };
   if (opts.tenant) headers['X-Laplace-Tenant'] = opts.tenant;
   if (opts.quoteId) headers['X-Laplace-Quote-Id'] = opts.quoteId;
   if (opts.session) headers['X-Laplace-Session'] = opts.session;
@@ -52,37 +55,49 @@ async function parseError(res: Response): Promise<never> {
     const err = (body as ErrorResponse).error;
     if (err?.message) message = err.message;
   } catch {
-    
+    // Preserve the actual HTTP status when a proxy returned a non-JSON error.
   }
   if (res.status === 402 && body) throw new PaymentRequiredError(body as PaymentRequiredResponse);
   throw new ApiError(res.status, message);
 }
 
 export async function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
-  const res = await fetch(path, { headers: laplaceHeaders(opts) });
+  const res = await fetch(path, {
+    headers: laplaceHeaders(opts), signal: opts.signal, credentials: 'same-origin',
+  });
   if (!res.ok) await parseError(res);
   return (await res.json()) as T;
 }
 
-/**
- * PUT a body that is already serialized.
- *
- * The agents config is edited as TEXT in the console and validated by the server,
- * so it must reach the endpoint byte-for-byte as typed — round-tripping it
- * through JSON.parse/stringify would reformat the operator's file on every save
- * and silently discard the comment keys the example config uses.
- */
+/** Preserve serialized operator configuration byte-for-byte. */
 export async function apiPutText<T>(path: string, body: string, opts: ApiOptions = {}): Promise<T> {
-  const res = await fetch(path, { method: 'PUT', headers: laplaceHeaders(opts), body });
+  const res = await fetch(path, {
+    method: 'PUT', headers: laplaceHeaders(opts), body,
+    signal: opts.signal, credentials: 'same-origin',
+  });
   if (!res.ok) await parseError(res);
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
 export async function apiPost<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
   const res = await fetch(path, {
-    method: 'POST',
-    headers: laplaceHeaders(opts),
-    body: JSON.stringify(payload),
+    method: 'POST', headers: laplaceHeaders(opts), body: JSON.stringify(payload),
+    signal: opts.signal, credentials: 'same-origin',
+  });
+  if (!res.ok) await parseError(res);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export function apiPut<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
+  return apiPutText<T>(path, JSON.stringify(payload), opts);
+}
+
+export async function apiDelete<T = void>(path: string, opts: ApiOptions = {}): Promise<T> {
+  const res = await fetch(path, {
+    method: 'DELETE', headers: laplaceHeaders(opts),
+    signal: opts.signal, credentials: 'same-origin',
   });
   if (!res.ok) await parseError(res);
   if (res.status === 204) return undefined as T;
