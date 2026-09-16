@@ -85,6 +85,33 @@ static void check_storage(Relation relation)
         elog(ERROR,"entity mask write cannot bypass row security");
 }
 
+/* Incremental Highway masks are rebuildable acceleration, never semantic
+ * authority. If an ingest-time accretion would wait behind another tuple owner,
+ * retain that canonical entity id for the existing authoritative refresh lane
+ * instead of letting a performance structure block or deadlock canonical ingest.
+ *
+ * The caller already owns one SPI connection. Keep recovery set-sized and ordered;
+ * entities.mask_dirty performs DISTINCT + ON CONFLICT and the later refresh reads
+ * current consensus, so multiple missed deltas collapse safely to one recompute. */
+static void retain_dirty_ids(Datum *ids, int count)
+{
+    static SPIPlanPtr dirty_plan;
+    Oid types[]={BYTEAARRAYOID};
+    Datum args[1];
+
+    if (count<=0) return;
+    args[0]=PointerGetDatum(construct_array(ids,count,BYTEAOID,-1,false,TYPALIGN_INT));
+    if (!dirty_plan)
+    {
+        dirty_plan=SPI_prepare_cursor(
+            laplace_sql_query_text("entities.mask_dirty"),1,types,0);
+        if (!dirty_plan || SPI_keepplan(dirty_plan)!=0)
+            elog(ERROR,"entity mask write: dirty queue prepare failed");
+    }
+    if (SPI_execute_plan(dirty_plan,args,NULL,false,0)!=SPI_OK_INSERT)
+        elog(ERROR,"entity mask write: dirty queue persistence failed");
+}
+
 static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count, bool replace)
 {
     if (!count) return 0;
@@ -137,6 +164,8 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
     }
     SPI_freetuptable(SPI_tuptable);
     qsort(targets,n,sizeof(*targets),compare_target);
+    Datum *dirty=palloc(Max(n,(uint64)1)*sizeof(Datum));
+    int dirty_count=0;
     HASHCTL ctl={0}; ctl.keysize=sizeof(Oid);ctl.entrysize=sizeof(MaskRelation);
     HTAB *relations=hash_create("entity mask write relations",32,&ctl,HASH_ELEM|HASH_BLOBS);
     int64 updated=0;
@@ -164,8 +193,17 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
         }
         TM_FailureData failure;
         TM_Result locked=table_tuple_lock(entry->relation,&target->tid,GetActiveSnapshot(),
-            entry->old_slot,GetCurrentCommandId(false),LockTupleNoKeyExclusive,LockWaitBlock,
+            entry->old_slot,GetCurrentCommandId(false),LockTupleNoKeyExclusive,
+            replace ? LockWaitBlock : LockWaitSkip,
             IsolationUsesXactSnapshot()?0:TUPLE_LOCK_FLAG_FIND_LAST_VERSION,&failure);
+        if(!replace && locked==TM_WouldBlock)
+        {
+            hash128_t id;
+            memcpy(&id,delta->id,sizeof(id));
+            dirty[dirty_count++]=hash128_to_datum(&id);
+            ExecClearTuple(entry->old_slot);
+            continue;
+        }
         if(locked==TM_Deleted && !IsolationUsesXactSnapshot()) continue;
         if(locked==TM_Updated || locked==TM_Deleted)
             ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),errmsg("entity mask target changed concurrently")));
@@ -201,14 +239,18 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
         ExecCloseIndices(&entry->result);FreeExecutorState(entry->estate);
         table_close(entry->relation,NoLock);
     }
-    hash_destroy(relations);table_close(root,NoLock);
+    hash_destroy(relations);
+    if(dirty_count) retain_dirty_ids(dirty,dirty_count);
+    table_close(root,NoLock);
     if(updated) CommandCounterIncrement();
     return updated;
 }
 
-/* Accumulation and authoritative refresh share tuple routing, lock rechecks,
- * constraints, permissions and index maintenance. Empty replacement means NULL,
- * not an absent request: it must clear an entity's final stale relation bit. */
+/* Accumulation and authoritative refresh share tuple routing, permissions and
+ * index maintenance. Incremental accretion never waits on a contended tuple:
+ * it defers that entity to the authoritative dirty-refresh queue because the
+ * Highway mask is an accelerator. Replacement/bit-clearing remains blocking
+ * and authoritative. Empty replacement means NULL, not an absent request. */
 int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count)
 {
     return entity_masks_write(deltas,count,false);
