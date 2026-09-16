@@ -1,96 +1,111 @@
-name: Supersede queued worktree operator with authoritative checkout
+name: Observe exact active foundation progress without host mutation
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
 permissions:
   contents: read
-  actions: write
+  actions: read
 jobs:
-  qualification:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  observe:
+    runs-on: [self-hosted, Linux, X64, laplace-refactor]
+    timeout-minutes: 2
     steps:
-      - name: Normally cancel only the exact queued superseded operation
+      - name: Read two bounded foundation journal and backend samples
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 -B - <<'PY'
-          import json, os, time, urllib.request
-          base="https://api.github.com/repos/SaltyPatron/Laplace"
-          headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"}
-          run_id=35147320006
-          def request(path, method="GET"):
-              with urllib.request.urlopen(urllib.request.Request(base+path,headers=headers,method=method),timeout=20) as response:
+          timeout --signal=TERM --kill-after=5s 60s python3 -B - <<'PY'
+          import datetime, hashlib, json, os, signal, stat, subprocess, time, urllib.request
+          from pathlib import Path
+          RUN=35145274819
+          SOURCE="ab1d442ffe7f26deaac3e19784e0483abba4ee4f"
+          JOB=104959583060
+          SQL="BEGIN READ ONLY;\nSET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='1s';\nWITH journal AS (\n SELECT CASE source_name WHEN 'UnicodeDecomposer' THEN 'unicode' WHEN 'ChessPgnDecomposer' THEN 'chess-pgn' WHEN 'ISO639Decomposer' THEN 'iso639' WHEN 'OperationalDecomposer' THEN 'operational' WHEN 'CILIDecomposer' THEN 'cili' WHEN 'WordNetDecomposer' THEN 'wordnet' WHEN 'VerbNetDecomposer' THEN 'verbnet' WHEN 'PropBankDecomposer' THEN 'propbank' WHEN 'FrameNetDecomposer' THEN 'framenet' WHEN 'MapNetDecomposer' THEN 'mapnet' WHEN 'WordFrameNetDecomposer' THEN 'wordframenet' WHEN 'SemLinkDecomposer' THEN 'semlink' ELSE 'other' END source_family,\n CASE WHEN status IN ('running','ok','failed','empty-noop','capped','cancelled','skipped-complete','already-present','already-complete','dependency-unset') THEN status ELSE 'other' END status,\n count(*) runs,min(started_at) oldest_started,max(started_at) newest_started,\n sum(units_attempted) units_attempted,sum(units_applied) units_applied,sum(units_failed) units_failed,\n sum(entities) entities,sum(physicalities) physicalities,sum(attestations) attestations,sum(files_done) files_done,sum(files_total) files_total\n FROM laplace.ingest_run_journal GROUP BY 1, 2\n), activity AS MATERIALIZED (\n SELECT pid,backend_start,state,xact_start,query_start,wait_event_type,wait_event,\n CASE WHEN query IS NULL OR query='<insufficient privilege>' THEN 'not-visible'\n WHEN state IS NULL THEN 'unknown-state' WHEN state='idle' THEN 'idle-last-query-not-classified'\n WHEN position('ops.physicality_descriptor_materialize' in query)>0 THEN 'physicality-descriptor-materialize'\n WHEN query ~* '^[[:space:]]*COPY[[:space:]]' THEN 'copy'\n WHEN position('pg_advisory_xact_lock' in query)>0 THEN 'advisory-transaction-lock' ELSE 'other' END query_class\n FROM pg_stat_activity WHERE datname=current_database() AND backend_type='client backend' AND pid<>pg_backend_pid()\n), bounded AS (SELECT * FROM activity ORDER BY backend_start, pid LIMIT 64)\nSELECT jsonb_build_object('schema','laplace.recording-ingest-observation/v1','observed_at',clock_timestamp(),'database',current_database(),'postmaster_started',pg_postmaster_start_time(),\n 'running_ingests',(SELECT count(*) FROM laplace.ingest_run_journal WHERE status='running'),\n 'journal_groups',COALESCE((SELECT jsonb_agg(jsonb_build_object('source_family',source_family,'status',status,'runs',runs,'oldest_age_seconds',GREATEST(0,EXTRACT(EPOCH FROM statement_timestamp()-oldest_started)),'newest_age_seconds',GREATEST(0,EXTRACT(EPOCH FROM statement_timestamp()-newest_started)),'units_attempted',units_attempted,'units_applied',units_applied,'units_failed',units_failed,'entities',entities,'physicalities',physicalities,'attestations',attestations,'files_done',files_done,'files_total',files_total) ORDER BY source_family,status) FROM journal),'[]'::jsonb),\n 'client_backends_total',(SELECT count(*) FROM activity),'client_backends_truncated',(SELECT count(*)>64 FROM activity),\n 'client_backends',COALESCE((SELECT jsonb_agg(jsonb_build_object('pid',pid,'backend_start',backend_start,'state',state,'transaction_age_seconds',CASE WHEN xact_start IS NULL THEN NULL ELSE GREATEST(0,EXTRACT(EPOCH FROM statement_timestamp()-xact_start)) END,'query_age_seconds',CASE WHEN state='idle' OR query_start IS NULL THEN NULL ELSE GREATEST(0,EXTRACT(EPOCH FROM statement_timestamp()-query_start)) END,'wait_event_type',wait_event_type,'wait_event',wait_event,'query_class',query_class) ORDER BY backend_start,pid) FROM bounded),'[]'::jsonb));\nROLLBACK;\n"
+          BASE="https://api.github.com/repos/SaltyPatron/Laplace"
+          HEADERS={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"}
+          def deadline(signum, frame): raise TimeoutError("bounded observation deadline")
+          signal.signal(signal.SIGALRM, deadline)
+          signal.alarm(55)
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(BASE+path,headers=HEADERS),timeout=8) as response:
                   raw=response.read(2097153)
-                  if len(raw)>2097152: raise ValueError("metadata exceeds bound")
-                  return json.loads(raw) if raw else None
-          current=request("/actions/runs/"+str(run_id))
-          assert current["head_sha"]=="f6f128c5d3005b39352474422a85bee72bd0cd3d"
-          assert current["path"]==".github/workflows/chess-floor-serving-controls.yml"
-          assert current["head_branch"]=="verify/chess-floor-serving-controls-20260916"
-          assert current["run_attempt"]==1
-          jobs=request("/actions/runs/"+str(run_id)+"/jobs?per_page=100")["jobs"]
-          if current["status"]=="completed" and current["conclusion"]=="cancelled":
-              print("SUPERSEDED_OPERATION_ALREADY_CANCELLED",run_id)
-          else:
-              assert current["status"] in ("queued","pending","waiting","requested"), current["status"]
-              assert jobs and all(job["status"] in ("queued","waiting","pending") for job in jobs)
-              request("/actions/runs/"+str(run_id)+"/cancel","POST")
-              print("SUPERSEDED_OPERATION_CANCEL_ACK "+json.dumps({"run":run_id,"source":current["head_sha"],"observedStatus":current["status"],"jobIds":[j["id"] for j in jobs]}),flush=True)
-              for unused in range(15):
-                  current=request("/actions/runs/"+str(run_id))
-                  if current["status"]=="completed": break
-                  time.sleep(2)
-              assert current["status"]=="completed" and current["conclusion"]=="cancelled"
-              print("SUPERSEDED_OPERATION_TERMINAL "+json.dumps({"run":run_id,"status":current["status"],"conclusion":current["conclusion"]}),flush=True)
+              if len(raw)>2097152: raise ValueError("metadata bound exceeded")
+              return json.loads(raw)
+          def bound_run():
+              run=api("/actions/runs/"+str(RUN))
+              if (run["head_sha"]!=SOURCE or run["path"]!=".github/workflows/seed-foundation.yml"
+                  or run["run_attempt"]!=1 or run["event"]!="workflow_dispatch"):
+                  raise ValueError("foundation source/run identity changed")
+              jobs=api("/actions/runs/"+str(RUN)+"/jobs?per_page=100")["jobs"]
+              selected=[j for j in jobs if j["id"]==JOB]
+              if len(selected)!=1: raise ValueError("foundation job identity unavailable")
+              job=selected[0]
+              return {"run":RUN,"source":SOURCE,"status":run["status"],"conclusion":run["conclusion"],
+                      "job":JOB,"jobStatus":job["status"],"runner":job.get("runner_name"),
+                      "activeSteps":[s["name"] for s in job.get("steps",[]) if s["status"]=="in_progress"]}
+          def bounded_proc(path, budget):
+              fd=os.open(path,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0))
+              with os.fdopen(fd,"rb") as stream:
+                  raw=stream.read(budget+1)
+              if len(raw)>budget: raise ValueError("process observation budget exceeded")
+              return raw.decode("ascii")
+          def process(pid, started):
+              raw=bounded_proc("/proc/"+str(pid)+"/stat",4096)
+              end=raw.rfind(")")
+              if end<0 or raw.split(" ",1)[0]!=str(pid): raise ValueError("process identity invalid")
+              fields=raw[end+2:].split()
+              ticks=os.sysconf("SC_CLK_TCK")
+              boot=[int(s.split()[1]) for s in bounded_proc("/proc/stat",262144).splitlines() if s.startswith("btime ")]
+              expected=datetime.datetime.fromisoformat(started.replace("Z","+00:00")).timestamp()
+              birth=int(fields[19])
+              if len(boot)!=1 or abs(expected-(boot[0]+birth/ticks))>2:
+                  raise ValueError("backend birth differs from process")
+              return {"pid":pid,"startTicks":birth,"userSeconds":int(fields[11])/ticks,
+                      "systemSeconds":int(fields[12])/ticks,"residentBytes":int(fields[21])*os.sysconf("SC_PAGE_SIZE"),
+                      "threads":int(fields[17]),"observedMonotonic":time.monotonic()}
+          previous={}
+          for sample in range(2):
+              owner=bound_run()
+              print("FOUNDATION_BOUND_JOB "+json.dumps(owner),flush=True)
+              if owner["status"]!="in_progress" or owner["jobStatus"]!="in_progress":
+                  print("FOUNDATION_OBSERVATION_SKIPPED_TERMINAL",flush=True)
+                  break
+              env={k:v for k,v in os.environ.items() if not k.startswith("PG")}
+              env["PGOPTIONS"]="-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=1000"
+              result=subprocess.run(["/opt/laplace/pgsql-18/bin/psql","-X","-q","-h","/var/run/postgresql",
+                  "-p","5432","-U","laplace_admin","-d","laplace","-v","ON_ERROR_STOP=1","-A","-t"],
+                  input=SQL.encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=8)
+              if result.returncode or len(result.stdout)>262144:
+                  print("FOUNDATION_DATABASE_OBSERVATION_UNAVAILABLE "+json.dumps({"returncode":result.returncode,
+                      "stdoutBytes":len(result.stdout),"stderrBytes":len(result.stderr),
+                      "stderrSha256":hashlib.sha256(result.stderr).hexdigest()}),flush=True)
+                  break
+              lines=[line for line in result.stdout.splitlines() if line.strip()]
+              if len(lines)!=1: raise ValueError("unexpected bounded database output")
+              data=json.loads(lines[0])
+              assert data["schema"]=="laplace.recording-ingest-observation/v1" and data["database"]=="laplace"
+              assert len(data["client_backends"])<=64
+              metrics=[]
+              for backend in data["client_backends"]:
+                  pid=backend["pid"]
+                  if type(pid) is not int or not 0<pid<2147483648: raise ValueError("backend pid invalid")
+                  try:
+                      current=process(pid,backend["backend_start"])
+                      prior=previous.get(pid)
+                      if prior and prior["startTicks"]==current["startTicks"]:
+                          elapsed=current["observedMonotonic"]-prior["observedMonotonic"]
+                          cpu=current["userSeconds"]+current["systemSeconds"]-prior["userSeconds"]-prior["systemSeconds"]
+                          if elapsed>0 and cpu>=0: current["delta"]={"seconds":elapsed,"cpuSeconds":cpu,"coreEquivalents":cpu/elapsed}
+                      previous[pid]=current.copy()
+                      metrics.append(current)
+                  except (OSError,ValueError,KeyError,IndexError) as error:
+                      metrics.append({"pid":pid,"unavailableErrorType":type(error).__name__,"errno":getattr(error,"errno",None)})
+              print("FOUNDATION_READONLY_SAMPLE "+json.dumps({"sample":sample,"owner":owner,"database":data,"backendProcesses":metrics,
+                  "observerUid":os.getuid(),"host":os.uname().nodename,
+                  "scope":"Read-only operational counters; database clients are not exclusively attributed to this foundation run; no query text, commands, environment, journal mutation or process action."}),flush=True)
+              if sample==0: time.sleep(8)
+          signal.alarm(0)
+          
           PY
-      - name: Verify exact current source and bounded operation syntax
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          work="/build/laplace/work/coherent-final-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work"
-          export TMPDIR="$work/tmp" TMP="$work/tmp" TEMP="$work/tmp"
-          unset LAPLACE_BUILD_ROOT
-          mkdir -p "$TMPDIR" "$work/source"
-          cd "$work/source"
-          git init -q
-          git remote add origin https://github.com/SaltyPatron/Laplace.git
-          git fetch --no-tags --depth=1 origin 6ee90d9e805eeb4cca126067c5a41e7a5f3698df
-          git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = '6ee90d9e805eeb4cca126067c5a41e7a5f3698df'
-          test "$(git rev-parse HEAD^{tree})" = '0847ccbc8340f1eb629355243913c0a306d9aa3e'
-          python3 -B - <<'PY'
-          import ast,base64,hashlib,json,os,pathlib,re,subprocess,urllib.request,yaml
-          blob="79ee8a670f1fd32235c226e784b2552c13d8ae95"
-          request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+blob,
-              headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
-          with urllib.request.urlopen(request,timeout=30) as response: payload=response.read(131073)
-          assert len(payload)<=131072
-          metadata=json.loads(payload)
-          raw=base64.b64decode(metadata["content"])
-          assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\x00"+raw).hexdigest()==blob
-          workflow=yaml.load(raw,Loader=yaml.BaseLoader)
-          assert workflow["jobs"]["native"]["env"]["TARGET_SHA"]=="6ee90d9e805eeb4cca126067c5a41e7a5f3698df"
-          assert workflow["jobs"]["native"]["env"]["TARGET_TREE"]=="0847ccbc8340f1eb629355243913c0a306d9aa3e"
-          assert workflow["jobs"]["native"]["timeout-minutes"]=="200"
-          scripts=[step["run"] for step in workflow["jobs"]["native"]["steps"] if "run" in step]
-          python_count=inner_count=0
-          for script in scripts:
-              subprocess.run(["bash","-n"],input=script,text=True,check=True,timeout=10)
-              for delimiter in ("NATIVE","MANAGED_READINESS"):
-                  for inner in re.findall(r"(?ms)^[^\n]*<<'"+delimiter+r"'[^\n]*\n(.*?)^"+delimiter+r"$",script):
-                      subprocess.run(["bash","-n"],input=inner,text=True,check=True,timeout=10)
-                      inner_count+=1
-              for module in re.findall(r"(?ms)^[^\n]*<<'PY'[^\n]*\n(.*?)^PY$",script):
-                  ast.parse(module)
-                  python_count+=1
-          assert inner_count==2 and python_count==7,(inner_count,python_count)
-          pathlib.Path(os.environ["TMPDIR"],"bound-operation.yml").write_bytes(raw)
-          print("BOUND_OPERATION_SYNTAX_PASS "+json.dumps({"blob":blob,"source":"6ee90d9e805eeb4cca126067c5a41e7a5f3698df","outerBash":len(scripts),"innerBash":inner_count,"python":python_count}))
-          PY
-          echo AUTHORITATIVE_OPERATION_SYNTAX_QUALIFIED
