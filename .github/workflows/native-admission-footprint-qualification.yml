@@ -42,6 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cp .github/workflows/native-admission-footprint-qualification.yml "$QUALIFICATION_DIR/evidence/workflow.yml"
           python3 - <<'VALIDATE'
           import ast,re,subprocess
           from pathlib import Path
@@ -57,14 +58,13 @@ jobs:
           parsed=0
           for block in blocks:
               subprocess.run(["bash","-n"],input=block,text=True,check=True,timeout=10)
-              for match in re.finditer(r"python3 - <<'PY'[^\n]*\n(.*?)^PY$",block,re.M|re.S):
+              for match in re.finditer(r"^(?:timeout[^\n]* )?python3 - <<'PY'[^\n]*\n(.*?)^PY$",block,re.M|re.S):
                   ast.parse(match.group(1));parsed+=1
           assert len(blocks)==5 and parsed==3,(len(blocks),parsed)
           print("actual workflow syntax:",len(blocks),"Bash blocks,",parsed,"Python bodies")
           VALIDATE
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain --untracked-files=all)"
-          cp .github/workflows/native-admission-footprint-qualification.yml "$QUALIFICATION_DIR/evidence/workflow.yml"
           python3 - <<'PY'
           import base64,hashlib,json,os,urllib.request
           from pathlib import Path
