@@ -50,7 +50,7 @@ jobs:
           mkdir -p "$TMPDIR" "$NATIVE_EVIDENCE/private"
           chmod 0700 "$TMPDIR" "$NATIVE_EVIDENCE/private"
           export LAPLACE_CI_SESSION_DIRECTORY="$NATIVE_EVIDENCE/private"
-          export LAPLACE_REGRESS_DB="laplace_native_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          export LAPLACE_REGRESS_DB="laplace_pr_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           set +u
           source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
           set -u
@@ -96,7 +96,7 @@ jobs:
           phase pg-source python3 scripts/postgresql-release.py source --external /build/external
           phase dependency-build bash scripts/build-system-deps.sh
           phase dependency-identity python3 scripts/postgresql-release.py installed --prefix /opt/laplace/pgsql-18
-          phase native-managed-build bash scripts/pipeline.sh build
+          phase native-managed-build bash scripts/pipeline.sh build --force-all
           phase isolated-native-database bash scripts/pr-db-proof.sh
           phase native-tests bash scripts/pr-proof.sh --phase native-dev
           phase managed-tests bash scripts/pr-proof.sh --phase managed-dev
