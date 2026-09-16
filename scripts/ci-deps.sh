@@ -34,6 +34,14 @@ ucd="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan
 [[ -f "$ucd" ]] || { echo "::error::UCD zip missing: $ucd"; exit 1; }
 endsection
 
+section "Managed host policy"
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+  bash deploy/linux/managed-publish.sh check-policy
+else
+  bash deploy/linux/managed-publish.sh prepare-policy
+fi
+endsection
+
 section "Pinned external cache"
 # Normal dependencies converge the tracked release through the existing source
 # owner before validating the mutable host pins. Read-only checks never provision.
