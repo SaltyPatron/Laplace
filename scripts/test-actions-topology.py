@@ -751,6 +751,79 @@ run_recorded_chess_benchmark() { step recorded-chess; }
                                             text=True, capture_output=True)
                 self.assertEqual(result.returncode == 0, corruption is None, result.stdout + result.stderr)
 
+    def test_private_database_executes_all_durable_billing_contracts(self):
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
+        migrations = [
+            "20260611000000_app_billing.sql",
+            "20260722000000_app_billing_identity.sql",
+            "20260807020000_app_consume_credit.sql",
+            "20260915000000_app_identity_sessions.sql",
+            "20260916000000_app_workspace_invitations.sql",
+            "20260916000100_app_subscription_sync.sql",
+            "20260916000200_browser_ticket_identity_binding.sql",
+        ]
+        migration_positions = [source.index('-f "$ROOT/db/migrations/' + name + '"') for name in migrations]
+        self.assertEqual(migration_positions, sorted(migration_positions))
+        billing_filter = "--filter 'FullyQualifiedName~Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests.'"
+        self.assertIn(billing_filter, source)
+        self.assertLess(migration_positions[-1], source.index(billing_filter))
+        self.assertLess(source.index(billing_filter), source.index('"$PG_PREFIX/bin/dropdb" "$identity_database"'))
+        self.assertIn('rm -f -- "$billing_receipt"', source)
+        self.assertIn("--logger 'trx;LogFileName=billing-stores.trx'", source)
+        tests = (ROOT / "app/Laplace.Endpoints.OpenAICompat.Tests/BillingStoreContractTests.cs").read_text(encoding="utf-8")
+        self.assertIn('[Trait("Tier", "db")]\npublic sealed class PostgresBillingStoreContractTests', tests)
+        validator = source.split("<<'PY_BILLING'\n", 1)[1].split("\nPY_BILLING\n", 1)[0]
+        prefix = "Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests."
+        methods = [
+            "QuoteStore_PutGetUpdate_RoundTrips",
+            "Ledger_RecordsAndReadsNewestFirst",
+            "Entitlements_ActivateConsumeExhaustDeactivate",
+            "Entitlements_RenewResetsUsedCredits",
+            "WebhookEvents_DuplicateBeginIsRejected",
+            "PriceMap_SetOverwritesAndGets",
+            "ApiKeys_PutGetRevokeAndLabelLookup",
+            "Config_SetOverwritesAndGets",
+        ]
+
+        def receipt():
+            root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
+            results = ET.SubElement(root, "Results")
+            for method in methods:
+                ET.SubElement(results, "UnitTestResult", testName=prefix + method, outcome="Passed")
+            summary = ET.SubElement(root, "ResultSummary")
+            ET.SubElement(summary, "Counters", total="8", executed="8", passed="8",
+                          failed="0", notExecuted="0")
+            return root
+
+        def check(root, passes):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "billing.trx"
+                ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+                result = subprocess.run([sys.executable, "-", str(path)], input=validator,
+                                        text=True, capture_output=True)
+            self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+
+        check(receipt(), True)
+        for omitted in range(len(methods)):
+            with self.subTest(omitted=methods[omitted]):
+                root = receipt()
+                results = root.find("Results")
+                results.remove(results[omitted])
+                check(root, False)
+        for corruption in ("duplicate", "unrelated", "skipped", "failed", "counter"):
+            with self.subTest(corruption=corruption):
+                root = receipt()
+                results = root.find("Results")
+                if corruption == "duplicate":
+                    results[0].set("testName", results[1].get("testName"))
+                elif corruption == "unrelated":
+                    results[0].set("testName", prefix + "UnrelatedPassingTest")
+                elif corruption in ("skipped", "failed"):
+                    results[0].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
+                else:
+                    root.find("ResultSummary/Counters").set("executed", "7")
+                check(root, False)
+
     def test_private_native_database_requires_built_physicality_fixtures_in_order(self):
         source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
         self.assertIn('ctest --test-dir "$BUILD" --show-only=json-v1 -L regress > "$native_selection"', source)

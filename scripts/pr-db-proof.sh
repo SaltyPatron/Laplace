@@ -427,14 +427,20 @@ print("SESSION_PHYSICALITY_EXECUTION_OK selected=3 executed=3 passed=3 skipped=0
 PY
 
 # The endpoint database tier is also excluded from the later managed profile.
-# Exercise the real identity store against its unchanged migration and the
-# branch-owned SQL catalog while this exact private postmaster is available.
+# Exercise real identity and billing stores against the canonical migration
+# chain and branch-owned SQL catalog in this exact private postmaster.
 identity_database="${REGRESS_DB}_identity"
 identity_receipt="$managed_results/browser-identity.trx"
 rm -f -- "$identity_receipt"
 "$PG_PREFIX/bin/createdb" "$identity_database"
 "$PG_PREFIX/bin/psql" -X -v ON_ERROR_STOP=1 -d "$identity_database" \
-  -f "$ROOT/db/migrations/20260915000000_app_identity_sessions.sql" >/dev/null
+  -f "$ROOT/db/migrations/20260611000000_app_billing.sql" \
+  -f "$ROOT/db/migrations/20260722000000_app_billing_identity.sql" \
+  -f "$ROOT/db/migrations/20260807020000_app_consume_credit.sql" \
+  -f "$ROOT/db/migrations/20260915000000_app_identity_sessions.sql" \
+  -f "$ROOT/db/migrations/20260916000000_app_workspace_invitations.sql" \
+  -f "$ROOT/db/migrations/20260916000100_app_subscription_sync.sql" \
+  -f "$ROOT/db/migrations/20260916000200_browser_ticket_identity_binding.sql" >/dev/null
 LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=$identity_database" \
 LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
 LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
@@ -458,6 +464,46 @@ if (counters is None or any(counters.get(key) != value for key, value in expecte
     raise SystemExit("private database proof did not execute and pass the exact identity store acceptance case")
 print("BROWSER_IDENTITY_EXECUTION_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
 PY_IDENTITY
+
+# Run every durable store contract against the same freshly migrated private
+# database. The exact TRX inventory makes an unavailable/skipped store a failure.
+billing_receipt="$managed_results/billing-stores.trx"
+rm -f -- "$billing_receipt"
+LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=$identity_database" \
+LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
+LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+  dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
+    -c Release --no-build --nologo --verbosity minimal \
+    --filter 'FullyQualifiedName~Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests.' \
+    --logger 'trx;LogFileName=billing-stores.trx' \
+    --results-directory "$managed_results"
+python3 - "$billing_receipt" <<'PY_BILLING'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+counters = root.find("{*}ResultSummary/{*}Counters")
+methods = {
+    "QuoteStore_PutGetUpdate_RoundTrips",
+    "Ledger_RecordsAndReadsNewestFirst",
+    "Entitlements_ActivateConsumeExhaustDeactivate",
+    "Entitlements_RenewResetsUsedCredits",
+    "WebhookEvents_DuplicateBeginIsRejected",
+    "PriceMap_SetOverwritesAndGets",
+    "ApiKeys_PutGetRevokeAndLabelLookup",
+    "Config_SetOverwritesAndGets",
+}
+prefix = "Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests."
+names = {prefix + method for method in methods}
+expected = {"total": "8", "executed": "8", "passed": "8", "failed": "0", "notExecuted": "0"}
+results = root.findall("{*}Results/{*}UnitTestResult")
+if (counters is None or any(counters.get(key) != value for key, value in expected.items())
+        or len(results) != len(names)
+        or {result.get("testName") for result in results} != names
+        or any(result.get("outcome") != "Passed" for result in results)):
+    raise SystemExit("private database proof did not execute and pass all eight exact billing store contracts")
+print("BILLING_STORE_EXECUTION_OK selected=8 executed=8 passed=8 skipped=0 postgres=isolated")
+PY_BILLING
 "$PG_PREFIX/bin/dropdb" "$identity_database"
 
 }

@@ -241,6 +241,9 @@ public sealed class InMemoryBillingStoreContractTests : BillingStoreContractTest
 
 
 
+// These exercise the actual account schema and must not use the installed
+// runner database during the ordinary managed-development test profile.
+[Trait("Tier", "db")]
 public sealed class PostgresBillingStoreContractTests : BillingStoreContractTests
 {
     private static readonly NpgsqlDataSource? Shared = TryBuild();

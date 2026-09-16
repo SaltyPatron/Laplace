@@ -1,3 +1,4 @@
+using Laplace.Endpoints.OpenAICompat.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -15,6 +16,11 @@ public sealed class GoldenFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<ISubstrateClient>();
             services.AddSingleton<ISubstrateClient, FakeSubstrateClient>();
+
+            // The discovery contract is explicitly an unconfigured provider
+            // host; installed OAuth registrations must not change its response.
+            services.RemoveAll<BrowserAuthSettings>();
+            services.AddSingleton(new BrowserAuthSettings([]));
 
             services.RemoveAll<IHostedService>();
             services.RemoveAll<IConversationWitness>();

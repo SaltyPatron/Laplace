@@ -36,7 +36,19 @@ public sealed class ContentWitnessContainmentTests
         Assert.True(stage.EmitContentTree(tree, Src, present, out var root));
         Assert.NotEqual(default, root);
         Assert.Equal(0, stage.EntityCount);
-        Assert.Equal(0, stage.PhysicalityCount);
+
+        // Existing entities still produce their exact observed forms. Compare
+        // the complete native COPY payload with ordinary unfiltered emission:
+        // placement IDs, geometry, packed trajectories, nullable metadata and
+        // observation time must survive the entity-presence short circuit.
+        using var baseline = IntentStage.New(256);
+        Assert.True(baseline.TryAddContentWitness(bytes, Src, out var expectedRoot));
+        Assert.True(root.EqualsBytewise(expectedRoot));
+        Assert.True(baseline.PhysicalityCount > 0);
+        Assert.Equal(baseline.PhysicalityCount, stage.PhysicalityCount);
+        Assert.Equal(
+            baseline.EmitCopyBinary(IntentStageTable.Physicalities),
+            stage.EmitCopyBinary(IntentStageTable.Physicalities));
     }
 
     [Theory]
@@ -69,7 +81,8 @@ public sealed class ContentWitnessContainmentTests
         // Grapheme-floor law: single-codepoint clusters are pass-through
         // scaffold and are never emitted, so the smallest emission unit whose
         // presence can shrink the batch is a WORD. Marking "dog" present must
-        // skip exactly its subtree while "cat" and the sentence still emit.
+        // suppress its entity subtree while "cat" and the sentence still emit.
+        // Computed physicalities remain source observations in either case.
         byte[] bytes = Encoding.UTF8.GetBytes("dog cat");
 
         using var full = IntentStage.New(256);

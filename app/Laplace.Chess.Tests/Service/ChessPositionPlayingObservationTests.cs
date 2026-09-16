@@ -60,6 +60,7 @@ public sealed class ChessPositionPlayingObservationTests
     {
         var builder = new SubstrateChangeBuilder(ChessPositionOutcomes.SourceId,
             "test/position-playing/" + game.PlayingId);
+        var modality = new ChessModality();
         switch (path)
         {
             case "parsed": ChessPositionOutcomes.DepositFromParsed(builder, game); break;
@@ -67,7 +68,9 @@ public sealed class ChessPositionPlayingObservationTests
                 ChessPgnDecomposer.MaterializeParsedReplay(game)); break;
             case "witnessed": ChessPositionOutcomes.Deposit(builder, ChessAnalyze.WitnessedFromParsed(game)); break;
             case "live-trajectory": ChessPositionOutcomes.DepositTrajectory(builder,
-                ChessPgnDecomposer.MaterializeParsedReplay(game).Boards.Select(board => board.ToFen()).ToArray(),
+                // Live hosts retain the modality interchange surface, not FEN text.
+                ChessPgnDecomposer.MaterializeParsedReplay(game).Boards
+                    .Select(board => modality.StateKey(new ChessState(board))).ToArray(),
                 game.Result, game.PlayingId); break;
             default: throw new ArgumentOutOfRangeException(nameof(path));
         }

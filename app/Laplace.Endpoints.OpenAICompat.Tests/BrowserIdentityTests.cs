@@ -6,6 +6,8 @@ using Laplace.Engine.Core;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Xunit;
 
@@ -79,6 +81,9 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
     public async Task AnonymousIdentityDiscoveryIsPublicAndReportsNoSession()
     {
         using var client = _factory.CreateClient();
+        Assert.Equal("header", _factory.Services.GetRequiredService<IOptions<LaplaceAuthOptions>>().Value.Mode);
+        Assert.Equal("memory", _factory.Services.GetRequiredService<BillingStoreMode>().Mode);
+        Assert.Empty(_factory.Services.GetRequiredService<BrowserAuthSettings>().Providers);
         using var me = await client.GetAsync("/v1/auth/me");
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
         using var document = JsonDocument.Parse(await me.Content.ReadAsStringAsync());

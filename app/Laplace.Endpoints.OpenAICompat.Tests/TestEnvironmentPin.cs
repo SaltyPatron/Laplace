@@ -5,16 +5,16 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 internal static class TestEnvironmentPin
 {
     /// <summary>
-    /// Billing store resolution is auto (Postgres-preferred) in the app; tests must
-    /// stay on the in-memory stores so WebApplicationFactory runs never write
-    /// quotes/keys/usage into the live app.billing_* tables. The Postgres store
-    /// contract is covered explicitly by BillingStoreContractTests, which constructs
-    /// the Postgres implementations directly.
+    /// WebApplicationFactory contracts explicitly use header-mode development
+    /// and in-memory billing, independently of the runner's installed identity
+    /// and payment configuration. Per-factory PostConfigure auth overrides still
+    /// exercise key/identity enforcement. Database contracts construct the real
+    /// Postgres stores directly and run in the disposable database proof.
     /// </summary>
     [ModuleInitializer]
     internal static void PinBillingStoreToMemory()
     {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_BILLING_STORE")))
-            Environment.SetEnvironmentVariable("LAPLACE_BILLING_STORE", "memory");
+        Environment.SetEnvironmentVariable("LAPLACE_AUTH_MODE", "header");
+        Environment.SetEnvironmentVariable("LAPLACE_BILLING_STORE", "memory");
     }
 }

@@ -7,6 +7,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "nodes/parsenodes.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
@@ -595,9 +596,11 @@ static void admission_prepare_provider_plans(admission_state *s,
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
             errmsg("physicality descriptor admission provider plans require two database operations")));
     ++s->operations;
-    s->metadata_plan = SPI_prepare(metadata_sql, 1, query_types);
+    s->metadata_plan = SPI_prepare_cursor(metadata_sql, 1, query_types,
+        CURSOR_OPT_PARALLEL_OK);
     ++s->operations;
-    s->payload_plan = SPI_prepare(payload_sql, 1, query_types);
+    s->payload_plan = SPI_prepare_cursor(payload_sql, 1, query_types,
+        CURSOR_OPT_PARALLEL_OK);
     if (!s->metadata_plan || !s->payload_plan) admission_invalid("could not prepare provider set queries");
 }
 
