@@ -10,6 +10,10 @@ recover() {
     application_api_recover "${GITHUB_RUN_ID:-local-$$}"
     return $?
   fi
+  if [[ -e "$ROOT/build/.uci-publish-pending" ]]; then
+    bash "$ROOT/deploy/linux/deploy.sh" --uci-recover
+    return $?
+  fi
   local rc=0
   managed rollback || rc=$?
   sudo -n systemctl start laplace-api || rc=1
@@ -30,8 +34,8 @@ main() {
       recover
       ;;
     deploy)
-      [[ ! -e "$ROOT/build/.api-publish-backup" && ! -e "$ROOT/build/.application-publish-owner" ]] || {
-        echo "::error::API publication recovery is unresolved; no full deployment changes made" >&2
+      [[ ! -e "$ROOT/build/.api-publish-backup" && ! -e "$ROOT/build/.application-publish-owner" && ! -e "$ROOT/build/.uci-publish-pending" ]] || {
+        echo "::error::application publication recovery is unresolved; no full deployment changes made" >&2
         return 1
       }
       managed preflight
@@ -100,7 +104,7 @@ application_api_active() {
 application_api_control() { sudo -n systemctl "$1" laplace-api; }
 
 application_api_recover() {
-  [[ ! -e "$ROOT/build/.managed-publish-backup" && ! -e /var/lib/laplace-managed/transaction.json ]] || {
+  [[ ! -e "$ROOT/build/.managed-publish-backup" && ! -e "$ROOT/build/.uci-publish-pending" && ! -e /var/lib/laplace-managed/transaction.json ]] || {
     echo "::error::API and managed transaction state is ambiguous; no recovery changes made" >&2
     return 1
   }
@@ -143,7 +147,7 @@ application_api_main() (
     exit 0
   fi
   [[ "$mode" == api-deploy ]] || return 2
-  for pending in .managed-publish-backup .application-publish-owner .application-restore-pending .api-publish-backup; do
+  for pending in .managed-publish-backup .application-publish-owner .application-restore-pending .api-publish-backup .uci-publish-pending; do
     [[ ! -e "$ROOT/build/$pending" ]] || {
       echo "::error::prior application transaction unresolved; no changes made" >&2; exit 1;
     }

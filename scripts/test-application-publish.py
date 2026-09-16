@@ -109,7 +109,7 @@ class ApplicationTransactionTests(unittest.TestCase):
                 self.assertNotEqual(0, result.returncode)
 
     def test_pending_api_transaction_refuses_full_deploy_before_any_action(self):
-        for name in (".api-publish-backup", ".application-publish-owner"):
+        for name in (".api-publish-backup", ".application-publish-owner", ".uci-publish-pending"):
             with self.subTest(name=name):
                 path = self.root / "build" / name
                 path.write_bytes(b"retained previous owner")
@@ -131,7 +131,7 @@ class ApplicationTransactionTests(unittest.TestCase):
                     "ensure_host() {\n",
                     'ensure_host() {\n  printf "host preflight reached\\n" >&2; return 97\n')
             (directory / name).write_text(content)
-        for name in (".api-publish-backup", ".application-publish-owner"):
+        for name in (".api-publish-backup", ".application-publish-owner", ".uci-publish-pending"):
             with self.subTest(name=name):
                 path = self.root / "build" / name
                 path.write_bytes(b"retained API owner")
@@ -140,7 +140,7 @@ class ApplicationTransactionTests(unittest.TestCase):
                     env=dict(os.environ, LAPLACE_APP_DIR=str(self.root / "app")),
                     capture_output=True, text=True, timeout=10)
                 self.assertEqual(1, result.returncode, result.stderr)
-                self.assertIn("API publication recovery is unresolved", result.stderr)
+                self.assertIn("publication recovery is unresolved", result.stderr)
                 self.assertNotIn("host preflight reached", result.stderr)
                 self.assertEqual(b"retained API owner", path.read_bytes())
                 path.unlink()
@@ -516,7 +516,7 @@ class ApiOnlyTransactionTests(unittest.TestCase):
         marker.write_text("fixture-api")
         api_receipt.write_text("retained API backup")
         for pending in (self.root / "build/.managed-publish-backup",
-                        self.root / "root-transaction.json"):
+                        self.root / "root-transaction.json", self.root / "build/.uci-publish-pending"):
             with self.subTest(pending=pending.name):
                 pending.write_text("retained managed state")
                 for mode in ("recover", "api-recover"):
@@ -724,6 +724,259 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         log = (repo / "tools.log").read_text().splitlines()
         self.assertEqual(1, log.count("dotnet api"))
         self.assertEqual(["stop api"], [line for line in log if line.startswith("stop ")])
+
+
+
+class UciOnlyDeploymentTests(unittest.TestCase):
+    """Real deploy/rsync/lease/protocol controls; executable payload is a fixture."""
+    def setUp(self):
+        import shutil
+        temporary = tempfile.TemporaryDirectory(prefix="uci-publication-contract-", dir=os.environ["TMPDIR"])
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        for leaf in ("scripts", "deploy/linux", "tools", "build/engine/core",
+                     "build/engine/dynamics", "build/engine/synthesis", "new-uci",
+                     "installed/logs", "installed/mcp-runtime"):
+            (self.root / leaf).mkdir(parents=True, exist_ok=True)
+        self.app, self.stage = self.root / "installed", self.root / "new-uci"
+        for name in ("deploy.sh", "payload-sync.sh"):
+            shutil.copyfile(ROOT / "deploy/linux" / name, self.root / "deploy/linux" / name)
+        # Only the privileged host-directory precondition is replaced.
+        (self.root / "deploy/linux/app-dir-contract.sh").write_text(
+            'laplace_reconcile_app_dir_contract() { test -d "$1"; }\n'
+            'laplace_require_app_dir_contract() { test -d "$1"; }\n')
+        for name in ("verify-api-payload.py", "verify-application-release.py",
+                     "verify-chess-floor-serving.py", "chess-floor-artifacts.py",
+                     "accept-chess-environment.py", "check-uci-runtime.py", "publish-applications.sh"):
+            shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
+        deploy = self.root / "deploy/linux/deploy.sh"
+        deploy.write_text(deploy.read_text().replace(
+            "/var/lib/laplace-managed/transaction.json", str(self.root / "root-transaction.json")))
+        self.api = load_module("uci_payload_test_owner", self.root / "scripts/verify-api-payload.py")
+        for name in self.api.UCI_REQUIRED:
+            (self.stage / name).write_bytes(("controlled-payload:" + name).encode())
+        for name in self.api.REQUIRED[3:]:
+            part = "dynamics" if "dynamics" in name else "synthesis" if "synthesis" in name else "core"
+            target = self.root / "build/engine" / part / name
+            target.write_bytes((self.stage / name).read_bytes())
+        (self.root / "build/CMakeCache.txt").write_text(
+            "CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.root) + "\n")
+        self.write_engine("old")
+        self.env = dict(os.environ, LAPLACE_APP_DIR=str(self.app),
+                        LAPLACE_ENGINE_BUILD=str(self.root / "build/engine"),
+                        UCI_FIXTURE_SOURCE=str(self.stage), UCI_FIXTURE_APP=str(self.app),
+                        UCI_TOOL_LOG=str(self.root / "tools.log"),
+                        PATH=str(self.root / "tools") + os.pathsep + os.environ["PATH"])
+        for key in ("UCI_FAIL_PUBLIC", "UCI_FAIL_OLD", "UCI_HOLD_PUBLIC", "UCI_FAIL_BUILD"):
+            self.env.pop(key, None)
+        dotnet = self.root / "tools/dotnet"
+        dotnet.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os,sys,shutil\nfrom pathlib import Path\n"
+            "assert sys.argv[1]=='publish' and '--no-build' in sys.argv\n"
+            "assert Path(sys.argv[2]).name=='Laplace.Chess.Uci.csproj'\n"
+            "Path(os.environ['UCI_TOOL_LOG']).open('a').write('dotnet uci\\n')\n"
+            "if os.environ.get('UCI_FAIL_BUILD'): sys.exit(47)\n"
+            "shutil.copytree(os.environ['UCI_FIXTURE_SOURCE'],"
+            "sys.argv[sys.argv.index('-o')+1],dirs_exist_ok=True)\n")
+        dotnet.chmod(0o755)
+        for name in ("npm", "sudo"):
+            target = self.root / "tools" / name
+            target.write_text('#!/bin/sh\nprintf "FORBIDDEN %s\\n" "$0" >> "$UCI_TOOL_LOG"\nexit 97\n')
+            target.chmod(0o755)
+        result = self.shell('release="$(laplace_stage_uci_runtime "$LAPLACE_APP_DIR" "$UCI_FIXTURE_SOURCE")"\n'
+                            'laplace_select_uci_runtime "$LAPLACE_APP_DIR" '
+                            '"releases/$(basename "$release")/uci/laplace-uci"\n'
+                            'printf "%s\\n" "$release"\n')
+        self.old = Path(result.stdout.strip())
+        self.old_target = os.readlink(self.app / "laplace-uci")
+        self.old_files = {str(p.relative_to(self.old)): p.read_bytes()
+                          for p in self.old.rglob("*") if p.is_file() and not p.is_symlink()}
+        self.preserved = {}
+        for name in ("Api.dll", "laplace-api.env", "agents.json", "logs/current.csv",
+                     "managed-services/selected.service"):
+            path = self.app / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("preserve " + name)
+            self.preserved[name] = (path.read_bytes(), path.stat().st_ino)
+        for name in ("laplace-mcp", "laplace-lichess"):
+            (self.app / name).symlink_to("unchanged/service/executable")
+        self.write_engine("new")
+
+    def write_engine(self, version):
+        # This real subprocess implements only the checker's wire protocol;
+        # it does not simulate Laplace computation or claim native execution.
+        program = '''#!/usr/bin/env python3
+import os,sys,time
+from pathlib import Path
+VERSION = __VERSION__
+if len(sys.argv)>1 and sys.argv[1]=="--hold":
+    Path(sys.argv[2]).write_text("ready")
+    sys.stdin.readline()
+    raise SystemExit(0)
+public = (Path(os.environ["UCI_FIXTURE_APP"]) / "laplace-uci").resolve()
+selected = public == Path(__file__).resolve().with_name("laplace-uci")
+if VERSION=="old" and os.environ.get("UCI_FAIL_OLD"):
+    raise SystemExit(31)
+if VERSION=="new" and selected:
+    if os.environ.get("UCI_FAIL_PUBLIC"):
+        raise SystemExit(32)
+    if os.environ.get("UCI_HOLD_PUBLIC"):
+        Path(os.environ["UCI_HOLD_PUBLIC"]).write_text("selected")
+        time.sleep(30)
+for line in sys.stdin:
+    line=line.strip()
+    if line=="uci": print("id name controlled-"+VERSION+"\\nuciok",flush=True)
+    elif line=="isready": print("readyok",flush=True)
+    elif line=="go depth 1": print("info depth 1 score cp 0\\nbestmove e2e4",flush=True)
+    elif line=="quit": raise SystemExit(0)
+'''
+        path = self.stage / "laplace-uci"
+        path.write_text(program.replace("__VERSION__", repr(version)))
+        path.chmod(0o755)
+
+    def shell(self, body, check=True):
+        result = subprocess.run(
+            ["bash", "-c", 'set -euo pipefail\nsource "$1"\n' + body,
+             "test", str(self.root / "deploy/linux/payload-sync.sh")],
+            env=self.env, capture_output=True, text=True, timeout=30)
+        if check:
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        return result
+
+    def deploy(self, mode="--uci-only", **updates):
+        return subprocess.run(["bash", str(self.root / "deploy/linux/deploy.sh"), mode],
+                              env=dict(self.env, **updates), text=True,
+                              capture_output=True, timeout=45)
+
+    def assert_preserved(self):
+        for name, expected in self.preserved.items():
+            path = self.app / name
+            self.assertEqual(expected, (path.read_bytes(), path.stat().st_ino), name)
+        for name in ("laplace-mcp", "laplace-lichess"):
+            self.assertEqual("unchanged/service/executable", os.readlink(self.app / name))
+        for name, expected in self.old_files.items():
+            self.assertEqual(expected, (self.old / name).read_bytes(), name)
+        log = self.root / "tools.log"
+        self.assertNotIn("FORBIDDEN", log.read_text() if log.exists() else "")
+
+    def test_uci_only_publishes_verified_wrapper_and_preserves_other_products(self):
+        result = self.deploy()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+        receipt = json.loads((self.root / "build/.uci-publish-verified.json").read_text())
+        self.assertEqual("passed", receipt["status"])
+        self.assertEqual("e2e4", receipt["bestmove"])
+        self.assertFalse(receipt["substrate_access_verified"])
+        self.assertEqual("selected-build", receipt["provenance"])
+        self.assertFalse((self.root / "build/.uci-publish-pending").exists())
+        self.assertEqual(["dotnet uci"], (self.root / "tools.log").read_text().splitlines())
+        self.assert_preserved()
+
+    def test_build_failure_and_stale_native_refuse_before_pointer_change(self):
+        failed = self.deploy(UCI_FAIL_BUILD="1")
+        self.assertEqual(47, failed.returncode, failed.stdout + failed.stderr)
+        self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+        (self.stage / "liblaplace_core.so").write_bytes(b"stale build copy")
+        stale = self.deploy()
+        self.assertNotEqual(0, stale.returncode)
+        self.assertIn("published native bytes differ", stale.stderr)
+        self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+        self.assertFalse((self.root / "build/.uci-publish-pending").exists())
+        self.assert_preserved()
+
+    def test_public_launcher_failure_restores_prior_runtime(self):
+        failed = self.deploy(UCI_FAIL_PUBLIC="1")
+        self.assertNotEqual(0, failed.returncode)
+        self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+        restored = json.loads((self.root / "build/.uci-publish-restored.json").read_text())
+        self.assertEqual("passed", restored["status"])
+        self.assertEqual("rollback-snapshot", restored["provenance"])
+        self.assertFalse((self.root / "build/.uci-publish-pending").exists())
+        self.assert_preserved()
+
+    def test_failed_restore_retains_state_and_explicit_recovery_retries(self):
+        failed = self.deploy(UCI_FAIL_PUBLIC="1", UCI_FAIL_OLD="1")
+        self.assertNotEqual(0, failed.returncode)
+        marker = self.root / "build/.uci-publish-pending"
+        state = Path(marker.read_text().strip())
+        self.assertTrue((state / "previous.json").is_file())
+        refused = self.deploy()
+        self.assertNotEqual(0, refused.returncode)
+        self.assertEqual(str(state), marker.read_text().strip())
+        recovered = subprocess.run(
+            ["bash", str(self.root / "scripts/publish-applications.sh"), "recover"],
+            env=self.env, text=True, capture_output=True, timeout=45)
+        self.assertEqual(0, recovered.returncode, recovered.stdout + recovered.stderr)
+        self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+        self.assertFalse(marker.exists())
+        self.assertFalse(state.exists())
+        repeated = self.deploy("--uci-recover")
+        self.assertEqual(0, repeated.returncode, repeated.stderr)
+        self.assert_preserved()
+
+    def test_term_after_pointer_switch_restores_old_selection(self):
+        import signal
+        import time
+        ready = self.root / "selected-ready"
+        process = subprocess.Popen(
+            ["bash", str(self.root / "deploy/linux/deploy.sh"), "--uci-only"],
+            env=dict(self.env, UCI_HOLD_PUBLIC=str(ready)), text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            end = time.monotonic() + 15
+            while not ready.exists() and process.poll() is None and time.monotonic() < end:
+                time.sleep(.02)
+            self.assertTrue(ready.exists(), "real public wrapper was not reached")
+            os.killpg(process.pid, signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=15)
+            self.assertNotEqual(0, process.returncode, stdout + stderr)
+            self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+            self.assertFalse((self.root / "build/.uci-publish-pending").exists())
+            self.assert_preserved()
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=5)
+
+    def test_running_old_wrapper_holds_lease_across_new_publication(self):
+        import time
+        ready = self.root / "lease-ready"
+        process = subprocess.Popen([str(self.app / "laplace-uci"), "--hold", str(ready)],
+                                   env=self.env, stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            end = time.monotonic() + 5
+            while not ready.exists() and process.poll() is None and time.monotonic() < end:
+                time.sleep(.02)
+            self.assertTrue(ready.exists())
+            result = self.deploy()
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.shell('laplace_prune_unreferenced_releases "$LAPLACE_APP_DIR"\n')
+            self.assertTrue(self.old.is_dir())
+            self.assert_preserved()
+            process.communicate("\n", timeout=5)
+            self.assertEqual(0, process.returncode)
+            self.shell('laplace_prune_unreferenced_releases "$LAPLACE_APP_DIR"\n')
+            self.assertFalse(self.old.exists())
+            self.assertTrue((self.app / "laplace-uci").is_file())
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+
+    def test_foreign_application_transaction_refuses_without_build(self):
+        for marker in (self.root / "build/.application-publish-owner",
+                       self.root / "build/.managed-publish-backup", self.root / "root-transaction.json"):
+            with self.subTest(marker=marker.name):
+                marker.write_bytes(b"other owner")
+                result = self.deploy()
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse((self.root / "tools.log").exists())
+                self.assertEqual(b"other owner", marker.read_bytes())
+                marker.unlink()
+                self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+                self.assert_preserved()
 
 
 if __name__ == "__main__":
