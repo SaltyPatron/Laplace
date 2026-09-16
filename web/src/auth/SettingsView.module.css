@@ -1,0 +1,55 @@
+.root {
+  width: 100%;
+  max-width: 76rem;
+  margin-inline: auto;
+  padding: clamp(1rem, 3vw, 2rem);
+  display: grid;
+  gap: 1.25rem;
+}
+.root h1 { margin: 0 0 .4rem; font-size: clamp(1.4rem, 3vw, 2rem); }
+.root p { line-height: 1.55; }
+.header, .row, .actions, .form {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  flex-wrap: wrap;
+}
+.header, .row { justify-content: space-between; }
+.row {
+  padding-block: .85rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  overflow-wrap: anywhere;
+}
+.row > div { min-width: 0; }
+.form { align-items: end; margin-block: 1rem; }
+.field { display: grid; gap: .4rem; min-width: 12rem; flex: 1; font-weight: 500; }
+.field select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  padding: .55rem .7rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: .35rem;
+  width: 100%;
+}
+.field select option { color: CanvasText; background: Canvas; }
+.field input { min-width: 0; width: 100%; }
+.actions { margin-block: 1rem; }
+.secret, .notice {
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: .4rem;
+  margin-block: 1rem;
+}
+.secret { display: grid; gap: .75rem; }
+.notice { border-inline-start-width: .3rem; }
+.configuration { display: grid; grid-template-columns: minmax(10rem, 1fr) 2fr; gap: .6rem 1rem; }
+.configuration dt { font-weight: 600; }
+.configuration dd { margin: 0; overflow-wrap: anywhere; }
+.root code { overflow-wrap: anywhere; }
+@media (max-width: 40rem) {
+  .configuration { grid-template-columns: 1fr; }
+  .configuration dd { margin-bottom: .5rem; }
+  .field { min-width: 0; flex-basis: 100%; }
+  .form { align-items: stretch; }
+}
