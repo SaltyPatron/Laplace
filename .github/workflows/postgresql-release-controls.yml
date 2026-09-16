@@ -1,64 +1,79 @@
-name: Qualify current recorded floor export controls
+name: Qualify retained OAuth provider configuration
 on:
   push:
-    branches: ['verify/postgresql-activation-20260916']
+    branches: [verify/postgresql-activation-20260916]
 permissions:
   contents: read
 jobs:
-  qualification:
+  source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
       PYTHONDONTWRITEBYTECODE: '1'
+      EVIDENCE: /build/laplace/work/identity-owner/evidence
+      TMPDIR: /build/laplace/work/identity-owner/tmp
+      TMP: /build/laplace/work/identity-owner/tmp
+      TEMP: /build/laplace/work/identity-owner/tmp
     steps:
-      - name: Prepare selected source and permanent evidence
-        shell: bash
+      - name: Prepare permanent qualification directory
         run: |
           set -euo pipefail
-          work="/build/laplace/work/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          evidence="/build/laplace/recovery/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence"
-          mkdir -p "$work/tmp" "$work/source"
-          echo "QUALIFY_WORK=$work" >> "$GITHUB_ENV"
-          echo "QUALIFY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          echo "TMPDIR=$work/tmp" >> "$GITHUB_ENV"
-          echo "TMP=$work/tmp" >> "$GITHUB_ENV"
-          echo "TEMP=$work/tmp" >> "$GITHUB_ENV"
-          cd "$work/source"
-          git init -q
-          git remote add origin https://github.com/SaltyPatron/Laplace.git
-          timeout 120s git fetch --no-tags --depth=1 origin 2b2d4e78e59bfac2b1fb0b2843e02ba2d5360599
-          git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 2b2d4e78e59bfac2b1fb0b2843e02ba2d5360599
-          test "$(git rev-parse HEAD^{tree})" = 83f9d707c287f0b990e110ae6d05ef31a6071f68
-          git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
-      - name: Execute affected export controls
-        shell: bash
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$EVIDENCE/scripts" "$TMPDIR"
+      - name: Test exact canonical identity update and pipeline caller
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cd "$QUALIFY_WORK/source"
-          python3 -B - <<'PY'
-          import ast, json, os, pathlib, subprocess
-          evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
-          for name in ("scripts/export-qualified-chess-floors.py","scripts/test-qualified-chess-floor-export.py"):
-              ast.parse(pathlib.Path(name).read_text(), filename=name)
-          (evidence/"ast.txt").write_text("PASS: current exporter and changed test Python sources\n")
-          command=["python3","-B","scripts/test-qualified-chess-floor-export.py","-v"]
-          with (evidence/"export-controls.log").open("w") as stream:
-              result=subprocess.run(["timeout","--kill-after=10s","180s",*command],stdout=stream,stderr=subprocess.STDOUT)
-          (evidence/"results.json").write_text(json.dumps({"command":command,"exit_code":result.returncode},indent=2)+"\n")
-          print((evidence/"export-controls.log").read_text(),flush=True)
-          if result.returncode:
-              raise SystemExit(result.returncode)
-          dirty=subprocess.check_output(["git","status","--porcelain","--untracked-files=all"],text=True)
-          (evidence/"source-clean.txt").write_text(dirty or "PASS: clean source checkout\n")
-          if dirty:
-              raise SystemExit("qualification modified source checkout")
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
+          import ast,base64,hashlib,json,os,re,subprocess,sys,tempfile,urllib.request
+          from pathlib import Path
+          root=Path(os.environ["EVIDENCE"])
+          selections={
+              "update-identity-secrets.py":"7e4d654b6f7d436ffa19da09a502213e01edf85c",
+              "test-update-identity-secrets.py":"650221ec6450af40103118f936d6b9f017c34130",
+              "pipeline.sh":"3445a5f8b0e2a7a9cbbacfd24893ad7f8877ace9",
+          }
+          for name,sha in selections.items():
+              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
+                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
+              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
+              assert len(encoded)<=2<<20
+              item=json.loads(encoded);raw=base64.b64decode(item["content"])
+              assert item["sha"]==sha and len(raw)==item["size"] and len(raw)<1<<20
+              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
+              (root/"scripts"/name).write_bytes(raw)
+              if name.endswith(".py"):ast.parse(raw)
+          subprocess.run(["bash","-n",root/"scripts/pipeline.sh"],check=True)
+          subprocess.run([sys.executable,root/"scripts/test-update-identity-secrets.py","-v"],check=True)
+          pipeline=(root/"scripts/pipeline.sh").read_text()
+          function=pipeline[pipeline.index("phase_runtime_secrets() {"):pipeline.index("\nphase_publish() {")]
+          with tempfile.TemporaryDirectory(prefix="pipeline-identity-") as directory:
+              prefix=Path(directory)
+              secrets=prefix/"secrets";secrets.mkdir()
+              identity=secrets/"identity.env"
+              original=b"LAPLACE_AUTH_MICROSOFT_CLIENT_ID=existing-id\nLAPLACE_AUTH_MICROSOFT_CLIENT_SECRET=existing-secret\n"
+              identity.write_bytes(original)
+              env=dict(os.environ,ROOT=str(root),LAPLACE_INSTALL_PREFIX=str(prefix),
+                       GITHUB_ACTIONS="true",LAPLACE_MCP_TOKEN="m"*40,LAPLACE_OPERATOR_TOKEN="o"*40,
+                       LICHESS_API="test-only-lichess-token",STRIPE_API_SECRET="test-only-stripe-token")
+              for provider in ("MICROSOFT","GOOGLE"):
+                  for suffix in ("CLIENT_ID","CLIENT_SECRET"):
+                      env["LAPLACE_AUTH_"+provider+"_"+suffix]=""
+              subprocess.run(["bash","-eu"],input=function+"\nphase_runtime_secrets\n",
+                             text=True,env=env,check=True)
+              assert identity.read_bytes()==original
+          receipt={"selections":selections,"filesystemControls":7,"actualPipelineCallerControls":1,
+                   "status":"passed","scope":"Real temporary-file update and extracted canonical caller; no host services or real credentials"}
+          (root/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt))
           PY
-      - name: Retain affected control evidence
+      - name: Retain actual OAuth preservation controls
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: current-floor-export-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.QUALIFY_EVIDENCE }}
+          name: canonical-identity-preservation-controls
+          path: /build/laplace/work/identity-owner/evidence/
           if-no-files-found: error
+          retention-days: 30
