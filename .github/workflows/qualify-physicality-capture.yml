@@ -59,13 +59,20 @@ jobs:
           native=[{"path":str((root/"build"/path).resolve(strict=True)),
                    "loaderName":Path(path).name,"sha256":digest(root/"build"/path)} for path in owner.MODULES]
           caches=[]
-          for name in ("laplace_t0_perfcache.bin","laplace_highway_perfcache.bin"):
-              path=(build/"core/perfcache"/name).resolve(strict=True)
-              installed=(prefix/"share/laplace"/name).resolve(strict=True)
-              item={"path":str(path),"bytes":path.stat().st_size,"sha256":digest(path),
-                    "installed":str(installed),"installedSha256":digest(installed)}
-              if item["sha256"] != item["installedSha256"]:raise RuntimeError("installed ROM differs from tested build: "+name)
-              caches.append(item)
+          with owner.staged_install(root,prefix) as staged:
+              for name,pattern in (("laplace_t0_perfcache.bin","laplace_t0_perfcache_*.bin"),
+                                   ("laplace_highway_perfcache.bin","laplace_highway_perfcache.bin")):
+                  matches=list((staged/"share/laplace").glob(pattern))
+                  if len(matches)!=1:raise RuntimeError("tested install did not select exactly one ROM: "+name)
+                  expected=matches[0]
+                  path=(build/"core/perfcache"/name).resolve(strict=True)
+                  installed=(prefix/expected.relative_to(staged)).resolve(strict=True)
+                  item={"path":str(path),"bytes":path.stat().st_size,"sha256":digest(path),
+                        "installed":str(installed),"installedSha256":digest(installed),
+                        "stagedSha256":digest(expected)}
+                  if len({item["sha256"],item["installedSha256"],item["stagedSha256"]})!=1:
+                      raise RuntimeError("installed ROM differs from tested installed form: "+name)
+                  caches.append(item)
           receipt={"schema":"laplace.focused-physicality-controls/v1","managedSource":os.environ["TARGET_SHA"],
                    "installedNativeSource":os.environ["INSTALLED_SOURCE_SHA"],"native":native,"perfcaches":caches,
                    "installedArtifacts":installed_hashes,
