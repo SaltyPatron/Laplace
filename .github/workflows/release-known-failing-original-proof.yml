@@ -1,0 +1,80 @@
+name: Release known failing Original proof
+on:
+  push:
+    branches: [diag/cancel-known-failing-original-proof-20260916]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  release-preinstall-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Cancel only the exact known failing run before installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          REPO = "SaltyPatron/Laplace"
+          RUN = 35074729077
+          HEAD = "abf18cb5ad3d2261feb1ac0b298a390452e36c00"
+          JOB = 104724302680
+          def api(path, method="GET"):
+              request = urllib.request.Request("https://api.github.com/repos/" + REPO + path,
+                  headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+                  method=method, data=b"" if method=="POST" else None)
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  payload = response.read(8 * 1024 * 1024)
+                  return response.status, json.loads(payload) if payload else None
+          assert os.environ["GITHUB_REPOSITORY"] == REPO
+          assert os.environ["GITHUB_REF"] == "refs/heads/diag/cancel-known-failing-original-proof-20260916"
+          _, main = api("/git/ref/heads/main")
+          assert main["object"]["sha"] == HEAD
+          _, known = api("/actions/runs/35072346614")
+          assert known["head_sha"] == "8d925c91a5b5c633e49e33639a917207c6900227" and known["conclusion"] == "failure"
+          _, tree = api("/git/trees/" + HEAD + "?recursive=1")
+          assert not tree["truncated"]
+          entries = {entry["path"]:entry["sha"] for entry in tree["tree"]}
+          test = "app/Laplace.Chess.Tests/Service/ChessRecordedCompletionTests.cs"
+          parser = "app/Laplace.Chess/Service/ChessPgnDecomposer.cs"
+          assert entries[test] == "2581e25e7bea6c3508295fbde6719df1d6e46da2"
+          assert entries[parser] == "a8f15c09fb63fcf816dc587556d88564c50b7edb"
+          _, replacement = api("/git/trees/7c691b5ab492b2c5f7cf390229d13a2c6c8e17fe?recursive=1")
+          assert not replacement["truncated"]
+          fixed = {entry["path"]:entry["sha"] for entry in replacement["tree"]}
+          assert fixed[test] == "ccc0880776d7ec3a54a79d653158f40b87aa489a"
+          assert fixed[parser] == entries[parser]
+          _, run = api("/actions/runs/" + str(RUN))
+          assert run["head_sha"] == HEAD and run["event"] == "push"
+          assert run["path"] == ".github/workflows/laplace.yml" and run["head_branch"] == "main"
+          if run["status"] == "completed":
+              print("NO_CANCEL_NEEDED " + json.dumps({"run":RUN, "head":HEAD, "conclusion":run["conclusion"]}))
+          else:
+              assert run["status"] in ("queued","in_progress","waiting","pending")
+              _, jobs = api("/actions/runs/" + str(RUN) + "/jobs?per_page=100")
+              assert jobs["total_count"] == 1 and len(jobs["jobs"]) == 1
+              job = jobs["jobs"][0]
+              assert job["id"] == JOB and job["name"] == "Product — prove, activate and verify"
+              steps = {step["number"]:step for step in job.get("steps", [])}
+              assert 19 in steps and steps[19]["name"] == "Install native artifacts"
+              for number in range(19,34):
+                  assert steps[number]["status"] == "pending" and steps[number].get("started_at") is None
+              active = [step for step in steps.values() if step["status"] == "in_progress"]
+              assert len(active) <= 1 and all(1 <= step["number"] <= 18 for step in active)
+              print("PREINSTALL_CANCEL_GUARDS_PASSED " + json.dumps({"run":RUN,"head":HEAD,"job":JOB,"active_steps":[step["name"] for step in active],"known_failed_run":35072346614,"prepared_fixed_tree":replacement["sha"]}, sort_keys=True))
+              status, result = api("/actions/runs/" + str(RUN) + "/cancel", "POST")
+              assert status == 202
+              print("NORMAL_CANCEL_ACCEPTED " + json.dumps({"run":RUN,"http_status":status}))
+              deadline = time.monotonic() + 120
+              while time.monotonic() < deadline:
+                  _, after = api("/actions/runs/" + str(RUN))
+                  if after["status"] == "completed":
+                      print("FINAL_RUN_STATE " + json.dumps({"run":RUN,"status":after["status"],"conclusion":after["conclusion"]}))
+                      break
+                  time.sleep(5)
+              else:
+                  raise RuntimeError("normal cancellation was accepted; final cleanup state still pending after120seconds")
+          PY
