@@ -134,6 +134,50 @@ TEST(PhysicalityDescriptor, EveryNodeUsesTheOrdinaryOrderedIdentityOwner) {
     }
 }
 
+
+TEST(PhysicalityDescriptor, OrderedIdentityMatchesPackedManifestsAcrossSourceWidths) {
+    const hash128_t child{0x9876, 0x5432};
+    // Empty and singleton source bodies still produce ordinary descriptor
+    // nodes with at least two children. The wide body crosses the redundant
+    // packed ordinal field without changing logical child order.
+    for (const size_t width : {0u, 1u, 2u, 65537u}) {
+        SCOPED_TRACE(width);
+        std::vector<hash128_t> source_children(width, child);
+        std::vector<double> source_trajectory(width * 4u);
+        if (width != 0u)
+            ASSERT_EQ(trajectory_build(source_children.data(), width, source_trajectory.data()), 0);
+        auto input = body();
+        input.trajectory_xyzm = width == 0u ? nullptr : source_trajectory.data();
+        input.trajectory_vertices = width;
+        input.n_constituents = static_cast<int32_t>(width);
+        const auto plan = build({input, input});
+        ASSERT_NE(plan, nullptr);
+        const auto ids = roots(plan);
+        ASSERT_EQ(ids.size(), 2u);
+        EXPECT_TRUE(hash128_equals(&ids[0], &ids[1]));
+        size_t count = 0;
+        const auto* nodes = physicality_descriptor_plan_nodes(plan.get(), &count);
+        const auto* children = physicality_descriptor_plan_children(plan.get(), nullptr);
+        std::vector<double> packed;
+        for (size_t i = 0; i < count; ++i) {
+            const auto& current = nodes[i];
+            ASSERT_GE(current.child_count, 2u);
+            packed.resize(current.child_count * 4u);
+            ASSERT_EQ(trajectory_build(children + current.first_child,
+                current.child_count, packed.data()), 0);
+            hash128_t reconstructed{};
+            size_t expanded = 0;
+            ASSERT_EQ(trajectory_content_identity(packed.data(), current.child_count,
+                &reconstructed, &expanded), 0);
+            EXPECT_EQ(expanded, current.child_count);
+            EXPECT_TRUE(hash128_equals(&reconstructed, &current.id));
+        }
+        size_t references = 0;
+        physicality_descriptor_plan_references(plan.get(), &references);
+        EXPECT_EQ(references, 2u * (width + 1u));
+    }
+}
+
 TEST(PhysicalityDescriptor, CarrierReferencesRemainOrdinaryChildrenAndKeepOccurrenceScope) {
     const hash128_t child{0x3456, 0x789a};
     const std::array<hash128_t, 2> repeated{child, child};

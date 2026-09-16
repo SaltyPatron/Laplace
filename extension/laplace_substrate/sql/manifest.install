@@ -293,7 +293,6 @@ functions/generation/word_order.sql.in
 functions/generation/sentence_order.sql.in
 functions/generation/sentence_order_word_bridge.sql.in
 functions/generation/entity_hilbert_keys.sql.in
-functions/generation/entity_highway_masks.sql.in
 functions/generation/continuation_conditional_plane.sql.in
 functions/generation/pos_transition_plane.sql.in
 functions/generation/pos_class_transitions.sql.in
@@ -415,6 +414,7 @@ functions/ops/entity_record.sql.in
 functions/highway/laplace_highway_ready.sql.in
 functions/chess/laplace_chess_position_ready.sql.in
 functions/highway/laplace_highway_mask_from_bits.sql.in
+functions/generation/entity_highway_masks.sql.in
 functions/highway/highway_mask_refresh.sql.in
 functions/highway/highway_mask_drain.sql.in
 functions/highway/highway_mask_deposit.sql.in

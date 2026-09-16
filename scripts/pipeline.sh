@@ -498,20 +498,8 @@ phase_runtime_secrets() {
     chmod 640 "$dst.tmp"; mv "$dst.tmp" "$dst"
   elif [[ "$in_ci" == 1 ]]; then echo "::error::STRIPE_API_SECRET is required" >&2; missing=1; fi
 
-  local mid="${LAPLACE_AUTH_MICROSOFT_CLIENT_ID:-}" msecret="${LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET:-}"
-  local gid="${LAPLACE_AUTH_GOOGLE_CLIENT_ID:-}" gsecret="${LAPLACE_AUTH_GOOGLE_CLIENT_SECRET:-}"
-  if { [[ -n "$mid" && -z "$msecret" ]] || [[ -z "$mid" && -n "$msecret" ]]; }; then
-    echo "::error::Microsoft OAuth client id/secret must be paired" >&2; missing=1
-  fi
-  if { [[ -n "$gid" && -z "$gsecret" ]] || [[ -z "$gid" && -n "$gsecret" ]]; }; then
-    echo "::error::Google OAuth client id/secret must be paired" >&2; missing=1
-  fi
-  dst="$dir/identity.env"
-  {
-    [[ -z "$mid" ]] || printf 'LAPLACE_AUTH_MICROSOFT_CLIENT_ID=%s\nLAPLACE_AUTH_MICROSOFT_CLIENT_SECRET=%s\n' "$mid" "$msecret"
-    [[ -z "$gid" ]] || printf 'LAPLACE_AUTH_GOOGLE_CLIENT_ID=%s\nLAPLACE_AUTH_GOOGLE_CLIENT_SECRET=%s\n' "$gid" "$gsecret"
-  } >"$dst.tmp"
-  chmod 640 "$dst.tmp"; mv "$dst.tmp" "$dst"
+  # Absent workflow inputs retain each installed OAuth provider.
+  python3 "$ROOT/scripts/update-identity-secrets.py" "$dir/identity.env" || missing=1
   [[ "$missing" == 0 ]]
 }
 

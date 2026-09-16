@@ -168,15 +168,15 @@ processes belong to this invocation and are removed when it finishes.
 
 ## Measured hart-server configuration (2026-09-16)
 
-[Candidate calibration run 35115292050](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35115292050)
+[Candidate calibration run 35157006382](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35157006382)
 completed on hart-server, the Intel Core i7-6850K machine with six physical cores
 and twelve logical CPUs. The retained measurement distinguishes a fixed-depth
 engine search from complete legal game generation.
 
 | Workload | Provisional best measured setting | Median result |
 | --- | --- | --- |
-| Stockfish upstream 51-position depth-12 suite | Threads=6; Hash=64 MiB | 3,342,731 wall-clock nodes/second; 2.265050 seconds |
-| CuteChess complete Stockfish self-play, depth 8, time control 60 | Concurrency=8; each engine Threads=1 and Hash=16 MiB; ponder off | 5.006408 completed games/second; 780.999642 plies/second |
+| Stockfish upstream 51-position depth-12 suite | Threads=4; Hash=256 MiB | 2,332,308 wall-clock nodes/second; 2.209944 seconds |
+| CuteChess complete Stockfish self-play, depth 8, time control 60 | Concurrency=8; each engine Threads=1 and Hash=16 MiB; ponder off | 5.006246 completed generated games/second; 780.974319 plies/second |
 
 The engine sweep tested Threads=1,2,4,6,8,12 with Hash=16,64,256 MiB.
 The game sweep tested concurrency=1,2,4,6,8,12. Each configuration had one
@@ -186,17 +186,19 @@ There was no maximum-move limit or adjudication. The independent legal PGN
 replay and final board outcome checks were required for completion.
 
 At concurrency eight, the three measured samples completed all 48 games and
-7,488 plies in 9.607963 seconds total, with zero capped diagnostic games.
-The sample game rates ranged from 4.974519 to 5.006779 games/second. The median
-sample took 3.195904 seconds; sampled peak RSS for that configuration was
-3,971,186,688 bytes. These are complete depth-eight generated games, not a
+7,488 plies in 9.610222 seconds total, with zero capped diagnostic games.
+The sample game rates ranged from 4.967676 to 5.010345 games/second. The median
+sample took 3.196008 seconds; sampled peak RSS for that configuration was
+3,895,078,912 bytes. These are complete depth-eight generated games, not a
 depth-free playing-strength experiment.
 
-The selected fixed-depth engine configuration had a median 7,571,451 searched
-nodes and 479,608,832 bytes sampled peak RSS. Thread and hash changes can change
+The selected fixed-depth engine configuration had a median 5,264,120 searched
+nodes and 596,795,392 bytes sampled peak RSS. Thread and hash changes can change
 the search workload, so the recorded wall-clock NPS selection and elapsed times
 do not establish identical-work parallel speedup. The single-engine setting
-also does not prescribe six threads for every concurrent game.
+also does not prescribe four threads for every concurrent game. Earlier sweeps
+selected six threads; these are finite, repeated measurements rather than a
+permanent machine-wide optimum.
 
 Database recording was not part of this experiment: its recorded-game count
 and recorded games/second are explicitly null. These results do not establish
@@ -206,9 +208,11 @@ their own configuration readback.
 
 Retained transcripts, complete PGNs, source/binary identities and measurement
 receipts are in
-[artifact candidate-chess-dependencies-35115292050-1](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35115292050/artifacts/10454324046),
-ID `10454324046`, 8,061,662 bytes; ZIP SHA-256
-`96cd386325b57afab3a62780e77dd71e1f008f8517ebc6fcc5244b1666289a5d`.
+[artifact candidate-chess-dependencies-35157006382-1](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35157006382/artifacts/10471018472),
+ID `10471018472`, 8,058,369 bytes; ZIP SHA-256
+`278e0d23f33785a0ff0ffbacc584acaf824aa0ff8654ee1505564370e59841ac`.
+The earlier [48-game calibration](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35115292050/artifacts/10454324046)
+remains a separate historical observation, with its original source and artifact identities.
 
 The earlier
 [2026-09-15 run 34958542147](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/34958542147)
@@ -285,11 +289,12 @@ the existing shared host lock, while the CLI uses the canonical ingest lane.
 Source-corpus readiness is distinct from PGN/opening/evaluation ingestion,
 external engine benchmarks, and any playing-strength result.
 
-For measurements, dispatch the existing **Laplace — benchmark evidence** workflow
-(`.github/workflows/benchmark-evidence.yml`) against the selected installed revision.
-Its `chess`, `recorded`, and `geometry` suites remain independently selectable.
-Ordinary delivery does not dispatch that workflow or require those measurements to
-finish. Delivery still admits its operational bundle, publishes applications, and
+For measurements, run `scripts/benchmark_suite.py run --suite chess`,
+`--suite recorded`, or `--suite geometry` on the selected machine, with a new
+`--receipt-dir` for each invocation. The former `benchmark-evidence.yml` dispatcher
+has been removed. The scripts remain independently selectable; reuse the existing
+host operator when invoking them through Actions. Current modular delivery selects
+build, installation, database, application and test stages explicitly. Delivery still admits its operational bundle, publishes applications, and
 verifies ordinary operational execution; removing the chess workload is not a
 claim that general instruction grounding or playing-strength targets are complete.
 
@@ -360,13 +365,13 @@ startup output. Use the managed service's existing server-side token configurati
 
 ## Explicit complete acceptance on the installed machine
 
-The benchmark evidence workflow also offers suite `acceptance`.
-It runs independently of product deployment. After the selected main revision
-has completed deployment, dispatch the existing workflow with that suite and exact
-revision. When dispatch is unavailable, reuse an existing operator workflow and
-its existing branch, preserving its previous tip and verifying the selected
-revision. Do not create another acceptance branch or checkout for each run.
-Ordinary main pushes do not select this work.
+`scripts/accept-chess-environment.py` owns the complete installed acceptance
+profile. After the selected revision has actually been built and installed,
+invoke it through the existing host operator with that exact revision and new
+evidence output. The former benchmark dispatcher has been removed. Reuse the
+existing operator workflow and branch, preserving its previous tip; do not create
+another acceptance branch or checkout for each run. Ordinary main pushes do not
+select this work.
 
 The acceptance receipt records the requested and executed revision, fixed profile,
 individual phase status and duration, and every retained artifact's SHA-256.
@@ -407,9 +412,9 @@ The fixed acceptance profile then retains:
   reserved logical CPUs, followed by another installed-native and service check.
 
 One shared host lock covers this sequence, including adjacent preparation and
-admission without an API restart between them. The self-hosted acceptance job has
-a finite 600-minute outer deadline to accommodate the independent per-phase
-envelopes; that deadline is not a claimed runtime. Independent measurements retain their
+admission without an API restart between them. The invoking operator supplies a finite outer deadline
+covering the selected phases and cleanup; each phase retains its own execution
+envelope and actual duration. Independent measurements retain their
 own failures; a failed match does not erase the separate geometry result.
 Complete games have no move cap or adjudicated early stop. Geometry rows and
 retained replays are never counted as newly recorded games. The 2,500-games/s

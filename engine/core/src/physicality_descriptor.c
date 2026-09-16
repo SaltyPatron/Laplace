@@ -13,7 +13,6 @@ struct physicality_descriptor_plan {
     hash128_t* roots;
     physicality_descriptor_reference_t* references;
     size_t* slots;
-    double* scratch;
     hash128_t* trajectory_children;
     size_t node_count, node_capacity;
     size_t child_count, child_capacity;
@@ -98,7 +97,6 @@ physicality_descriptor_status_t physicality_descriptor_plan_payload_bound(
         !checked_add(&references, stored_vertices) ||
         !checked_array(&bytes, forms, sizeof(hash128_t)) ||
         !checked_array(&bytes, references, sizeof(physicality_descriptor_reference_t)) ||
-        !checked_array(&bytes, widest, 4u * sizeof(double)) ||
         !checked_array(&bytes, widest, sizeof(hash128_t)) ||
         !capacity_bound(nodes, &node_capacity) || !capacity_bound(children, &child_capacity) ||
         nodes > SIZE_MAX / 2u)
@@ -242,15 +240,17 @@ int physicality_descriptor_basis_is_valid(const physicality_descriptor_basis_t* 
 static physicality_descriptor_status_t compose(
     physicality_descriptor_plan_t* plan, physicality_descriptor_plan_diagnostics_t* diagnostics, const hash128_t* children,
     size_t count, hash128_t* result) {
-    size_t expanded;
     size_t slot;
     if (physicality_descriptor_cancel_requested(plan->cancellation))
         return PHYSICALITY_DESCRIPTOR_CANCELLED;
-    if (count < 2u || count > plan->scratch_capacity ||
-        trajectory_build(children, count, plan->scratch) != 0 ||
-        trajectory_content_identity(plan->scratch, count, result, &expanded) != 0 ||
-        expanded != count)
+    if (count < 2u || count > plan->scratch_capacity)
         return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
+    /* These are already the complete ordered child identities. The ordinary
+     * Merkle owner has exactly the identity of their unit-run trajectory;
+     * packing and decoding that temporary carrier adds no validation here.
+     * describe_one still validates every borrowed source manifest before any
+     * descriptor is built. One/zero-child collapse is outside this recipe. */
+    hash128_merkle(0, children, count, result);
     slot = identity_slot(result, plan->slot_count - 1u);
     while (plan->slots[slot] != 0u) {
         const physicality_descriptor_node_t* node = &plan->nodes[plan->slots[slot] - 1u];
@@ -264,7 +264,7 @@ static physicality_descriptor_status_t compose(
         slot = (slot + 1u) & (plan->slot_count - 1u);
     }
     /* Exact reuse above needs no spare capacity. Growth cannot invalidate
-     * children/result: callers use stack fields or the fixed scratch/root
+     * children/result: callers use stack fields or the fixed child/root
      * arrays, never the growable node/child arrays. */
     if (plan->node_count == SIZE_MAX || count > SIZE_MAX - plan->child_count) {
         plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_GRAPH,
@@ -490,7 +490,6 @@ void physicality_descriptor_plan_free(physicality_descriptor_plan_t* plan) {
     free(plan->roots);
     free(plan->references);
     free(plan->slots);
-    free(plan->scratch);
     free(plan->trajectory_children);
     free(plan);
 }
@@ -557,7 +556,6 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
         !checked_array(&bytes, input_count, sizeof(hash128_t)) ||
         !checked_array(&bytes, references, sizeof(physicality_descriptor_reference_t)) ||
         !checked_array(&bytes, 1u, sizeof(size_t)) ||
-        !checked_array(&bytes, widest, 4u * sizeof(double)) ||
         !checked_array(&bytes, widest, sizeof(hash128_t))) {
         plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_INITIAL,
             PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW, 0u);
@@ -577,10 +575,9 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
     if (input_count != 0u) plan->roots = calloc(input_count, sizeof(*plan->roots));
     if (references != 0u) plan->references = calloc(references, sizeof(*plan->references));
     plan->slots = calloc(1u, sizeof(*plan->slots));
-    plan->scratch = calloc(widest, 4u * sizeof(double));
     plan->trajectory_children = calloc(widest, sizeof(hash128_t));
     if ((input_count != 0u && !plan->roots) || (references != 0u && !plan->references) ||
-        !plan->slots || !plan->scratch || !plan->trajectory_children) {
+        !plan->slots || !plan->trajectory_children) {
         plan_refusal(diagnostics, PHYSICALITY_DESCRIPTOR_PLAN_INITIAL,
             PHYSICALITY_DESCRIPTOR_PLAN_ALLOCATOR_REFUSED, bytes);
         physicality_descriptor_plan_free(plan);

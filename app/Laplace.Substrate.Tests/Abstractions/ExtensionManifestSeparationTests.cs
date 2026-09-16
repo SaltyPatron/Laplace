@@ -98,4 +98,29 @@ public sealed class ExtensionManifestSeparationTests
                 $"{manifestName} must define consensus.relation_rank before its expression index");
         }
     }
+
+    [Fact]
+    public void EntityHighwayMasks_IsInstalledAfterItsParsedSqlDependencies()
+    {
+        string[] dependencies =
+        [
+            "functions/identity/relation_type_id.sql.in",
+            "functions/highway/relation_highway.sql.in",
+            "functions/highway/laplace_highway_ready.sql.in",
+            "functions/highway/laplace_highway_mask_from_bits.sql.in",
+        ];
+        foreach (var manifestName in new[] { "manifest.install", "manifest.upgrade" })
+        {
+            var entries = Read("extension", "laplace_substrate", "sql", manifestName)
+                .Split('\n', StringSplitOptions.TrimEntries);
+            var dependent = Array.IndexOf(entries, "functions/generation/entity_highway_masks.sql.in");
+            Assert.True(dependent >= 0, $"{manifestName} must install generation.entity_highway_masks");
+            foreach (var dependency in dependencies)
+            {
+                var prerequisite = Array.IndexOf(entries, dependency);
+                Assert.True(prerequisite >= 0 && prerequisite < dependent,
+                    $"{manifestName} must install {dependency} before the parsed SQL body of generation.entity_highway_masks");
+            }
+        }
+    }
 }
