@@ -981,19 +981,22 @@ phase_chess_lab() {
   # the fingerprint matches AND the installed binary actually exists — stamps
   # attest sources, never artifacts (the stale-.so lesson).
   local fp sf zstd_version bin="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess-cli"
+  local gui="${LAPLACE_CUTECHESS_GUI:-${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess}"
+  local gui_receipt="${LAPLACE_CUTECHESS_GUI_RECEIPT:-${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}/laplace-cutechess-gui-build.json}"
   sf="$(python3 "$ROOT/scripts/install-stockfish.py" --print-path)" || return 1
   fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json scripts/install-zstd.py scripts/check-zstd-runtime.py deploy/zstd-release.json)
   # A different selected source/installation is a different publish input even
   # when source files are unchanged; refresh the service's actual launch paths.
   fp=$(printf '%s\0' "$fp" "${LAPLACE_EXTERNAL:-/build/external}" "$sf" \
-    "${LAPLACE_STOCKFISH:-}" "${LAPLACE_CUTECHESS:-}" \
+    "${LAPLACE_STOCKFISH:-}" "${LAPLACE_CUTECHESS:-}" "$gui" "$gui_receipt" \
     "${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}" "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" \
     "${LAPLACE_ZSTD_SOURCE:-}" "${LAPLACE_ZSTD_LIBRARY:-}" "${LAPLACE_ZSTD_WINDOW_LOG_MAX:-27}" "${LAPLACE_ZSTD_BUILD:-}" \
     "${LAPLACE_QT_ROOT:-}" "${LAPLACE_DEPS_PREFIX:-}" "${CC:-}" "${CXX:-}" | sha256sum | cut -d' ' -f1)
-  if fp_check chess-lab "$fp" && [[ -x "$bin" && -x "$sf" ]]; then
+  if fp_check chess-lab "$fp" && [[ -x "$bin" && -x "$sf" && -x "$gui" && -f "$gui_receipt" ]]; then
     python3 "$ROOT/scripts/install-stockfish.py" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --source-dir "${LAPLACE_EXTERNAL:-/build/external}/cutechess" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$bin}" || return 1
+    python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" || return 1
     python3 "$ROOT/scripts/install-stockfish.py" --check-binary "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-zstd.py" --print-path >/dev/null || return 1
     zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/deploy/zstd-release.json")"
@@ -1001,7 +1004,7 @@ phase_chess_lab() {
     echo "chess-lab inputs unchanged; Stockfish, CuteChess, Qt and native Zstandard reverified"
     return 0
   fi
-  bash "$ROOT/scripts/bootstrap-chess-lab.sh" || return 1
+  bash "$ROOT/scripts/bootstrap-chess-lab.sh" --cutechess-gui || return 1
   fp_record chess-lab "$fp"
 }
 

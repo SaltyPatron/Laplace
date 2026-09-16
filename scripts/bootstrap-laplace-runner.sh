@@ -1914,7 +1914,7 @@ bootstrap_chess_lab() {
         yellow "missing $script — skip"
         return 0
     fi
-    bash "$script" || yellow "chess-lab incomplete — packages/build will be retried by CI publish"
+    bash "$script" --cutechess-gui || yellow "chess-lab incomplete — packages/build will be retried by CI publish"
 }
 
 case "$MODE" in

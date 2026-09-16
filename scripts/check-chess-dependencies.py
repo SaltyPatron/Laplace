@@ -16,7 +16,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-KEYS = {"LAPLACE_STOCKFISH", "LAPLACE_CUTECHESS", "LAPLACE_SYZYGY",
+KEYS = {"LAPLACE_STOCKFISH", "LAPLACE_CUTECHESS", "LAPLACE_CUTECHESS_GUI",
+        "LAPLACE_CUTECHESS_GUI_RECEIPT", "LAPLACE_SYZYGY",
         "LAPLACE_CHESS_OPENINGS", "LAPLACE_DATA_ROOT", "LAPLACE_EXTERNAL",
         "LAPLACE_STOCKFISH_SOURCE", "LAPLACE_CUTECHESS_BUILD", "LAPLACE_QT_BIN",
         "LAPLACE_CHESS_LAB_DIR", "LAPLACE_ZSTD_LIBRARY", "LAPLACE_ZSTD_WINDOW_LOG_MAX",
@@ -66,7 +67,7 @@ def check(result, name, action, required=True):
         with contextlib.redirect_stdout(io.StringIO()):
             detail = action()
         result.append({"name": name, "status": "ready", "required": required, "detail": detail})
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, KeyError, TypeError) as error:
         result.append({"name": name, "status": "failed", "required": required,
                        "detail": str(error)})
 
@@ -115,6 +116,7 @@ def main():
     parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_INSTALL_PREFIX", str(default))))
     parser.add_argument("--uci", type=Path, help="Published laplace-uci executable")
     parser.add_argument("--check-latest", action="store_true")
+    parser.add_argument("--cutechess-gui", action="store_true", help="Require the installed official GUI and selected Qt offscreen runtime")
     parser.add_argument("--require-data", action="store_true", help="Fail if openings or paired Syzygy files are missing; does not certify complete tablebase coverage")
     args = parser.parse_args()
     config = configuration(args.prefix)
@@ -137,6 +139,16 @@ def main():
     check(report, "zstandard-pgn-codec", lambda: module("check-zstd-runtime").probe(
         config.get("LAPLACE_ZSTD_LIBRARY"), int(config.get("LAPLACE_ZSTD_WINDOW_LOG_MAX", "27")),
         json.loads((ROOT / "deploy/zstd-release.json").read_text())["version"]))
+    gui_configured = bool(config.get("LAPLACE_CUTECHESS_GUI") or config.get("LAPLACE_CUTECHESS_GUI_RECEIPT"))
+    if args.cutechess_gui or gui_configured:
+        gui = Path(config.get("LAPLACE_CUTECHESS_GUI", str(args.prefix / "bin" / ("cutechess" + suffix))))
+        gui_receipt = Path(config.get("LAPLACE_CUTECHESS_GUI_RECEIPT",
+                          str(Path(config.get("LAPLACE_CUTECHESS_BUILD", "/build/cutechess")) / "laplace-cutechess-gui-build.json")))
+        check(report, "cutechess-gui", lambda: module("provision-cutechess").verify_gui_install(
+            gui, gui_receipt, json.loads((ROOT / "deploy/cutechess-release.json").read_text())))
+    else:
+        report.append({"name": "cutechess-gui", "status": "not-configured", "required": False,
+                       "detail": "Linux host setup and publish provision the official GUI; --cutechess-gui requires its retained build and offscreen runtime proof."})
     data_root = Path(config.get("LAPLACE_DATA_ROOT", "D:/Data/Ingest" if os.name == "nt" else "/vault/Data"))
     data = data_inventory(config, data_root)
     for item in data[:2]:
@@ -150,7 +162,8 @@ def main():
                 return reply.stdout.strip()
             check(report, name + "-latest", latest)
     failed = any(item["required"] and item["status"] not in ("ready", "present") for item in report)
-    print(json.dumps({"executable_ready": all(item["status"] == "ready" for item in report[:3]),
+    print(json.dumps({"executable_ready": all(item["status"] == "ready" for item in report
+                                               if item["required"] and item["name"] in ("stockfish", "cutechess", "laplace-uci", "cutechess-gui")),
                       "configured_settings": {
                           "scope": "Selected environment and installed configuration files; live process settings require a separate runtime observation.",
                           "values": config},

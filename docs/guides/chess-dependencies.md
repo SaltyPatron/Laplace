@@ -28,7 +28,8 @@ runtime libraries through Qt's own deployment tool.
 ## Installation and checks
 
 The normal Linux host setup and product publish invoke
-`scripts/bootstrap-chess-lab.sh`. Windows publishing invokes
+`scripts/bootstrap-chess-lab.sh --cutechess-gui` and build both official CMake
+targets, `cli` and `gui`. Windows publishing invokes
 `scripts/win/build-cutechess.cmd` and builds Stockfish from its Git checkout.
 The source trees use `LAPLACE_EXTERNAL`: `/build/external` by default on the
 Linux host and the repository's `external` directory on Windows. Source updates
@@ -42,7 +43,7 @@ root. The existing `LAPLACE_STOCKFISH` executable override still takes precedenc
 Run the installed dependency report from the repository:
 
 ```sh
-python3 scripts/check-chess-dependencies.py --prefix /opt/laplace --check-latest
+python3 scripts/check-chess-dependencies.py --prefix /opt/laplace --check-latest --cutechess-gui
 ```
 
 On Windows, provide the published UCI executable and use the same environment as
@@ -65,6 +66,48 @@ are missing. File presence and pairing do not certify complete tablebase coverag
 or checksums. A successful executable report alone does not claim complete data
 ingestion or online Lichess connectivity. The normal publish also runs an actual
 short Cute Chess match against the published Laplace UCI application.
+
+## Installed Cute Chess GUI and Qt capability
+
+Linux setup and product publication build the official GUI executable from the
+same verified Cute Chess source as the tournament CLI. They install the direct
+executable at `/opt/laplace/bin/cutechess` by default and persist
+`LAPLACE_CUTECHESS_GUI` plus `LAPLACE_CUTECHESS_GUI_RECEIPT` in the service
+configuration. The retained `laplace-cutechess-gui-build.json` binds the source
+commit and committed bytes, executable SHA-256, CMake cache, selected Qt SDK
+configuration files and available platform/SVG plugin hashes.
+
+The probe executes that GUI with `-platform offscreen --version`. Upstream
+constructs its QApplication before handling this option. A passing receipt
+requires the selected Cute Chess and Qt versions, successful process exit, and
+Qt's loader diagnostic identifying the exact selected offscreen plugin. Linux
+probes use temporary XDG settings directories under the build volume, preserving
+the operator's application settings. The doctor rechecks the current source,
+installed executable and Qt inputs against the retained build before probing.
+
+This establishes headless QApplication initialization. The receipt explicitly
+leaves interactive desktop readiness unverified: it does not open a window,
+run the event loop, or prove X11/Wayland connectivity. Platform and SVG plugin
+files are inventoried separately; their presence does not imply they were loaded.
+The seven required SDK modules are Core, Gui, Widgets, Concurrent, Svg,
+PrintSupport and Core5Compat. SDK module configuration hashes do not claim
+complete runtime shared-library identity.
+
+Launch the installed GUI from a working desktop session with
+`/opt/laplace/bin/cutechess`. The doctor receipt supplies the actual configured
+direct executable and selected Qt runtime/plugin environment when paths differ.
+On Linux this prepends the selected SDK library directory ahead of inherited
+library search paths. Qt is
+the GUI runtime; it is not another server to boot.
+
+Bare chess bootstrap calls may opt in with `--cutechess-gui` or
+`LAPLACE_CUTECHESS_GUI_BUILD=1`. Once a GUI executable or build receipt exists,
+later bootstrap calls rebuild it from the selected source alongside the CLI.
+Product publish always requests the GUI, and its unchanged-input path rechecks
+the installed GUI against the retained source build. The read-only chess
+benchmark readiness step also requires this proof. These dependency checks do not
+start corpus admission, game generation, or throughput benchmarks; those remain
+explicit operator operations.
 
 ## Measured hart-server configuration (2026-09-15)
 

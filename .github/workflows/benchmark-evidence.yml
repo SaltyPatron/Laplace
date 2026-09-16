@@ -280,7 +280,7 @@ jobs:
                   env['LAPLACE_' + name] = selected
           command = ['timeout', '--signal=TERM', '--kill-after=5s', '240s', sys.executable,
                      'scripts/chess-runtime-env.py', '--prefix', str(prefix), '--', sys.executable,
-                     'scripts/check-chess-dependencies.py', '--prefix', str(prefix), '--uci', uci, '--check-latest']
+                     'scripts/check-chess-dependencies.py', '--prefix', str(prefix), '--uci', uci, '--check-latest', '--cutechess-gui']
           observed = datetime.datetime.now(datetime.timezone.utc).isoformat()
           execution = {'observed_utc': observed, 'timeout_seconds': 240, 'prefix': str(prefix), 'uci': uci}
           try:

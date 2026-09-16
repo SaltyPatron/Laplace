@@ -133,5 +133,57 @@ class DependencyReportTests(unittest.TestCase):
                 self.assertEqual("/explicit/binary", doctor.configuration(root)["LAPLACE_STOCKFISH"])
 
 
+    def test_gui_required_flag_and_persisted_configuration_drive_verified_build_probe(self):
+        import json
+        for explicit, configured in ((True, False), (False, True)):
+            for succeeds in (True, False):
+                with self.subTest(explicit=explicit, configured=configured, succeeds=succeeds), \
+                        tempfile.TemporaryDirectory() as temporary:
+                    prefix = Path(temporary)
+                    gui, receipt = prefix / "selected-gui", prefix / "selected-build.json"
+                    config = {"LAPLACE_CUTECHESS_GUI": str(gui),
+                              "LAPLACE_CUTECHESS_GUI_RECEIPT": str(receipt)} if configured else {}
+                    original_check = doctor.check
+                    def selective_check(report, name, action, required=True):
+                        if name == "cutechess-gui":
+                            return original_check(report, name, action, required)
+                        report.append({"name": name, "required": required, "status": "ready"})
+                    output = io.StringIO()
+                    argv = ["doctor", "--prefix", str(prefix)] + (["--cutechess-gui"] if explicit else [])
+                    with patch.object(doctor, "configuration", return_value=config), \
+                            patch.object(doctor, "check", side_effect=selective_check), \
+                            patch.object(doctor, "module") as helper, \
+                            patch.object(doctor.sys, "argv", argv), contextlib.redirect_stdout(output):
+                        probe = helper.return_value.verify_gui_install
+                        if succeeds:
+                            probe.return_value = {"runtime": {"status": "ready-headless",
+                                                              "interactive_desktop_ready": None}}
+                        else:
+                            probe.side_effect = FileNotFoundError("no retained official GUI build")
+                        self.assertEqual(0 if succeeds else 1, doctor.main())
+                    report = json.loads(output.getvalue())
+                    check = next(item for item in report["checks"] if item["name"] == "cutechess-gui")
+                    self.assertTrue(check["required"])
+                    self.assertEqual("ready" if succeeds else "failed", check["status"])
+                    self.assertEqual(succeeds, report["executable_ready"])
+                    probe.assert_called_once()
+                    if configured:
+                        self.assertEqual((gui, receipt), probe.call_args.args[:2])
+
+    def test_gui_paths_survive_service_configuration_without_importing_tokens(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "app").mkdir()
+            (root / "app/laplace-api.env").write_text(
+                "LAPLACE_CUTECHESS_GUI=/selected/cutechess\n"
+                "LAPLACE_CUTECHESS_GUI_RECEIPT=/selected/build.json\nLICHESS_TOKEN=private\n")
+            with patch.dict(os.environ, {}, clear=True):
+                config = doctor.configuration(root)
+            self.assertEqual("/selected/cutechess", config["LAPLACE_CUTECHESS_GUI"])
+            self.assertEqual("/selected/build.json", config["LAPLACE_CUTECHESS_GUI_RECEIPT"])
+            self.assertNotIn("LICHESS_TOKEN", config)
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
