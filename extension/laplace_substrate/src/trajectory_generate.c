@@ -14,6 +14,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "mb/pg_wchar.h"
 #include "nodes/bitmapset.h"
 #include "utils/array.h"
 #include "utils/hsearch.h"
@@ -1637,6 +1638,32 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
     walk_call->args[0] = (NullableDatum) {PointerGetDatum(input->context), false};
     for (int i = 1; i <= 5; ++i)
         walk_call->args[i] = fcinfo->args[i];
+    if (walk_call->args[5].isnull)
+    {
+        /* The native prompt executor owns the omitted-seed policy for every
+         * projection. Preserve the established text/chat seed: BLAKE3 over the
+         * exact prompt UTF-8, then the first eight digest bytes in network order,
+         * as laplace.hash128_lo exposes them. Neither parsed/normalized content
+         * nor the host-endian hash128_t fields represent that byte contract.
+         * An explicit seed (including zero or negative) is never replaced. */
+        text *prompt = PG_GETARG_TEXT_PP(0);
+        const char *source = VARDATA_ANY(prompt);
+        int source_length = VARSIZE_ANY_EXHDR(prompt);
+        char *utf8 = pg_server_to_any(source, source_length, PG_UTF8);
+        Size utf8_length = utf8 == source ? (Size) source_length : strlen(utf8);
+        hash128_t digest;
+        const uint8 *bytes = (const uint8 *) &digest;
+        uint64 seed_bits = 0;
+        int64 seed;
+
+        hash128_blake3((const uint8 *) utf8, utf8_length, &digest);
+        for (int i = 0; i < 8; ++i)
+            seed_bits = (seed_bits << 8) | bytes[i];
+        memcpy(&seed, &seed_bits, sizeof(seed));
+        if (utf8 != source)
+            pfree(utf8);
+        walk_call->args[5] = (NullableDatum) {Int64GetDatum(seed), false};
+    }
     walk_call->args[6] = (NullableDatum) {
         makeArrayResult(frontier.ids, frontier.owner), false};
     walk_call->args[8] = (NullableDatum) {Int32GetDatum(fanout), false};
