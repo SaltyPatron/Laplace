@@ -30,7 +30,7 @@ jobs:
           import ast,base64,fcntl,hashlib,json,os,re,signal,subprocess,sys,textwrap,time,urllib.request,yaml
           from pathlib import Path
           evidence=Path(os.environ["EVIDENCE"])
-          selections={"workflow":"c9a1d8c1847a91767a3eeb91a04d47598ec5e5c7","gui":"dfe56d9ce45a095dd1a578895ce0162efeb1eafd","bootstrap":"1aafd564ecec11a9f7a9ce450dc00e8563d1b63b","cache":"11b974204dabeb261380905a40d0cb8311c36378","follow":"e6b7e5c0a3021ae1adc1be117b74e36fea26b160","managed":"3701def6f1544ac2994ea58a84fe7a2950b00f90","accept":"78868583becc43bcd129a46007d8d703093415ae","identity":"4f72dc77f8d809f46fd751781a9a68c0ac20ba7a","identity_test":"0263374954b37a0b358cb569043750058ccbd043","pipeline":"3445a5f8b0e2a7a9cbbacfd24893ad7f8877ace9"}
+          selections={"workflow":"6e50374a9d93056fe00b86aab7c961b17cc8da24","gui":"dfe56d9ce45a095dd1a578895ce0162efeb1eafd","bootstrap":"1aafd564ecec11a9f7a9ce450dc00e8563d1b63b","cache":"11b974204dabeb261380905a40d0cb8311c36378","follow":"e6b7e5c0a3021ae1adc1be117b74e36fea26b160","managed":"ddf5d4c219cc386d52a44274394a8b0dff8251d6","accept":"b7846e06e1f9dc67c9ca0c06df93340f9dd7d697","identity":"4f72dc77f8d809f46fd751781a9a68c0ac20ba7a","identity_test":"0263374954b37a0b358cb569043750058ccbd043","pipeline":"3445a5f8b0e2a7a9cbbacfd24893ad7f8877ace9"}
           sources={}
           for name,sha in selections.items():
               request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
@@ -136,6 +136,23 @@ jobs:
                       try:os.killpg(process.pid,signal.SIGKILL)
                       except ProcessLookupError:pass
                       process.wait(timeout=5)
+          # The actual process owner must allow a publication rollback to exceed
+          # its old five-second grace without killing the owned command early.
+          slow=evidence/"slow-owned-worker.py"
+          slow.write_text(worker.read_text().replace("time.sleep(0.6)","time.sleep(6.2)"))
+          slow_case=evidence/"long-cleanup";slow_case.mkdir()
+          namespace={"os":os,"signal":signal,"subprocess":subprocess,"ROOT":evidence}
+          exec(command_functions,namespace)
+          begin=time.monotonic()
+          try:
+              namespace["command"]([sys.executable,slow,slow_case],slow_case/"worker.log",0.3,cleanup_seconds=8)
+          except TimeoutError:pass
+          else:raise AssertionError("command timeout was not reported")
+          elapsed=time.monotonic()-begin
+          assert (slow_case/"cleanup-completed").read_text()=="yes" and elapsed>=6.2
+          long_cleanup={"actualOwner":"accept-chess-environment.command/stop_group",
+                        "requestedCleanupSeconds":8,"elapsedSeconds":elapsed,"cleanupCompleted":True,
+                        "scope":"Owned process cleanup exceeding five seconds; real service rollback not simulated"}
           # Execute the final canonical OAuth helper and extracted production caller.
           scripts=evidence/"scripts";scripts.mkdir()
           (scripts/"update-identity-secrets.py").write_text(sources["identity"])
@@ -160,7 +177,7 @@ jobs:
               assert identity.read_bytes()==original and identity.stat().st_mode&0o777==0o600
           receipt={"status":"passed","selections":selections,"syntax":counts,
                    "actualNestedCancellationControls":results,"identityFilesystemControls":7,
-                   "actualIdentityCallerControls":1,
+                   "actualIdentityCallerControls":1,"longOwnedCleanup":long_cleanup,
                    "scope":"Authenticated syntax, real nested process-lock cancellation and OAuth files; no GUI/cache/database execution"}
           (evidence/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
           print(json.dumps(receipt))
