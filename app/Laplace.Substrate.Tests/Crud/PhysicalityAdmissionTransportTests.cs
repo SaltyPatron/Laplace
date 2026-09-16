@@ -75,6 +75,80 @@ public class PhysicalityAdmissionTransportTests
         Assert.InRange(batch.AllocatedBytes, batch.TotalTupleBytes, Grant);
     }
 
+    [Fact]
+    public void SourceCapture_FitsPhysicalitiesWithoutReservingUnusedNativeTables()
+    {
+        const int count = 512;
+        const long stageGrant = 200_000;
+        const long scratchGrant = count * 136L;
+        PhysicalityRow[] rows = CaptureRows(count);
+        // This is the former production request, against the same real native
+        // allocator and grant. Its three unrelated table reservations cannot fit.
+        Assert.Throws<OutOfMemoryException>(() => IntentStage.NewBounded(count, stageGrant));
+        using var captured = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(
+            rows, stageGrant, scratchGrant);
+        using var expected = IntentStage.New(0);
+        foreach (var row in rows)
+            expected.AddPhysicality(row.Id, row.EntityId, (short)row.Type,
+                [row.CoordX, row.CoordY, row.CoordZ, row.CoordM], row.HilbertIndex,
+                row.TrajectoryXyzm ?? [], row.NConstituents,
+                row.AlignmentResidual, row.SourceDim, row.ObservedAtUnixUs);
+        Assert.Equal(count, captured.PhysicalityCount);
+        Assert.Equal(0, captured.EntityCount);
+        Assert.Equal(0, captured.AttestationCount);
+        Assert.InRange(captured.AllocatedBytes, captured.TotalTupleBytes, stageGrant);
+        Assert.Equal(Tuples(expected, IntentStageTable.Physicalities),
+            Tuples(captured, IntentStageTable.Physicalities));
+    }
+
+    [Theory]
+    [InlineData(1, 69_632, "OutOfMemoryException")]
+    [InlineData(1_024, 69_632, "InvalidOperationException")]
+    [InlineData(200_000, 69_631, "InvalidOperationException")]
+    public void SourceCapture_PreservesNativeAndScratchGrants(
+        long stageGrant, long scratchGrant, string exceptionType)
+    {
+        PhysicalityRow[] rows = CaptureRows(512);
+        Exception? error = Record.Exception(() =>
+        {
+            using var stage = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(
+                rows, stageGrant, scratchGrant);
+        });
+        Assert.NotNull(error);
+        Assert.Equal(exceptionType, error.GetType().Name);
+        Assert.Contains("observations=512", error.Message);
+        Assert.Contains($"stageGrantBytes={stageGrant}", error.Message);
+        Assert.Contains($"scratchGrantBytes={scratchGrant}", error.Message);
+        Assert.NotNull(error.InnerException);
+        // A failed capture owns and discards its partial stage. A subsequent
+        // ordinary capture still emits every original row under the finite grant.
+        using var retry = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(
+            rows, 200_000, 69_632);
+        Assert.Equal(rows.Length, retry.PhysicalityCount);
+    }
+
+    [Fact]
+    public void SourceCapture_StillRejectsDeclaredIdentityMismatch()
+    {
+        PhysicalityRow[] rows = CaptureRows(2);
+        rows[1] = rows[1] with { Id = H(999) };
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(rows, Grant, Grant));
+        Assert.Contains("native physicality batch staging failed", error.Message);
+        Assert.Contains("observations=2", error.Message);
+    }
+
+    private static PhysicalityRow[] CaptureRows(int count)
+    {
+        double[] coordinate = [.1, .2, .3, .4];
+        Hilbert128 hilbert = Hilbert128.Encode(coordinate);
+        return Enumerable.Range(1, count).Select(i =>
+            new PhysicalityRow(PhysicalityId.Compute(H(i), PhysicalityType.Projection),
+                H(i), H(50), PhysicalityType.Projection,
+                coordinate[0], coordinate[1], coordinate[2], coordinate[3], hilbert,
+                null, 0, null, null, IntentStage.PgEpochUnixUs + i)).ToArray();
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
