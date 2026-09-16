@@ -39,7 +39,8 @@ done
 if [[ "$SERIAL" == 1 ]]; then
   export CTEST_PARALLEL_LEVEL=1
 elif [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
-  export CTEST_PARALLEL_LEVEL="$(nproc 2>/dev/null || echo 1)"
+  CTEST_PARALLEL_LEVEL="$(nproc 2>/dev/null || echo 1)"
+  export CTEST_PARALLEL_LEVEL
 fi
 
 bash scripts/sync-managed-native-artifacts.sh
@@ -136,17 +137,17 @@ run_managed_live() {
 }
 
 run_generation_eval() {
-  mkdir -p .eval-proof
+  mkdir -p "$ROOT/build/eval-proof"
   python3 scripts/eval-generation.py --api "${LAPLACE_API_BASE:-http://127.0.0.1:8080}" \
-    --probes scripts/eval-probes.json --baseline scripts/eval-baselines.json --report .eval-proof/generation.json
+    --probes scripts/eval-probes.json --baseline scripts/eval-baselines.json --report "$ROOT/build/eval-proof/generation.json"
 }
 
 run_perf() {
   set_installed_perfcache
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal --filter 'Tier=perf'
-  mkdir -p .eval-proof
+  mkdir -p "$ROOT/build/eval-proof"
   python3 scripts/verify-generation.py --api "${LAPLACE_API_BASE:-http://127.0.0.1:8080}" \
-    --report .eval-proof/lane-detectors.json --enforce
+    --report "$ROOT/build/eval-proof/lane-detectors.json" --enforce
 }
 
 run_suite() {
