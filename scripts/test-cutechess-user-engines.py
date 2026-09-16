@@ -62,6 +62,20 @@ class UserEngineAcceptanceTests(unittest.TestCase):
             return OWNER.uci(entry, self.environment, self.root / (entry["name"] + ".log"),
                              time.monotonic() + 5, Path(sys.executable), substrate=substrate)
 
+    def test_public_default_route_refuses_ambient_redirection_and_credentials(self):
+        expected = OWNER.default_database_route({})
+        self.assertEqual(5432, expected["port"])
+        matching = {"PGHOST": "/var/run/postgresql", "PGUSER": "laplace_admin",
+                    "PGPORT": "5432", "PGDATABASE": "laplace"}
+        self.assertEqual(expected, OWNER.default_database_route(matching))
+        for key, value in {"PGHOST": "/elsewhere", "PGUSER": "other",
+                           "PGPORT": "55433", "PGDATABASE": "other",
+                           "LAPLACE_DB": "Host=elsewhere", "PGPASSWORD": "fixture-secret",
+                           "PGPASSFILE": "/fixture-passwords"}.items():
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "public default") as caught:
+                OWNER.default_database_route({**matching, key: value})
+            self.assertNotIn(value, str(caught.exception))
+
     def test_real_child_complete_protocol_requires_prepared_and_searched_providers(self):
         result = self.check(self.engine("prepared"))
         self.assertEqual("e2e4", result["bestmove"])

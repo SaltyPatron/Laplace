@@ -13,8 +13,8 @@ jobs:
       TMP: /build/laplace/work/cutechess-user-engine-controls/tmp
       TEMP: /build/laplace/work/cutechess-user-engine-controls/tmp
       PYTHONDONTWRITEBYTECODE: '1'
-      CANDIDATE_SHA: 0d7257b5dba979fde295bad6c32ec5b1e6995675
-      CANDIDATE_TREE: 4d4ac74de05cc72b6be2bdfba4aac785572ebd3c
+      CANDIDATE_SHA: cd7a3116eb3fe1ee72fc1dfa2482a030b81a5409
+      CANDIDATE_TREE: 4a05770465f5d19d8b2ac7c0e97542403f7a14e8
     steps:
       - name: Prepare permanent work and evidence directories
         run: |
@@ -24,7 +24,7 @@ jobs:
           mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/cutechess-user-engine-controls
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 0d7257b5dba979fde295bad6c32ec5b1e6995675
+          ref: cd7a3116eb3fe1ee72fc1dfa2482a030b81a5409
           fetch-depth: 1
           persist-credentials: false
       - name: Bind exact source in the permanent worktree

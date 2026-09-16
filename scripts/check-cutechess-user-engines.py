@@ -367,6 +367,21 @@ def enumeration(lines, entries, cwd):
             "official EngineManager did not enumerate the exact installed engine pair")
 
 
+def default_database_route(environment):
+    # ChessEngineService -> LaplaceDataSource -> LaplaceInstall supplies the
+    # explicit Unix host/user/database. Refuse conflicting libpq-style hints too;
+    # this observer is not a credentialed alternative-connection acceptance.
+    defaults = {"PGHOST": "/var/run/postgresql", "PGUSER": "laplace_admin",
+                "PGPORT": "5432", "PGDATABASE": "laplace"}
+    require(not environment.get("LAPLACE_DB", "").strip()
+            and all(environment.get(key, expected) in ("", expected)
+                    for key, expected in defaults.items())
+            and not environment.get("PGPASSWORD") and not environment.get("PGPASSFILE"),
+            "acceptance requires the public default local database route without credential overrides")
+    return {"host": defaults["PGHOST"], "port": 5432, "database": defaults["PGDATABASE"],
+            "role": defaults["PGUSER"], "source": "public UCI defaults; conflicting ambient hints refused"}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=Path, default=Path("/opt/laplace"))
@@ -383,10 +398,7 @@ def main(argv=None):
     operator = pwd.getpwnam(args.expected_user)
     require(operator.pw_uid == os.getuid() == os.geteuid() and os.geteuid() != 0,
             "run acceptance as the intended non-root mapped operator")
-    require(not os.environ.get("LAPLACE_DB", "").strip()
-            and os.environ.get("PGDATABASE", "laplace") in ("", "laplace")
-            and not os.environ.get("PGPASSWORD") and not os.environ.get("PGPASSFILE"),
-            "acceptance requires the public default local database route without credential overrides")
+    database_route = default_database_route(os.environ)
     for name in ("prefix", "gui_build_receipt", "cli_binary", "cli_build_receipt", "output_dir"):
         path = getattr(args, name)
         require(path.is_absolute(), "acceptance paths must be absolute")
@@ -399,8 +411,7 @@ def main(argv=None):
               "operator": args.expected_user, "scope": "installed-configuration-and-direct-uci",
               "gui_engine_game_proven": False, "operator_desktop_tested": False,
               "recorded_games_proven": False,
-              "database_route": {"host": "/var/run/postgresql", "database": "laplace",
-                                 "role": "laplace_admin", "source": "public UCI defaults"},
+              "database_route": database_route,
               "engines": []}
     started, lock = time.monotonic(), None
     old_environment = dict(os.environ)
