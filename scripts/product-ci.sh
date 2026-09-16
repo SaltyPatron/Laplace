@@ -5,11 +5,15 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  reconcile|check|build|install|database|applications|deploy|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|database|applications|deploy|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
-run_deps() {
+check_deps() {
+  bash scripts/ci-deps.sh --check-only
+}
+
+provision_deps() {
   bash scripts/ci-deps.sh
 }
 
@@ -66,6 +70,9 @@ reconcile_installed_product() {
 }
 
 case "$stage" in
+  provision)
+    provision_deps
+    ;;
   check)
     bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh scripts/test-parallel.sh
     ;;
@@ -73,7 +80,7 @@ case "$stage" in
     reconcile_installed_product
     ;;
   build)
-    run_deps
+    check_deps
     run_build
     ;;
   install)
@@ -95,7 +102,7 @@ case "$stage" in
     run_live_tests
     ;;
   deploy)
-    run_deps
+    check_deps
     run_build
     run_install
     run_database_maintenance
