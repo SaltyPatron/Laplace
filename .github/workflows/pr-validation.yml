@@ -1,9 +1,9 @@
-name: PR proof — proportional product evidence
+name: PR — build and test
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, closed]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -13,322 +13,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prove:
-    name: PR — targeted or full proof
-    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+  validate:
+    name: PR — build and test
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     env:
       LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
       LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
       LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+      PGHOST: /var/run/postgresql
+      PGPORT: 5432
+      PGUSER: laplace_admin
       PGDATABASE: laplace
+      LAPLACE_DATA_ROOT: /vault/Data
     steps:
-      - name: Prepare isolated pull-request worktree
+      - name: Checkout exact pull request revision
         env:
           TARGET_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          set -euo pipefail
-          worktree="$RUNNER_TEMP/laplace-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          git worktree prune
-          rm -rf "$worktree"
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA" "$BASE_SHA"
-          git worktree add --detach "$worktree" "$TARGET_SHA"
-          echo "LAPLACE_PR_WORKTREE=$worktree" >> "$GITHUB_ENV"
-          echo "LAPLACE_PR_BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
-          echo "LAPLACE_PR_TARGET_SHA=$TARGET_SHA" >> "$GITHUB_ENV"
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
 
-      - name: Classify proof scope
-        run: |
-          set -euo pipefail
-          cd "$LAPLACE_PR_WORKTREE"
-          full=0
-          while IFS= read -r path; do
-            [[ -z "$path" ]] && continue
-            case "$path" in
-              scripts/product-ci.sh|scripts/pr-proof.sh|scripts/pr-db-proof.sh|scripts/ci-session.py|scripts/test-profile-registry.py)
-                full=1
-                ;;
-              docs/*|.github/*|scripts/test-*|scripts/check-*|scripts/ci-*|scripts/actions-audit.py|scripts/test-profiles.json|scripts/benchmark-profiles.json|scripts/product-ci.sh)
-                ;;
-              *)
-                full=1
-                ;;
-            esac
-          done < <(git diff --name-only "$LAPLACE_PR_BASE_SHA" "$LAPLACE_PR_TARGET_SHA")
-          echo "LAPLACE_PR_FULL_PROOF=$full" >> "$GITHUB_ENV"
-          echo "PR proof classification: full=$full"
+      - uses: ./.github/actions/setup-laplace-env
 
-      - name: Retain existing proof receipts before full proof
-        id: baseline_diagnostic
-        if: env.LAPLACE_PR_FULL_PROOF == '1'
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          umask 0002
-          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr-baseline"
-          args=(
-            --checkout "$LAPLACE_PR_WORKTREE"
-            --checkout "$GITHUB_WORKSPACE"
-            --output "$evidence"
-            --expected-source "$LAPLACE_PR_TARGET_SHA"
-            --proof-outcome baseline-before-proof
-          )
-          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
-            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
-          fi
-          python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
-
-      - name: Upload retained baseline before full proof
-        if: always() && steps.baseline_diagnostic.outcome != 'skipped' && env.LAPLACE_PR_FULL_PROOF == '1'
-        continue-on-error: true
-        # actions/upload-artifact v4.6.2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-pr-baseline
-          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr-baseline/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Start ordered pull request phases
-        id: pr_session
-        run: |
-          set -euo pipefail
-          umask 0002
-          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
-          mkdir -p /build/laplace/work
-          cd "$LAPLACE_PR_WORKTREE"
-          stage=check
-          if [[ "$LAPLACE_PR_FULL_PROOF" == 1 ]]; then
-            stage=all
-            set +u
-            source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-            set -u
-            export LAPLACE_QUERY_DB="${LAPLACE_QUERY_DB:-${PGDATABASE:-laplace}}"
-            export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}"
-            export MSBUILDDISABLENODEREUSE=1 UseSharedCompilation=false
-            nproc_n="$(nproc 2>/dev/null || echo 1)"
-            export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$nproc_n}"
-            export CTEST_PARALLEL_LEVEL="${CTEST_PARALLEL_LEVEL:-$nproc_n}"
-            export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-          fi
-          directory="/build/laplace/work/ci-sessions/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr"
-          mkdir -p "$(dirname "$directory")"
-          echo "LAPLACE_PHASE_CHECKOUT=$LAPLACE_PR_WORKTREE" >> "$GITHUB_ENV"
-          echo "LAPLACE_CI_SESSION_DIRECTORY=$directory" >> "$GITHUB_ENV"
-          export LAPLACE_NATIVE_REGRESSION_EVIDENCE_DIRECTORY="/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr"
-          python3 scripts/ci-session.py start --directory "$directory" \
-            --lock /build/laplace/work/host-resource.lock --checkout "$LAPLACE_PR_WORKTREE" \
-            --kind pr --stage "$stage"
-
-      - name: Check source and publication contracts
-        id: pr_policy
-        if: contains(env.LAPLACE_CI_PHASES, '|policy|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase policy
-
-      - name: Retain native regression baseline before build
-        continue-on-error: true
-        id: pr_native_baseline
-        if: env.LAPLACE_PR_FULL_PROOF == '1'
-        run: |
-          python3 "$LAPLACE_PR_WORKTREE/scripts/capture-native-regression.py" --repo-root "$GITHUB_WORKSPACE" \
-            --build-root "$(readlink -f "$GITHUB_WORKSPACE/build")" \
-            --output-dir "/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr/baseline" \
-            --label retained-baseline --print-diffs
-
-      - name: Upload retained native baseline before build
-        continue-on-error: true
-        if: always() && steps.pr_native_baseline.outcome != 'skipped'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-native-baseline-${{ github.run_id }}-${{ github.run_attempt }}-pr
-          path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr/baseline/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Build exact pull request artifacts
-        id: pr_build
-        if: contains(env.LAPLACE_CI_PHASES, '|build|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase build
-
-      - name: Start isolated branch PostgreSQL
-        id: pr_private_db_start
-        if: contains(env.LAPLACE_CI_PHASES, '|private-db-start|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase private-db-start
-
-      - name: Test branch PostgreSQL extensions
-        id: pr_native_db
-        if: contains(env.LAPLACE_CI_PHASES, '|native-db|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-db
-
-      - name: Test authored operational memory and sessions
-        id: pr_operational_db
-        if: contains(env.LAPLACE_CI_PHASES, '|operational-db|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase operational-db
-
-      - name: Test private highway recovery
-        id: pr_highway_recovery
-        if: contains(env.LAPLACE_CI_PHASES, '|highway-recovery|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase highway-recovery
-
-      - name: Test private corpus repair transactions
-        id: pr_legacy_repair_db
-        if: contains(env.LAPLACE_CI_PHASES, '|legacy-repair-db|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase legacy-repair-db
-
-      - name: Stop isolated branch PostgreSQL
-        id: pr_private_db_stop
-        if: contains(env.LAPLACE_CI_PHASES, '|private-db-stop|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase private-db-stop
-
-      - name: Test native engine
-        id: pr_native_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|native-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-dev
-
-      - name: Test managed code
-        id: pr_managed_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|managed-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase managed-dev
-
-      - name: Test UCI runtime
-        id: pr_uci_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|uci-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase uci-dev
-
-      - name: Test browser product
-        id: pr_browser_dev
-        if: contains(env.LAPLACE_CI_PHASES, '|browser-dev|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase browser-dev
-
-      - name: Record completed pull request proof
-        id: pr_proof_complete
-        if: contains(env.LAPLACE_CI_PHASES, '|proof-complete|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase proof-complete
-
-      - name: Release pull request host reservation
-        if: always() && steps.pr_session.outcome == 'success'
-        run: python3 "$LAPLACE_PR_WORKTREE/scripts/ci-session.py" stop --directory "$LAPLACE_CI_SESSION_DIRECTORY"
-
-      - name: Upload lifecycle phase results
-        if: always() && steps.pr_session.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-phases-${{ github.run_id }}-${{ github.run_attempt }}-pr
-          path: |
-            ${{ env.LAPLACE_CI_SESSION_DIRECTORY }}/session.json
-            ${{ env.LAPLACE_CI_SESSION_DIRECTORY }}/supervisor.log
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Retain native regression results
-        if: always() && env.LAPLACE_PR_WORKTREE != ''
-        run: |
-          python3 "$LAPLACE_PR_WORKTREE/scripts/capture-native-regression.py" --repo-root "$LAPLACE_PR_WORKTREE" \
-            --build-root "$LAPLACE_PR_WORKTREE/build" \
-            --output-dir "/build/laplace/work/native-regression-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr/current" \
-            --label current --print-diffs
-
-      - name: Upload native regression diagnostics
-        if: always() && env.LAPLACE_PR_WORKTREE != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-native-regression-${{ github.run_id }}-${{ github.run_attempt }}-pr
-          path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr/
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Retain existing recursive proof receipts
-        if: always() && env.LAPLACE_PR_WORKTREE != ''
-        env:
-          PROOF_OUTCOME: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          evidence="/build/laplace/work/recursive-proof-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr"
-          args=(
-            --checkout "$LAPLACE_PR_WORKTREE"
-            --checkout "$GITHUB_WORKSPACE"
-            --output "$evidence"
-            --expected-source "$LAPLACE_PR_TARGET_SHA"
-            --proof-outcome "$PROOF_OUTCOME"
-          )
-          if [[ -n "${LAPLACE_BUILD_DIRECTORY:-}" ]]; then
-            args+=(--build-directory "$LAPLACE_BUILD_DIRECTORY")
-          fi
-          python3 "$LAPLACE_PR_WORKTREE/scripts/collect-recursive-proof-evidence.py" "${args[@]}"
-
-      - name: Upload retained recursive proof diagnostics
-        if: always() && env.LAPLACE_PR_WORKTREE != ''
-        # actions/upload-artifact v4.6.2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-recursive-proof-${{ github.run_id }}-${{ github.run_attempt }}-pr
-          path: /build/laplace/work/recursive-proof-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr/
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload legacy content repair transaction evidence
-        if: always() && env.LAPLACE_PR_WORKTREE != ''
-        # actions/upload-artifact v4.6.2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: laplace-legacy-content-repair-${{ github.run_id }}-${{ github.run_attempt }}-pr
-          path: ${{ env.LAPLACE_PR_WORKTREE }}/build/test-results/legacy-content-repair/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Read source exemplars when the operational diagnostic changes
-        if: always() && env.LAPLACE_PR_FULL_PROOF == '1' && env.LAPLACE_PR_WORKTREE != ''
-        run: |
-          set -euo pipefail
-          cd "$LAPLACE_PR_WORKTREE"
-          if git diff --quiet "$LAPLACE_PR_BASE_SHA" "$LAPLACE_PR_TARGET_SHA" -- scripts/read-operational-source.py; then
-            exit 0
-          fi
-          source scripts/lib/storage.sh
-          laplace_storage_init
-          evidence="/build/laplace/work/operational-source-evidence/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -p "$evidence"
-          echo "LAPLACE_OPERATIONAL_SOURCE_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          python3 scripts/test-operational-source-readback.py
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          export PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=laplace_admin
-          export LD_LIBRARY_PATH="$LAPLACE_INSTALL_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            python3 scripts/read-operational-source.py "$PGDATABASE" \
-              --core "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
-              --cue The --cue opposite --cue of --cue hot --cue is \
-              --operand hot --operand empty --operand cold \
-              --relation IS_ANTONYM_OF --relation HAS_NAME --relation IS_EXAMPLE_OF \
-              --relation CALLS --relation HAS_INPUT --relation IS_LEMMA_OF --relation HAS_NAME_ALIAS \
-              --receipt "$evidence/source-readback.json"
-
-      - name: Retain operational source evidence
-        if: always() && env.LAPLACE_OPERATIONAL_SOURCE_EVIDENCE != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: operational-source-readback-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.LAPLACE_OPERATIONAL_SOURCE_EVIDENCE }}
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Retain authored operational exemplar proof
-        if: always() && env.LAPLACE_PR_WORKTREE != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: operational-exemplar-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.LAPLACE_PR_WORKTREE }}/build/test-results/operational-exemplar/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Remove isolated pull-request worktree
-        if: always()
-        run: |
-          set +e
-          if [[ -n "${LAPLACE_PR_WORKTREE:-}" ]]; then
-            git worktree remove --force "$LAPLACE_PR_WORKTREE"
-          fi
-          git worktree prune
+      - name: Build and test the product
+        run: bash scripts/product-ci.sh test
