@@ -9,11 +9,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("postgresql_release", ROOT / "scripts/postgresql-release.py")
@@ -213,6 +215,120 @@ class PostgreSQLReleaseTests(unittest.TestCase):
                 self.assertEqual(2, len(log.read_text().splitlines()))
                 owner.verify_installed(self.prefix, self.selected)
                 self.assertTrue((build / ".laplace-deps.fingerprint").is_file())
+
+
+    def prepare_fixture(self):
+        project = self.root / "prepare-project"
+        (project / "scripts").mkdir(parents=True)
+        (project / "deploy").mkdir()
+        shutil.copy2(ROOT / "scripts/postgresql-release.py",
+                     project / "scripts/postgresql-release.py")
+        (project / "deploy/postgresql-release.json").write_text(json.dumps(self.selected))
+        log = self.root / "bootstrap-calls.jsonl"
+        # Only the privileged/bootstrap boundary is doubled. Source verification,
+        # pin selection, Git checkout, the deadline executable and caller run for real.
+        (project / "scripts/bootstrap-laplace-runner.sh").write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            "[[ $# == 1 && $1 == prefix ]]\n"
+            + "test \"$LAPLACE_EXTERNAL\" = " + shlex.quote(str(self.external)) + "\n"
+            + "printf '%s\\n' prefix >> " + shlex.quote(str(log)) + "\n"
+            + "case \"$" + "{PG_PREPARE_FIXTURE_MODE:-update}\" in\n"
+            + " fail) echo 'fixture bootstrap refused' >&2; exit 7 ;;\n"
+            + " unchanged) exit 0 ;;\n"
+            + "esac\n"
+            + "python3 " + shlex.quote(str(project / "scripts/postgresql-release.py"))
+            + " select-pin --external \"$LAPLACE_EXTERNAL\"\n"
+            + "git -C \"$LAPLACE_EXTERNAL/postgresql\" checkout --quiet --detach "
+            + self.selected["commit"] + "\n")
+        doubles = self.root / "prepare-tools"
+        doubles.mkdir()
+        sudo = doubles / "sudo"
+        sudo.write_text(
+            "#!" + sys.executable + "\n"
+            "import os,sys\n"
+            "assert sys.argv[1:3] == ['-n', '--'], sys.argv\n"
+            "assert sys.argv[3:7] == ['timeout', '--signal=TERM', '--kill-after=10s', '600s'], sys.argv\n"
+            "os.execvp(sys.argv[3], sys.argv[3:])\n")
+        sudo.chmod(0o755)
+        environment = dict(os.environ, PATH=str(doubles) + os.pathsep + os.environ["PATH"],
+                           LAPLACE_EXTERNAL=str(self.external), PYTHONDONTWRITEBYTECODE="1")
+        command = [sys.executable, "-B", str(project / "scripts/postgresql-release.py")]
+        return project, log, environment, command
+
+    def test_prepare_current_source_does_not_invoke_privileged_owner(self):
+        _, log, env, command = self.prepare_fixture()
+        env["PG_PREPARE_FIXTURE_MODE"] = "fail"
+        before = (self.pins.read_bytes(), self.pins.stat().st_ino, self.git("rev-parse", "HEAD"))
+        result = subprocess.run(command + ["prepare-source", "--external", str(self.external)],
+                                env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("already-current", json.loads(result.stdout)["source_preparation"])
+        self.assertFalse(log.exists())
+        self.assertEqual(before, (self.pins.read_bytes(), self.pins.stat().st_ino,
+                                  self.git("rev-parse", "HEAD")))
+
+    def test_prepare_converges_stale_pin_and_head_then_becomes_read_only(self):
+        _, log, env, command = self.prepare_fixture()
+        (self.source / "configure.ac").write_text(
+            "AC_INIT([PostgreSQL], [18.3], [pgsql-bugs@lists.postgresql.org])\n")
+        self.git("add", "configure.ac")
+        self.git("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+                 "commit", "--quiet", "-m", "old generation")
+        self.pins.write_bytes(self.pins.read_bytes().replace(
+            self.selected["commit"].encode(), self.git("rev-parse", "HEAD").strip().encode()))
+        stale = (self.pins.read_bytes(), self.git("rev-parse", "HEAD"))
+        check = subprocess.run(command + ["source", "--external", str(self.external)],
+                               env=env, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(0, check.returncode)
+        self.assertFalse(log.exists())
+        self.assertEqual(stale, (self.pins.read_bytes(), self.git("rev-parse", "HEAD")))
+        result = subprocess.run(command + ["prepare-source", "--external", str(self.external)],
+                                env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        proof = json.loads(result.stdout.splitlines()[-1])
+        self.assertEqual("bootstrap-prefix", proof["source_preparation"])
+        self.assertEqual(self.selected["commit"], proof["source_commit"])
+        self.assertTrue(proof["tracked_source_clean"])
+        self.assertEqual(["prefix"], log.read_text().splitlines())
+        self.assertEqual(stale[0].splitlines()[:2], self.pins.read_bytes().splitlines()[:2])
+        owner.verify_source(self.external, self.selected)
+        repeat = subprocess.run(command + ["prepare-source", "--external", str(self.external)],
+                                env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, repeat.returncode, repeat.stdout + repeat.stderr)
+        self.assertEqual("already-current", json.loads(repeat.stdout)["source_preparation"])
+        self.assertEqual(["prefix"], log.read_text().splitlines())
+
+    def test_prepare_refuses_failed_or_ineffective_bootstrap_without_retry(self):
+        _, log, env, command = self.prepare_fixture()
+        self.pins.write_bytes(self.pins.read_bytes().replace(
+            self.selected["commit"].encode(), b"0" * 40))
+        stale = (self.pins.read_bytes(), self.git("rev-parse", "HEAD"))
+        for mode in ("fail", "unchanged"):
+            with self.subTest(mode=mode):
+                log.unlink(missing_ok=True)
+                env["PG_PREPARE_FIXTURE_MODE"] = mode
+                result = subprocess.run(command + ["prepare-source", "--external", str(self.external)],
+                                        env=env, capture_output=True, text=True, timeout=15)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(["prefix"], log.read_text().splitlines())
+                self.assertEqual(stale, (self.pins.read_bytes(), self.git("rev-parse", "HEAD")))
+                self.assertIn("PostgreSQL selection failed", result.stderr)
+                if mode == "fail":
+                    self.assertIn("fixture bootstrap refused", result.stderr)
+                else:
+                    self.assertIn("PINS.tsv", result.stderr)
+
+    def test_prepare_nonroot_invokes_bounded_noninteractive_privileged_owner(self):
+        project, log, env, _ = self.prepare_fixture()
+        self.pins.write_bytes(self.pins.read_bytes().replace(
+            self.selected["commit"].encode(), b"0" * 40))
+        with mock.patch.object(owner, "ROOT", project), \
+                mock.patch.object(owner.os, "geteuid", return_value=12345), \
+                mock.patch.dict(os.environ, env, clear=True):
+            result = owner.prepare_source(self.external, self.selected)
+        self.assertEqual("bootstrap-prefix", result["source_preparation"])
+        self.assertEqual(["prefix"], log.read_text().splitlines())
+        owner.verify_source(self.external, self.selected)
 
     def test_changed_shell_owners_parse(self):
         for name in ("bootstrap-laplace-runner.sh", "build-system-deps.sh", "ci-deps.sh"):

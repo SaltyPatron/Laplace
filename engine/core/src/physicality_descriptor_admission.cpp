@@ -577,19 +577,28 @@ physicality_descriptor_status_t materialize(
     hash128_t relation;
     require(laplace_relation_resolve("HAS_PHYSICALITY", &relation) == 0);
     IdMap<size_t> observation_index(&memory);
+    hash128_t context_id{};
     for (size_t i = 0; i < original_count; ++i) {
         checkpoint();
         /* A source-unit receipt is a typed identifier, not automatically an E.
          * Its ordinary context binds the registered source id and exact unit
          * receipt bytes while the attestation retains the real source owner. */
-        const auto source_identifier = identifier(vocabulary.source_schema.id, sources[i].source_id);
-        const auto unit_identifier = identifier(vocabulary.unit_schema.id, sources[i].source_unit_id);
-        const std::array<hash128_t,3> context_fields{vocabulary.context_schema.id,
-            source_identifier.id, unit_identifier.id};
-        const auto context = compose(context_fields.data(), context_fields.size(), nullptr, SIZE_MAX);
+        // The context recipe depends only on these exact identifiers. Reuse
+        // the immediately preceding result while that pair is unchanged;
+        // alternating source/unit rows still take the ordinary compose path.
+        // Trust, timestamp and descriptor remain per-observation inputs below.
+        if (i == 0u ||
+            !hash128_equals(&sources[i].source_id, &sources[i - 1u].source_id) ||
+            !hash128_equals(&sources[i].source_unit_id, &sources[i - 1u].source_unit_id)) {
+            const auto source_identifier = identifier(vocabulary.source_schema.id, sources[i].source_id);
+            const auto unit_identifier = identifier(vocabulary.unit_schema.id, sources[i].source_unit_id);
+            const std::array<hash128_t,3> context_fields{vocabulary.context_schema.id,
+                source_identifier.id, unit_identifier.id};
+            context_id = compose(context_fields.data(), context_fields.size(), nullptr, SIZE_MAX).id;
+        }
         laplace_attestation_staged_t observation{};
         require(laplace_attestation_resolved_build(&inputs[i].entity_id, &relation,
-            &descriptors[i], 0, &sources[i].source_id, &context.id, 0,
+            &descriptors[i], 0, &sources[i].source_id, &context_id, 0,
             sources[i].source_trust, 1, 1, observations[i].observed_at_unix_us, &observation) == 0);
         observation.last_observed_at_unix_us = observations[i].observed_at_unix_us;
         /* The ordinary writer's source-unit journal owns replay exclusion.

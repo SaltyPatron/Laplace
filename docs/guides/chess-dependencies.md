@@ -160,43 +160,54 @@ engine play, or visual board correctness. The receipt and process logs are
 retained on failure as well as success. Temporary settings, Xauthority and display
 processes belong to this invocation and are removed when it finishes.
 
-## Measured hart-server configuration (2026-09-15)
+## Measured hart-server configuration (2026-09-16)
 
-[Candidate calibration run 34958542147](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/34958542147)
-completed on the actual Intel Core i7-6850K host: six physical cores, twelve logical
-CPUs, affinity 0–11 and one NUMA node. The accepted observation ran from
-10:51:49.006804 to 10:55:57.770316 UTC (248.764 seconds). Its memory grant was
-7,040 MiB including a 512 MiB margin; peak sampled RSS was 6,154.48 MiB. Binary
-identities and the observed resource envelope remained stable.
+[Candidate calibration run 35115292050](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35115292050)
+completed on hart-server, the Intel Core i7-6850K machine with six physical cores
+and twelve logical CPUs. The retained measurement distinguishes a fixed-depth
+engine search from complete legal game generation.
 
-| Workload | Best measured starting setting | Median result |
+| Workload | Provisional best measured setting | Median result |
 | --- | --- | --- |
-| One Stockfish process, 51-position depth-12 suite | Threads=4, Hash=64 MiB | 2.186 seconds |
-| Stockfish self-play, capped 24-ply launch diagnostic | Concurrency=4; each engine Threads=1, Hash=16 MiB; ponder off | 11.518 games/second |
-| Same capped Stockfish diagnostic, next concurrency point | Concurrency=6; same engine settings | 11.297 games/second |
+| Stockfish upstream 51-position depth-12 suite | Threads=6; Hash=64 MiB | 3,342,731 wall-clock nodes/second; 2.265050 seconds |
+| CuteChess complete Stockfish self-play, depth 8, time control 60 | Concurrency=8; each engine Threads=1 and Hash=16 MiB; ponder off | 5.006408 completed games/second; 780.999642 plies/second |
 
-The full grid tested Stockfish Threads=1,2,4,6,8,12 with Hash=16,64,256 MiB, and
-CuteChess concurrency=1,2,4,6,8,12. Each profile has one warmup and three measured
-samples: 96 timed processes, 24 PGNs, and 384 games including warmups. Every game
-ended at the imposed 24-ply limit. These generated samples were not complete
-recorded games and establish no Laplace recording rate. All transcript/PGN hashes and the medians were
-independently checked. The single-process winner's measured range was
-2.128–2.511 seconds. CuteChess concurrency four led six by about 1.96%, with
-overlapping ranges. Repeat calibration for a different machine, CPU reservation,
-search budget, opening suite, tablebase configuration or executable.
+The engine sweep tested Threads=1,2,4,6,8,12 with Hash=16,64,256 MiB.
+The game sweep tested concurrency=1,2,4,6,8,12. Each configuration had one
+excluded warmup and three measured samples. Each tournament sample contained
+16 games from the standard starting position, with both color assignments.
+There was no maximum-move limit or adjudication. The independent legal PGN
+replay and final board outcome checks were required for completion.
 
-These settings describe two different measured workloads. Do not turn the
-single-process four-thread result into four threads for every concurrent game,
-or treat the CuteChess result as a measured Laplace evaluation-worker count.
-The captured fresh Stockfish defaults were Threads=1, Hash=16 MiB and
-NumaPolicy=auto. This candidate receipt does not establish the deployed services'
-configuration. It also does not establish Laplace playing strength or Elo.
+At concurrency eight, the three measured samples completed all 48 games and
+7,488 plies in 9.607963 seconds total, with zero capped diagnostic games.
+The sample game rates ranged from 4.974519 to 5.006779 games/second. The median
+sample took 3.195904 seconds; sampled peak RSS for that configuration was
+3,971,186,688 bytes. These are complete depth-eight generated games, not a
+depth-free playing-strength experiment.
 
-Retained evidence is the `candidate-chess-dependencies-34958542147-1` artifact,
-ID `10392833423`, ZIP SHA-256
-`15b902f010a6a4a9d1d0f5dd65e562ca91a4293af8337a34a879a69aef3afb62`.
-The earlier candidate attempt failed its final memory-headroom check and remains
-failed; only this completed attempt supports these provisional settings.
+The selected fixed-depth engine configuration had a median 7,571,451 searched
+nodes and 479,608,832 bytes sampled peak RSS. Thread and hash changes can change
+the search workload, so the recorded wall-clock NPS selection and elapsed times
+do not establish identical-work parallel speedup. The single-engine setting
+also does not prescribe six threads for every concurrent game.
+
+Database recording was not part of this experiment: its recorded-game count
+and recorded games/second are explicitly null. These results do not establish
+Laplace admission throughput, corpus deduplication, playing strength, or a
+2,500-recorded-games/second result. Actual installed service settings require
+their own configuration readback.
+
+Retained transcripts, complete PGNs, source/binary identities and measurement
+receipts are in
+[artifact candidate-chess-dependencies-35115292050-1](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35115292050/artifacts/10454324046),
+ID `10454324046`, 8,061,662 bytes; ZIP SHA-256
+`96cd386325b57afab3a62780e77dd71e1f008f8517ebc6fcc5244b1666289a5d`.
+
+The earlier
+[2026-09-15 run 34958542147](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/34958542147)
+ended every game at a 24-ply limit. Its game rates remain historical launch
+diagnostics and are superseded here for complete-game configuration.
 
 ## Official Stockfish source as a Laplace corpus
 
