@@ -1,4 +1,6 @@
-import { Button, Muted } from '@ui';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Button, ErrorText, Muted } from '@ui';
 import { apiPost } from '../api/client';
 import type { AuthProvider, AuthUser } from '../store';
 import styles from './AccountControls.module.css';
@@ -10,24 +12,27 @@ export interface AccountControlsProps {
 }
 
 export function AccountControls({ user, providers, returnUrl }: AccountControlsProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   if (user) {
     const label = user.displayName || user.email || 'Signed in';
     return (
       <div className={styles.account}>
         <div className={styles.identity}>
-          <span>{label}</span>
+          <Link to="/settings">{label}</Link>
           <Muted>{user.provider} · {user.tenantId}</Muted>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={async () => {
+        <Button variant="ghost" size="sm" disabled={busy} onClick={async () => {
+          setBusy(true); setError('');
+          try {
             await apiPost('/v1/auth/logout', {});
             window.location.assign('/');
-          }}
-        >
-          Sign out
-        </Button>
+          } catch (failure) {
+            setError(failure instanceof Error ? failure.message : 'Sign out failed.');
+            setBusy(false);
+          }
+        }}>Sign out</Button>
+        {error && <ErrorText>{error}</ErrorText>}
       </div>
     );
   }
