@@ -1,0 +1,96 @@
+name: Inspect exact Original chess source inventory
+
+on:
+  push:
+    branches: ['diag/read-original-chess-inventory-*']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  operation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect exact Original chess source inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, io, json, os, re, urllib.error, urllib.request, zipfile
+          EXPECTED_SHA = "dc5c630a8ddca17466018f6485d444d5679af2c8"
+          INVENTORY_RUN_ID = 35078646503
+          ARTIFACT_ID = 10439777022
+          EXPECTED_ZIP_BYTES = 3555
+          EXPECTED_ZIP_SHA256 = "8c87c46f45844c74dc3ad54aca3c17f196962f4ac4153f1ac87ff15766e36223"
+          REPOSITORY = "SaltyPatron/Laplace"
+          if not re.fullmatch(r"[0-9a-f]{40}", EXPECTED_SHA) or not re.fullmatch(r"[0-9a-f]{64}", EXPECTED_ZIP_SHA256):
+              raise ValueError("exact observed source and artifact identities must be supplied")
+          if min(INVENTORY_RUN_ID, ARTIFACT_ID, EXPECTED_ZIP_BYTES) <= 0 or EXPECTED_ZIP_BYTES > 64 * 1024 * 1024:
+              raise ValueError("invalid bounded artifact identity")
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2026-03-10"}
+          base = "https://api.github.com/repos/" + REPOSITORY
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
+                  raw = response.read(2 * 1024 * 1024 + 1)
+              if len(raw) > 2 * 1024 * 1024:
+                  raise ValueError("API metadata exceeded the bounded envelope")
+              return json.loads(raw)
+          run = api("/actions/runs/" + str(INVENTORY_RUN_ID))
+          if (run["head_sha"] != EXPECTED_SHA or run["status"] != "completed" or run["conclusion"] != "success"
+                  or run["path"] != ".github/workflows/chess-corpus-evidence.yml"):
+              raise ValueError("inventory run does not match the exact completed source proof")
+          artifact = api("/actions/artifacts/" + str(ARTIFACT_ID))
+          if (artifact.get("expired") or artifact["workflow_run"]["id"] != INVENTORY_RUN_ID
+                  or artifact["workflow_run"]["head_sha"] != EXPECTED_SHA
+                  or artifact["name"] != "laplace-chess-corpus-" + str(INVENTORY_RUN_ID) + "-" + str(run["run_attempt"])
+                  or artifact["size_in_bytes"] != EXPECTED_ZIP_BYTES
+                  or artifact.get("digest") != "sha256:" + EXPECTED_ZIP_SHA256):
+              raise ValueError("artifact metadata differs from the observed inventory artifact")
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, response_headers, new_url):
+                  return None
+          try:
+              urllib.request.build_opener(NoRedirect).open(
+                  urllib.request.Request(base + "/actions/artifacts/" + str(ARTIFACT_ID) + "/zip", headers=headers), timeout=30)
+              raise ValueError("artifact download did not supply the expected authenticated redirect")
+          except urllib.error.HTTPError as redirect:
+              if redirect.code != 302:
+                  raise
+              location = redirect.headers["Location"]
+          if not location.startswith("https://"):
+              raise ValueError("artifact download redirect is not HTTPS")
+          # The presigned URL is used without the GitHub bearer header.
+          with urllib.request.urlopen(location, timeout=60) as response:
+              raw = response.read(EXPECTED_ZIP_BYTES + 1)
+          if len(raw) != EXPECTED_ZIP_BYTES or hashlib.sha256(raw).hexdigest() != EXPECTED_ZIP_SHA256:
+              raise ValueError("downloaded ZIP bytes differ from the observed artifact")
+          with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+              entries = archive.infolist()
+              if len(entries) > 128 or sum(entry.file_size for entry in entries) > 32 * 1024 * 1024:
+                  raise ValueError("inventory archive exceeded its uncompressed envelope")
+              def document(suffix):
+                  candidates = [entry for entry in entries if entry.filename == suffix or entry.filename.endswith("/" + suffix)]
+                  if len(candidates) != 1 or candidates[0].file_size > 8 * 1024 * 1024:
+                      raise ValueError("inventory document is absent, ambiguous or oversized")
+                  return json.loads(archive.read(candidates[0]))
+              receipt = document("corpus/receipt.json")
+              observed = document("corpus/source-inventory.json")
+          if (receipt.get("schema") != "laplace.installed-native-corpus-measurement/v1"
+                  or receipt.get("sourceSha") != EXPECTED_SHA or receipt.get("status") != "observed"
+                  or receipt.get("mode") != "inventory" or observed.get("complete") is not True):
+              raise ValueError("retained inventory receipt is incomplete or bound to another source")
+          rows = observed.get("files")
+          if not isinstance(rows, list) or len(rows) > 4096 or receipt.get("inventory", {}).get("files") != len(rows):
+              raise ValueError("inventory file count does not reconcile")
+          public = {"sourceSha": EXPECTED_SHA, "runId": INVENTORY_RUN_ID, "artifactId": ARTIFACT_ID,
+                    "zipBytes": len(raw), "zipSha256": EXPECTED_ZIP_SHA256, "root": observed.get("root"),
+                    "scope": observed.get("scope"), "complete": True, "missingDirectories": observed.get("missingDirectories"),
+                    "files": [{key: row.get(key) for key in ("path", "family", "bytes", "mtimeNs", "regularFile", "resolvedPath", "eligiblePlainPgn")}
+                              for row in rows]}
+          print("OBSERVED_CHESS_SOURCE_INVENTORY " + json.dumps(public, allow_nan=False), flush=True)
+          PY
