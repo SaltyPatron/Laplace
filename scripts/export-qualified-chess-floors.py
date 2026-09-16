@@ -29,9 +29,10 @@ NATIVE_PREFIX = Path("/opt/laplace")
 NATIVE_WORKFLOW = ".github/workflows/chess-floor-serving-controls.yml"
 NATIVE_PHASES = [
     "pg-pin", "pg-checkout", "pg-source", "dependency-build",
-    "dependency-identity", "native-managed-build", "isolated-native-database",
-    "native-tests", "managed-tests", "uci-tests", "quiet-native-owner",
-    "native-install", "extension-sql", "database-health", "postgres-activation",
+    "dependency-identity", "native-managed-build", "native-tests",
+    "managed-tests", "uci-tests", "quiet-native-owner", "native-install",
+    "extension-sql", "installed-native-database", "database-health",
+    "postgres-activation",
 ]
 
 
@@ -221,6 +222,10 @@ def native_qualification(plan, root):
         raise ValueError("native installation phase sequence is incomplete or reordered")
     if paths["completed-phases.txt"].read_text().splitlines() != phases:
         raise ValueError("native installation phase journal differs from the receipt")
+    regression_stem = "laplace_pr_" + str(run_id) + "_" + str(attempt)
+    if (state.get("executionRoute") != "direct-installed-regression"
+            or state.get("regressionDatabaseStem") != regression_stem):
+        raise ValueError("native installation regression route or reserved database names differ")
     contract = load(root / "deploy/postgresql-release.json", 65536)
     if contract.get("version") != "18.6" or contract.get("major") != 18:
         raise ValueError("native installation operator requires the selected PostgreSQL18.6 source")
@@ -261,6 +266,8 @@ def native_qualification(plan, root):
         "full_lifecycle_passed": False, "managed_publication": "not_attempted",
         "database_recreation": False, "foundation_ingestion": False,
         "lexical_failure": None, "native_install_status": "completed",
+        "execution_route": state["executionRoute"],
+        "regression_database_stem": regression_stem,
         "phases": [{"phase": phase, "exit_code": 0} for phase in phases],
         "native_build": str(build), "lifecycle_checkout": str(checkout),
         "native_fingerprint": fingerprint,
@@ -420,7 +427,8 @@ def execute(plan, root, prefix, pg, output):
             if git(root, "status", "--porcelain", "--untracked-files=all"):
                 raise ValueError("candidate worktree has local changes")
             command("lifecycle-controls", [sys.executable,
-                    Path(__file__).with_name("test-qualified-chess-floor-export.py"), "-v"],
+                    root / "scripts/test-qualified-chess-floor-export.py",
+                    "--driver-path", Path(__file__).resolve(strict=True), "-v"],
                     60, dict(os.environ))
             proof["lifecycle_controls"] = "passed"
             build, proof["qualification"] = qualification(plan, root)

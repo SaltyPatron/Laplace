@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real filesystem/process publication controls; no corpus or native chess claim."""
+import argparse
 import importlib.util
 import copy
 import hashlib
@@ -27,7 +28,18 @@ def module(name, filename):
     return value
 
 
-driver = module("qualified_floor_export", "export-qualified-chess-floors.py")
+transport = argparse.ArgumentParser(add_help=False)
+transport.add_argument("--driver-path", type=Path)
+selected, remaining = transport.parse_known_args()
+sys.argv[1:] = remaining
+if selected.driver_path is None:
+    driver = module("qualified_floor_export", "export-qualified-chess-floors.py")
+else:
+    spec = importlib.util.spec_from_file_location(
+        "qualified_floor_export", selected.driver_path.resolve(strict=True))
+    driver = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = driver
+    spec.loader.exec_module(driver)
 runtime = module("export_process_owner", "accept-chess-environment.py")
 fixtures = module("export_artifact_fixtures", "test-chess-floor-artifacts.py")
 artifact = fixtures.owner
@@ -236,13 +248,27 @@ class RetainedBuildTests(unittest.TestCase):
         tracked.write_text("selected source\n")
         git_command("add", "selected.txt")
         git_command("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
-                    "commit", "-q", "-m", "source fixture")
+                    "commit", "-q", "-m", "candidate source fixture")
         plan = {**self.plan, "candidate_commit": git_command("rev-parse", "HEAD"),
                 "candidate_tree": git_command("rev-parse", "HEAD^{tree}"),
                 "proof_kind": "native-only-install", "native_checkout": str(self.checkout)}
         plan["installed_source"] = plan["candidate_commit"]
-        selected = self.root / "selection.json"
-        selected.write_text(json.dumps(plan))
+        # The operator is another commit in this SAME repository; execution must
+        # materialize its two files without checking it out over the candidate.
+        operator_driver = self.checkout / "scripts/export-qualified-chess-floors.py"
+        operator_driver.parent.mkdir()
+        driver_bytes = Path(driver.__file__).read_bytes()
+        operator_driver.write_bytes(driver_bytes)
+        operator_selection = self.checkout / ".github/chess-floor-export-selection.json"
+        operator_selection.parent.mkdir()
+        selection_bytes = (json.dumps(plan) + "\n").encode()
+        operator_selection.write_bytes(selection_bytes)
+        git_command("add", "scripts", ".github")
+        git_command("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+                    "commit", "-q", "-m", "operator fixture")
+        target = git_command("rev-parse", "HEAD")
+        git_command("checkout", "--detach", plan["candidate_commit"])
+        self.assertNotEqual(target, git_command("rev-parse", "HEAD"))
         workflow = (ROOT / ".github/workflows/chess-floor-export.yml").read_text()
         match = re.search(r'<< "PY_SOURCE"\n(.*?)\n          PY_SOURCE', workflow, re.DOTALL)
         self.assertIsNotNone(match)
@@ -250,12 +276,30 @@ class RetainedBuildTests(unittest.TestCase):
         before = (git_command("rev-parse", "HEAD"), git_command("worktree", "list", "--porcelain"),
                   git_command("show-ref", "--head"), tracked.read_bytes(),
                   os.readlink(self.checkout / "build"))
-        command = [sys.executable, "-", str(selected),
-                   str(ROOT / "scripts/export-qualified-chess-floors.py")]
+        materialized = self.root / "retained-operator"
+        command = [sys.executable, "-", target, str(materialized)]
         result = subprocess.run(command, input=program, text=True, capture_output=True,
-                                timeout=10, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                                cwd=self.checkout, timeout=10,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(str(self.checkout), result.stdout.strip())
+        self.assertEqual(driver_bytes, (materialized / operator_driver.name).read_bytes())
+        self.assertEqual(selection_bytes, (materialized / "selection.json").read_bytes())
+        self.assertFalse(operator_driver.exists())
+        self.assertFalse(operator_selection.exists())
+        controls = [sys.executable, str(Path(__file__).resolve()), "--driver-path",
+                    str(materialized / operator_driver.name),
+                    "RetainedBuildTests.test_selection_rejects_mutable_incomplete_and_different_installed_sources"]
+        checked = subprocess.run(controls, text=True, capture_output=True, timeout=10,
+                                 env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        self.assertEqual(0, checked.returncode, checked.stderr)
+        staged_driver = materialized / operator_driver.name
+        staged_driver.write_bytes(b"raise RuntimeError('staged-driver-refusal')\n" + driver_bytes)
+        refused_driver = subprocess.run(controls, text=True, capture_output=True, timeout=10,
+                                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        self.assertNotEqual(0, refused_driver.returncode)
+        self.assertIn("staged-driver-refusal", refused_driver.stderr)
+        staged_driver.write_bytes(driver_bytes)
         self.assertEqual(before, (git_command("rev-parse", "HEAD"),
                                  git_command("worktree", "list", "--porcelain"),
                                  git_command("show-ref", "--head"), tracked.read_bytes(),
@@ -273,10 +317,12 @@ class RetainedBuildTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             driver.candidate_checkout({**plan, "native_checkout": str(alias)})
         tracked.write_text("uncommitted change\n")
-        selected.write_text(json.dumps(plan))
+        command[-1] = str(self.root / "refused-operator")
         refused = subprocess.run(command, input=program, text=True, capture_output=True,
-                                 timeout=10, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                                 cwd=self.checkout, timeout=10,
+                                 env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         self.assertNotEqual(0, refused.returncode)
+        self.assertIn("current checkout differs", refused.stderr)
         self.assertEqual("uncommitted change\n", tracked.read_text())
         self.assertEqual(before[:3], (git_command("rev-parse", "HEAD"),
                                      git_command("worktree", "list", "--porcelain"),
@@ -374,7 +420,9 @@ class NativeQualificationTests(unittest.TestCase):
                   "runId": "123", "attempt": "1", "managedPublication": "not_attempted",
                   "fullLifecyclePassed": False, "databaseRecreation": False, "foundationIngestion": False}
         self.state = {**common, "status": "completed", "completedPhases": list(driver.NATIVE_PHASES),
-                      "identities": self.identities, "serverVersionNum": 180006}
+                      "identities": self.identities, "serverVersionNum": 180006,
+                      "executionRoute": "direct-installed-regression",
+                      "regressionDatabaseStem": "laplace_pr_123_1"}
         self.selection = {**common, "status": "running", "operatorSource": self.plan["proof_operator_commit"],
                           "uid": os.getuid(), "postgresqlSelection": driver.load(
                               ROOT / "deploy/postgresql-release.json")}
@@ -448,6 +496,8 @@ class NativeQualificationTests(unittest.TestCase):
                 self.assertFalse(receipt["database_recreation"])
                 self.assertFalse(receipt["foundation_ingestion"])
                 self.assertEqual(180006, receipt["server_version_num"])
+                self.assertEqual("direct-installed-regression", receipt["execution_route"])
+                self.assertEqual("laplace_pr_123_1", receipt["regression_database_stem"])
                 self.assertEqual(self.identities, receipt["installed_identities"])
                 self.assertEqual("a" * 64, receipt["native_fingerprint"])
                 self.assertNotIn("session_receipt", receipt)
@@ -482,7 +532,13 @@ class NativeQualificationTests(unittest.TestCase):
                     {"source": "6" * 40}, {"tree": "6" * 40}, {"attempt": "2"},
                     {"status": "running"}, {"serverVersionNum": 180003},
                     {"managedPublication": "completed"}, {"fullLifecyclePassed": True},
-                    {"databaseRecreation": True}, {"foundationIngestion": True}]
+                    {"databaseRecreation": True}, {"foundationIngestion": True},
+                    {"executionRoute": None}, {"executionRoute": "private-postmaster"},
+                    {"regressionDatabaseStem": "laplace"},
+                    {"regressionDatabaseStem": "laplace_pr_124_1"},
+                    {"completedPhases": driver.NATIVE_PHASES[:6] + ["isolated-native-database"]
+                     + [phase for phase in driver.NATIVE_PHASES[6:]
+                        if phase != "installed-native-database"]}]
         for change in changes:
             with self.subTest(change=change):
                 self.state = {**original, **change}
