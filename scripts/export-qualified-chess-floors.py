@@ -78,74 +78,6 @@ def selection_identity(plan):
     return {"commit": values[0], "tree": values[1]}
 
 
-def lexical_failure_evidence(run_id, attempt, expected, state):
-    """Authenticate the one supported failed lifecycle without changing its status."""
-    prerequisites = ["policy", "dependencies", "build", "native-dev", "managed-dev",
-                     "uci-dev", "browser-dev", "native-install", "database-maintenance"]
-    failed_phase = "lexical-foundation"
-    if expected.count(failed_phase) != 1:
-        raise ValueError("canonical product phase list has no unique lexical boundary")
-    boundary = expected.index(failed_phase)
-    results = state.get("results")
-    if (expected[:boundary] != prerequisites or state.get("status") != "failed"
-            or state.get("next") != boundary + 1 or not isinstance(results, list)
-            or len(results) != boundary + 1
-            or results[:-1] != [{"phase": p, "exit_code": 0} for p in prerequisites]
-            or not isinstance(results[-1], dict) or set(results[-1]) != {"phase", "exit_code"}
-            or results[-1]["phase"] != failed_phase
-            or type(results[-1]["exit_code"]) is not int or results[-1]["exit_code"] <= 0):
-        raise ValueError("retained canonical product phases do not establish lexical-only failure")
-
-    jobs = run_json(run_id, "/attempts/" + str(attempt) + "/jobs?per_page=100")
-    rows = jobs.get("jobs") if isinstance(jobs, dict) else None
-    if (not isinstance(rows, list) or jobs.get("total_count") != 1 or len(rows) != 1
-            or not isinstance(rows[0], dict)):
-        raise ValueError("failed exact-main lifecycle job is absent or ambiguous")
-    job = rows[0]
-    if (type(job.get("id")) is not int or job["id"] <= 0 or job.get("run_id") != run_id
-            or job.get("head_sha") != state["source"]["commit"]
-            or job.get("status") != "completed" or job.get("conclusion") != "failure"):
-        raise ValueError("failed exact-main lifecycle job identity differs")
-    steps = job.get("steps")
-    if (not isinstance(steps, list) or any(not isinstance(step, dict)
-            or not all(isinstance(step.get(key), str) for key in ("name", "status", "conclusion"))
-            for step in steps)):
-        raise ValueError("failed exact-main lifecycle steps are incomplete")
-    installed = (
-        "Resolve the Stockfish checkout for application publication", "Reserve host for product phases",
-        "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
-        "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
-        "Install native artifacts", "Migrate and reconcile installed database",
-    )
-    downstream = (
-        "Admit operational memory", "Publish applications",
-        "Verify the installed direct build uses the selected Stockfish checkout",
-        "Verify ordinary operational execution", "Verify database health",
-        "Test native PostgreSQL extensions", "Test managed database integration",
-        "Prove live recursive substrate", "Verify live API endpoints", "Test live product behavior",
-        "Evaluate witnessed generation",
-    )
-    sequence = [(name, "success") for name in installed]
-    sequence += [("Admit required lexical foundation", "failure")]
-    sequence += [(name, "skipped") for name in downstream]
-    sequence += [("Release product host reservation", "success")]
-    observed = []
-    for name, conclusion in sequence:
-        matches = [(index, step) for index, step in enumerate(steps) if step["name"] == name]
-        if (len(matches) != 1 or matches[0][1]["status"] != "completed"
-                or matches[0][1]["conclusion"] != conclusion):
-            raise ValueError("failed exact-main lifecycle lacks required phase outcome: " + name)
-        observed.append(matches[0][0])
-    if observed != sorted(observed) or [step["name"] for step in steps
-            if step["conclusion"] == "failure"] != ["Admit required lexical foundation"]:
-        raise ValueError("failed exact-main lifecycle differs from ordered lexical-only failure")
-    return {"job_id": job["id"], "failed_phase": failed_phase,
-            "failed_exit_code": results[-1]["exit_code"],
-            "not_executed_phases": expected[boundary + 1:],
-            "workflow_steps": [{key: step[key] for key in ("name", "status", "conclusion")}
-                               for step in steps]}
-
-
 def qualification(plan, root):
     source = selection_identity(plan)
     run_id, attempt = plan["proof_run_id"], plan["proof_run_attempt"]
@@ -153,7 +85,7 @@ def qualification(plan, root):
         raise ValueError("an explicit positive proof run and attempt are required")
     remote = run_json(run_id)
     if (remote.get("id") != run_id or remote.get("status") != "completed"
-            or remote.get("conclusion") not in ("success", "failure") or remote.get("event") != "push"
+            or remote.get("conclusion") != "success" or remote.get("event") != "push"
             or remote.get("head_branch") != "main"
             or remote.get("path") != ".github/workflows/laplace.yml"
             or remote.get("run_attempt") != attempt or remote.get("head_sha") != source["commit"]):
@@ -166,7 +98,6 @@ def qualification(plan, root):
     state = load(path, 65536)
     # A normal main push selects the full default product lifecycle. Environment
     # inherited by this later export must not omit phases from the retained plan.
-    # A lexical-only failure retains the unexecuted suffix explicitly.
     environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
                        LAPLACE_GENERATION_BENCHMARK="")
     expected = subprocess.check_output(
@@ -178,13 +109,9 @@ def qualification(plan, root):
             or "active" not in state or state["active"] is not None
             or state.get("source") != source or state.get("phases") != expected):
         raise ValueError("retained main session does not establish canonical product phase identity and cleanup")
-    failed = None
-    if remote["conclusion"] == "success":
-        if (state.get("status") != "stopped" or state.get("next") != len(expected)
-                or state.get("results") != [{"phase": p, "exit_code": 0} for p in expected]):
-            raise ValueError("retained main session does not establish every completed canonical product phase")
-    else:
-        failed = lexical_failure_evidence(run_id, attempt, expected, state)
+    if (state.get("status") != "stopped" or state.get("next") != len(expected)
+            or state.get("results") != [{"phase": p, "exit_code": 0} for p in expected]):
+        raise ValueError("retained main session does not establish every completed canonical product phase")
     checkout = Path(state["checkout"])
     if (not checkout.is_absolute() or checkout.resolve(strict=True) != checkout
             or str(checkout).startswith(("/tmp/", "/var/tmp/", "/dev/shm/"))):
@@ -211,9 +138,9 @@ def qualification(plan, root):
         raise ValueError("qualified native build/install stamps are absent or disagree")
     return build, {"run_id": run_id, "run_attempt": attempt, "source": state["source"],
                    "lifecycle_conclusion": remote["conclusion"],
-                   "full_lifecycle_passed": remote["conclusion"] == "success",
+                   "full_lifecycle_passed": True,
                    "session_status": state["status"], "cleanup_exit_code": state["cleanup_exit_code"],
-                   "lexical_failure": failed,
+                   "lexical_failure": None,
                    "phases": state["results"], "native_build": str(build),
                    "lifecycle_checkout": str(checkout), "native_fingerprint": stamps["build-native"],
                    "session_receipt": str(path),
