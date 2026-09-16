@@ -11,6 +11,7 @@ jobs:
     env:
       LAPLACE_BUILD_ROOT: /build/laplace/build/floor-managed-compile
       LAPLACE_ENGINE_BUILD: /build/laplace/build/floor-managed-compile/engine
+      LAPLACE_EXTERNAL: /build/laplace/work/floor-managed-compile/external
       TMPDIR: /build/laplace/work/floor-managed-compile/tmp
       TMP: /build/laplace/work/floor-managed-compile/tmp
       TEMP: /build/laplace/work/floor-managed-compile/tmp
@@ -54,7 +55,46 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.x'
-      - name: Compile the catalog and both test projects through their existing owners
+      - name: Provision immutable upstream resources for compilation
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=15s 300s python3 - <<'PY' 2>&1 | tee /build/laplace/recovery/floor-managed-compile/dependency-provision.log
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          root=Path(os.environ["LAPLACE_EXTERNAL"])
+          root.mkdir(parents=True)
+          selected=[
+              ("tree-sitter-grammars/tree-sitter-c","https://github.com/tree-sitter/tree-sitter-c","b780e47fc780ddc8da13afa35a3f4ed5c157823d","9194799a7a7dcedf020ba2558fc92fc430633d73680243ae1f1d9de78c719528","queries/tags.scm"),
+              ("blake3","https://github.com/BLAKE3-team/BLAKE3.git","f3149ec5bb5449af877ba20377a11008ff499fa2","b8352186f14559127a324333c3378f4208a2de9aea855746bf2fcd1f883efef1","c/blake3.h")
+          ]
+          report={"scope":"diagnostic-compilation-only","pin_source_repository":"SaltyPatron/Laplace-Refactor","pin_source_commit":"e5fb773c3c5758679eb13c3dd228a0ba2aab27af","matches_original_installed_dependencies":False,"status":"running","dependencies":[]}
+          receipt=Path("/build/laplace/recovery/floor-managed-compile/dependencies.json")
+          try:
+              for name,url,revision,archive_sha,required in selected:
+                  path=root/name
+                  path.parent.mkdir(parents=True,exist_ok=True)
+                  def git(*args,capture=False):
+                      result=subprocess.run(["git","-C",str(path),*args],check=True,timeout=90,stdout=subprocess.PIPE if capture else None)
+                      return result.stdout
+                  subprocess.run(["git","init","--quiet",str(path)],check=True,timeout=10)
+                  git("remote","add","origin",url)
+                  git("fetch","--quiet","--no-tags","--depth=1","origin",revision)
+                  git("checkout","--quiet","--detach",revision)
+                  assert git("rev-parse","HEAD",capture=True).decode().strip()==revision
+                  observed_archive=hashlib.sha256(git("archive","--format=tar",revision,capture=True)).hexdigest()
+                  assert observed_archive==archive_sha,(name,observed_archive,archive_sha)
+                  assert not git("status","--porcelain","--untracked-files=all",capture=True)
+                  content=(path/required).read_bytes()
+                  report["dependencies"].append({"path":str(path),"upstream":url,"revision":revision,"git_archive_sha256":observed_archive,"required_file":required,"required_file_sha256":hashlib.sha256(content).hexdigest()})
+              report["status"]="completed"
+          except BaseException as error:
+              report["status"]="failed"
+              report["failure_type"]=type(error).__name__
+              raise
+          finally:
+              receipt.write_text(json.dumps(report,indent=2)+"\n")
+          PY
+      - name: Compile managed owners and check native translation units
         working-directory: /build/laplace/worktrees/floor-managed-compile
         shell: bash
         run: |
@@ -74,6 +114,20 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             printf '%s\t%s\n' "$project" "$status" >> "$evidence/build-summary.tsv"
+            if [[ "$status" != 0 ]]; then failed=1; fi
+          done
+          g++ --version 2>&1 | tee "$evidence/native-compiler.log"
+          printf 'translation_unit\texit_code\n' > "$evidence/native-syntax-summary.tsv"
+          for unit in main.cpp producer.cpp producer_tests.cpp; do
+            set +e
+            timeout --signal=TERM --kill-after=15s 60s \
+              g++ -std=c++20 -fsyntax-only -Wall -Wextra -Wpedantic \
+              -Iengine/core/include -I"$LAPLACE_EXTERNAL/blake3/c" \
+              "engine/core/tools/chess_position_tables_emit/$unit" \
+              2>&1 | tee "$evidence/native-$unit.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '%s\t%s\n' "$unit" "$status" >> "$evidence/native-syntax-summary.tsv"
             if [[ "$status" != 0 ]]; then failed=1; fi
           done
           test -z "$(git status --porcelain --untracked-files=all)"
