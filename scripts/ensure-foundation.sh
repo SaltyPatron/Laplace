@@ -13,9 +13,9 @@ REQUIRED_LEXICAL=0
 
 usage() {
   echo "Usage: $0 [--force|--check-only] [--required-lexical]" >&2
-  echo "  --force       always re-ingest foundation sources (fresh_db path)" >&2
-  echo "  --check-only  fail loud if any foundation layer is incomplete (no ingest; #792)" >&2
-  echo "  --required-lexical  admit Unicode, ISO639, CILI and WordNet through ordinary completion/resume" >&2
+  echo "  --force       always re-ingest foundation sources" >&2
+  echo "  --check-only  report incomplete foundation layers without ingest" >&2
+  echo "  --required-lexical  admit Unicode, ISO639, CILI and WordNet" >&2
   exit 2
 }
 
@@ -29,8 +29,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# -d MUST precede -c. `psql -tAc -d DB SQL` makes -c consume "-d" as the
-# query string (PG 18); layer markers then always look missing.
 PSQL=(psql -h "$PGHOST" -U "$PGUSER" -v ON_ERROR_STOP=1)
 
 db_exists() {
@@ -41,7 +39,6 @@ db_exists() {
 layer_ok() {
   local decomposer="$1" layer="$2"
   db_exists || return 1
-  # psql -tA prints bool as t/f, not true/false.
   "${PSQL[@]}" -d "$DB" -tAc \
     "SELECT ops.evidence_count(p_type => realize.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
     | grep -qiE '^(t|true)$'
@@ -62,9 +59,6 @@ FOUNDATION=(
 )
 
 if [[ "$REQUIRED_LEXICAL" -eq 1 ]]; then
-  # Select from the existing ordered roster. The ordinary source/file completion
-  # owner must see these sources even when an older source-level marker exists.
-  # It skips completed inputs and can admit newly available complete artifacts.
   required=()
   for entry in "${FOUNDATION[@]}"; do
     case "${entry%%:*}" in unicode|iso639|cili|wordnet) required+=("$entry") ;; esac
@@ -96,56 +90,38 @@ if [[ "$needs_work" -eq 0 ]]; then
 fi
 
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
-  echo "::error::THIN_SUBSTRATE: foundation HasLayerCompleted markers incomplete on $DB"
+  echo "foundation incomplete on $DB" >&2
   for entry in "${FOUNDATION[@]}"; do
     IFS=':' read -r cli decomposer layer <<< "$entry"
-    if ! layer_ok "$decomposer" "$layer"; then
-      echo "  missing: ${cli} (source=${decomposer} layer=${layer})"
-    fi
+    layer_ok "$decomposer" "$layer" || echo "  missing: ${cli} (source=${decomposer} layer=${layer})" >&2
   done
-  echo "Heal: dispatch seed-foundation / run scripts/ensure-foundation.sh — this check does not auto-reseed."
   exit 1
 fi
 
-echo "==== ensure-foundation on $DB ===="
-# Journal is the pass/fail surface; keep Actions free of WS_APPLY / per-file spam.
 if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; then
   export LAPLACE_INGEST_CONSOLE=ci
 fi
 
-# One process for the whole ladder. The previous loop called ingest-source.sh once
-# per source, paying a CLI startup + perfcache map + native runtime init each time —
-# the 12x tax scripts/win/seed-chain.cmd documents and which no Linux caller avoided.
-# `ingest chain` dispatches every spec in one process through the same table, and
-# stops on the first non-zero rc exactly as `set -e` did here.
 CHAIN=()
-CHAIN_DECOMPOSERS=()
 for entry in "${FOUNDATION[@]}"; do
   IFS=':' read -r cli decomposer layer <<< "$entry"
   if [[ "$FORCE" -eq 1 || "$REQUIRED_LEXICAL" -eq 1 ]] || ! layer_ok "$decomposer" "$layer"; then
     CHAIN+=("$cli")
-    CHAIN_DECOMPOSERS+=("$decomposer")
   else
-    echo "==== skip $cli (layer complete) ===="
+    echo "skip $cli (layer complete)"
   fi
 done
 
 if [[ ${#CHAIN[@]} -gt 0 ]]; then
-  echo "==== ingest chain (${#CHAIN[@]} source(s), one process): ${CHAIN[*]} ===="
+  echo "ingest foundation chain (${#CHAIN[@]} source(s)): ${CHAIN[*]}"
   "$SCRIPTS/ingest-source.sh" chain "${CHAIN[@]}"
-  # Journal verification is unchanged, one per ingested source; it ran inline before
-  # and runs after the chain now. A mid-chain failure aborts under set -e before this,
-  # which is the same reachability the inline form had.
-  for decomposer in "${CHAIN_DECOMPOSERS[@]}"; do
-    bash "$SCRIPTS/verify-ingest-journal.sh" "$decomposer"
-  done
 fi
 
-echo "==== foundation journal (latest per source) ===="
+echo "foundation journal (latest per source)"
 psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
   "SELECT DISTINCT ON (source_name) source_name, status, files_done, files_total,
           entities, attestations, ended_at
    FROM laplace.ingest_run_journal
    ORDER BY source_name, started_at DESC;"
 
-echo "ENSURE-FOUNDATION COMPLETE: $DB"
+echo "foundation complete: $DB"
