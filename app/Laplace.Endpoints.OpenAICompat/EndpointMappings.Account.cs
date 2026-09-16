@@ -4,7 +4,6 @@ using System.Text;
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -34,8 +33,7 @@ internal static class AccountEndpoints
             }
             return Results.Ok(new
             {
-                userId = account.User,
-                tenantId = account.Tenant,
+                userId = account.User, tenantId = account.Tenant,
                 displayName = http.User.FindFirstValue(ClaimTypes.Name),
                 email = http.User.FindFirstValue(ClaimTypes.Email),
                 provider = http.User.FindFirstValue(LaplaceClaimTypes.Provider),
@@ -49,15 +47,10 @@ internal static class AccountEndpoints
                     stripeConfigured = !string.IsNullOrWhiteSpace(stripe.Value.ApiKey),
                     publicBaseUrl = stripe.Value.PublicBaseUrl,
                     persistentSessionKeys = !string.IsNullOrWhiteSpace(LaplaceInstall.TryReadConfig("LAPLACE_DATA_PROTECTION_KEYS", "identity.env")),
-                    providers = identity.Providers.Select(p => new
-                    {
-                        id = p.Scheme, name = p.DisplayName,
-                        callbackPath = p.CallbackPath
-                    }),
-                    // Account/session authorization is not a statement that the
-                    // legacy global Explore/geometry readers isolate private data.
-                    substrateScope = "shared",
-                    privateDataIsolation = false
+                    providers = identity.Providers.Select(p => new { id = p.Scheme, name = p.DisplayName, callbackPath = p.CallbackPath }),
+                    // This reports the actual legacy data-reader contract, not a
+                    // privacy promise inferred from authentication being configured.
+                    substrateScope = "shared", privateDataIsolation = false
                 }
             });
         }).WithTags("account");
@@ -68,6 +61,7 @@ internal static class AccountEndpoints
             if (BrowserAccount(http) is not { } account) return Error(401, "sign_in_required", "Sign in to create a company workspace.");
             if (!ValidName(request.Name)) return Error(400, "invalid_name", "Use a workspace name between 1 and 160 characters without control characters.");
             var tenant = $"t-{Guid.NewGuid():N}";
+            var name = request.Name!.Trim();
             await using var connection = await substrate.DataSource.OpenConnectionAsync(ct);
             await using var transaction = await connection.BeginTransactionAsync(ct);
             await using var command = new NpgsqlCommand("""
@@ -75,11 +69,11 @@ internal static class AccountEndpoints
                 INSERT INTO app.tenant_memberships (tenant_id, user_id, role) VALUES (@tenant, @user, 'owner');
                 """, connection, transaction);
             command.Parameters.AddWithValue("tenant", tenant);
-            command.Parameters.AddWithValue("name", request.Name!.Trim());
+            command.Parameters.AddWithValue("name", name);
             command.Parameters.AddWithValue("user", account.User);
             await command.ExecuteNonQueryAsync(ct);
             await transaction.CommitAsync(ct);
-            return Results.Ok(new WorkspaceView(tenant, request.Name.Trim(), "organization", "owner"));
+            return Results.Ok(new WorkspaceView(tenant, name, "organization", "owner"));
         }).WithTags("account");
 
         app.MapPost("/v1/account/workspaces/{tenantId}/select", async (string tenantId, HttpContext http,
@@ -93,25 +87,11 @@ internal static class AccountEndpoints
             command.Parameters.AddWithValue("user", account.User);
             if (await command.ExecuteScalarAsync(ct) is not string role)
                 return Error(403, "workspace_membership_required", "This account does not belong to that workspace.");
-            var authentication = await http.AuthenticateAsync(BrowserAuthSettings.CookieScheme);
-            if (!authentication.Succeeded || authentication.Principal is null)
-                return Error(401, "sign_in_required", "The browser session has expired.");
-            var principal = authentication.Principal.Clone();
-            foreach (var identity in principal.Identities)
-            {
-                foreach (var claim in identity.FindAll(LaplaceClaimTypes.Tenant).Concat(identity.FindAll(LaplaceClaimTypes.WebSession)).ToArray())
-                    identity.RemoveClaim(claim);
-            }
-            ((ClaimsIdentity)principal.Identity!).AddClaim(new Claim(LaplaceClaimTypes.Tenant, tenantId));
-            // Rotate the server-side ticket rather than retaining an old tenant's
-            // browser session reference. Other devices retain their own workspace.
-            await http.SignOutAsync(BrowserAuthSettings.CookieScheme);
-            await http.SignInAsync(BrowserAuthSettings.CookieScheme, principal, new AuthenticationProperties
-            {
-                IsPersistent = true,
-                IssuedUtc = DateTimeOffset.UtcNow,
-                ExpiresUtc = authentication.Properties?.ExpiresUtc ?? DateTimeOffset.UtcNow.AddDays(14)
-            });
+            // An opaque login session and a workspace selection have different
+            // lifetimes. The resolver revalidates membership on every request.
+            var cookie = ApiKeyTenantResolver.WorkspaceCookieOptions();
+            cookie.Expires = DateTimeOffset.UtcNow.AddDays(14);
+            http.Response.Cookies.Append(ApiKeyTenantResolver.WorkspaceCookie, tenantId, cookie);
             return Results.Ok(new { tenantId, role });
         }).WithTags("account");
 
@@ -177,7 +157,6 @@ internal static class AccountEndpoints
             command.Parameters.AddWithValue("user", account.User);
             command.Parameters.AddWithValue("expires", expires);
             if (await command.ExecuteNonQueryAsync(ct) != 1) return Error(403, "workspace_admin_required", "Your workspace permissions have changed.");
-            // Fragment keeps the bearer invitation out of HTTP request URLs and referrers.
             return Results.Ok(new { invitationId = id, role, expiresAt = expires, invitationPath = $"/settings#join={token}" });
         }).WithTags("account");
 
@@ -297,7 +276,7 @@ internal static class AccountEndpoints
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Sign in as a workspace owner or administrator to create API keys.");
             if (request.Label?.Length > 160) return Error(400, "invalid_label", "Key labels may contain at most 160 characters.");
             var plans = await entitlements.GetByTenantAsync(account.Tenant, ct);
-            if (!plans.Any(p => p.Status == "active" && p.PeriodEnd > DateTimeOffset.UtcNow))
+            if (!plans.Any(p => p.Status == "active" && p.PeriodStart <= DateTimeOffset.UtcNow && p.PeriodEnd > DateTimeOffset.UtcNow))
                 return Error(402, "active_subscription_required", "An active workspace subscription is required to create an API key.");
             var issued = await keys.IssueAsync(account.Tenant, request.Label?.Trim(), ct);
             return Results.Ok(new { key = issued.Key, keyPrefix = issued.Record.KeyPrefix,
@@ -314,7 +293,7 @@ internal static class AccountEndpoints
             if (!session.Found || !string.Equals(session.Tenant, account.Tenant, StringComparison.Ordinal)) return Results.NotFound();
             var subscriptions = await entitlements.GetByTenantAsync(account.Tenant, ct);
             var active = subscriptions.Any(e => e.StripeSubscriptionId == session.SubscriptionId
-                && e.Status == "active" && e.PeriodEnd > DateTimeOffset.UtcNow);
+                && e.Status == "active" && e.PeriodStart <= DateTimeOffset.UtcNow && e.PeriodEnd > DateTimeOffset.UtcNow);
             return Results.Ok(new { paid = session.Paid, active, tenantId = account.Tenant,
                 status = active ? "active" : session.Paid ? "awaiting_subscription_confirmation" : "awaiting_payment" });
         }).WithTags("billing");
@@ -331,30 +310,32 @@ internal static class AccountEndpoints
             var customer = (await entitlements.GetByTenantAsync(account.Tenant, ct))
                 .OrderByDescending(e => e.UpdatedAt).FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.StripeCustomerId))?.StripeCustomerId;
             if (customer is null) return Error(409, "billing_customer_missing", "Complete a subscription checkout before opening billing management.");
-            var service = new Stripe.BillingPortal.SessionService(new Stripe.StripeClient(options.Value.ApiKey));
-            var session = await service.CreateAsync(new Stripe.BillingPortal.SessionCreateOptions
+            try
             {
-                Customer = customer,
-                ReturnUrl = new Uri(origin, "/settings").AbsoluteUri
-            }, cancellationToken: ct);
-            return Results.Ok(new { url = session.Url });
+                var service = new Stripe.BillingPortal.SessionService(new Stripe.StripeClient(options.Value.ApiKey));
+                var session = await service.CreateAsync(new Stripe.BillingPortal.SessionCreateOptions
+                {
+                    Customer = customer, ReturnUrl = new Uri(origin, "/settings").AbsoluteUri
+                }, cancellationToken: ct);
+                return Results.Ok(new { url = session.Url });
+            }
+            catch (Stripe.StripeException)
+            {
+                return Error(503, "billing_portal_unavailable", "Stripe billing management is unavailable. The operator must check the Stripe customer-portal configuration.");
+            }
         }).WithTags("billing");
     }
 
     private static (Guid User, string Tenant)? BrowserAccount(HttpContext http)
     {
-        if (http.User.Identity?.IsAuthenticated != true || ApiKeyTenantResolver.PresentedKey(http.Request) is not null)
-            return null;
+        if (http.User.Identity?.IsAuthenticated != true || ApiKeyTenantResolver.PresentedKey(http.Request) is not null) return null;
         var tenant = http.User.FindFirstValue(LaplaceClaimTypes.Tenant);
         return Guid.TryParse(http.User.FindFirstValue(LaplaceClaimTypes.User), out var user)
             && !string.IsNullOrWhiteSpace(tenant) ? (user, tenant) : null;
     }
-
-    private static string? Role(HttpContext http) => http.Items["laplace.workspace_role"] as string;
-    private static (Guid User, string Tenant)? Manager(HttpContext http) =>
-        Role(http) is "owner" or "admin" ? BrowserAccount(http) : null;
-    private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name)
-        && name.Trim().Length <= 160 && !name.Any(char.IsControl);
+    private static string? Role(HttpContext http) => http.Items.TryGetValue("laplace.workspace_role", out var role) ? role as string : null;
+    private static (Guid User, string Tenant)? Manager(HttpContext http) => Role(http) is "owner" or "admin" ? BrowserAccount(http) : null;
+    private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 160 && !name.Any(char.IsControl);
     private static IResult Error(int status, string code, string message) =>
         Results.Json(new ErrorResponse(new ErrorBody("account_error", code, message)), statusCode: status);
 
