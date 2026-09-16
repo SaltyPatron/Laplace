@@ -11,6 +11,9 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (args.FirstOrDefault() == ChessStartingSideInventory.Mode)
+            return ChessStartingSideInventory.RunAsync(args[1..]).GetAwaiter().GetResult();
+
         if (args.Length < 2)
         {
             Console.Error.WriteLine(

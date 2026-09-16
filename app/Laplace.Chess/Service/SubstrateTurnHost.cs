@@ -65,6 +65,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var line = new List<ChessNode>(edges.Count + 1);
         var moves = new List<ChessNode>(edges.Count);
+        bool initialWhiteToMove = false;
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         foreach (var e in edges)
         {
@@ -74,6 +75,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
             line.Add(to);
             if (!PositionContent.TryFenFromSurface(e.SubjectKey, out var fen)) return;
             var board = Board.FromFen(fen);
+            if (moves.Count == 0) initialWhiteToMove = board.WhiteToMove;
             var legal = MoveGen.Legal(board);
             ChessMove? resolved = null;
             if (!string.IsNullOrWhiteSpace(e.MoveKey))
@@ -131,7 +133,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
                 PlyOutcome.Loss => Laplace.Modality.GameOutcome.WonBy(1),
                 _ => Laplace.Modality.GameOutcome.Draw,
             },
-            ChessVocabulary.SourceId, _witnessWeight);
+            initialWhiteToMove, ChessVocabulary.SourceId, _witnessWeight);
         ChessGraph.AppendTransitions(
             b, line.Select(static n => n.Id).ToArray(),
             whiteOutcome switch
@@ -140,7 +142,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
                 PlyOutcome.Loss => Laplace.Modality.GameOutcome.WonBy(1),
                 _ => Laplace.Modality.GameOutcome.Draw,
             },
-            _witnessWeight, ChessVocabulary.SourceId, playingId);
+            initialWhiteToMove, _witnessWeight, ChessVocabulary.SourceId, playingId);
         ChessPositionOutcomes.DepositTrajectory(
             b, edges.Select(static edge => edge.SubjectKey)
                     .Append(edges[^1].ObjectKey).ToArray(),
@@ -164,14 +166,16 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
             moves.Select(static n => n.Id));
     }
 
-    private static PlyOutcome WhiteOutcome(
+    internal static PlyOutcome WhiteOutcome(
         IReadOnlyList<RecordedEdge> edges, bool adjudicated)
     {
         if (adjudicated) return PlyOutcome.Draw;
         for (int i = 0; i < edges.Count; i++)
         {
             if (edges[i].MoverOutcome == PlyOutcome.Draw) continue;
-            bool whiteMoved = (i & 1) == 0;
+            if (!PositionContent.TryFenFromSurface(edges[i].SubjectKey, out var fen))
+                throw new InvalidOperationException("turn outcome has no typed pre-move board");
+            bool whiteMoved = Board.FromFen(fen).WhiteToMove;
             return edges[i].MoverOutcome == PlyOutcome.Win
                 ? (whiteMoved ? PlyOutcome.Win : PlyOutcome.Loss)
                 : (whiteMoved ? PlyOutcome.Loss : PlyOutcome.Win);

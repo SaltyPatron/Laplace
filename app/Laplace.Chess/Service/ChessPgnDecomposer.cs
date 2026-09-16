@@ -433,6 +433,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             BlackName = blackName,
             Date = date,
             StartFen = startFen,
+            InitialWhiteToMove = replay.InitialWhiteToMove,
             PositionIds = replay.PositionIds,
             ResolvedMoves = replay.Moves,
             MovingPieces = replay.MovingPieces,
@@ -522,11 +523,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (expectedSourceOutcome is { } sourceOutcome && MoveGen.Legal(board).Count == 0
             && m.Terminal(new ChessState(board, ImmutableList.Create(ids[^1]))) != sourceOutcome)
             throw new InvalidDataException("complete source game's forced terminal outcome differs from its result");
-        return new ChessLineReplay(ids, moves, movingPieces, moveIds);
+        return new ChessLineReplay(ids, moves, movingPieces, moveIds, start.Initial.Board.WhiteToMove);
     }
 
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
+        var initialWhiteToMove = parsed.InitialWhiteToMove;
+        if (parsed.MoveIds.Length > 0 && !initialWhiteToMove.HasValue)
+            throw new InvalidDataException("parsed move outcomes lack the validated initial mover");
+
         var (gameText, _, result, lineId, eventId, playingId) = parsed;
         var src = sourceId ?? ChessVocabulary.PgnSourceId;
 
@@ -539,9 +544,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var blackPlayer = EmitPlayer(b, blackName, src);
 
         EmitGame(b, lineId, eventId, playingId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
-        if (parsed.MoveIds.Length > 0)
+        if (parsed.MoveIds.Length > 0 && initialWhiteToMove.HasValue)
             ChessMoveOutcomes.AppendGame(
-                b, lineId, parsed.MoveIds, result, src, PgnWitnessWeight);
+                b, lineId, parsed.MoveIds, result, initialWhiteToMove.Value,
+                src, PgnWitnessWeight);
 
         RecordStartPosition(b, lineId, playingId, gameText, src);
         RecordOpeningHeaders(b, lineId, gameText, src);
@@ -869,7 +875,8 @@ internal sealed record ChessLineReplay(
     Hash128[] PositionIds,
     ChessMove[] Moves,
     Piece[] MovingPieces,
-    Hash128[] MoveIds);
+    Hash128[] MoveIds,
+    bool InitialWhiteToMove);
 
 internal sealed record ChessParsedReplay(
     Board[] Boards,
@@ -899,6 +906,8 @@ public sealed record ChessGameRecord(
     internal string? BlackName { get; init; }
     internal string? Date { get; init; }
     internal string? StartFen { get; init; }
+    // Admission evidence from the native legal replay, never an identity salt.
+    internal bool? InitialWhiteToMove { get; init; }
 
     internal Hash128[] PositionIds { get; init; } = [];
     internal ChessMove[] ResolvedMoves { get; init; } = [];

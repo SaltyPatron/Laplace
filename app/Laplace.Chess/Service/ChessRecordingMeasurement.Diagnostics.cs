@@ -69,6 +69,7 @@ internal sealed partial class ChessRecordingMeasurement
         if (_workPhase is { } current) Work.Add(current, now - _workPhaseStarted);
         _workPhase = next;
         _workPhaseStarted = now;
+        Checkpoint(next?.ToString() ?? "admission", next is null ? "phase-returned" : "phase-entered");
     }
 
     internal readonly struct PhaseScope(ChessRecordingMeasurement owner, WorkPhase? previous) : IDisposable
@@ -142,6 +143,11 @@ internal sealed partial class ChessRecordingMeasurement
             measurement.WriterLog.Add(new(Stopwatch.GetElapsedTime(measurement._started).TotalSeconds,
                 logLevel.ToString(), WriterLogDiagnostics.Bounded(formatter(state, exception)),
                 fields, exception?.GetType().FullName));
+            if (fields.TryGetValue("Phase", out var phase) && phase is string phaseName
+                && fields.TryGetValue("Boundary", out var boundary) && boundary is string boundaryName)
+                measurement._progress?.ObserveWriter(phaseName, boundaryName,
+                    fields.TryGetValue("Returned", out var returned) && returned is bool completed ? completed : null,
+                    fields.TryGetValue("ElapsedMs", out var elapsed) && elapsed is double milliseconds ? milliseconds : null);
         }
     }
 }

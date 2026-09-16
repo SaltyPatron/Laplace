@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -100,16 +101,34 @@ public static class ChessPositionOutcomes
         SubstrateChangeBuilder b, ChessComposed composed, GameOutcome result, Hash128 playingId)
     {
         long score = ChessGraph.ScoreFp1e9(result.ForMover(0));
-        foreach (var atom in composed.Substructures)
-            b.AddAttestation(NativeAttestation.Aggregated(
-                subject: atom.Id,
-                typeId: ChessVocabulary.OutcomeType,
-                obj: ChessVocabulary.OutcomeObject,
-                sourceId: SourceId,
-                contextId: playingId,
-                games: 1,
-                sumScoreFp1e9: score,
-                witnessWeight: OutcomeWeight));
+        int count = composed.Substructures.Count;
+        if (count == 0) return;
+        var cells = ArrayPool<AttestationAggregatedCellNative>.Shared.Rent(count);
+        AttestationStagedNative[]? staged = null;
+        try
+        {
+            for (int i = 0; i < count; i++)
+                cells[i] = new AttestationAggregatedCellNative
+                {
+                    Subject = composed.Substructures[i].Id,
+                    Object = ChessVocabulary.OutcomeObject,
+                    ObjectIsNull = 0,
+                    Games = 1,
+                    SumScoreFp1e9 = score
+                };
+            staged = ArrayPool<AttestationStagedNative>.Shared.Rent(count);
+            // Processing time is sampled once for this board. Every constituent
+            // occurrence still enters the ordinary checked evidence merge below.
+            NativeAttestation.AggregatedBatch(cells, count, ChessVocabulary.OutcomeType,
+                SourceId, playingId, OutcomeWeight, staged);
+            for (int i = 0; i < count; i++)
+                b.AddAttestation(NativeAttestation.Row(in staged[i]));
+        }
+        finally
+        {
+            if (staged is not null) ArrayPool<AttestationStagedNative>.Shared.Return(staged);
+            ArrayPool<AttestationAggregatedCellNative>.Shared.Return(cells);
+        }
     }
 
     private static void AddMarker(SubstrateChangeBuilder b, Hash128 playingId) =>

@@ -97,6 +97,7 @@ public static class ChessCorpusBenchmark
                 phases.Add(measurement);
                 if (baseline is null) fresh = measurement;
                 diagnostics.Measurement = measurement;
+                await measurement.StartProgressAsync(Path.Combine(directory, "progress.json"), Console.Error.WriteLine);
                 try
                 {
                     await ingestor.IngestCorpusGamesAsync(preparation.ReadSelected(token), measurement, token);
@@ -122,6 +123,7 @@ public static class ChessCorpusBenchmark
                 finally
                 {
                     diagnostics.Measurement = null;
+                    await measurement.StopProgressAsync();
                     await measurement.WriteAsync(Path.Combine(directory, "recording.json"));
                 }
             }

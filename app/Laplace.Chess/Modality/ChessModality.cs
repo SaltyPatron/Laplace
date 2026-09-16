@@ -55,8 +55,8 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
 
     public IReadOnlyList<ChessMove> LegalActions(ChessState state)
     {
-        if (Terminal(state) is not null) return Array.Empty<ChessMove>();
-        return MoveGen.Legal(state.Board);
+        var moves = MoveGen.Legal(state.Board);
+        return Terminal(state, moves) is not null ? Array.Empty<ChessMove>() : moves;
     }
 
     public ChessState Apply(ChessState state, ChessMove action)
@@ -79,10 +79,11 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     public int SideToMove(ChessState state) => state.Board.WhiteToMove ? 0 : 1;
 
     public GameOutcome? Terminal(ChessState state)
+        => Terminal(state, MoveGen.Legal(state.Board));
+
+    private static GameOutcome? Terminal(ChessState state, IReadOnlyList<ChessMove> moves)
     {
         var b = state.Board;
-
-        var moves = MoveGen.Legal(b);
         if (moves.Count == 0)
         {
             if (MoveGen.InCheck(b, b.WhiteToMove))

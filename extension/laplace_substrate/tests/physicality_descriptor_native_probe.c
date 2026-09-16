@@ -285,29 +285,55 @@ int main(void) {
     coord[0] = .15; hilbert4d_encode(coord, &hilbert);
     CHECK(intent_stage_add_physicality(original, &placement, &entity, 1, coord, &hilbert,
         trajectory, 2, 2, 1, 0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US + 20) == 0);
+    const hash128_t content_type = laplace_content_tier_type_id(4);
+    CHECK(intent_stage_add_entity(original, &entity, 4, &content_type, &entity) == 0);
+    CHECK(intent_stage_add_attestation(original, &entity, &entity, &content_type,
+        NULL, &entity, NULL, 0, INTENT_STAGE_PG_EPOCH_UNIX_US + 30, 1,
+        0, 0, 0, NULL) == 0);
+    CHECK(intent_stage_entity_count(original) == 1 && intent_stage_attestation_count(original) == 1);
     transport_array parts[3] = {0}; Datum tuple_values[3]; bool tuple_nulls[3] = {false};
     for (int i = 0; i < 3; ++i) {
         size_t length; const uint8_t *tuples = intent_stage_tuple_ptr(original, (intent_stage_table_t)(i + 1), &length);
         tuple_values[i] = PointerGetDatum(probe_bytes(tuples, length));
         parts[i].values = &tuple_values[i]; parts[i].nulls = &tuple_nulls[i]; parts[i].count = 1;
     }
-    /* The callable backend boundary copies all three tuple tables through the
-     * same native importer; it never borrows mutable caller stage storage. */
+    /* Both entry paths fully validate E/P/A framing, then retain only the
+     * physicality observations needed by descriptor admission. The ordinary
+     * writer still owns the untouched original E/P/A stage. */
     {
         admission_state *copy = probe_state(&snapshot);
         const intent_stage_t *inputs[1] = {original};
+        const uint8_t *buffers[3];
+        size_t lengths[3];
+        intent_stage_t *full_import = NULL, *physical_import = NULL;
+        for (int table = 0; table < 3; ++table)
+            buffers[table] = intent_stage_tuple_ptr(original,
+                (intent_stage_table_t)(table + 1), &lengths[table]);
+        CHECK(intent_stage_from_tuple_bytes(buffers[0], lengths[0], buffers[1], lengths[1],
+            buffers[2], lengths[2], copy->maximum_bytes, &full_import) == 0);
+        CHECK(intent_stage_from_tuple_bytes(NULL, 0, buffers[1], lengths[1],
+            NULL, 0, copy->maximum_bytes, &physical_import) == 0);
+        const size_t imported_peak = intent_stage_memory_peak_bytes(full_import);
+        const size_t physical_bytes = intent_stage_memory_bytes(physical_import);
+        CHECK(intent_stage_memory_bytes(full_import) > physical_bytes);
         admission_clone_stages(copy, inputs, 1, &copy->source);
         CHECK(copy->source.count == 1 && copy->source.items[0] != original);
-        for (int table = 1; table <= 3; ++table) {
-            size_t expected_size, copied_size;
-            const uint8_t *expected = intent_stage_tuple_ptr(original,
-                (intent_stage_table_t)table, &expected_size);
+        CHECK(copy->bytes == 4 * sizeof(intent_stage_t *) + physical_bytes);
+        CHECK(copy->peak_bytes == 4 * sizeof(intent_stage_t *) + imported_peak);
+        CHECK(intent_stage_memory_peak_bytes(copy->source.items[0]) == imported_peak);
+        for (int table = 0; table < 3; ++table) {
+            size_t copied_size;
             const uint8_t *copied = intent_stage_tuple_ptr(copy->source.items[0],
-                (intent_stage_table_t)table, &copied_size);
-            CHECK(copied_size == expected_size);
-            CHECK(copied_size == 0 || memcmp(copied, expected, copied_size) == 0);
-            CHECK(copied_size == 0 || copied != expected);
+                (intent_stage_table_t)(table + 1), &copied_size);
+            if (table == 1) {
+                CHECK(copied_size == lengths[table]);
+                CHECK(memcmp(copied, buffers[table], copied_size) == 0 && copied != buffers[table]);
+            } else CHECK(copied_size == 0 && copied == NULL);
         }
+        CHECK(intent_stage_entity_count(copy->source.items[0]) == 0);
+        CHECK(intent_stage_attestation_count(copy->source.items[0]) == 0);
+        CHECK(intent_stage_entity_count(original) == 1 && intent_stage_attestation_count(original) == 1);
+        intent_stage_free(full_import); intent_stage_free(physical_import);
         CHECK(admission_preflight(copy, &copy->source) == 4);
         REFUSES(admission_clone_stages(copy, NULL, 1, &copy->admitted), "array is missing");
         inputs[0] = NULL;
@@ -317,8 +343,34 @@ int main(void) {
         REFUSES(admission_clone_stages(copy, inputs, 1, &copy->admitted), "caller stage import");
         probe_stages_free(copy);
     }
+    /* Discarded tables must still reject malformed framing through each real
+     * admission caller. These mutate actual native/SQL COPY bytes. */
+    for (int table = 0; table < 3; table += 2) {
+        size_t length;
+        uint8_t *frame = (uint8_t *)intent_stage_tuple_ptr(original,
+            (intent_stage_table_t)(table + 1), &length);
+        CHECK(length > 2);
+        const uint8_t columns = frame[1];
+        admission_state *bad = probe_state(&snapshot);
+        const intent_stage_t *inputs[1] = {original};
+        frame[1] = 1;
+        REFUSES(admission_clone_stages(bad, inputs, 1, &bad->source), "caller stage import");
+        CHECK(bad->source.count == 1 && bad->source.items[0] == NULL);
+        frame[1] = columns;
+        probe_stages_free(bad);
+        bytea *transported = (bytea *)DatumGetPointer(tuple_values[table]);
+        const Size size = VARSIZE(transported);
+        bad = probe_state(&snapshot);
+        SET_VARSIZE(transported, size - 1);
+        REFUSES(admission_import(bad, parts, &bad->source), "tuple import");
+        CHECK(bad->source.count == 1 && bad->source.items[0] == NULL);
+        SET_VARSIZE(transported, size);
+        probe_stages_free(bad);
+    }
     admission_import(s, parts, &s->source);
     CHECK(s->source.count == 1 && intent_stage_physicality_count(s->source.items[0]) == 2);
+    CHECK(intent_stage_entity_count(s->source.items[0]) == 0);
+    CHECK(intent_stage_attestation_count(s->source.items[0]) == 0);
     CHECK(admission_preflight(s, &s->source) == 4);
     {
         Datum source_values[2] = {row.values[0], row.values[1]};

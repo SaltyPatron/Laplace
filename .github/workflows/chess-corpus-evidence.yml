@@ -55,7 +55,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          receipt="$RUNNER_TEMP/laplace-chess-corpus-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          umask 0002
+          evidence_root=/build/laplace/work/chess-corpus-evidence
+          mkdir -p "$evidence_root"
+          receipt="$evidence_root/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir "$receipt"
           printf 'LAPLACE_CORPUS_EVIDENCE=%s\n' "$receipt" >> "$GITHUB_ENV"
 
@@ -74,11 +77,14 @@ jobs:
           mkdir -p /build/laplace/work
           export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
           # Checkout also belongs to the lock: the persistent workspace is shared.
-          flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock bash -c '
+          timeout --signal=TERM --kill-after=15s 7500s \
+            flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock bash -c '
             set -euo pipefail
-            git fetch --no-tags --prune origin "$TARGET_SHA"
-            git checkout --force "$TARGET_SHA"
-            [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+            printf "%s\n" "CORPUS_SETUP source-fetch running"
+            timeout --signal=TERM --kill-after=5s 120s git fetch --no-tags --prune origin "$TARGET_SHA"
+            timeout --signal=TERM --kill-after=5s 60s git checkout --force "$TARGET_SHA"
+            [[ "$(timeout 10s git rev-parse HEAD)" == "$TARGET_SHA" ]]
+            printf "%s\n" "CORPUS_SETUP source-checkout passed"
             mode="${REQUESTED_MODE:-inventory}"
             if [[ "$GITHUB_REF_NAME" == verify/chess-corpus-measure-* ]]; then mode=measure; fi
             if [[ "$GITHUB_REF_NAME" == verify/chess-corpus-inventory-* ]]; then mode=inventory; fi
@@ -86,35 +92,87 @@ jobs:
             games="${REQUESTED_GAMES:-75000}"
             export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
             export MSBUILDDISABLENODEREUSE=1 UseSharedCompilation=false
-            if [[ "$mode" == measure ]]; then
-              set +u
-              source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-              set -u
-              export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-              export LAPLACE_ENGINE_BUILD="$PWD/build/engine"
-            fi
             args=(--mode "$mode" --expected-source "$TARGET_SHA"
                   --output-dir "$LAPLACE_CORPUS_EVIDENCE/corpus"
                   --family "$family" --games "$games" --deadline-seconds 3600)
             [[ -z "${REQUESTED_PGN:-}" ]] || args+=(--pgn "$REQUESTED_PGN")
             if [[ "$mode" == inventory ]]; then
-              python3 scripts/measure-installed-chess-corpus.py "${args[@]}"
+              exec python3 scripts/measure-installed-chess-corpus.py "${args[@]}"
             else
-              python3 scripts/chess-runtime-env.py --prefix "$LAPLACE_INSTALL_PREFIX" -- \
-                python3 scripts/measure-installed-chess-corpus.py "${args[@]}"
+              exec python3 - "${args[@]}" <<"PY"
+          import json, os, signal, subprocess, sys, time
+          def interrupted(signum, frame):
+              raise KeyboardInterrupt("toolchain initialization interrupted")
+          signal.signal(signal.SIGTERM, interrupted)
+          started = time.monotonic()
+          print("CORPUS_SETUP toolchain running", flush=True)
+          process = subprocess.Popen([
+              "bash", "-c",
+              "source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 && exec \"$1\" -c \"$2\"",
+              "corpus-toolchain", sys.executable,
+              "import json, os; print(json.dumps(dict(os.environ)))"
+          ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+          try:
+              raw, _ = process.communicate(timeout=120)
+              if process.returncode or len(raw) > 2 * 1024 * 1024:
+                  raise RuntimeError("toolchain initialization failed or exceeded environment bound")
+              environment = json.loads(raw)
+              if not isinstance(environment, dict) or any(
+                      not isinstance(k, str) or not isinstance(v, str) for k, v in environment.items()):
+                  raise ValueError("toolchain environment shape is invalid")
+          finally:
+              try:
+                  os.killpg(process.pid, signal.SIGTERM)
+              except ProcessLookupError:
+                  pass
+              try:
+                  process.wait(timeout=5)
+              except subprocess.TimeoutExpired:
+                  pass
+              try:
+                  os.killpg(process.pid, signal.SIGKILL)
+              except ProcessLookupError:
+                  pass
+              process.wait(timeout=5)
+              process.stdout.close()
+          # The captured environment stays in memory and is never logged or retained.
+          root = os.getcwd()
+          environment["LD_LIBRARY_PATH"] = ":".join(
+              [root + "/build/engine/" + part for part in ("core", "dynamics", "synthesis")]
+              + [environment.get("LD_LIBRARY_PATH", "")])
+          environment["LAPLACE_ENGINE_BUILD"] = root + "/build/engine"
+          print("CORPUS_SETUP toolchain passed " + json.dumps({
+              "wallSeconds": time.monotonic() - started}), flush=True)
+          os.execvpe(sys.executable, [sys.executable, "scripts/chess-runtime-env.py", "--prefix",
+              environment["LAPLACE_INSTALL_PREFIX"], "--", sys.executable,
+              "scripts/measure-installed-chess-corpus.py", *sys.argv[1:]], environment)
+          PY
             fi
           ' 2>&1 | tee "$LAPLACE_CORPUS_EVIDENCE/execution.log"
 
       - name: Retain corpus result summary
         if: always()
+        env:
+          CORPUS_STEP_OUTCOME: ${{ steps.corpus_measurement.outcome }}
+          CORPUS_REQUESTED_INPUTS: ${{ toJSON(inputs) }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib, json, os
+          import datetime, hashlib, json, os
           from pathlib import Path
           root = Path(os.environ["LAPLACE_CORPUS_EVIDENCE"])
           path = root / "corpus/receipt.json"
+          (root / "workflow-result.json").write_text(json.dumps({
+              "schema": "laplace.chess-corpus-workflow-result/v1",
+              "sourceSha": os.environ["GITHUB_SHA"],
+              "runId": int(os.environ["GITHUB_RUN_ID"]),
+              "runAttempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "stepOutcome": os.environ["CORPUS_STEP_OUTCOME"],
+              "requestedInputs": json.loads(os.environ["CORPUS_REQUESTED_INPUTS"]),
+              "observedUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "scope": "Workflow outcome only; checkpoint presence does not certify completion or a rate."
+          }, sort_keys=True) + "\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("## Authentic existing-corpus measurement\n\n")
               summary.write("Exact source: " + os.environ["GITHUB_SHA"] + "\n\n")
@@ -149,6 +207,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: laplace-chess-corpus-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/laplace-chess-corpus-${{ github.run_id }}-${{ github.run_attempt }}/
+          path: ${{ env.LAPLACE_CORPUS_EVIDENCE }}/
           if-no-files-found: error
           retention-days: 90

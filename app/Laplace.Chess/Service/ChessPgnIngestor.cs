@@ -138,9 +138,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         CancellationToken ct, string? experimentReceiptJson, ChessRecordingMeasurement? measurement)
     {
         var experiment = experimentReceiptJson is null ? null : ChessExperimentEvidence.Parse(experimentReceiptJson);
+        measurement?.Checkpoint("gate", "waiting");
         await Gate.WaitAsync(ct);
         try
         {
+            measurement?.Checkpoint("gate", "acquired");
             if (experiment is not null)
             {
                 var names = await ChessVocabulary.BootstrapAsync(_writer,
@@ -162,21 +164,28 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     ct.ThrowIfCancellationRequested();
                     experiment?.ValidateGame(gameText);
                     if (measurement is not null) measurement.Work.ParseAttempts++;
+                    measurement?.Checkpoint("SourceReadParseAndValidation", "parse-entered", periodic: true,
+                        chunkGames: chunk.Count);
                     if (ChessPgnDecomposer.TryParseGame(gameText,
                         requireNormalCompletion: measurement?.RequiresNormalCompletion == true,
                         requireCompleteSource: measurement?.IsCorpus == true) is not { } game)
                     {
                         if (measurement is not null) measurement.Work.ParseRejected++;
+                        measurement?.Checkpoint("SourceReadParseAndValidation", "parse-progress", periodic: true);
                         continue;
                     }
                     measurement?.ObserveParsed(game);
                     parsed++;
                     chunk.Add(game);
+                    measurement?.Checkpoint("SourceReadParseAndValidation", "parse-progress", periodic: true,
+                        chunkGames: chunk.Count);
                     if (chunk.Count < ChunkSize) continue;
+                    measurement?.Checkpoint("SourceReadParseAndValidation", "chunk-parsed", chunkGames: chunk.Count);
                     (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement);
                     novel += n; applied += a; repaired += r;
                     chunk.Clear();
                 }
+                measurement?.Checkpoint("SourceReadParseAndValidation", "source-enumeration-complete", chunkGames: chunk.Count);
                 if (chunk.Count > 0)
                 {
                     (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement);
@@ -353,6 +362,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         using var compositionPhase = measurement?.MeasurePhase(
             ChessRecordingMeasurement.WorkPhase.CompositionAndNoveltyProbe);
         if (measurement is not null) measurement.Work.ChunksStarted++;
+        measurement?.Checkpoint("CompositionAndNoveltyProbe", "chunk-started", chunkGames: chunk.Count);
         // Novel content still takes the fused record+calculated path. Already-present playings
         // take a separate repair lane: rebuild the CURRENT source-record projection in memory,
         // retain only exact playing-grain attestation ids absent from durable evidence, and apply
@@ -374,6 +384,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         {
             novel++;
             novelIds.Add(game.PlayingId);
+            measurement?.Checkpoint("CompositionAndNoveltyProbe", "game-composition-entered", periodic: true);
             ChessPgnDecomposer.RecordGame(game, record);
             // Share the parsed board/position walk across the same calculated consumers
             // as generic PGN composition; outcomes must not replay and compose it again.
@@ -395,6 +406,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 measurement.Work.NovelGamesComposed++;
                 measurement.Work.NovelPliesComposed += game.MoveIds.Length;
                 measurement.Work.PositionOccurrencesComposed += game.PositionIds.Length;
+                measurement.Checkpoint("CompositionAndNoveltyProbe", "game-completed", periodic: true);
             }
             for (int i = 0; i + 1 < game.PositionIds.Length; i++)
                 observedPositions.Add(game.PositionIds[i]);
@@ -412,8 +424,10 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             // line-grain opening/move testimony is not replayed.
             ChessPgnDecomposer.RecordGame(game, repair);
             if (measurement is not null) measurement.Work.RepairGamesComposed++;
+            measurement?.Checkpoint("CompositionAndNoveltyProbe", "repair-game-completed", periodic: true);
         }
 
+        measurement?.Checkpoint("CompositionAndNoveltyProbe", "composition-complete");
         var changes = new List<SubstrateChange>(4);
         var expectedWitnesses = new List<AttestationRow>();
         var expectedCarriers = new List<PhysicalityRow>();
@@ -467,6 +481,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             }
         }
         measurement?.ObserveBuiltChanges(changes);
+        measurement?.Checkpoint("ChangeMaterializationAndWitnessPreparation", "changes-built");
 
         ChessRecordingMeasurement.ScopeRequest? scope = null;
         if (measurement is { RetainedPgn: true })
@@ -484,11 +499,13 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         {
             using var writerPhase = measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.WriterApply);
             if (measurement is not null) measurement.Work.WriterApplyAttempts++;
+            measurement?.Checkpoint("WriterApply", "writer-entered");
             long commitStarted = Stopwatch.GetTimestamp();
             try
             {
                 var result = await _writer.ApplyManyAsync(changes, ct);
                 measurement?.ObserveCommit(result);
+                measurement?.Checkpoint("WriterApply", "writer-acknowledged");
             }
             finally
             {
@@ -503,6 +520,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             using var readbackPhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.ExactReadback);
             await measurement.VerifyChunkAsync(_ds, chunk, expectedWitnesses, expectedCarriers,
                 experimentChange, experiment, ct);
+            measurement.Checkpoint("ExactReadback", "readback-returned");
         }
         if (scope is not null)
         {
@@ -515,6 +533,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             await measurement.FlushCorpusChunkAsync(novel, ct);
         }
         if (measurement is not null) measurement.Work.ChunksVerified++;
+        measurement?.Checkpoint("ChunkEvidenceOutput", "chunk-sealed");
         return (novel, novel, repairedGames);
     }
 

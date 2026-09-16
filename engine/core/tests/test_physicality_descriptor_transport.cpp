@@ -56,6 +56,74 @@ TEST(PhysicalityDescriptorTransport, TupleImportPreservesAllThreeAuthoritativeNa
     EXPECT_LE(intent_stage_memory_bytes(imported.get()), kBudget);
 }
 
+TEST(PhysicalityDescriptorTransport, RetainingPhysicalitiesReleasesExactCapacitiesAndWitnessCache) {
+    auto original = sample_stage();
+    const auto entities = tuples(original.get(), INTENT_STAGE_TABLE_ENTITIES);
+    const auto physicalities = tuples(original.get(), INTENT_STAGE_TABLE_PHYSICALITIES);
+    const auto attestations = tuples(original.get(), INTENT_STAGE_TABLE_ATTESTATIONS);
+    intent_stage_t* raw = nullptr;
+    ASSERT_EQ(intent_stage_from_tuple_bytes(entities.data(), entities.size(),
+        physicalities.data(), physicalities.size(), attestations.data(), attestations.size(),
+        4u * kBudget, &raw), 0);
+    Stage imported(raw, intent_stage_free);
+    raw = nullptr;
+    ASSERT_EQ(intent_stage_from_tuple_bytes(nullptr, 0u, physicalities.data(), physicalities.size(),
+        nullptr, 0u, 4u * kBudget, &raw), 0);
+    const Stage only_physicalities(raw, intent_stage_free);
+    const size_t before_witness = intent_stage_memory_bytes(imported.get());
+    ASSERT_EQ(intent_stage_witness_record(imported.get(), &kEntity), 0);
+    ASSERT_EQ(intent_stage_witness_seen(imported.get(), &kEntity), 1);
+    const size_t before = intent_stage_memory_bytes(imported.get());
+    const size_t witness_bytes = before - before_witness;
+    ASSERT_GT(witness_bytes, 0u);
+    const size_t peak = intent_stage_memory_peak_bytes(imported.get());
+    const size_t expected_retained = intent_stage_memory_bytes(only_physicalities.get());
+    const size_t expected_released = before - expected_retained;
+    EXPECT_GE(expected_released, witness_bytes + entities.size() + attestations.size());
+    size_t physicality_bytes = 0;
+    const auto* borrowed = intent_stage_tuple_ptr(imported.get(), INTENT_STAGE_TABLE_PHYSICALITIES,
+        &physicality_bytes);
+    original.reset();
+
+    EXPECT_EQ(intent_stage_retain_physicalities(nullptr), 0u);
+    EXPECT_EQ(intent_stage_retain_physicalities(imported.get()), expected_released);
+    EXPECT_EQ(intent_stage_memory_bytes(imported.get()), expected_retained);
+    EXPECT_EQ(intent_stage_memory_peak_bytes(imported.get()), peak);
+    EXPECT_EQ(intent_stage_entity_count(imported.get()), 0u);
+    EXPECT_EQ(intent_stage_attestation_count(imported.get()), 0u);
+    EXPECT_EQ(intent_stage_physicality_count(imported.get()), 1u);
+    EXPECT_EQ(intent_stage_witness_seen(imported.get(), &kEntity), 0);
+    for (const auto table : {INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_ATTESTATIONS}) {
+        size_t discarded_bytes = 1u;
+        EXPECT_EQ(intent_stage_tuple_ptr(imported.get(), table, &discarded_bytes), nullptr);
+        EXPECT_EQ(discarded_bytes, 0u);
+    }
+    size_t retained_bytes = 0;
+    EXPECT_EQ(intent_stage_tuple_ptr(imported.get(), INTENT_STAGE_TABLE_PHYSICALITIES,
+        &retained_bytes), borrowed);
+    EXPECT_EQ(retained_bytes, physicality_bytes);
+    EXPECT_EQ(tuples(imported.get(), INTENT_STAGE_TABLE_PHYSICALITIES), physicalities);
+    EXPECT_EQ(intent_stage_retain_physicalities(imported.get()), 0u);
+    EXPECT_EQ(intent_stage_memory_bytes(imported.get()), expected_retained);
+    EXPECT_EQ(intent_stage_memory_peak_bytes(imported.get()), peak);
+
+    const intent_stage_t* stages[]{imported.get()};
+    physicality_descriptor_capture_t* captured_raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stage_rows(stages, 1u, kBudget, &captured_raw),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const std::unique_ptr<physicality_descriptor_capture_t, decltype(&physicality_descriptor_capture_free)>
+        captured(captured_raw, physicality_descriptor_capture_free);
+    size_t count = 0;
+    const auto* observations = physicality_descriptor_capture_observations(captured.get(), &count);
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(observations[0].observed_at_unix_us, 42);
+    EXPECT_EQ(observations[0].source_stage_index, 0u);
+    EXPECT_EQ(observations[0].source_row_index, 0u);
+    // A later owner cannot inherit stale entity-witness membership.
+    EXPECT_EQ(intent_stage_witness_record(imported.get(), &kEntity), 0);
+    EXPECT_EQ(intent_stage_witness_seen(imported.get(), &kEntity), 1);
+}
+
 TEST(PhysicalityDescriptorTransport, RejectsTruncatedWrongColumnAndInvalidNegativeLengths) {
     const auto original = sample_stage();
     const auto valid = tuples(original.get(), INTENT_STAGE_TABLE_PHYSICALITIES);

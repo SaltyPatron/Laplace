@@ -342,10 +342,19 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         catch { return null; }
     }
 
-    private sealed class ApplyDiagnosticPhase(ILogger log, string phase) : IDisposable
+    private sealed class ApplyDiagnosticPhase : IDisposable
     {
+        private readonly ILogger _log;
+        private readonly string _phase;
         private long _started = Stopwatch.GetTimestamp();
         private bool _completed;
+        internal ApplyDiagnosticPhase(ILogger log, string phase)
+        {
+            _log = log;
+            _phase = phase;
+            try { _log.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", _phase, "entered"); }
+            catch { /* A diagnostic sink cannot reject the operation it observes. */ }
+        }
         public void Complete()
         {
             _completed = true;
@@ -357,9 +366,9 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             if (started == 0) return;
             try
             {
-                log.LogInformation(
-                    "WS_APPLY phase: {Phase} returned={Returned} elapsed_ms={ElapsedMs}",
-                    phase, _completed, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                _log.LogInformation(
+                    "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",
+                    _phase, "exited", _completed, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             }
             catch
             {

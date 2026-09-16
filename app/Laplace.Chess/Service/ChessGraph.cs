@@ -139,9 +139,11 @@ public static class ChessGraph
     /// </summary>
     internal static void AppendTransitions(
         SubstrateChangeBuilder b, IReadOnlyList<Hash128> positions, GameOutcome result,
-        double witnessWeight, Hash128 sourceId, Hash128 playingId)
+        bool initialWhiteToMove, double witnessWeight, Hash128 sourceId, Hash128 playingId)
     {
         if (positions.Count < 2) return;
+        // The ordinal alternates from the validated initial board; a SetUp/FEN
+        // game can start with Black. Position and evidence identities are unchanged.
         for (int ply = 0; ply + 1 < positions.Count; ply++)
             b.AddAttestation(NativeAttestation.Aggregated(
                 subject: positions[ply],
@@ -150,7 +152,7 @@ public static class ChessGraph
                 sourceId: sourceId,
                 contextId: playingId,
                 games: 1,
-                sumScoreFp1e9: ScoreFp1e9(result.ForMover(ply & 1)),
+                sumScoreFp1e9: ScoreFp1e9(result.ForMover((initialWhiteToMove ? 0 : 1) ^ (ply & 1))),
                 witnessWeight: witnessWeight));
     }
 

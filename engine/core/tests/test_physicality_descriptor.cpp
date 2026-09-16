@@ -611,6 +611,101 @@ TEST(PhysicalityDescriptorStage, ExactCopyReadbackRetainsBodyAndRetiresBorrowedS
         physicality_descriptor_capture_plan(result.get()), nullptr)));
 }
 
+TEST(PhysicalityDescriptorStage, ReleasesOnlyValidatedPlanAndRetainsExactCapturedRows) {
+    const std::array<hash128_t, 2> members{hash128_t{12,34}, hash128_t{56,78}};
+    double trajectory[8]{};
+    ASSERT_EQ(trajectory_build(members.data(), members.size(), trajectory), 0);
+    auto a = body();
+    a.trajectory_xyzm = trajectory;
+    a.trajectory_vertices = 2;
+    a.n_constituents = 2;
+    a.coord[0] = -0.0;
+    a.alignment_residual_is_null = 0;
+    a.alignment_residual = -0.0;
+    a.source_dim_is_null = 0;
+    a.source_dim = 17;
+    auto b = a;
+    b.coord[1] = 0.875;
+    const std::array<physicality_descriptor_input_t, 3> expected{a, b, a};
+    const std::array<int64_t, 3> times{-1234567, 0, 1700000000123456};
+    Stage first(intent_stage_new(0), intent_stage_free);
+    Stage second(intent_stage_new(0), intent_stage_free);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    stage_body(first.get(), a, times[0]);
+    stage_body(first.get(), b, times[1]);
+    stage_body(second.get(), a, times[2]);
+    auto result = capture({first.get(), second.get()});
+    ASSERT_NE(result, nullptr);
+    const auto* plan = physicality_descriptor_capture_plan(result.get());
+    ASSERT_NE(plan, nullptr);
+    const size_t released_bytes = physicality_descriptor_plan_bytes(plan);
+    const size_t retained_before = physicality_descriptor_capture_bytes(result.get());
+    const size_t peak_before = physicality_descriptor_capture_peak_bytes(result.get());
+    size_t count = 0;
+    const auto* root_data = physicality_descriptor_plan_roots(plan, &count);
+    ASSERT_EQ(count, expected.size());
+    const std::vector<hash128_t> saved_roots(root_data, root_data + count);
+    const auto* reference_data = physicality_descriptor_plan_references(plan, &count);
+    ASSERT_EQ(count, 9u);
+    const std::vector<physicality_descriptor_reference_t> saved_references(reference_data, reference_data + count);
+    const auto* inputs = physicality_descriptor_capture_inputs(result.get(), &count);
+    ASSERT_EQ(count, expected.size());
+    const auto* observations = physicality_descriptor_capture_observations(result.get(), &count);
+    ASSERT_EQ(count, expected.size());
+    const std::array<const double*, 3> decoded{inputs[0].trajectory_xyzm,
+        inputs[1].trajectory_xyzm, inputs[2].trajectory_xyzm};
+    first.reset();
+    second.reset();
+
+    ASSERT_GT(released_bytes, 0u);
+    EXPECT_EQ(physicality_descriptor_capture_release_plan(nullptr), 0u);
+    EXPECT_EQ(physicality_descriptor_capture_release_plan(result.get()), released_bytes);
+    EXPECT_EQ(physicality_descriptor_capture_plan(result.get()), nullptr);
+    EXPECT_EQ(physicality_descriptor_capture_bytes(result.get()), retained_before - released_bytes);
+    EXPECT_EQ(physicality_descriptor_capture_peak_bytes(result.get()), peak_before);
+    EXPECT_EQ(physicality_descriptor_capture_release_plan(result.get()), 0u);
+    EXPECT_EQ(physicality_descriptor_capture_bytes(result.get()), retained_before - released_bytes);
+    EXPECT_EQ(physicality_descriptor_capture_peak_bytes(result.get()), peak_before);
+    EXPECT_EQ(physicality_descriptor_capture_inputs(result.get(), &count), inputs);
+    ASSERT_EQ(count, expected.size());
+    EXPECT_EQ(physicality_descriptor_capture_observations(result.get(), &count), observations);
+    ASSERT_EQ(count, expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_TRUE(hash128_equals(&inputs[i].entity_id, &expected[i].entity_id));
+        EXPECT_EQ(inputs[i].type, expected[i].type);
+        EXPECT_EQ(std::memcmp(inputs[i].coord, expected[i].coord, sizeof(a.coord)), 0);
+        EXPECT_EQ(std::memcmp(&inputs[i].hilbert_index, &expected[i].hilbert_index, sizeof(a.hilbert_index)), 0);
+        EXPECT_EQ(inputs[i].trajectory_xyzm, decoded[i]);
+        ASSERT_EQ(inputs[i].trajectory_vertices, 2u);
+        EXPECT_EQ(std::memcmp(inputs[i].trajectory_xyzm, trajectory, sizeof(trajectory)), 0);
+        EXPECT_EQ(inputs[i].n_constituents, 2);
+        EXPECT_EQ(inputs[i].alignment_residual_is_null, 0);
+        EXPECT_TRUE(std::signbit(inputs[i].alignment_residual));
+        EXPECT_EQ(inputs[i].source_dim_is_null, 0);
+        EXPECT_EQ(inputs[i].source_dim, 17);
+        hash128_t placement{};
+        laplace_physicality_id_compute(expected[i].entity_id, expected[i].type, &placement);
+        EXPECT_TRUE(hash128_equals(&observations[i].placement_id, &placement));
+        EXPECT_EQ(observations[i].source_stage_index, i == 2 ? 1u : 0u);
+        EXPECT_EQ(observations[i].source_row_index, i == 2 ? 0u : i);
+        EXPECT_EQ(observations[i].observed_at_unix_us, times[i]);
+    }
+    const auto rebuilt = build(std::vector<physicality_descriptor_input_t>(inputs, inputs + count));
+    ASSERT_NE(rebuilt, nullptr);
+    const auto rebuilt_roots = roots(rebuilt);
+    ASSERT_EQ(rebuilt_roots.size(), saved_roots.size());
+    EXPECT_EQ(std::memcmp(rebuilt_roots.data(), saved_roots.data(), saved_roots.size() * sizeof(hash128_t)), 0);
+    const auto* rebuilt_references = physicality_descriptor_plan_references(rebuilt.get(), &count);
+    ASSERT_EQ(count, saved_references.size());
+    for (size_t i = 0; i < count; ++i) {
+        EXPECT_TRUE(hash128_equals(&rebuilt_references[i].entity_id, &saved_references[i].entity_id));
+        EXPECT_EQ(rebuilt_references[i].input_index, saved_references[i].input_index);
+        EXPECT_EQ(rebuilt_references[i].vertex_index, saved_references[i].vertex_index);
+        EXPECT_EQ(rebuilt_references[i].kind, saved_references[i].kind);
+    }
+}
+
 TEST(PhysicalityDescriptorStage, PreservesIdentityAcrossActualStagePartitionBoundaries) {
     Stage together(intent_stage_new(0), intent_stage_free);
     Stage first(intent_stage_new(0), intent_stage_free);

@@ -186,6 +186,16 @@ static int decode_fields(const fields_t* fields, physicality_descriptor_input_t*
     return hash128_equals(&expected, &observation->placement_id);
 }
 
+size_t physicality_descriptor_capture_release_plan(physicality_descriptor_capture_t* capture) {
+    size_t released;
+    if (capture == NULL || capture->plan == NULL) return 0u;
+    released = physicality_descriptor_plan_bytes(capture->plan);
+    physicality_descriptor_plan_free(capture->plan);
+    capture->plan = NULL;
+    capture->bytes -= released;
+    return released;
+}
+
 void physicality_descriptor_capture_free(physicality_descriptor_capture_t* capture) {
     if (capture == NULL) return;
     physicality_descriptor_plan_free(capture->plan);
