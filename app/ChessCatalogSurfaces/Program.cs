@@ -11,6 +11,8 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (args.FirstOrDefault() == ChessRecordedFloorWitness.Mode)
+            return ChessRecordedFloorWitness.Run(args[1..]);
         if (args.FirstOrDefault() == ChessStartingSideInventory.Mode)
             return ChessStartingSideInventory.RunAsync(args[1..]).GetAwaiter().GetResult();
         if (args.FirstOrDefault() == ChessRecordedFloorExport.Mode)
