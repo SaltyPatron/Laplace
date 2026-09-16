@@ -57,19 +57,26 @@ class ActionsArchitectureTests(unittest.TestCase):
     def test_main_push_is_development_validation_not_delivery(self):
         plan = self.product_plan("all", GITHUB_EVENT_NAME="push")
         self.assertEqual(
-            ["policy", "dependencies", "build", "native-dev", "managed-dev", "uci-dev", "browser-dev"],
+            ["dependencies", "build", "native-dev", "managed-dev", "uci-dev", "browser-dev"],
             plan,
         )
         for forbidden in (
-            "native-install", "database-maintenance", "foundation", "lexical-foundation",
+            "policy", "native-install", "database-maintenance", "foundation", "lexical-foundation",
             "operational-seed", "publish", "operational-execution", "db-health",
             "native-db", "managed-db", "live-floor", "performance",
         ):
             self.assertNotIn(forbidden, plan)
 
+    def test_push_dependency_phase_is_read_only(self):
+        source = PRODUCT.read_text(encoding="utf-8")
+        block = source.split("run_deps() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('"${GITHUB_EVENT_NAME:-}" == "push"', block)
+        self.assertIn("bash scripts/ci-deps.sh --check-only", block)
+        self.assertIn("bash scripts/ci-deps.sh", block)
+
     def test_operator_all_remains_explicit_and_separate_from_push(self):
         plan = self.product_plan("all", GITHUB_EVENT_NAME="workflow_dispatch")
-        for required in ("native-install", "database-maintenance", "publish", "db-health"):
+        for required in ("policy", "native-install", "database-maintenance", "publish", "db-health"):
             self.assertIn(required, plan)
         self.assertGreater(len(plan), len(self.product_plan("all", GITHUB_EVENT_NAME="push")))
 
