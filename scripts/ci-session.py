@@ -174,7 +174,8 @@ def guardian(directory, lock_fd, control_fd, parent, environment):
         state = read_state(directory)
         terminate_group(state.get("active"))
         cleanup_rc = cleanup(state, environment) if state.get("host_lock_acquired", True) else 0
-        state.update(status="failed", failure="supervisor exited unexpectedly", active=None, cleanup_exit_code=cleanup_rc)
+        state.update(status="failed", failure="supervisor exited unexpectedly", active=None,
+                     waiting_for_host=False, cleanup_exit_code=cleanup_rc)
         save(directory, state)
     finally:
         os.close(parent)
@@ -303,22 +304,32 @@ def serve(directory, startup_fd, lock_path, idle_timeout, phase_timeout):
     locked = False
     state["supervisor"] = {"pid": os.getpid(), "start": process_identity(os.getpid())}
     state["host_lock_acquired"] = False
+    state["waiting_for_host"] = False
 
     def acquire_host(client, timeout=None):
         nonlocal locked
         deadline = time.monotonic() + timeout if timeout is not None else None
-        while True:
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutError("host reservation timed out")
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                locked = True
-                state["host_lock_acquired"] = True
+        # A reservation wait owns no phase process. Expose it separately so
+        # stop can interrupt the supervisor instead of queueing behind the wait.
+        state["waiting_for_host"] = True
+        save(directory, state)
+        try:
+            while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("host reservation timed out")
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+                    state.update(host_lock_acquired=True, waiting_for_host=False)
+                    save(directory, state)
+                    return
+                except BlockingIOError:
+                    if select.select([client], [], [], .2)[0]:
+                        raise ConnectionError("host reservation client disconnected")
+        finally:
+            if state["waiting_for_host"]:
+                state["waiting_for_host"] = False
                 save(directory, state)
-                return
-            except BlockingIOError:
-                if select.select([client], [], [], .2)[0]:
-                    raise ConnectionError("host reservation client disconnected")
 
     def interrupted(signum, frame):
         raise KeyboardInterrupt
@@ -550,7 +561,7 @@ def main():
     supervisor = state.get("supervisor", {})
     if not supervisor.get("start") or process_identity(supervisor.get("pid", 0)) != supervisor.get("start"):
         raise ValueError("CI session supervisor identity is stale")
-    if args.operation == "stop" and state.get("active"):
+    if args.operation == "stop" and (state.get("active") or state.get("waiting_for_host")):
         descriptor = os.pidfd_open(supervisor["pid"])
         try:
             if process_identity(supervisor["pid"]) != supervisor["start"]:
