@@ -699,7 +699,7 @@ main "$@"
         program = program[:offset] + (
             "if sys.argv[1:] != ['-platform', 'offscreen', '--version']:\n"
             "    names = ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', "
-            "'XDG_CONFIG_HOME', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'LD_LIBRARY_PATH', 'LAPLACE_PERFCACHE_BIN', 'LAPLACE_CHESS_PERFCACHE_BIN', 'LAPLACE_CHESS_TRANSITION_BIN']\n"
+            "'XDG_CONFIG_HOME', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'LD_LIBRARY_PATH', 'LAPLACE_PERFCACHE_BIN', 'LAPLACE_CHESS_PERFCACHE_BIN', 'LAPLACE_CHESS_TRANSITION_BIN', 'LAPLACE_UCI_SUBSTRATE']\n"
             "    Path(" + repr(str(observed)) + ").write_text(json.dumps({'argv': sys.argv, "
             "'environment': {key: os.environ.get(key) for key in names}}))\n"
             "    raise SystemExit(0)\n"
@@ -752,7 +752,7 @@ main "$@"
                            WAYLAND_DISPLAY="wayland-7", XDG_RUNTIME_DIR="/operator/run",
                            XDG_CONFIG_HOME=str(self.root / "operator-settings"), QT_PLUGIN_PATH="/wrong/plugin",
                            QT_QPA_PLATFORM_PLUGIN_PATH="/wrong/platform",
-                           LD_LIBRARY_PATH="/operator/lib:" + str(sdk / "lib"))
+                           LD_LIBRARY_PATH="/operator/lib:" + str(sdk / "lib"), LAPLACE_UCI_SUBSTRATE="off")
         run = subprocess.run([str(launcher), *arguments], env=environment, capture_output=True, text=True, timeout=10)
         self.assertEqual(0, run.returncode, run.stderr)
         child = json.loads(observed.read_text())
@@ -762,6 +762,7 @@ main "$@"
         self.assertEqual(str(sdk / "plugins"), child["environment"]["QT_PLUGIN_PATH"])
         self.assertEqual(str(sdk / "plugins/platforms"), child["environment"]["QT_QPA_PLATFORM_PLUGIN_PATH"])
         self.assertEqual(str(sdk / "lib") + ":/operator/lib", child["environment"]["LD_LIBRARY_PATH"])
+        self.assertEqual("substrate", child["environment"]["LAPLACE_UCI_SUBSTRATE"])
         engine_config = Path(environment["XDG_CONFIG_HOME"]) / "cutechess/engines.json"
         engines = json.loads(engine_config.read_text())
         self.assertEqual(["Stockfish (official)", "Laplace (substrate)"], [engine["name"] for engine in engines])
