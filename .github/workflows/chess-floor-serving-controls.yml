@@ -1,0 +1,77 @@
+name: Hosted chess floor serving controls
+on:
+  push:
+    branches: [verify/chess-floor-serving-controls-20260916]
+permissions:
+  contents: read
+jobs:
+  protocol-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TMPDIR: /build/laplace/work/floor-serving-controls/tmp
+      TMP: /build/laplace/work/floor-serving-controls/tmp
+      TEMP: /build/laplace/work/floor-serving-controls/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
+      CANDIDATE_SHA: 15567b18cc47a99092bd91c3103825b72f87c50f
+      CANDIDATE_TREE: 6992c950536fd0e917b61ac612effee41358a0a5
+    steps:
+      - name: Prepare permanent work and evidence directories
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/floor-serving-controls
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 15567b18cc47a99092bd91c3103825b72f87c50f
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind the exact candidate in the permanent worktree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          git worktree add --detach /build/laplace/worktrees/floor-serving-controls "$CANDIDATE_SHA"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          Path("/build/laplace/recovery/floor-serving-controls/source.json").write_text(json.dumps({
+              "candidate_commit":os.environ["CANDIDATE_SHA"],
+              "candidate_tree":os.environ["CANDIDATE_TREE"],
+              "workflow_commit":os.environ["GITHUB_SHA"],
+              "claim":"python-protocol-and-registry-controls",
+              "installed_acceptance_executed":False,
+              "native_chess_runtime_executed":False
+          },indent=2)+"\n")
+          PY
+      - name: Execute real protocol and required profile controls
+        working-directory: /build/laplace/worktrees/floor-serving-controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence=/build/laplace/recovery/floor-serving-controls
+          python3 --version 2>&1 | tee "$evidence/python-version.log"
+          printf 'suite\texit_code\n' > "$evidence/test-summary.tsv"
+          failed=0
+          for suite in test-chess-floor-serving.py test-test-profile-registry.py; do
+            set +e
+            timeout --signal=TERM --kill-after=10s 60s \
+              python3 "scripts/$suite" \
+              2>&1 | tee "$evidence/$suite.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '%s\t%s\n' "$suite" "$status" >> "$evidence/test-summary.tsv"
+            if [[ "$status" != 0 ]]; then failed=1; fi
+          done
+          cat "$evidence/test-summary.tsv"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          exit "$failed"
+      - name: Retain exact protocol evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chess-floor-serving-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/floor-serving-controls/
+          if-no-files-found: error
+          retention-days: 30
