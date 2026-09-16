@@ -121,6 +121,7 @@ app.MapCoreEndpoints();
 app.MapQueryEndpoints();
 app.MapOpEndpoints();
 app.MapAdminEndpoints();
+app.MapIngestAdminEndpoints();
 app.MapServiceControlEndpoints();
 app.MapOpenAiCompatEndpoints();
 app.MapFoundryEndpoints();
