@@ -1,36 +1,38 @@
 /*
- * realize_batch.c — realize.realize() for N ids in a fixed number of batched SPI
- * round-trips (6), positionally aligned to the input array.
+ * realize_batch.c — realize.realize() for N ids in a bounded number of batched
+ * SPI round-trips, positionally aligned to the input array.
  *
  * The scalar ladder it reproduces exactly (realize.sql.in, lang-only path —
  * resolve_name is called WITHOUT context, so only its null-context branch
  * matters):
  *
  *   COALESCE(
- *     realize._has_name(id, lang),      -- arm 1: first NON-EMPTY render
- *     realize._synset_lemma(id, lang),  -- arm 2: first NON-EMPTY render
- *     NULLIF(realize.render_text(id), ''),  -- arm 3: exact self render
- *     realize._translation(id, lang),   -- arm 4: first NON-EMPTY render
- *     realize._canonical(id),           -- arm 5: first row, text AS-IS
+ *     NULLIF(realize.render_text(id), ''),  -- arm 1: exact self render
+ *     realize._has_name(id, lang),      -- arm 2: first NON-EMPTY render
+ *     realize._synset_lemma(id, lang),  -- arm 3: first NON-EMPTY render
+ *     realize._canonical(id),           -- arm 4: resolve_name fallback, AS-IS
+ *     realize._translation(id, lang),   -- arm 5: first NON-EMPTY render
  *     realize._defines(id))             -- arm 6: TOP-mu row, render AS-IS
  *
  * Parity notes (deliberate, match the scalar helpers byte-for-byte):
- *   - arms 1/2/4 filter candidates to non-empty renders BEFORE their LIMIT 1,
+ *   - arms 2/3/5 filter candidates to non-empty renders BEFORE their LIMIT 1,
  *     so the batch walks each id's rank-ordered candidates and takes the first
  *     whose render is non-empty;
- *   - arms 5/6 have NO non-empty filter in the scalar: arm 5 returns the
+ *   - arms 4/6 have NO non-empty filter in the scalar: arm 4 returns the
  *     regexp-stripped canonical name as-is, arm 6 returns the render of the
  *     single top-mu definition as-is (possibly NULL → overall NULL, possibly
  *     '' → '' is the final answer);
- *   - arm 2 joins plain consensus for the HAS_SENSE hop (only the IS_SENSE_OF
+ *   - arm 3 joins plain consensus for the HAS_SENSE hop (only the IS_SENSE_OF
  *     edge goes through the unrefuted view), exactly as _realize_synset_lemma;
  *   - a NULL lang makes every lp flag false (LEFT JOIN on object_id = NULL
  *     never matches), identical to the scalar helpers;
  *   - abstention: unresolvable ids yield SQL NULL, never hex.
  *
- * All candidate rendering funnels through ONE realize.render_text_batch($ids) call
- * (generate_walk.c) — one shared, complete, cycle-safe constituent closure + memo
- * across every candidate of every arm plus the inputs themselves.
+ * Render input identities once, retain those results, then render only newly
+ * discovered fallback identities as one additional batch. The append-only union
+ * provides stable slots across arms; repeated ids reuse the same result, including
+ * NULL/empty results. Each batch uses the complete cycle-safe constituent closure
+ * in realize.render_text_batch; no candidate introduces a scalar SPI call.
  */
 #include "postgres.h"
 
@@ -546,6 +548,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     Datum        *union_ids;
     ArrayType    *arm_input = NULL;   /* residual ids the arms run on; NULL = none */
     int32         un = 0, ucap;
+    int32         input_render_count = 0;
+    char        **input_rendered;
     ArmData       arm_name, arm_lemma, arm_trans, arm_def;
     HTAB         *canon;
     char        **rendered;
@@ -580,7 +584,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         ensure_plan(&plan_defines, Q_DEFINES, 1, one);
     }
 
-    /* Seed the render union with the inputs themselves (arm 3, self render). */
+    /* Seed the render union with the inputs themselves (arm 1, self render). */
     render_ids = make_id_htab("realize_batch render union",
                               sizeof(RenderEntry), Max(256, n * 2));
     ucap = Max(64, n * 2);
@@ -598,16 +602,14 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
      * for the overwhelming majority. realize.render_text_batch was 1,385 ms mean over
      * 205 calls, ~1,200 ids per call against ~200 inputs.
      *
-     * The inputs are rendered once here to decide the residual. That costs n extra
-     * renders and removes roughly 5n candidate renders. Everything downstream --
-     * the union, the single shared render pass, the ladder -- is untouched, so an
-     * id in the residual is resolved exactly as before.
+     * Retain the exact input renders as the prefix of the append-only union.
+     * Fallback arms can reference an input again; its prior result (including
+     * NULL or empty) is still authoritative within this read. Only identities
+     * added by the arms require another batched closure.
      *
      * When the residual is empty the arms are skipped entirely: five SPI queries and
      * their whole candidate set never happen. */
     {
-        char **probe;
-
         /* Every arm must be a VALID EMPTY arm before the residual test, because the
          * ladder hash-searches all four unconditionally. run_arm builds by_id itself,
          * and arm_def's htab is built inside the defines block -- both of which are
@@ -622,7 +624,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         arm_name.n = arm_lemma.n = arm_trans.n = arm_def.n = 0;
         arm_name.cap = arm_lemma.cap = arm_trans.cap = arm_def.cap = 0;
 
-        probe = render_union(union_ids, un, "realize_batch residual probe");
+        input_render_count = un;
+        input_rendered = render_union(union_ids, un, "realize_batch inputs");
         Datum *resid = (Datum *) palloc(sizeof(Datum) * Max(1, n));
         int32  nresid = 0;
 
@@ -635,7 +638,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
                 continue;
             id_key(&key, in_elems[i], "residual");
             re = (RenderEntry *) hash_search(render_ids, &key, HASH_FIND, NULL);
-            if (re == NULL || probe[re->slot] == NULL || probe[re->slot][0] == '\0')
+            if (re == NULL || input_rendered[re->slot] == NULL
+                || input_rendered[re->slot][0] == '\0')
                 resid[nresid++] = in_elems[i];
         }
 
@@ -735,8 +739,22 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         SPI_freetuptable(SPI_tuptable);
     }
 
-    /* ---- ONE shared render pass over every candidate + every input ---- */
-    rendered = render_union(union_ids, un, "realize_batch");
+    /* Extend the retained render prefix with NEW candidates only. Re-rendering
+     * the whole union would repeat every input closure even when no fallback
+     * arm ran. Slots never move when render_union_add appends a new identity. */
+    rendered = input_rendered;
+    if (un > input_render_count)
+    {
+        int32  additional_count = un - input_render_count;
+        char **additional = render_union(union_ids + input_render_count,
+                                          additional_count,
+                                          "realize_batch fallback candidates");
+
+        rendered = (char **) repalloc(rendered, sizeof(char *) * un);
+        memcpy(rendered + input_render_count, additional,
+               sizeof(char *) * additional_count);
+        pfree(additional);
+    }
 
     /* ---- per-id COALESCE ladder, output aligned to the input ---- */
     out = (Datum *) palloc(sizeof(Datum) * n);
@@ -783,10 +801,9 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             label = first_nonempty(&arm_name, &key, rendered, render_ids);
         if (label == NULL)
             label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
-        /* arm 4: translation, first non-empty render */
-        if (label == NULL)
-            label = first_nonempty(&arm_trans, &key, rendered, render_ids);
-        /* arm 5: canonical name text AS-IS (no non-empty filter, per scalar) */
+        /* arm 4: resolve_name's canonical fallback AS-IS, including empty.
+         * The scalar resolves names before considering translation; preserving
+         * that nested COALESCE order is required for identical projections. */
         if (label == NULL)
         {
             CanonEntry *ce = (CanonEntry *) hash_search(canon, &key,
@@ -802,6 +819,9 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
                 have = true;
             }
         }
+        /* arm 5: translation, only if resolve_name returned SQL NULL. */
+        if (label == NULL && !have)
+            label = first_nonempty(&arm_trans, &key, rendered, render_ids);
         /* arm 6: top-mu definition's render AS-IS (may be NULL; '' is a result) */
         if (label == NULL && !have)
         {

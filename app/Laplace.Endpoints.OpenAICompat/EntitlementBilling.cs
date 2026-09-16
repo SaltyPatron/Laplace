@@ -161,6 +161,27 @@ internal interface IBillingWebhookHandler
     Task<StripeWebhookProcessResult> HandleStripeAsync(string payload, string? signature, CancellationToken ct);
 }
 
+internal interface IStripeSubscriptionGateway
+{
+    Task<Subscription> GetAsync(string subscriptionId, CancellationToken ct);
+}
+
+internal sealed class StripeSubscriptionGateway : IStripeSubscriptionGateway
+{
+    private readonly StripeBillingOptions _options;
+
+    public StripeSubscriptionGateway(IOptions<StripeBillingOptions> options) => _options = options.Value;
+
+    public async Task<Subscription> GetAsync(string subscriptionId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_options.ApiKey))
+            throw new InvalidOperationException("Stripe subscription synchronization requires its configured API credential.");
+
+        var subscriptions = new SubscriptionService(new StripeClient(_options.ApiKey));
+        return await subscriptions.GetAsync(subscriptionId, cancellationToken: ct);
+    }
+}
+
 internal sealed class BillingWebhookHandler : IBillingWebhookHandler
 {
     private readonly StripeBillingOptions _options;
@@ -169,11 +190,13 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
     private readonly IBillingOrchestrator _billing;
     private readonly IBillingEntitlementStore _entitlements;
     private readonly IBillingWebhookEventStore _events;
+    private readonly IStripeSubscriptionGateway _subscriptions;
     public BillingWebhookHandler(IOptions<StripeBillingOptions> options, IWebhookSecretProvider webhookSecret,
-        IBillingCatalog catalog, IBillingOrchestrator billing, IBillingEntitlementStore entitlements, IBillingWebhookEventStore eventStore)
+        IBillingCatalog catalog, IBillingOrchestrator billing, IBillingEntitlementStore entitlements, IBillingWebhookEventStore eventStore,
+        IStripeSubscriptionGateway subscriptions)
     {
         _options = options.Value; _secret = webhookSecret; _catalog = catalog;
-        _billing = billing; _entitlements = entitlements; _events = eventStore;
+        _billing = billing; _entitlements = entitlements; _events = eventStore; _subscriptions = subscriptions;
     }
 
     public async Task<StripeWebhookProcessResult> HandleStripeAsync(string payload, string? signature, CancellationToken ct)
@@ -254,11 +277,7 @@ internal sealed class BillingWebhookHandler : IBillingWebhookHandler
         subscriptionId ??= ObjectId(Child(Child(Child(obj, "parent"), "subscription_details"), "subscription"));
         if (string.IsNullOrWhiteSpace(subscriptionId))
             return new(true, verified, false, id, type, checkout ? "quote_approved" : "ignored", tenant, serviceId, quoteId, null);
-        if (string.IsNullOrWhiteSpace(_options.ApiKey))
-            throw new InvalidOperationException("Stripe subscription synchronization requires its configured API credential.");
-
-        var subscriptions = new SubscriptionService(new StripeClient(_options.ApiKey));
-        var subscription = await subscriptions.GetAsync(subscriptionId, cancellationToken: ct);
+        var subscription = await _subscriptions.GetAsync(subscriptionId, ct);
         string? Meta(string key) => subscription.Metadata is not null && subscription.Metadata.TryGetValue(key, out var value) ? value : null;
         tenant = Meta("tenant");
         if (string.IsNullOrWhiteSpace(tenant))

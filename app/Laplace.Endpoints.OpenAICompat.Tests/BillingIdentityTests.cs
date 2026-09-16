@@ -70,7 +70,7 @@ public sealed class KeyModeEnforcementTests : IClassFixture<KeyModeFactory>
     public KeyModeEnforcementTests(KeyModeFactory factory) => _factory = factory;
 
     [Fact]
-    public async Task Protected_Route_Requires_Key()
+    public async Task Protected_Route_Requires_Authentication()
     {
         using var client = _factory.CreateClient();
         using var response = await client.PostAsJsonAsync("/v1/chat/completions", new
@@ -79,18 +79,23 @@ public sealed class KeyModeEnforcementTests : IClassFixture<KeyModeFactory>
             messages = new[] { new { role = "user", content = "what is a whale" } }
         });
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("api_key_required", body);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var error = body.RootElement.GetProperty("error");
+        Assert.Equal("authentication_error", error.GetProperty("type").GetString());
+        Assert.Equal("authentication_required", error.GetProperty("code").GetString());
     }
 
     // GH #489 / C04: /chess/* sits outside /v1 and was skipped by the middleware.
     [Fact]
-    public async Task Chess_Playing_Surface_Requires_Key()
+    public async Task Chess_Playing_Surface_Requires_Authentication()
     {
         using var client = _factory.CreateClient();
         using var response = await client.GetAsync("/chess/new");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Contains("api_key_required", await response.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var error = body.RootElement.GetProperty("error");
+        Assert.Equal("authentication_error", error.GetProperty("type").GetString());
+        Assert.Equal("authentication_required", error.GetProperty("code").GetString());
     }
 
     [Fact]

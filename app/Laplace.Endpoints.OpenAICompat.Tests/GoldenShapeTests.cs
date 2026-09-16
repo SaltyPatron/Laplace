@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
+using Laplace.Endpoints.OpenAICompat.Auth;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
@@ -17,10 +19,12 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
 {
     private readonly HttpClient _client;
+    private readonly GoldenFactory _factory;
     private readonly Dictionary<string,string> _quoteTenants = new();
 
     public GoldenShapeTests(GoldenFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -708,7 +712,7 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     public async Task Golden_Webhook_ApproveQuote()
     {
         var quoteId = await CreateQuoteAsync("audit.report", "golden-webhook-tenant");
-        using var response = await PostStripeWebhookAsync(WebhookEnvelope(
+        using var response = await PostStripeWebhookAsync(await WebhookEnvelopeAsync(
             "evt_golden_webhook", "golden-webhook-tenant", "audit.report", quoteId, subscription: null));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         GoldenJson.Match("webhook-approve-200", await response.Content.ReadAsStringAsync());
@@ -731,8 +735,13 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     public async Task Golden_Entitlements_And_Consume()
     {
         const string tenant = "golden-entitlement-tenant";
-        using var activate = await PostStripeWebhookAsync(WebhookEnvelope(
-            "evt_golden_entitlement", tenant, "plan.studio", "q_golden_plan", subscription: "sub_golden_entitlement"));
+        var quoteId = await CreateQuoteAsync("plan.studio", tenant);
+        var periodStart = DateTimeOffset.UtcNow.AddDays(-1);
+        _factory.Services.GetRequiredService<TestStripeSubscriptions>().Set(
+            _factory.Services, "sub_golden_entitlement", tenant, "plan.studio",
+            "cus_evt_golden_entitlement", periodStart, periodStart.AddDays(30));
+        using var activate = await PostStripeWebhookAsync(await WebhookEnvelopeAsync(
+            "evt_golden_entitlement", tenant, "plan.studio", quoteId, subscription: "sub_golden_entitlement"));
         Assert.Equal(HttpStatusCode.OK, activate.StatusCode);
 
         using var entitlements = await GetWithTenantAsync("/v1/billing/entitlements", tenant);
@@ -753,7 +762,9 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     [Fact]
     public async Task Golden_CatalogSync_Unconfigured()
     {
-        using var response = await _client.PostAsync("/v1/billing/catalog/sync", content: null);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/catalog/sync");
+        request.Headers.Add(OperatorAuth.TokenHeader, GoldenFactory.OperatorToken);
+        using var response = await _client.SendAsync(request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         GoldenJson.Match("catalog-sync-200", await response.Content.ReadAsStringAsync());
     }
@@ -911,27 +922,17 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     private async Task<string> ApproveQuoteAsync(string serviceId, string tenant, string eventId)
     {
         var quoteId = await CreateQuoteAsync(serviceId, tenant);
-        using var webhook = await PostStripeWebhookAsync(WebhookEnvelope(eventId, tenant, serviceId, quoteId, subscription: null));
+        using var webhook = await PostStripeWebhookAsync(await WebhookEnvelopeAsync(eventId, tenant, serviceId, quoteId, subscription: null));
         Assert.Equal(HttpStatusCode.OK, webhook.StatusCode);
         return quoteId;
     }
 
-    private static string WebhookEnvelope(string eventId, string tenant, string serviceId, string quoteId, string? subscription) =>
-        JsonSerializer.Serialize(new
-        {
-            id = eventId,
-            type = "checkout.session.completed",
-            data = new
-            {
-                @object = new
-                {
-                    id = $"cs_{eventId}",
-                    customer = $"cus_{eventId}",
-                    subscription,
-                    metadata = new { tenant, service_id = serviceId, quote_id = quoteId }
-                }
-            }
-        });
+    private async Task<string> WebhookEnvelopeAsync(string eventId, string tenant, string serviceId, string quoteId, string? subscription)
+    {
+        var sessionId = $"cs_{eventId}";
+        await WebhookTestEvents.BindCheckoutAsync(_factory.Services, quoteId, sessionId);
+        return WebhookTestEvents.PaidCheckout(eventId, tenant, serviceId, quoteId, sessionId, subscription);
+    }
 
     private async Task<HttpResponseMessage> PostStripeWebhookAsync(string payload)
     {

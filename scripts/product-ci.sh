@@ -5,10 +5,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# Completion state belongs to this shell invocation, never its inherited environment.
-stockfish_corpus_passed=0
-operational_postchecks_passed=0
-operational_seed_run_id=
 stage="${1:-all}"
 case "$stage" in
   reconcile|check|build|test|deploy|integrate|all|application-check|applications) ;;
@@ -91,8 +87,7 @@ seed_operational_memory() {
 }
 
 verify_operational_execution() {
-  local receipt_prefix="${1:-}" seed_run_id remaining deadline=$((SECONDS + 900))
-  case "$receipt_prefix" in ''|post-stockfish-) ;; *) return 2 ;; esac
+  local seed_run_id remaining deadline=$((SECONDS + 900))
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
     echo "fresh DB intentionally left unseeded — operational execution proof skipped"
     return 0
@@ -120,131 +115,19 @@ if not isinstance(run_id, str) or str(uuid.UUID(run_id)) != run_id:
 print(run_id)
 PY
 )"
-  if [[ "$receipt_prefix" == post-stockfish- ]]; then
-    if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
-      IFS= read -r operational_seed_run_id < "$LAPLACE_CI_SESSION_DIRECTORY/initial-operational-seed-run-id"
-    fi
-    [[ "$seed_run_id" == "${operational_seed_run_id:?initial operational proof did not select its seed}" ]] || {
-      echo "post-Stockfish seed differs from this lifecycle's initial verified seed" >&2
-      return 1
-    }
-  else
-    operational_seed_run_id="$seed_run_id"
-  fi
   remaining=$((deadline - SECONDS))
   (( remaining > 0 )) || return 124
   timeout --signal=TERM --kill-after=5s "${remaining}s" python3 scripts/verify-operational-task.py \
     --shape-file seeds/operational/tasks/en_define.json --seed-run-id "$seed_run_id" \
-    --receipt "$operational_proof_directory/${receipt_prefix}task.json"
+    --receipt "$operational_proof_directory/task.json"
   remaining=$((deadline - SECONDS))
   (( remaining > 0 )) || return 124
   timeout --signal=TERM --kill-after=5s "${remaining}s" python3 scripts/verify-operational-task.py \
     --proof-mode direct-relation --prompt 'The opposite of hot is' --operand hot \
     --shape-file seeds/operational/tasks/en_antonym.json \
     --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
-    --receipt "$operational_proof_directory/${receipt_prefix}antonym-task.json"
-  if [[ "$receipt_prefix" == post-stockfish- ]]; then
-    operational_postchecks_passed=1
-  elif [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
-    printf '%s\n' "$seed_run_id" > "$LAPLACE_CI_SESSION_DIRECTORY/initial-operational-seed-run-id"
-  fi
-}
+    --receipt "$operational_proof_directory/antonym-task.json"
 
-run_stockfish_corpus_acceptance() {
-  # The caller already owns the shared host lock through publication and both
-  # ordinary proofs. The common CLI additionally
-  # owns the canonical ingest lane for its two exact observations.
-  local output="${LAPLACE_STOCKFISH_CORPUS_DIRECTORY:-$operational_proof_directory/stockfish-corpus}"
-  export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
-  dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --nologo -v minimal
-  bash scripts/sync-managed-native-artifacts.sh
-  python3 scripts/ingest-stockfish-corpus.py \
-    --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --output "$output"
-  stockfish_corpus_passed=1
-}
-
-record_chess_completion() {
-  # Direct execution retains its local completion state. Visible CI steps use
-  # the same session owner's exact source, ordered results and run identity;
-  # no inherited flag or receipt from a different publication establishes this.
-  if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
-    python3 - "$LAPLACE_CI_SESSION_DIRECTORY" "$ROOT" "$stage" <<'PY'
-import importlib.util
-import sys
-from pathlib import Path
-directory, root, stage = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-spec = importlib.util.spec_from_file_location("ci_session", root / "scripts/ci-session.py")
-owner = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(owner)
-state = owner.read_state(directory)
-if (state.get("kind") != "product" or state.get("stage") != stage
-        or Path(state["checkout"]).resolve() != root.resolve()
-        or state["source"] != owner.source(root)
-        or (state.get("active") or {}).get("phase") != "chess-completion"):
-    raise SystemExit("chess completion belongs to another lifecycle or source")
-required = ["operational-seed", "publish", "chess-runtime", "operational-execution",
-            "stockfish-corpus", "post-stockfish-execution"]
-results = state["results"]
-completed = [item["phase"] for item in results if item["exit_code"] == 0]
-if any(item["exit_code"] != 0 for item in results) or [p for p in completed if p in required] != required:
-    raise SystemExit("chess completion requires this lifecycle's successful ordered prerequisites")
-PY
-  else
-    [[ "${stockfish_corpus_passed:-0}" == 1 && "${operational_postchecks_passed:-0}" == 1 ]] || return 0
-  fi
-  local source_sha
-  source_sha="$(git rev-parse HEAD)"
-  [[ -z "${GITHUB_SHA:-}" || "$source_sha" == "$GITHUB_SHA" ]] || {
-    echo "completed chess acceptance source differs from this workflow revision" >&2
-    return 1
-  }
-  case "$stage" in all|applications) ;; *) return 1 ;; esac
-  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-    [[ "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ && "${GITHUB_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]*$ ]] || return 1
-    printf 'chess_benchmark_ready=true\nactivated_ref=%s\nchess_acceptance_stage=%s\n' \
-      "$source_sha" "$stage" >> "$GITHUB_OUTPUT"
-  fi
-}
-
-run_recorded_chess_benchmark() {
-  # Use the activated application's ordinary recording path while this lifecycle
-  # still owns the host lock. All requested measurements retain their result;
-  # an unsuccessful match does not prevent measuring the underlying storage.
-  local recorded_status=0 retained_status=0 geometry_status=0
-  if python3 scripts/benchmark-recorded-chess.py \
-    --duration-seconds 30 --total-timeout 7200 \
-    --output-dir "${LAPLACE_RECORDED_CHESS_DIRECTORY:-$operational_proof_directory/recorded-chess}"; then
-    :
-  else
-    recorded_status=$?
-  fi
-  if python3 scripts/benchmark-retained-chess-ingestion.py \
-    --output-dir "${LAPLACE_RETAINED_CHESS_DIRECTORY:-$operational_proof_directory/retained-chess}"; then
-    :
-  else
-    retained_status=$?
-  fi
-  if PATH="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}/bin:$PATH" \
-    python3 scripts/benchmark_suite.py run --suite geometry \
-      --database "${PGDATABASE:-laplace}" --repeats 3 \
-      --receipt-dir "${LAPLACE_POSTGRES_GEOMETRY_DIRECTORY:-$operational_proof_directory/postgres-geometry}"; then
-    :
-  else
-    geometry_status=$?
-  fi
-  printf 'CHESS_STORAGE_MEASUREMENT recorded_exit=%s retained_exit=%s geometry_exit=%s\n' \
-    "$recorded_status" "$retained_status" "$geometry_status"
-  if [[ "$recorded_status" != 0 ]]; then return "$recorded_status"; fi
-  if [[ "$retained_status" != 0 ]]; then return "$retained_status"; fi
-  return "$geometry_status"
-}
-
-observe_chess_runtime() {
-  # Observe the already-published services before corpus work can fail. This
-  # starts one owned Stockfish probe, preserving the actual service lifetimes.
-  python3 scripts/benchmark-chess-environment.py --runtime-only \
-    --output-dir "${LAPLACE_CHESS_RUNTIME_DIRECTORY:-$operational_proof_directory/chess-runtime}" \
-    --reserve-cpus 0 --cpu-budget 1 --memory-mb 512 --max-seconds 60
 }
 
 reconcile_installed_product() {
@@ -315,6 +198,8 @@ run_live_suite() {
   run_suite live "$1"
 }
 
+# Delivery owns the operational bundle, not optional source imports or benchmarks.
+# Domain ingestion and measurement use their independent operator workflows.
 product_phases() {
   echo policy
   if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
@@ -326,8 +211,7 @@ product_phases() {
   if [[ "$stage" == application-check || "$stage" == applications ]]; then
     echo application-check
     if [[ "$stage" == applications ]]; then
-      printf '%s\n' operational-seed publish chess-runtime operational-execution \
-        stockfish-corpus post-stockfish-execution chess-completion recorded-chess
+      printf '%s\n' operational-seed publish operational-execution
     fi
     return 0
   fi
@@ -336,9 +220,9 @@ product_phases() {
   echo operational-seed
   [[ "$stage" != deploy ]] || return 0
   if [[ "$stage" == all ]]; then
-    printf '%s\n' publish chess-runtime
+    echo publish
     if [[ "${LAPLACE_FRESH_DB:-}" != 1 || "${LAPLACE_RESTORE_FOUNDATION:-}" == 1 ]]; then
-      printf '%s\n' operational-execution stockfish-corpus post-stockfish-execution chess-completion recorded-chess
+      echo operational-execution
     fi
   fi
   printf '%s\n' db-health native-db managed-db
@@ -372,12 +256,7 @@ run_phase() {
     foundation) restore_foundation_if_requested ;;
     operational-seed) seed_operational_memory ;;
     publish) run_publish_with_recovery ;;
-    chess-runtime) observe_chess_runtime ;;
     operational-execution) verify_operational_execution ;;
-    stockfish-corpus) run_stockfish_corpus_acceptance ;;
-    post-stockfish-execution) verify_operational_execution post-stockfish- ;;
-    chess-completion) record_chess_completion ;;
-    recorded-chess) run_recorded_chess_benchmark ;;
     db-health|managed-db) run_suite db "$1" ;;
     native-db)
       rm -rf build/extension/*/tests/regress_output

@@ -119,6 +119,7 @@ internal static class AppComposition
         services.AddSingleton<ISynthesisQuoteCalculator, SynthesisQuoteCalculator>();
         services.AddSingleton<ITraceQuoteCalculator, TraceQuoteCalculator>();
         services.AddSingleton<IReportQuoteCalculator, ReportQuoteCalculator>();
+        services.AddSingleton<IStripeSubscriptionGateway, StripeSubscriptionGateway>();
         services.AddSingleton<IBillingWebhookHandler, BillingWebhookHandler>();
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();
         services.AddSingleton<IBillingOrchestrator, BillingOrchestrator>();
