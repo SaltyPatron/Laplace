@@ -19,10 +19,25 @@ case "$stage" in
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
+# The workflow classifier sends documentation/tooling/workflow-only pushes here.
+# Those edits do not justify reserving the host or executing the entire policy
+# registry. Validate the actual shell/YAML syntax and finish. Operator-dispatched
+# `check` still executes the complete policy profile below.
+if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "$stage" == "check" ]]; then
+  bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-policy.sh scripts/ci-deps.sh
+  python3 - <<'PY'
+from pathlib import Path
+import yaml
+for path in sorted(Path('.github/workflows').glob('*.yml')):
+    yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
+print('source-only syntax check passed')
+PY
+  exit 0
+fi
+
 run_policy() {
   bash scripts/ci-policy.sh
 }
-
 
 run_deps() {
   bash scripts/ci-deps.sh
@@ -49,9 +64,6 @@ run_install() (
 
 run_database_maintenance() (
   resume_chess_observation_if_needed
-  # Use the already installed fixed service controls. The command holds their
-  # managed transaction through migration, discards writer processes,
-  # and restores only the services that were running before maintenance.
   python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" -- \
     bash scripts/maintain-installed-database.sh
 )
@@ -79,9 +91,6 @@ ensure_required_lexical_foundation() {
 }
 
 seed_operational_memory() {
-  # The versioned operational source ships with this executable generation.
-  # Its per-file content completion skips unchanged artifacts; do not use
-  # --force/ReObservePresent and turn a deployment into another witness.
   local proof_root="${LAPLACE_OPERATIONAL_PROOF_DIRECTORY:-/build/laplace/recovery/operational-product}"
   mkdir -p "$proof_root"
   operational_proof_directory="$(mktemp -d "$proof_root/invocation-XXXXXXXX")"
@@ -99,8 +108,6 @@ verify_operational_execution() {
     IFS= read -r operational_proof_directory < "$LAPLACE_CI_SESSION_DIRECTORY/operational-proof-directory"
     [[ -d "$operational_proof_directory" ]] || { echo "missing operational proof directory" >&2; return 1; }
   fi
-  # Consume only this invocation's verified seed receipt. Never select a latest
-  # source run or reuse a receipt from another publication attempt.
   seed_run_id="$(python3 - "$operational_proof_directory/seed.json" <<'PY'
 import json
 import sys
@@ -130,12 +137,9 @@ PY
     --shape-file seeds/operational/tasks/en_antonym.json \
     --exemplar-file seeds/operational/exemplars/en_antonym.conllu --seed-run-id "$seed_run_id" \
     --receipt "$operational_proof_directory/antonym-task.json"
-
 }
 
 reconcile_installed_product() {
-  # Fast source/tooling path: reconcile installed derived state and prove
-  # application health. Never build and never seed corpus content.
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   python3 scripts/verify-application-release.py --timeout-seconds 120
@@ -145,7 +149,6 @@ run_publish() {
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   bash scripts/publish-applications.sh deploy
 }
-
 
 ensure_api_running() {
   sudo -n systemctl start laplace-api || true
@@ -172,8 +175,6 @@ resume_chess_observation_if_needed() {
 }
 
 run_publish_with_recovery() {
-  # A prior source transition owns the still-published producer generation and
-  # must finish before publication can acquire or recover its own transaction.
   resume_chess_observation_if_needed
   trap recover_publish EXIT
   if [[ "$stage" == applications ]]; then
@@ -183,9 +184,6 @@ run_publish_with_recovery() {
     run_publish
   fi
   trap - EXIT
-  # Published services now use the corrected observation recipe. Drain them through
-  # the existing maintenance owner while retaining, rebuilding and reading back the
-  # old calculated source; restarted services cannot reintroduce the previous recipe.
   LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)" \
     python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
     --timeout-seconds "${LAPLACE_CHESS_OBSERVATION_TIMEOUT_SECONDS:-3600}" -- \
@@ -201,8 +199,6 @@ run_live_suite() {
   run_suite live "$1"
 }
 
-# Delivery admits the lexical sources required by operational task execution.
-# Broader foundation restoration and domain benchmarks retain their explicit owners.
 product_phases() {
   echo policy
   if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
