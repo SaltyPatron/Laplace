@@ -21,8 +21,8 @@ jobs:
       DOTNET_NOLOGO: '1'
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       MSBUILDDISABLENODEREUSE: '1'
-      CANDIDATE_SHA: 19289bfc9584c02d1c3a5cd0758a9f351fab5bf1
-      CANDIDATE_TREE: fd3037c7bc2e5568b8f43a00a5c657530080c2ff
+      CANDIDATE_SHA: adfa239d94c86da117d68212abc9388144253186
+      CANDIDATE_TREE: a835f6a24acdadeaf8982ce8a25a8d14f6567b39
     steps:
       - name: Prepare permanent build and evidence directories
         run: |
@@ -32,7 +32,7 @@ jobs:
           mkdir -p "$LAPLACE_BUILD_ROOT" "$TMPDIR" "$DOTNET_CLI_HOME" "$DOTNET_INSTALL_DIR" "$NUGET_PACKAGES" /build/laplace/worktrees /build/laplace/recovery/floor-managed-compile
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 19289bfc9584c02d1c3a5cd0758a9f351fab5bf1
+          ref: adfa239d94c86da117d68212abc9388144253186
           fetch-depth: 1
           persist-credentials: false
       - name: Bind the exact candidate in the permanent worktree
