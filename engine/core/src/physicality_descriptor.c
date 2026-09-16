@@ -20,6 +20,7 @@ struct physicality_descriptor_plan {
     size_t reference_count, reference_capacity;
     size_t root_count, slot_count, scratch_capacity;
     size_t bytes, peak_bytes, maximum_bytes;
+    const physicality_descriptor_cancel_t* cancellation;
 };
 
 static int checked_add(size_t* value, size_t addition) {
@@ -33,10 +34,10 @@ static int checked_array(size_t* bytes, size_t count, size_t width) {
     return checked_add(bytes, count * width);
 }
 
-/* Grow retained arrays under the same aggregate grant. The old allocation
- * remains charged until the replacement has been allocated and copied. Only
- * actual unique descriptor structure asks for node/edge growth; root and
- * reference occurrence storage is never deduplicated. */
+/* Grow retained arrays under the same aggregate grant. Reserve old plus new
+ * requested payload even when realloc grows in place; this conservative peak
+ * is not allocator residency/RSS. Only unique descriptor structure asks for
+ * node/edge growth; root/reference occurrence storage is never deduplicated. */
 static int reserve_array(physicality_descriptor_plan_t* plan, void* previous,
     size_t used, size_t capacity, size_t required, size_t width,
     void** replacement, size_t* replacement_capacity) {
@@ -62,13 +63,13 @@ static int reserve_array(physicality_descriptor_plan_t* plan, void* previous,
         next = required;
     allocated = next * width;
     if (allocated > plan->maximum_bytes - plan->bytes) return 0;
-    memory = calloc(next, width);
+    memory = realloc(previous, allocated);
     if (memory == NULL) return 0;
-    if (used != 0u) memcpy(memory, previous, used * width);
+    /* Preserve calloc's complete zero tail, including unused old capacity. */
+    memset((uint8_t*)memory + used * width, 0, allocated - used * width);
     if (plan->bytes + allocated > plan->peak_bytes)
         plan->peak_bytes = plan->bytes + allocated;
     previous_bytes = capacity * width;
-    free(previous);
     plan->bytes += allocated - previous_bytes;
     *replacement = memory;
     *replacement_capacity = next;
@@ -100,6 +101,10 @@ static int reserve_slots(physicality_descriptor_plan_t* plan, size_t nodes) {
     slots = calloc(next, sizeof(*slots));
     if (slots == NULL) return 0;
     for (size_t i = 0u; i < plan->node_count; ++i) {
+        if (physicality_descriptor_cancel_requested(plan->cancellation)) {
+            free(slots);
+            return -1;
+        }
         size_t slot = identity_slot(&plan->nodes[i].id, next - 1u);
         while (slots[slot] != 0u) slot = (slot + 1u) & (next - 1u);
         slots[slot] = i + 1u;
@@ -138,6 +143,8 @@ static physicality_descriptor_status_t compose(
     size_t count, hash128_t* result) {
     size_t expanded;
     size_t slot;
+    if (physicality_descriptor_cancel_requested(plan->cancellation))
+        return PHYSICALITY_DESCRIPTOR_CANCELLED;
     if (count < 2u || count > plan->scratch_capacity ||
         trajectory_build(children, count, plan->scratch) != 0 ||
         trajectory_content_identity(plan->scratch, count, result, &expanded) != 0 ||
@@ -172,8 +179,9 @@ static physicality_descriptor_status_t compose(
         return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     plan->children = replacement;
     plan->child_capacity = capacity;
-    if (!reserve_slots(plan, plan->node_count + 1u))
-        return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+    const int slots_status = reserve_slots(plan, plan->node_count + 1u);
+    if (slots_status != 1)
+        return slots_status < 0 ? PHYSICALITY_DESCRIPTOR_CANCELLED : PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     slot = identity_slot(result, plan->slot_count - 1u);
     while (plan->slots[slot] != 0u)
         slot = (slot + 1u) & (plan->slot_count - 1u);
@@ -337,17 +345,29 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
     const physicality_descriptor_basis_t* basis,
     const physicality_descriptor_limits_t* limits,
     physicality_descriptor_plan_t** out_plan) {
+    return physicality_descriptor_plan_build_cancelable(
+        inputs, input_count, basis, limits, NULL, out_plan);
+}
+
+physicality_descriptor_status_t physicality_descriptor_plan_build_cancelable(
+    const physicality_descriptor_input_t* inputs, size_t input_count,
+    const physicality_descriptor_basis_t* basis,
+    const physicality_descriptor_limits_t* limits,
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_plan_t** out_plan) {
     size_t vertices = 0u, widest = 17u;
     size_t references = input_count, bytes = sizeof(physicality_descriptor_plan_t);
     physicality_descriptor_plan_t* plan;
     if (out_plan == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     *out_plan = NULL;
+    if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
     if ((input_count != 0u && inputs == NULL) ||
         !physicality_descriptor_basis_is_valid(basis) || limits == NULL)
         return PHYSICALITY_DESCRIPTOR_INVALID;
     if (input_count > SIZE_MAX / sizeof(*inputs))
         return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     for (size_t input = 0; input < input_count; ++input) {
+        if (physicality_descriptor_cancel_requested(cancellation)) return PHYSICALITY_DESCRIPTOR_CANCELLED;
         size_t width = inputs[input].trajectory_vertices;
         if (!checked_add(&vertices, width) || width > SIZE_MAX / (4u * sizeof(double)) ||
             width == SIZE_MAX)
@@ -375,6 +395,7 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
         physicality_descriptor_plan_free(plan);
         return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
     }
+    plan->cancellation = cancellation;
     plan->reference_capacity = references;
     plan->root_count = input_count;
     plan->slot_count = 1u;
@@ -388,6 +409,7 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
             return status;
         }
     }
+    plan->cancellation = NULL;
     *out_plan = plan;
     return PHYSICALITY_DESCRIPTOR_OK;
 }
