@@ -34,7 +34,6 @@ run_dev_tests() {
 }
 
 run_install() {
-  python3 scripts/bootstrap-ingest-liveness.py apply --database "${PGDATABASE:-laplace}"
   bash scripts/pipeline.sh install
 }
 
