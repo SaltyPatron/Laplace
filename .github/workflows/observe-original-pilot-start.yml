@@ -1,0 +1,85 @@
+name: Observe authentic pilot starting-position provenance
+on:
+  push:
+    branches: ['diag/observe-original-pilot-start-20260916']
+permissions:
+  contents: read
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+jobs:
+  observe:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 35
+    steps:
+      - name: Read unchanged source and bind its first selected frame
+        shell: bash
+        run: |
+          set -euo pipefail
+          flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock timeout --signal=TERM --kill-after=5s 75s python3 - <<'PY'
+          import codecs, hashlib, json, os, signal, stat, time
+          path = "/vault/Data/Games/Chess/Lumbras/otb/LumbrasGigaBase_OTB_2025.pgn"
+          expected_bytes = 256162073
+          expected_sha256 = "9eafc83ed9a97f9dcfc82135448d45653d325a742e497e8d08c3085a6a48b0ea"
+          expected_frame_sha256 = "474bc75575390aa71474bd618e8b26beeffac1f3f78a96bcf9695039b23c24ac"
+          def expired(signum, frame):
+              raise TimeoutError("bounded source observation expired")
+          signal.signal(signal.SIGALRM, expired)
+          signal.alarm(60)
+          started = time.monotonic()
+          digest = hashlib.sha256()
+          prefix = bytearray()
+          read_bytes = 0
+          with open(path, "rb") as handle:
+              before = os.fstat(handle.fileno())
+              if not stat.S_ISREG(before.st_mode) or before.st_size != expected_bytes:
+                  raise ValueError("source is not the observed regular file size")
+              while True:
+                  block = handle.read(min(1 << 20, expected_bytes + 1 - read_bytes))
+                  if not block:
+                      break
+                  read_bytes += len(block)
+                  if read_bytes > expected_bytes:
+                      raise ValueError("source exceeded observed byte count")
+                  digest.update(block)
+                  remaining = (2 << 20) - len(prefix)
+                  if remaining > 0:
+                      prefix.extend(block[:remaining])
+              after = os.fstat(handle.fileno())
+          if (read_bytes != expected_bytes or digest.hexdigest() != expected_sha256
+                  or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                  != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+              raise ValueError("observed source bytes changed or differ from retained measurement")
+          # This follows the existing StreamReader/StreamGames frame boundary;
+          # the retained native-prepared frame hash must match independently.
+          decoded = codecs.getincrementaldecoder("utf-8-sig")(errors="strict").decode(prefix, final=False)
+          lines = decoded.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+          boundaries = [index for index, line in enumerate(lines) if line.startswith("[Event ")]
+          if len(boundaries) < 2:
+              raise ValueError("first complete framed game exceeds bounded prefix")
+          framed = "\n".join(lines[boundaries[0]:boundaries[1]]) + "\n"
+          frame_bytes = framed.encode("utf-8")
+          frame_sha256 = hashlib.sha256(frame_bytes).hexdigest()
+          if frame_sha256 != expected_frame_sha256:
+              raise ValueError("first observed framed game differs from retained selected ordinal1")
+          has_setup = '[SetUp "' in framed
+          has_fen = '[FEN "' in framed
+          if has_setup or has_fen:
+              raise ValueError("first selected frame has explicit setup; default-start attribution is unavailable")
+          receipt = {
+              "schema": "laplace.chess-pilot-start-observation/v1", "status": "verified",
+              "source": {"path": path, "bytes": read_bytes, "sha256": digest.hexdigest()},
+              "selected_source_ordinal": 1, "framed_game_bytes": len(frame_bytes),
+              "framed_game_sha256": frame_sha256, "setup_literal_present": has_setup, "fen_literal_present": has_fen,
+              "retained_start_position_id": "6e209f78d66f64f1405d9184f65065bb",
+              "start_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+              "side_to_move": "white",
+              "proof": "Exact retained first-game frame has no setup or FEN literals; unchanged parser selects the standard White initial state. The authenticated previous selection manifest has this same start ID for all2000 games.",
+              "parser_source": "f40078c50e6936fda9e74951ba3905b56e396407",
+              "parser_owners_unchanged_at": "b09f8adb4491b4de99761598c524144e10ec254b",
+              "elapsed_seconds": time.monotonic() - started,
+              "scope": "Starting-position provenance only; no recorded throughput or complete admission claim."
+          }
+          signal.alarm(0)
+          print("PILOT_START_PROVENANCE " + json.dumps(receipt, sort_keys=True), flush=True)
+          PY
