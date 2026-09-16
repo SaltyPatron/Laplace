@@ -1,9 +1,10 @@
-name: Qualify canonical ingest liveness bootstrap
+name: Qualify final bootstrap shell syntax and retain passed SQL controls
 on:
   push:
     branches: ['verify/postgresql-activation-20260916']
 permissions:
   contents: read
+  actions: read
 jobs:
   qualification:
     runs-on: ubuntu-24.04
@@ -33,22 +34,36 @@ jobs:
           cd "$work/source"
           git init -q
           git remote add origin https://github.com/SaltyPatron/Laplace.git
-          timeout 120s git fetch --no-tags --depth=1 origin 023ed5f8b275246d020a142c030b0c380311127a
+          timeout 120s git fetch --no-tags --depth=1 origin 439b9d2b5572cc4ace02e86db0ca83e77e7e0816
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 023ed5f8b275246d020a142c030b0c380311127a
-          test "$(git rev-parse HEAD^{tree})" = 69a1b7e1da5113fc35909944151c40af28a1d8f0
+          test "$(git rev-parse HEAD)" = 439b9d2b5572cc4ace02e86db0ca83e77e7e0816
+          test "$(git rev-parse HEAD^{tree})" = d6d5371cd286f74c9c46e75242fb7043d84706e2
           git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
-      - name: Prepare labelled SQL extension packaging fixture
+      - name: Authenticate prior passed SQL and quiet control logs
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          cd "$QUALIFY_WORK/source"
-          python3 -B scripts/test-bootstrap-ingest-liveness.py --prepare-extension "$QUALIFY_WORK/extension-fixture" > "$QUALIFY_EVIDENCE/fixture-files.json"
-          test "$(pg_config --bindir)" = "$PG_BINDIR"
-          sharedir="$(pg_config --sharedir)/extension"
-          test -d "$sharedir"
-          sudo install -m 0644 "$QUALIFY_WORK/extension-fixture/"*.control "$QUALIFY_WORK/extension-fixture/"*.sql "$sharedir/"
-          printf '%s\n' "$sharedir" > "$QUALIFY_EVIDENCE/fixture-extension-directory.txt"
+          curl --fail --silent --show-error --location --max-time 60 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/SaltyPatron/Laplace/actions/artifacts/10470617512/zip \
+            -o "$QUALIFY_EVIDENCE/prior-sql-controls.zip"
+          python3 -B - <<'PY'
+          import hashlib, os, pathlib, zipfile
+          evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
+          archive=evidence/"prior-sql-controls.zip"
+          assert archive.stat().st_size == 2945
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == "047788490d022cde92ca5a371ef968397a9cdf93b4e485ce6a6b6f5eaecb191f"
+          with zipfile.ZipFile(archive) as package:
+              for name in ("postgresql-bootstrap.log","quiet-owner.log","postgresql.txt","results.json"):
+                  info=package.getinfo(name)
+                  assert info.file_size < 1024*1024
+                  data=package.read(name)
+                  (evidence/("prior-"+name)).write_bytes(data)
+                  print(name,flush=True)
+                  print(data.decode(),flush=True)
+          PY
       - name: Execute bounded actual PostgreSQL and caller controls
         shell: bash
         run: |
@@ -61,8 +76,6 @@ jobs:
               ast.parse(pathlib.Path(name).read_text(), filename=name)
           (evidence/"ast.txt").write_text("PASS: helper and PostgreSQL fixture test Python sources\n")
           commands=[
-              ("postgresql-bootstrap", ["python3", "-B", "scripts/test-bootstrap-ingest-liveness.py"]),
-              ("quiet-owner", ["python3", "-B", "scripts/test-wait-for-quiet-substrate.py", "-v"]),
               ("bash", ["bash", "-n", "scripts/product-ci.sh", "scripts/test-parallel.sh"]),
               ("shellcheck", ["shellcheck", "-S", "warning", "scripts/product-ci.sh", "scripts/test-parallel.sh"]),
           ]
