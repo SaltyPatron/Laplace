@@ -412,3 +412,11 @@ monotonic process starts and measures restart request through full readiness. Th
 is service startup with existing OS caches, not a machine cold reboot. Preserved
 operator-stopped services receive no startup claim. Services are not restarted
 during recorded-game timing.
+
+### Full Stockfish corpus and selected-file evidence
+
+The Stockfish corpus wrapper now defaults to `--coverage all-tracked`. Success requires every entry in the selected commit's tracked manifest to have an exact native readback, followed by the existing exact repeat with zero inserted entities, physicalities, attestations or consensus evidence. The receipt includes `tracked_entries`, `selected_files`, `coverage_scope` and `full_tracked_corpus`. A reconciled count alone does not turn a selected subset into a full repository proof.
+
+An explicitly requested `--coverage selected` run can retain a legitimate selected-file result. If some tracked entries were not admitted, its status is `verified-partial` and `full_tracked_corpus` is false. The default full mode retains that same partial receipt and both admission/repeat receipts before returning failure. Unsupported entries remain honestly visible in the common repository lane; this change does not fabricate native admission for them. Full tracked-byte coverage is separate from grammar completeness: native partial CST and raw-text representations retain their actual syntax diagnostics and scope.
+
+Explicit installed acceptance requests all tracked entries. After service startup and corpus verification, it runs the existing 16 complete-game admission and two exact zero-writer replay checks before the independent 24-game concurrency/repetition sweep. Both retain their original validators and deadlines. Failure of the earlier integrity check does not suppress the independent sweep or become a passed acceptance. Neither the 16-game sample nor the replay rate establishes sustained fresh-game capacity.

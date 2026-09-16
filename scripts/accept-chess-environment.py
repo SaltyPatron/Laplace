@@ -390,7 +390,10 @@ def public_summary(name, output):
     elif name.startswith("native-binding"):
         summary.update(nativeFingerprint=value.get("native_fingerprint"), artifacts=value.get("artifacts"))
     elif name == "stockfish-corpus":
-        summary.update(fields(value, ("native_exact_readback", "repeat_without_amplification", "selected_files")))
+        summary.update(fields(value, ("native_exact_readback", "repeat_without_amplification", "selected_files",
+                                      "tracked_entries", "full_tracked_corpus")))
+        summary["coverageScope"] = value.get("coverage_scope")
+        summary["requestedCoverage"] = value.get("requested_coverage")
         summary["commit"] = value.get("commit")
         summary["coverage"] = value.get("coverage")
     elif name == "recorded":
@@ -543,6 +546,19 @@ def retained_capacity(owner, python, *, allowed):
         3630, allowed=allowed and prepared)
 
 
+def recording_checks(owner, python, *, allowed):
+    """Prove complete admission/replay before the independent full rate sweep."""
+    owner.run("retained", [python, "scripts/benchmark-retained-chess-ingestion.py",
+              "--output-dir", owner.output / "retained", "--games", "16", "--depth", "4",
+              "--concurrency", "1", "--replays", "2", "--timeout-seconds", "900"], 930,
+              allowed=allowed)
+    owner.run("recorded", [python, "scripts/benchmark_suite.py", "run", "--suite", "recorded",
+              "--repeats", "3", "--receipt-dir", owner.output / "recorded",
+              "--recorded-games", "24", "--recorded-depth", "4", "--recorded-concurrency", "1,2,4",
+              "--recorded-duration-seconds", "30", "--recorded-total-timeout", "7200"], 7230,
+              allowed=allowed)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -609,17 +625,9 @@ def main():
                     "-c", "Release", "--nologo", "-v", "minimal"], 900, allowed=binding)
     synced = owner.run("cli-native-sync", ["bash", "scripts/sync-managed-native-artifacts.sh"], 120, allowed=cli)
     owner.run("stockfish-corpus", [python, "scripts/ingest-stockfish-corpus.py", "--prefix", args.prefix,
-              "--output", args.output_dir / "stockfish-corpus"], 3600, allowed=binding and synced)
+              "--output", args.output_dir / "stockfish-corpus", "--coverage", "all-tracked"], 3600, allowed=binding and synced)
     # Independent measurements still run after a failed match or corpus proof.
-    owner.run("recorded", [python, "scripts/benchmark_suite.py", "run", "--suite", "recorded",
-              "--repeats", "3", "--receipt-dir", args.output_dir / "recorded",
-              "--recorded-games", "24", "--recorded-depth", "4", "--recorded-concurrency", "1,2,4",
-              "--recorded-duration-seconds", "30", "--recorded-total-timeout", "7200"], 7230,
-              allowed=binding)
-    owner.run("retained", [python, "scripts/benchmark-retained-chess-ingestion.py",
-              "--output-dir", args.output_dir / "retained", "--games", "16", "--depth", "4",
-              "--concurrency", "1", "--replays", "2", "--timeout-seconds", "900"], 930,
-              allowed=binding)
+    recording_checks(owner, python, allowed=binding)
     retained_capacity(owner, python, allowed=binding)
     owner.run("geometry", [python, "scripts/benchmark_suite.py", "run", "--suite", "geometry",
               "--database", os.environ.get("PGDATABASE", "laplace"), "--repeats", "3",

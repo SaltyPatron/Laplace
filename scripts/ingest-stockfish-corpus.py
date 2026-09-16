@@ -48,7 +48,8 @@ def verify_coverage(receipt):
     coverage = receipt.get('coverage', {})
     if coverage.get('native_cpp_files', 0) < 1:
         raise ValueError('Native C++ corpus coverage is missing')
-    if not receipt.get('selected_files') or receipt['selected_files'] != len(rows):
+    if (type(receipt.get('selected_files')) is not int or receipt['selected_files'] <= 0 or
+            receipt['selected_files'] != len(rows)):
         raise ValueError('Native readback does not cover all selected files')
     native, partial, raw, cpp = 0, 0, 0, 0
     diagnostics = ('native_ast_nodes', 'native_syntax_nodes', 'native_error_nodes', 'native_missing_nodes')
@@ -75,9 +76,45 @@ def verify_coverage(receipt):
                 'native_complete_cst_files': native - partial, 'raw_only_files': raw, 'native_cpp_files': cpp}
     if any(coverage.get(field) != value for field, value in expected.items()):
         raise ValueError('Declared coverage does not reconcile with native readbacks')
-    unadmitted = receipt.get('tracked_entries', -1) - len(rows)
+    if type(receipt.get('tracked_entries')) is not int or receipt['tracked_entries'] < len(rows):
+        raise ValueError('Tracked manifest count is absent or invalid')
+    unadmitted = receipt['tracked_entries'] - len(rows)
     if unadmitted < 0 or coverage.get('unadmitted_entries') != unadmitted or coverage.get('all_tracked_bytes_roundtripped') is not (unadmitted == 0):
         raise ValueError('Complete tracked artifact coverage does not reconcile')
+
+
+    artifacts = receipt.get('provenance', {}).get('artifacts')
+    if not isinstance(artifacts, list) or len(artifacts) != receipt['tracked_entries']:
+        raise ValueError('Tracked manifest entries do not reconcile with the receipt')
+    manifest = {}
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or not isinstance(artifact.get('Path'), str) or not artifact['Path']:
+            raise ValueError('Tracked manifest path is absent or invalid')
+        if artifact['Path'] in manifest:
+            raise ValueError('Tracked manifest contains a duplicate path')
+        if artifact.get('Disposition') not in ('admitted', 'unsupported-with-why-not'):
+            raise ValueError('Tracked manifest disposition is absent or unsupported')
+        manifest[artifact['Path']] = artifact
+    selected = {path for path, artifact in manifest.items() if artifact['Disposition'] == 'admitted'}
+    readback_paths = [row.get('path') for row in rows]
+    if (len(set(readback_paths)) != len(readback_paths) or set(readback_paths) != selected or
+            len(selected) != receipt['selected_files']):
+        raise ValueError('Native readback paths do not cover the exact selected manifest')
+    for row in rows:
+        artifact = manifest[row['path']]
+        for field, source in (('sha256', 'Sha256'), ('bytes', 'Bytes'), ('modality', 'Modality'),
+                              ('representation', 'Representation')):
+            if row.get(field) != artifact.get(source):
+                raise ValueError('Native readback differs from tracked manifest: ' + row['path'])
+        for body, hash_field, byte_field in ((row, 'sha256', 'bytes'), (artifact, 'Sha256', 'Bytes')):
+            digest, length = body.get(hash_field), body.get(byte_field)
+            if (not isinstance(digest, str) or len(digest) != 64 or
+                    any(character not in '0123456789abcdef' for character in digest)):
+                raise ValueError('Selected source SHA256 is absent or invalid: ' + row['path'])
+            # VerifiedGitRepository retains empty files as unsupported-with-why-not;
+            # only nonempty selected/admitted bodies can carry this native readback.
+            if type(length) is not int or length <= 0:
+                raise ValueError('Selected source byte count is absent or invalid: ' + row['path'])
 
 
 def verify_repeat(first, repeated):
@@ -104,7 +141,9 @@ def verify_repeat(first, repeated):
         raise ValueError('Repeat amplified consensus evidence')
 
 
-def execute(prefix, output, cli):
+def execute(prefix, output, cli, coverage='all-tracked'):
+    if coverage not in ('all-tracked', 'selected'):
+        raise ValueError('Unsupported requested corpus coverage')
     source, selected = selection(prefix)
     output = output.absolute()
     if output == source or source in output.resolve().parents:
@@ -134,20 +173,34 @@ def execute(prefix, output, cli):
     (output / 'runtime-inventory.json').write_bytes(inventory_bytes)
     if not inventory['loaded_core']['matches_receipt_bytes']:
         raise ValueError('Loaded native core no longer matches the actual admission/readback receipt')
+    full = receipts[0]['coverage']['all_tracked_bytes_roundtripped']
+    status = 'verified' if full else 'verified-partial'
+    proof = {'schema': 'laplace.stockfish-corpus-proof.v1', 'status': status,
+             'requested_coverage': coverage,
+             'coverage_scope': 'all-tracked' if full else 'selected-files',
+             'full_tracked_corpus': full,
+             'upstream': selected['Upstream'], 'commit': selected['Commit'],
+             'admission_run_id': receipts[0]['run_id'], 'repeat_run_id': receipts[1]['run_id'],
+             'provenance_content_id': receipts[0]['provenance_content_id'],
+             'provenance_sha256': receipts[0]['provenance_sha256'],
+             'selected_files': receipts[0]['selected_files'],
+             'tracked_entries': receipts[0]['tracked_entries'],
+             'coverage': receipts[0]['coverage'],
+             'laplace_runtime': runtime,
+             'runtime_inventory': {'path': 'runtime-inventory.json',
+                                   'sha256': hashlib.sha256(inventory_bytes).hexdigest()},
+             'native_exact_readback': True, 'repeat_without_amplification': True,
+             'playing_strength_proved': False}
     with (output / 'receipt.json').open('x') as stream:
-        json.dump({'schema': 'laplace.stockfish-corpus-proof.v1', 'status': 'verified',
-                   'upstream': selected['Upstream'], 'commit': selected['Commit'],
-                   'admission_run_id': receipts[0]['run_id'], 'repeat_run_id': receipts[1]['run_id'],
-                   'provenance_content_id': receipts[0]['provenance_content_id'],
-                   'provenance_sha256': receipts[0]['provenance_sha256'],
-                   'selected_files': receipts[0]['selected_files'],
-                   'coverage': receipts[0]['coverage'],
-                   'laplace_runtime': runtime,
-                   'runtime_inventory': {'path': 'runtime-inventory.json',
-                                         'sha256': hashlib.sha256(inventory_bytes).hexdigest()},
-                   'native_exact_readback': True, 'repeat_without_amplification': True,
-                   'playing_strength_proved': False}, stream, indent=2)
-    print(json.dumps({'status': 'verified', 'receipt': str(output / 'receipt.json')}))
+        json.dump(proof, stream, indent=2)
+    print(json.dumps({'status': status, 'coverage_scope': proof['coverage_scope'],
+                      'selected_files': proof['selected_files'],
+                      'tracked_entries': proof['tracked_entries'],
+                      'receipt': str(output / 'receipt.json')}))
+    if coverage == 'all-tracked' and not full:
+        raise ValueError('Full tracked Stockfish corpus required; verified only '
+                         f"{proof['selected_files']} of {proof['tracked_entries']} tracked entries. "
+                         'Partial admission and repeat evidence have been retained.')
 
 
 def default_cli():
@@ -167,9 +220,11 @@ def main():
     parser.add_argument('--prefix', type=Path, default=Path(os.environ.get('LAPLACE_INSTALL_PREFIX', '/opt/laplace')))
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--cli', type=Path, help='Exact candidate or installed CLI executable; default resolves the common Release build through MSBuild')
+    parser.add_argument('--coverage', choices=('all-tracked', 'selected'), default='all-tracked',
+                        help='Require every tracked entry by default; selected explicitly permits a partial proof')
     args = parser.parse_args()
     try:
-        execute(args.prefix, args.output, args.cli or default_cli())
+        execute(args.prefix, args.output, args.cli or default_cli(), args.coverage)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)
         return 1

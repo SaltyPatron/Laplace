@@ -7,12 +7,8 @@ import {
 } from '../api/client';
 import { AccountControls } from '../auth/AccountControls';
 import { useAppStore } from '../store';
-import { formatCents, formatCurrencyCents } from './amounts';
+import { formatCents, formatCurrencyCents as amount } from './amounts';
 import styles from './BillingView.module.css';
-
-function amount(cents: number | string | undefined | null, currency: string | undefined | null) {
-  return cents == null ? 'Not reported' : formatCurrencyCents(cents, currency);
-}
 
 export function BillingView() {
   const { tenant, authReady, authUser } = useAppStore();
@@ -128,13 +124,13 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     <h2>Usage — {tenant}</h2>
     {!signedIn ? <Muted>Sign in to view workspace usage.</Muted> : <ReadStatus label="Usage" resource={usageRead} />}
     {usage && (usage.entries?.length ? <>
-      <p>Recorded total: {usage.total_amount_cents == null ? 'Not reported' : formatCents(usage.total_amount_cents)}</p>
+      <p>Recorded total: {formatCents(usage.total_amount_cents)}</p>
       <TableScroll className={styles.catalogScroll}>
         <Table className={styles.catalog}>
           <thead><tr><Th>Service</Th><Th>Units</Th><Th>Recorded amount</Th><Th>Executed</Th></tr></thead>
           <tbody>{usage.entries.map((entry, index) => <tr key={index}>
             <Td>{entry.serviceId}</Td><Td>{entry.units}</Td>
-            <Td>{entry.amountCents == null ? 'Not reported' : formatCents(entry.amountCents)}</Td>
+            <Td>{formatCents(entry.amountCents)}</Td>
             <Td>{entry.executedAt ? new Date(entry.executedAt).toLocaleString() : 'Not reported'}</Td>
           </tr>)}</tbody>
         </Table>
