@@ -227,9 +227,22 @@ jobs:
                       if phase is not None:
                           for kind in ("chunks", "state"):
                               print("PILOT_RETAINED_MANIFEST " + json.dumps(verify_jsonl(phase_name, phase, kind)), flush=True)
+                      else:
+                          member = "corpus/measurement/" + phase_name + "/chunks.jsonl"
+                          entry = exact_member(member)
+                          if entry is not None:
+                              identity, _, _, _ = stream_member(entry)
+                              print("PILOT_UNSEALED_CHUNK_MANIFEST " + json.dumps({
+                                  "path": member, **identity, "evidence_completed": False,
+                                  "observed_complete_chunk_records": 0 if identity["bytes"] == 0 else None,
+                                  "scope": "Exact retained unsealed member bytes; no aggregate, commit-count or throughput claim."
+                              }), flush=True)
                   receipt = documents.get("corpus/measurement/corpus-recording.json")
-                  if receipt is not None:
-                      source = receipt.get("source") or {}
+                  preparation = documents.get("corpus/measurement/preparation.json")
+                  if receipt is not None or preparation is not None:
+                      source = (receipt.get("source") or {}) if receipt is not None else preparation
+                      selection_identity_scope = "aggregate-receipt" if receipt is not None else "preparation-only"
+                      measurement_status = receipt.get("status") if receipt is not None else "aggregate-unavailable"
                       manifest = source.get("selectionManifest")
                       selection_member = "corpus/measurement/selection.jsonl"
                       if manifest is not None:
@@ -246,7 +259,7 @@ jobs:
                           if (selected_identity["bytes"] != expected_selection_bytes
                                   or selected_identity["sha256"] != expected_selection_hash):
                               raise ValueError("selection bytes differ from the corpus receipt")
-                          requested = count_field((receipt.get("options") or {}).get("games"), "requested games")
+                          requested = count_field((receipt.get("options") or {}).get("games"), "requested games") if receipt is not None else 2000
                           records = standard_white_records = omitted_start_records = 0
                           first_ordinal = last_ordinal = None
                           starts = {}
@@ -284,7 +297,7 @@ jobs:
                               else "partial_selection" if records < requested
                               else "different_selection_count")
                           print("PILOT_SELECTION_START_OBSERVATION " + json.dumps({
-                              "measurement_status": receipt.get("status"), "selection_status": selection_status,
+                              "measurement_status": measurement_status, "selection_identity_scope": selection_identity_scope, "selection_status": selection_status,
                               "reader_status": "read" if selection_read_complete else "reader_budget_exceeded",
                               "line_budget_bytes": 1 << 20, "selection_read_complete": selection_read_complete,
                               "records": records, "requested_games": requested,
@@ -307,7 +320,7 @@ jobs:
                           }, sort_keys=True, allow_nan=False), flush=True)
                       else:
                           print("PILOT_SELECTION_START_OBSERVATION " + json.dumps({
-                              "measurement_status": receipt.get("status"), "available": False,
+                              "measurement_status": measurement_status, "selection_identity_scope": selection_identity_scope, "available": False,
                               "reason": "Measurement receipt has no completed selection manifest."
                           }), flush=True)
                   print("PILOT_READER_COMPLETION " + json.dumps({
