@@ -1,0 +1,60 @@
+name: Qualify bounded corpus workflow and phase diagnostics
+on:
+  push:
+    branches: [qualify/corpus-workflow-diagnostics-*]
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 78168204d4377c4f1c7811744def171711397871
+          persist-credentials: false
+      - name: Assert exact source and prepare isolated policy dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == 78168204d4377c4f1c7811744def171711397871 ]]
+          [[ "$(git write-tree)" == 1d9985b307d5b9940406ff9f26831e11779263c9 ]]
+          mkdir -p "$RUNNER_TEMP/corpus-controls"
+          python3 -m venv "$RUNNER_TEMP/corpus-control-venv"
+          "$RUNNER_TEMP/corpus-control-venv/bin/pip" install --disable-pip-version-check PyYAML==6.0.2
+      - name: Parse YAML and validate actual Bash and embedded Python blocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/corpus-control-venv/bin/python" - <<'PY'
+          from pathlib import Path
+          import re, subprocess, yaml
+          workflow = yaml.load(Path(".github/workflows/chess-corpus-evidence.yml").read_text(), Loader=yaml.BaseLoader)
+          blocks = 0
+          for step in workflow["jobs"]["corpus"]["steps"]:
+              script = step.get("run")
+              if script is None:
+                  continue
+              subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+              lines = script.splitlines()
+              for index, line in enumerate(lines):
+                  match = re.match(r"""^\s*(?:exec )?python3 .*?<<\s*["']?([A-Za-z_][A-Za-z0-9_]*)["']?\s*$""", line)
+                  if match is None:
+                      continue
+                  end = next(i for i in range(index + 1, len(lines)) if lines[i] == match.group(1))
+                  compile("\n".join(lines[index + 1:end]) + "\n", step["name"], "exec")
+                  blocks += 1
+          if blocks != 2:
+              raise ValueError("expected both exact workflow Python blocks")
+          compile(Path("scripts/measure-installed-chess-corpus.py").read_text(), "measure-installed-chess-corpus.py", "exec")
+          print("CORPUS_WORKFLOW_SYNTAX_OK bash=true python_blocks=2 yaml=true", flush=True)
+          PY
+      - name: Execute existing workflow policy and installed corpus controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP/corpus-controls"
+          export PATH="$RUNNER_TEMP/corpus-control-venv/bin:$PATH"
+          python3 scripts/actions-audit.py
+          python3 scripts/test-actions-topology.py
+          python3 scripts/test-installed-chess-corpus.py
