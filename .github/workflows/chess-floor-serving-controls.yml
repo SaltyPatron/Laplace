@@ -1,33 +1,70 @@
-name: Qualify private PostgreSQL topology owner
+name: Dispatch the approved complete Original deployment
 on:
   push:
-    branches: [verify/chess-floor-serving-controls-20260916]
+    branches: ['verify/chess-floor-serving-controls-20260916']
 permissions:
   contents: read
+  actions: write
 jobs:
-  controls:
-    runs-on: ubuntu-24.04
+  operation:
+    runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      TMPDIR: /build/laplace/work/topology-controls/tmp
-      TMP: /build/laplace/work/topology-controls/tmp
-      TEMP: /build/laplace/work/topology-controls/tmp
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: 2335b0543cf7d47901d0d74b11db9bb8a20668cc
-          persist-credentials: false
-      - name: Execute every topology control on exact correction
+      - name: Dispatch the exact merged main through its ordinary complete lifecycle
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$TMPDIR"
-          python3 -m venv /build/laplace/work/topology-controls/venv
-          /build/laplace/work/topology-controls/venv/bin/pip -q install PyYAML==6.0.2
-          test "$(git rev-parse HEAD)" = 2335b0543cf7d47901d0d74b11db9bb8a20668cc
-          test "$(git rev-parse HEAD^{tree})" = eea711191b2f5df2c99127435fe701d8e3ff857d
-          timeout --signal=TERM --kill-after=5s 180s /build/laplace/work/topology-controls/venv/bin/python scripts/test-actions-topology.py -v
-          test -z "$(git status --porcelain --untracked-files=all)"
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          REPOSITORY = "SaltyPatron/Laplace"
+          EXPECTED_MAIN = "0d181eabf2389eafdcde02fcaa75018ffc096b8e"
+          PROOF_RUN = 35138096800
+          PROOF_HEAD = "9a91eefd4a41bdcc4d22a73c05e710242b547123"
+          EXPECTED_TREE = "6861448e083c138055c1bc5930521f65afc59257"
+          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (EXPECTED_MAIN, PROOF_HEAD)):
+              raise ValueError("exact immutable source identities are required")
+          base = "https://api.github.com/repos/" + REPOSITORY
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                     "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10"}
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
+                  raw = response.read(2 * 1024 * 1024 + 1)
+              if len(raw) > 2 * 1024 * 1024:
+                  raise ValueError("API metadata exceeded the read budget")
+              return json.loads(raw)
+          proof = api("/actions/runs/" + str(PROOF_RUN))
+          if (proof["head_sha"] != PROOF_HEAD or proof["status"] != "completed"
+                  or proof["conclusion"] != "success" or proof["event"] != "pull_request"
+                  or proof["path"] != ".github/workflows/pr-validation.yml"):
+              raise ValueError("the selected current-source PR proof has not passed")
+          commit = api("/git/commits/" + EXPECTED_MAIN)
+          if commit["tree"]["sha"] != EXPECTED_TREE:
+              raise ValueError("the explicitly approved main tree changed")
+          if api("/git/ref/heads/main")["object"]["sha"] != EXPECTED_MAIN:
+              raise ValueError("main changed before the explicit deployment")
+          inputs = {"stage": "all", "full_clean": "false", "force_codegen": "false",
+                    "fresh_db": "false", "restore_foundation": "false", "serial_tests": "false",
+                    "force_all": "false", "generation_benchmark": "false"}
+          payload = {"ref": "main", "inputs": inputs}
+          print("ORIGINAL_DEPLOYMENT_SELECTION " + json.dumps({"source": EXPECTED_MAIN,
+              "historicalSourceProofRun": PROOF_RUN, "historicalSourceProofHead": PROOF_HEAD,
+              "historicalProofAppliesToCurrentMain": False, "currentMainQualification": "pending_this_full_lifecycle",
+              "expectedTree": EXPECTED_TREE, "inputs": inputs}), flush=True)
+          request = urllib.request.Request(base + "/actions/workflows/laplace.yml/dispatches",
+              data=json.dumps(payload).encode(), headers={**headers, "Content-Type": "application/json"}, method="POST")
+          # One request only: an ambiguous transport response is inspected, never retried automatically.
+          with urllib.request.urlopen(request, timeout=30) as response:
+              code = response.status
+              raw = response.read(65537)
+          if code not in (200, 204) or len(raw) > 65536:
+              raise ValueError("unexpected dispatch response")
+          result = json.loads(raw) if raw else {}
+          unchanged = api("/git/ref/heads/main")["object"]["sha"] == EXPECTED_MAIN
+          print("ORIGINAL_DEPLOYMENT_DISPATCH " + json.dumps({"status": "requested",
+              "expectedHead": EXPECTED_MAIN, "mainUnchangedAfterRequest": unchanged,
+              "workflowRunId": result.get("workflow_run_id"), "runUrl": result.get("html_url")}), flush=True)
+          if not unchanged:
+              raise ValueError("main changed during dispatch; authenticate the actual run before using it")
+          PY
