@@ -861,6 +861,11 @@ for line in sys.stdin:
         self.assertNotIn("FORBIDDEN", log.read_text() if log.exists() else "")
 
     def test_uci_only_publishes_verified_wrapper_and_preserves_other_products(self):
+        help_result = self.deploy("--help")
+        self.assertEqual(0, help_result.returncode, help_result.stderr)
+        self.assertIn("--uci-only", help_result.stdout)
+        self.assertIn("--uci-recover", help_result.stdout)
+        self.assertFalse((self.root / "tools.log").exists())
         result = self.deploy()
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertNotEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
@@ -967,6 +972,7 @@ for line in sys.stdin:
 
     def test_foreign_application_transaction_refuses_without_build(self):
         for marker in (self.root / "build/.application-publish-owner",
+                       self.root / "build/.application-restore-pending",
                        self.root / "build/.managed-publish-backup", self.root / "root-transaction.json"):
             with self.subTest(marker=marker.name):
                 marker.write_bytes(b"other owner")

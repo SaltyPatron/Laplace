@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
     --uci-only)  UCI_ONLY=1; shift ;;
     --uci-recover) UCI_ONLY=1; UCI_RECOVER=1; shift ;;
     -h|--help)
-      sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -40,7 +40,7 @@ done
 # secret reads, API replacement, or MCP/Lichess selection.
 uci_no_other_transaction() {
   local pending
-  for pending in .managed-publish-backup .api-publish-backup .application-publish-owner; do
+  for pending in .managed-publish-backup .api-publish-backup .application-publish-owner .application-restore-pending; do
     [[ ! -e "$REPO_ROOT/build/$pending" ]] || {
       echo "::error::another application transaction is unresolved" >&2; return 1;
     }
