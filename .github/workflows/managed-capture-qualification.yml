@@ -1,0 +1,234 @@
+name: Targeted managed capture qualification
+on:
+  push:
+    branches: [qualify/managed-capture-4fa-20260916]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  managed-capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: 4fa186e38de10ee5cc768d38f33ec9663cf2e314
+      CANDIDATE_TREE: 8e5cde196b33dc2dbbc7a0d1643b26dd3b45f595
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      MSBUILDDISABLENODEREUSE: '1'
+    steps:
+      - name: Prepare isolated permanent diagnostic directories
+        run: |
+          set -euo pipefail
+          root="/build/laplace/work/managed-capture/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$(dirname "$root")"
+          test ! -e "$root"
+          mkdir -m 0700 "$root"
+          mkdir -p "$root"/{evidence,build,engine,tmp,dotnet-home,dotnet,nuget}
+          printf 'QUALIFICATION_DIR=%s\nLAPLACE_BUILD_ROOT=%s/build\nLAPLACE_ENGINE_BUILD=%s/engine\nLAPLACE_EXTERNAL=%s/external\n' "$root" "$root" "$root" "$root" >> "$GITHUB_ENV"
+          printf 'TMPDIR=%s/tmp\nTMP=%s/tmp\nTEMP=%s/tmp\nDOTNET_CLI_HOME=%s/dotnet-home\nDOTNET_INSTALL_DIR=%s/dotnet\nNUGET_PACKAGES=%s/nuget\n' "$root" "$root" "$root" "$root" "$root" "$root" >> "$GITHUB_ENV"
+          printf 'LAPLACE_PERFCACHE_BIN=%s/engine/core/perfcache/laplace_t0_perfcache.bin\nLD_LIBRARY_PATH=%s/engine/core\n' "$root" "$root" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 4fa186e38de10ee5cc768d38f33ec9663cf2e314
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind corrected source and unchanged qualified native implementation
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          timeout --signal=TERM --kill-after=5s 120s git fetch --no-tags --depth=1 origin 2630f20eef44e8ad78cfefada02df9677bdc59e9
+          git diff --exit-code 2630f20eef44e8ad78cfefada02df9677bdc59e9 "$CANDIDATE_SHA" -- engine/core/src engine/core/include
+          git worktree add --detach "$QUALIFICATION_DIR/source" "$CANDIDATE_SHA"
+          printf 'candidate=%s\ntree=%s\nqualified_native_source=%s\n' "$CANDIDATE_SHA" "$CANDIDATE_TREE" 2630f20eef44e8ad78cfefada02df9677bdc59e9 > "$QUALIFICATION_DIR/evidence/source.txt"
+      - name: Authenticate and reuse actual native57 library and Unicode floor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,resource,stat,subprocess,zipfile
+          from pathlib import Path
+          root=Path(os.environ["QUALIFICATION_DIR"]); evidence=root/"evidence"
+          repo="SaltyPatron/Laplace"; artifact_id=10454379337; run_id=35116775887
+          head="ec98d15e78d9d229aeb3d9dd6a155c71576673e0"
+          size=99705010; digest="58ac3b3057d94ce98cf7183de2512bdc67e3d047cf84522861ab6cb4125b7541"
+          def require(ok,message):
+              if not ok: raise RuntimeError(message)
+          def fetch(endpoint,path,bound,seconds=45):
+              def limit(): resource.setrlimit(resource.RLIMIT_FSIZE,(bound,bound))
+              with path.open("xb") as output:
+                  done=subprocess.run(["gh","api",endpoint],stdout=output,stderr=subprocess.PIPE,timeout=seconds,preexec_fn=limit)
+              require(done.returncode==0 and path.stat().st_size<=bound,"authenticated download failed")
+          metadata_path=evidence/"native-artifact.json"
+          fetch(f"repos/{repo}/actions/artifacts/{artifact_id}",metadata_path,1<<20)
+          metadata=json.loads(metadata_path.read_text()); binding=metadata["workflow_run"]
+          require(metadata["id"]==artifact_id and metadata["size_in_bytes"]==size and metadata["digest"]=="sha256:"+digest
+              and metadata["expired"] is False and binding["id"]==run_id and binding["head_sha"]==head
+              and binding["repository_id"]==1246058537 and binding["head_repository_id"]==1246058537,"artifact binding mismatch")
+          archive=root/"native-retained.zip"
+          fetch(f"repos/{repo}/actions/artifacts/{artifact_id}/zip",archive,size+1,120)
+          with archive.open("rb") as stream: actual=hashlib.file_digest(stream,"sha256").hexdigest()
+          require(archive.stat().st_size==size and actual==digest,"retained ZIP mismatch")
+          selected=[
+              ("build/core/liblaplace_core.so","engine/core/liblaplace_core.so",66177864,"9a59f2a8b35ecfe7c097a7ab5679002d3495503b40790e27b23cba5837ce2684"),
+              ("build/core/perfcache/laplace_t0_perfcache.bin","engine/core/perfcache/laplace_t0_perfcache.bin",89580004,"45b14f04e7a39ac4218f83cb9fde87e4330b5c8cccc4470f762d0f8bd6286a70"),
+              ("build/core/perfcache/laplace_modality_number_perfcache.bin","engine/core/perfcache/laplace_modality_number_perfcache.bin",20624,"c28aa5c7dffe7e9d9fd773468a7725e008eec57684ed6e4ef2dea7ec214f1501")]
+          with zipfile.ZipFile(archive) as retained:
+              infos=retained.infolist()
+              require(1<=len(infos)<=64 and len({x.filename for x in infos})==len(infos)
+                  and sum(x.file_size for x in infos)<=512<<20,"ZIP bounds")
+              entries={x.filename:x for x in infos}
+              for name,destination,length,sha in selected:
+                  entry=entries[name]
+                  require(entry.file_size==length and not entry.is_dir() and not entry.flag_bits&1
+                      and not stat.S_ISLNK(entry.external_attr>>16),"retained member type/size")
+                  target=root/destination; target.parent.mkdir(parents=True,exist_ok=True)
+                  hasher=hashlib.sha256();count=0
+                  with retained.open(entry) as source,target.open("xb") as output:
+                      while block:=source.read(1<<20):
+                          count+=len(block);require(count<=length,"member overflow");hasher.update(block);output.write(block)
+                  require(count==length and hasher.hexdigest()==sha,"native payload identity")
+              receipt_entry=entries["evidence/result.json"]
+              require(receipt_entry.file_size<=1<<20,"native receipt bound")
+              receipt=json.loads(retained.read(receipt_entry))
+              require(receipt["status"]=="passed" and receipt["passed"]==57 and receipt["failed"]==0
+                  and receipt["skipped"]==0 and receipt["product_candidate"]=="2630f20eef44e8ad78cfefada02df9677bdc59e9"
+                  and receipt["source_commit"]==head,"native executed receipt mismatch")
+              (evidence/"native-original-result.json").write_text(json.dumps(receipt,sort_keys=True,indent=2)+"\n")
+          report={"schema":"laplace.managed-retained-native-input/v1","artifact_id":artifact_id,"run_id":run_id,
+              "zip_sha256":digest,"candidate":os.environ["CANDIDATE_SHA"],"native_source_candidate":receipt["product_candidate"],
+              "payloads":[{"member":a,"selected_path":b,"bytes":c,"sha256":d} for a,b,c,d in selected],
+              "scope":"Reuse authenticated actual hosted native57 library and real generated Unicode floor; no native rebuild or installed-product provenance claim"}
+          (evidence/"native-inputs.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(report,sort_keys=True))
+          PY
+          ldd "$QUALIFICATION_DIR/engine/core/liblaplace_core.so" | tee "$QUALIFICATION_DIR/evidence/native-loader.log"
+          ! grep -q 'not found' "$QUALIFICATION_DIR/evidence/native-loader.log"
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Acquire the one pinned grammar query required by managed compilation
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 300s python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/grammar-query.log"
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          root=Path(os.environ["LAPLACE_EXTERNAL"])/"tree-sitter-grammars/tree-sitter-c"
+          root.parent.mkdir(parents=True)
+          revision="b780e47fc780ddc8da13afa35a3f4ed5c157823d"
+          expected="9194799a7a7dcedf020ba2558fc92fc430633d73680243ae1f1d9de78c719528"
+          def git(*args,capture=False):
+              result=subprocess.run(["git","-C",str(root),*args],check=True,timeout=90,stdout=subprocess.PIPE if capture else None)
+              return result.stdout
+          subprocess.run(["git","init","--quiet",str(root)],check=True,timeout=10)
+          git("remote","add","origin","https://github.com/tree-sitter/tree-sitter-c")
+          git("fetch","--quiet","--no-tags","--depth=1","origin",revision)
+          git("checkout","--quiet","--detach",revision)
+          assert git("rev-parse","HEAD",capture=True).decode().strip()==revision
+          assert hashlib.sha256(git("archive","--format=tar",revision,capture=True)).hexdigest()==expected
+          query=root/"queries/tags.scm";assert query.is_file()
+          report={"scope":"Exact compile resource from the same authenticated upstream pin used by native57 qualification",
+              "revision":revision,"git_archive_sha256":expected,"required_file":"queries/tags.scm",
+              "required_file_sha256":hashlib.sha256(query.read_bytes()).hexdigest()}
+          (Path(os.environ["QUALIFICATION_DIR"])/"evidence/grammar-query.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
+          PY
+      - name: Compile changed managed owners and their test assemblies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$QUALIFICATION_DIR/source"
+          evidence="$QUALIFICATION_DIR/evidence"
+          dotnet --info > "$evidence/dotnet-info.log"
+          printf 'project\texit_code\n' > "$evidence/build-summary.tsv"
+          failed=0
+          for project in Laplace.Substrate.Tests Laplace.Chess.Tests Laplace.Core.Tests Laplace.Cli; do
+            set +e
+            timeout --signal=TERM --kill-after=15s 240s               dotnet build "app/$project/$project.csproj" --configuration Release               --disable-build-servers --nologo --verbosity minimal -p:UseSharedCompilation=false               "-bl:$evidence/$project.binlog" 2>&1 | tee "$evidence/$project.build.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '%s\t%s\n' "$project" "$status" >> "$evidence/build-summary.tsv"
+            if [[ "$status" != 0 ]]; then failed=1; fi
+          done
+          cat "$evidence/build-summary.tsv"
+          exit "$failed"
+      - name: Execute targeted native transport and complete-game chunk controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$QUALIFICATION_DIR/source"
+          evidence="$QUALIFICATION_DIR/evidence"
+          failed=0
+          for item in substrate chess; do
+            if [[ "$item" == substrate ]]; then
+              project=Laplace.Substrate.Tests
+              filter='FullyQualifiedName~PhysicalityAdmissionTransportTests|FullyQualifiedName~SubstrateChangeTests'
+            else
+              project=Laplace.Chess.Tests
+              filter='FullyQualifiedName~ChessPgnChunkTests|FullyQualifiedName~ChessCorpusSourceTests|FullyQualifiedName~ChessCorpusEvidenceTests'
+            fi
+            set +e
+            timeout --signal=TERM --kill-after=15s 180s               dotnet test "app/$project/$project.csproj" --configuration Release --no-build --no-restore               --nologo --filter "$filter" --logger "trx;LogFileName=$item.trx"               --results-directory "$evidence" 2>&1 | tee "$evidence/$item.tests.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [[ "$status" != 0 ]]; then failed=1; fi
+          done
+          exit "$failed"
+      - name: Verify actual selected cases and app-local native identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,xml.etree.ElementTree as ET
+          from pathlib import Path
+          root=Path(os.environ["QUALIFICATION_DIR"]);evidence=root/"evidence"
+          expected="9a59f2a8b35ecfe7c097a7ab5679002d3495503b40790e27b23cba5837ce2684"
+          libraries=sorted((root/"build/app/bin").rglob("liblaplace_core.so"))
+          if len(libraries)<4:raise RuntimeError("missing app-local native copies")
+          for library in libraries:
+              with library.open("rb") as source: actual=hashlib.file_digest(source,"sha256").hexdigest()
+              if actual!=expected:raise RuntimeError("managed output native identity mismatch")
+          required=[
+          "SourceCapture_BoundedAndBulkMatchEveryScalarNativeTuple",
+          "SourceCapture_ReusesScratchWithinTheSameAggregateGrant",
+          "SourceCapture_RefusesAnIndivisibleRowOrLaterInvalidIdentity",
+          "SourceCapture_CancellationAtNativeBoundaryStopsBeforeNextBatch",
+          "SourceCapture_PreservesAllObservationSourcesUnitsAndReferenceSupplement",
+          "SourceCapture_EmptyInputHasNoRowsAndNoObservationBatch",
+          "BuilderDisposeReleasesOnlyUntransferredNativeStagesAndIsIdempotent",
+          "Builder_ObservationByteEstimateTracksAppendAndNativeOwnershipTransfer",
+          "ByteBoundaryKeepsFullGamesAndEveryObservationAcrossCanonicalComposition",
+          "ActualStagedBytesCloseAfterTheCrossingGameWithoutANewGameCountCap",
+          "DiscardedComposedChunkDeterministicallyReleasesUnbuiltNativeSourceStages",
+          "RepeatedPlayingAfterAcknowledgedByteChunkUsesRepairButUnacknowledgedWorkRemainsNovel",
+          "ReplayScheduleKeepsMixedNovelAndRepairGamesTogetherDespiteDifferentMemoryShape",
+          "ReplayScheduleFollowsSealedFreshBoundariesAndDoesNotAdvanceOnRefusal",
+          "FailedSummaryRetainsPartialWorkButNeverPublishesANumericRate",
+          "CompletedSummaryPreservesSampleRateAndSeparateDurationQualification"]
+          results=[]
+          ns={"t":"http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          for name in ("substrate","chess"):
+              document=ET.parse(evidence/f"{name}.trx")
+              cases=document.findall(".//t:UnitTestResult",ns)
+              if not cases:raise RuntimeError("empty selected managed test run")
+              for case in cases:
+                  results.append({"name":case.attrib["testName"],"outcome":case.attrib["outcome"]})
+          if any(case["outcome"]!="Passed" for case in results):raise RuntimeError("selected managed test failed or skipped")
+          for name in required:
+              if not any(name in case["name"] for case in results):raise RuntimeError("missing required new control "+name)
+          summary={"schema":"laplace.targeted-managed-capture-proof/v1","status":"passed",
+              "candidate_commit":os.environ["CANDIDATE_SHA"],"candidate_tree":os.environ["CANDIDATE_TREE"],
+              "native_library_sha256":expected,"native_copies_verified":len(libraries),"passed":len(results),
+              "failed":0,"skipped":0,"tests":results,
+              "scope":"Targeted managed compilation and actual retained-native transport/chunk/reporting controls; no PostgreSQL backend, installed product, or recorded throughput proof"}
+          (evidence/"result.json").write_text(json.dumps(summary,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(summary,sort_keys=True))
+          PY
+          test -z "$(git -C "$QUALIFICATION_DIR/source" status --porcelain --untracked-files=all)"
+      - name: Retain exact successful or failed managed evidence
+        if: always() && env.QUALIFICATION_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: managed-capture-4fa-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.QUALIFICATION_DIR }}/evidence/
+          if-no-files-found: error
+          retention-days: 30
