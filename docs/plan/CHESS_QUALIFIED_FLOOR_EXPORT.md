@@ -1,42 +1,58 @@
-# Export recorded floors from the qualified installed main
+# Export recorded floors from the qualified installed source
 
-The opt-in workflow chess-floor-export.yml prepares an authenticated recorded-corpus input for the normal cache build. It does not change ordinary PR proof, install files, restart services, mutate the database, or merge a pull request.
+The opt-in workflow chess-floor-export.yml prepares an authenticated recorded-corpus input for the normal cache build. It does not install files, restart services, mutate the database, or merge a pull request.
 
-Each invocation selects one complete immutable main commit and tree in **.github/chess-floor-export-selection.json**. That exact source must also be the installed source observed by a successful recorded-corpus pilot. The exact-main product lifecycle must have reached a verified terminal installation outcome, and the pilot must have completed successfully. The normal route requires the full lifecycle to pass. A second, narrowly defined route permits only a failed required lexical-foundation phase after every build, test, native-install and database-maintenance prerequisite passed; that lifecycle remains explicitly failed. A successor release uses its own selection and evidence; the operator does not contain a release-specific source pin.
+Each invocation selects a complete immutable commit and tree in **.github/chess-floor-export-selection.json**. That source must be the installed source observed by a successful recorded-corpus pilot. Qualification accepts the retained successful exact-main lifecycle or the independent native-only installation described below. Failed lexical-foundation lifecycles are not an accepted route. A successor release uses its own selection and evidence.
 
 ## Source and native compatibility
 
-The driver verifies that the candidate checkout has the selected complete commit and tree, has no local changes, and uses the same source identity as the installed pilot. It checks the live PostgreSQL extensions, migration/function inventory, configured ROMs, installed module closure and absence of active ingests against the successful installed pilot's before/after snapshot. Candidate extension versions and its content-addressed execution-module name must match that installed baseline.
+The candidate checkout must have the selected complete commit and tree and no local changes. The installed-form runtime guard checks retained CMake installed bytes, live PostgreSQL extensions, migration/function inventory, configured ROMs, installed module closure, sealed chess floor pair and actual build/install fingerprints. Candidate extension versions and its content-addressed execution-module name must match the installed pilot.
 
-The general application deployment guard is unchanged and is reused in full. Source and installed generation are now identical: before and after export its snapshot owner checks the retained CMake installed form against actual installed native modules, SQL versions, migrations, ROMs, sealed floor pair, build/install fingerprints and idle ingestion. That snapshot must exactly equal the successful pilot baseline. An observed mismatch fails before selection; it does not infer ABI compatibility or install a substitute extension.
+Export and pilot comparisons use the guard's explicit recording purpose. Every runtime/database identity remains equal; only the observed nonnegative integer running_ingests count may change. Each original count remains in its snapshot. A journal row may describe an interrupted unrelated ingest and is not an active writer lock. This does not remove the ordinary writer's transaction locking or change the stricter publication guard. A publication-purpose or unlabelled historical snapshot cannot substitute for a recording snapshot.
 
-The main lifecycle retains its persistent checkout and build. This job rebuilds the managed catalog and focused tests from the exact qualified source into a new /build/laplace/build/chess-floor-export-<run>-<attempt> directory. The receipt explicitly calls those managed bytes rebuilt. It derives the retained native build from the selected main session's actual persistent checkout through the existing build-placement address, verifies the applicable canonical phase outcomes, matching build/install stamps and CMake source binding, and hashes the private session without retaining its token. App-local native libraries must match that selected build before any test or export. Current bytes are freshly hashed and focused-tested; the full installed-form guard binds that build to the pilot's observed installed generation. No direct historical comparison to a native hash saved by the workflow run is claimed.
+The job rebuilds the managed catalog and focused tests from the exact qualified source into a new /build/laplace/build/chess-floor-export-<run>-<attempt> directory. The receipt labels those managed bytes rebuilt. It follows the selected checkout's actual build symlink and checks CMake source/cache placement plus matching build/install stamps. App-local native libraries must match that selected build before tests or export. Current bytes are freshly hashed and tested; no missing historical native hash is inferred.
 
-## Required real identities
+## Independent native-only installation
 
-After the exact-main lifecycle has reached one of the accepted terminal outcomes and its installed pilot has completed successfully, put their observed identities in **.github/chess-floor-export-selection.json** on a separate reviewed operator branch. That file is deliberately absent from this candidate: no fictional run or successful pilot is supplied.
+Set proof_kind to native-only-install only for the reviewed runner-owned PostgreSQL18.6/native installation operator. This is distinct from the main lifecycle and has no ci-session receipt. The selected product source remains candidate_commit/candidate_tree/installed_source; proof_operator_commit identifies the separate workflow source. The completed native workflow does not establish application publication, database recreation or foundation ingestion.
 
-Required fields are:
+In addition to the common pilot/source fields below, supply these observed values:
 
 | Field | Required value |
 | --- | --- |
-| candidate_commit | Complete lowercase 40-character commit identity from the selected terminal main lifecycle |
-| candidate_tree | Complete lowercase 40-character tree identity for that commit |
-| installed_source | Same commit as candidate_commit, authenticated by the installed pilot |
-| proof_run_id | Positive integer for the selected exact-main product lifecycle run |
+| proof_operator_commit | Exact immutable commit of the completed native operator |
+| native_workflow_blob | Reviewed Git blob of .github/workflows/chess-floor-serving-controls.yml at that operator commit |
+| native_checkout | Absolute permanent checkout actually used by the native operator, verified again now |
+| native_receipt_sha256 | SHA256 of the authenticated artifact's receipt.json and matching retained private file |
+| native_selection_sha256 | SHA256 of the authenticated artifact's selection.json and matching retained private file |
+| native_artifact_id | Positive GitHub artifact ID for original-native-install-RUN-ATTEMPT |
+| native_artifact_sha256 | SHA256 of that exact authenticated artifact ZIP |
+
+The existing dispatcher authenticates the artifact archive and emits its document identities; copy those observed hashes into the selection. The export driver authenticates remote artifact metadata and the separately selected private receipt hashes. It does not download the ZIP again or claim that a metadata-only check re-hashed archive contents.
+
+The remote run must be the successful push of the selected operator to verify/chess-floor-serving-controls-20260916, with the exact workflow, run and attempt. Its one completed job must contain the actual native execution, outcome and evidence steps in order. Under /build/laplace/recovery/native-install/RUN-ATTEMPT, private runner-owned selection.json, receipt.json, workflow-outcome.json and completed-phases.txt must agree on the exact source, operator, release and outcome. The completed phase sequence must include the PostgreSQL pin/source/build checks, native/managed build, private PostgreSQL test, native/managed/UCI tests, quiet-state check, native install, extension SQL, database health and PostgreSQL activation. Only the actual optional pg-fetch phase is optional.
+
+The receipt must retain server180006 and the exact installed core/postgres/pg_config file identities. Those actual files are hashed now and rechecked around the export, and the live server must still be180006. All common pilot/database/SQL/native closure checks below remain required.
+
+Early v1 receipts did not store a historical checkout path or build fingerprint. The exporter always verifies the explicitly observed checkout’s current HEAD/tree, tracked cleanliness, actual build symlink, CMake source/cache placement and matching build/install stamps. When the receipt includes checkout, buildDirectory, buildNativeStamp and installNativeStamp, those fields must match that observation; a selection checkout field is also checked. Missing historical fields are not invented. The report retains full_lifecycle_passed=false and managed_publication=not_attempted. These facts do not prevent the independently qualified read-only export.
+
+## Required real identities
+
+Put the selected proof and completed pilot identities in **.github/chess-floor-export-selection.json** on the existing reviewed operator branch. No successful run, artifact or pilot identity is supplied by the source change.
+
+| Field | Required value |
+| --- | --- |
+| candidate_commit | Complete lowercase 40-character installed product commit |
+| candidate_tree | Complete lowercase 40-character tree for that commit |
+| installed_source | Same commit as candidate_commit, authenticated by the pilot |
+| proof_kind | native-only-install for the independent route; absent or main-lifecycle for the existing main route |
+| proof_run_id | Positive integer for the selected proof run |
 | proof_run_attempt | Positive integer for that completed attempt |
-| pilot_evidence_directory | Absolute permanent directory containing the completed corpus wrapper receipt and native snapshots |
-| pilot_receipt_sha256 | Observed SHA256 of that directory's receipt.json |
-| pilot_native_snapshot_sha256 | Observed SHA256 of its equal native-before.json and native-after.json |
+| pilot_evidence_directory | Absolute permanent completed corpus receipt and native snapshot directory |
+| pilot_receipt_sha256 | Observed SHA256 of receipt.json |
+| pilot_native_snapshot_sha256 | Observed SHA256 of native-before.json; native-after.json must be recording-compatible |
 
-The remote run must be a completed laplace.yml push to main with exactly the selected commit and attempt. Its private RUN-ATTEMPT-product/session.json must show kind=product, stage=all, no active phase and cleanup_exit_code=0. The normal main phase list is resolved independently of later export environment flags. The two accepted outcomes are:
-
-- Full success: the remote conclusion is success, the private session is stopped, and every canonical product phase completed in order with zero exit status. This existing route is unchanged.
-- Lexical-only failure: the remote conclusion and private session remain failure/failed. The exact ordered prefix policy, dependencies, build, native-dev, managed-dev, uci-dev, browser-dev, native-install and database-maintenance must have succeeded, followed by one nonzero lexical-foundation result and no later executed phase. The remote attempt must contain exactly one matching completed failed job. Its installed-prerequisite steps and host-reservation release must have succeeded in order, required lexical foundation must be its sole failed step, and every later ordinary delivery step must be explicitly skipped.
-
-The receipt preserves the actual lifecycle conclusion, full_lifecycle_passed flag, terminal session status, cleanup result, exact phase results and, for the failed route, the failed exit code, unexecuted phase suffix and observed workflow step outcomes. ci-session.py normally leaves a cleaned failed session marked failed; a subsequent stop command does not relabel it stopped. A cancelled run, another failed phase, missing or reordered prerequisites, incomplete cleanup, an active phase, another source, another attempt or ambiguous job is refused. The private session's token is never copied or printed; its SHA256 is rechecked at completion.
-
-This exception covers only a verified chess export and future-build selection. Lexical admission, application publication and skipped live/generation checks remain failed or unexecuted as observed. They are not dependencies of the read-only typed chess exporter. The installed native/SQL/migration/ROM checks, completed fresh pilot with exact zero-writer replay, focused export controls, complete artifact checks and before/after identities remain mandatory. The application runtime guard still refuses active/unresolved ingest journals or a changed database/runtime.
+The existing exact-main route requires a successful completed laplace.yml push to main at the selected commit and attempt. Its private RUN-ATTEMPT-product/session.json must show kind=product, stage=all, no active phase, cleanup_exit_code=0 and every canonical full product phase completed in order. A development-only push does not establish installation. A failed, cancelled, incomplete, wrong-source or reordered lifecycle cannot qualify. The private session token is never retained; its receipt SHA256 is checked again before selection. The independent native-only route proves its own narrower installation scope and never claims application publication or full lifecycle success.
 
 The workflow's operator driver and its protocol tests execute from the reviewed operator checkout. The catalog, native/runtime owners and canonical phase list still come from the selected immutable candidate source. The workflow source and candidate source are retained separately; an exporter-only correction does not pretend to be a new installed native generation.
 
@@ -52,7 +68,7 @@ The direct command, under the same host ownership and prepared environment, is:
 
     python3 scripts/export-qualified-chess-floors.py --selection /absolute/reviewed-selection.json --candidate-root /build/laplace/worktrees/exact-cache-source --output /build/laplace/corpus-exports/chess/new-unique-child
 
-Nineteen local protocol and filesystem/process controls first check exact-main phase/source/build selection, the sole lexical-failure exception and its refusal cases, successor release evidence binding, immutable source selection, and post-publication failure, absent/different selection, failed readback, and SIGTERM lock ownership through child cleanup/finalization. They use explicitly synthetic publisher framing and do not claim corpus/native acceptance. It then builds ChessCatalogSurfaces, Laplace.Core.Tests and Laplace.Chess.Tests, then runs the existing floor serialization/checksum/lifetime, recorded export, recorded witness and starting-side inventory classes. The retained TRX must contain every selected class, at least one result, and no failed or skipped result. The published catalog and all three app-local native libraries are hashed before and after.
+Twenty-three local protocol and filesystem/process controls check exact-main and independent native-install source/build selection, receipt/artifact/phase identity, recorded placement, recording-purpose runtime comparisons, publication failure reconciliation and actual SIGTERM lock ownership through child cleanup. They use explicitly synthetic publisher framing and do not claim corpus/native acceptance. It then builds ChessCatalogSurfaces, Laplace.Core.Tests and Laplace.Chess.Tests, then runs the existing floor serialization/checksum/lifetime, recorded export, recorded witness and starting-side inventory classes. The retained TRX must contain every selected class, at least one result, and no failed or skipped result. The published catalog and all three app-local native libraries are hashed before and after.
 
 The actual database read is the existing command:
 

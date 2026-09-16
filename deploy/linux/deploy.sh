@@ -4,6 +4,7 @@
 # Options:
 #   --force-npm    always run npm ci (ignore lockfile stamp)
 #   --serial       publish API, UCI, MCP, Lichess serially (default: parallel)
+#   --api-only     publish API + SPA in the existing API-only transaction
 
 set -euo pipefail
 
@@ -11,14 +12,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"
 source "$REPO_ROOT/deploy/linux/app-dir-contract.sh"
 source "$REPO_ROOT/deploy/linux/payload-sync.sh"
-STAGE="$(mktemp -d)"
+STAGE=""
 FORCE_NPM=0
 SERIAL=0
+API_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force-npm) FORCE_NPM=1; shift ;;
     --serial)    SERIAL=1; shift ;;
+    --api-only)  API_ONLY=1; shift ;;
     -h|--help)
       sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -26,6 +29,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$API_ONLY" -eq 1 && "${LAPLACE_API_TRANSACTION:-}" != "1" ]]; then
+  echo "::error::use scripts/publish-applications.sh api-deploy for API-only publication" >&2
+  exit 2
+fi
+
+STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 laplace_reconcile_app_dir_contract "$APP_DIR"
@@ -53,16 +62,32 @@ npm run gen:api
 npm run build
 popd >/dev/null
 
-UCI_STAGE="$(mktemp -d)"
-MCP_STAGE="$(mktemp -d)"
-LICHESS_STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"' EXIT
-
 publish_api() {
   echo "==> publish API -> staging ($STAGE)"
   dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" \
     -c Release --no-self-contained -o "$STAGE"
 }
+
+if [[ "$API_ONLY" -eq 1 ]]; then
+  publish_api
+  rm -rf "$STAGE/wwwroot"
+  mkdir -p "$STAGE/wwwroot"
+  cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+  python3 "$REPO_ROOT/scripts/verify-api-payload.py" \
+    --seal-payload "$STAGE" --native-build "$LAPLACE_ENGINE_BUILD" \
+    --manifest "$LAPLACE_API_PAYLOAD_MANIFEST"
+  # All build/closure checks complete before the serving API is stopped.
+  sudo -n systemctl stop laplace-api
+  laplace_sync_api_payload "$STAGE" "$APP_DIR"
+  laplace_require_app_dir_contract "$APP_DIR"
+  echo "published API + SPA; transaction owner must verify or restore"
+  exit 0
+fi
+
+UCI_STAGE="$(mktemp -d)"
+MCP_STAGE="$(mktemp -d)"
+LICHESS_STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"' EXIT
 
 publish_uci() {
   echo "==> publish laplace-uci -> $UCI_STAGE"
