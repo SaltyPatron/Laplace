@@ -1,4 +1,4 @@
-name: Qualify current managed service storage policy
+name: Qualify exact recorded floor lifecycle evidence
 on:
   push:
     branches: [verify/chess-floor-serving-controls-20260916]
@@ -10,23 +10,29 @@ jobs:
     timeout-minutes: 5
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      TMPDIR: /build/laplace/work/service-policy-controls/tmp
-      TMP: /build/laplace/work/service-policy-controls/tmp
-      TEMP: /build/laplace/work/service-policy-controls/tmp
+      TMPDIR: /build/laplace/work/export-protocol-controls/tmp
+      TMP: /build/laplace/work/export-protocol-controls/tmp
+      TEMP: /build/laplace/work/export-protocol-controls/tmp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 33d84e249c7e3ca131959c6263f9066dd20f455a
+          ref: e24e854c0ef97292fa272a48981c28ae9a594640
           persist-credentials: false
-      - name: Execute service and host controls with real isolated filesystem operations
+      - name: Check exact source and execute lifecycle protocol controls
         shell: bash
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$TMPDIR"
-          test "$(git rev-parse HEAD)" = 33d84e249c7e3ca131959c6263f9066dd20f455a
-          test "$(git rev-parse HEAD^{tree})" = d1ab2271bd3ba5b269c2c9c94c52f01128ce2117
-          timeout --signal=TERM --kill-after=5s 120s python3 scripts/test-managed-services.py
-          timeout --signal=TERM --kill-after=5s 120s python3 scripts/test-managed-host.py
+          test "$(git rev-parse HEAD)" = e24e854c0ef97292fa272a48981c28ae9a594640
+          test "$(git rev-parse HEAD^{tree})" = 9d07e322d580214dc1b3be0fd07e01c5dcca79f8
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ("scripts/export-qualified-chess-floors.py", "scripts/test-qualified-chess-floor-export.py"):
+              ast.parse(Path(name).read_text(), filename=name)
+              print("AST_PASS " + name)
+          PY
+          timeout --signal=TERM --kill-after=5s 120s python3 scripts/test-qualified-chess-floor-export.py -v
           test -z "$(git status --porcelain --untracked-files=all)"
