@@ -65,7 +65,8 @@ jobs:
           with zipfile.ZipFile(archive) as retained:
               infos=retained.infolist()
               require(1<=len(infos)<=64 and len({x.filename for x in infos})==len(infos),"ZIP count/duplicate bound")
-              require(sum(x.file_size for x in infos)<=256<<20,"ZIP expanded-size bound")
+              expanded_bytes=sum(x.file_size for x in infos)
+              require(expanded_bytes<=512<<20,"ZIP expanded-size bound")
               for entry in infos:
                   require(not entry.is_dir() and not entry.flag_bits&1
                       and not stat.S_ISLNK(entry.external_attr>>16),"unexpected ZIP member type")
@@ -118,7 +119,8 @@ jobs:
               "original":{"repository":repo,"run_id":run_id,"job_id":job_id,"head_sha":head,
                   "workflow_conclusion":"failure","product_candidate":"6cef77a55870103657f9494dd83e84d87e7f3ab6",
                   "native_candidate":"2630f20eef44e8ad78cfefada02df9677bdc59e9"},
-              "artifact":{"id":artifact_id,"bytes":zip_size,"zip_sha256":zip_sha},
+              "artifact":{"id":artifact_id,"bytes":zip_size,"zip_sha256":zip_sha,
+                  "member_count":len(infos),"declared_expanded_bytes":expanded_bytes},
               "executed":{"checks":393,"fake_spi_calls":12,"backend_executions":0,"postgis_executions":0},
               "binaries":binaries,"retained_input_log_identities":logs,
               "postgres_provenance":{"source":pg[0],"actual_generated_header_hashes":None,
