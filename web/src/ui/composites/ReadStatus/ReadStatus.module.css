@@ -1,0 +1,4 @@
+@layer components {
+  .status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding-block: var(--space-2); }
+  .status > * { min-width: 0; overflow-wrap: anywhere; }
+}

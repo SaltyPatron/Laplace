@@ -20,18 +20,21 @@ export interface ApiOptions {
   quoteId?: string;
   session?: string;
   operatorToken?: string;
+  /** Stops this transport request, not an independently admitted server job. */
+  signal?: AbortSignal;
 }
-
 
 export class PaymentRequiredError extends Error {
   constructor(public readonly body: PaymentRequiredResponse) {
-    super(body.error.message ?? 'Payment required');
+    super(body.error?.message ?? 'Payment required');
+    this.name = 'PaymentRequiredError';
   }
 }
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(public readonly status: number, message: string, public readonly requestId?: string) {
     super(message);
+    this.name = 'ApiError';
   }
 }
 
@@ -44,46 +47,40 @@ export function laplaceHeaders(opts: ApiOptions): Record<string, string> {
   return headers;
 }
 
+function object(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
+}
+
 async function parseError(res: Response): Promise<never> {
-  let message = `${res.status} ${res.statusText}`;
-  let body: unknown = null;
-  try {
-    body = await res.json();
-    const err = (body as ErrorResponse).error;
-    if (err?.message) message = err.message;
-  } catch {
-    
-  }
-  if (res.status === 402 && body) throw new PaymentRequiredError(body as PaymentRequiredResponse);
-  throw new ApiError(res.status, message);
+  const fallback = `${res.status} ${res.statusText}`.trim();
+  let body: unknown;
+  try { body = await res.json(); } catch { /* A proxy may return HTML or an empty body. */ }
+  const record = object(body);
+  const error = object(record?.error);
+  const message = [error?.message, record?.detail, record?.message, record?.title]
+    .find((value): value is string => typeof value === 'string' && value.length > 0) ?? fallback;
+  if (res.status === 402 && error) throw new PaymentRequiredError(body as PaymentRequiredResponse);
+  throw new ApiError(res.status, message, res.headers.get('x-request-id') ?? undefined);
 }
 
-export async function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
-  const res = await fetch(path, { headers: laplaceHeaders(opts) });
+/** One transport/error/cancellation contract for every product surface. No implicit retries. */
+async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Promise<T> {
+  const res = await fetch(path, { ...init, headers: laplaceHeaders(opts), signal: opts.signal });
   if (!res.ok) await parseError(res);
-  return (await res.json()) as T;
+  if (res.status === 204) return undefined as T;
+  return await res.json() as T;
 }
 
-/**
- * PUT a body that is already serialized.
- *
- * The agents config is edited as TEXT in the console and validated by the server,
- * so it must reach the endpoint byte-for-byte as typed — round-tripping it
- * through JSON.parse/stringify would reformat the operator's file on every save
- * and silently discard the comment keys the example config uses.
- */
-export async function apiPutText<T>(path: string, body: string, opts: ApiOptions = {}): Promise<T> {
-  const res = await fetch(path, { method: 'PUT', headers: laplaceHeaders(opts), body });
-  if (!res.ok) await parseError(res);
-  return (await res.json()) as T;
+export function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
+  return request<T>(path, {}, opts);
 }
 
-export async function apiPost<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: laplaceHeaders(opts),
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) await parseError(res);
-  return (await res.json()) as T;
+/** Preserve authored text byte-for-byte; the server owns its validation. */
+export function apiPutText<T>(path: string, body: string, opts: ApiOptions = {}): Promise<T> {
+  return request<T>(path, { method: 'PUT', body }, opts);
+}
+
+export function apiPost<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
+  return request<T>(path, { method: 'POST', body: JSON.stringify(payload) }, opts);
 }
