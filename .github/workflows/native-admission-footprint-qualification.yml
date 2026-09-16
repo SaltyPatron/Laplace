@@ -1,86 +1,93 @@
-name: Read retained native source context results
+name: Hosted recorded floor placement controls
 on:
   push:
     branches: [qualify/native-admission-footprint-o1-20260916]
 permissions:
   contents: read
-  actions: read
 jobs:
-  retained-results:
+  python-controls:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       PYTHONDONTWRITEBYTECODE: '1'
+      CANDIDATE_SHA: a0f7506c6f4ecb9340095e501b014b036bf7718c
+      CANDIDATE_TREE: 9bb0a65248b060a5da62dfcb398b4f8444750cd2
     steps:
-      - name: Read authenticated completed comparison artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Prepare permanent owned source and evidence paths
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -d /build/laplace/work ]]; then
-            sudo install -d -m 2775 -o "$(id -u)" -g "$(id -g)" /build/laplace/work
-          fi
-          qualification_dir="/build/laplace/work/source-context-read-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          test ! -e "$qualification_dir"
-          mkdir -m 0700 "$qualification_dir"
-          mkdir -m 0700 "$qualification_dir/tmp"
-          export QUALIFICATION_DIR="$qualification_dir" TMPDIR="$qualification_dir/tmp" TMP="$qualification_dir/tmp" TEMP="$qualification_dir/tmp"
-          printf 'QUALIFICATION_DIR=%s\n' "$qualification_dir" >> "$GITHUB_ENV"
-          timeout --signal=TERM --kill-after=5s 240s python3 - <<'PY'
-          import hashlib,json,os,subprocess,zipfile,xml.etree.ElementTree as ET
+          for parent in /build/laplace/work /build/laplace/worktrees; do
+            if [[ ! -d "$parent" ]]; then
+              sudo install -d -m 2775 -o "$(id -u)" -g "$(id -g)" "$parent"
+            fi
+            test -w "$parent"
+          done
+          work="/build/laplace/work/export-placement-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          source="/build/laplace/worktrees/export-placement-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$work"
+          test ! -e "$source"
+          mkdir -m 0700 "$work"
+          mkdir -m 0700 "$work/tmp" "$work/evidence"
+          printf 'QUALIFICATION_DIR=%s\nQUALIFICATION_SOURCE=%s\nTMPDIR=%s/tmp\nTMP=%s/tmp\nTEMP=%s/tmp\n' "$work" "$source" "$work" "$work" "$work" >> "$GITHUB_ENV"
+      - name: Read exact source candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: a0f7506c6f4ecb9340095e501b014b036bf7718c
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind permanent candidate checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          git worktree add --detach "$QUALIFICATION_SOURCE" "$CANDIDATE_SHA"
+          python3 - <<'PY'
+          import json,os,subprocess
           from pathlib import Path
-          root=Path(os.environ["QUALIFICATION_DIR"])
-          repo="SaltyPatron/Laplace"
-          run=35129860405
-          artifact=10460429890
-          expected_sha="73512a35ec4151c6b1ee08a033ab0ed6c70877a1"
-          expected_zip="5a4410525249c70b866b62111a20da0013cb71ebd672dabbeb0ae6b0c05000e4"
-          def require(ok,message):
-              if not ok: raise RuntimeError(message)
-          def api(path):
-              result=subprocess.run(["gh","api",path],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
-              return json.loads(result.stdout)
-          run_info=api(f"repos/{repo}/actions/runs/{run}")
-          require(run_info["head_sha"]==expected_sha and run_info["conclusion"]=="success","unexpected successful source run")
-          meta=api(f"repos/{repo}/actions/artifacts/{artifact}")
-          require(meta["workflow_run"]["id"]==run and meta["workflow_run"]["head_sha"]==expected_sha and not meta["expired"],"artifact binding")
-          require(meta["size_in_bytes"]==120015345 and meta["digest"]=="sha256:"+expected_zip,"artifact identity")
-          archive=root/"retained.zip"
-          with archive.open("xb") as output:
-              subprocess.run(["gh","api",f"repos/{repo}/actions/artifacts/{artifact}/zip"],check=True,stdout=output,timeout=120)
-          with archive.open("rb") as stream:
-              require(hashlib.file_digest(stream,"sha256").hexdigest()==expected_zip,"archive hash mismatch")
-          require(archive.stat().st_size==meta["size_in_bytes"],"archive size mismatch")
-          prefix="work/source-context-35129860405-1/evidence/"
-          with zipfile.ZipFile(archive) as z:
-              def read(name):
-                  info=z.getinfo(prefix+name)
-                  require(not info.is_dir() and info.file_size<=2*1024*1024,"bounded member invalid")
-                  return z.read(info)
-              result=json.loads(read("result.json"))
-              require(result["status"]=="passed" and result["baseline_controls_passed"]==20 and result["candidate_controls_passed"]==20,"comparison result")
-              properties={}
-              for label in ("baseline","candidate"):
-                  doc=ET.fromstring(read(label+"-controls.xml"))
-                  cases=doc.findall(".//testcase")
-                  require(len(cases)==20 and all(c.find("failure") is None and c.find("skipped") is None for c in cases),"controls XML")
-                  case=next(c for c in cases if c.attrib["name"]=="SourceContextObservationWorkload")
-                  values={p.attrib["name"]:p.attrib["value"] for p in case.findall("./properties/property")}
-                  properties[label]={k:v for k,v in values.items() if "_sample" not in k}
-              require(properties["baseline"]==properties["candidate"],"concrete tuple/owner values differ")
-              host=json.loads(read("host.json"))
-              evidence={"schema":"laplace.native-source-context-retained-fields/v1","run":run,"artifact":artifact,
-                  "zip_sha256":expected_zip,"properties":properties,"host":host}
-          (root/"retained-fields.json").write_text(json.dumps(evidence,indent=2,sort_keys=True)+"\n")
-          print(json.dumps(evidence,sort_keys=True))
-          
+          root=Path(os.environ["QUALIFICATION_DIR"])/"evidence"
+          value={"candidate":os.environ["CANDIDATE_SHA"],"tree":os.environ["CANDIDATE_TREE"],
+                 "workflow_commit":os.environ["GITHUB_SHA"],
+                 "scope":"Python source syntax and real filesystem/process controls; no native, database, or installed GUI execution",
+                 "python":subprocess.check_output(["python3","--version"],text=True).strip()}
+          (root/"source.json").write_text(json.dumps(value,indent=2)+"\n")
           PY
-      - name: Retain extracted concrete counters
+      - name: Execute all thirteen existing and new export controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$QUALIFICATION_SOURCE"
+          timeout --signal=TERM --kill-after=10s 120s python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/controls.log"
+          import ast,importlib.util,json,os,sys,unittest
+          from pathlib import Path
+          for filename in ("export-qualified-chess-floors.py","test-qualified-chess-floor-export.py"):
+              path=Path("scripts")/filename
+              ast.parse(path.read_text(encoding="utf-8"),filename=str(path))
+              print(str(path)+": AST passed",flush=True)
+          path=Path("scripts/test-qualified-chess-floor-export.py")
+          spec=importlib.util.spec_from_file_location("qualified_export_controls",path)
+          module=importlib.util.module_from_spec(spec)
+          sys.modules[spec.name]=module
+          spec.loader.exec_module(module)
+          suite=unittest.defaultTestLoader.loadTestsFromModule(module)
+          count=suite.countTestCases()
+          if count!=13: raise RuntimeError("unexpected control count: "+str(count))
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          receipt={"selected":count,"run":result.testsRun,"failed":len(result.failures),
+                   "errors":len(result.errors),"skipped":len(result.skipped),
+                   "successful":result.wasSuccessful()}
+          (Path(os.environ["QUALIFICATION_DIR"])/"evidence/result.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt),flush=True)
+          if not result.wasSuccessful() or result.testsRun!=13 or result.skipped: raise SystemExit(1)
+          PY
+          test -z "$(git status --porcelain --untracked-files=all)"
+          printf '%s\n' 'Exact candidate source remained clean.' | tee "$QUALIFICATION_DIR/evidence/clean-source.txt"
+      - name: Retain source and control results
         if: always() && env.QUALIFICATION_DIR != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: native-source-context-fields-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.QUALIFICATION_DIR }}/retained-fields.json
+          name: recorded-floor-placement-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.QUALIFICATION_DIR }}/evidence/
           if-no-files-found: error
           retention-days: 90
