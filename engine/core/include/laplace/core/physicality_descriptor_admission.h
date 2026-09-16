@@ -12,8 +12,9 @@ typedef struct physicality_descriptor_materialization physicality_descriptor_mat
 /* Build the actual ordinary source entity for this generated derivation. The
  * caller registers this returned content ID under the exact canonical name and
  * deposits the returned declaration stage without reflecting it as raw input.
- * Outputs publish only on success. The peak includes the fixed text-work
- * reservation; source identity is never inferred from a caller's opaque hash. */
+ * Outputs publish only on success. The peak includes the stage's conservative
+ * replacement reservation and fixed text-work reservation, not allocator RSS;
+ * source identity is never inferred from a caller's opaque hash. */
 const char* physicality_descriptor_generated_source_name(void);
 physicality_descriptor_status_t physicality_descriptor_generated_source_create(
     size_t maximum_bytes, hash128_t* out_source_id, intent_stage_t** out_stage,
@@ -41,9 +42,10 @@ const hash128_t* physicality_descriptor_vocabulary_floor_receipt(
 intent_stage_t* physicality_descriptor_vocabulary_take_stage(
     physicality_descriptor_vocabulary_t* vocabulary);
 size_t physicality_descriptor_vocabulary_bytes(const physicality_descriptor_vocabulary_t* vocabulary);
-/* Initialization high-water reservation: observed retained capacity plus the
- * proven 64 KiB scratch upper bound for the frozen <=64-ASCII-codepoint content
- * literals and any newly allocated floor index. This is not process RSS. */
+/* Initialization high-water reservation: stage retained/replacement payload
+ * upper bound plus the proven 64 KiB scratch upper bound for frozen
+ * <=64-ASCII-codepoint literals and any newly allocated floor index.
+ * Includes old/new replacement reservation even for in-place realloc; not RSS. */
 size_t physicality_descriptor_vocabulary_peak_bytes(const physicality_descriptor_vocabulary_t* vocabulary);
 /* Floor-owned index allocation performed by this initialization; separately
  * retained by the floor after vocabulary_free. Already prepared means zero. */
@@ -136,6 +138,8 @@ intent_stage_t* physicality_descriptor_materialization_take_stage(
     physicality_descriptor_materialization_t* materialization);
 size_t physicality_descriptor_materialization_bytes(
     const physicality_descriptor_materialization_t* materialization);
+/* High-water payload reservation, including the output stage's conservative
+ * old/new replacement bound; not measured allocator residency or process RSS. */
 size_t physicality_descriptor_materialization_peak_bytes(
     const physicality_descriptor_materialization_t* materialization);
 

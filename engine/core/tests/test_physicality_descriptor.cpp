@@ -414,7 +414,7 @@ TEST(PhysicalityDescriptor, RehashAndArrayGrowthPreserveOrderedIdentityUnderFini
     }
     const size_t retained = physicality_descriptor_plan_bytes(reference.get());
     const size_t peak = physicality_descriptor_plan_peak_bytes(reference.get());
-    ASSERT_GT(peak, retained); // A real replaced array coexisted with its old buffer.
+    ASSERT_GT(peak, retained); // Replacement reserves the old and requested new arrays.
     const auto empty = build({});
     ASSERT_NE(empty, nullptr);
     const size_t fixed = physicality_descriptor_plan_bytes(empty.get())
@@ -423,7 +423,7 @@ TEST(PhysicalityDescriptor, RehashAndArrayGrowthPreserveOrderedIdentityUnderFini
     const auto vocabulary = basis();
     bool rejected_after_fixed = false, accepted = false;
     // Tight grants may shed geometric slack. Acceptance always proves the
-    // measured old+new peak, not just retained storage, stayed within the grant.
+    // conservative old+new reservation, not just retained storage, stayed within the grant.
     for (size_t grant : {fixed, fixed + 128u, retained - 1u, retained, peak - 1u, peak}) {
         const physicality_descriptor_limits_t limits{grant};
         physicality_descriptor_plan_t* output = nullptr;
@@ -445,6 +445,23 @@ TEST(PhysicalityDescriptor, RehashAndArrayGrowthPreserveOrderedIdentityUnderFini
         ASSERT_EQ(actual.size(), expected.size());
         for (size_t i = 0u; i < actual.size(); ++i)
             EXPECT_TRUE(hash128_equals(&actual[i], &expected[i]));
+        size_t expected_count = 0, actual_count = 0;
+        const auto* expected_nodes = physicality_descriptor_plan_nodes(reference.get(), &expected_count);
+        const auto* actual_nodes = physicality_descriptor_plan_nodes(bounded.get(), &actual_count);
+        ASSERT_EQ(actual_count, expected_count);
+        if (actual_count != 0)
+            EXPECT_EQ(std::memcmp(actual_nodes, expected_nodes, actual_count * sizeof(*actual_nodes)), 0);
+        const auto* expected_children = physicality_descriptor_plan_children(reference.get(), &expected_count);
+        const auto* actual_children = physicality_descriptor_plan_children(bounded.get(), &actual_count);
+        ASSERT_EQ(actual_count, expected_count);
+        if (actual_count != 0)
+            EXPECT_EQ(std::memcmp(actual_children, expected_children, actual_count * sizeof(*actual_children)), 0);
+        const auto* expected_references = physicality_descriptor_plan_references(reference.get(), &expected_count);
+        const auto* actual_references = physicality_descriptor_plan_references(bounded.get(), &actual_count);
+        ASSERT_EQ(actual_count, expected_count);
+        if (actual_count != 0)
+            EXPECT_EQ(std::memcmp(actual_references, expected_references,
+                                  actual_count * sizeof(*actual_references)), 0);
     }
     EXPECT_TRUE(rejected_after_fixed);
     EXPECT_TRUE(accepted);

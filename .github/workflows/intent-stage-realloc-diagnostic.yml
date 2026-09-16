@@ -1,0 +1,156 @@
+name: Compare bounded native buffer reallocation
+on:
+  push:
+    branches: [diag/intent-stage-realloc-20260916]
+permissions:
+  contents: read
+jobs:
+  compare-public-serializer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Read immutable candidate and baseline
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Build and compare actual public serializers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object engine/core/src/intent_stage.c)" = 7a06976ca24dc60748956777006fb00142076c42
+          test "$(git hash-object engine/core/tests/intent_stage_growth_probe.c)" = 3b1fc55d7ea1a6254332cf80fe8321e638b1e2fa
+          diagnostic_dir="/build/laplace/work/intent-stage-realloc/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test ! -e "$diagnostic_dir"
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$diagnostic_dir"
+          export DIAGNOSTIC_DIR="$diagnostic_dir"
+          printf 'DIAGNOSTIC_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+          mkdir -m 0700 "$diagnostic_dir/baseline" "$diagnostic_dir/candidate"
+          cc --version | tee "$diagnostic_dir/compiler.txt"
+          git show f2cbb5fc7305dfd20d9fa3a19003b60a06b457c0:engine/core/src/intent_stage.c > "$diagnostic_dir/baseline/intent_stage.c"
+          test "$(git hash-object "$diagnostic_dir/baseline/intent_stage.c")" = 342d92f0fc2faae39d75cdc2e64f54bddaea02a5
+          cp engine/core/src/intent_stage.c "$diagnostic_dir/candidate/intent_stage.c"
+          cp engine/core/tests/intent_stage_growth_probe.c "$diagnostic_dir/probe.c"
+          for variant in baseline candidate; do
+            uses_realloc=0
+            if [[ "$variant" == candidate ]]; then uses_realloc=1; fi
+            cc -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -fno-builtin -fno-lto \
+              -ffunction-sections -fdata-sections -I engine/core/include \
+              -c "$diagnostic_dir/$variant/intent_stage.c" -o "$diagnostic_dir/$variant/intent_stage.o" \
+              2>&1 | tee "$diagnostic_dir/$variant/compile-source.log"
+            cc -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -fno-builtin -fno-lto \
+              -DREPLACEMENT_USES_REALLOC="$uses_realloc" -ffunction-sections -fdata-sections \
+              -I engine/core/include "$diagnostic_dir/probe.c" "$diagnostic_dir/$variant/intent_stage.o" \
+              -Wl,--gc-sections -Wl,--wrap=memcpy -Wl,--wrap=__memcpy_chk \
+              -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=free \
+              -o "$diagnostic_dir/$variant/probe" 2>&1 | tee "$diagnostic_dir/$variant/compile-probe.log"
+            nm -u "$diagnostic_dir/$variant/intent_stage.o" > "$diagnostic_dir/$variant/undefined-symbols.txt"
+            objdump -dr --disassemble=buf_reserve "$diagnostic_dir/$variant/intent_stage.o" > "$diagnostic_dir/$variant/growth-assembly.txt"
+            timeout --signal=TERM --kill-after=5s 120s "$diagnostic_dir/$variant/probe" "$diagnostic_dir/$variant" \
+              | tee "$diagnostic_dir/$variant/result.jsonl"
+          done
+          python3 - <<'PY'
+          import hashlib, json, math, os, statistics
+          from pathlib import Path
+          
+          root=Path(os.environ["DIAGNOSTIC_DIR"])
+          def require(value,message):
+              if not value: raise RuntimeError(message)
+          def records(name):
+              return [json.loads(line) for line in (root/name/"result.jsonl").read_text().splitlines()]
+          def keyed(rows,key):
+              result={}
+              for row in rows:
+                  if key in row:
+                      require(row[key] not in result,"duplicate diagnostic record")
+                      result[row[key]]=row
+              return result
+          baseline,candidate=records("baseline"),records("candidate")
+          require(baseline[-1]["status"]==candidate[-1]["status"]=="passed","native diagnostic did not pass")
+          require(baseline[-1]["replacement_uses_realloc"] is False and
+                  candidate[-1]["replacement_uses_realloc"] is True,"compiled variants differ")
+          boundaries=keyed(baseline,"boundary_case")
+          require(len(boundaries)==10 and boundaries==keyed(candidate,"boundary_case"),
+                  "accepted/refused mixed sequences changed")
+          a,b=keyed(baseline,"capacity_anchor_bytes"),keyed(candidate,"capacity_anchor_bytes")
+          require(set(a)==set(b)=={65536,262144,1048576},"growth cases differ")
+          same=("capacity_anchor_bytes","fixed_grant_bytes","stage_overhead_bytes","rows","tuple_bytes",
+                "copy_bytes","allocation_calls","retained_payload_bytes","replacement_reservation_peak_bytes",
+                "refusal_peak_payload_bytes","copy_equal","grant_refusal_observed","stage_freed")
+          for capacity in a:
+              require({key:a[capacity][key] for key in same}=={key:b[capacity][key] for key in same},
+                      "successful growth or grant refusal contract changed")
+          alloc_a,alloc_b=keyed(baseline,"case_allocator"),keyed(candidate,"case_allocator")
+          for capacity in a:
+              for key in ("completed_rows_at_refusal","refused_tuple_bytes"):
+                  require(alloc_a[capacity][key]==alloc_b[capacity][key],"refused entity sequence changed")
+          files=[]
+          for folder in ("baseline","candidate"):
+              selected=sorted(p.name for p in (root/folder).iterdir()
+                              if p.name.endswith((".copy",".refused-prefix",".bin")))
+              files.append(selected)
+          require(files[0]==files[1] and len(files[0])==36,"exact public byte evidence inventory differs")
+          byte_hashes={}
+          for name in files[0]:
+              first=(root/"baseline"/name).read_bytes()
+              second=(root/"candidate"/name).read_bytes()
+              require(first==second,"exact successful/refused public bytes changed")
+              byte_hashes[name]=hashlib.sha256(first).hexdigest()
+          timings=[]
+          for capacity in sorted(a):
+              def samples(rows):
+                  values=[row["public_create_append_emit_free_seconds"] for row in rows
+                          if row.get("wall_capacity_anchor_bytes")==capacity]
+                  require(len(values)==3 and all(type(value) in (float,int) and
+                          math.isfinite(value) and value>0 for value in values),"invalid wall observations")
+                  return values
+              old,new=samples(baseline),samples(candidate)
+              timings.append({"capacity_anchor_bytes":capacity,
+                              "baseline_seconds":old,"candidate_seconds":new,
+                              "median_baseline_seconds":statistics.median(old),
+                              "median_candidate_seconds":statistics.median(new),
+                              "median_observed_speedup":statistics.median(old)/statistics.median(new),
+                              "baseline_growth_library_copy_bytes":a[capacity]["growth_copy_bytes"],
+                              "candidate_growth_library_copy_bytes":b[capacity]["growth_copy_bytes"],
+                              "candidate_realloc_calls":alloc_b[capacity]["realloc_calls"],
+                              "candidate_in_place_growths":alloc_b[capacity]["in_place_growths"],
+                              "candidate_moved_growths":alloc_b[capacity]["moved_growths"]})
+          result={"schema":"laplace.intent-stage-reallocation-comparison-summary/v1","status":"passed",
+                  "baseline_commit":"f2cbb5fc7305dfd20d9fa3a19003b60a06b457c0",
+                  "baseline_source_blob":"342d92f0fc2faae39d75cdc2e64f54bddaea02a5",
+                  "candidate_source_blob":"7a06976ca24dc60748956777006fb00142076c42",
+                  "identical_mixed_grant_decision_cases":10,"exact_byte_file_sha256":byte_hashes,
+                  "timings":timings,
+                  "scope":"public serializer only; allocator-dependent wall observation",
+                  "allocation_peak_meaning":"conservative old-plus-requested-new payload reservation",
+                  "libc_internal_copy_bytes_observed":False,
+                  "worst_case_quadratic_realloc_copy_remains_possible":True,
+                  "postgres_ingestion_measured":False,"chess_throughput_measured":False,
+                  "descriptor_plan_execution_measured":False}
+          data=json.dumps(result,sort_keys=True,indent=2)+"\n"
+          with (root/"comparison.json").open("x") as stream:
+              stream.write(data);stream.flush();os.fsync(stream.fileno())
+          print(data,end="")
+          PY
+          sha256sum "$diagnostic_dir/comparison.json" "$diagnostic_dir/probe.c" \
+            "$diagnostic_dir/baseline/intent_stage.c" "$diagnostic_dir/candidate/intent_stage.c" \
+            "$diagnostic_dir/baseline/result.jsonl" "$diagnostic_dir/candidate/result.jsonl" \
+            | tee "$diagnostic_dir/sha256.txt"
+          git diff --exit-code
+      - name: Retain source, binaries, exact public bytes and timing observations
+        id: artifact
+        if: always() && env.DIAGNOSTIC_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: intent-stage-realloc-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.DIAGNOSTIC_DIR }}/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Print retained artifact identity
+        if: always()
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          ARTIFACT_SHA256: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          printf 'artifact_id=%s\nartifact_sha256=%s\n' "$ARTIFACT_ID" "$ARTIFACT_SHA256"
