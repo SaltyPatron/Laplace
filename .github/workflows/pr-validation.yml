@@ -91,7 +91,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Reserve host for pull request phases
+      - name: Start ordered pull request phases
         id: pr_session
         run: |
           set -euo pipefail
@@ -122,6 +122,11 @@ jobs:
             --lock /build/laplace/work/host-resource.lock --checkout "$LAPLACE_PR_WORKTREE" \
             --kind pr --stage "$stage"
 
+      - name: Check source and publication contracts
+        id: pr_policy
+        if: contains(env.LAPLACE_CI_PHASES, '|policy|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase policy
+
       - name: Retain native regression baseline before build
         continue-on-error: true
         id: pr_native_baseline
@@ -141,11 +146,6 @@ jobs:
           path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-pr/baseline/
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Check source and publication contracts
-        id: pr_policy
-        if: contains(env.LAPLACE_CI_PHASES, '|policy|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase policy
 
       - name: Build exact pull request artifacts
         id: pr_build
