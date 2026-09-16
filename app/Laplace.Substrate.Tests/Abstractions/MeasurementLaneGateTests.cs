@@ -4,25 +4,11 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// The measurement lane is mutual exclusion between "something is writing to the
-/// substrate" and "something is timing it": ingest holds it SHARED for a run's lifetime,
-/// a measurement holds it EXCLUSIVE for its duration, and Postgres conflicts the two
-/// modes. Four independent facts have to line up — same class, same key, opposite modes,
-/// session scope — and the compiler checks none of them.
-///
-/// <para>MEASURED 2026-08-15, the failure this exists to stop: generation.compose_batch
-/// returned 81,701 ms to 316,998 ms across one session for near-identical code with an
-/// ingest active throughout; quiesced, realize.resolve_name read 36,000 -&gt; 0 ms and
-/// generation.separator_ids 9,450 -&gt; 11 ms with no code change. Both had been recorded
-/// as defects and both were contention. Drift here does not fail loudly — it silently
-/// returns the lane to that state, and every number taken afterwards looks exactly as
-/// trustworthy as a real one.</para>
-///
-/// <para>Run liveness is read through the canonical SQL predicate. Its advisory
-/// beacon must agree with the C# writer, while the quiet shell delegates to that
-/// predicate rather than maintaining another lock/heartbeat interpretation.</para>
-///
-/// If one of these fails, fix the divergence, never the fixture.
+/// Measurements observe product activity before and after their child process; they
+/// must not acquire an exclusive lock that makes ingestion wait. Ingest's remaining
+/// shared session beacon has one identity, distinct from per-run liveness. The
+/// canonical SQL liveness predicate and its quiet-shell caller must agree with
+/// the C# writer without carrying a second shell lock/heartbeat interpretation.
 /// </summary>
 public class MeasurementLaneGateTests
 {
@@ -162,25 +148,35 @@ public class MeasurementLaneGateTests
     }
 
     /// <summary>
-    /// The modes are the whole mechanism. Ingest SHARED lets any number of ingests run
-    /// together — exclusive there would serialise ingest against ingest, the exact thing
-    /// wait-for-quiet-substrate.sh's header refuses to do. Measurement EXCLUSIVE is what
-    /// actually empties the substrate; shared there would leave the lane looking correct
-    /// while ingests wrote straight through it.
+    /// The retained ingest beacon stays shared so independent ingests do not serialize.
+    /// Measurements must never take its conflicting exclusive mode.
     /// </summary>
     [Fact]
     public void Ingest_TakesTheLaneShared()
         => Assert.Matches(@"HoldMeasurementLaneAsync\(\s*conn,\s*exclusive:\s*false", Observability());
 
     [Fact]
-    public void Measurement_TakesTheLaneExclusive()
-        => Assert.Matches(@"HoldMeasurementLaneAsync\(\s*conn,\s*exclusive:\s*true", Runner());
+    public void Measurement_ObservesBeforeAndAfterChildWithoutBlockingIngest()
+    {
+        var runner = Runner();
+        var probes = Regex.Matches(runner, @"await RefuseIfIngestRunningAsync\(conn, ct\)");
+        Assert.Equal(2, probes.Count);
+        var start = runner.IndexOf("Process.Start(psi)", StringComparison.Ordinal);
+        var wait = runner.IndexOf("await proc.WaitForExitAsync(ct)", StringComparison.Ordinal);
+        var returned = runner.IndexOf("return proc.ExitCode;", StringComparison.Ordinal);
+        Assert.True(probes[0].Index < start && start < wait
+            && wait < probes[1].Index && probes[1].Index < returned,
+            "quiet observation must bracket the actual child, including completion");
+        Assert.DoesNotContain("HoldMeasurementLaneAsync(", runner);
+        Assert.DoesNotMatch(@"pg_advisory\w*lock\w*\s*\(", runner);
+        Assert.Contains("could not establish whether an ingest is running", runner);
+        Assert.Contains("catch (OperationCanceledException) { throw; }", runner);
+    }
 
     /// <summary>
-    /// SESSION scope, not transaction. The runner holds the lane across a child process
-    /// that runs no transaction of its own, and an ingest holds it across thousands; an
-    /// _xact_ variant would release at the first COMMIT and the lane would be empty for
-    /// the whole measurement while still reading as held.
+    /// The retained ingest beacon is session-scoped across its transactions. An
+    /// _xact_ variant would release at the first COMMIT. This checks the lock
+    /// helper's scope, not a claim that the measurement runner acquires it.
     /// </summary>
     [Fact]
     public void Lane_IsSessionScoped()
