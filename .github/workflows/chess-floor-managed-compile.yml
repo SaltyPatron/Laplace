@@ -1,29 +1,29 @@
-name: Hosted chess service receipt controls
+name: Hosted CuteChess desktop launcher controls
 on:
   push:
     branches: [verify/chess-floor-managed-compile-20260916]
 permissions:
   contents: read
 jobs:
-  service-receipt-controls:
+  cutechess-desktop-controls:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
-      TMPDIR: /build/laplace/work/service-receipt-controls/tmp
-      TMP: /build/laplace/work/service-receipt-controls/tmp
-      TEMP: /build/laplace/work/service-receipt-controls/tmp
-      CANDIDATE_SHA: 677bf471fdc63979a1549cf492669623bc0e7dd5
-      CANDIDATE_TREE: 84287b7ed8e8401f525ab36a65cfff09b381c6ba
+      TMPDIR: /build/laplace/work/cutechess-desktop-controls/tmp
+      TMP: /build/laplace/work/cutechess-desktop-controls/tmp
+      TEMP: /build/laplace/work/cutechess-desktop-controls/tmp
+      CANDIDATE_SHA: bb23f839ab9164aa2feffc42699172908eb8b294
+      CANDIDATE_TREE: ff984a5bb1c1713a7b35050d2898132625f9c700
     steps:
       - name: Prepare permanent work and evidence directories
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/service-receipt-controls
+          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/cutechess-desktop-controls
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 677bf471fdc63979a1549cf492669623bc0e7dd5
+          ref: bb23f839ab9164aa2feffc42699172908eb8b294
           fetch-depth: 1
           persist-credentials: false
       - name: Bind exact source in permanent worktree
@@ -31,39 +31,45 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
-          git worktree add --detach /build/laplace/worktrees/service-receipt-controls "$CANDIDATE_SHA"
+          git worktree add --detach /build/laplace/worktrees/cutechess-desktop-controls "$CANDIDATE_SHA"
           python3 - <<'PY'
           import json,os
           from pathlib import Path
-          Path("/build/laplace/recovery/service-receipt-controls/source.json").write_text(json.dumps({
+          Path("/build/laplace/recovery/cutechess-desktop-controls/source.json").write_text(json.dumps({
               "candidate_commit":os.environ["CANDIDATE_SHA"],
               "candidate_tree":os.environ["CANDIDATE_TREE"],
               "workflow_commit":os.environ["GITHUB_SHA"],
-              "scope":"hosted acceptance orchestrator protocol and process cleanup controls",
+              "scope":"hosted desktop launcher subprocess, GIO and installation protocol controls",
               "installed_service_observation":False,
               "machine_cold_boot_measured":False
           },indent=2)+"\n")
           PY
-      - name: Run all existing and new chess acceptance controls
-        working-directory: /build/laplace/worktrees/service-receipt-controls
+      - name: Run CuteChess release and pipeline installation controls
+        working-directory: /build/laplace/worktrees/cutechess-desktop-controls
         shell: bash
         run: |
           set -euo pipefail
-          evidence=/build/laplace/recovery/service-receipt-controls
+          evidence=/build/laplace/recovery/cutechess-desktop-controls
           python3 --version 2>&1 | tee "$evidence/python-version.log"
-          set +e
-          timeout --signal=TERM --kill-after=10s 180s \
-            python3 scripts/test-chess-acceptance.py 2>&1 | tee "$evidence/test-chess-acceptance.log"
-          status=${PIPESTATUS[0]}
-          set -e
-          printf 'test\texit_code\ntest-chess-acceptance.py\t%s\n' "$status" > "$evidence/summary.tsv"
+          bash -n scripts/bootstrap-chess-lab.sh scripts/pipeline.sh
+          printf 'test\texit_code\n' > "$evidence/summary.tsv"
+          failed=0
+          for test in test-cutechess-release test-pipeline-install; do
+            set +e
+            timeout --signal=TERM --kill-after=10s 240s \
+              python3 "scripts/$test.py" -v 2>&1 | tee "$evidence/$test.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '%s\t%s\n' "$test" "$status" >> "$evidence/summary.tsv"
+            if [[ "$status" != 0 ]]; then failed=1; fi
+          done
           test -z "$(git status --porcelain --untracked-files=all)"
-          exit "$status"
+          exit "$failed"
       - name: Retain complete evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chess-service-receipt-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/recovery/service-receipt-controls/
+          name: chess-cutechess-desktop-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/cutechess-desktop-controls/
           if-no-files-found: error
           retention-days: 30
