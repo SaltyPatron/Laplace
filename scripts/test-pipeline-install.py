@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Execute actual pipeline functions with isolated artifacts and fake OS/SQL calls."""
+import importlib.util
 import os
 import json
 import shlex
@@ -32,11 +33,9 @@ class InstallTests(unittest.TestCase):
                         LAPLACE_PG_PREFIX=str(self.base / "pg"),
                         LAPLACE_INSTALL_PREFIX=str(self.base / "install"),
                         LAPLACE_EXT_LIBDIR=str(self.base / "install/lib/postgresql/18"),
-                        FP_STAMP_DIR=str(self.base / "stamps"),
                         CALLS=str(self.base / "calls"), CURRENT="$libdir")
         (self.base / "build").mkdir()
-        (self.base / "stamps").mkdir()
-        (self.base / "stamps/build-native").write_text("known\n")
+        (self.base / "build/build.ninja").write_text("# configured build fixture\n")
         (self.base / "install/lib").mkdir(parents=True)
         (self.base / "install/lib/liblaplace_core.so").touch()
 
@@ -49,94 +48,29 @@ class InstallTests(unittest.TestCase):
         path = self.base / "calls"
         return path.read_text() if path.exists() else ""
 
-    def chess_publication_fixture(self):
-        sources = [self.base / name for name in ("source-one", "source-two")]
-        for source in sources:
-            binary = source / "src/stockfish"
-            binary.parent.mkdir(parents=True)
-            binary.write_text("#!/bin/sh\nexit 0\n")
-            binary.chmod(0o755)
-        cc = self.base / "install/bin/cutechess-cli"
-        cc.parent.mkdir(parents=True)
-        cc.write_text("#!/bin/sh\nexit 0\n")
-        cc.chmod(0o755)
-        # Exercise the real publication state machine. The controlled bootstrap
-        # materializes the GUI artifacts that its production contract now owns;
-        # GUI source/runtime verification is exercised by the verifier's own tests.
-        return sources, function("phase_chess_lab") + r'''
+    def chess_publication(self, **env):
+        return self.run_shell(function("phase_chess_lab") + r'''
 ROOT="$PWD"
-export LAPLACE_CUTECHESS_GUI="$LAPLACE_INSTALL_PREFIX/bin/cutechess"
-export LAPLACE_CUTECHESS_GUI_RECEIPT="$PWD/cutechess-gui-build.json"
-export LAPLACE_CUTECHESS_BUILD="$PWD/cutechess-build"
-GUI_CHECKS="$PWD/gui-checks"
-fp_compute() { printf '%s\n' unchanged-files; }
-fp_check() { [[ -f "$FP_STAMP_DIR/$1" && $(cat "$FP_STAMP_DIR/$1") == "$2" ]]; }
-fp_record() { printf '%s\n' "$2" > "$FP_STAMP_DIR/$1"; }
-python3() {
-  if [[ "$*" == *--print-path* ]]; then
-    printf '%s/src/stockfish\n' "$LAPLACE_STOCKFISH_SOURCE"
-  elif [[ "$*" == *" --gui "* ]]; then
-    printf '%s\n' "$*" >> "$GUI_CHECKS"
-    [[ "${GUI_VERIFICATION_FAILURE:-0}" == 0 ]] || return 23
-  fi
-}
 bash() {
   [[ "$#" == 2 && "$1" == "$ROOT/scripts/bootstrap-chess-lab.sh" && "$2" == --cutechess-gui ]] || return 77
-  printf 'published source=%s explicit=%s\n' "$LAPLACE_STOCKFISH_SOURCE" "${LAPLACE_STOCKFISH:-}" >> "$CALLS"
-  cp "$LAPLACE_INSTALL_PREFIX/bin/cutechess-cli" "$LAPLACE_CUTECHESS_GUI"
-  chmod +x "$LAPLACE_CUTECHESS_GUI"
-  printf '%s\n' '{"scope":"controlled-publication-fixture"}' > "$LAPLACE_CUTECHESS_GUI_RECEIPT"
+  printf 'published source=%s explicit=%s\n' "${LAPLACE_STOCKFISH_SOURCE:-}" "${LAPLACE_STOCKFISH:-}" >> "$CALLS"
+  return "${BOOTSTRAP_RC:-0}"
 }
-export LAPLACE_STOCKFISH_SOURCE="$PWD/source-one"
-unset LAPLACE_STOCKFISH LAPLACE_CUTECHESS GUI_VERIFICATION_FAILURE
-'''
+phase_chess_lab
+phase_chess_lab
+''', **env)
 
-    def test_chess_source_and_executable_selection_invalidate_publish_stamp(self):
-        sources, script = self.chess_publication_fixture()
-        result = self.run_shell(script + r'''
-phase_chess_lab
-phase_chess_lab
-export LAPLACE_STOCKFISH_SOURCE="$PWD/source-two"
-phase_chess_lab
-export LAPLACE_STOCKFISH="$PWD/source-one/src/stockfish"
-phase_chess_lab
-''')
+    def test_chess_publication_delegates_each_invocation_and_preserves_selection(self):
+        result = self.chess_publication(LAPLACE_STOCKFISH_SOURCE=str(self.base / "source"),
+                                        LAPLACE_STOCKFISH=str(self.base / "selected-stockfish"))
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        calls = self.calls().splitlines()
-        self.assertEqual(3, len(calls), calls)
-        self.assertIn("source=", calls[0])
-        self.assertIn("source-two", calls[1])
-        self.assertIn("explicit=" + str(sources[0] / "src/stockfish"), calls[2])
-        checks = (self.base / "gui-checks").read_text().splitlines()
-        self.assertEqual(1, len(checks), checks)
-        self.assertIn("--binary " + str(self.base / "install/bin/cutechess"), checks[0])
-        self.assertIn("--verify-receipt " + str(self.base / "cutechess-gui-build.json"), checks[0])
-        self.assertIn("--install-desktop " + str(self.base / "install"), checks[0])
-        self.assertIn("--desktop-stockfish " + str(sources[0] / "src/stockfish"), checks[0])
+        expected = "published source=" + str(self.base / "source") + " explicit=" + str(self.base / "selected-stockfish")
+        self.assertEqual([expected, expected], self.calls().splitlines())
 
-    def test_chess_unchanged_stamp_requires_gui_artifacts_and_successful_reverification(self):
-        _, script = self.chess_publication_fixture()
-        result = self.run_shell(script + r'''
-phase_chess_lab
-phase_chess_lab
-rm "$LAPLACE_CUTECHESS_GUI"
-phase_chess_lab
-phase_chess_lab
-rm "$LAPLACE_CUTECHESS_GUI_RECEIPT"
-phase_chess_lab
-phase_chess_lab
-chmod -x "$LAPLACE_CUTECHESS_GUI"
-phase_chess_lab
-phase_chess_lab
-GUI_VERIFICATION_FAILURE=1 phase_chess_lab
-''')
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        # Missing or non-executable artifacts force publication even when the
-        # source fingerprint is unchanged. A verifier refusal cannot pass or
-        # silently replace the installed artifact with another bootstrap.
-        self.assertEqual(4, len(self.calls().splitlines()), self.calls())
-        checks = (self.base / "gui-checks").read_text().splitlines()
-        self.assertEqual(5, len(checks), checks)
+    def test_chess_publication_preserves_bootstrap_failure(self):
+        result = self.chess_publication(BOOTSTRAP_RC="23")
+        self.assertEqual(23, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(1, len(self.calls().splitlines()))
 
     def test_install_manifest_detects_replacement_deletion_and_symlink_change(self):
         import runpy
@@ -254,7 +188,7 @@ psql -d postgres -U laplace_admin -c 'SHOW dynamic_library_path'
         result = self.run_shell(function("psql") + '\nid() { echo 0; }; psql -c SELECT',
                                 PGHOST="192.168.1.2")
         self.assertEqual(2, result.returncode)
-        self.assertIn("local PostgreSQL socket", result.stderr)
+        self.assertIn("root SQL requires local socket", result.stderr)
 
     def test_nonroot_does_not_change_identity(self):
         binary = self.base / "pg/bin/psql"
@@ -268,13 +202,6 @@ psql -d postgres -U laplace_admin -c 'SHOW dynamic_library_path'
     def phase(self, source=None, **env):
         env.setdefault("LAPLACE_BUILD_DIRECTORY", str(self.base / "build"))
         return self.run_shell((source or function("phase_install")) + r'''
-fp_native() { echo known; }
-fp_check() {
-  if [[ "$1" == install-native ]]; then return "${NATIVE_MATCH_RC:-1}"; fi
-  return "${ARTIFACT_MATCH_RC:-1}"
-}
-installed_artifact_digest() { echo live; }
-fp_record() { echo stamp >> "$CALLS"; }
 ensure_extension_library_path() { return "${PATH_RC:-1}"; }
 systemctl() { [[ "${API_ACTIVE:-1}" == 1 ]]; }
 sudo() {
@@ -282,7 +209,11 @@ sudo() {
   if [[ "$*" == *"start laplace-api"* ]]; then return "${START_RC:-0}"; fi
 }
 postgresql_restart_required() {
-  if [[ -f pg-restarted ]]; then return "${PG_AFTER_RC:-1}"; fi
+  if [[ -f installed ]]; then
+    echo release-after >> "$CALLS"
+    return "${PG_AFTER_RC:-1}"
+  fi
+  [[ "${PG_RESTART_RC:-1}" != 2 ]] || return 2
   return "${PG_RESTART_RC:-1}"
 }
 preloaded_so_digest() {
@@ -290,38 +221,39 @@ preloaded_so_digest() {
   elif [[ -f installed ]]; then echo new; else echo old; fi
 }
 cmake() { echo install >> "$CALLS"; touch installed; return "${COPY_RC:-0}"; }
-psql() { echo probe >> "$CALLS"; return "${PROBE_RC:-0}"; }
-restart_postgres() { echo bounce >> "$CALLS"; touch pg-restarted; return "${BOUNCE_RC:-0}"; }
+psql() {
+  echo probe >> "$CALLS"
+  [[ "${PROBE_RC:-0}" == 0 ]] || return "$PROBE_RC"
+  printf '%s\n' "${PRELOAD:-laplace_substrate}"
+}
+restart_postgres() { echo bounce >> "$CALLS"; return "${BOUNCE_RC:-0}"; }
 phase_install
 ''', **env)
 
-
-    def test_server_release_mismatch_cannot_skip_and_restarts_unchanged_preloads(self):
-        result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="0",
-                            PG_RESTART_RC="0", SAME_PRELOAD="1")
+    def test_server_release_mismatch_restarts_unchanged_preloads(self):
+        result = self.phase(PG_RESTART_RC="0", SAME_PRELOAD="1")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         calls = self.calls().splitlines()
         self.assertEqual(1, calls.count("install"))
         self.assertEqual(1, calls.count("bounce"))
         self.assertLess(calls.index("install"), calls.index("bounce"))
-        self.assertLess(calls.index("bounce"), calls.index("stamp"))
+        self.assertLess(calls.index("bounce"), calls.index("release-after"))
+        self.assertLess(calls.index("release-after"), calls.index("-n systemctl start laplace-api"))
 
     def test_server_release_read_failure_refuses_install_and_service_actions(self):
         result = self.phase(PG_RESTART_RC="2")
         self.assertEqual(2, result.returncode, result.stdout + result.stderr)
         self.assertEqual("", self.calls())
 
-    def test_failed_restart_or_stale_readback_never_stamps_activation(self):
+    def test_failed_restart_or_stale_readback_fails_and_restores_api(self):
         for error in ({"BOUNCE_RC": "27"}, {"PG_AFTER_RC": "0"}, {"PG_AFTER_RC": "2"}):
             with self.subTest(error=error):
                 (self.base / "calls").write_text("")
                 (self.base / "installed").unlink(missing_ok=True)
-                (self.base / "pg-restarted").unlink(missing_ok=True)
                 result = self.phase(PG_RESTART_RC="0", SAME_PRELOAD="1", **error)
                 self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
                 self.assertIn("bounce", self.calls())
                 self.assertIn("start laplace-api", self.calls())
-                self.assertNotIn("stamp", self.calls())
 
     def test_running_release_comparison_uses_actual_helper_and_refuses_bad_observation(self):
         binary_root = self.base / "pg/bin"
@@ -351,61 +283,19 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
         self.assertEqual(2, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
                                           RUNNING_VERSION="180003").returncode)
 
-    def test_native_and_runtime_fingerprints_change_with_tracked_postgresql_release(self):
-        import runpy
-        fixture = runpy.run_path(str(ROOT / "scripts/test-postgresql-release.py"))["write_postgresql_fixture"]
-        source = self.base / "fingerprint-source"
-        (source / "scripts/lib").mkdir(parents=True)
-        (source / "deploy").mkdir()
-        shutil.copy2(ROOT / "scripts/lib/fp.sh", source / "scripts/lib/fp.sh")
-        for name in ("chess-floor-artifacts.py", "postgresql-release.py"):
-            shutil.copy2(ROOT / "scripts" / name, source / "scripts" / name)
-        release = source / "deploy/postgresql-release.json"
-        release.write_bytes((ROOT / "deploy/postgresql-release.json").read_bytes())
-        prefix = self.base / "selected-postgresql"
-        fixture(prefix, "18.6")
-        subprocess.run(["git", "init", "--quiet", str(source)], check=True, timeout=10)
-        subprocess.run(["git", "-C", str(source), "add", "."], check=True, timeout=10)
-        body = 'source "$ROOT/scripts/lib/fp.sh"\nfp_native\nfp_runtime\n'
-        env = {"ROOT": str(source), "LAPLACE_CHESS_OPENINGS": str(source / "absent-openings"),
-               "LAPLACE_CHESS_CORPUS_EXPORT": "", "LAPLACE_PG_PREFIX": str(prefix)}
-        before = self.run_shell(body, **env)
-        self.assertEqual(0, before.returncode, before.stderr)
-        self.assertEqual(before.stdout, self.run_shell(body, **env).stdout)
-        # A tracked selection cannot make an older physical header/tool tree
-        # eligible for native build or a matching stamp.
-        selected = json.loads(release.read_text())
-        selected["version"], selected["tag"] = "18.7", "REL_18_7"
-        selected["archive"]["url"] = selected["archive"]["url"].replace("18.6", "18.7")
-        release.write_text(json.dumps(selected))
-        refused = self.run_shell(body, **env)
-        self.assertNotEqual(0, refused.returncode)
-        self.assertEqual("", refused.stdout)
-        fixture(prefix, "18.7")
-        after = self.run_shell(body, **env)
-        self.assertEqual(0, after.returncode, after.stderr)
-        old_hashes, new_hashes = before.stdout.splitlines(), after.stdout.splitlines()
-        self.assertEqual(2, len(old_hashes))
-        self.assertEqual(2, len(new_hashes))
-        for old, new in zip(old_hashes, new_hashes):
-            self.assertNotEqual(old, new)
-
-    def test_matching_source_with_changed_install_reinstalls(self):
-        result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="1")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("install\n", self.calls())
-
-    def test_matching_source_and_live_artifacts_skip_service_actions(self):
-        result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="0")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual("", self.calls())
+    def test_each_install_invocation_delegates_copy_and_observes_release(self):
+        for _ in range(2):
+            result = self.phase(SAME_PRELOAD="1")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(2, self.calls().splitlines().count("install"))
+        self.assertNotIn("bounce", self.calls())
 
     def test_failed_preflight_never_installs_or_touches_services(self):
         result = self.phase(PATH_RC="2")
         self.assertEqual(2, result.returncode)
         self.assertEqual("", self.calls())
 
-    def test_failed_copy_and_probe_restore_active_api_without_stamp(self):
+    def test_failed_copy_and_probe_restore_active_api(self):
         for env in ({"COPY_RC": "23"}, {"PROBE_RC": "24"}):
             with self.subTest(env=env):
                 (self.base / "calls").write_text("")
@@ -414,31 +304,31 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn("stop laplace-api", self.calls())
                 self.assertIn("start laplace-api", self.calls())
-                self.assertNotIn("stamp", self.calls())
 
-    def test_success_stamps_and_restores_active_api(self):
-        result = self.phase()
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("stamp", self.calls())
-        self.assertIn("start laplace-api", self.calls())
+    def test_success_rechecks_release_then_restores_active_api(self):
+        result = self.phase(SAME_PRELOAD="1")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        calls = self.calls().splitlines()
+        self.assertLess(calls.index("install"), calls.index("release-after"))
+        self.assertLess(calls.index("release-after"), calls.index("-n systemctl start laplace-api"))
 
     def test_inactive_api_stays_stopped(self):
         self.assertEqual(0, self.phase(API_ACTIVE="0").returncode)
         self.assertNotIn("laplace-api", self.calls())
 
-    def test_failed_api_restore_does_not_stamp_success(self):
+    def test_failed_api_restore_is_reported_as_failure(self):
         result = self.phase(START_RC="25")
         self.assertNotEqual(0, result.returncode)
         self.assertIn("start laplace-api", self.calls())
-        self.assertNotIn("stamp", self.calls())
 
     def test_deliberate_swallowed_preflight_error_is_detected(self):
         original = function("phase_install")
-        broken = original.replace('[[ "$path_rc" -eq 1 ]] || return "$path_rc"', ':')
+        broken = original.replace('[[ "$path_rc" == 1 ]] || exit "$path_rc"', ':')
         self.assertNotEqual(original, broken)
         result = self.phase(source=broken, PATH_RC="2")
         self.assertEqual(0, result.returncode)
         self.assertIn("install", self.calls())  # the no-install regression would fail
+        (self.base / "installed").unlink()
         (self.base / "calls").write_text("")
         self.assertEqual(2, self.phase(PATH_RC="2").returncode)
         self.assertEqual("", self.calls())
@@ -464,6 +354,96 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
         self.assertEqual("build\ninstall\n", self.calls())
 
 
+
+class BuildInputTests(unittest.TestCase):
+    """Execute phase_build with real selected tools/headers; compilers are protocol doubles."""
+    def setUp(self):
+        scratch = Path(os.environ.get("TMPDIR", ""))
+        if not scratch.is_absolute() or not scratch.is_dir():
+            raise RuntimeError("build input controls require an existing absolute TMPDIR")
+        self.temporary = tempfile.TemporaryDirectory(prefix="pipeline-build-inputs-", dir=scratch)
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+        self.project = self.base / "project"
+        for name in ("scripts", "deploy", "engine/core"):
+            (self.project / name).mkdir(parents=True, exist_ok=True)
+        for name in ("scripts/postgresql-release.py", "deploy/postgresql-release.json"):
+            shutil.copy2(ROOT / name, self.project / name)
+        # Only the export selector is replaced; the PG owner executes from source.
+        (self.project / "scripts/chess-floor-artifacts.py").write_text(
+            "import sys\nassert sys.argv[1] == 'selected-export'\nprint('')\n")
+        (self.project / "engine/core/CMakeLists.txt").write_text("# no chess producer in this protocol fixture\n")
+        self.build = self.project / "build"
+        self.build.mkdir()
+        for name in ("laplace_t0_perfcache_fixture.bin", "laplace_highway_perfcache_fixture.bin"):
+            (self.build / name).write_bytes(b"protocol-only presence marker\n")
+        self.calls = self.base / "calls"
+        self.prefix = self.base / "pgsql-18"
+        specification = importlib.util.spec_from_file_location(
+            "pipeline_postgresql_fixture", ROOT / "scripts/test-postgresql-release.py")
+        self.fixture = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(self.fixture)
+        self.fixture.write_postgresql_fixture(self.prefix)
+
+    def build_once(self, **changes):
+        environment = {**os.environ, "ROOT": str(self.project), "PYTHON": sys.executable,
+                       "LAPLACE_PG_PREFIX": str(self.prefix),
+                       "LAPLACE_INSTALL_PREFIX": str(self.base / "install"),
+                       "LAPLACE_BUILD_DIRECTORY": str(self.build),
+                       "LAPLACE_EXTERNAL": str(self.base / "external"),
+                       "CALLS": str(self.calls), "FORCE_REBUILD": "0", "FORCE_CODEGEN": "0",
+                       "CLEAN_FIRST": "0", **changes}
+        program = function("phase_build") + r'''
+phase_clean() { echo clean >> "$CALLS"; }
+phase_codegen() { echo codegen >> "$CALLS"; }
+chess_openings_path() { printf '%s\n' "$ROOT/openings"; }
+cmake() { printf 'cmake %s\n' "$*" >> "$CALLS"; }
+phase_build_app() { echo managed-build >> "$CALLS"; }
+phase_build
+'''
+        return subprocess.run(["bash", "-c", "set -euo pipefail\n" + program],
+                              cwd=self.project, env=environment, capture_output=True,
+                              text=True, timeout=15)
+
+    def test_valid_real_inputs_are_observed_before_direct_configure_and_build(self):
+        for _ in range(2):
+            result = self.build_once(FORCE_REBUILD="1", FORCE_CODEGEN="1")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            receipt = json.loads(result.stdout.splitlines()[0])
+            self.assertEqual("build-inputs", receipt["mode"])
+            self.assertEqual("18.6", receipt["version"])
+            self.assertFalse(receipt["running_server_checked"])
+            self.assertEqual(str(self.prefix / "include/server"),
+                             receipt["configuration_paths"]["includedir-server"])
+        calls = self.calls.read_text().splitlines()
+        self.assertEqual(2, calls.count("clean"))
+        self.assertEqual(2, calls.count("codegen"))
+        self.assertEqual(2, calls.count("managed-build"))
+        configure = [row for row in calls if row.startswith("cmake -S ")]
+        builds = [row for row in calls if row.startswith("cmake --build ")]
+        self.assertEqual(2, len(configure))
+        self.assertEqual(2, len(builds))
+        self.assertTrue(all("-DLAPLACE_PG_PREFIX=" + str(self.prefix) in row for row in configure))
+
+    def test_invalid_real_tools_or_headers_refuse_before_clean_or_any_build(self):
+        for defect in ("postgres", "pg_config", "headers", "missing"):
+            with self.subTest(defect=defect):
+                self.fixture.write_postgresql_fixture(self.prefix)
+                if defect == "headers":
+                    (self.prefix / "include/server/pg_config.h").write_text(
+                        '#define PG_VERSION "18.3"\n#define PG_VERSION_NUM 180003\n')
+                elif defect == "missing":
+                    (self.prefix / "bin/pg_config").unlink()
+                else:
+                    path = self.prefix / "bin" / defect
+                    path.write_text(path.read_text().replace("18.6", "18.3"))
+                self.calls.unlink(missing_ok=True)
+                result = self.build_once(FORCE_REBUILD="1", FORCE_CODEGEN="1")
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("PostgreSQL selection failed", result.stderr)
+                self.assertFalse(self.calls.exists())
+        self.fixture.write_postgresql_fixture(self.prefix)
+        self.assertEqual(0, self.build_once().returncode)
 
 
 class ManagedPolicyPreparationTests(unittest.TestCase):

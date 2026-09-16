@@ -1,14 +1,60 @@
--- Plan Phase 6 (doc 14 P2): per-entity 256-bit relation-membership mask for the
--- foundry's content-dependent FFN gate — which relation families a token
--- participates in is a genuine step function of content, synthesized, not learned.
+-- Per-entity governed relation-membership masks for foundry synthesis.
+--
+-- This is semantic input to the exported gate, so it must be derived from the
+-- canonical consensus relation set rather than copied from entities.highway_mask.
+-- The stored entity mask is a rebuildable accelerator: a stale/partial mask may
+-- change a physical plan, never synthesized model content.
+--
+-- Static governed relation types resolve directly. Dynamic relation types inherit
+-- the same direct IS_A family bit used by the native deposit/refresh path. Both
+-- subject and object participation count, matching highway_mask_deposit.
+--
+-- If the Highway registry is unavailable the result is empty. Foundry already
+-- interprets all-zero masks as its constant-gate fallback; it must never reuse
+-- stale stored masks merely because some rows happen to be populated.
 DROP FUNCTION IF EXISTS laplace.entity_highway_masks(bytea[]);
--- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION generation.entity_highway_masks(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, highway_mask bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT e.id, e.highway_mask
-    FROM laplace.entities e
-    WHERE e.id = ANY (p_vocab)
-      AND e.highway_mask IS NOT NULL;
+    WITH ready AS MATERIALIZED (
+        SELECT consensus.highway_ready() AS ok
+    ), vocab AS MATERIALIZED (
+        SELECT DISTINCT v.entity_id
+        FROM unnest(p_vocab) AS v(entity_id)
+        WHERE v.entity_id IS NOT NULL
+    ), incident AS (
+        SELECT v.entity_id, c.type_id
+        FROM vocab v
+        JOIN laplace.consensus c ON c.subject_id = v.entity_id
+        UNION
+        SELECT v.entity_id, c.type_id
+        FROM vocab v
+        JOIN laplace.consensus c ON c.object_id = v.entity_id
+        WHERE c.object_id IS NOT NULL
+    ), resolved AS (
+        SELECT i.entity_id,
+               CASE WHEN r.ok THEN
+                   COALESCE(
+                       consensus.relation_highway_bit(i.type_id),
+                       consensus.relation_highway_bit(fam.object_id))
+               END AS bit
+        FROM incident i
+        CROSS JOIN ready r
+        LEFT JOIN laplace.consensus fam
+          ON r.ok
+         AND fam.subject_id = i.type_id
+         AND fam.type_id = laplace.relation_type_id('IS_A')
+         AND fam.object_id IS NOT NULL
+    ), masks AS (
+        SELECT entity_id,
+               consensus.highway_mask_from_bits(
+                   array_agg(DISTINCT bit ORDER BY bit)
+                       FILTER (WHERE bit IS NOT NULL)) AS highway_mask
+        FROM resolved
+        GROUP BY entity_id
+    )
+    SELECT entity_id, highway_mask
+    FROM masks
+    WHERE highway_mask IS NOT NULL;
 END;

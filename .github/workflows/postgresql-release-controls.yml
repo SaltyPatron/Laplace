@@ -1,4 +1,4 @@
-name: Qualify final UCI help and transaction refusals
+name: Qualify canonical ingest liveness bootstrap
 on:
   push:
     branches: ['verify/postgresql-activation-20260916']
@@ -11,36 +11,45 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Prepare exact source and permanent evidence
+      - name: Prepare exact source and permanent SQL evidence
         shell: bash
         run: |
           set -euo pipefail
-          work="/build/laplace/work/uci-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          evidence="/build/laplace/recovery/uci-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence"
-          mkdir -p "$work/tmp" "$work/source"
+          work="/build/laplace/work/ingest-liveness-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          evidence="/build/laplace/recovery/ingest-liveness-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence" /build/laplace/work/ilsql
+          mkdir -p "$work/source"
           echo "QUALIFY_WORK=$work" >> "$GITHUB_ENV"
           echo "QUALIFY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          echo "TMPDIR=$work/tmp" >> "$GITHUB_ENV"
-          echo "TMP=$work/tmp" >> "$GITHUB_ENV"
-          echo "TEMP=$work/tmp" >> "$GITHUB_ENV"
-          missing=()
-          command -v rsync >/dev/null || missing+=(rsync)
-          command -v shellcheck >/dev/null || missing+=(shellcheck)
-          if (( ${#missing[@]} )); then
+          echo "TMPDIR=/build/laplace/work/ilsql" >> "$GITHUB_ENV"
+          echo "TMP=/build/laplace/work/ilsql" >> "$GITHUB_ENV"
+          echo "TEMP=/build/laplace/work/ilsql" >> "$GITHUB_ENV"
+          if [[ ! -x /usr/lib/postgresql/16/bin/postgres ]] || ! command -v shellcheck >/dev/null || ! command -v pg_config >/dev/null; then
             sudo -n timeout 120s apt-get update
-            sudo -n timeout 180s apt-get install -y --no-install-recommends "${missing[@]}"
+            sudo -n timeout 180s apt-get install -y --no-install-recommends postgresql-16 libpq-dev shellcheck
           fi
-          command -v flock
+          /usr/lib/postgresql/16/bin/postgres --version > "$evidence/postgresql.txt"
+          echo "PG_BINDIR=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
           cd "$work/source"
           git init -q
           git remote add origin https://github.com/SaltyPatron/Laplace.git
-          timeout 120s git fetch --no-tags --depth=1 origin e1efe584bf7afdccc532d7b690fcbb69bb6b5ac2
+          timeout 120s git fetch --no-tags --depth=1 origin 023ed5f8b275246d020a142c030b0c380311127a
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = e1efe584bf7afdccc532d7b690fcbb69bb6b5ac2
-          test "$(git rev-parse HEAD^{tree})" = cc6d7177878dcf5e1c2278dfc74886998a42879a
+          test "$(git rev-parse HEAD)" = 023ed5f8b275246d020a142c030b0c380311127a
+          test "$(git rev-parse HEAD^{tree})" = 69a1b7e1da5113fc35909944151c40af28a1d8f0
           git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
-      - name: Execute bounded real file and child protocol controls
+      - name: Prepare labelled SQL extension packaging fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$QUALIFY_WORK/source"
+          python3 -B scripts/test-bootstrap-ingest-liveness.py --prepare-extension "$QUALIFY_WORK/extension-fixture" > "$QUALIFY_EVIDENCE/fixture-files.json"
+          test "$(pg_config --bindir)" = "$PG_BINDIR"
+          sharedir="$(pg_config --sharedir)/extension"
+          test -d "$sharedir"
+          sudo install -m 0644 "$QUALIFY_WORK/extension-fixture/"*.control "$QUALIFY_WORK/extension-fixture/"*.sql "$sharedir/"
+          printf '%s\n' "$sharedir" > "$QUALIFY_EVIDENCE/fixture-extension-directory.txt"
+      - name: Execute bounded actual PostgreSQL and caller controls
         shell: bash
         run: |
           set -euo pipefail
@@ -48,39 +57,34 @@ jobs:
           python3 -B - <<'PY'
           import ast, json, os, pathlib, subprocess, sys
           evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
-          for name in ("scripts/test-application-publish.py",):
+          for name in ("scripts/bootstrap-ingest-liveness.py", "scripts/test-bootstrap-ingest-liveness.py"):
               ast.parse(pathlib.Path(name).read_text(), filename=name)
-          (evidence/"ast.txt").write_text("PASS: changed Python test source\n")
+          (evidence/"ast.txt").write_text("PASS: helper and PostgreSQL fixture test Python sources\n")
           commands=[
-              ("uci-only",["python3","-B","scripts/test-application-publish.py","UciOnlyDeploymentTests","-v"]),
-              ("bash-syntax",["bash","-n","deploy/linux/deploy.sh"]),
-              ("shellcheck",["shellcheck","-S","warning","-x","deploy/linux/deploy.sh"]),
+              ("postgresql-bootstrap", ["python3", "-B", "scripts/test-bootstrap-ingest-liveness.py"]),
+              ("quiet-owner", ["python3", "-B", "scripts/test-wait-for-quiet-substrate.py", "-v"]),
+              ("bash", ["bash", "-n", "scripts/product-ci.sh", "scripts/test-parallel.sh"]),
+              ("shellcheck", ["shellcheck", "-S", "warning", "scripts/product-ci.sh", "scripts/test-parallel.sh"]),
           ]
           results=[]
-          for name,argv in commands:
-              path=evidence/(name+".log")
-              with path.open("w") as log:
-                  completed=subprocess.run(["timeout","--kill-after=10s","240s",*argv],stdout=log,stderr=subprocess.STDOUT)
-              results.append({"name":name,"argv":argv,"exit_code":completed.returncode})
-              print("CONTROL "+name+" exit="+str(completed.returncode),flush=True)
-              print(path.read_text(),flush=True)
-          (evidence/"results.json").write_text(json.dumps(results,indent=2)+"\n")
-          sys.exit(0 if all(item["exit_code"]==0 for item in results) else 1)
+          for name, command in commands:
+              with (evidence/(name+".log")).open("w") as stream:
+                  completed=subprocess.run(["timeout","--kill-after=10s","300s",*command],stdout=stream,stderr=subprocess.STDOUT)
+              results.append({"name":name,"command":command,"exit_code":completed.returncode})
+              (evidence/"results.json").write_text(json.dumps(results,indent=2)+"\n")
+              print(name,completed.returncode,flush=True)
+              if completed.returncode:
+                  print((evidence/(name+".log")).read_text(),flush=True)
+                  raise SystemExit(completed.returncode)
+          dirty=subprocess.check_output(["git","status","--porcelain","--untracked-files=all"],text=True)
+          (evidence/"source-clean.txt").write_text(dirty or "PASS: clean source checkout\n")
+          if dirty:
+              raise SystemExit("qualification modified source checkout")
           PY
-      - name: Verify clean source
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${QUALIFY_WORK:-}"
-          cd "$QUALIFY_WORK/source"
-          git status --porcelain > "$QUALIFY_EVIDENCE/source-status.txt"
-          test ! -s "$QUALIFY_EVIDENCE/source-status.txt"
-          echo CLEAN_SOURCE_PASS
-      - name: Retain hosted qualification evidence
+      - name: Retain exact qualification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: scoped-uci-publication-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/recovery/uci-publication-${{ github.run_id }}-${{ github.run_attempt }}/
+          name: ingest-liveness-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.QUALIFY_EVIDENCE }}
           if-no-files-found: error

@@ -94,14 +94,12 @@ class PostgreSQLReleaseTests(unittest.TestCase):
             path.chmod(0o755)
 
 
-    def fingerprint(self, name="fp_native"):
-        env = dict(os.environ, ROOT=str(ROOT), LAPLACE_PG_PREFIX=str(self.prefix),
-                   LAPLACE_INSTALL_PREFIX=str(self.root / "unused-install"),
-                   LAPLACE_CHESS_OPENINGS=str(self.root / "absent-openings"),
-                   LAPLACE_CHESS_CORPUS_EXPORT="")
+    def build_input_command(self):
         return subprocess.run(
-            ["bash", "-c", 'set -euo pipefail; source "$ROOT/scripts/lib/fp.sh"; ' + name],
-            text=True, capture_output=True, timeout=20, env=env)
+            [sys.executable, str(ROOT / "scripts/postgresql-release.py"),
+             "build-inputs", "--prefix", str(self.prefix)],
+            text=True, capture_output=True, timeout=20,
+            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
 
     def test_build_inputs_bind_actual_headers_tools_and_ignore_timestamp_churn(self):
         write_postgresql_fixture(self.prefix)
@@ -123,21 +121,20 @@ class PostgreSQLReleaseTests(unittest.TestCase):
                 path.write_bytes(original)
                 self.assertEqual(before, owner.build_inputs(self.prefix, self.selected))
 
-    def test_actual_native_and_runtime_stamps_change_when_only_installed_header_changes(self):
+    def test_actual_build_input_command_reports_header_changes_without_stamp_state(self):
         write_postgresql_fixture(self.prefix)
-        for name in ("fp_native", "fp_runtime"):
-            with self.subTest(name=name):
-                before = self.fingerprint(name)
-                self.assertEqual(0, before.returncode, before.stderr)
-                self.assertRegex(before.stdout, r"^[0-9a-f]{64}\n$")
-                self.assertEqual(before.stdout, self.fingerprint(name).stdout)
-                header = self.prefix / "include/server/postgres.h"
-                header.write_text(header.read_text() + "/* same version, changed installed header */\n")
-                after = self.fingerprint(name)
-                self.assertEqual(0, after.returncode, after.stderr)
-                self.assertNotEqual(before.stdout, after.stdout)
+        before = self.build_input_command()
+        self.assertEqual(0, before.returncode, before.stderr)
+        identity = json.loads(before.stdout)
+        self.assertFalse(identity["running_server_checked"])
+        self.assertEqual(identity, json.loads(self.build_input_command().stdout))
+        header = self.prefix / "include/server/postgres.h"
+        header.write_text(header.read_text() + "/* same version, changed installed header */\n")
+        after = self.build_input_command()
+        self.assertEqual(0, after.returncode, after.stderr)
+        self.assertNotEqual(identity, json.loads(after.stdout))
 
-    def test_old_tools_or_headers_cannot_emit_a_successful_native_fingerprint(self):
+    def test_old_tools_or_headers_refuse_before_returning_build_input_identity(self):
         for kind in ("postgres", "pg_config", "headers", "missing"):
             with self.subTest(kind=kind):
                 write_postgresql_fixture(self.prefix)
@@ -149,12 +146,11 @@ class PostgreSQLReleaseTests(unittest.TestCase):
                 else:
                     path = self.prefix / "bin" / kind
                     path.write_text(path.read_text().replace("18.6", "18.3"))
-                for name in ("fp_native", "fp_runtime"):
-                    result = self.fingerprint(name)
-                    self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
-                    self.assertEqual("", result.stdout)
+                result = self.build_input_command()
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual("", result.stdout)
         write_postgresql_fixture(self.prefix)
-        self.assertEqual(0, self.fingerprint().returncode)
+        self.assertEqual(0, self.build_input_command().returncode)
 
     def test_header_version_number_and_complete_header_contents_are_required(self):
         write_postgresql_fixture(self.prefix)

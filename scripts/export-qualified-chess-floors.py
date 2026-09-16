@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Explicit recorded-floor export from a qualified and installed main revision.
+"""Explicit recorded-floor export from a qualified and installed source revision.
 
 Run only under the ordinary host lock. This rebuilds and checks the managed
 catalog; it does not claim byte identity with the prior managed publication.
-Native libraries come from the retained main build path and are hashed and tested
+Native libraries come from the retained native build path and are hashed and tested
 again here; the ordinary installed-form guard binds them to the pilot generation. No installation or DB write
 is performed. Selection is published only after complete readback and postflight.
 """
@@ -23,16 +23,16 @@ import xml.etree.ElementTree as ET
 
 REPOSITORY = "SaltyPatron/Laplace"
 DURABLE_ROOT = Path("/build/laplace/corpus-exports/chess")
-SESSION_ROOT = Path("/build/laplace/work/ci-sessions")
 BUILD_ROOT = Path("/build/laplace/build")
 NATIVE_ROOT = Path("/build/laplace/recovery/native-install")
 NATIVE_PREFIX = Path("/opt/laplace")
 NATIVE_WORKFLOW = ".github/workflows/chess-floor-serving-controls.yml"
 NATIVE_PHASES = [
     "pg-pin", "pg-checkout", "pg-source", "dependency-build",
-    "dependency-identity", "native-managed-build", "isolated-native-database",
-    "native-tests", "managed-tests", "uci-tests", "quiet-native-owner",
-    "native-install", "extension-sql", "database-health", "postgres-activation",
+    "dependency-identity", "native-managed-build", "native-tests",
+    "managed-tests", "uci-tests", "quiet-native-owner", "native-install",
+    "extension-sql", "installed-native-database", "database-health",
+    "postgres-activation",
 ]
 
 
@@ -89,6 +89,26 @@ def selection_identity(plan):
     if values[0] != values[2]:
         raise ValueError("export candidate must be the selected installed source")
     return {"commit": values[0], "tree": values[1]}
+
+
+def candidate_checkout(plan):
+    """Observe the selected existing checkout without changing Git state."""
+    source = selection_identity(plan)
+    if plan.get("proof_kind") != "native-only-install":
+        raise ValueError("export requires an authenticated native-only installation proof")
+    raw = plan.get("native_checkout")
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("native installation requires an existing checkout")
+    checkout = Path(raw)
+    if (not checkout.is_absolute() or checkout.resolve(strict=True) != checkout
+            or not checkout.is_dir()
+            or str(checkout).startswith(("/tmp/", "/var/tmp/", "/dev/shm/"))):
+        raise ValueError("native installation checkout must be an existing permanent physical directory")
+    if (git(checkout, "rev-parse", "HEAD") != source["commit"]
+            or git(checkout, "rev-parse", "HEAD^{tree}") != source["tree"]
+            or git(checkout, "status", "--porcelain", "--untracked-files=no")):
+        raise ValueError("native installation current checkout differs from selected source")
+    return checkout
 
 
 def file_identity(path):
@@ -202,6 +222,10 @@ def native_qualification(plan, root):
         raise ValueError("native installation phase sequence is incomplete or reordered")
     if paths["completed-phases.txt"].read_text().splitlines() != phases:
         raise ValueError("native installation phase journal differs from the receipt")
+    regression_stem = "laplace_pr_" + str(run_id) + "_" + str(attempt)
+    if (state.get("executionRoute") != "direct-installed-regression"
+            or state.get("regressionDatabaseStem") != regression_stem):
+        raise ValueError("native installation regression route or reserved database names differ")
     contract = load(root / "deploy/postgresql-release.json", 65536)
     if contract.get("version") != "18.6" or contract.get("major") != 18:
         raise ValueError("native installation operator requires the selected PostgreSQL18.6 source")
@@ -223,16 +247,12 @@ def native_qualification(plan, root):
     if outcome != {"workflowOutcome": "success", "source": source["commit"],
                    "applicationPublication": "not_attempted", "fullLifecyclePassed": False}:
         raise ValueError("native installation retained workflow outcome differs")
-    checkout = Path(plan["native_checkout"])
-    # This checkout/build observation is made now. The v1 native receipt does not
-    # contain a historical checkout path or native fingerprint.
-    if (git(checkout, "rev-parse", "HEAD") != source["commit"]
-            or git(checkout, "rev-parse", "HEAD^{tree}") != source["tree"]
-            or git(checkout, "status", "--porcelain", "--untracked-files=no")):
-        raise ValueError("native installation current checkout differs from selected source")
-    build, fingerprint = retained_build(checkout)
-    placement = {"checkout": str(checkout), "buildDirectory": str(build),
-                 "buildNativeStamp": fingerprint, "installNativeStamp": fingerprint}
+    # Observe the existing checkout; never create a worktree or move its HEAD.
+    checkout = candidate_checkout(plan)
+    build, build_identity = retained_build(checkout)
+    if state.get("buildIdentity") != build_identity:
+        raise ValueError("native installation recorded build identity differs")
+    placement = {"checkout": str(checkout), "buildDirectory": str(build)}
     for key, expected in placement.items():
         if key in state and state[key] != expected:
             raise ValueError("native installation retained placement differs: " + key)
@@ -247,10 +267,12 @@ def native_qualification(plan, root):
         "full_lifecycle_passed": False, "managed_publication": "not_attempted",
         "database_recreation": False, "foundation_ingestion": False,
         "lexical_failure": None, "native_install_status": "completed",
+        "execution_route": state["executionRoute"],
+        "regression_database_stem": regression_stem,
         "phases": [{"phase": phase, "exit_code": 0} for phase in phases],
         "native_build": str(build), "lifecycle_checkout": str(checkout),
-        "native_fingerprint": fingerprint,
-        "checkout_build_observation": "current source/cache/stamps verification; historical placement fields checked when recorded",
+        "build_identity": build_identity,
+        "checkout_build_observation": "current configured build and install program match the authenticated installation receipt",
         "recorded_placement": {key: state[key] for key in placement if key in state},
         "server_version_num": state["serverVersionNum"], "installed_identities": state["identities"],
         "evidence_receipts": list(receipts.values()),
@@ -263,11 +285,9 @@ def native_qualification(plan, root):
 
 
 def verify_qualification_receipts(qualification):
-    if qualification.get("proof_kind") == "native-only-install":
-        rows = qualification["evidence_receipts"]
-    else:
-        rows = [{"path": qualification["session_receipt"], "sha256": qualification["session_sha256"]}]
-    for row in rows:
+    if qualification.get("proof_kind") != "native-only-install":
+        raise ValueError("export requires an authenticated native-only installation proof")
+    for row in qualification["evidence_receipts"]:
         if file_identity(Path(row["path"]))["sha256"] != row["sha256"]:
             raise ValueError("qualified lifecycle evidence changed")
 
@@ -285,92 +305,46 @@ def retained_build(checkout):
     build = build_link.resolve(strict=True)
     if not build.is_dir() or build.parent != BUILD_ROOT.resolve(strict=True):
         raise ValueError("retained native build is outside the canonical build root")
-    cache = (build / "CMakeCache.txt").read_text()
-    match = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$", cache, re.MULTILINE)
-    if not match or Path(match.group(1)) != checkout:
-        raise ValueError("retained native build belongs to another checkout")
-    directory = re.search(r"^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$", cache, re.MULTILINE)
-    if not directory or Path(directory.group(1)).resolve(strict=True) != build:
-        raise ValueError("retained CMake cache belongs to another build directory")
-    stamps = {name: (build / ".stamps" / name).read_text().strip()
-              for name in ("build-native", "install-native")}
-    if (any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in stamps.values())
-            or len(set(stamps.values())) != 1):
-        raise ValueError("qualified native build/install stamps are absent or disagree")
-    return build, stamps["build-native"]
+    guard = module(checkout, "export_retained_build_guard", "check-application-runtime.py")
+    identity = guard.build_identity(checkout, NATIVE_PREFIX)
+    if identity["directory"] != str(build):
+        raise ValueError("retained native build differs from the configured build")
+    return build, identity
 
 
 def qualification(plan, root):
-    if plan.get("proof_kind") == "native-only-install":
-        return native_qualification(plan, root)
-    if plan.get("proof_kind") not in (None, "main-lifecycle"):
-        raise ValueError("unsupported qualification proof kind")
-    source = selection_identity(plan)
-    run_id, attempt = plan["proof_run_id"], plan["proof_run_attempt"]
-    if type(run_id) is not int or type(attempt) is not int or run_id <= 0 or attempt <= 0:
-        raise ValueError("an explicit positive proof run and attempt are required")
-    remote = run_json(run_id)
-    if (remote.get("id") != run_id or remote.get("status") != "completed"
-            or remote.get("conclusion") != "success" or remote.get("event") != "push"
-            or remote.get("head_branch") != "main"
-            or remote.get("path") != ".github/workflows/laplace.yml"
-            or remote.get("run_attempt") != attempt or remote.get("head_sha") != source["commit"]):
-        raise ValueError("selected run is not a supported terminal exact-main product lifecycle")
-    path = SESSION_ROOT / (str(run_id) + "-" + str(attempt) + "-product/session.json")
-    if (path.is_symlink() or path.parent.is_symlink()
-            or path.parent.stat().st_uid != os.getuid()
-            or path.parent.stat().st_mode & 0o077):
-        raise ValueError("retained lifecycle session must remain private and owned by this runner")
-    state = load(path, 65536)
-    # A normal main push selects the full default product lifecycle. Environment
-    # inherited by this later export must not omit phases from the retained plan.
-    environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
-                       LAPLACE_GENERATION_BENCHMARK="")
-    expected = subprocess.check_output(
-        ["bash", str(root / "scripts/product-ci.sh"), "all", "--list-phases"],
-        cwd=root, text=True, timeout=10, env=environment).splitlines()
-    if (not expected or state.get("schema") != "laplace.ci-session.v1"
-            or state.get("kind") != "product" or state.get("stage") != "all"
-            or type(state.get("cleanup_exit_code")) is not int or state["cleanup_exit_code"] != 0
-            or "active" not in state or state["active"] is not None
-            or state.get("source") != source or state.get("phases") != expected):
-        raise ValueError("retained main session does not establish canonical product phase identity and cleanup")
-    if (state.get("status") != "stopped" or state.get("next") != len(expected)
-            or state.get("results") != [{"phase": p, "exit_code": 0} for p in expected]):
-        raise ValueError("retained main session does not establish every completed canonical product phase")
-    checkout = Path(state["checkout"])
-    build, fingerprint = retained_build(checkout)
-    return build, {"run_id": run_id, "run_attempt": attempt, "source": state["source"],
-                   "lifecycle_conclusion": remote["conclusion"],
-                   "full_lifecycle_passed": True,
-                   "session_status": state["status"], "cleanup_exit_code": state["cleanup_exit_code"],
-                   "lexical_failure": None,
-                   "phases": state["results"], "native_build": str(build),
-                   "lifecycle_checkout": str(checkout), "native_fingerprint": fingerprint,
-                   "session_receipt": str(path),
-                   "session_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    # The current product owner no longer emits private CI sessions. Require the
+    # independent native installation receipt; a main workflow success alone
+    # cannot stand in for its source, phase, artifact and installed-byte evidence.
+    if not isinstance(plan, dict) or plan.get("proof_kind") != "native-only-install":
+        raise ValueError("export requires an authenticated native-only installation proof")
+    return native_qualification(plan, root)
 
 
 def recording_compatible(guard, before, after):
     """Retain all runtime identities; only observed journal occupancy may differ."""
+    for state in (before, after):
+        if (not isinstance(state, dict) or type(state.get("format")) is not int
+                or state["format"] != 2):
+            raise ValueError("pilot installed runtime has an unsupported format")
     if not guard.compatible(before, after, purpose="recording"):
         raise ValueError("installed native/database selection differs from the recording baseline")
 
 
 def installed_state(guard, prefix, pg, baseline, qualification):
-    if qualification["native_fingerprint"] != baseline["native_fingerprint"]:
-        raise ValueError("retained native generation differs from the exact installed pilot")
+    if qualification["build_identity"] != baseline.get("build"):
+        raise ValueError("retained configured build differs from the exact installed pilot")
     database = guard.read_database(pg)
     if qualification.get("proof_kind") == "native-only-install":
         native_files(qualification["installed_identities"])
         if int(database["server_version"]) != qualification["server_version_num"]:
             raise ValueError("native installation running PostgreSQL release changed")
     verify_qualification_receipts(qualification)
-    # The actual source, stamps, installed native/SQL bytes, ROMs and floor pair
+    # The actual source/configuration, installed native/SQL bytes, ROMs and floor pair
     # remain authoritative. Journal occupancy is recorded without reinterpreting
     # unrelated historical entries as an admission lock.
     observed = guard.snapshot(Path(qualification["lifecycle_checkout"]), prefix, database,
-                              baseline["native_fingerprint"], purpose="recording")
+                              purpose="recording")
     recording_compatible(guard, baseline, observed)
     return observed
 
@@ -434,7 +408,7 @@ def execute(plan, root, prefix, pg, output):
              "installed_source": source["commit"], "installed_payload_mutated": False,
              "database_write_requested": False, "selection_attempted": False, "selection_completed": False,
              "managed_provenance": "rebuilt from qualified source and checked in this invocation",
-             "native_provenance": "selected retained build/source/stamps; current bytes installed-form verified against the completed pilot and focused-tested now",
+             "native_provenance": "selected retained build configuration/source; current bytes installed-form verified against the completed pilot and focused-tested now",
              "native_historical_byte_comparison": False,
              "claim": "completed observed-read-interval export; no snapshot, historical coverage or throughput claim"}
     evidence = output / "evidence"
@@ -450,7 +424,8 @@ def execute(plan, root, prefix, pg, output):
             if git(root, "status", "--porcelain", "--untracked-files=all"):
                 raise ValueError("candidate worktree has local changes")
             command("lifecycle-controls", [sys.executable,
-                    Path(__file__).with_name("test-qualified-chess-floor-export.py"), "-v"],
+                    root / "scripts/test-qualified-chess-floor-export.py",
+                    "--driver-path", Path(__file__).resolve(strict=True), "-v"],
                     60, dict(os.environ))
             proof["lifecycle_controls"] = "passed"
             build, proof["qualification"] = qualification(plan, root)
@@ -468,8 +443,6 @@ def execute(plan, root, prefix, pg, output):
             if artifact.sha256(pilot / "native-before.json") != plan["pilot_native_snapshot_sha256"]:
                 raise ValueError("selected pilot native snapshot changed")
             baseline = load(pilot / "native-before.json")
-            if baseline.get("format") != 1:
-                raise ValueError("pilot installed runtime has an unsupported format")
             recording_compatible(guard, baseline, load(pilot / "native-after.json"))
             if os.environ.get("LAPLACE_CHESS_CORPUS_EXPORT"):
                 raise ValueError("explicit export override would hide the persisted selection")
