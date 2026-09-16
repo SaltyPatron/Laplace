@@ -33,7 +33,6 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || 60 }}
     env:
-      LAPLACE_REQUIRE_PREBUILT_MIGRATIONS: "1"
       PGHOST: /var/run/postgresql
       PGPORT: 5432
       PGUSER: laplace_admin
@@ -78,14 +77,22 @@ jobs:
             break
           done
 
+          require_migration() {
+            [[ -n "$migration" ]] || {
+              echo "::error::prebuilt migration runtime not found; build/deploy owns compilation"
+              exit 1
+            }
+          }
+
           case "$op" in
             status)
-              [[ -n "$migration" ]] || { echo "::error::prebuilt migration runtime not found"; exit 1; }
+              require_migration
               dotnet "$migration" status
               bash scripts/check-database-health.sh "$db"
               ;;
             migrate)
-              bash scripts/pipeline.sh migrate
+              require_migration
+              dotnet "$migration" up
               bash scripts/check-database-health.sh "$db"
               ;;
             repair)
@@ -93,13 +100,16 @@ jobs:
               bash scripts/check-database-health.sh "$db"
               ;;
             remigrate)
-              [[ -n "$migration" ]] || { echo "::error::prebuilt migration runtime not found"; exit 1; }
+              require_migration
               dotnet "$migration" reset --yes
-              bash scripts/pipeline.sh migrate
+              dotnet "$migration" up
               bash scripts/check-database-health.sh "$db"
               ;;
             recreate)
-              bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc
+              require_migration
+              dotnet "$migration" nuke --yes
+              dotnet "$migration" up
+              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
               bash scripts/check-database-health.sh "$db"
               ;;
             reindex)
