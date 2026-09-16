@@ -1,4 +1,4 @@
-name: Qualify complete managed GUI cache and foundation operator
+name: Qualify repaired fresh extension native operator
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -7,216 +7,86 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      EVIDENCE: /build/laplace/work/final-gui-cache/evidence
-      TMPDIR: /build/laplace/work/final-gui-cache/tmp
-      TMP: /build/laplace/work/final-gui-cache/tmp
-      TEMP: /build/laplace/work/final-gui-cache/tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+      EVIDENCE: /build/laplace/work/final-operator-syntax/evidence
+      TMPDIR: /build/laplace/work/final-operator-syntax/tmp
+      TMP: /build/laplace/work/final-operator-syntax/tmp
+      TEMP: /build/laplace/work/final-operator-syntax/tmp
     steps:
-      - name: Prepare permanent qualification directory
+      - name: Prepare permanent syntax workspace
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$EVIDENCE" "$TMPDIR"
-      - name: Authenticate sources and exercise actual nested cancellation and credential preservation
+      - name: Authenticate and parse the coordinated native operator
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
-          import ast,base64,fcntl,hashlib,json,os,re,signal,subprocess,sys,textwrap,time,urllib.request,yaml
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
+          import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
           from pathlib import Path
-          evidence=Path(os.environ["EVIDENCE"])
-          selections={"workflow":"6e50374a9d93056fe00b86aab7c961b17cc8da24","gui":"dfe56d9ce45a095dd1a578895ce0162efeb1eafd","bootstrap":"1aafd564ecec11a9f7a9ce450dc00e8563d1b63b","cache":"11b974204dabeb261380905a40d0cb8311c36378","follow":"e6b7e5c0a3021ae1adc1be117b74e36fea26b160","managed":"ddf5d4c219cc386d52a44274394a8b0dff8251d6","accept":"b7846e06e1f9dc67c9ca0c06df93340f9dd7d697","identity":"4f72dc77f8d809f46fd751781a9a68c0ac20ba7a","identity_test":"0263374954b37a0b358cb569043750058ccbd043","pipeline":"3445a5f8b0e2a7a9cbbacfd24893ad7f8877ace9"}
-          sources={}
-          for name,sha in selections.items():
-              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
-                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
-              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
-              assert len(encoded)<=2<<20
-              item=json.loads(encoded)
-              assert item["sha"]==sha and item["encoding"]=="base64"
-              raw=base64.b64decode(item["content"])
-              assert len(raw)==item["size"] and len(raw)<1<<20
-              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-              sources[name]=raw.decode()
-              (evidence/(name+(".yml" if name=="workflow" else ".sh" if name=="pipeline" else ".py"))).write_bytes(raw)
-              if name not in ("workflow","pipeline"):ast.parse(raw,filename=name+".py")
-          document=yaml.safe_load(sources["workflow"])
-          counts={"outerBash":0,"innerBash":0,"pythonHeredocs":0}
+          sha = "16d4f2690f9103af8c65c3c9d0551cd4af93aa04"
+          request = urllib.request.Request(
+              "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json"})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              encoded = response.read(2 * 1024 * 1024 + 1)
+          if len(encoded) > 2 * 1024 * 1024:
+              raise ValueError("operator metadata exceeded bound")
+          item = json.loads(encoded)
+          assert item["sha"] == sha and item["encoding"] == "base64"
+          raw = base64.b64decode(item["content"])
+          assert len(raw) == item["size"] and len(raw) < 1024 * 1024
+          assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == sha
+          (Path(os.environ["EVIDENCE"]) / "native-operator.yml").write_bytes(raw)
+          document = yaml.safe_load(raw)
+          environment = document["jobs"]["native"]["env"]
+          assert environment["TARGET_SHA"] == environment["TARGET_TREE"] == ""
+          assert environment["REQUIRED_ANCESTOR"] == "c490651eee906f44f944ae2c2b0d0783516f9e0c"
+          native_program = document["jobs"]["native"]["steps"][1]["run"]
+          pins = re.search(r"done <<'SOURCE_OWNERS'\n(.*?)\nSOURCE_OWNERS", native_program, re.S).group(1).splitlines()
+          assert len(pins) == 14, pins
+          assert all(re.fullmatch(r"100(?:644|755) [0-9a-f]{40} .+", pin) for pin in pins)
+          assert not any("physicality_descriptor.c" in pin or "physicality_descriptor_admission.cpp" in pin for pin in pins)
+          assert "--exclusive --no-fork" in native_program
+          assert native_program.index("flock --exclusive") < native_program.index("git fetch")
+          outer = inner = python = 0
           for job in document["jobs"].values():
               for step in job["steps"]:
-                  program=step.get("run")
-                  if program is None:continue
-                  subprocess.run(["bash","-n"],input=program,text=True,check=True)
-                  counts["outerBash"]+=1
-                  lines=program.splitlines()
-                  for i,line in enumerate(lines):
-                      match=re.search(r"<<'([A-Z_]+)'",line)
-                      if not match:continue
-                      delimiter=match.group(1)
-                      end=next(j for j in range(i+1,len(lines)) if lines[j].strip()==delimiter)
-                      body=textwrap.dedent("\n".join(lines[i+1:end]))+"\n"
-                      if delimiter=="PY":
+                  program = step.get("run")
+                  if program is None:
+                      continue
+                  subprocess.run(["bash", "-n"], input=program, text=True, check=True)
+                  outer += 1
+                  lines = program.splitlines()
+                  for index, line in enumerate(lines):
+                      match = re.search(r"<<'([A-Z_]+)'", line)
+                      if not match:
+                          continue
+                      delimiter = match.group(1)
+                      end = next(i for i in range(index + 1, len(lines)) if lines[i].strip() == delimiter)
+                      body = textwrap.dedent("\n".join(lines[index + 1:end])) + "\n"
+                      if delimiter == "PY":
                           ast.parse(body)
-                          counts["pythonHeredocs"]+=1
-                      elif delimiter=="FOLLOW":
-                          subprocess.run(["bash","-n"],input=body,text=True,check=True)
-                          counts["innerBash"]+=1
-          assert counts=={"outerBash":6,"innerBash":1,"pythonHeredocs":6},counts
-          assert document["jobs"]["foundation"]["if"]=="always()"
-          assert "env" not in document["jobs"]["foundation"]
-          assert len(document["jobs"]["chess"]["env"])==10
-          def functions(source,names):
-              nodes=[node for node in ast.parse(source).body if isinstance(node,ast.FunctionDef) and node.name in names]
-              assert {node.name for node in nodes}==set(names)
-              return ast.unparse(ast.Module(body=nodes,type_ignores=[]))
-          parent_functions=functions(sources["follow"],("run_child","interrupted"))
-          command_functions=functions(sources["accept"],("command","stop_group"))
-          worker=evidence/"nested-owned-worker.py"
-          worker.write_text("import signal,sys,time\nfrom pathlib import Path\n"
-              "root=Path(sys.argv[1])\n"
-              "def stop(signum,frame):\n"
-              " (root/'cleanup-started').write_text('yes')\n"
-              " time.sleep(0.6)\n"
-              " (root/'cleanup-completed').write_text('yes')\n"
-              " raise SystemExit(0)\n"
-              "signal.signal(signal.SIGTERM,stop)\n"
-              "(root/'worker-ready').write_text('yes')\n"
-              "while True:time.sleep(0.05)\n")
-          driver=evidence/"actual-parent.py"
-          driver.write_text("import fcntl,os,signal,subprocess,sys\nfrom pathlib import Path\n"+parent_functions+"\n"
-              "root=Path(sys.argv[1])\n"
-              "fd=os.open(root/'host.lock',os.O_CREAT|os.O_RDWR,0o600)\n"
-              "fcntl.flock(fd,fcntl.LOCK_EX)\n"
-              "os.environ['FOLLOW_LOCK_FD']=str(fd)\n"
-              "signal.signal(signal.SIGTERM,interrupted)\n"
-              "signal.signal(signal.SIGINT,interrupted)\n"
-              "try:run_child([sys.executable,sys.argv[2],str(root),sys.argv[3]])\n"
-              "except KeyboardInterrupt:raise SystemExit(143)\n"
-              "finally:os.close(fd)\n")
-          def wait_file(path,process):
-              end=time.monotonic()+10
-              while not path.exists():
-                  assert process.poll() is None,"actual owner exited early"
-                  if time.monotonic()>end:raise TimeoutError(str(path))
-                  time.sleep(0.02)
-          results=[]
-          for name,handler in (("gui","interrupt"),("cache","interrupted"),("managed","interrupted")):
-              child=evidence/("actual-child-"+name+".py")
-              child.write_text("import os,signal,subprocess,sys\nfrom pathlib import Path\n"+
-                  command_functions+"\n"+functions(sources[name],(handler,))+"\n"
-                  "ROOT=Path(sys.argv[1])\n"
-                  "signal.signal(signal.SIGTERM,"+handler+")\n"
-                  "signal.signal(signal.SIGINT,"+handler+")\n"
-                  "command([sys.executable,sys.argv[2],str(ROOT)],ROOT/'worker.log',30)\n")
-              for first,second in ((signal.SIGTERM,signal.SIGTERM),(signal.SIGINT,signal.SIGTERM)):
-                  case=evidence/(name+"-"+str(first)+"-"+str(second));case.mkdir()
-                  process=subprocess.Popen([sys.executable,driver,case,child,worker],start_new_session=True)
-                  try:
-                      wait_file(case/"worker-ready",process)
-                      os.killpg(process.pid,first)
-                      wait_file(case/"cleanup-started",process)
-                      os.killpg(process.pid,second)
-                      with (case/"host.lock").open("r+") as contender:
-                          try:fcntl.flock(contender,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                          except BlockingIOError:pass
-                          else:raise AssertionError("host lock released during actual nested command cleanup")
-                      assert process.wait(timeout=10)==143
-                      assert (case/"cleanup-completed").read_text()=="yes"
-                      with (case/"host.lock").open("r+") as contender:
-                          fcntl.flock(contender,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                      results.append({"childOwner":name,"firstGroupSignal":first,"secondGroupSignal":second,
-                                      "actualNestedOwner":"accept-chess-environment.command/stop_group",
-                                      "cleanupCompleted":True,"lockHeldUntilCleanup":True,"lockReleasedAfterward":True})
-                  finally:
-                      try:os.killpg(process.pid,signal.SIGKILL)
-                      except ProcessLookupError:pass
-                      process.wait(timeout=5)
-          # The actual process owner must allow a publication rollback to exceed
-          # its old five-second grace without killing the owned command early.
-          slow=evidence/"slow-owned-worker.py"
-          slow.write_text(worker.read_text().replace("time.sleep(0.6)","time.sleep(6.2)"))
-          slow_case=evidence/"long-cleanup";slow_case.mkdir()
-          namespace={"os":os,"signal":signal,"subprocess":subprocess,"ROOT":evidence}
-          exec(command_functions,namespace)
-          begin=time.monotonic()
-          try:
-              namespace["command"]([sys.executable,slow,slow_case],slow_case/"worker.log",0.3,cleanup_seconds=8)
-          except TimeoutError:pass
-          else:raise AssertionError("command timeout was not reported")
-          elapsed=time.monotonic()-begin
-          assert (slow_case/"cleanup-completed").read_text()=="yes" and elapsed>=6.2
-          long_cleanup={"actualOwner":"accept-chess-environment.command/stop_group",
-                        "requestedCleanupSeconds":8,"elapsedSeconds":elapsed,"cleanupCompleted":True,
-                        "scope":"Owned process cleanup exceeding five seconds; real service rollback not simulated"}
-          # Execute the final canonical OAuth helper and extracted production caller.
-          scripts=evidence/"scripts";scripts.mkdir()
-          (scripts/"update-identity-secrets.py").write_text(sources["identity"])
-          (scripts/"test-update-identity-secrets.py").write_text(sources["identity_test"])
-          subprocess.run([sys.executable,scripts/"test-update-identity-secrets.py","-v"],check=True)
-          subprocess.run(["bash","-n"],input=sources["pipeline"],text=True,check=True)
-          import tempfile
-          pipeline=sources["pipeline"]
-          function=pipeline[pipeline.index("phase_runtime_secrets() {"):pipeline.index("\nphase_publish() {")]
-          with tempfile.TemporaryDirectory(prefix="pipeline-identity-") as directory:
-              prefix=Path(directory);secret_directory=prefix/"secrets";secret_directory.mkdir()
-              identity=secret_directory/"identity.env"
-              original=b"LAPLACE_AUTH_MICROSOFT_CLIENT_ID=existing-id\nLAPLACE_AUTH_MICROSOFT_CLIENT_SECRET=existing-secret\n"
-              identity.write_bytes(original);identity.chmod(0o600)
-              env=dict(os.environ,ROOT=str(evidence),LAPLACE_INSTALL_PREFIX=str(prefix),
-                       GITHUB_ACTIONS="true",LAPLACE_MCP_TOKEN="m"*40,LAPLACE_OPERATOR_TOKEN="o"*40,
-                       LICHESS_API="test-only-lichess-token",STRIPE_API_SECRET="test-only-stripe-token")
-              for provider in ("MICROSOFT","GOOGLE"):
-                  for suffix in ("CLIENT_ID","CLIENT_SECRET"):
-                      env["LAPLACE_AUTH_"+provider+"_"+suffix]=""
-              subprocess.run(["bash","-eu"],input=function+"\nphase_runtime_secrets\n",text=True,env=env,check=True)
-              assert identity.read_bytes()==original and identity.stat().st_mode&0o777==0o600
-          receipt={"status":"passed","selections":selections,"syntax":counts,
-                   "actualNestedCancellationControls":results,"identityFilesystemControls":7,
-                   "actualIdentityCallerControls":1,"longOwnedCleanup":long_cleanup,
-                   "scope":"Authenticated syntax, real nested process-lock cancellation and OAuth files; no GUI/cache/database execution"}
-          (evidence/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
-          print(json.dumps(receipt))
-          
+                          python += 1
+                      elif delimiter in ("NATIVE", "MANAGED_READINESS"):
+                          subprocess.run(["bash", "-n"], input=body, text=True, check=True)
+                          inner += 1
+          assert (outer, inner, python) == (4, 2, 10), (outer, inner, python)
+          print(json.dumps({"operatorBlob": sha, "bytes": len(raw),
+                            "outerBash": outer, "innerBash": inner, "python": python,
+                            "scope": "authenticated source syntax only; no native or host execution"}))
           PY
-      - name: Retain final operational controls
+      - name: Retain authenticated operator syntax
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: complete-managed-gui-cache-foundation-controls
-          path: /build/laplace/work/final-gui-cache/evidence/
-          if-no-files-found: error
-          retention-days: 30
-  identity-owner-metadata:
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 5
-    steps:
-      - name: Observe installed credential metadata without reading values
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os,pathlib,stat
-          p=pathlib.Path("/opt/laplace/secrets/identity.env")
-          value={"path":str(p),"callerUid":os.getuid(),"callerGid":os.getgid(),"callerGroups":os.getgroups()}
-          if p.exists() or p.is_symlink():
-              s=p.lstat()
-              value.update(exists=True,uid=s.st_uid,gid=s.st_gid,mode=oct(stat.S_IMODE(s.st_mode)),
-                           regular=stat.S_ISREG(s.st_mode),writable=os.access(p,os.W_OK))
-          else:value["exists"]=False
-          out=pathlib.Path("/build/laplace/recovery/identity-metadata")/(os.environ["GITHUB_RUN_ID"]+"-"+os.environ["GITHUB_RUN_ATTEMPT"])
-          out.mkdir(mode=0o700,parents=True)
-          (out/"receipt.json").write_text(json.dumps(value,sort_keys=True)+"\n")
-          print(json.dumps(value,sort_keys=True))
-          with open(os.environ["GITHUB_ENV"],"a") as env:env.write("IDENTITY_EVIDENCE="+str(out)+"\n")
-          PY
-      - name: Retain metadata observation
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: original-identity-owner-metadata
-          path: ${{ env.IDENTITY_EVIDENCE }}/
+          name: final-native-operator-syntax
+          path: /build/laplace/work/final-operator-syntax/evidence/
           if-no-files-found: error
           retention-days: 30
