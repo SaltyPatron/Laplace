@@ -1,4 +1,4 @@
-name: Explicit activation export lifecycle controls
+name: Native and main activation export lifecycle controls
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
@@ -10,8 +10,8 @@ jobs:
     timeout-minutes: 12
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: 07831041c545a13bd4f9da78e03130455ca02f79
-      SOURCE_TREE: f7093029cc78f65d6b145a238021238494904a2e
+      SOURCE_SHA: cc64ec8f617f5f26c0db1fb6ae8604bc1536d3e6
+      SOURCE_TREE: a3184deeef6be1ebf44731e2e77ac8d42c0a15ec
       TMPDIR: /build/laplace/work/postgresql-release/tmp
       TMP: /build/laplace/work/postgresql-release/tmp
       TEMP: /build/laplace/work/postgresql-release/tmp
