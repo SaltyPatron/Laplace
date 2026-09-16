@@ -1,0 +1,48 @@
+name: Qualify chess floor registration
+on:
+  push:
+    branches: [qualify/chess-floor-registration-20260916]
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 10f68fadc3ab555e541586330f43ea0645f72a4e
+          persist-credentials: false
+      - name: Qualify actual registered source selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 10f68fadc3ab555e541586330f43ea0645f72a4e
+          test "$(git write-tree)" = 9c6ab4327fcedee5f613cd911479475329c60df4
+          mkdir -p "$RUNNER_TEMP/chess-floor-registration"
+          export TMPDIR="$RUNNER_TEMP/chess-floor-registration"
+          python3 -m venv "$RUNNER_TEMP/registration-venv"
+          "$RUNNER_TEMP/registration-venv/bin/python" -m pip install --disable-pip-version-check PyYAML==6.0.2
+          export PATH="$RUNNER_TEMP/registration-venv/bin:$PATH"
+          python3 -m py_compile scripts/test-chess-floor-artifacts.py scripts/test-test-profile-registry.py
+          python3 scripts/test-test-profile-registry.py
+          python3 scripts/test-profile-registry.py run --profile policy --suite policy-chess-floor-artifacts --receipt "$TMPDIR/policy.json"
+      - name: Verify explicit missing native cannot skip
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP/chess-floor-registration"
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          missing = pathlib.Path(os.environ["TMPDIR"]) / "deliberately-missing-native-core.so"
+          assert not missing.exists()
+          result = subprocess.run(
+              ["python3", "scripts/test-chess-floor-artifacts.py",
+               "ArtifactTests.test_native_hash_abi_and_floor_checksum_when_current_library_is_available"],
+              env=dict(os.environ, LAPLACE_TEST_NATIVE_CORE=str(missing)),
+              text=True, capture_output=True, timeout=30)
+          assert result.returncode == 1, result.stdout + result.stderr
+          assert "names a missing current-build artifact" in result.stderr, result.stderr
+          assert "skipped=" not in result.stderr, result.stderr
+          print("Explicit selected-native absence correctly failed; no real native checksum execution claimed.")
+          PY
