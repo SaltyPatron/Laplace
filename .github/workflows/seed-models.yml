@@ -74,7 +74,6 @@ jobs:
           [[ -f "$model_dir/config.json" ]] || { echo "::error::$model_dir/config.json missing"; exit 1; }
           mkdir -p "$(dirname "$GGUF_OUT")"
           rm -f "$GGUF_OUT"
-          bash scripts/pipeline.sh build
           scripts/laplace synthesize substrate "$model_dir/config.json" "$GGUF_OUT"
           [[ -s "$GGUF_OUT" ]] || { echo "::error::synthesis produced no GGUF"; exit 1; }
           echo "GGUF_READY path=$GGUF_OUT bytes=$(stat -c%s "$GGUF_OUT")"
