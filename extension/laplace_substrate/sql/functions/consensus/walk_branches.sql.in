@@ -13,7 +13,8 @@
 -- authoritative relation set. Explicit p_type remains the semantic relation scope.
 DROP FUNCTION IF EXISTS laplace.walk_branches(bytea, bytea, int, int, bytea, bytea[], bool);
 DROP FUNCTION IF EXISTS consensus.walk_branches(bytea, bytea, int, int, bytea, bytea[], bool);
-DROP FUNCTION IF EXISTS consensus.walk_branches_native(bytea, bytea, int, int, bytea, bytea[], bool, bool);
+-- Preserve this stable native ABI's OID: the parsed SQL public wrapper and
+-- converse.recall_walk_response depend on it during extension upgrades.
 
 CREATE OR REPLACE FUNCTION consensus.walk_branches_native(
     p_prompt              bytea,

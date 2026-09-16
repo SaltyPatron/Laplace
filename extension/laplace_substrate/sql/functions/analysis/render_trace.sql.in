@@ -19,7 +19,8 @@
 -- LEFT JOIN against the trajectory, one document at a time. MEASURED
 -- 2026-08-12: three tier-4 documents with n_constituents=5 returned NULL at
 -- both depth 8 and depth 32; ordinals 1 and 5 had no laplace.entities row.
--- Those are two of the 899,179 orphaned physicalities (ops.ingest_integrity_gate).
+-- The former journal-count diagnostic does not establish a substrate-wide
+-- missing-reference count; only the actual entity anti-join can measure that.
 --
 -- realize.render_gaps() does not answer this: it scans consensus for globally
 -- unnameable ids, not the constituent closure of one entity.

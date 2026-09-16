@@ -311,4 +311,79 @@ EXCEPTION WHEN raise_exception THEN
     ELSE RAISE; END IF;
 END $$;
 
+-- Integrity uses actual references, including new forms for existing content.
+DO $integrity$
+DECLARE
+    existing_id bytea;
+    existing_tier smallint;
+    observed_coord public.geometry;
+    content_id bytea;
+    projection_id bytea;
+    missing_id bytea := laplace.word_id('ingest-integrity-regression-missing');
+    orphan_id bytea;
+    orphan_count_before bigint;
+    entities_before bigint;
+    physicalities_before bigint;
+    witness record;
+BEGIN
+    SELECT p.root_id, p.tier,
+           public.ST_MakePoint(p.coord[1], p.coord[2], p.coord[3], p.coord[4])
+    INTO STRICT existing_id, existing_tier, observed_coord
+    FROM converse.text_root_placements(ARRAY[chr(57344)]) p;
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    VALUES (existing_id, existing_tier, laplace.entity_type_id('Codepoint'),
+            laplace.source_id('IntegrityRegressionTest'))
+    ON CONFLICT DO NOTHING;
+    content_id := public.laplace_hash128_blake3(existing_id || decode('0100', 'hex'));
+    projection_id := public.laplace_hash128_blake3(existing_id || decode('0300', 'hex'));
+    orphan_id := public.laplace_hash128_blake3(missing_id || decode('0300', 'hex'));
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index, observed_at)
+    VALUES (content_id, existing_id, 1, observed_coord,
+            public.laplace_hilbert_encode(observed_coord), '2026-01-01 00:00:00+00')
+    ON CONFLICT DO NOTHING;
+
+    orphan_count_before := ops.orphan_physicality_count();
+    SELECT count(*) INTO entities_before FROM laplace.entities;
+    SELECT count(*) INTO physicalities_before FROM laplace.physicalities;
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index, observed_at)
+    VALUES (projection_id, existing_id, 3, observed_coord,
+            public.laplace_hilbert_encode(observed_coord), '2026-01-02 00:00:00+00');
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, layer, status, started_at, ended_at, entities, physicalities)
+    VALUES ('10000000-0000-0000-0000-000000000099', 'IntegrityRegressionTest',
+            1, 'ok', '2026-01-02 00:00:00+00', '2026-01-02 00:00:01+00', 0, 1);
+    IF (SELECT count(*) FROM laplace.entities) <> entities_before
+       OR (SELECT count(*) FROM laplace.physicalities) <> physicalities_before + 1
+       OR EXISTS (SELECT 1 FROM ops.ingest_integrity_gate()
+                  WHERE physicality_id IN (content_id, projection_id))
+       OR ops.orphan_physicality_count() <> orphan_count_before THEN
+        RAISE EXCEPTION 'new physicality around an existing entity was treated as an orphan';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM laplace.entities WHERE id = missing_id) THEN
+        RAISE EXCEPTION 'missing-reference fixture entity unexpectedly exists';
+    END IF;
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index, observed_at)
+    VALUES (orphan_id, missing_id, 3, observed_coord,
+            public.laplace_hilbert_encode(observed_coord), '2026-02-01 00:00:00+00');
+    SELECT * INTO STRICT witness
+    FROM ops.ingest_integrity_gate('2026-02-01 00:00:00+00')
+    WHERE physicality_id = orphan_id;
+    IF witness.entity_id IS DISTINCT FROM missing_id
+       OR witness.observed_at IS DISTINCT FROM '2026-02-01 00:00:00+00'::timestamptz
+       OR ops.orphan_physicality_count() <> orphan_count_before + 1
+       OR EXISTS (SELECT 1 FROM ops.ingest_integrity_gate('2026-02-02 00:00:00+00')
+                  WHERE physicality_id = orphan_id) THEN
+        RAISE EXCEPTION 'actual missing reference or its observation-time scope was lost';
+    END IF;
+
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    VALUES (missing_id, 2, laplace.entity_type_id('Word'),
+            laplace.source_id('IntegrityRegressionTest'));
+    IF EXISTS (SELECT 1 FROM ops.ingest_integrity_gate() WHERE physicality_id = orphan_id)
+       OR ops.orphan_physicality_count() <> orphan_count_before THEN
+        RAISE EXCEPTION 'resolved entity reference remained an orphan';
+    END IF;
+END $integrity$;
+
 ROLLBACK;

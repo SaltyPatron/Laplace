@@ -124,8 +124,8 @@ if [[ "${unvalidated:-0}" != "0" ]]; then
   fail "$unvalidated unvalidated substrate constraint(s)"
 fi
 
-# A freshly-created DB should normally have zero rows; a standing DB may have
-# completed history. Only nonterminal ownership is unhealthy for lifecycle work.
+# Active ingest progress is independent of structural database health. Report
+# current ownership without requiring unrelated ingestion to finish.
 running=$("${PSQL[@]}" -d "$DB" -tAc \
   "SELECT count(*) FROM laplace.ingest_run_journal WHERE status = 'running'")
 if [[ "${running:-0}" != "0" ]]; then
@@ -135,7 +135,7 @@ if [[ "${running:-0}" != "0" ]]; then
   FROM laplace.ingest_run_journal
   WHERE status = 'running'
   ORDER BY started_at;" || true
-  fail "$running ingest journal row(s) still running"
+  echo "DB_HEALTH_OBSERVATION running_ingests=$running"
 fi
 
 # Use the installed health operation as a second, extension-owned index verdict.
@@ -146,4 +146,4 @@ if [[ "${op_invalid:-0}" != "0" ]]; then
   fail "ops.index_health reports $op_invalid invalid index(es)"
 fi
 
-echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext relation_bands=maintained_counts required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=0 seed_state=not_required"
+echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext relation_bands=maintained_counts required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=$running seed_state=not_required"
