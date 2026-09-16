@@ -246,6 +246,8 @@ jobs:
             "$diagnostic_dir/observe.c" "$diagnostic_dir/intent_stage.o" \
             -Wl,--gc-sections -Wl,--wrap=memcpy -Wl,--wrap=malloc -Wl,--wrap=calloc \
             -Wl,--wrap=realloc -Wl,--wrap=free -o "$diagnostic_dir/observe" 2>&1 | tee "$diagnostic_dir/compile-diagnostic.log"
+          nm -u "$diagnostic_dir/intent_stage.o" | tee "$diagnostic_dir/undefined-symbols.txt"
+          objdump -dr --disassemble=buf_reserve "$diagnostic_dir/intent_stage.o" | tee "$diagnostic_dir/buf-reserve-assembly.txt"
           timeout 30s "$diagnostic_dir/observe" | tee "$diagnostic_dir/result.jsonl"
           sha256sum engine/core/src/intent_stage.c "$diagnostic_dir/observe.c" "$diagnostic_dir/observe" "$diagnostic_dir/result.jsonl" | tee "$diagnostic_dir/sha256.txt"
           git diff --exit-code
