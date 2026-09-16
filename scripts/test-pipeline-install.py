@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import shutil
+import sys
 import tempfile
 import unittest
 
@@ -271,12 +273,97 @@ sudo() {
   echo "$*" >> "$CALLS"
   if [[ "$*" == *"start laplace-api"* ]]; then return "${START_RC:-0}"; fi
 }
-preloaded_so_digest() { if [[ -f installed ]]; then echo new; else echo old; fi; }
+postgresql_restart_required() {
+  if [[ -f pg-restarted ]]; then return "${PG_AFTER_RC:-1}"; fi
+  return "${PG_RESTART_RC:-1}"
+}
+preloaded_so_digest() {
+  if [[ "${SAME_PRELOAD:-0}" == 1 ]]; then echo same;
+  elif [[ -f installed ]]; then echo new; else echo old; fi
+}
 cmake() { echo install >> "$CALLS"; touch installed; return "${COPY_RC:-0}"; }
 psql() { echo probe >> "$CALLS"; return "${PROBE_RC:-0}"; }
-restart_postgres() { echo bounce >> "$CALLS"; }
+restart_postgres() { echo bounce >> "$CALLS"; touch pg-restarted; return "${BOUNCE_RC:-0}"; }
 phase_install
 ''', **env)
+
+
+    def test_server_release_mismatch_cannot_skip_and_restarts_unchanged_preloads(self):
+        result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="0",
+                            PG_RESTART_RC="0", SAME_PRELOAD="1")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        calls = self.calls().splitlines()
+        self.assertEqual(1, calls.count("install"))
+        self.assertEqual(1, calls.count("bounce"))
+        self.assertLess(calls.index("install"), calls.index("bounce"))
+        self.assertLess(calls.index("bounce"), calls.index("stamp"))
+
+    def test_server_release_read_failure_refuses_install_and_service_actions(self):
+        result = self.phase(PG_RESTART_RC="2")
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("", self.calls())
+
+    def test_failed_restart_or_stale_readback_never_stamps_activation(self):
+        for error in ({"BOUNCE_RC": "27"}, {"PG_AFTER_RC": "0"}, {"PG_AFTER_RC": "2"}):
+            with self.subTest(error=error):
+                (self.base / "calls").write_text("")
+                (self.base / "installed").unlink(missing_ok=True)
+                (self.base / "pg-restarted").unlink(missing_ok=True)
+                result = self.phase(PG_RESTART_RC="0", SAME_PRELOAD="1", **error)
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("bounce", self.calls())
+                self.assertIn("start laplace-api", self.calls())
+                self.assertNotIn("stamp", self.calls())
+
+    def test_running_release_comparison_uses_actual_helper_and_refuses_bad_observation(self):
+        binary_root = self.base / "pg/bin"
+        binary_root.mkdir(parents=True)
+        for name, label in (("postgres", "postgres (PostgreSQL)"), ("pg_config", "PostgreSQL")):
+            executable = binary_root / name
+            executable.write_text("#!/bin/sh\nprintf '%s\\n' '" + label + " 18.6'\n")
+            executable.chmod(0o755)
+        script = function("postgresql_restart_required") + r'''
+psql() {
+  [[ "$*" == "-d postgres -U laplace_admin -tAc SHOW server_version_num" ]] || return 98
+  [[ "${READ_FAIL:-0}" == 0 ]] || return 29
+  printf '%s\n' "$RUNNING_VERSION"
+}
+if postgresql_restart_required; then exit 0; else exit $?; fi
+'''
+        for version, expected in (("180003", 0), ("180006", 1), ("", 2), ("invalid", 2)):
+            with self.subTest(version=version):
+                result = self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
+                                        RUNNING_VERSION=version)
+                self.assertEqual(expected, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(2, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
+                                          RUNNING_VERSION="180006", READ_FAIL="1").returncode)
+        executable = binary_root / "postgres"
+        executable.write_text(executable.read_text().replace("18.6", "18.3"))
+        self.assertEqual(2, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
+                                          RUNNING_VERSION="180003").returncode)
+
+    def test_native_and_runtime_fingerprints_change_with_tracked_postgresql_release(self):
+        source = self.base / "fingerprint-source"
+        (source / "scripts/lib").mkdir(parents=True)
+        (source / "deploy").mkdir()
+        shutil.copy2(ROOT / "scripts/lib/fp.sh", source / "scripts/lib/fp.sh")
+        release = source / "deploy/postgresql-release.json"
+        release.write_bytes((ROOT / "deploy/postgresql-release.json").read_bytes())
+        subprocess.run(["git", "init", "--quiet", str(source)], check=True, timeout=10)
+        subprocess.run(["git", "-C", str(source), "add", "."], check=True, timeout=10)
+        body = 'source "$ROOT/scripts/lib/fp.sh"\nfp_native\nfp_runtime\n'
+        env = {"ROOT": str(source), "LAPLACE_CHESS_OPENINGS": str(source / "absent-openings")}
+        before = self.run_shell(body, **env)
+        self.assertEqual(0, before.returncode, before.stderr)
+        self.assertEqual(before.stdout, self.run_shell(body, **env).stdout)
+        release.write_text(release.read_text().replace('"18.6"', '"18.7"'))
+        after = self.run_shell(body, **env)
+        self.assertEqual(0, after.returncode, after.stderr)
+        old_hashes, new_hashes = before.stdout.splitlines(), after.stdout.splitlines()
+        self.assertEqual(2, len(old_hashes))
+        self.assertEqual(2, len(new_hashes))
+        for old, new in zip(old_hashes, new_hashes):
+            self.assertNotEqual(old, new)
 
     def test_matching_source_with_changed_install_reinstalls(self):
         result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="1")

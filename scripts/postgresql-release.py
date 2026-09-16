@@ -172,11 +172,12 @@ def verify_archive(path: Path, selected: dict) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("select-pin", "source", "installed", "archive"))
+    parser.add_argument("mode", choices=("select-pin", "source", "installed", "restart-needed", "archive"))
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--external", type=Path, default=Path(os.environ.get("LAPLACE_EXTERNAL", "/build/external")))
     parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_PG_PREFIX", "/opt/laplace/pgsql-18")))
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--server-version-num", help="actual SHOW server_version_num read by the activation owner")
     args = parser.parse_args(argv)
     try:
         selected = contract(args.contract)
@@ -184,8 +185,19 @@ def main(argv: list[str] | None = None) -> int:
             result = {"pin_changed": select_pin(args.external / "PINS.tsv", selected)}
         elif args.mode == "source":
             result = verify_source(args.external, selected)
-        elif args.mode == "installed":
+        elif args.mode in ("installed", "restart-needed"):
             result = verify_installed(args.prefix, selected)
+            if args.mode == "restart-needed":
+                observed = args.server_version_num or ""
+                if not re.fullmatch(r"[1-9][0-9]{4,7}", observed):
+                    raise ValueError("invalid running server_version_num observation")
+                major, minor = (int(part) for part in selected["version"].split("."))
+                expected = major * 10000 + minor
+                result.update(running_server_version_num=int(observed),
+                              selected_server_version_num=expected,
+                              restart_required=int(observed) != expected,
+                              running_server_checked=True,
+                              observation_owner="pipeline SHOW server_version_num")
         else:
             if args.archive is None:
                 parser.error("archive mode requires --archive")
@@ -193,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"schema": "laplace.postgresql-selection/v1",
                           "version": selected["version"], "mode": args.mode, **result},
                          sort_keys=True))
-        return 0
+        # Distinguish a valid observed mismatch from a failed read/installation.
+        return 3 if result.get("restart_required") else 0
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print("PostgreSQL selection failed: " + str(exc), file=sys.stderr)
         return 1
