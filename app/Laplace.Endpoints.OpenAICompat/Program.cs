@@ -93,11 +93,9 @@ forwardedHeaders.KnownProxies.Add(IPAddress.Loopback);
 forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
 app.UseForwardedHeaders(forwardedHeaders);
 
-app.UseRateLimiter();
-app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseMiddleware<ExceptionEnvelopeMiddleware>();
-app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
-
+// Static assets never need a browser authentication ticket. Serve them before
+// cookie authentication so one page load does not turn every hashed JS/CSS/font
+// request into a PostgreSQL web-session lookup.
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -110,6 +108,12 @@ app.UseStaticFiles(new StaticFileOptions
     }
 });
 
+app.UseRateLimiter();
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<ExceptionEnvelopeMiddleware>();
+app.UseAuthentication();
+app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
+
 app.MapPrometheusScrapingEndpoint();
 app.MapOpenApi();
 app.MapCoreEndpoints();
@@ -121,6 +125,7 @@ app.MapOpenAiCompatEndpoints();
 app.MapFoundryEndpoints();
 app.MapBillingEndpoints();
 app.MapBillingIdentityEndpoints();
+app.MapIdentityEndpoints();
 app.MapChessEndpoints();
 app.MapChessPlayerModelEndpoints();
 app.MapChessReadEndpoints();

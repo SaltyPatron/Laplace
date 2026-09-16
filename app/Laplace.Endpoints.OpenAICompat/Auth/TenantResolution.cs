@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat.Auth;
@@ -18,13 +19,18 @@ public interface ITenantResolver
 
 internal sealed class LaplaceAuthOptions
 {
-    /// <summary>"header" trusts X-Laplace-Tenant (local/dev); "key" requires a valid API key on /v1/*.</summary>
+    /// <summary>
+    /// "header" trusts X-Laplace-Tenant for local development; "key" and
+    /// "identity" require a Laplace API key or authenticated browser session.
+    /// </summary>
     public string Mode { get; set; } = "header";
 
     /// <summary>Shared secret for explicit host/operator endpoints.</summary>
     public string? OperatorToken { get; set; }
 
     public bool KeyMode => string.Equals(Mode, "key", StringComparison.OrdinalIgnoreCase);
+    public bool IdentityMode => string.Equals(Mode, "identity", StringComparison.OrdinalIgnoreCase);
+    public bool RequiresIdentity => KeyMode || IdentityMode;
 }
 
 internal sealed class HeaderTenantResolver : ITenantResolver
@@ -68,7 +74,23 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
     {
         var presented = PresentedKey(context.Request);
         if (presented is null)
+        {
+            var principal = context.User;
+            var tenant = principal.FindFirstValue(LaplaceClaimTypes.Tenant);
+            var user = principal.FindFirstValue(LaplaceClaimTypes.User);
+            if (principal.Identity?.IsAuthenticated == true
+                && !string.IsNullOrWhiteSpace(tenant)
+                && !string.IsNullOrWhiteSpace(user))
+            {
+                var claims = new Dictionary<string, string>
+                {
+                    ["user_id"] = user,
+                    ["provider"] = principal.FindFirstValue(LaplaceClaimTypes.Provider) ?? "oidc"
+                };
+                return new TenantContext(tenant, "browser", claims);
+            }
             return await _header.ResolveAsync(context, ct);
+        }
 
         var record = await _apiKeys.ValidateAsync(presented, ct);
         if (record is null)
@@ -112,7 +134,8 @@ internal sealed class ApiKeyEnforcementMiddleware
         "/v1/billing/quotes",
         "/v1/billing/keys/redeem",
         "/v1/billing/webhooks",
-        "/v1/billing/operator"
+        "/v1/billing/operator",
+        "/v1/auth"
     };
 
     private readonly RequestDelegate _next;
@@ -174,12 +197,16 @@ internal sealed class ApiKeyEnforcementMiddleware
             return;
         }
 
-        if (_options.KeyMode &&
+        if (_options.RequiresIdentity &&
             !string.Equals(tenant.AuthKind, "api_key", StringComparison.Ordinal) &&
-            !AnonymousPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+            !string.Equals(tenant.AuthKind, "browser", StringComparison.Ordinal) &&
+            !AnonymousPrefixes.Any(prefix => IsUnder(path, prefix)))
         {
-            await Reject(context, "api_key_required",
-                "This endpoint requires an API key. Subscribe to a plan and redeem your checkout session at POST /v1/billing/keys/redeem.");
+            await Reject(context,
+                _options.KeyMode ? "api_key_required" : "authentication_required",
+                _options.KeyMode
+                    ? "This endpoint requires an API key or signed-in browser session. Subscribe to a plan and redeem your checkout session at POST /v1/billing/keys/redeem."
+                    : "This endpoint requires a signed-in browser session or Laplace API key.");
             return;
         }
 

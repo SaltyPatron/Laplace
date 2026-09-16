@@ -425,6 +425,40 @@ print("PHYSICALITY_WRITER_EXECUTION_OK selected=9 executed=9 passed=9 skipped=0 
 print("SESSION_PHYSICALITY_EXECUTION_OK selected=3 executed=3 passed=3 skipped=0 postgres=isolated")
 PY
 
+# The endpoint database tier is also excluded from the later managed profile.
+# Exercise the real identity store against its unchanged migration and the
+# branch-owned SQL catalog while this exact private postmaster is available.
+identity_database="${REGRESS_DB}_identity"
+identity_receipt="$managed_results/browser-identity.trx"
+rm -f -- "$identity_receipt"
+"$PG_PREFIX/bin/createdb" "$identity_database"
+"$PG_PREFIX/bin/psql" -X -v ON_ERROR_STOP=1 -d "$identity_database" \
+  -f "$ROOT/db/migrations/20260915000000_app_identity_sessions.sql" >/dev/null
+LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=$identity_database" \
+LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
+LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+  dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
+    -c Release --no-build --nologo --verbosity minimal \
+    --filter 'FullyQualifiedName=Laplace.Endpoints.OpenAICompat.Tests.BrowserIdentityTests.PostgresIdentityStorePersistsAccountSessionAndConversation' \
+    --logger 'trx;LogFileName=browser-identity.trx' \
+    --results-directory "$managed_results"
+python3 - "$identity_receipt" <<'PY_IDENTITY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+counters = root.find("{*}ResultSummary/{*}Counters")
+expected = {"total": "1", "executed": "1", "passed": "1", "failed": "0", "notExecuted": "0"}
+results = root.findall("{*}Results/{*}UnitTestResult")
+name = "Laplace.Endpoints.OpenAICompat.Tests.BrowserIdentityTests.PostgresIdentityStorePersistsAccountSessionAndConversation"
+if (counters is None or any(counters.get(key) != value for key, value in expected.items())
+        or len(results) != 1 or results[0].get("testName") != name
+        or results[0].get("outcome") != "Passed"):
+    raise SystemExit("private database proof did not execute and pass the exact identity store acceptance case")
+print("BROWSER_IDENTITY_EXECUTION_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
+PY_IDENTITY
+"$PG_PREFIX/bin/dropdb" "$identity_database"
+
 }
 
 prove_highway_recovery() {

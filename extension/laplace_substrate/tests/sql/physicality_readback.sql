@@ -34,6 +34,26 @@ INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
 SELECT p.root_id,p.tier,laplace.entity_type_id('Word'),s.source_id
 FROM physicality_readback_fixture.atoms p CROSS JOIN physicality_readback_fixture.source s WHERE p.ord=3
 ON CONFLICT DO NOTHING;
+-- A loaded floor resolves canonical atoms but does not prove their E rows are
+-- persisted in this fresh regression database. Declare this fixture's bounded
+-- printable-ASCII basis through the actual native floor owner; generated source
+-- and vocabulary stages intentionally do not redeclare tier-zero entities.
+CREATE TEMP TABLE descriptor_floor ON COMMIT DROP AS
+SELECT * FROM converse.text_root_placements(
+    ARRAY(SELECT chr(cp) FROM generate_series(33,126) cp ORDER BY cp));
+DO $floor$
+BEGIN
+    IF (SELECT count(*) FROM descriptor_floor)<>94
+       OR EXISTS(SELECT FROM descriptor_floor WHERE tier<>0) THEN
+        RAISE EXCEPTION 'fixture basis did not resolve to actual native floor atoms';
+    END IF;
+END
+$floor$;
+INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+SELECT root_id,0,laplace.entity_type_id('Codepoint'),
+       realize.canonical_id('substrate/source/UnicodeDecomposer/v1')
+FROM descriptor_floor
+ON CONFLICT DO NOTHING;
 -- Exact native A/B/AB content and geometry above are the fixture's provider.
 -- The second body is an explicit alternate observation, not composer output.
 -- Native COPY geometry fields use EWKB Z/M flag bits. ST_AsBinary emits ISO
@@ -89,8 +109,23 @@ $adapter$;
 DO $deposit$
 DECLARE a record; receipt bigint[]; replay bigint[];
     counts_before bigint[]; counts_after bigint[]; consensus_before jsonb; consensus_after jsonb;
+    refused boolean:=false; message text;
 BEGIN
     SELECT * INTO STRICT a FROM physicality_readback_fixture.admitted;
+    -- The floor cache must not silently substitute for a missing persisted E.
+    -- Subtransaction rollback restores A before the successful deposit below.
+    BEGIN
+        DELETE FROM laplace.entities
+        WHERE id=(SELECT root_id FROM physicality_readback_fixture.atoms WHERE ord=1);
+        PERFORM pg_temp.deposit_generated(a.entities,a.physicalities,a.attestations,
+            100000,268435456,10000000,1024);
+    EXCEPTION WHEN foreign_key_violation THEN
+        GET STACKED DIAGNOSTICS message=MESSAGE_TEXT;
+        IF message<>'generated stage sink: referenced entity is not admitted' THEN RAISE; END IF;
+        refused:=true;
+    END;
+    IF NOT refused THEN RAISE EXCEPTION 'sink accepted a floor reference without its persisted entity'; END IF;
+    RAISE NOTICE 'physicality readback: loaded floor does not replace a missing persisted entity';
     receipt:=pg_temp.deposit_generated(a.entities,a.physicalities,a.attestations,100000,268435456,10000000,1024);
     IF receipt[2]<=0 OR receipt[11]>268435456 OR receipt[12]>1024 THEN
         RAISE EXCEPTION 'real generated-stage deposition receipt is incomplete';

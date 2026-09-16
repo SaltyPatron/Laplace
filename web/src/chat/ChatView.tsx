@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   Banner,
@@ -8,7 +8,7 @@ import {
   TextArea,
 } from '@ui';
 
-import { apiPost, PaymentRequiredError, type PreflightQuoteResponse, type ChatCompletionResponse } from '../api/client';
+import { apiGet, apiPost, PaymentRequiredError, type PreflightQuoteResponse, type ChatCompletionResponse } from '../api/client';
 
 import { streamChat } from '../api/sse';
 
@@ -25,7 +25,7 @@ const asOptionalNum = (value: string | number | null | undefined): number | unde
 
 export function ChatView() {
 
-  const { tenant, quoteId, model, messages, pendingQuote, exploreSeedPrompt } = useAppStore();
+  const { tenant, quoteId, model, session, messages, pendingQuote, exploreSeedPrompt, authUser } = useAppStore();
 
   const { setQuoteId, pushMessage, updateLastAssistant, setPendingQuote, setExploreSeedPrompt, clearConversation } = useAppStore();
 
@@ -37,9 +37,36 @@ export function ChatView() {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  const [conversations, setConversations] = useState<{
+    sessionKey: string;
+    title?: string | null;
+    createdAt: string;
+    lastTurnAt: string;
+  }[]>([]);
+
+  const loadConversations = useCallback(async () => {
+    if (!authUser) {
+      setConversations([]);
+      return;
+    }
+    try {
+      const result = await apiGet<{ conversations: {
+        sessionKey: string;
+        title?: string | null;
+        createdAt: string;
+        lastTurnAt: string;
+      }[] }>('/v1/auth/conversations');
+      setConversations(result.conversations ?? []);
+    } catch {
+      setConversations([]);
+    }
+  }, [authUser]);
+
 
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  useEffect(() => { void loadConversations(); }, [loadConversations]);
 
 
 
@@ -229,6 +256,8 @@ export function ChatView() {
 
       setBusy(false);
 
+      void loadConversations();
+
     }
 
   }
@@ -333,7 +362,27 @@ export function ChatView() {
             follow physical trajectories, then update the frontier after each selection.
           </Muted>
 
-          <Button variant="ghost" onClick={clearConversation}>Clear</Button>
+          {authUser && conversations.length > 0 && (
+            <label className={styles.sessions}>
+              <span>Session</span>
+              <select
+                value={session ?? ''}
+                onChange={(event) => {
+                  clearConversation();
+                  if (event.target.value) useAppStore.getState().setSession(event.target.value);
+                }}
+              >
+                <option value="">New conversation</option>
+                {conversations.map((conversation) => (
+                  <option key={conversation.sessionKey} value={conversation.sessionKey}>
+                    {conversation.title || conversation.sessionKey}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <Button variant="ghost" onClick={clearConversation}>New</Button>
 
         </div>
 

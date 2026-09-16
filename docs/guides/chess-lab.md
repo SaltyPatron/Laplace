@@ -61,9 +61,10 @@ Manual cutechess-cli invocation (every `key=value` is its own token, and
 `proto=uci` is required — cutechess defaults to xboard):
 
 ```sh
+stockfish_exe="$(python3 scripts/install-stockfish.py --print-path)"
 cutechess-cli \
   -engine name=Laplace cmd=/path/to/laplace-uci proto=uci \
-  -engine name=Stockfish cmd=/opt/laplace/bin/stockfish proto=uci \
+  -engine name=Stockfish cmd="$stockfish_exe" proto=uci \
       option.UCI_LimitStrength=true option.UCI_Elo=2000 \
   -each st=1 timemargin=2000 \
   -rounds 10 -pgnout games.pgn -debug all

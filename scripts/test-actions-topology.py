@@ -707,6 +707,48 @@ run_recorded_chess_benchmark() { step recorded-chess; }
                     root.find("ResultSummary/Counters").set("executed", "6")
                 check(root, False)
 
+    def test_private_database_executes_the_endpoint_identity_store(self):
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
+        name = "Laplace.Endpoints.OpenAICompat.Tests.BrowserIdentityTests.PostgresIdentityStorePersistsAccountSessionAndConversation"
+        self.assertIn('identity_database="${REGRESS_DB}_identity"', source)
+        self.assertIn('"$PG_PREFIX/bin/createdb" "$identity_database"', source)
+        self.assertIn('-f "$ROOT/db/migrations/20260915000000_app_identity_sessions.sql"', source)
+        self.assertIn('LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=$identity_database"', source)
+        self.assertIn("--filter 'FullyQualifiedName=" + name + "'", source)
+        self.assertIn('rm -f -- "$identity_receipt"', source)
+        self.assertIn('"$PG_PREFIX/bin/dropdb" "$identity_database"', source)
+        validator = source.split("<<'PY_IDENTITY'\n", 1)[1].split("\nPY_IDENTITY\n", 1)[0]
+
+        def receipt():
+            root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
+            results = ET.SubElement(root, "Results")
+            ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
+            summary = ET.SubElement(root, "ResultSummary")
+            ET.SubElement(summary, "Counters", total="1", executed="1", passed="1",
+                          failed="0", notExecuted="0")
+            return root
+
+        for corruption in (None, "missing", "unrelated", "duplicate", "skipped", "failed", "counter"):
+            with self.subTest(corruption=corruption):
+                root = receipt()
+                results = root.find("Results")
+                if corruption == "missing":
+                    results.remove(results[0])
+                elif corruption == "unrelated":
+                    results[0].set("testName", name + "Unrelated")
+                elif corruption == "duplicate":
+                    ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
+                elif corruption in ("skipped", "failed"):
+                    results[0].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
+                elif corruption == "counter":
+                    root.find("ResultSummary/Counters").set("executed", "0")
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "identity.trx"
+                    ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+                    result = subprocess.run([sys.executable, "-", str(path)], input=validator,
+                                            text=True, capture_output=True)
+                self.assertEqual(result.returncode == 0, corruption is None, result.stdout + result.stderr)
+
     def test_private_native_database_requires_built_physicality_fixtures_in_order(self):
         source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
         self.assertIn('ctest --test-dir "$BUILD" --show-only=json-v1 -L regress > "$native_selection"', source)
