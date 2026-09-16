@@ -96,3 +96,29 @@ Fixture data is never imported into the application entry point. These tests
 establish component behavior, not native source admission, live authorization,
 whole-product completeness or installed performance. Failed browser traces are
 retained at the reported temporary path.
+
+## Installed-operation forms
+
+`GET /v1/ops/catalog` projects the existing `ops.api` result through the same
+`InstalledOpInvoker.ParseSignature`, `IsWritable` and `IsDestructive` used at
+execution. It neither widens the write allow-list nor supplies authorization.
+The Operator warning about absent authentication still applies.
+
+`OperationFields` consumes this typed parameter metadata. Default omission,
+explicit SQL NULL and an empty supplied value stay separate. Exact text,
+integer/decimal digits and JSON input are sent without numeric round trips;
+array items are explicitly strings or null. Server casts and overload selection
+remain authoritative. Advanced JSON retains the original submitted JSON text.
+
+The operation browser searches the server catalog, pages the returned signatures,
+shows selection and truncation, and uses the existing named POST operation.
+State-changing operations require review of the exact submitted inputs. There
+is no automatic effect retry. An interrupted transport does not prove whether a
+write ran; inspect current state before another explicit attempt. Return tables
+include keys from every returned row and distinguish missing fields from NULL.
+This is a general developer/admin operation form, not completion of specialized
+source management, onboarding, security or the entire data workspace.
+
+Projection tests use the real invoker parser/policy. Browser fixtures also
+exercise actual Query, Billing and OpConsole with substituted HTTP responses.
+Their fixtures cannot certify installed backend behavior or operation authority.

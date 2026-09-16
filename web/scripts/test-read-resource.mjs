@@ -1,11 +1,18 @@
 // Executes the production transport/read controller, not a copied implementation.
 // HTTP is substituted only at fetch; these tests do not claim native/database proof.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
+// Identify the actual bytes executed by the runner; a checkout label alone is
+// not proof that a reused work directory contains this publication's files.
+for (const path of ['test-read-resource.mjs', '../src/ui/lib/readResource.ts', '../src/ui/hooks/useReadResource.ts', '../src/ui/composites/Field/Field.tsx', '../src/ui/index.ts']) {
+  const bytes = await readFile(new URL(path, import.meta.url));
+  console.log(`WORKSPACE_TEST_INPUT ${path} sha256=${createHash('sha256').update(bytes).digest('hex')}`);
+}
 async function load(relative) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8');
   const output = ts.transpileModule(source, {
@@ -16,7 +23,7 @@ async function load(relative) {
   return import(`data:text/javascript;base64,${Buffer.from(output.outputText).toString('base64')}`);
 }
 const { ReadResource } = await load('../src/ui/lib/readResource.ts');
-const { apiGet, apiPost, apiPutText, ApiError, PaymentRequiredError } = await load('../src/api/client.ts');
+const { apiGet, apiPost, apiPostJson, apiPutText, ApiError, PaymentRequiredError } = await load('../src/api/client.ts');
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -140,4 +147,33 @@ test('network and write failure are never silently retried', async () => {
     await assert.rejects(apiPost('/write', {}), /network down/);
   });
   assert.equal(calls, 1);
+});
+
+const { operationArguments, initialOperationDraft } = await load('../src/ui/lib/operationFields.ts');
+test('operation fields preserve exact scalar integers, whitespace and JSON digits', () => {
+  const parameters = [{ name: 'p_id', type: 'bigint', optional: false }, { name: 'p_text', type: 'text', optional: false }, { name: 'p_json', type: 'jsonb', optional: false }];
+  const args = operationArguments(parameters, {
+    p_id: { mode: 'value', value: '9223372036854775807' }, p_text: { mode: 'value', value: ' King ' },
+    p_json: { mode: 'value', value: '{"x":12345678901234567890,"n":0.12345678901234567890}' },
+  });
+  assert.equal(args.p_id, '9223372036854775807'); assert.equal(args.p_text, ' King ');
+  assert.equal(args.p_json, '{"x":12345678901234567890,"n":0.12345678901234567890}');
+});
+test('operation fields distinguish omitted default, explicit NULL and empty text', () => {
+  const parameters = ['default', 'null', 'empty'].map((name) => ({ name, type: 'text', optional: true }));
+  const draft = initialOperationDraft(parameters); draft.null.mode = 'null'; draft.empty.mode = 'value';
+  const args = operationArguments(parameters, draft);
+  assert.equal('default' in args, false); assert.equal(args.null, null); assert.equal(args.empty, '');
+});
+test('array fields preserve quoted elements, null and wide digits without numeric coercion', () => {
+  const parameters = [{ name: 'p_values', type: 'text[]', optional: false }];
+  const args = operationArguments(parameters, { p_values: { mode: 'value', value: '["a,b",null,"NULL","9223372036854775807"]' } });
+  assert.deepEqual(args.p_values, ['a,b', null, 'NULL', '9223372036854775807']);
+  assert.throws(() => operationArguments(parameters, { p_values: { mode: 'value', value: '[9223372036854775807]' } }), /Quote numeric/);
+});
+test('raw JSON transport retains every authored numeric literal', async () => {
+  const body = '{"name":"ops.example","args":{"id":9223372036854775807,"n":0.12345678901234567890},"max_rows":0}';
+  await withFetch(async (_path, init) => { assert.equal(init.body, body); return Response.json({ rows: [] }); }, async () => {
+    await apiPostJson('/v1/op', body);
+  });
 });

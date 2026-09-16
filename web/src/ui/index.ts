@@ -50,3 +50,6 @@ export { Stack, type StackProps } from './layout/Stack';
 export { AppHeader, type AppHeaderProps } from './layout/AppHeader';
 export { TenantField, type TenantFieldProps } from './layout/TenantField';
 export { NavTabs, type NavTab, type NavTabsProps } from './layout/NavTabs';
+
+export { OperationFields, type OperationFieldsProps } from './composites/OperationFields/OperationFields';
+export { initialOperationDraft, operationArguments, type OperationParameter, type OperationDraft } from './lib/operationFields';

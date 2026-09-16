@@ -4,6 +4,11 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Button, Field, Input, Modal, NavTabs, Panel, ReadStatus, TooltipProvider, useReadResource } from '../src/ui';
 import { apiGet } from '../src/api/client';
+import { QueryConsole } from '../src/query/QueryConsole';
+import { BillingView } from '../src/billing/BillingView';
+import { Activity } from '../src/admin/Activity';
+import { OpConsole } from '../src/admin/OpConsole';
+import { useAppStore } from '../src/store';
 import { useSectionParam } from '../src/layout/useSectionParam';
 import '../src/ui/layers.css';
 import '../src/ui/theme.css';
@@ -51,4 +56,12 @@ function Fixture() {
     <Panel title="Other workspace" expandable><Input aria-label="Other draft" defaultValue="unchanged" /></Panel>
   </main>;
 }
-createRoot(document.getElementById('root')!).render(<StrictMode><TooltipProvider><BrowserRouter><Fixture /></BrowserRouter></TooltipProvider></StrictMode>);
+function Surface() {
+  const view = new URLSearchParams(location.search).get('view');
+  if (view === 'query') return <QueryConsole />;
+  if (view === 'billing') return <><Button onClick={() => useAppStore.getState().setTenant('other-scope')}>Change tenant</Button><BillingView /></>;
+  if (view === 'activity') return <Activity />;
+  if (view === 'operations') return <OpConsole />;
+  return <Fixture />;
+}
+createRoot(document.getElementById('root')!).render(<StrictMode><TooltipProvider><BrowserRouter><Surface /></BrowserRouter></TooltipProvider></StrictMode>);

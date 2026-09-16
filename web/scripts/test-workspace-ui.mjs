@@ -96,8 +96,93 @@ try {
     assert.ok(box.width > width * 0.9 && box.x >= 0 && box.x + box.width <= width + 1);
     await page.keyboard.press('Escape');
   }
+  // Exercise the actual consumers as well as the shared control composition.
+  const bodies = [];
+  let failQuery = false, heldUsage;
+  const invocations = [];
+  await page.route('**/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/v1/ops/catalog') return route.fulfill({ json: { object: 'op.catalog', truncated_at: null, operations: [
+      { name: 'ops.fixture_read', args: 'p_id bigint, p_text text, p_optional text DEFAULT NULL', returns: 'TABLE(answer text)', kind: 'function', writable: false, destructive: false,
+        parameters: [{ name: 'p_id', type: 'bigint', optional: false }, { name: 'p_text', type: 'text', optional: false }, { name: 'p_optional', type: 'text', optional: true }] },
+      { name: 'ops.fixture_write', args: '', returns: 'TABLE(changed boolean)', kind: 'function', writable: true, destructive: false, parameters: [] },
+    ] } });
+    if (path === '/v1/op') {
+      invocations.push(route.request().postData());
+      return route.fulfill({ json: { object: 'op.result', name: route.request().postDataJSON().name, rows: [{ answer: 'Operation fixture result' }], truncated_at: null } });
+    }
+    if (path === '/v1/query/shapes') return route.fulfill({ json: { shapes: [
+      { shape: 'describe', summary: 'Fixture description read', needs_topic2: false, needs_type: false, accepts_lang: true },
+      { shape: 'path', summary: 'Fixture two-topic read', needs_topic2: true, needs_type: false, accepts_lang: false },
+    ] } });
+    if (path === '/v1/query') {
+      const body = route.request().postDataJSON(); bodies.push(body);
+      if (failQuery) return route.fulfill({ status: 503, json: { error: { message: 'Fixture query unavailable' } } });
+      return route.fulfill({ json: { shape: body.shape, topic_id: 'a'.repeat(32), topic_label: body.topic, rows: [{ reply: 'Fixture witnessed result', eff_mu: 1, witnesses: 1 }] } });
+    }
+    if (path === '/v1/billing/plans') return route.fulfill({ json: { data: [{ plan_id: 'fixture', name: 'Fixture plan', monthly_price_cents: 1255, description: 'UI-only fixture', monthly_credits: {} }] } });
+    if (path === '/v1/billing/catalog') return route.fulfill({ status: 503, json: { error: { message: 'Fixture catalog unavailable' } } });
+    if (path === '/v1/billing/usage') { heldUsage = route; return; }
+    // No unexpected fixture action may reach a real server.
+    return route.fulfill({ status: 501, json: { error: { message: `Unprovided fixture route: ${path}` } } });
+  });
+  await page.goto(`${base}/__workspace_test?view=query`);
+  await page.getByRole('textbox', { name: 'topic', exact: true }).fill(' King ');
+  await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Run query', exact: true }).click();
+  await expect(page.getByText('Fixture witnessed result', { exact: true })).toBeVisible();
+  assert.equal(bodies.at(-1).topic, ' King ');
+  const callsBeforeExpand = bodies.length;
+  await page.getByRole('button', { name: 'Expand Result', exact: true }).click();
+  await page.keyboard.press('Escape'); assert.equal(bodies.length, callsBeforeExpand);
+  failQuery = true;
+  await page.getByRole('button', { name: 'Run query', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Fixture query unavailable');
+  await expect(page.getByText('Fixture witnessed result', { exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'shape', exact: true }).selectOption('path');
+  await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeDisabled();
+  await page.getByRole('textbox', { name: 'second topic', exact: true }).fill('second');
+  await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeEnabled();
+
+  await page.goto(`${base}/__workspace_test?view=billing`);
+  await expect(page.getByRole('heading', { name: 'Fixture plan', exact: true })).toBeVisible();
+  await expect(page.getByText('$12.55/mo', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Fixture catalog unavailable');
+  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toHaveCount(0);
+  await expect.poll(() => heldUsage !== undefined).toBe(true);
+  await heldUsage.fulfill({ json: { entries: [], total_amount_cents: 0 } });
+  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toBeVisible();
+  heldUsage = undefined;
+  await page.getByRole('button', { name: 'Change tenant', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Usage — other-scope', exact: true })).toBeVisible();
+  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toHaveCount(0);
+  await expect.poll(() => heldUsage !== undefined).toBe(true);
+  await heldUsage.fulfill({ status: 503, json: { error: { message: 'Fixture usage unavailable' } } });
+  await expect(page.getByRole('alert').filter({ hasText: 'Fixture usage unavailable' })).toBeVisible();
+  await expect(page.getByText('No usage recorded for this tenant.', { exact: true })).toHaveCount(0);
+  await page.goto(`${base}/__workspace_test?view=operations`);
+  await page.getByRole('button', { name: /^ops\.fixture_read/ }).click();
+  await page.getByRole('textbox', { name: 'p_id', exact: true }).fill('9223372036854775807');
+  await page.getByRole('textbox', { name: 'p_text', exact: true }).fill(' King ');
+  await page.getByRole('button', { name: 'Run operation', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Operation result' })).toContainText('Operation fixture result');
+  assert.deepEqual(JSON.parse(invocations.at(-1)).args, { p_id: '9223372036854775807', p_text: ' King ' });
+  await page.getByRole('combobox', { name: 'p_optional — input mode', exact: true }).selectOption('null');
+  await page.getByRole('button', { name: 'Run operation', exact: true }).click();
+  await expect.poll(() => JSON.parse(invocations.at(-1)).args.p_optional).toBe(null);
+  await page.getByRole('button', { name: /^ops\.fixture_write/ }).click();
+  const beforeReview = invocations.length;
+  await page.getByRole('button', { name: 'Review operation', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Confirm state-changing operation', exact: true })).toBeVisible();
+  assert.equal(invocations.length, beforeReview, 'review must not execute a write');
+  await page.getByRole('button', { name: 'Go back', exact: true }).click();
+  assert.equal(invocations.length, beforeReview, 'dismissed confirmation must not execute');
+  await page.getByRole('button', { name: 'Review operation', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm and run', exact: true }).click();
+  await expect.poll(() => invocations.length).toBe(beforeReview + 1);
+  assert.equal(JSON.parse(invocations.at(-1)).name, 'ops.fixture_write');
   assert.deepEqual(errors, []);
-  console.log('WORKSPACE_UI_OK scope fencing; non-overlapping polling; independent panes; URL/back/reload; exact accessible fields; disabled activation; retained DOM/editor; nested modal focus/Escape; four viewport widths');
+  console.log('WORKSPACE_UI_OK scope fencing; non-overlapping polling; independent panes; URL/back/reload; exact accessible fields; disabled activation; retained DOM/editor; nested modal focus/Escape; four viewport widths; actual Query exact submission/failure retention; actual Billing independent/failed/empty/tenant states; actual operation catalog/exact parameters/default/null/write confirmation');
   passed = true;
 } finally {
   if (context) await context.tracing.stop({ path: join(artifacts, 'trace.zip') });

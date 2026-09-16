@@ -84,3 +84,8 @@ export function apiPutText<T>(path: string, body: string, opts: ApiOptions = {})
 export function apiPost<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
   return request<T>(path, { method: 'POST', body: JSON.stringify(payload) }, opts);
 }
+
+/** Send an already formed JSON request without rounding its numeric literals. */
+export function apiPostJson<T>(path: string, json: string, opts: ApiOptions = {}): Promise<T> {
+  return request<T>(path, { method: 'POST', body: json }, opts);
+}
