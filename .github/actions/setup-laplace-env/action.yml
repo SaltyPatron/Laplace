@@ -1,7 +1,11 @@
 name: Set up Laplace build/runtime env
-description: Export the installed toolchain and runtime environment for one job.
+description: Export runtime environment and, only when requested, the installed CMake tool.
 
 inputs:
+  use_cmake:
+    description: "resolve the pinned CMake tool for a build-capable job"
+    required: false
+    default: "true"
   provision_tools:
     description: "allow this explicit operator job to install the pinned CMake tool"
     required: false
@@ -10,7 +14,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Export installed toolchain and runtime environment
+    - name: Export runtime environment
       shell: bash
       run: |
         set -euo pipefail
@@ -18,18 +22,6 @@ runs:
         source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
         set -u
         printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-
-        args=(
-          --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake"
-          --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake"
-        )
-        if [[ '${{ inputs.provision_tools }}' == true ]]; then
-          args+=(--ensure)
-        fi
-        cmake_bin=$(python3 scripts/provision-cmake.py "${args[@]}")
-        export PATH="$cmake_bin:$PATH"
-        echo "PATH=$PATH" >> "$GITHUB_ENV"
-
         echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
         echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_QUERY_DB=${LAPLACE_QUERY_DB:-laplace}" >> "$GITHUB_ENV"
@@ -38,9 +30,7 @@ runs:
         echo "UseSharedCompilation=false" >> "$GITHUB_ENV"
 
         nproc_n="$(nproc 2>/dev/null || echo 1)"
-        if [[ -z "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]]; then
-          echo "CMAKE_BUILD_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"
-        fi
+        [[ -n "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]] || echo "CMAKE_BUILD_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"
         if [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
           if [[ "${LAPLACE_TEST_SERIAL:-}" == 1 ]]; then
             echo "CTEST_PARALLEL_LEVEL=1" >> "$GITHUB_ENV"
@@ -48,3 +38,18 @@ runs:
             echo "CTEST_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"
           fi
         fi
+
+    - name: Select build tool
+      if: inputs.use_cmake == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        args=(
+          --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake"
+          --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake"
+        )
+        if [[ '${{ inputs.provision_tools }}' == true ]]; then
+          args+=(--ensure)
+        fi
+        cmake_bin=$(python3 scripts/provision-cmake.py "${args[@]}")
+        echo "PATH=$cmake_bin:$PATH" >> "$GITHUB_ENV"
