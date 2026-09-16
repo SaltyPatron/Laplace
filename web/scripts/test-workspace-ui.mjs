@@ -191,7 +191,7 @@ try {
   await page.getByRole('textbox', { name: 'p_id', exact: true }).fill('9223372036854775807');
   await page.getByRole('textbox', { name: 'p_text', exact: true }).fill(' King ');
   await page.getByRole('button', { name: 'Run operation', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Operation result' })).toContainText('Operation fixture result');
+  await expect(page.getByRole('region', { name: 'Operation result', exact: true })).toContainText('Operation fixture result');
   assert.deepEqual(JSON.parse(invocations.at(-1)).args, { p_id: '9223372036854775807', p_text: ' King ' });
   await page.getByRole('combobox', { name: 'p_optional — input mode', exact: true }).selectOption('null');
   await page.getByRole('button', { name: 'Run operation', exact: true }).click();

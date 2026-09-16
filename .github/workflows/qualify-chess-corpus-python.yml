@@ -9,21 +9,39 @@ permissions:
 
 jobs:
   controls:
-    name: Actual Stockfish scope and retained-admission controls
+    name: Exact workspace, data and chess browser qualification
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: e1f837d2a949cf5d3c100420b6a1760d915cb82a
+          ref: dc5c630a8ddca17466018f6485d444d5679af2c8
           fetch-depth: 1
           persist-credentials: false
-      - name: Execute exact intended production scope controls
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.18.1
+      - name: Execute exact production browser command
         shell: bash
         run: |
           set -euo pipefail
-          export TMPDIR="$RUNNER_TEMP"
-          [[ "$(git write-tree)" == "92dad97891a693f377fcfd0d3b35aa3ad7fd5cd8" ]]
-          python3 --version
-          python3 scripts/test-stockfish-corpus.py -v
-          python3 scripts/test-chess-acceptance.py -v
+          [[ "$(git write-tree)" == "db61adcb9f2692849d3c4aec9f1d19a7b1aa81fc" ]]
+          export TMPDIR="$RUNNER_TEMP/laplace-browser-evidence"
+          mkdir -p "$TMPDIR"
+          node --version
+          cd web
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npx playwright install --with-deps chromium
+          npm run test:chess-ui 2>&1 | tee "$TMPDIR/browser.log"
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: corpus-browser-qualification
+          path: |
+            ${{ runner.temp }}/laplace-browser-evidence/
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
