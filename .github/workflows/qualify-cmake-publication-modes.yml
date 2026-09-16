@@ -1,78 +1,106 @@
-name: Qualify CMake publication access
+name: Coordinate superseded Original lifecycle runs
 on:
   push:
-    branches: ['qualify/cmake-publication-modes-20260916']
+    branches: [qualify/cmake-publication-modes-20260916]
 permissions:
   contents: read
+  actions: write
 jobs:
-  modes:
+  cancel-exact-queued-lifecycles:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: 3a2b09383a19fc429a014c8b0f354d9082b910d1
-      - name: Verify exact source and execute existing and new publication controls
+      - name: Verify exact obsolete source and normally cancel only queued lifecycle runs
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = 3a2b09383a19fc429a014c8b0f354d9082b910d1
-          test "$(git write-tree)" = 2daf54b1a99e45d5313b734358508d9aaa71abcc
-          mkdir -p "$RUNNER_TEMP/cmake-mode-controls"
-          export TMPDIR="$RUNNER_TEMP/cmake-mode-controls"
-          export PYTHONDONTWRITEBYTECODE=1
           python3 - <<'PY'
-          import ast
-          from pathlib import Path
-          for name in ("scripts/provision-cmake.py", "scripts/test-cmake-release.py"):
-              ast.parse(Path(name).read_text(), filename=name)
-          PY
-          python3 scripts/test-cmake-release.py -v
-      - name: Acquire a fixture as root under umask 077 and select it as the runner
-        shell: bash
-        run: |
-          set -euo pipefail
-          export TMPDIR="$RUNNER_TEMP/cmake-mode-controls"
-          export PYTHONDONTWRITEBYTECODE=1
-          fixture_root=$(mktemp -d "$RUNNER_TEMP/cmake-cross-uid.XXXXXX")
-          chmod 755 "$fixture_root"
-          export FIXTURE_ROOT="$fixture_root"
-          trap 'sudo -n rm -rf -- "$FIXTURE_ROOT"' EXIT
-          sudo -n env TMPDIR="$FIXTURE_ROOT" FIXTURE_ROOT="$FIXTURE_ROOT" PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
-          import importlib.util, json, os
-          from pathlib import Path
-          spec = importlib.util.spec_from_file_location("cmake_tests", "scripts/test-cmake-release.py")
-          module = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(module)
-          case = module.CMakeProvisionTests()
-          case.setUp()
-          case.base.chmod(0o755)
-          case.root = Path(os.environ["FIXTURE_ROOT"]) / "prefix" / "tools" / "cmake"
-          case.work = Path(os.environ["FIXTURE_ROOT"]) / "acquisition"
-          raw = case.archive()
-          previous = os.umask(0o077)
-          try:
-              selected = case.select(raw)
-          finally:
-              os.umask(previous)
-          assert os.geteuid() == 0
-          assert selected.parent.stat().st_uid == 0
-          output = Path(os.environ["FIXTURE_ROOT"]) / "selection.json"
-          output.write_text(json.dumps({"root": str(case.root), "work": str(case.work),
-              "lock": case.lock, "bin": str(selected), "acquisitionUid": os.geteuid()}))
-          output.chmod(0o644)
-          PY
-          python3 - <<'PY'
-          import importlib.util, json, os
-          from pathlib import Path
-          spec = importlib.util.spec_from_file_location("cmake_owner", "scripts/provision-cmake.py")
-          owner = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(owner)
-          document = json.loads((Path(os.environ["FIXTURE_ROOT"]) / "selection.json").read_text())
-          assert document["acquisitionUid"] == 0 and os.geteuid() != 0
-          selected = owner.select(Path(document["root"]), Path(document["work"]), document["lock"])
-          assert str(selected) == document["bin"]
-          assert selected.parent.stat().st_uid == 0
-          print(json.dumps({"status": "passed", "acquisitionUid": 0,
-              "selectionUid": os.geteuid(), "scope": "Fixture archive only; actual cross-UID filesystem access and three fixture tool executions. No official archive or compiler qualification."}))
+          import json, os, time, urllib.request, urllib.error
+          REPO = "SaltyPatron/Laplace"
+          BASE = "4fa186e38de10ee5cc768d38f33ec9663cf2e314"
+          TARGETS = [
+              (35126971407, "79de57897d10d7f5c6da5c829bc624b2cf326091"),
+              (35127572564, "e2b6e24860797a200d36faa140e851a750fe2bfd"),
+          ]
+          LIMIT = 8 * 1024 * 1024
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise RuntimeError("unexpected API redirect")
+          opener = urllib.request.build_opener(NoRedirect)
+          def api(path, method="GET"):
+              request = urllib.request.Request(
+                  "https://api.github.com/repos/" + REPO + "/" + path,
+                  data=b"" if method == "POST" else None, method=method,
+                  headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                           "Accept": "application/vnd.github+json",
+                           "X-GitHub-Api-Version": "2022-11-28",
+                           "User-Agent": "bounded-original-lifecycle-owner"})
+              try:
+                  with opener.open(request, timeout=20) as response:
+                      raw = response.read(LIMIT + 1)
+                      if len(raw) > LIMIT:
+                          raise RuntimeError("bounded API response exceeded")
+                      return response.status, json.loads(raw) if raw else None
+              except urllib.error.HTTPError as error:
+                  return error.code, None
+          def read(path):
+              status, value = api(path)
+              if status != 200:
+                  raise RuntimeError("API GET refused with status " + str(status))
+              return value
+          def identity(run, ident, sha):
+              return (run["id"] == ident and run["head_sha"] == sha
+                      and run["run_attempt"] == 1 and run["event"] == "push"
+                      and run["path"] == ".github/workflows/laplace.yml"
+                      and run["head_branch"] == "main")
+          report = []
+          for ident, sha in TARGETS:
+              item = {"run": ident, "head": sha, "action": "none"}
+              report.append(item)
+              current = read("actions/runs/" + str(ident))
+              if not identity(current, ident, sha):
+                  item["result"] = "identity_changed_no_action"
+                  continue
+              if current["status"] == "completed":
+                  item["result"] = "already_terminal"
+                  item["conclusion"] = current["conclusion"]
+                  continue
+              comparison = read("compare/" + BASE + "..." + sha)
+              files = comparison.get("files", [])
+              if (comparison.get("base_commit", {}).get("sha") != BASE
+                      or not files or len(files) != 1
+                      or files[0]["filename"] != ".github/workflows/repo-hygiene.yml"
+                      or files[0]["status"] != "modified"):
+                  item["result"] = "product_source_changed_no_action"
+                  continue
+              jobs = read("actions/runs/" + str(ident) + "/jobs?per_page=100")
+              if jobs["total_count"] != len(jobs["jobs"]) or any(
+                      job["status"] != "queued" or job.get("steps") for job in jobs["jobs"]):
+                  item["result"] = "job_started_no_action"
+                  continue
+              current = read("actions/runs/" + str(ident))
+              if not identity(current, ident, sha) or current["status"] not in ("queued", "pending"):
+                  item["result"] = "run_advanced_no_action"
+                  continue
+              item["verified_source_delta"] = [files[0]["filename"]]
+              item["queued_job_ids"] = [job["id"] for job in jobs["jobs"]]
+              status, ignored = api("actions/runs/" + str(ident) + "/cancel", "POST")
+              item["cancel_http_status"] = status
+              item["action"] = "normal_cancel_requested" if status == 202 else "cancel_not_accepted"
+              # Exactly one POST; ambiguous results never cause an automatic retry.
+              for attempt in range(15):
+                  latest = read("actions/runs/" + str(ident))
+                  if not identity(latest, ident, sha):
+                      raise RuntimeError("target identity changed during readback")
+                  item["status"] = latest["status"]
+                  item["conclusion"] = latest["conclusion"]
+                  if latest["status"] == "completed":
+                      break
+                  time.sleep(2)
+              item["result"] = "cancelled" if item.get("conclusion") == "cancelled" else "readback_pending_or_changed"
+          print("LIFECYCLE_COORDINATION " + json.dumps(report, sort_keys=True), flush=True)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
+              output.write("Exact obsolete lifecycle coordination; external hygiene/source transfer and PR1607 untouched.\n\n")
+              output.write("```json\n" + json.dumps(report, indent=2) + "\n```\n")
           PY
