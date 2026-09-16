@@ -25,6 +25,15 @@ REPOSITORY = "SaltyPatron/Laplace"
 DURABLE_ROOT = Path("/build/laplace/corpus-exports/chess")
 SESSION_ROOT = Path("/build/laplace/work/ci-sessions")
 BUILD_ROOT = Path("/build/laplace/build")
+NATIVE_ROOT = Path("/build/laplace/recovery/native-install")
+NATIVE_PREFIX = Path("/opt/laplace")
+NATIVE_WORKFLOW = ".github/workflows/chess-floor-serving-controls.yml"
+NATIVE_PHASES = [
+    "pg-pin", "pg-checkout", "pg-source", "dependency-build",
+    "dependency-identity", "native-managed-build", "isolated-native-database",
+    "native-tests", "managed-tests", "uci-tests", "quiet-native-owner",
+    "native-install", "extension-sql", "database-health", "postgres-activation",
+]
 
 
 def load(path, limit=4 * 1024 * 1024):
@@ -48,10 +57,10 @@ def module(root, name, filename):
     return value
 
 
-def run_json(run_id, suffix=""):
+def github_json(path):
     token = os.environ.get("GITHUB_TOKEN", "")
     request = urllib.request.Request(
-        "https://api.github.com/repos/" + REPOSITORY + "/actions/runs/" + str(run_id) + suffix,
+        "https://api.github.com/repos/" + REPOSITORY + "/" + path,
         headers={"Accept": "application/vnd.github+json", "Authorization": "Bearer " + token,
                  "X-GitHub-Api-Version": "2022-11-28"})
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -63,6 +72,10 @@ def run_json(run_id, suffix=""):
     if len(raw) > 4 * 1024 * 1024:
         raise ValueError("workflow metadata exceeded its envelope")
     return json.loads(raw)
+
+
+def run_json(run_id, suffix=""):
+    return github_json("actions/runs/" + str(run_id) + suffix)
 
 
 def selection_identity(plan):
@@ -146,7 +159,213 @@ def lexical_failure_evidence(run_id, attempt, expected, state):
                                for step in steps]}
 
 
+def file_identity(path):
+    path = Path(path)
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1048576), b""):
+            digest.update(block)
+    return {"path": str(path.resolve(strict=True)), "bytes": path.stat().st_size,
+            "sha256": digest.hexdigest()}
+
+
+def native_files(identities):
+    """Compare actual installed files with this completed installation receipt."""
+    selected = {
+        "/opt/laplace/lib/liblaplace_core.so": NATIVE_PREFIX / "lib/liblaplace_core.so",
+        "/opt/laplace/pgsql-18/bin/postgres": NATIVE_PREFIX / "pgsql-18/bin/postgres",
+        "/opt/laplace/pgsql-18/bin/pg_config": NATIVE_PREFIX / "pgsql-18/bin/pg_config",
+    }
+    if not isinstance(identities, dict) or set(identities) != set(selected):
+        raise ValueError("native installation receipt has unexpected file identities")
+    for name, path in selected.items():
+        value = identities[name]
+        if (not isinstance(value, dict) or type(value.get("bytes")) is not int
+                or value["bytes"] <= 0 or not isinstance(value.get("sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is None
+                or file_identity(path) != value):
+            raise ValueError("native installation file identity changed: " + name)
+
+
+def native_qualification(plan, root):
+    source = selection_identity(plan)
+    run_id, attempt = plan.get("proof_run_id"), plan.get("proof_run_attempt")
+    for value in (run_id, attempt, plan.get("native_artifact_id")):
+        if type(value) is not int or value <= 0:
+            raise ValueError("native installation requires positive run, attempt and artifact IDs")
+    for key, width in (("proof_operator_commit", 40), ("native_workflow_blob", 40),
+                       ("native_receipt_sha256", 64), ("native_selection_sha256", 64),
+                       ("native_artifact_sha256", 64)):
+        if not isinstance(plan.get(key), str) or re.fullmatch(
+                "[0-9a-f]{" + str(width) + "}", plan[key]) is None:
+            raise ValueError("native installation requires an exact identity: " + key)
+    remote = run_json(run_id)
+    if (remote.get("id") != run_id or remote.get("run_attempt") != attempt
+            or remote.get("status") != "completed" or remote.get("conclusion") != "success"
+            or remote.get("event") != "push"
+            or remote.get("head_branch") != "verify/chess-floor-serving-controls-20260916"
+            or remote.get("path") != NATIVE_WORKFLOW
+            or remote.get("head_sha") != plan["proof_operator_commit"]):
+        raise ValueError("native installation run does not match the exact completed operator")
+    workflow = github_json("contents/" + NATIVE_WORKFLOW + "?ref=" + plan["proof_operator_commit"])
+    if workflow.get("path") != NATIVE_WORKFLOW or workflow.get("sha") != plan["native_workflow_blob"]:
+        raise ValueError("native installation workflow differs from the reviewed source")
+    jobs = run_json(run_id, "/attempts/" + str(attempt) + "/jobs?per_page=100")
+    if jobs.get("total_count") != 1 or len(jobs.get("jobs", [])) != 1:
+        raise ValueError("native installation must retain one exact completed job")
+    job = jobs["jobs"][0]
+    if (type(job.get("id")) is not int or job["id"] <= 0 or job.get("run_id") != run_id
+            or job.get("head_sha") != plan["proof_operator_commit"]
+            or job.get("status") != "completed" or job.get("conclusion") != "success"):
+        raise ValueError("native installation job identity or outcome differs")
+    required_steps = [
+        "Prepare retained native execution paths",
+        "Execute existing native dependency build proof and install owners",
+        "Observe fixed public managed service state",
+        "Retain native operator outcome", "Retain native execution evidence",
+    ]
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError("native installation has no completed execution steps")
+    observed_steps = [step for step in steps if step.get("name") in required_steps]
+    if ([step.get("name") for step in observed_steps] != required_steps
+            or any(step.get("status") != "completed" or step.get("conclusion") != "success"
+                   for step in observed_steps)):
+        raise ValueError("native installation required steps did not complete in order")
+    inventory = run_json(run_id, "/artifacts?per_page=100")
+    candidates = [item for item in inventory.get("artifacts", [])
+                  if item.get("id") == plan["native_artifact_id"]]
+    if len(candidates) != 1:
+        raise ValueError("native installation artifact is missing or ambiguous")
+    artifact = candidates[0]
+    artifact_run = artifact.get("workflow_run", {})
+    if (artifact.get("name") != "original-native-install-" + str(run_id) + "-" + str(attempt)
+            or artifact.get("expired") is not False
+            or artifact.get("digest") != "sha256:" + plan["native_artifact_sha256"]
+            or artifact_run.get("id") != run_id
+            or artifact_run.get("head_sha") != plan["proof_operator_commit"]):
+        raise ValueError("native installation artifact identity differs")
+
+    directory = NATIVE_ROOT / (str(run_id) + "-" + str(attempt))
+    if (directory.resolve(strict=True) != directory or directory.stat().st_uid != os.getuid()
+            or directory.stat().st_mode & 0o077):
+        raise ValueError("native installation evidence must remain private and runner-owned")
+    paths = {name: directory / name for name in (
+        "receipt.json", "selection.json", "workflow-outcome.json", "completed-phases.txt")}
+    receipts = {}
+    for name, path in paths.items():
+        if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid():
+            raise ValueError("native installation evidence file ownership changed")
+        if path.stat().st_size > 65536:
+            raise ValueError("native installation evidence exceeds its envelope")
+        receipts[name] = {"path": str(path), "sha256": file_identity(path)["sha256"]}
+    if (receipts["receipt.json"]["sha256"] != plan["native_receipt_sha256"]
+            or receipts["selection.json"]["sha256"] != plan["native_selection_sha256"]):
+        raise ValueError("native installation selected receipt bytes changed")
+    state, selected, outcome = (load(paths[name], 65536) for name in (
+        "receipt.json", "selection.json", "workflow-outcome.json"))
+    phases = state.get("completedPhases")
+    with_fetch = NATIVE_PHASES[:1] + ["pg-fetch"] + NATIVE_PHASES[1:]
+    if phases not in (NATIVE_PHASES, with_fetch):
+        raise ValueError("native installation phase sequence is incomplete or reordered")
+    if paths["completed-phases.txt"].read_text().splitlines() != phases:
+        raise ValueError("native installation phase journal differs from the receipt")
+    contract = load(root / "deploy/postgresql-release.json", 65536)
+    if contract.get("version") != "18.6" or contract.get("major") != 18:
+        raise ValueError("native installation operator requires the selected PostgreSQL18.6 source")
+    for value, status in ((state, "completed"), (selected, "running")):
+        if (value.get("schema") != "laplace.native-only-install/v1"
+                or value.get("status") != status or value.get("source") != source["commit"]
+                or value.get("tree") != source["tree"] or value.get("runId") != str(run_id)
+                or value.get("attempt") != str(attempt)
+                or value.get("managedPublication") != "not_attempted"
+                or value.get("fullLifecyclePassed") is not False
+                or value.get("databaseRecreation") is not False
+                or value.get("foundationIngestion") is not False):
+            raise ValueError("native installation receipt source or scope differs")
+    if (selected.get("operatorSource") != plan["proof_operator_commit"]
+            or type(selected.get("uid")) is not int or selected["uid"] != os.getuid()
+            or selected.get("postgresqlSelection") != contract
+            or type(state.get("serverVersionNum")) is not int or state["serverVersionNum"] != 180006):
+        raise ValueError("native installation PostgreSQL source, operator or server differs")
+    if outcome != {"workflowOutcome": "success", "source": source["commit"],
+                   "applicationPublication": "not_attempted", "fullLifecyclePassed": False}:
+        raise ValueError("native installation retained workflow outcome differs")
+    checkout = Path(plan["native_checkout"])
+    # This checkout/build observation is made now. The v1 native receipt does not
+    # contain a historical checkout path or native fingerprint.
+    if (git(checkout, "rev-parse", "HEAD") != source["commit"]
+            or git(checkout, "rev-parse", "HEAD^{tree}") != source["tree"]
+            or git(checkout, "status", "--porcelain", "--untracked-files=no")):
+        raise ValueError("native installation current checkout differs from selected source")
+    build, fingerprint = retained_build(checkout)
+    native_files(state["identities"])
+    result = {
+        "proof_kind": "native-only-install", "run_id": run_id, "run_attempt": attempt,
+        "source": source, "operator_source": plan["proof_operator_commit"],
+        "workflow_blob": plan["native_workflow_blob"], "job_id": job["id"],
+        "lifecycle_event": remote["event"], "lifecycle_conclusion": remote["conclusion"],
+        "full_lifecycle_passed": False, "managed_publication": "not_attempted",
+        "database_recreation": False, "foundation_ingestion": False,
+        "lexical_failure": None, "native_install_status": "completed",
+        "phases": [{"phase": phase, "exit_code": 0} for phase in phases],
+        "native_build": str(build), "lifecycle_checkout": str(checkout),
+        "native_fingerprint": fingerprint,
+        "checkout_build_observation": "current source/cache/stamps verification; not a historical receipt field",
+        "server_version_num": state["serverVersionNum"], "installed_identities": state["identities"],
+        "evidence_receipts": list(receipts.values()),
+        "artifact": {"id": artifact["id"], "sha256": plan["native_artifact_sha256"],
+                     "name": artifact["name"],
+                     "binding": "authenticated run artifact metadata; private receipt hashes selected separately"},
+    }
+    verify_qualification_receipts(result)
+    return build, result
+
+
+def verify_qualification_receipts(qualification):
+    if qualification.get("proof_kind") == "native-only-install":
+        rows = qualification["evidence_receipts"]
+    else:
+        rows = [{"path": qualification["session_receipt"], "sha256": qualification["session_sha256"]}]
+    for row in rows:
+        if file_identity(Path(row["path"]))["sha256"] != row["sha256"]:
+            raise ValueError("qualified lifecycle evidence changed")
+
+
+def retained_build(checkout):
+    checkout = Path(checkout)
+    if (not checkout.is_absolute() or checkout.resolve(strict=True) != checkout
+            or str(checkout).startswith(("/tmp/", "/var/tmp/", "/dev/shm/"))):
+        raise ValueError("qualified checkout identity was not permanent")
+    # Follow the placement owner's actual link, including any completed migration.
+    # Never reconstruct an obsolete directory name or select the newest build.
+    build_link = checkout / "build"
+    if not build_link.is_symlink():
+        raise ValueError("retained checkout has no placed native build link")
+    build = build_link.resolve(strict=True)
+    if not build.is_dir() or build.parent != BUILD_ROOT.resolve(strict=True):
+        raise ValueError("retained native build is outside the canonical build root")
+    cache = (build / "CMakeCache.txt").read_text()
+    match = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$", cache, re.MULTILINE)
+    if not match or Path(match.group(1)) != checkout:
+        raise ValueError("retained native build belongs to another checkout")
+    directory = re.search(r"^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$", cache, re.MULTILINE)
+    if not directory or Path(directory.group(1)).resolve(strict=True) != build:
+        raise ValueError("retained CMake cache belongs to another build directory")
+    stamps = {name: (build / ".stamps" / name).read_text().strip()
+              for name in ("build-native", "install-native")}
+    if (any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in stamps.values())
+            or len(set(stamps.values())) != 1):
+        raise ValueError("qualified native build/install stamps are absent or disagree")
+    return build, stamps["build-native"]
+
+
 def qualification(plan, root):
+    kind = plan.get("proof_kind", "main-lifecycle")
+    if kind == "native-only-install":
+        return native_qualification(plan, root)
+    if kind != "main-lifecycle":
+        raise ValueError("unsupported qualification proof kind")
     source = selection_identity(plan)
     run_id, attempt = plan["proof_run_id"], plan["proof_run_attempt"]
     if type(run_id) is not int or type(attempt) is not int or run_id <= 0 or attempt <= 0:
@@ -188,30 +407,7 @@ def qualification(plan, root):
             raise ValueError("retained main session does not establish every completed canonical product phase")
     else:
         failed = lexical_failure_evidence(run_id, attempt, expected, state)
-    checkout = Path(state["checkout"])
-    if (not checkout.is_absolute() or checkout.resolve(strict=True) != checkout
-            or str(checkout).startswith(("/tmp/", "/var/tmp/", "/dev/shm/"))):
-        raise ValueError("qualified checkout identity was not permanent")
-    # Follow the placement owner's actual link, including any completed migration.
-    # Never reconstruct an obsolete directory name or select the newest build.
-    build_link = checkout / "build"
-    if not build_link.is_symlink():
-        raise ValueError("retained checkout has no placed native build link")
-    build = build_link.resolve(strict=True)
-    if not build.is_dir() or build.parent != BUILD_ROOT.resolve(strict=True):
-        raise ValueError("retained native build is outside the canonical build root")
-    cache = (build / "CMakeCache.txt").read_text()
-    match = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$", cache, re.MULTILINE)
-    if not match or Path(match.group(1)) != checkout:
-        raise ValueError("retained native build belongs to another checkout")
-    directory = re.search(r"^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$", cache, re.MULTILINE)
-    if not directory or Path(directory.group(1)).resolve(strict=True) != build:
-        raise ValueError("retained CMake cache belongs to another build directory")
-    stamps = {name: (build / ".stamps" / name).read_text().strip()
-              for name in ("build-native", "install-native")}
-    if (any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in stamps.values())
-            or len(set(stamps.values())) != 1):
-        raise ValueError("qualified native build/install stamps are absent or disagree")
+    build, fingerprint = retained_build(state["checkout"])
     return build, {"run_id": run_id, "run_attempt": attempt, "source": state["source"],
                    "lifecycle_event": remote["event"],
                    "lifecycle_conclusion": remote["conclusion"],
@@ -219,7 +415,7 @@ def qualification(plan, root):
                    "session_status": state["status"], "cleanup_exit_code": state["cleanup_exit_code"],
                    "lexical_failure": failed,
                    "phases": state["results"], "native_build": str(build),
-                   "lifecycle_checkout": str(checkout), "native_fingerprint": stamps["build-native"],
+                   "lifecycle_checkout": str(state["checkout"]), "native_fingerprint": fingerprint,
                    "session_receipt": str(path),
                    "session_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
@@ -228,6 +424,11 @@ def installed_state(guard, prefix, pg, baseline, qualification):
     if qualification["native_fingerprint"] != baseline["native_fingerprint"]:
         raise ValueError("retained native generation differs from the exact installed pilot")
     database = guard.read_database(pg)
+    if qualification.get("proof_kind") == "native-only-install":
+        native_files(qualification["installed_identities"])
+        if int(database["server_version"]) != qualification["server_version_num"]:
+            raise ValueError("native installation running PostgreSQL release changed")
+        verify_qualification_receipts(qualification)
     if database != baseline["database"]:
         raise ValueError("installed database/SQL contract differs from the exact pilot baseline")
     # The same source is now proved and installed. Reuse the full existing guard:
@@ -299,7 +500,7 @@ def execute(plan, root, prefix, pg, output):
              "installed_source": source["commit"], "installed_payload_mutated": False,
              "database_write_requested": False, "selection_attempted": False, "selection_completed": False,
              "managed_provenance": "rebuilt from qualified source and checked in this invocation",
-             "native_provenance": "retained main build path/source/stamps; current bytes installed-form verified against the completed pilot and focused-tested now",
+             "native_provenance": "selected retained build/source/stamps; current bytes installed-form verified against the completed pilot and focused-tested now",
              "native_historical_byte_comparison": False,
              "claim": "completed observed-read-interval export; no snapshot, historical coverage or throughput claim"}
     evidence = output / "evidence"
@@ -430,8 +631,7 @@ def execute(plan, root, prefix, pg, output):
                 raise ValueError("pilot evidence changed")
             if git(root, "status", "--porcelain", "--untracked-files=all"):
                 raise ValueError("candidate source changed across export")
-            if artifact.sha256(Path(proof["qualification"]["session_receipt"])) != proof["qualification"]["session_sha256"]:
-                raise ValueError("qualified lifecycle session changed across export")
+            verify_qualification_receipts(proof["qualification"])
             save()
             # The ordinary publisher owns this one persistent configuration write.
             # It does not replace serving files; the subsequent normal build/install does.
