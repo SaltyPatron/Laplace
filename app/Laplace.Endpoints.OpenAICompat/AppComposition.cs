@@ -34,7 +34,7 @@ internal static class AppComposition
     ///
     /// The repo already knew the remedy and applied it in exactly two places, both
     /// tests -- GoldenFactory.cs:19 and BillingIdentityTests.cs:50 both call
-    /// `services.RemoveAll&lt;IHostedService&gt;()`. .scratchpad/31 flagged the same shape
+    /// `services.RemoveAll<IHostedService>()`. .scratchpad/31 flagged the same shape
     /// for BillingTestFactories and named GoldenFactory as the fix. It was applied to
     /// the test factories and never to the composition, so the production path still
     /// boots everything for a schema dump.
@@ -73,11 +73,12 @@ internal static class AppComposition
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
         var browserAuth = BuildBrowserAuthSettings();
+        var authMode = ResolveAuthMode(browserAuth);
         services.AddSingleton(browserAuth);
         var dataProtectionPath = IdentityConfig("LAPLACE_DATA_PROTECTION_KEYS");
         if (!string.IsNullOrWhiteSpace(dataProtectionPath))
         {
-            Directory.CreateDirectory(dataProtectionPath);
+            if (!IsDocumentGenerationHost) Directory.CreateDirectory(dataProtectionPath);
             services.AddDataProtection()
                 .SetApplicationName("Laplace")
                 .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
@@ -156,7 +157,7 @@ internal static class AppComposition
         services.AddSingleton<IStripeCheckoutGateway, StripeCheckoutGateway>();
         services.AddSingleton<IBillingOrchestrator, BillingOrchestrator>();
 
-        AddBillingStores(services);
+        AddBillingStores(services, requireDurable: authMode != "header");
 
         services.AddSingleton<IWebhookSecretProvider, WebhookSecretProvider>();
         services.AddSingleton<IStripeWebhookProvisioner, StripeWebhookProvisioner>();
@@ -166,40 +167,50 @@ internal static class AppComposition
 
         services.AddOptions<LaplaceAuthOptions>().Configure(options =>
         {
-            options.Mode = FirstConfig("LAPLACE_AUTH_MODE") ?? "header";
+            options.Mode = authMode;
             options.OperatorToken = FirstConfig(
                 "LAPLACE_OPERATOR_TOKEN", "LAPLACE_OPERATOR_SECRET", secretFile: "stripe.env");
         });
 
         services.AddOptions<StripeBillingOptions>().Configure(options =>
         {
-            // Prefer operator names (repo .env / secrets.env): STRIPE_API_SECRET.
-            // LAPLACE_STRIPE_* kept as fallback for older runner bootstrap blocks.
             options.ApiKey = FirstConfig(
                 "STRIPE_API_SECRET", "LAPLACE_STRIPE_API_KEY", secretFile: "stripe.env");
             options.WebhookSecret = FirstConfig(
                 "STRIPE_WEBHOOK_SECRET", "LAPLACE_STRIPE_WEBHOOK_SECRET", secretFile: "stripe.env");
-
             options.PublicBaseUrl = FirstConfig("LAPLACE_PUBLIC_BASE_URL");
             var externalBase = options.PublicBaseUrl?.TrimEnd('/') ?? LaplaceInstall.EndpointBaseUrl;
-
             options.Currency = FirstConfig("LAPLACE_BILLING_CURRENCY") ?? "usd";
-            // {CHECKOUT_SESSION_ID} is substituted by Stripe on redirect; the SPA's
-            // success page hands it to POST /v1/billing/keys/redeem for key issuance.
+            // The returned session ID is read under the signed-in workspace;
+            // reaching the return page never grants an entitlement by itself.
             options.SuccessUrl = FirstConfig("LAPLACE_STRIPE_SUCCESS_URL")
                 ?? $"{externalBase}/billing/success?session_id={{CHECKOUT_SESSION_ID}}";
             options.CancelUrl = FirstConfig("LAPLACE_STRIPE_CANCEL_URL")
                 ?? $"{externalBase}/billing/cancel";
-            // Explicit LAPLACE_BILLING_BYPASS always wins. Unset means: enforce billing
-            // exactly when Stripe is configured — a fresh install with a Stripe key
-            // charges out of the box; a keyless local checkout stays unlocked.
-            var bypassEnv = Environment.GetEnvironmentVariable("LAPLACE_BILLING_BYPASS");
-            options.Bypass = string.IsNullOrWhiteSpace(bypassEnv)
-                ? string.IsNullOrWhiteSpace(options.ApiKey)
-                : !string.Equals(bypassEnv, "false", StringComparison.OrdinalIgnoreCase);
+            options.Bypass = FirstConfig("LAPLACE_BILLING_BYPASS")?.ToLowerInvariant() switch
+            {
+                null => string.IsNullOrWhiteSpace(options.ApiKey),
+                "true" or "1" => true,
+                "false" or "0" => false,
+                _ => throw new InvalidOperationException("LAPLACE_BILLING_BYPASS must be true, false, 1, or 0.")
+            };
         });
 
         return services;
+    }
+
+    private static string ResolveAuthMode(BrowserAuthSettings browserAuth)
+    {
+        var configured = FirstConfig("LAPLACE_AUTH_MODE")?.ToLowerInvariant();
+        if (configured is not null)
+            return configured is "header" or "key" or "identity" ? configured
+                : throw new InvalidOperationException("LAPLACE_AUTH_MODE must be identity, key, or the explicit development mode header.");
+        // Registering OAuth, configuring paid access or publishing a public host
+        // must not leave the anonymous free-text tenant selector as the default.
+        var published = browserAuth.Providers.Count > 0
+            || !string.IsNullOrWhiteSpace(FirstConfig("LAPLACE_PUBLIC_BASE_URL"))
+            || !string.IsNullOrWhiteSpace(FirstConfig("STRIPE_API_SECRET", "LAPLACE_STRIPE_API_KEY", secretFile: "stripe.env"));
+        return published ? "identity" : "header";
     }
 
     private static BrowserAuthSettings BuildBrowserAuthSettings()
@@ -254,19 +265,28 @@ internal static class AppComposition
     }
 
     /// <summary>
-    /// LAPLACE_BILLING_STORE: "postgres" | "memory" | unset (auto). Auto probes the
-    /// app billing tables and prefers Postgres so paid quotes, plan credits, usage,
-    /// and API keys survive deploys; "memory" remains for tests/ephemeral runs.
+    /// Authenticated company hosts use durable billing storage. Local header-mode
+    /// development can explicitly use memory or retain the previous auto fallback.
+    /// Build-time schema generation never opens a payment database.
     /// </summary>
-    private static void AddBillingStores(IServiceCollection services)
+    private static void AddBillingStores(IServiceCollection services, bool requireDurable)
     {
         var requested = FirstConfig("LAPLACE_BILLING_STORE")?.ToLowerInvariant();
+        if (requested is not (null or "auto" or "postgres" or "memory"))
+            throw new InvalidOperationException("LAPLACE_BILLING_STORE must be postgres, memory, or auto.");
         string mode;
         string? detail = null;
         Npgsql.NpgsqlDataSource? dataSource = null;
 
-        if (requested is "memory")
+        if (IsDocumentGenerationHost)
         {
+            mode = "memory";
+            detail = "document_generation";
+        }
+        else if (requested is "memory")
+        {
+            if (requireDurable)
+                throw new InvalidOperationException("Authenticated company deployments require LAPLACE_BILLING_STORE=postgres; memory is only for explicit header-mode development.");
             mode = "memory";
             detail = "explicit";
         }
@@ -278,10 +298,11 @@ internal static class AppComposition
                 BillingPostgres.BillingSchemaProbe.EnsureQuotesTableReachable(dataSource);
                 mode = "postgres";
             }
-            catch (Exception ex) when (requested is not "postgres")
+            catch (Exception ex)
             {
                 dataSource?.Dispose();
                 dataSource = null;
+                if (requireDurable || requested == "postgres") throw;
                 mode = "memory";
                 detail = $"auto_fallback:{ex.GetType().Name}";
             }
@@ -332,7 +353,6 @@ internal static class AppComposition
             if (!string.IsNullOrWhiteSpace(value))
                 return value.Trim();
         }
-
         return null;
     }
 }
